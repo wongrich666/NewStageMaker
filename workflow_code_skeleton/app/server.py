@@ -208,6 +208,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=400)
         return _json_ok(task=snapshot)
 
+    @app.post("/api/tasks/<task_id>/retry")
+    @_login_required
+    def retry_task(task_id: str):
+        try:
+            snapshot = task_manager.retry_task(task_id, user_id=_require_user_id())
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        return _json_ok(task=snapshot)
+
     @app.post("/api/tasks/<task_id>/terminate")
     @_login_required
     def terminate_task(task_id: str):

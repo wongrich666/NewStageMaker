@@ -19,6 +19,8 @@ from ..workflow_ids import (
     CHARACTER_VAR,
     CORE_SCENE_FINAL_VAR,
     DIALOGUE_FINAL_VAR,
+    FINAL_CHARACTER_VAR,
+    FINAL_SCENE_VAR,
     HOOK_FINAL_VAR,
     MEMORY_VAR,
     SCENE_VAR,
@@ -105,6 +107,7 @@ class TaskRecord:
     control: TaskControl = field(default_factory=TaskControl)
     thread: threading.Thread | None = None
     lock: threading.RLock = field(default_factory=threading.RLock)
+    resume_snapshot: dict[str, Any] | None = None
 
     def clone_snapshot(self) -> dict[str, Any]:
         with self.lock:
@@ -219,9 +222,9 @@ class WorkflowRuntime:
     def sync_from_state(self, state: WorkflowState) -> None:
         artifacts = {
             "worldview": state.get_var(WORLDVIEW_VAR, ""),
-            "character_summary": state.get_var(CHARACTER_VAR, ""),
+            "character_summary": state.get_var(FINAL_CHARACTER_VAR, state.get_var(CHARACTER_VAR, "")),
             "scene_json": state.get_var(SCENE_VAR, ""),
-            "core_scene_summary": state.get_var(CORE_SCENE_FINAL_VAR, ""),
+            "core_scene_summary": state.get_var(FINAL_SCENE_VAR, state.get_var(CORE_SCENE_FINAL_VAR, "")),
             "hook_plan": state.get_var(HOOK_FINAL_VAR, ""),
             "dialogue_plan": state.get_var(DIALOGUE_FINAL_VAR, ""),
             "script_batch": state.get_var(SCRIPT_CURRENT_VAR, ""),
@@ -544,6 +547,7 @@ class TaskManager:
                 workflow_spec_path=record.workflow_spec_path,
                 runtime=runtime,
                 model_option=record.model_option,
+                resume_snapshot=record.resume_snapshot,
             )
 
             if state.halted_message:
@@ -649,6 +653,71 @@ class TaskManager:
             status="running",
             message="继续指令已发出，任务恢复执行。",
         )
+        return record.clone_snapshot()
+
+    def retry_task(self, task_id: str, user_id: int | None = None) -> dict[str, Any]:
+        snapshot = self.get_task_snapshot(task_id, user_id=user_id)
+        if not snapshot:
+            raise ValueError("任务不存在")
+        status = snapshot.get("status")
+        if status in PROJECT_RUNNING_STATUSES:
+            raise ValueError("任务仍在执行中，不能重复重试")
+        if status == "completed":
+            raise ValueError("任务已完成，无需继续生成")
+
+        project_id = int(snapshot.get("project_id") or 0)
+        if project_id <= 0:
+            raise ValueError("项目记录缺少 project_id，无法继续")
+
+        old_task_id = str(snapshot.get("task_id") or task_id)
+        new_task_id = uuid.uuid4().hex[:12]
+        resume_snapshot = copy.deepcopy(snapshot)
+        model_option = settings.resolve_model_selection(
+            (snapshot.get("model_option") or {}).get("id")
+        )
+        new_snapshot = copy.deepcopy(snapshot)
+        new_snapshot.update(
+            {
+                "task_id": new_task_id,
+                "status": "pending",
+                "message": "已从上次失败点创建继续任务，准备重试。",
+                "error": None,
+                "retry_of_task_id": old_task_id,
+                "updated_at": now_iso(),
+                "finished_at": None,
+            }
+        )
+
+        record = TaskRecord(
+            user_id=int(snapshot.get("user_id") or user_id or 0),
+            project_id=project_id,
+            task_id=new_task_id,
+            workflow_spec_path=str(snapshot.get("workflow_spec_path", "")),
+            input_payload=snapshot.get("input_payload", {}),
+            model_option=model_option,
+            snapshot=new_snapshot,
+            resume_snapshot=resume_snapshot,
+        )
+        with self._lock:
+            self._tasks.pop(old_task_id, None)
+            self._tasks[new_task_id] = record
+            self._projects[project_id] = record
+            self._remember_latest_project(record.user_id, project_id)
+        self._append_log(
+            record,
+            title="控制动作：继续失败任务",
+            message="将使用上次保存的中间产物继续执行；已完成阶段会尽量跳过，失败阶段会重新调用。",
+        )
+        self._persist_snapshot(record)
+
+        thread = threading.Thread(
+            target=self._run_task,
+            args=(record,),
+            daemon=True,
+            name=f"workflow-task-{new_task_id}",
+        )
+        record.thread = thread
+        thread.start()
         return record.clone_snapshot()
 
     def terminate_task(self, task_id: str, user_id: int | None = None) -> dict[str, Any]:

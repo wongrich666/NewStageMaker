@@ -3,17 +3,19 @@ from __future__ import annotations
 import copy
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, Protocol
 
 from ..config import ModelOption, settings
 from ..models.inputs import WorkflowInput
 from ..models.state import WorkflowState
-from ..services.fastgpt_client import fastgpt_client
+from ..services.fastgpt_client import FastGPTTransientError, fastgpt_client
 from ..services.fastgpt_contracts import (
     ALL_DIALOGUES,
     ALL_HOOKS,
     ALL_SCRIPT,
+    BATCH_START_EPISODE,
     BATCH_DIALOGUES,
     BATCH_HOOKS,
     BATCH_SCRIPT,
@@ -49,18 +51,25 @@ from ..workflow_ids import (
     CHARACTER_VAR,
     CORE_SCENE_FINAL_VAR,
     DIALOGUE_CURRENT_VAR,
+    DIALOGUE_START_VAR,
     DIALOGUE_FINAL_VAR,
+    FINAL_CHARACTER_VAR,
+    FINAL_SCENE_VAR,
     HOOK_CURRENT_VAR,
+    HOOK_START_VAR,
     HOOK_FINAL_VAR,
     MEMORY_VAR,
     SCENE_VAR,
     SCRIPT_CURRENT_VAR,
+    SCRIPT_START_VAR,
     SCRIPT_FINAL_VAR,
     WORLDVIEW_VAR,
 )
 from .runtime_tools import set_runtime_stage, sync_runtime_state
 
 logger = get_logger("fastgpt_hybrid_workflow")
+LOCAL_COMPLETED_BATCHES = "_completed_batches"
+LOCAL_COMMITTED_SCRIPT = "_committed_all_script"
 
 
 class FastGPTRunner(Protocol):
@@ -75,6 +84,7 @@ def run_fastgpt_hybrid_workflow(
     runtime=None,
     model_option: ModelOption | None = None,
     client: FastGPTRunner | None = None,
+    resume_snapshot: dict[str, Any] | None = None,
 ) -> WorkflowState:
     """Run the script workflow with local orchestration and FastGPT stage calls."""
 
@@ -87,20 +97,31 @@ def run_fastgpt_hybrid_workflow(
     runner = client or fastgpt_client
 
     variables = _initial_fastgpt_variables(payload)
+    _restore_resume_state(state, variables, resume_snapshot)
     _sync_state_variables(state, variables)
     sync_runtime_state(state)
 
-    set_runtime_stage(state, "validation", "正在核对分集计划和总集数。", progress_percent=1)
-    consistency = _run_fastgpt_stage(
-        state,
-        runner,
-        STAGE_CONSISTENCY,
-        variables,
-        stage_key="validation",
-        message="正在核对分集计划和总集数。",
-        progress_percent=2,
-        max_retries=0,
-    )
+    if _truthy(variables.get(IS_CONSISTENT)):
+        consistency = {IS_CONSISTENT: True}
+        set_runtime_stage(
+            state,
+            "validation",
+            "已从缓存恢复集数一致性检查结果。",
+            progress_percent=3,
+        )
+    else:
+        set_runtime_stage(state, "validation", "正在核对分集计划和总集数。", progress_percent=1)
+        consistency = _run_fastgpt_stage(
+            state,
+            runner,
+            STAGE_CONSISTENCY,
+            variables,
+            stage_key="validation",
+            message="正在核对分集计划和总集数。",
+            progress_percent=2,
+            max_retries=0,
+        )
+        variables.update(consistency)
     if not consistency[IS_CONSISTENT]:
         state.halted_message = "分集计划与总集数不一致，请调整后重新生成。"
         state.final_output_text = state.halted_message
@@ -109,43 +130,67 @@ def run_fastgpt_hybrid_workflow(
         return state
     set_runtime_stage(state, "validation", "集数一致性检查通过。", progress_percent=3)
 
-    variables.update(
-        _run_fastgpt_stage(
+    if _has_value(variables.get(WORLDVIEW)):
+        set_runtime_stage(
             state,
-            runner,
-            STAGE_WORLDVIEW,
-            variables,
-            stage_key="worldview",
-            message="正在生成并校正故事规则。",
+            "worldview",
+            "已从缓存恢复故事规则。",
             progress_percent=12,
         )
-    )
+    else:
+        variables.update(
+            _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_WORLDVIEW,
+                variables,
+                stage_key="worldview",
+                message="正在生成并校正故事规则。",
+                progress_percent=12,
+            )
+        )
     _sync_state_variables(state, variables)
 
-    variables.update(
-        _run_fastgpt_stage(
+    if _has_value(variables.get(CHARACTERS)):
+        set_runtime_stage(
             state,
-            runner,
-            STAGE_CHARACTERS,
-            variables,
-            stage_key="character",
-            message="正在生成并校正人物设定。",
+            "character",
+            "已从缓存恢复人物设定。",
             progress_percent=24,
         )
-    )
+    else:
+        variables.update(
+            _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_CHARACTERS,
+                variables,
+                stage_key="character",
+                message="正在生成并校正人物设定。",
+                progress_percent=24,
+            )
+        )
     _sync_state_variables(state, variables)
 
-    variables.update(
-        _run_fastgpt_stage(
+    if _has_value(variables.get(SCENES)):
+        set_runtime_stage(
             state,
-            runner,
-            STAGE_SCENES,
-            variables,
-            stage_key="scene",
-            message="正在生成并校正核心场景。",
+            "scene",
+            "已从缓存恢复核心场景。",
             progress_percent=34,
         )
-    )
+    else:
+        variables.update(
+            _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_SCENES,
+                variables,
+                stage_key="scene",
+                message="正在生成并校正核心场景。",
+                progress_percent=34,
+            )
+        )
     _sync_state_variables(state, variables)
 
     _run_batched_generation(state, runner, payload, variables)
@@ -229,9 +274,23 @@ def _run_batched_generation(
     all_hooks: dict[str, Any] = {}
     all_dialogues: dict[str, Any] = {}
     all_script_parts: list[str] = []
+    all_hooks = _dict_or_empty(variables.get(ALL_HOOKS))
+    all_dialogues = _dict_or_empty(variables.get(ALL_DIALOGUES))
+    committed_script = str(
+        variables.get(LOCAL_COMMITTED_SCRIPT) or variables.get(ALL_SCRIPT) or ""
+    ).strip()
+    if committed_script:
+        all_script_parts = [committed_script]
+    completed_batches = min(
+        total_batches,
+        max(0, _safe_int(variables.get(LOCAL_COMPLETED_BATCHES), 0)),
+    )
 
     for index, batch in enumerate(batches):
+        if index < completed_batches:
+            continue
         plan_for_batch = slice_episode_plan_for_batch(payload.episode_plan, batch)
+        variables[BATCH_START_EPISODE] = batch.start_episode
         batch_base = dict(variables)
         batch_base[EPISODE_PLAN] = plan_for_batch
 
@@ -253,6 +312,7 @@ def _run_batched_generation(
 
         dialogue_base = dict(variables)
         dialogue_base[EPISODE_PLAN] = plan_for_batch
+        dialogue_base[BATCH_START_EPISODE] = batch.start_episode
         dialogue_progress = 50 + int((index / total_batches) * 12)
         dialogue_output = _run_fastgpt_stage(
             state,
@@ -271,6 +331,7 @@ def _run_batched_generation(
 
         script_base = dict(variables)
         script_base[EPISODE_PLAN] = plan_for_batch
+        script_base[BATCH_START_EPISODE] = batch.start_episode
         script_progress = 68 + int((index / total_batches) * 26)
         script_output = _run_fastgpt_stage(
             state,
@@ -302,6 +363,8 @@ def _run_batched_generation(
             max_retries=0,
         )
         variables[LAST_SUMMARY] = memory_output[LAST_SUMMARY]
+        variables[LOCAL_COMPLETED_BATCHES] = index + 1
+        variables[LOCAL_COMMITTED_SCRIPT] = variables[ALL_SCRIPT]
         _sync_state_variables(state, variables)
 
     set_runtime_stage(
@@ -328,6 +391,7 @@ def _run_full_fastgpt_generation(
     variables: dict[str, Any],
 ) -> None:
     variables[EPISODE_PLAN] = payload.episode_plan
+    variables[BATCH_START_EPISODE] = 1
 
     hook_output = _run_fastgpt_stage(
         state,
@@ -418,7 +482,10 @@ def _run_fastgpt_stage(
     attempts = 1 + max(0, stage_retries)
     last_error: Exception | None = None
 
-    for attempt in range(1, attempts + 1):
+    attempt = 0
+    contract_failures = 0
+    while True:
+        attempt += 1
         _checkpoint(state)
         visible_message = message
         if attempt > 1:
@@ -442,8 +509,34 @@ def _run_fastgpt_stage(
             _sync_state_variables(state, output)
             _checkpoint(state)
             return output
+        except FastGPTTransientError as exc:
+            last_error = exc
+            state.set_output(f"fastgpt:{stage_name}", f"attempt_{attempt}_transient_error", str(exc))
+            delay_seconds = _transient_retry_delay(attempt)
+            retry_message = (
+                f"{contract.label} 遇到远端临时错误（HTTP {exc.status_code or '网络错误'}），"
+                f"已保留当前进度，{delay_seconds:.0f} 秒后自动继续重试。"
+            )
+            set_runtime_stage(
+                state,
+                stage_key,
+                retry_message,
+                batch_label=batch_label,
+                progress_percent=progress_percent,
+                generated_episodes=generated_episodes,
+            )
+            sync_runtime_state(state)
+            logger.warning(
+                "FastGPT 阶段 %s 第 %s 次调用遇到临时错误，将自动继续重试: %s",
+                stage_name,
+                attempt,
+                exc,
+            )
+            _sleep_with_checkpoints(state, delay_seconds)
+            continue
         except Exception as exc:
             last_error = exc
+            contract_failures += 1
             state.set_output(f"fastgpt:{stage_name}", f"attempt_{attempt}_error", str(exc))
             sync_runtime_state(state)
             logger.warning(
@@ -452,7 +545,7 @@ def _run_fastgpt_stage(
                 attempt,
                 exc,
             )
-            if _is_non_retryable(exc) or attempt >= attempts:
+            if _is_non_retryable(exc) or contract_failures >= attempts:
                 set_runtime_stage(
                     state,
                     stage_key,
@@ -471,7 +564,6 @@ def _run_fastgpt_stage(
                 progress_percent=progress_percent,
                 generated_episodes=generated_episodes,
             )
-    raise RuntimeError(f"FastGPT 阶段 {stage_name} 调用失败：{last_error}")
 
 
 def _log_fastgpt_stage_start(
@@ -505,6 +597,21 @@ def _checkpoint(state: WorkflowState) -> None:
         runtime.checkpoint()
 
 
+def _transient_retry_delay(attempt: int) -> float:
+    base = max(1.0, float(getattr(settings, "fastgpt_http_retry_delay", 1.5)))
+    return min(60.0, base * min(max(1, attempt), 20))
+
+
+def _sleep_with_checkpoints(state: WorkflowState, seconds: float) -> None:
+    deadline = time.monotonic() + max(0.0, seconds)
+    while True:
+        _checkpoint(state)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(0.5, remaining))
+
+
 def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> None:
     for key, value in variables.items():
         state.set_var(key, value)
@@ -513,9 +620,15 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
         state.set_var(WORLDVIEW_VAR, variables[WORLDVIEW])
     if CHARACTERS in variables:
         state.set_var(CHARACTER_VAR, variables[CHARACTERS])
+        state.set_var(FINAL_CHARACTER_VAR, variables[CHARACTERS])
     if SCENES in variables:
         state.set_var(SCENE_VAR, variables[SCENES])
         state.set_var(CORE_SCENE_FINAL_VAR, variables[SCENES])
+        state.set_var(FINAL_SCENE_VAR, variables[SCENES])
+    if BATCH_START_EPISODE in variables:
+        state.set_var(HOOK_START_VAR, variables[BATCH_START_EPISODE])
+        state.set_var(DIALOGUE_START_VAR, variables[BATCH_START_EPISODE])
+        state.set_var(SCRIPT_START_VAR, variables[BATCH_START_EPISODE])
     if BATCH_HOOKS in variables:
         state.set_var(HOOK_CURRENT_VAR, variables[BATCH_HOOKS])
     if ALL_HOOKS in variables:
@@ -534,6 +647,66 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
         state.set_var(SCRIPT_FINAL_VAR, variables[FINAL_SCRIPT])
 
     sync_runtime_state(state)
+
+
+def _restore_resume_state(
+    state: WorkflowState,
+    variables: dict[str, Any],
+    resume_snapshot: dict[str, Any] | None,
+) -> None:
+    if not resume_snapshot:
+        return
+    debug_state = resume_snapshot.get("debug_state")
+    if not isinstance(debug_state, dict):
+        return
+
+    restored_variables = debug_state.get("variables")
+    if isinstance(restored_variables, dict):
+        variables.update(restored_variables)
+        state.variables.update(restored_variables)
+
+    restored_outputs = debug_state.get("node_outputs")
+    if isinstance(restored_outputs, dict):
+        state.node_outputs.update(restored_outputs)
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    return text in {"true", "1", "yes", "y", "是", "通过", "一致"}
+
+
+def _has_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (dict, list, tuple, set)):
+        return bool(value)
+    return True
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value in (None, ""):
+            return default
+        return int(value)
+    except Exception:
+        return default
+
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return copy.deepcopy(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return {}
+    return {}
 
 
 def merge_batch_object(current: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:

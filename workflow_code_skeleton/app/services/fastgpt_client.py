@@ -41,6 +41,25 @@ OUTPUT_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+class FastGPTTransientError(RuntimeError):
+    """A retryable FastGPT HTTP/upstream error after local retries are exhausted."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        stage_name: str,
+        status_code: int | None = None,
+        url: str = "",
+        response_text: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.stage_name = stage_name
+        self.status_code = status_code
+        self.url = url
+        self.response_text = response_text
+
+
 @dataclass(frozen=True, slots=True)
 class FastGPTEndpoint:
     url: str
@@ -124,8 +143,10 @@ class FastGPTClient:
                     exc,
                 )
                 if attempt >= attempts:
-                    raise RuntimeError(
-                        f"FastGPT 阶段 {stage_name} 网络请求失败：{exc}"
+                    raise FastGPTTransientError(
+                        f"FastGPT 阶段 {stage_name} 网络请求失败：{exc}。当前项目进度已保存，将自动继续重试。",
+                        stage_name=stage_name,
+                        url=endpoint.url,
                     ) from exc
                 _sleep_before_retry(delay, attempt)
                 continue
@@ -144,10 +165,11 @@ class FastGPTClient:
 
             if response.status_code in TRANSIENT_STATUS_CODES and attempt < attempts:
                 logger.warning(
-                    "FastGPT 阶段 %s 返回 HTTP %s，准备第 %s 次重试。",
+                    "FastGPT 阶段 %s 返回 HTTP %s，准备第 %s/%s 次重试。",
                     stage_name,
                     response.status_code,
                     attempt + 1,
+                    attempts,
                 )
                 _sleep_before_retry(delay, attempt)
                 continue
@@ -155,9 +177,16 @@ class FastGPTClient:
             try:
                 response.raise_for_status()
             except requests.HTTPError as exc:
-                raise RuntimeError(
-                    _format_http_error(stage_name, endpoint.url, response)
-                ) from exc
+                message = _format_http_error(stage_name, endpoint.url, response)
+                if response.status_code in TRANSIENT_STATUS_CODES:
+                    raise FastGPTTransientError(
+                        message,
+                        stage_name=stage_name,
+                        status_code=response.status_code,
+                        url=endpoint.url,
+                        response_text=_safe_response_text(response),
+                    ) from exc
+                raise RuntimeError(message) from exc
             return response
 
         raise RuntimeError(f"FastGPT 阶段 {stage_name} 请求失败：{last_error}")
@@ -414,6 +443,10 @@ def _format_http_error(
     )
     if body:
         message += f"，响应片段：{body}"
+    else:
+        message += "，响应体为空"
+    if response.status_code in TRANSIENT_STATUS_CODES:
+        message += "。这是远端 FastGPT 或其上游模型服务的临时/网关错误；当前项目进度已保存，可稍后点击继续生成重试。"
     return message
 
 

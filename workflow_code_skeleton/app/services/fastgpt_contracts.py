@@ -12,17 +12,22 @@ from ..workflow_ids import (
     CORE_SCENE_INPUT_VAR,
     DIALOGUE_CURRENT_VAR,
     DIALOGUE_FINAL_VAR,
+    DIALOGUE_START_VAR,
     DIALOGUE_MAX_RETRY_VAR,
     EPISODE_PLAN_VAR,
     EPISODE_WORD_COUNT_VAR,
+    FINAL_CHARACTER_VAR,
+    FINAL_SCENE_VAR,
     HOOK_CURRENT_VAR,
     HOOK_FINAL_VAR,
+    HOOK_START_VAR,
     HOOK_MAX_RETRY_VAR,
     MEMORY_VAR,
     SCENE_MAX_RETRY_VAR,
     SCENE_VAR,
     SCRIPT_CURRENT_VAR,
     SCRIPT_FINAL_VAR,
+    SCRIPT_START_VAR,
     SCRIPT_MAX_RETRY_VAR,
     STORY_OUTLINE_VAR,
     TITLE_VAR,
@@ -53,6 +58,7 @@ ALL_SCRIPT = "all_script"
 LAST_SUMMARY = "last_summary"
 FINAL_SCRIPT = "final_script"
 IS_CONSISTENT = "is_consistent"
+BATCH_START_EPISODE = "batch_start_episode"
 
 STAGE_CONSISTENCY = "consistency"
 STAGE_WORLDVIEW = "worldview"
@@ -244,6 +250,12 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
         "FastGPT 内部审核修订最大轮次。仅当前 legacy 工作流需要。",
         "本地配置",
     ),
+    BATCH_START_EPISODE: FastGPTVariable(
+        BATCH_START_EPISODE,
+        "number",
+        "当前批次起始集数。仅传给当前 legacy 批处理智能体，用于约束从第几集开始。",
+        "本地批次控制",
+    ),
 }
 
 
@@ -282,6 +294,7 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         STORY_OUTLINE: STORY_OUTLINE_VAR,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        BATCH_START_EPISODE: HOOK_START_VAR,
         ALL_HOOKS: HOOK_FINAL_VAR,
         MAX_RETRIES: HOOK_MAX_RETRY_VAR,
     },
@@ -292,6 +305,7 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         ALL_HOOKS: HOOK_FINAL_VAR,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        BATCH_START_EPISODE: DIALOGUE_START_VAR,
         ALL_DIALOGUES: DIALOGUE_FINAL_VAR,
         MAX_RETRIES: DIALOGUE_MAX_RETRY_VAR,
     },
@@ -305,6 +319,7 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         EPISODE_WORD_COUNT: EPISODE_WORD_COUNT_VAR,
         LAST_SUMMARY: MEMORY_VAR,
+        BATCH_START_EPISODE: SCRIPT_START_VAR,
         ALL_SCRIPT: SCRIPT_FINAL_VAR,
         MAX_RETRIES: SCRIPT_MAX_RETRY_VAR,
     },
@@ -316,8 +331,8 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         SCRIPT_TITLE: TITLE_VAR,
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         STORY_OUTLINE: STORY_OUTLINE_VAR,
-        CHARACTERS: CHARACTER_VAR,
-        SCENES: CORE_SCENE_FINAL_VAR,
+        CHARACTERS: FINAL_CHARACTER_VAR,
+        SCENES: FINAL_SCENE_VAR,
         ALL_SCRIPT: SCRIPT_FINAL_VAR,
     },
 }
@@ -371,7 +386,14 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
     STAGE_HOOKS: FastGPTStageContract(
         stage_name=STAGE_HOOKS,
         label="开头冲突钩子批处理",
-        input_names=(WORLDVIEW, CHARACTERS, EPISODE_PLAN, TOTAL_EPISODES, LAST_SUMMARY),
+        input_names=(
+            WORLDVIEW,
+            CHARACTERS,
+            EPISODE_PLAN,
+            TOTAL_EPISODES,
+            LAST_SUMMARY,
+            BATCH_START_EPISODE,
+        ),
         output_types={BATCH_HOOKS: "object"},
         fastgpt_responsibility="生成当前批次 5 集的开头冲突钩子 JSON。",
         local_responsibility="划分批次、裁剪 episode_plan、拼接 all_hooks、推进批次。",
@@ -379,7 +401,13 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
     STAGE_DIALOGUES: FastGPTStageContract(
         stage_name=STAGE_DIALOGUES,
         label="角色对话批处理",
-        input_names=(CHARACTERS, EPISODE_PLAN, TOTAL_EPISODES, LAST_SUMMARY),
+        input_names=(
+            CHARACTERS,
+            EPISODE_PLAN,
+            TOTAL_EPISODES,
+            LAST_SUMMARY,
+            BATCH_START_EPISODE,
+        ),
         output_types={BATCH_DIALOGUES: "object"},
         fastgpt_responsibility="生成当前批次 5 集的角色对话 JSON。",
         local_responsibility="划分批次、裁剪 episode_plan、拼接 all_dialogues、推进批次。",
@@ -394,6 +422,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             EPISODE_PLAN,
             TOTAL_EPISODES,
             LAST_SUMMARY,
+            BATCH_START_EPISODE,
         ),
         output_types={BATCH_SCRIPT: "string"},
         fastgpt_responsibility="生成当前批次 5 集剧本正文。",
@@ -496,7 +525,10 @@ def coerce_fastgpt_value(value: Any, type_name: str) -> Any:
         return int(value)
 
     if type_name == "string":
-        text = "" if value is None else str(value).strip()
+        if isinstance(value, (dict, list)):
+            text = json.dumps(value, ensure_ascii=False)
+        else:
+            text = "" if value is None else str(value).strip()
         if not text:
             raise ValueError("FastGPT 输出 string 不能为空")
         return text
