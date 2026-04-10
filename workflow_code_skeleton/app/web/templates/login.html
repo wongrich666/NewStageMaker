@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 - 剧本生成工作台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260410-2">
+</head>
+<body>
+  <div class="bg-orb orb-a"></div>
+  <div class="bg-orb orb-b"></div>
+  <main class="auth-shell">
+    <section class="auth-card">
+      <p class="eyebrow">Welcome Back</p>
+      <h1>登录工作台</h1>
+      <p class="muted">登录后会恢复你账户下的草稿和生成结果。</p>
+      {% if error %}
+        <div class="auth-error">{{ error }}</div>
+      {% endif %}
+      <form method="post" class="auth-form">
+        <label class="field">
+          <span>用户名</span>
+          <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" required>
+        </label>
+        <label class="field">
+          <span>密码</span>
+          <input name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button class="btn btn-primary" type="submit">登录</button>
+      </form>
+      <p class="auth-switch">还没有账号？<a href="{{ url_for('register_page') }}">注册一个</a></p>
+    </section>
+  </main>
+</body>
+</html>

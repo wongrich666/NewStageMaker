@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>剧本生成工作台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260410-2">
+</head>
+<body>
+  <div class="bg-orb orb-a"></div>
+  <div class="bg-orb orb-b"></div>
+  <div class="bg-grid"></div>
+
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">剧本生成工作台</p>
+        <h1>把故事材料生成完整剧本</h1>
+        <p class="hero-copy">登录后生成内容会归档到你的账户；刷新页面会恢复你的草稿和最近一次生成结果。</p>
+        <p class="account-line">当前账号：<strong>{{ current_user.username }}</strong> · <a href="{{ url_for('logout') }}">退出登录</a></p>
+      </div>
+      <div class="hero-actions">
+        <button id="startBtn" class="btn btn-primary">开始生成</button>
+        <button id="pauseBtn" class="btn btn-secondary" disabled>暂停生成</button>
+        <button id="resumeBtn" class="btn btn-secondary" disabled>继续生成</button>
+        <button id="terminateBtn" class="btn btn-danger" disabled>终止生成</button>
+        <button id="clearBtn" class="btn btn-ghost">清空全部</button>
+        <button id="saveBtn" class="btn btn-secondary" disabled>保存最终剧本</button>
+      </div>
+    </section>
+
+    <section class="runtime card">
+      <div class="runtime-head">
+        <div>
+          <p class="runtime-label">当前状态</p>
+          <h2 id="statusText">待开始</h2>
+          <p id="messageText" class="muted">填写创作输入后点击开始生成。</p>
+        </div>
+        <div class="runtime-meta">
+          <div class="metric">
+            <span>当前阶段</span>
+            <strong id="stageText">尚未运行</strong>
+          </div>
+          <div class="metric">
+            <span>当前批次</span>
+            <strong id="batchText">-</strong>
+          </div>
+          <div class="metric">
+            <span>生成进度</span>
+            <strong id="episodeProgressText">0 / 0</strong>
+          </div>
+          <div class="metric">
+            <span>模型</span>
+            <strong id="modelText">未选择</strong>
+          </div>
+        </div>
+      </div>
+      <div class="progress-bar">
+        <div id="progressFill" class="progress-fill"></div>
+      </div>
+      <div class="runtime-foot">
+        <span id="progressText">0%</span>
+        <span id="projectText">项目：未创建</span>
+        <span id="taskText">任务：未创建</span>
+      </div>
+    </section>
+
+    <div class="layout">
+      <section class="card form-card">
+        <div class="card-head">
+          <h3>创作输入</h3>
+          <p>以下是必须填写的创作材料，会按你的账号自动缓存。</p>
+        </div>
+
+        <div class="field-grid compact-grid">
+          <label class="field">
+            <span>模型选择</span>
+            <select id="modelSelect"></select>
+          </label>
+          <label class="field">
+            <span>剧本标题</span>
+            <input id="titleInput" type="text" maxlength="100" placeholder="例如：潮汐之夜">
+          </label>
+          <label class="field">
+            <span>每集正文字数</span>
+            <input id="wordCountInput" type="number" min="50" max="10000" value="500">
+          </label>
+          <label class="field">
+            <span>总集数</span>
+            <input id="episodeCountInput" type="number" min="1" max="100" value="10">
+          </label>
+        </div>
+
+        <label class="field">
+          <span>故事大纲</span>
+          <textarea id="storyOutlineInput" placeholder="完整梳理故事主线、核心冲突、关键转折与结局。"></textarea>
+        </label>
+
+        <label class="field">
+          <span>核心场景</span>
+          <textarea id="coreSceneInput" placeholder="可选。不填则由系统按工作流自动提炼核心场景。"></textarea>
+        </label>
+
+        <label class="field">
+          <span>人物小传</span>
+          <textarea id="characterBiosInput" placeholder="写清主角、配角的外貌、性格、背景、行为与动机。"></textarea>
+        </label>
+
+        <label class="field">
+          <span>分集计划</span>
+          <textarea id="episodePlanInput" placeholder="请按集拆分叙事节奏与核心看点，确保与总集数一致。"></textarea>
+        </label>
+
+        <p id="formHint" class="hint">你的表单草稿和最近结果会按账号缓存。</p>
+      </section>
+
+      <section class="card result-card">
+        <div class="card-head">
+          <h3>最终完整剧本</h3>
+          <p>生成完成后，这里只显示最终拼接版完整稿件。</p>
+        </div>
+        <pre id="finalOutputBox" class="output-box large-output">暂无内容</pre>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    window.scriptMakerConfig = {
+      userId: {{ current_user.id }},
+      username: {{ current_user.username|tojson }},
+      modelsUrl: "/api/models",
+      latestProjectUrl: "/api/projects/latest",
+      startUrl: "/api/workflows/start"
+    };
+  </script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260410-2"></script>
+</body>
+</html>
