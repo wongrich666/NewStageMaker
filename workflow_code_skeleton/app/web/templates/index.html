@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260410-3">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260410-5">
 </head>
 <body>
   <div class="bg-orb orb-a"></div>
@@ -12,24 +12,51 @@
   <div class="bg-grid"></div>
 
   <main class="shell">
-    <section class="hero">
-      <div>
-        <p class="eyebrow">剧本生成工作台</p>
-        <h1>把故事材料生成完整剧本</h1>
-        <p class="hero-copy">登录后生成内容会归档到你的账户；刷新页面会恢复你的草稿和最近一次生成结果。</p>
-        <p class="account-line">当前账号：<strong>{{ current_user.username }}</strong> · <a href="{{ url_for('logout') }}">退出登录</a></p>
+    <header class="topbar">
+      <a class="brand-mark" href="/">
+        <span>剧</span>
+        <strong>剧本生成工作台</strong>
+      </a>
+      <nav class="nav-links">
+        <a href="#create">新建剧本</a>
+        <a href="#assets">以往资产</a>
+        <a href="#guide">使用说明</a>
+        <a href="#community">社区好剧</a>
+      </nav>
+      <div class="user-chip">
+        {% if current_user %}
+          <span class="avatar">{{ current_user.username[:1] }}</span>
+          <a href="#assets">个人中心</a>
+          <a class="logout-link" href="{{ url_for('logout') }}">退出</a>
+        {% else %}
+          <span class="avatar">游</span>
+          <a href="{{ url_for('login_page') }}">登录</a>
+          <a class="logout-link" href="{{ url_for('register_page') }}">注册</a>
+        {% endif %}
       </div>
-      <div class="hero-actions">
-        <button id="startBtn" class="btn btn-primary">开始生成</button>
-        <button id="pauseBtn" class="btn btn-secondary" disabled>暂停生成</button>
-        <button id="resumeBtn" class="btn btn-secondary" disabled>继续生成</button>
-        <button id="terminateBtn" class="btn btn-danger" disabled>终止生成</button>
-        <button id="clearBtn" class="btn btn-ghost">清空全部</button>
-        <button id="saveBtn" class="btn btn-secondary" disabled>保存最终剧本</button>
+    </header>
+
+    <section class="landing-hero">
+      <div class="hero-panel">
+        <p class="eyebrow">Script Studio</p>
+        <h1>从故事材料到完整短剧剧本，一条线跑完。</h1>
+        <p class="hero-copy">工作台会把世界观、人设、场景、钩子、对白、正文和记忆串成可暂停、可恢复、可保存的生成流程。公开成品后，它也能进入社区共享好剧。</p>
+        <div class="hero-actions">
+          <button id="newScriptBtn" class="btn btn-primary" type="button">新建剧本</button>
+          <button id="viewAssetsBtn" class="btn btn-secondary" type="button">查看以往资产</button>
+          {% if not current_user %}
+            <a class="btn btn-ghost btn-link" href="{{ url_for('login_page') }}">登录后开始创作</a>
+          {% endif %}
+        </div>
       </div>
+      <aside class="hero-sidecard">
+        <span class="status-dot"></span>
+        <strong>本地逻辑 + FastGPT 智能体</strong>
+        <p>批次 +5、拼接、缓存、暂停恢复由本地负责；内容生成和审核修订交给 FastGPT。</p>
+      </aside>
     </section>
 
-    <section class="runtime card">
+    <section id="create" class="runtime card">
       <div class="runtime-head">
         <div>
           <p class="runtime-label">当前状态</p>
@@ -62,6 +89,14 @@
         <span id="progressText">0%</span>
         <span id="projectText">项目：未创建</span>
         <span id="taskText">任务：未创建</span>
+      </div>
+      <div class="control-row">
+        <button id="startBtn" class="btn btn-primary">开始生成</button>
+        <button id="pauseBtn" class="btn btn-secondary" disabled>暂停生成</button>
+        <button id="resumeBtn" class="btn btn-secondary" disabled>继续生成</button>
+        <button id="terminateBtn" class="btn btn-danger" disabled>终止生成</button>
+        <button id="clearBtn" class="btn btn-ghost">清空全部</button>
+        <button id="saveBtn" class="btn btn-secondary" disabled>保存最终剧本</button>
       </div>
     </section>
 
@@ -122,17 +157,95 @@
         <pre id="finalOutputBox" class="output-box large-output">暂无内容</pre>
       </section>
     </div>
+
+    <section id="assets" class="card asset-card">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Personal Center</p>
+          <h2>新建剧本与以往资产</h2>
+          <p>你可以修改作品信息、设置公开或不公开，也可以删除不需要的剧本资产。</p>
+        </div>
+        <button id="refreshAssetsBtn" class="btn btn-secondary" type="button">刷新资产</button>
+      </div>
+      <div id="assetsList" class="asset-grid"></div>
+
+      <div id="assetEditor" class="asset-editor hidden">
+        <div class="card-head">
+          <h3>修改资产</h3>
+          <p>修改标题、故事梗概、公开状态或最终剧本文本。</p>
+        </div>
+        <div class="field-grid compact-grid">
+          <label class="field">
+            <span>剧本标题</span>
+            <input id="editAssetTitle" type="text">
+          </label>
+          <label class="field">
+            <span>隐私程度</span>
+            <select id="editAssetPrivacy">
+              <option value="private">不公开</option>
+              <option value="public">公开成品</option>
+            </select>
+          </label>
+        </div>
+        <label class="field">
+          <span>故事梗概</span>
+          <textarea id="editAssetSummary"></textarea>
+        </label>
+        <label class="field">
+          <span>最终剧本文本</span>
+          <textarea id="editAssetFinal" class="tall-textarea"></textarea>
+        </label>
+        <div class="control-row">
+          <button id="saveAssetEditBtn" class="btn btn-primary" type="button">保存修改</button>
+          <button id="cancelAssetEditBtn" class="btn btn-ghost" type="button">取消</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="guide" class="guide-grid">
+      <article class="card guide-card">
+        <span>1</span>
+        <h3>登录后创建</h3>
+        <p>填写剧本标题、故事大纲、人物小传和分集计划，选择模型后开始生成。游客可以浏览页面，但不能调用生成服务。</p>
+      </article>
+      <article class="card guide-card">
+        <span>2</span>
+        <h3>生成可中断</h3>
+        <p>你可以暂停、继续、终止。遇到 FastGPT 502 等临时错误时，系统会自动保存进度并持续重试。</p>
+      </article>
+      <article class="card guide-card">
+        <span>3</span>
+        <h3>资产可处置</h3>
+        <p>完成后的剧本会归档为你的资产。你可以修改、删除、保存，也可以设置成“公开成品”进入社区展示。</p>
+      </article>
+    </section>
+
+    <section id="community" class="card community-card">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Community Picks</p>
+          <h2>社区共享好剧</h2>
+          <p>这里展示用户设置为“公开成品”的剧本，摘要直接来自用户填写的故事梗概。</p>
+        </div>
+        <button id="refreshCommunityBtn" class="btn btn-secondary" type="button">刷新社区</button>
+      </div>
+      <div id="communityList" class="community-grid"></div>
+    </section>
   </main>
 
   <script>
     window.scriptMakerConfig = {
-      userId: {{ current_user.id }},
-      username: {{ current_user.username|tojson }},
+      isAuthenticated: {{ 'true' if current_user else 'false' }},
+      userId: {{ current_user.id if current_user else 'null' }},
+      username: {{ current_user.username|tojson if current_user else 'null' }},
       modelsUrl: "/api/models",
       latestProjectUrl: "/api/projects/latest",
-      startUrl: "/api/workflows/start"
+      assetsUrl: "/api/assets",
+      communityUrl: "/api/community",
+      startUrl: "/api/workflows/start",
+      loginUrl: "{{ url_for('login_page') }}"
     };
   </script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260410-3"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260410-5"></script>
 </body>
 </html>

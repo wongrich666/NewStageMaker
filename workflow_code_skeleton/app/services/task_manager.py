@@ -488,6 +488,7 @@ class TaskManager:
             "created_at": now_iso(),
             "updated_at": now_iso(),
             "workflow_spec_path": workflow_spec_path,
+            "visibility": "private",
             "model_option": {
                 "id": model_option.id,
                 "label": self._model_alias(model_option.provider),
@@ -533,6 +534,114 @@ class TaskManager:
         record.thread = thread
         thread.start()
         return record.clone_snapshot()
+
+    def list_user_assets(self, user_id: int) -> list[dict[str, Any]]:
+        assets = [
+            self._asset_summary(snapshot, include_private=True)
+            for snapshot in self._all_project_snapshots()
+            if self._snapshot_belongs_to_user(snapshot, user_id)
+        ]
+        assets.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+        return assets
+
+    def list_public_assets(self) -> list[dict[str, Any]]:
+        assets = [
+            self._asset_summary(snapshot, include_private=False)
+            for snapshot in self._all_project_snapshots()
+            if str(snapshot.get("visibility") or "private") == "public"
+        ]
+        assets.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+        return assets[:24]
+
+    def update_project_asset(
+        self,
+        project_id: int,
+        *,
+        user_id: int,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        record = self._projects.get(project_id)
+        if record:
+            snapshot = record.clone_snapshot()
+        else:
+            snapshot = self.get_project_snapshot(project_id, user_id=user_id)
+        if not snapshot or not self._snapshot_belongs_to_user(snapshot, user_id):
+            raise ValueError("项目不存在或无权操作")
+        if snapshot.get("status") in PROJECT_RUNNING_STATUSES:
+            raise ValueError("任务执行中，暂时不能修改资产")
+
+        title = str(changes.get("title") or "").strip()
+        story_outline = str(changes.get("story_outline") or "").strip()
+        final_script = changes.get("final_script")
+        visibility = str(changes.get("visibility") or snapshot.get("visibility") or "private").strip()
+        if visibility not in {"public", "private"}:
+            raise ValueError("隐私设置只能是 public 或 private")
+
+        if title:
+            snapshot["title"] = title
+            snapshot.setdefault("input_payload", {})["title"] = title
+        if story_outline:
+            snapshot.setdefault("input_payload", {})["story_outline"] = story_outline
+        if final_script is not None:
+            text = str(final_script).strip()
+            artifacts = dict(snapshot.get("artifacts") or {})
+            artifacts["final_script"] = text
+            artifacts["final_output_text"] = text
+            snapshot["artifacts"] = artifacts
+        snapshot["visibility"] = visibility
+        snapshot["updated_at"] = now_iso()
+
+        if record:
+            with record.lock:
+                record.snapshot = snapshot
+            self._persist_snapshot(record)
+        else:
+            self._project_path(project_id).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        return snapshot
+
+    def _all_project_snapshots(self) -> list[dict[str, Any]]:
+        snapshots: dict[int, dict[str, Any]] = {}
+        for project_id, record in self._projects.items():
+            snapshots[int(project_id)] = record.clone_snapshot()
+        for path in self.projects_dir.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            project_id = int(data.get("project_id") or path.stem or 0)
+            snapshots.setdefault(project_id, data)
+        return list(snapshots.values())
+
+    def _asset_summary(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        include_private: bool,
+    ) -> dict[str, Any]:
+        input_payload = snapshot.get("input_payload") or {}
+        artifacts = snapshot.get("artifacts") or {}
+        story_outline = str(input_payload.get("story_outline") or "").strip()
+        final_script = str(
+            artifacts.get("final_output_text") or artifacts.get("final_script") or ""
+        ).strip()
+        summary = story_outline or "这个作品还没有填写故事梗概。"
+        payload = {
+            "project_id": snapshot.get("project_id"),
+            "task_id": snapshot.get("task_id"),
+            "title": snapshot.get("title") or input_payload.get("title") or "未命名剧本",
+            "summary": summary[:360],
+            "status": snapshot.get("status"),
+            "visibility": snapshot.get("visibility") or "private",
+            "updated_at": snapshot.get("updated_at"),
+            "created_at": snapshot.get("created_at"),
+            "has_final": bool(final_script),
+        }
+        if include_private:
+            payload["final_preview"] = final_script[:500]
+        return payload
 
     def _run_task(self, record: TaskRecord) -> None:
         self._update_snapshot(record, status="running", message="开始执行工作流。")

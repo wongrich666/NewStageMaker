@@ -74,7 +74,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         return custom or str(app.config["WORKFLOW_SPEC_PATH"])
 
     @app.get("/")
-    @_login_required
     def index():
         return render_template("index.html", current_user=_current_user())
 
@@ -149,12 +148,37 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         snapshot = task_manager.latest_project_snapshot(user_id=_require_user_id())
         return _json_ok(project=snapshot)
 
+    @app.get("/api/assets")
+    @_login_required
+    def list_assets():
+        assets = task_manager.list_user_assets(user_id=_require_user_id())
+        return _json_ok(assets=assets)
+
+    @app.get("/api/community")
+    def community_assets():
+        assets = task_manager.list_public_assets()
+        return _json_ok(assets=assets)
+
     @app.get("/api/projects/<int:project_id>")
     @_login_required
     def get_project(project_id: int):
         snapshot = task_manager.get_project_snapshot(project_id, user_id=_require_user_id())
         if not snapshot:
             return _json_error("项目不存在", status=404)
+        return _json_ok(project=snapshot)
+
+    @app.patch("/api/projects/<int:project_id>")
+    @_login_required
+    def update_project(project_id: int):
+        data = request.get_json(silent=True) or {}
+        try:
+            snapshot = task_manager.update_project_asset(
+                project_id,
+                user_id=_require_user_id(),
+                changes=data,
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
         return _json_ok(project=snapshot)
 
     @app.post("/api/workflows/start")

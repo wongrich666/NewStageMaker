@@ -29,6 +29,19 @@
     terminateBtn: $("terminateBtn"),
     clearBtn: $("clearBtn"),
     saveBtn: $("saveBtn"),
+    newScriptBtn: $("newScriptBtn"),
+    viewAssetsBtn: $("viewAssetsBtn"),
+    refreshAssetsBtn: $("refreshAssetsBtn"),
+    refreshCommunityBtn: $("refreshCommunityBtn"),
+    assetsList: $("assetsList"),
+    communityList: $("communityList"),
+    assetEditor: $("assetEditor"),
+    editAssetTitle: $("editAssetTitle"),
+    editAssetSummary: $("editAssetSummary"),
+    editAssetPrivacy: $("editAssetPrivacy"),
+    editAssetFinal: $("editAssetFinal"),
+    saveAssetEditBtn: $("saveAssetEditBtn"),
+    cancelAssetEditBtn: $("cancelAssetEditBtn"),
 
     statusText: $("statusText"),
     messageText: $("messageText"),
@@ -49,8 +62,20 @@
     status: "idle",
     pollTimer: null,
     availableModels: [],
-    latestSnapshot: null
+    latestSnapshot: null,
+    assets: [],
+    editingProjectId: null
   };
+
+  function isAuthenticated() {
+    return Boolean(window.scriptMakerConfig.isAuthenticated);
+  }
+
+  function requireLogin() {
+    if (isAuthenticated()) return true;
+    window.location.href = window.scriptMakerConfig.loginUrl || "/login";
+    return false;
+  }
 
   function statusLabel(status) {
     const mapping = {
@@ -205,11 +230,12 @@
     const hasFinal = Boolean(finalOutputFrom(state.latestSnapshot));
     const hasConfiguredModel = state.availableModels.some((item) => item.configured !== false);
 
-    els.startBtn.disabled = !hasConfiguredModel || ["running", "pending", "pausing", "paused"].includes(status);
+    els.startBtn.disabled = !isAuthenticated() || !hasConfiguredModel || ["running", "pending", "pausing", "paused"].includes(status);
     els.pauseBtn.disabled = status !== "running" && status !== "pending";
-    els.resumeBtn.disabled = !["paused", "pausing"].includes(status);
+    els.resumeBtn.disabled = !["paused", "pausing", "failed", "terminated"].includes(status);
     els.terminateBtn.disabled = !["pending", "running", "pausing", "paused", "failed"].includes(status);
-    els.saveBtn.disabled = !hasProject || !hasFinal;
+    els.clearBtn.disabled = !isAuthenticated();
+    els.saveBtn.disabled = !isAuthenticated() || !hasProject || !hasFinal;
   }
 
   function hasConfiguredModel() {
@@ -245,6 +271,14 @@
   }
 
   async function loadModels() {
+    if (!isAuthenticated()) {
+      state.availableModels = [];
+      els.modelSelect.innerHTML = `<option value="">登录后选择模型</option>`;
+      els.modelSelect.disabled = true;
+      els.modelText.textContent = "登录后可用";
+      syncButtons();
+      return;
+    }
     const data = await requestJson(window.scriptMakerConfig.modelsUrl);
     state.availableModels = data.models || [];
     const availableModels = state.availableModels.filter((item) => item.configured !== false);
@@ -290,6 +324,7 @@
   }
 
   async function startGeneration() {
+    if (!requireLogin()) return;
     saveDraft();
     const payload = buildPayload();
     els.formHint.textContent = "正在创建任务，请稍候。";
@@ -303,6 +338,7 @@
   }
 
   async function pauseTask() {
+    if (!requireLogin()) return;
     if (!state.taskId) return;
     const data = await requestJson(`/api/tasks/${state.taskId}/pause`, { method: "POST" });
     renderSnapshot(data.task);
@@ -310,13 +346,18 @@
   }
 
   async function resumeTask() {
+    if (!requireLogin()) return;
     if (!state.taskId) return;
-    const data = await requestJson(`/api/tasks/${state.taskId}/resume`, { method: "POST" });
+    const endpoint = ["failed", "terminated"].includes(state.status)
+      ? `/api/tasks/${state.taskId}/retry`
+      : `/api/tasks/${state.taskId}/resume`;
+    const data = await requestJson(endpoint, { method: "POST" });
     renderSnapshot(data.task);
     startPolling();
   }
 
   async function terminateTask() {
+    if (!requireLogin()) return;
     if (!state.taskId) return;
     const ok = window.confirm("确认终止当前任务吗？当前节点会在结束后停止。");
     if (!ok) return;
@@ -326,6 +367,7 @@
   }
 
   async function clearAll() {
+    if (!requireLogin()) return;
     if (["running", "pending", "pausing", "paused"].includes(state.status)) {
       throw new Error("请先终止当前任务，再执行清空全部。");
     }
@@ -354,8 +396,146 @@
   }
 
   function saveFinalScript() {
+    if (!requireLogin()) return;
     if (!state.projectId) return;
     window.location.href = `/api/projects/${state.projectId}/download`;
+  }
+
+  function visibilityLabel(value) {
+    return value === "public" ? "公开成品" : "不公开";
+  }
+
+  function statusBadge(status) {
+    return statusLabel(status || "idle");
+  }
+
+  function emptyCard(message, actionText = "") {
+    return `
+      <div class="empty-card">
+        <strong>${escapeHtml(message)}</strong>
+        ${actionText ? `<p>${escapeHtml(actionText)}</p>` : ""}
+      </div>
+    `;
+  }
+
+  async function loadAssets() {
+    if (!isAuthenticated()) {
+      if (els.assetsList) {
+        els.assetsList.innerHTML = emptyCard("登录后查看和处置你的剧本资产", "你可以修改、删除、设置公开或不公开。");
+      }
+      return;
+    }
+    const data = await requestJson(window.scriptMakerConfig.assetsUrl);
+    state.assets = data.assets || [];
+    renderAssets(state.assets);
+  }
+
+  async function loadCommunity() {
+    const data = await requestJson(window.scriptMakerConfig.communityUrl);
+    renderCommunity(data.assets || []);
+  }
+
+  function renderAssets(assets) {
+    if (!els.assetsList) return;
+    if (!assets.length) {
+      els.assetsList.innerHTML = emptyCard("还没有剧本资产", "先新建一个剧本，生成结果会自动归档到这里。");
+      return;
+    }
+    els.assetsList.innerHTML = assets.map((item) => `
+      <article class="asset-tile">
+        <div class="asset-topline">
+          <span>${escapeHtml(statusBadge(item.status))}</span>
+          <span>${escapeHtml(visibilityLabel(item.visibility))}</span>
+        </div>
+        <h3>${escapeHtml(item.title)}</h3>
+        <p>${escapeHtml(item.summary)}</p>
+        <div class="asset-meta">
+          <span>项目 ${escapeHtml(item.project_id)}</span>
+          <span>${item.has_final ? "已有成品" : "未完成"}</span>
+        </div>
+        <div class="asset-actions">
+          <button class="btn btn-secondary" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">修改</button>
+          <button class="btn btn-ghost" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : "公开成品"}</button>
+          <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除</button>
+        </div>
+      </article>
+    `).join("");
+  }
+
+  function renderCommunity(assets) {
+    if (!els.communityList) return;
+    if (!assets.length) {
+      els.communityList.innerHTML = emptyCard("社区里暂时还没有公开作品", "当用户把成品设置为公开后，会展示在这里。");
+      return;
+    }
+    els.communityList.innerHTML = assets.map((item) => `
+      <article class="community-tile">
+        <span class="community-tag">公开成品</span>
+        <h3>${escapeHtml(item.title)}</h3>
+        <p>${escapeHtml(item.summary)}</p>
+      </article>
+    `).join("");
+  }
+
+  async function openAssetEditor(projectId) {
+    if (!requireLogin()) return;
+    const data = await requestJson(`/api/projects/${projectId}`);
+    const project = data.project || {};
+    const input = project.input_payload || {};
+    const artifacts = project.artifacts || {};
+    state.editingProjectId = Number(projectId);
+    els.editAssetTitle.value = project.title || input.title || "";
+    els.editAssetSummary.value = input.story_outline || "";
+    els.editAssetPrivacy.value = project.visibility || "private";
+    els.editAssetFinal.value = artifacts.final_output_text || artifacts.final_script || "";
+    els.assetEditor.classList.remove("hidden");
+    els.assetEditor.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  async function saveAssetEdit() {
+    if (!requireLogin() || !state.editingProjectId) return;
+    const payload = {
+      title: els.editAssetTitle.value.trim(),
+      story_outline: els.editAssetSummary.value.trim(),
+      visibility: els.editAssetPrivacy.value,
+      final_script: els.editAssetFinal.value
+    };
+    const data = await requestJson(`/api/projects/${state.editingProjectId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+    renderSnapshot(data.project);
+    closeAssetEditor();
+    await loadAssets();
+    await loadCommunity();
+  }
+
+  function closeAssetEditor() {
+    state.editingProjectId = null;
+    els.assetEditor.classList.add("hidden");
+  }
+
+  async function toggleAssetPrivacy(projectId, currentVisibility) {
+    if (!requireLogin()) return;
+    const nextVisibility = currentVisibility === "public" ? "private" : "public";
+    await requestJson(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ visibility: nextVisibility })
+    });
+    await loadAssets();
+    await loadCommunity();
+  }
+
+  async function deleteAsset(projectId) {
+    if (!requireLogin()) return;
+    const ok = window.confirm("确认删除这个剧本资产吗？删除后不可恢复。");
+    if (!ok) return;
+    await requestJson(`/api/projects/${projectId}`, { method: "DELETE" });
+    if (Number(projectId) === Number(state.projectId)) {
+      renderSnapshot(null);
+    }
+    await loadAssets();
+    await loadCommunity();
   }
 
   async function pollTask() {
@@ -387,6 +567,12 @@
   }
 
   async function restoreProject() {
+    if (!isAuthenticated()) {
+      renderSnapshot(null);
+      els.statusText.textContent = "游客浏览";
+      els.messageText.textContent = "登录后可以开始生成、保存资产和管理公开状态。";
+      return;
+    }
     const cachedProjectId = Number(localStorage.getItem(STORAGE.projectId) || 0);
     if (cachedProjectId) {
       const cachedSnapshot = readCachedSnapshot(cachedProjectId);
@@ -424,6 +610,59 @@
   }
 
   function bindActions() {
+    els.newScriptBtn?.addEventListener("click", () => {
+      if (!requireLogin()) return;
+      document.getElementById("create")?.scrollIntoView({ behavior: "smooth" });
+    });
+
+    els.viewAssetsBtn?.addEventListener("click", () => {
+      if (!requireLogin()) return;
+      document.getElementById("assets")?.scrollIntoView({ behavior: "smooth" });
+    });
+
+    els.refreshAssetsBtn?.addEventListener("click", async () => {
+      try {
+        await loadAssets();
+      } catch (error) {
+        els.messageText.textContent = error.message || String(error);
+      }
+    });
+
+    els.refreshCommunityBtn?.addEventListener("click", async () => {
+      try {
+        await loadCommunity();
+      } catch (error) {
+        els.messageText.textContent = error.message || String(error);
+      }
+    });
+
+    els.assetsList?.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) return;
+      const projectId = button.dataset.projectId;
+      try {
+        if (button.dataset.action === "edit-asset") {
+          await openAssetEditor(projectId);
+        } else if (button.dataset.action === "toggle-privacy") {
+          await toggleAssetPrivacy(projectId, button.dataset.visibility);
+        } else if (button.dataset.action === "delete-asset") {
+          await deleteAsset(projectId);
+        }
+      } catch (error) {
+        els.messageText.textContent = error.message || String(error);
+      }
+    });
+
+    els.saveAssetEditBtn?.addEventListener("click", async () => {
+      try {
+        await saveAssetEdit();
+      } catch (error) {
+        els.messageText.textContent = error.message || String(error);
+      }
+    });
+
+    els.cancelAssetEditBtn?.addEventListener("click", closeAssetEditor);
+
     els.startBtn.addEventListener("click", async () => {
       try {
         await startGeneration();
@@ -478,8 +717,12 @@
     try {
       await loadModels();
       await restoreProject();
+      await loadAssets();
+      await loadCommunity();
       if (hasConfiguredModel()) {
         els.formHint.textContent = `已登录 ${window.scriptMakerConfig.username}，草稿会按账号自动缓存。`;
+      } else if (!isAuthenticated()) {
+        els.formHint.textContent = "你可以先浏览说明和社区作品；登录后即可开始创作。";
       } else {
         els.formHint.textContent = "当前没有已配置模型，请先在 .env 中补齐模型服务配置。";
       }
