@@ -350,7 +350,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         input_names=(STORY_OUTLINE, USER_SCENES, USER_CHARACTERS, EPISODE_PLAN),
         output_types={WORLDVIEW: "string"},
         fastgpt_responsibility="完成世界观提取、生成、审核、修订，返回最终可用世界观。",
-        local_responsibility="控制重试次数，校验 worldview 是否按契约返回。",
+        local_responsibility="不做业务审核循环，只校验 worldview 是否按契约返回并缓存。",
     ),
     STAGE_CHARACTERS: FastGPTStageContract(
         stage_name=STAGE_CHARACTERS,
@@ -358,7 +358,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         input_names=(USER_CHARACTERS, WORLDVIEW),
         output_types={CHARACTERS: "string"},
         fastgpt_responsibility="完成人设生成、审核、修订、整理。",
-        local_responsibility="控制重试次数，校验 characters 是否按契约返回。",
+        local_responsibility="不做业务审核循环，只校验 characters 是否按契约返回并缓存。",
     ),
     STAGE_SCENES: FastGPTStageContract(
         stage_name=STAGE_SCENES,
@@ -366,7 +366,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         input_names=(USER_SCENES, WORLDVIEW),
         output_types={SCENES: "string"},
         fastgpt_responsibility="完成核心场景提炼/复用、生成、审核、修订、整理。",
-        local_responsibility="控制重试次数，校验 scenes 是否按契约返回。",
+        local_responsibility="不做业务审核循环，只校验 scenes 是否按契约返回并缓存。",
     ),
     STAGE_HOOKS: FastGPTStageContract(
         stage_name=STAGE_HOOKS,
