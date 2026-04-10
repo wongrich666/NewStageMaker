@@ -37,11 +37,6 @@ OUTPUT_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
         "passed",
         "approved",
         "consistent",
-        "is_passed",
-        "is_approved",
-        "result",
-        "value",
-        "answer",
     ),
 }
 
@@ -507,15 +502,7 @@ def _iter_choice_message_contents(data: Any) -> Iterable[str]:
             continue
         message = choice.get("message")
         if isinstance(message, dict):
-            content = message.get("content")
-            if isinstance(content, str):
-                yield content
-            elif isinstance(content, list):
-                for item in content:
-                    if isinstance(item, dict) and isinstance(item.get("text"), str):
-                        yield item["text"]
-                    elif isinstance(item, str):
-                        yield item
+            yield from _iter_text_from_content(message.get("content"))
 
 
 def _payload_from_candidate(
@@ -524,6 +511,8 @@ def _payload_from_candidate(
 ) -> dict[str, Any] | None:
     expected = contract.output_names
     if not isinstance(candidate, dict):
+        return None
+    if _is_non_output_metadata(candidate):
         return None
 
     if all(name in candidate for name in expected):
@@ -559,6 +548,8 @@ def _extract_generic_alias_payload(
     candidate: dict[str, Any],
     contract: FastGPTStageContract,
 ) -> dict[str, Any] | None:
+    if _is_non_output_metadata(candidate):
+        return None
     payload: dict[str, Any] = {}
     lowered_candidate = {key.lower(): key for key in candidate.keys()}
     for expected_name in contract.output_names:
@@ -594,6 +585,48 @@ def _warn_similar_fields(candidate: dict[str, Any], contract: FastGPTStageContra
                 expected_name,
                 found,
             )
+
+
+def _is_non_output_metadata(candidate: dict[str, Any]) -> bool:
+    keys = {str(key).lower() for key in candidate.keys()}
+    if "historypreview" in keys:
+        return True
+    if "reasoningtext" in keys or "reasoning_text" in keys:
+        return True
+    if "system_error_text" in keys or "system_errortext" in keys:
+        return True
+    if "obj" in keys and "value" in keys:
+        return True
+    metadata_only_keys = {
+        "obj",
+        "value",
+        "type",
+        "module",
+        "moduleid",
+        "nodeid",
+        "name",
+        "avatar",
+        "status",
+    }
+    return bool(keys) and keys.issubset(metadata_only_keys)
+
+
+def _iter_text_from_content(content: Any) -> Iterable[str]:
+    if isinstance(content, str):
+        yield content
+        return
+    if isinstance(content, dict):
+        text = content.get("text")
+        if isinstance(text, str):
+            yield text
+        elif isinstance(text, dict) and isinstance(text.get("content"), str):
+            yield text["content"]
+        if isinstance(content.get("content"), str):
+            yield content["content"]
+        return
+    if isinstance(content, list):
+        for item in content:
+            yield from _iter_text_from_content(item)
 
 
 def _can_coerce_single_output(value: Any, contract: FastGPTStageContract) -> bool:
@@ -645,6 +678,8 @@ def _iter_output_candidates(data: Any) -> Iterable[Any]:
 def _iter_structured_output_candidates(data: Any) -> Iterable[Any]:
     yield data
     if isinstance(data, dict):
+        if _is_non_output_metadata(data):
+            return
         priority_keys = (
             "choices",
             "message",
@@ -658,11 +693,23 @@ def _iter_structured_output_candidates(data: Any) -> Iterable[Any]:
             "answer",
             "content",
         )
+        skip_keys = {
+            "historyPreview",
+            "history",
+            "chatHistory",
+            "reasoningText",
+            "reasoning_text",
+            "system_error_text",
+            "systemErrorText",
+            "quoteList",
+            "obj",
+            "value",
+        }
         for key in priority_keys:
-            if key in data:
+            if key in data and key not in skip_keys:
                 yield from _iter_structured_output_candidates(data[key])
         for key, value in data.items():
-            if key not in priority_keys:
+            if key not in priority_keys and key not in skip_keys:
                 yield from _iter_structured_output_candidates(value)
     elif isinstance(data, list):
         for item in data:
@@ -675,6 +722,8 @@ def _iter_structured_output_candidates(data: Any) -> Iterable[Any]:
 
 def _iter_answer_text_candidates(data: Any) -> Iterable[str]:
     if isinstance(data, dict):
+        if _is_non_output_metadata(data):
+            return
         choices = data.get("choices")
         if isinstance(choices, list):
             for choice in choices:
@@ -682,15 +731,7 @@ def _iter_answer_text_candidates(data: Any) -> Iterable[str]:
                     continue
                 message = choice.get("message")
                 if isinstance(message, dict):
-                    content = message.get("content")
-                    if isinstance(content, str):
-                        yield content
-                    elif isinstance(content, list):
-                        for item in content:
-                            if isinstance(item, dict) and isinstance(item.get("text"), str):
-                                yield item["text"]
-                            elif isinstance(item, str):
-                                yield item
+                    yield from _iter_text_from_content(message.get("content"))
                 delta = choice.get("delta")
                 if isinstance(delta, dict) and isinstance(delta.get("content"), str):
                     yield delta["content"]
@@ -711,7 +752,24 @@ def _iter_answer_text_candidates(data: Any) -> Iterable[str]:
             if isinstance(value, str):
                 yield value
 
-        skip_keys = {"variables", "newVariables", "inputs", "input", "request", "messages"}
+        skip_keys = {
+            "variables",
+            "newVariables",
+            "inputs",
+            "input",
+            "request",
+            "messages",
+            "historyPreview",
+            "history",
+            "chatHistory",
+            "reasoningText",
+            "reasoning_text",
+            "system_error_text",
+            "systemErrorText",
+            "quoteList",
+            "obj",
+            "value",
+        }
         priority_keys = ("responseData", "pluginOutput", "output", "outputs", "data")
         for key in priority_keys:
             if key in data:

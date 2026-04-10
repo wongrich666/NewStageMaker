@@ -47,6 +47,10 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat()
 
 
+def use_fastgpt_backend() -> bool:
+    return settings.workflow_backend in {"fastgpt", "hybrid", "fastgpt_hybrid"}
+
+
 class TaskTerminated(RuntimeError):
     pass
 
@@ -113,7 +117,7 @@ class WorkflowRuntime:
         *,
         manager: "TaskManager",
         record: TaskRecord,
-        spec: WorkflowSpec,
+        spec: WorkflowSpec | None,
     ) -> None:
         self.manager = manager
         self.record = record
@@ -163,7 +167,7 @@ class WorkflowRuntime:
 
     def before_node(self, node_id: str, state: WorkflowState) -> None:
         self.checkpoint()
-        node_name = self.spec.get_node_name(node_id)
+        node_name = self.spec.get_node_name(node_id) if self.spec else node_id
         self.manager._append_log(
             self.record,
             title=f"开始节点：{node_name}",
@@ -180,7 +184,7 @@ class WorkflowRuntime:
         self.sync_from_state(state)
 
     def after_node(self, node_id: str, state: WorkflowState, output_text: str) -> None:
-        node_name = self.spec.get_node_name(node_id)
+        node_name = self.spec.get_node_name(node_id) if self.spec else node_id
         preview = str(output_text or "").strip().replace("\n", " ")[:180]
         self.manager._append_log(
             self.record,
@@ -367,8 +371,11 @@ class TaskManager:
         return base if index <= 1 else f"{base}{index}"
 
     def list_model_options(self, workflow_spec_path: str) -> list[dict[str, Any]]:
-        spec = WorkflowSpec(workflow_spec_path)
-        options = settings.list_model_options(extra_models=spec.list_chat_models())
+        extra_models: list[str] = []
+        if not use_fastgpt_backend():
+            spec = WorkflowSpec(workflow_spec_path)
+            extra_models = spec.list_chat_models()
+        options = settings.list_model_options(extra_models=extra_models)
         provider_counts: dict[str, int] = {}
         result = []
         for item in options:
@@ -466,7 +473,7 @@ class TaskManager:
         self._remember_latest_project(user_id, project_id)
         task_id = uuid.uuid4().hex[:12]
         model_option = settings.resolve_model_selection(model_selection_id)
-        spec = WorkflowSpec(workflow_spec_path)
+        spec = None if use_fastgpt_backend() else WorkflowSpec(workflow_spec_path)
 
         snapshot = {
             "user_id": int(user_id),
@@ -489,7 +496,7 @@ class TaskManager:
             "input_payload": input_payload,
             "artifacts": {},
             "logs": [],
-            "prompt_fixes": spec.get_prompt_fixes(),
+            "prompt_fixes": spec.get_prompt_fixes() if spec else [],
             "progress_percent": 0,
             "generated_episodes": 0,
             "total_episodes": int(input_payload.get("total_episodes", 0) or 0),
@@ -526,9 +533,10 @@ class TaskManager:
 
     def _run_task(self, record: TaskRecord) -> None:
         self._update_snapshot(record, status="running", message="开始执行工作流。")
+        runtime: WorkflowRuntime | None = None
         try:
             workflow_input = WorkflowInput.from_dict(record.input_payload)
-            spec = WorkflowSpec(record.workflow_spec_path)
+            spec = None if use_fastgpt_backend() else WorkflowSpec(record.workflow_spec_path)
             runtime = WorkflowRuntime(manager=self, record=record, spec=spec)
 
             state = run_configured_workflow(
@@ -565,21 +573,29 @@ class TaskManager:
                 prompt_fixes=state.prompt_fixes,
             )
         except TaskTerminated as exc:
+            if runtime is not None:
+                self._append_log(
+                    record,
+                    title="任务已终止",
+                    message="已保留终止前的阶段、进度和中间产物。",
+                )
             self._update_snapshot(
                 record,
                 status="terminated",
-                current_stage="finished",
-                current_stage_label=STAGE_LABELS["finished"],
                 message=str(exc),
                 finished_at=now_iso(),
             )
         except Exception as exc:
             logger.exception("任务执行失败: %s", record.task_id)
+            if runtime is not None:
+                self._append_log(
+                    record,
+                    title="任务失败",
+                    message=f"已保留失败前的阶段、进度和中间产物。错误：{exc}",
+                )
             self._update_snapshot(
                 record,
                 status="failed",
-                current_stage="finished",
-                current_stage_label=STAGE_LABELS["finished"],
                 message=f"任务失败：{exc}",
                 error=str(exc),
                 finished_at=now_iso(),
@@ -638,8 +654,21 @@ class TaskManager:
     def terminate_task(self, task_id: str, user_id: int | None = None) -> dict[str, Any]:
         record = self._get_task_record_for_user(task_id, user_id)
         snapshot = record.clone_snapshot()
-        if snapshot.get("status") in {"completed", "failed", "terminated"}:
+        if snapshot.get("status") in {"completed", "terminated"}:
             return snapshot
+        if snapshot.get("status") == "failed":
+            self._append_log(
+                record,
+                title="控制动作：终止失败任务",
+                message="失败任务已标记为终止，失败前的阶段和中间产物已保留。",
+            )
+            self._update_snapshot(
+                record,
+                status="terminated",
+                message="任务已终止，失败前的阶段和中间产物已保留，可直接重新开始。",
+                finished_at=now_iso(),
+            )
+            return record.clone_snapshot()
         record.control.request_terminate()
         self._append_log(
             record,

@@ -317,8 +317,6 @@ def _run_batched_generation(
 def _effective_batch_mode() -> str:
     mode = settings.fastgpt_batch_mode
     if mode == "auto":
-        if settings.fastgpt_variable_mode in {"legacy", "legacy_ids"}:
-            return "fastgpt_full"
         return "local"
     return mode
 
@@ -413,7 +411,11 @@ def _run_fastgpt_stage(
     max_retries: int | None = None,
 ) -> dict[str, Any]:
     contract = contract_for(stage_name)
-    attempts = 1 + max(0, settings.max_retries_default if max_retries is None else max_retries)
+    # Business audit/revise loops live inside FastGPT. Python only retries malformed
+    # stage calls when explicitly configured, while HTTP/network retry is handled
+    # by FastGPTClient.
+    stage_retries = settings.fastgpt_stage_retries if max_retries is None else max_retries
+    attempts = 1 + max(0, stage_retries)
     last_error: Exception | None = None
 
     for attempt in range(1, attempts + 1):
@@ -443,6 +445,7 @@ def _run_fastgpt_stage(
         except Exception as exc:
             last_error = exc
             state.set_output(f"fastgpt:{stage_name}", f"attempt_{attempt}_error", str(exc))
+            sync_runtime_state(state)
             logger.warning(
                 "FastGPT 阶段 %s 第 %s 次调用失败: %s",
                 stage_name,
@@ -450,6 +453,15 @@ def _run_fastgpt_stage(
                 exc,
             )
             if _is_non_retryable(exc) or attempt >= attempts:
+                set_runtime_stage(
+                    state,
+                    stage_key,
+                    f"{contract.label} 调用失败，已保留当前进度：{exc}",
+                    batch_label=batch_label,
+                    progress_percent=progress_percent,
+                    generated_episodes=generated_episodes,
+                )
+                sync_runtime_state(state)
                 raise
             set_runtime_stage(
                 state,

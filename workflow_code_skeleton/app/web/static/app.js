@@ -95,6 +95,28 @@
     } catch (_) {}
   }
 
+  function formHasUserInput() {
+    return Boolean(
+      els.titleInput.value.trim()
+      || els.storyOutlineInput.value.trim()
+      || els.coreSceneInput.value.trim()
+      || els.characterBiosInput.value.trim()
+      || els.episodePlanInput.value.trim()
+    );
+  }
+
+  function restoreInputPayload(inputPayload) {
+    if (!inputPayload || formHasUserInput()) return;
+    els.titleInput.value = inputPayload.title || "";
+    els.wordCountInput.value = inputPayload.episode_word_count || 500;
+    els.episodeCountInput.value = inputPayload.total_episodes || 10;
+    els.storyOutlineInput.value = inputPayload.story_outline || "";
+    els.coreSceneInput.value = inputPayload.core_scene_input || "";
+    els.characterBiosInput.value = inputPayload.character_bios || "";
+    els.episodePlanInput.value = inputPayload.episode_plan || "";
+    saveDraft();
+  }
+
   function cacheSnapshot(snapshot) {
     if (!snapshot || !snapshot.project_id) return;
     localStorage.setItem(STORAGE.projectId, String(snapshot.project_id));
@@ -186,7 +208,7 @@
     els.startBtn.disabled = !hasConfiguredModel || ["running", "pending", "pausing", "paused"].includes(status);
     els.pauseBtn.disabled = status !== "running" && status !== "pending";
     els.resumeBtn.disabled = !["paused", "pausing"].includes(status);
-    els.terminateBtn.disabled = !["pending", "running", "pausing", "paused"].includes(status);
+    els.terminateBtn.disabled = !["pending", "running", "pausing", "paused", "failed"].includes(status);
     els.saveBtn.disabled = !hasProject || !hasFinal;
   }
 
@@ -375,6 +397,7 @@
 
     const data = await requestJson(window.scriptMakerConfig.latestProjectUrl);
     if (data.project) {
+      restoreInputPayload(data.project.input_payload);
       renderSnapshot(data.project);
       if (["running", "pending", "pausing"].includes(data.project.status)) {
         startPolling();

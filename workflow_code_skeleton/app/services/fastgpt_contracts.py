@@ -440,7 +440,7 @@ def coerce_fastgpt_value(value: Any, type_name: str) -> Any:
             return bool(value)
 
         if isinstance(value, dict):
-            for key in ("is_consistent", "passed", "approved", "result", "value", "answer"):
+            for key in ("is_consistent", "passed", "approved", "consistent"):
                 if key in value:
                     return coerce_fastgpt_value(value[key], "boolean")
 
