@@ -16,6 +16,7 @@ from flask import (
 )
 
 from .services.auth_store import auth_store
+from .services.simple_fastgpt_tools import list_simple_tools, run_simple_tool
 from .services.task_manager import task_manager
 
 
@@ -132,6 +133,38 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         user = _current_user()
         return _json_ok(user={"id": user.id, "username": user.username})
 
+    @app.patch("/api/me/username")
+    @_login_required
+    def update_username_api():
+        data = request.get_json(silent=True) or {}
+        try:
+            user = auth_store.update_username(
+                _require_user_id(),
+                str(data.get("username") or ""),
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        session["username"] = user.username
+        return _json_ok(user={"id": user.id, "username": user.username})
+
+    @app.patch("/api/me/password")
+    @_login_required
+    def update_password_api():
+        data = request.get_json(silent=True) or {}
+        new_password = str(data.get("new_password") or "")
+        confirm_password = str(data.get("confirm_password") or "")
+        if new_password != confirm_password:
+            return _json_error("两次输入的新密码不一致", status=400)
+        try:
+            auth_store.update_password(
+                _require_user_id(),
+                str(data.get("current_password") or ""),
+                new_password,
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        return _json_ok(message="密码已修改")
+
     @app.get("/api/models")
     @_login_required
     def list_models():
@@ -141,6 +174,21 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         except Exception as exc:
             return _json_error(str(exc), status=500)
         return _json_ok(models=models, workflow_spec_path=spec_path)
+
+    @app.get("/api/tools")
+    @_login_required
+    def list_tools():
+        return _json_ok(tools=list_simple_tools())
+
+    @app.post("/api/tools/<tool_key>/run")
+    @_login_required
+    def run_tool(tool_key: str):
+        data = request.get_json(silent=True) or {}
+        try:
+            result = run_simple_tool(tool_key, data)
+        except Exception as exc:
+            return _json_error(str(exc), status=400)
+        return _json_ok(result=result)
 
     @app.get("/api/projects/latest")
     @_login_required

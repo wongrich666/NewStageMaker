@@ -29,6 +29,10 @@
     terminateBtn: $("terminateBtn"),
     clearBtn: $("clearBtn"),
     saveBtn: $("saveBtn"),
+    openProfileBtn: $("openProfileBtn"),
+    closeProfileBtn: $("closeProfileBtn"),
+    closeProfileBackdrop: $("closeProfileBackdrop"),
+    profilePanel: $("profilePanel"),
     newScriptBtn: $("newScriptBtn"),
     viewAssetsBtn: $("viewAssetsBtn"),
     refreshAssetsBtn: $("refreshAssetsBtn"),
@@ -42,6 +46,16 @@
     editAssetFinal: $("editAssetFinal"),
     saveAssetEditBtn: $("saveAssetEditBtn"),
     cancelAssetEditBtn: $("cancelAssetEditBtn"),
+    usernameForm: $("usernameForm"),
+    passwordForm: $("passwordForm"),
+    profileUsernameInput: $("profileUsernameInput"),
+    currentPasswordInput: $("currentPasswordInput"),
+    newPasswordInput: $("newPasswordInput"),
+    confirmPasswordInput: $("confirmPasswordInput"),
+    profileMessage: $("profileMessage"),
+    toolForms: $("toolForms"),
+    runToolBtn: $("runToolBtn"),
+    toolOutputBox: $("toolOutputBox"),
 
     statusText: $("statusText"),
     messageText: $("messageText"),
@@ -64,7 +78,57 @@
     availableModels: [],
     latestSnapshot: null,
     assets: [],
-    editingProjectId: null
+    editingProjectId: null,
+    activeTool: "hot_review"
+  };
+
+  const TOOL_DEFINITIONS = {
+    hot_review: {
+      title: "爆款文审核",
+      help: "提交剧本正文、故事大纲、分集计划或局部片段，系统会评估爆款元素、风险和修改建议。",
+      fields: [
+        ["text", "待检测文本", "textarea", "粘贴需要审核的剧本正文 / 小说原著 / 大纲 / 分集计划。"]
+      ]
+    },
+    reskin: {
+      title: "换皮",
+      help: "输入源剧本材料和目标风格，调用换皮工作流生成新版本结果。",
+      fields: [
+        ["title", "剧本标题", "input", "新剧本标题。"],
+        ["source_outline", "源剧本梗概", "textarea", "源故事梗概。"],
+        ["core_scenes", "源剧本核心场景", "textarea", "可选，源剧本核心场景。"],
+        ["source_characters", "源剧本人物小传", "textarea", "源人物小传。"],
+        ["source_script", "源剧本正文", "textarea", "源剧本正文，可为空但效果会受影响。"],
+        ["target_style", "目标风格", "textarea", "希望换成的题材、风格、爽点方向。"],
+        ["total_episodes", "总集数", "number", "例如 60。"],
+        ["episode_word_count", "每集字数", "number", "例如 500。"]
+      ]
+    },
+    punchup: {
+      title: "增加爽感",
+      help: "在不改情节事实的前提下，强化台词网感、黄金 7 秒和爽点表达。",
+      fields: [
+        ["title", "剧本名", "input", "原剧本名。"],
+        ["story_outline", "故事梗概", "textarea", "故事梗概。"],
+        ["characters", "人物小传", "textarea", "人物设定。"],
+        ["core_scenes", "核心场景", "textarea", "核心场景。"],
+        ["script", "剧本正文", "textarea", "需要增爽的剧本正文。"],
+        ["total_episodes", "总集数", "number", "总集数。"]
+      ]
+    },
+    character_reskin: {
+      title: "换皮只换人设",
+      help: "保留主剧情结构，重点替换人物小传和角色设定。",
+      fields: [
+        ["title", "剧本标题", "input", "新剧本标题。"],
+        ["story_outline", "故事大纲", "textarea", "故事大纲。"],
+        ["characters", "人物小传", "textarea", "需要换皮的人物小传。"],
+        ["core_scenes", "核心场景", "textarea", "核心场景。"],
+        ["source_script", "原剧本正文", "textarea", "原剧本正文。"],
+        ["total_episodes", "总集数", "number", "总集数。"],
+        ["episode_word_count", "每集正文字数", "number", "每集字数。"]
+      ]
+    }
   };
 
   function isAuthenticated() {
@@ -249,6 +313,62 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  function renderToolForm(toolKey) {
+    if (!els.toolForms) return;
+    const tool = TOOL_DEFINITIONS[toolKey] || TOOL_DEFINITIONS.hot_review;
+    state.activeTool = toolKey;
+    document.querySelectorAll(".tool-tab").forEach((button) => {
+      button.classList.toggle("active", button.dataset.tool === toolKey);
+    });
+    els.toolForms.innerHTML = `
+      <div class="tool-form-head">
+        <h3>${escapeHtml(tool.title)}</h3>
+        <p>${escapeHtml(tool.help)}</p>
+      </div>
+      <div class="tool-field-grid">
+        ${tool.fields.map(([name, label, type, placeholder]) => {
+          if (type === "textarea") {
+            return `
+              <label class="field tool-field wide-field">
+                <span>${escapeHtml(label)}</span>
+                <textarea data-tool-field="${escapeHtml(name)}" placeholder="${escapeHtml(placeholder)}"></textarea>
+              </label>
+            `;
+          }
+          return `
+            <label class="field tool-field">
+              <span>${escapeHtml(label)}</span>
+              <input data-tool-field="${escapeHtml(name)}" type="${escapeHtml(type)}" placeholder="${escapeHtml(placeholder)}">
+            </label>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  function collectToolPayload() {
+    const payload = {};
+    document.querySelectorAll("[data-tool-field]").forEach((field) => {
+      const key = field.dataset.toolField;
+      payload[key] = field.type === "number" ? Number(field.value || 0) : field.value.trim();
+    });
+    return payload;
+  }
+
+  function openProfilePanel() {
+    if (!requireLogin()) return;
+    els.profilePanel?.classList.remove("hidden");
+    els.profilePanel?.setAttribute("aria-hidden", "false");
+    loadAssets().catch((error) => {
+      els.messageText.textContent = error.message || String(error);
+    });
+  }
+
+  function closeProfilePanel() {
+    els.profilePanel?.classList.add("hidden");
+    els.profilePanel?.setAttribute("aria-hidden", "true");
   }
 
   async function requestJson(url, options = {}) {
@@ -538,6 +658,54 @@
     await loadCommunity();
   }
 
+  async function runActiveTool() {
+    if (!requireLogin()) return;
+    const payload = collectToolPayload();
+    els.toolOutputBox.textContent = "正在调用 FastGPT 工具，请稍候。";
+    const data = await requestJson(`/api/tools/${state.activeTool}/run`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    els.toolOutputBox.textContent = data.result?.result || "工具没有返回文本结果。";
+  }
+
+  async function updateUsername(event) {
+    event.preventDefault();
+    if (!requireLogin()) return;
+    const username = els.profileUsernameInput.value.trim();
+    try {
+      const data = await requestJson("/api/me/username", {
+        method: "PATCH",
+        body: JSON.stringify({ username })
+      });
+      window.scriptMakerConfig.username = data.user?.username || username;
+      els.profileMessage.textContent = "用户名已修改。";
+    } catch (error) {
+      els.profileMessage.textContent = error.message || String(error);
+    }
+  }
+
+  async function updatePassword(event) {
+    event.preventDefault();
+    if (!requireLogin()) return;
+    try {
+      await requestJson("/api/me/password", {
+        method: "PATCH",
+        body: JSON.stringify({
+          current_password: els.currentPasswordInput.value,
+          new_password: els.newPasswordInput.value,
+          confirm_password: els.confirmPasswordInput.value
+        })
+      });
+      els.currentPasswordInput.value = "";
+      els.newPasswordInput.value = "";
+      els.confirmPasswordInput.value = "";
+      els.profileMessage.textContent = "密码已修改。";
+    } catch (error) {
+      els.profileMessage.textContent = error.message || String(error);
+    }
+  }
+
   async function pollTask() {
     if (!state.taskId) return;
     try {
@@ -610,6 +778,12 @@
   }
 
   function bindActions() {
+    els.openProfileBtn?.addEventListener("click", openProfilePanel);
+    els.closeProfileBtn?.addEventListener("click", closeProfilePanel);
+    els.closeProfileBackdrop?.addEventListener("click", closeProfilePanel);
+    els.usernameForm?.addEventListener("submit", updateUsername);
+    els.passwordForm?.addEventListener("submit", updatePassword);
+
     els.newScriptBtn?.addEventListener("click", () => {
       if (!requireLogin()) return;
       document.getElementById("create")?.scrollIntoView({ behavior: "smooth" });
@@ -617,7 +791,7 @@
 
     els.viewAssetsBtn?.addEventListener("click", () => {
       if (!requireLogin()) return;
-      document.getElementById("assets")?.scrollIntoView({ behavior: "smooth" });
+      openProfilePanel();
     });
 
     els.refreshAssetsBtn?.addEventListener("click", async () => {
@@ -662,6 +836,18 @@
     });
 
     els.cancelAssetEditBtn?.addEventListener("click", closeAssetEditor);
+
+    document.querySelectorAll(".tool-tab").forEach((button) => {
+      button.addEventListener("click", () => renderToolForm(button.dataset.tool));
+    });
+
+    els.runToolBtn?.addEventListener("click", async () => {
+      try {
+        await runActiveTool();
+      } catch (error) {
+        els.toolOutputBox.textContent = error.message || String(error);
+      }
+    });
 
     els.startBtn.addEventListener("click", async () => {
       try {
@@ -710,6 +896,7 @@
 
   async function init() {
     restoreDraft();
+    renderToolForm(state.activeTool);
     bindInputs();
     bindActions();
     renderSnapshot(null);

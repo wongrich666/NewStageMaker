@@ -4,13 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260410-5">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260410-7">
 </head>
 <body>
-  <div class="bg-orb orb-a"></div>
-  <div class="bg-orb orb-b"></div>
-  <div class="bg-grid"></div>
-
   <main class="shell">
     <header class="topbar">
       <a class="brand-mark" href="/">
@@ -19,14 +15,14 @@
       </a>
       <nav class="nav-links">
         <a href="#create">新建剧本</a>
-        <a href="#assets">以往资产</a>
+        <a href="#tools">辅助工具</a>
         <a href="#guide">使用说明</a>
         <a href="#community">社区好剧</a>
       </nav>
       <div class="user-chip">
         {% if current_user %}
           <span class="avatar">{{ current_user.username[:1] }}</span>
-          <a href="#assets">个人中心</a>
+          <button id="openProfileBtn" class="link-button" type="button">个人中心</button>
           <a class="logout-link" href="{{ url_for('logout') }}">退出</a>
         {% else %}
           <span class="avatar">游</span>
@@ -38,22 +34,15 @@
 
     <section class="landing-hero">
       <div class="hero-panel">
-        <p class="eyebrow">Script Studio</p>
-        <h1>从故事材料到完整短剧剧本，一条线跑完。</h1>
-        <p class="hero-copy">工作台会把世界观、人设、场景、钩子、对白、正文和记忆串成可暂停、可恢复、可保存的生成流程。公开成品后，它也能进入社区共享好剧。</p>
+        <p class="eyebrow">AI Script Studio</p>
+        <h1>框架到剧本，让 AI 实现你的想法</h1>
+        <p class="hero-copy">登录后开始生成；只要不退出账户，离开页面后工作流也会继续运行，回来即可查看进度和结果。</p>
         <div class="hero-actions">
           <button id="newScriptBtn" class="btn btn-primary" type="button">新建剧本</button>
-          <button id="viewAssetsBtn" class="btn btn-secondary" type="button">查看以往资产</button>
-          {% if not current_user %}
-            <a class="btn btn-ghost btn-link" href="{{ url_for('login_page') }}">登录后开始创作</a>
-          {% endif %}
+          <button id="viewAssetsBtn" class="btn btn-secondary" type="button">个人中心</button>
+          <a class="btn btn-ghost btn-link" href="#tools">使用辅助工具</a>
         </div>
       </div>
-      <aside class="hero-sidecard">
-        <span class="status-dot"></span>
-        <strong>本地逻辑 + FastGPT 智能体</strong>
-        <p>批次 +5、拼接、缓存、暂停恢复由本地负责；内容生成和审核修订交给 FastGPT。</p>
-      </aside>
     </section>
 
     <section id="create" class="runtime card">
@@ -158,12 +147,109 @@
       </section>
     </div>
 
-    <section id="assets" class="card asset-card">
+    <section id="tools" class="card tool-card">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Personal Center</p>
-          <h2>新建剧本与以往资产</h2>
-          <p>你可以修改作品信息、设置公开或不公开，也可以删除不需要的剧本资产。</p>
+          <p class="eyebrow">One-Shot Tools</p>
+          <h2>辅助工作流</h2>
+          <p>单次调用，不影响主剧本生成流程。</p>
+        </div>
+      </div>
+      <div class="tool-tabs">
+        <button class="tool-tab active" data-tool="hot_review" type="button">爆款文审核</button>
+        <button class="tool-tab" data-tool="reskin" type="button">换皮</button>
+        <button class="tool-tab" data-tool="punchup" type="button">增加爽感</button>
+        <button class="tool-tab" data-tool="character_reskin" type="button">只换人设</button>
+      </div>
+      <div id="toolForms" class="tool-forms"></div>
+      <div class="control-row">
+        <button id="runToolBtn" class="btn btn-primary" type="button">运行当前工具</button>
+      </div>
+      <pre id="toolOutputBox" class="output-box tool-output">工具结果会显示在这里。</pre>
+    </section>
+
+    <section id="guide" class="guide-grid">
+      <article class="card guide-card">
+        <span>1</span>
+        <h3>登录后创建</h3>
+        <p>填写创作材料，点击开始生成。</p>
+      </article>
+      <article class="card guide-card">
+        <span>2</span>
+        <h3>可暂停恢复</h3>
+        <p>离开页面也会继续执行，回到账户即可恢复查看。</p>
+      </article>
+      <article class="card guide-card">
+        <span>3</span>
+        <h3>资产在个人中心</h3>
+        <p>剧本可修改、删除，也可设置公开或不公开。</p>
+      </article>
+    </section>
+
+    <section id="community" class="card community-card">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Community Picks</p>
+          <h2>社区共享好剧</h2>
+          <p>展示用户设置为公开成品的剧本。</p>
+        </div>
+        <button id="refreshCommunityBtn" class="btn btn-secondary" type="button">刷新社区</button>
+      </div>
+      <div id="communityList" class="community-grid"></div>
+    </section>
+  </main>
+
+  <aside id="profilePanel" class="profile-panel hidden" aria-hidden="true">
+    <div class="profile-backdrop" id="closeProfileBackdrop"></div>
+    <section class="profile-drawer">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Profile</p>
+          <h2>个人中心</h2>
+          <p>管理账号和剧本资产。</p>
+        </div>
+        <button id="closeProfileBtn" class="btn btn-ghost" type="button">关闭</button>
+      </div>
+
+      <div class="profile-grid">
+        <form id="usernameForm" class="card mini-card">
+          <div class="card-head">
+            <h3>修改用户名</h3>
+            <p>用户名不能重复。</p>
+          </div>
+          <label class="field">
+            <span>新用户名</span>
+            <input id="profileUsernameInput" type="text" value="{{ current_user.username if current_user else '' }}">
+          </label>
+          <button class="btn btn-primary" type="submit">保存用户名</button>
+          <p id="profileMessage" class="hint"></p>
+        </form>
+
+        <form id="passwordForm" class="card mini-card">
+          <div class="card-head">
+            <h3>修改密码</h3>
+            <p>密码至少 6 位。</p>
+          </div>
+          <label class="field">
+            <span>当前密码</span>
+            <input id="currentPasswordInput" type="password">
+          </label>
+          <label class="field">
+            <span>新密码</span>
+            <input id="newPasswordInput" type="password">
+          </label>
+          <label class="field">
+            <span>确认新密码</span>
+            <input id="confirmPasswordInput" type="password">
+          </label>
+          <button class="btn btn-primary" type="submit">保存密码</button>
+        </form>
+      </div>
+
+      <div class="section-head compact-head">
+        <div>
+          <h3>我的资产</h3>
+          <p>修改、删除、公开或隐藏你的剧本。</p>
         </div>
         <button id="refreshAssetsBtn" class="btn btn-secondary" type="button">刷新资产</button>
       </div>
@@ -172,7 +258,6 @@
       <div id="assetEditor" class="asset-editor hidden">
         <div class="card-head">
           <h3>修改资产</h3>
-          <p>修改标题、故事梗概、公开状态或最终剧本文本。</p>
         </div>
         <div class="field-grid compact-grid">
           <label class="field">
@@ -201,37 +286,7 @@
         </div>
       </div>
     </section>
-
-    <section id="guide" class="guide-grid">
-      <article class="card guide-card">
-        <span>1</span>
-        <h3>登录后创建</h3>
-        <p>填写剧本标题、故事大纲、人物小传和分集计划，选择模型后开始生成。游客可以浏览页面，但不能调用生成服务。</p>
-      </article>
-      <article class="card guide-card">
-        <span>2</span>
-        <h3>生成可中断</h3>
-        <p>你可以暂停、继续、终止。遇到 FastGPT 502 等临时错误时，系统会自动保存进度并持续重试。</p>
-      </article>
-      <article class="card guide-card">
-        <span>3</span>
-        <h3>资产可处置</h3>
-        <p>完成后的剧本会归档为你的资产。你可以修改、删除、保存，也可以设置成“公开成品”进入社区展示。</p>
-      </article>
-    </section>
-
-    <section id="community" class="card community-card">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">Community Picks</p>
-          <h2>社区共享好剧</h2>
-          <p>这里展示用户设置为“公开成品”的剧本，摘要直接来自用户填写的故事梗概。</p>
-        </div>
-        <button id="refreshCommunityBtn" class="btn btn-secondary" type="button">刷新社区</button>
-      </div>
-      <div id="communityList" class="community-grid"></div>
-    </section>
-  </main>
+  </aside>
 
   <script>
     window.scriptMakerConfig = {
@@ -242,10 +297,11 @@
       latestProjectUrl: "/api/projects/latest",
       assetsUrl: "/api/assets",
       communityUrl: "/api/community",
+      toolsUrl: "/api/tools",
       startUrl: "/api/workflows/start",
       loginUrl: "{{ url_for('login_page') }}"
     };
   </script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260410-5"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260410-7"></script>
 </body>
 </html>

@@ -140,5 +140,59 @@ class AuthStore:
             return None
         return self._row_to_user(row)
 
+    def update_username(self, user_id: int, username: str) -> UserAccount:
+        normalized = normalize_username(username)
+        username_error = validate_username(normalized)
+        if username_error:
+            raise ValueError(username_error)
+        with self._connect() as conn:
+            current = conn.execute(
+                "SELECT username FROM users WHERE id = ?",
+                (int(user_id),),
+            ).fetchone()
+            if current is None:
+                raise ValueError("用户不存在")
+            if str(current["username"]) == normalized:
+                return self.get_user(user_id)
+            duplicate = conn.execute(
+                "SELECT id FROM users WHERE username = ? AND id <> ?",
+                (normalized, int(user_id)),
+            ).fetchone()
+            if duplicate is not None:
+                raise ValueError("该用户名已被使用，请换一个用户名")
+            conn.execute(
+                "UPDATE users SET username = ? WHERE id = ?",
+                (normalized, int(user_id)),
+            )
+            conn.commit()
+        user = self.get_user(user_id)
+        if user is None:
+            raise ValueError("用户不存在")
+        return user
+
+    def update_password(
+        self,
+        user_id: int,
+        current_password: str,
+        new_password: str,
+    ) -> None:
+        password_error = validate_password(new_password)
+        if password_error:
+            raise ValueError(password_error)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT password_hash FROM users WHERE id = ?",
+                (int(user_id),),
+            ).fetchone()
+            if row is None:
+                raise ValueError("用户不存在")
+            if not check_password_hash(str(row["password_hash"]), str(current_password)):
+                raise ValueError("当前密码不正确")
+            conn.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (generate_password_hash(str(new_password)), int(user_id)),
+            )
+            conn.commit()
+
 
 auth_store = AuthStore()

@@ -549,6 +549,10 @@ class TaskManager:
             self._asset_summary(snapshot, include_private=False)
             for snapshot in self._all_project_snapshots()
             if str(snapshot.get("visibility") or "private") == "public"
+            and bool(
+                (snapshot.get("artifacts") or {}).get("final_output_text")
+                or (snapshot.get("artifacts") or {}).get("final_script")
+            )
         ]
         assets.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return assets[:24]
