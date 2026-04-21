@@ -3,17 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260421-2">
+  <title>IDEA TO SCRIPT  剧本生成工作台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260421-3">
 </head>
 <body>
   <main class="shell">
     <header class="topbar">
-      <a class="brand-mark" href="/">
+      <a class="brand-mark" href="{{ url_for('index', auth_token=current_auth_token) }}">
         <span>剧</span>
-        <strong>剧本生成工作台</strong>
+        <strong>IDEA TO SCRIPT  剧本生成工作台</strong>
       </a>
       <nav class="nav-links">
+        <a href="{{ url_for('index', auth_token=current_auth_token) }}">首页</a>
         <a href="#create">新建剧本</a>
         <a href="#tools">辅助工具</a>
         <a href="#guide">使用说明</a>
@@ -36,7 +37,7 @@
       <div class="hero-panel">
         <p class="eyebrow">AI Script Studio</p>
         <h1>框架到剧本，让 AI 实现你的想法</h1>
-        <p class="hero-copy">登录后可以同时开启多个任务；点击新建剧本会直接打开新的工作页面。只要不退出账户，离开页面后工作流也会继续运行，回来即可按项目查看进度、暂停继续和下载结果。</p>
+        <p class="hero-copy">登录后可以同时生成多个剧本；点击【新建剧本】会直接打开新的工作页面。只要不退出登录，离开页面后工作流也会继续运行。</p>
         <div class="hero-actions">
           <button id="newScriptBtn" class="btn btn-primary" type="button">新建剧本</button>
           <button id="viewAssetsBtn" class="btn btn-secondary" type="button">个人中心</button>
@@ -299,6 +300,8 @@
       isAuthenticated: {{ 'true' if current_user else 'false' }},
       userId: {{ current_user.id if current_user else 'null' }},
       username: {{ current_user.username|tojson if current_user else 'null' }},
+      homeUrl: "{{ url_for('index') }}",
+      workspaceUrl: "{{ url_for('workspace_page') }}",
       modelsUrl: "/api/models",
       latestProjectUrl: "/api/projects/latest",
       projectsUrl: "/api/projects",
@@ -309,6 +312,6 @@
       loginUrl: "{{ url_for('login_page') }}"
     };
   </script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260421-2"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260421-3"></script>
 </body>
 </html>

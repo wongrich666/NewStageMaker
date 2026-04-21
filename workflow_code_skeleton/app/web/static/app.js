@@ -2,7 +2,8 @@
   "use strict";
 
   const userKey = `user.${window.scriptMakerConfig.userId || "anon"}`;
-  const storage = window.sessionStorage;
+  const draftStorage = window.localStorage;
+  const pageStorage = window.sessionStorage;
   const STORAGE = {
     draft: `scriptmaker.web.${userKey}.draft`,
     selectedProjectId: `scriptmaker.web.${userKey}.selectedProjectId`,
@@ -159,6 +160,12 @@
     return new URL(window.location.href);
   }
 
+  function updateUrlParams(mutator) {
+    const url = currentUrl();
+    mutator(url.searchParams);
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
   function isFreshWorkspaceMode() {
     const url = currentUrl();
     return url.searchParams.get("mode") === "new" && !normalizeNumber(url.searchParams.get("project_id"));
@@ -171,15 +178,15 @@
     }
     const fromUrl = normalizeNumber(url.searchParams.get("project_id"));
     if (fromUrl) return fromUrl;
-    return normalizeNumber(storage.getItem(STORAGE.selectedProjectId));
+    return normalizeNumber(pageStorage.getItem(STORAGE.selectedProjectId));
   }
 
   function persistSelectedProjectId(projectId) {
     const normalized = normalizeNumber(projectId);
     if (normalized) {
-      storage.setItem(STORAGE.selectedProjectId, String(normalized));
+      pageStorage.setItem(STORAGE.selectedProjectId, String(normalized));
     } else {
-      storage.removeItem(STORAGE.selectedProjectId);
+      pageStorage.removeItem(STORAGE.selectedProjectId);
     }
     const url = currentUrl();
     if (normalized) {
@@ -196,8 +203,12 @@
 
   function buildWorkspaceUrl({ projectId = null, fresh = false } = {}) {
     const url = currentUrl();
+    const basePath = window.scriptMakerConfig.workspaceUrl || url.pathname;
+    url.pathname = basePath;
     url.searchParams.delete("project_id");
     url.searchParams.delete("mode");
+    url.searchParams.delete("section");
+    url.searchParams.delete("panel");
     if (projectId) {
       url.searchParams.set("project_id", String(projectId));
     } else if (fresh) {
@@ -230,13 +241,13 @@
       character_count: Number(els.characterCountInput.value || 0),
       total_episodes: Number(els.episodeCountInput.value || 0),
     };
-    storage.setItem(STORAGE.draft, JSON.stringify(draft));
-    storage.setItem(STORAGE.modelId, els.modelSelect.value || "");
+    draftStorage.setItem(STORAGE.draft, JSON.stringify(draft));
+    draftStorage.setItem(STORAGE.modelId, els.modelSelect.value || "");
   }
 
   function restoreDraft() {
     try {
-      const raw = storage.getItem(STORAGE.draft);
+      const raw = draftStorage.getItem(STORAGE.draft);
       if (!raw) return;
       const draft = JSON.parse(raw);
       els.expectationInput.value = draft.user_expectation || "";
@@ -246,7 +257,7 @@
   }
 
   function clearDraft() {
-    storage.removeItem(STORAGE.draft);
+    draftStorage.removeItem(STORAGE.draft);
   }
 
   function formHasUserInput() {
@@ -396,6 +407,7 @@
     if (!requireLogin()) return;
     els.profilePanel?.classList.remove("hidden");
     els.profilePanel?.setAttribute("aria-hidden", "false");
+    updateUrlParams((params) => params.set("panel", "profile"));
     loadAssets().catch((error) => {
       els.messageText.textContent = error.message || String(error);
     });
@@ -404,6 +416,7 @@
   function closeProfilePanel() {
     els.profilePanel?.classList.add("hidden");
     els.profilePanel?.setAttribute("aria-hidden", "true");
+    updateUrlParams((params) => params.delete("panel"));
   }
 
   async function requestJson(url, options = {}) {
@@ -439,7 +452,7 @@
     const data = await requestJson(window.scriptMakerConfig.modelsUrl);
     state.availableModels = data.models || [];
     const availableModels = state.availableModels.filter((item) => item.configured !== false);
-    const cachedModelId = storage.getItem(STORAGE.modelId) || "";
+    const cachedModelId = draftStorage.getItem(STORAGE.modelId) || "";
     els.modelSelect.innerHTML = state.availableModels.map((item) => {
       const disabled = item.configured === false ? " disabled" : "";
       return `<option value="${escapeHtml(item.id)}"${disabled}>${escapeHtml(item.label)}</option>`;
@@ -948,6 +961,17 @@
     await loadProjects({ restoreSelection: true, restoreInputs: true });
     if (shouldContinuePolling()) {
       startPolling();
+    }
+    const params = currentUrl().searchParams;
+    const panel = params.get("panel");
+    const section = params.get("section");
+    if (panel === "profile" && isAuthenticated()) {
+      openProfilePanel();
+    }
+    if (section) {
+      window.setTimeout(() => {
+        document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 80);
     }
   }
 

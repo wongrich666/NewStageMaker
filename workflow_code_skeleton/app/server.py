@@ -90,6 +90,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @app.get("/")
     def index():
         return render_template(
+            "home.html",
+            current_user=_current_user(),
+            current_auth_token=_current_auth_token(),
+            community_assets=task_manager.list_public_assets(),
+        )
+
+    @app.get("/workspace")
+    def workspace_page():
+        return render_template(
             "index.html",
             current_user=_current_user(),
             current_auth_token=_current_auth_token(),
