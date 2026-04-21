@@ -42,14 +42,26 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def _json_error(message: str, status: int = 400):
         return jsonify({"success": False, "message": message}), status
 
-    def _current_user():
-        return auth_store.get_user(session.get("user_id"))
+    def _request_auth_token() -> str:
+        auth_header = str(request.headers.get("Authorization") or "").strip()
+        if auth_header.lower().startswith("bearer "):
+            return auth_header[7:].strip()
+        return str(
+            request.args.get("auth_token")
+            or request.form.get("auth_token")
+            or ""
+        ).strip()
 
-    def _login_user(user) -> None:
+    def _current_user():
+        token = _request_auth_token()
+        return auth_store.get_user_by_token(token)
+
+    def _current_auth_token() -> str:
+        return _request_auth_token()
+
+    def _login_user(user) -> str:
         session.clear()
-        session["user_id"] = user.id
-        session["username"] = user.username
-        session.permanent = True
+        return auth_store.create_session_token(user.id)
 
     def _logout_user() -> None:
         session.clear()
@@ -77,12 +89,16 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
     @app.get("/")
     def index():
-        return render_template("index.html", current_user=_current_user())
+        return render_template(
+            "index.html",
+            current_user=_current_user(),
+            current_auth_token=_current_auth_token(),
+        )
 
     @app.get("/login")
     def login_page():
         if _current_user():
-            return redirect(url_for("index"))
+            return redirect(url_for("index", auth_token=_current_auth_token()))
         return render_template("login.html")
 
     @app.post("/login")
@@ -92,13 +108,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         user = auth_store.authenticate(username, password)
         if not user:
             return render_template("login.html", error="用户名或密码错误", username=username), 400
-        _login_user(user)
-        return redirect(url_for("index"))
+        auth_token = _login_user(user)
+        return redirect(url_for("index", auth_token=auth_token))
 
     @app.get("/register")
     def register_page():
         if _current_user():
-            return redirect(url_for("index"))
+            return redirect(url_for("index", auth_token=_current_auth_token()))
         return render_template("register.html")
 
     @app.post("/register")
@@ -120,8 +136,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 error=str(exc),
                 username=username,
             ), 400
-        _login_user(user)
-        return redirect(url_for("index"))
+        auth_token = _login_user(user)
+        return redirect(url_for("index", auth_token=auth_token))
 
     @app.get("/logout")
     def logout():
@@ -145,7 +161,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             )
         except ValueError as exc:
             return _json_error(str(exc), status=400)
-        session["username"] = user.username
         return _json_ok(user={"id": user.id, "username": user.username})
 
     @app.patch("/api/me/password")

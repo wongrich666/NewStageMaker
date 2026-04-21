@@ -14,6 +14,7 @@
   const RESUMABLE_STATUSES = new Set(["paused", "pausing", "failed", "terminated"]);
   const TERMINATABLE_STATUSES = new Set(["pending", "running", "pausing", "paused", "failed"]);
   const $ = (id) => document.getElementById(id);
+  const currentAuthToken = () => new URL(window.location.href).searchParams.get("auth_token") || "";
 
   const els = {
     modelSelect: $("modelSelect"),
@@ -406,9 +407,11 @@
   }
 
   async function requestJson(url, options = {}) {
+    const authToken = currentAuthToken();
     const response = await fetch(url, {
       headers: {
         "Content-Type": "application/json",
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         ...(options.headers || {})
       },
       ...options
@@ -516,7 +519,10 @@
             data-project-id="${escapeHtml(item.project_id)}"
             title="${escapeHtml(projectTooltip(item))}"
           >
-            <span class="workspace-pick-title">${escapeHtml(item.title || "未命名剧本")}</span>
+            <span class="workspace-pick-main">
+              <span class="workspace-pick-title">${escapeHtml(item.title || "未命名剧本")}</span>
+              <span class="workspace-pick-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${item.current_stage_label || statusLabel(item.status)}`)}</span>
+            </span>
             <span class="workspace-pick-state">${escapeHtml(statusLabel(item.status))}</span>
           </button>
         `;
@@ -647,7 +653,9 @@
   function saveFinalScript() {
     if (!requireLogin()) return;
     if (!state.projectId) return;
-    window.location.href = `/api/projects/${state.projectId}/download`;
+    const authToken = currentAuthToken();
+    const suffix = authToken ? `?auth_token=${encodeURIComponent(authToken)}` : "";
+    window.location.href = `/api/projects/${state.projectId}/download${suffix}`;
   }
 
   function visibilityLabel(value) {

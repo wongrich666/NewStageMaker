@@ -32,6 +32,30 @@ logger = get_logger("fastgpt_client")
 
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 OUTPUT_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "script_title": (
+        "script_title",
+        "title",
+    ),
+    "story_outline": (
+        "story_outline",
+        "storyoutline",
+        "story_outline_content",
+    ),
+    "user_characters": (
+        "user_characters",
+        "characterbios",
+        "character_bios_content",
+    ),
+    "user_scenes": (
+        "user_scenes",
+        "corescene",
+        "core_scene_content",
+    ),
+    "episode_plan": (
+        "episode_plan",
+        "episodeplan",
+        "episode_plan_content",
+    ),
     "is_consistent": (
         "is_consistent",
         "passed",
@@ -397,6 +421,8 @@ def _payload_from_candidate(
     candidate: Any,
     contract: FastGPTStageContract,
 ) -> dict[str, Any] | None:
+    if isinstance(candidate, list):
+        candidate = _dict_from_variable_items(candidate)
     expected = contract.output_names
     if not isinstance(candidate, dict):
         return None
@@ -724,6 +750,8 @@ def _extract_legacy_alias_payload(
     candidate: Any,
     contract: FastGPTStageContract,
 ) -> dict[str, Any] | None:
+    if isinstance(candidate, list):
+        candidate = _dict_from_variable_items(candidate)
     if not isinstance(candidate, dict):
         return None
     aliases = LEGACY_OUTPUT_ALIASES.get(contract.stage_name, {})
@@ -742,3 +770,28 @@ def _extract_legacy_alias_payload(
         if expected_name not in payload:
             return None
     return payload
+
+
+def _dict_from_variable_items(candidate: list[Any]) -> dict[str, Any] | None:
+    payload: dict[str, Any] = {}
+    for item in candidate:
+        if not isinstance(item, dict):
+            continue
+        key = item.get("key")
+        value = item.get("value")
+        if isinstance(key, str) and key.strip():
+            payload[key.strip()] = value
+            continue
+        variable = item.get("variable")
+        if isinstance(variable, str) and variable.strip():
+            payload[variable.strip()] = value
+            continue
+        if isinstance(variable, list) and len(variable) >= 2:
+            variable_key = str(variable[-1] or "").strip()
+            if variable_key:
+                payload[variable_key] = value
+                continue
+        name = item.get("name")
+        if isinstance(name, str) and name.strip():
+            payload[name.strip()] = value
+    return payload or None

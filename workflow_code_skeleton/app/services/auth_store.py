@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -57,6 +58,15 @@ class AuthStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS auth_sessions (
+                    token TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
                     created_at TEXT NOT NULL
                 )
                 """
@@ -138,6 +148,36 @@ class AuthStore:
             return None
         if not check_password_hash(str(row["password_hash"]), str(password)):
             return None
+        return self._row_to_user(row)
+
+    def create_session_token(self, user_id: int) -> str:
+        token = secrets.token_urlsafe(32)
+        created_at = datetime.now(timezone.utc).astimezone().isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO auth_sessions (token, user_id, created_at)
+                VALUES (?, ?, ?)
+                """,
+                (token, int(user_id), created_at),
+            )
+            conn.commit()
+        return token
+
+    def get_user_by_token(self, token: str | None) -> UserAccount | None:
+        value = str(token or "").strip()
+        if not value:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT u.id, u.username, u.created_at
+                FROM auth_sessions s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.token = ?
+                """,
+                (value,),
+            ).fetchone()
         return self._row_to_user(row)
 
     def update_username(self, user_id: int, username: str) -> UserAccount:

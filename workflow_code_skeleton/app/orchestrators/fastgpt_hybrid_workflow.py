@@ -880,11 +880,12 @@ def _apply_framework_outputs_to_variables(
     if not _has_framework_outputs(variables):
         return False
 
+    framework_title = str(variables.get(SCRIPT_TITLE) or "").strip()
     story_outline = str(variables.get(STORY_OUTLINE) or "").strip()
     user_characters = str(variables.get(USER_CHARACTERS) or "").strip()
     user_scenes = str(variables.get(USER_SCENES) or "").strip()
     episode_plan = str(variables.get(EPISODE_PLAN) or "").strip()
-    script_title = str(variables.get(SCRIPT_TITLE) or payload.title or "").strip() or "AI原创剧本"
+    script_title = framework_title or str(payload.title or "").strip() or "AI原创剧本"
 
     variables[SCRIPT_TITLE] = script_title
     variables[STORY_OUTLINE] = story_outline

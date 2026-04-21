@@ -23,6 +23,8 @@ from ..workflow_ids import (
     FRAMEWORK_CHARACTER_COUNT_VAR,
     FRAMEWORK_CORE_SCENE_VAR,
     FRAMEWORK_EPISODE_PLAN_VAR,
+    FRAMEWORK_TITLE_VAR,
+    FRAMEWORK_TOTAL_EPISODES_VAR,
     FRAMEWORK_STORY_OUTLINE_VAR,
     FRAMEWORK_USER_EXPECTATION_VAR,
     HOOK_CURRENT_VAR,
@@ -187,8 +189,8 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
     SCRIPT_TITLE: FastGPTVariable(
         SCRIPT_TITLE,
         "string",
-        "剧本标题。当前默认由本地从用户期待生成一个可用标题，也兼容用户直传。",
-        "本地生成/用户输入兼容",
+        "剧本标题。优先使用框架阶段生成标题；若缺失，再回退到本地基于用户期待生成的标题。",
+        "框架阶段输出/本地回退",
     ),
     WORLDVIEW: FastGPTVariable(
         WORLDVIEW,
@@ -291,7 +293,7 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
 
 LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
     STAGE_FRAMEWORK: {
-        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        TOTAL_EPISODES: FRAMEWORK_TOTAL_EPISODES_VAR,
         USER_EXPECTATION: FRAMEWORK_USER_EXPECTATION_VAR,
         CHARACTER_COUNT: FRAMEWORK_CHARACTER_COUNT_VAR,
     },
@@ -378,6 +380,7 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
 
 LEGACY_OUTPUT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
     STAGE_FRAMEWORK: {
+        SCRIPT_TITLE: (FRAMEWORK_TITLE_VAR,),
         STORY_OUTLINE: (FRAMEWORK_STORY_OUTLINE_VAR,),
         USER_CHARACTERS: (FRAMEWORK_CHARACTER_BIOS_VAR,),
         USER_SCENES: (FRAMEWORK_CORE_SCENE_VAR,),
@@ -403,13 +406,14 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         label="剧本框架撰写",
         input_names=(TOTAL_EPISODES, USER_EXPECTATION, CHARACTER_COUNT),
         output_types={
+            SCRIPT_TITLE: "string",
             STORY_OUTLINE: "string",
             USER_CHARACTERS: "string",
             USER_SCENES: "string",
             EPISODE_PLAN: "string",
         },
-        fastgpt_responsibility="根据用户期待、角色数量和总集数，生成故事大纲、人物小传、核心场景、分集计划。",
-        local_responsibility="缓存并复用四项框架产物，后续阶段统一读取这些结果。",
+        fastgpt_responsibility="根据用户期待、角色数量和总集数，生成剧本标题、故事大纲、人物小传、核心场景、分集计划。",
+        local_responsibility="缓存并复用五项框架产物，后续阶段统一读取这些结果。",
     ),
     STAGE_CONSISTENCY: FastGPTStageContract(
         stage_name=STAGE_CONSISTENCY,

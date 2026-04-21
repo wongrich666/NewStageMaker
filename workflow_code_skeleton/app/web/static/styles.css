@@ -461,12 +461,12 @@ a {
 .workspace-folders {
   display: grid;
   gap: 12px;
-  margin-top: 14px;
+  margin-top: 10px;
 }
 
 .workspace-folder {
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.74);
   overflow: hidden;
 }
@@ -476,7 +476,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   cursor: pointer;
   list-style: none;
   font-weight: 800;
@@ -487,26 +487,27 @@ a {
 }
 
 .workspace-folder summary em {
-  min-width: 32px;
-  padding: 4px 10px;
+  min-width: 28px;
+  padding: 3px 8px;
   border-radius: 999px;
   color: white;
   font-style: normal;
   text-align: center;
+  font-size: 12px;
   background: linear-gradient(135deg, var(--c-blue), var(--c-violet));
 }
 
 .workspace-compact-list {
   display: grid;
-  gap: 8px;
-  padding: 0 12px 12px;
+  gap: 6px;
+  padding: 0 10px 10px;
 }
 
 .workspace-pick,
 .workspace-empty {
   width: 100%;
-  min-height: 46px;
-  padding: 12px 14px;
+  min-height: 44px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 14px;
   color: var(--text);
@@ -545,6 +546,21 @@ a {
 .workspace-pick-title {
   overflow: hidden;
   font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-pick-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workspace-pick-meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

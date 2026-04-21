@@ -14,6 +14,7 @@ from ..config import ModelOption, settings
 from ..models.inputs import WorkflowInput
 from ..models.state import WorkflowState
 from ..orchestrators.runner import run_configured_workflow
+from .llm_client import llm_client
 from .workflow_spec import WorkflowSpec
 from ..utils.logger import get_logger
 from ..workflow_ids import (
@@ -50,6 +51,8 @@ STAGE_LABELS = {
     "finalize": "正在整理完整稿件",
     "finished": "已完成",
 }
+STORY_TEASER_ARTIFACT = "story_teaser"
+STORY_TEASER_SOURCE_ARTIFACT = "story_teaser_source"
 
 
 def _summarize_fastgpt_output(output: dict[str, Any]) -> str:
@@ -256,8 +259,9 @@ class WorkflowRuntime:
         )
 
     def sync_from_state(self, state: WorkflowState) -> None:
+        script_title = str(state.get_var(TITLE_VAR, "") or "").strip()
         artifacts = {
-            "script_title": state.get_var(TITLE_VAR, ""),
+            "script_title": script_title,
             "story_outline": state.get_var(STORY_OUTLINE_VAR, ""),
             "character_bios": state.get_var(CHARACTER_BIOS_VAR, ""),
             "episode_plan": state.get_var(EPISODE_PLAN_VAR, ""),
@@ -276,6 +280,7 @@ class WorkflowRuntime:
         }
         self.manager._update_snapshot(
             self.record,
+            title=script_title or self.record.snapshot.get("title") or "未命名剧本",
             artifacts=artifacts,
             debug_state=state.as_debug_dict(),
             prompt_fixes=state.prompt_fixes,
@@ -578,7 +583,7 @@ class TaskManager:
 
     def list_user_assets(self, user_id: int) -> list[dict[str, Any]]:
         assets = [
-            self._asset_summary(snapshot, include_private=True)
+            self._asset_summary(snapshot, include_private=True, use_teaser=True)
             for snapshot in self._all_project_snapshots()
             if self._snapshot_belongs_to_user(snapshot, user_id)
         ]
@@ -587,7 +592,7 @@ class TaskManager:
 
     def list_user_projects(self, user_id: int) -> list[dict[str, Any]]:
         projects = [
-            self._asset_summary(snapshot, include_private=True)
+            self._asset_summary(snapshot, include_private=True, use_teaser=False)
             for snapshot in self._all_project_snapshots()
             if self._snapshot_belongs_to_user(snapshot, user_id)
         ]
@@ -596,9 +601,10 @@ class TaskManager:
 
     def list_public_assets(self) -> list[dict[str, Any]]:
         assets = [
-            self._asset_summary(snapshot, include_private=False)
+            self._asset_summary(snapshot, include_private=False, use_teaser=True)
             for snapshot in self._all_project_snapshots()
             if str(snapshot.get("visibility") or "private") == "public"
+            and str(snapshot.get("status") or "") == "completed"
             and bool(
                 (snapshot.get("artifacts") or {}).get("final_output_text")
                 or (snapshot.get("artifacts") or {}).get("final_script")
@@ -636,6 +642,10 @@ class TaskManager:
             snapshot.setdefault("input_payload", {})["title"] = title
         if story_outline:
             snapshot.setdefault("input_payload", {})["story_outline"] = story_outline
+            artifacts = dict(snapshot.get("artifacts") or {})
+            artifacts.pop(STORY_TEASER_ARTIFACT, None)
+            artifacts.pop(STORY_TEASER_SOURCE_ARTIFACT, None)
+            snapshot["artifacts"] = artifacts
         if final_script is not None:
             text = str(final_script).strip()
             artifacts = dict(snapshot.get("artifacts") or {})
@@ -674,6 +684,7 @@ class TaskManager:
         snapshot: dict[str, Any],
         *,
         include_private: bool,
+        use_teaser: bool,
     ) -> dict[str, Any]:
         input_payload = snapshot.get("input_payload") or {}
         artifacts = snapshot.get("artifacts") or {}
@@ -685,11 +696,13 @@ class TaskManager:
         final_script = str(
             artifacts.get("final_output_text") or artifacts.get("final_script") or ""
         ).strip()
-        summary = story_outline or "这个作品还没有填写故事梗概。"
+        summary = self._story_teaser_for_snapshot(snapshot) if use_teaser else ""
+        if not summary:
+            summary = story_outline or "这个作品还没有填写故事梗概。"
         payload = {
             "project_id": snapshot.get("project_id"),
             "task_id": snapshot.get("task_id"),
-            "title": snapshot.get("title") or input_payload.get("title") or "未命名剧本",
+            "title": artifacts.get("script_title") or snapshot.get("title") or input_payload.get("title") or "未命名剧本",
             "summary": summary[:360],
             "status": snapshot.get("status"),
             "visibility": snapshot.get("visibility") or "private",
@@ -708,6 +721,93 @@ class TaskManager:
         if include_private:
             payload["final_preview"] = final_script[:500]
         return payload
+
+    def _story_teaser_for_snapshot(self, snapshot: dict[str, Any]) -> str:
+        input_payload = snapshot.get("input_payload") or {}
+        artifacts = snapshot.get("artifacts") or {}
+        story_outline = str(
+            artifacts.get("story_outline")
+            or input_payload.get("story_outline")
+            or ""
+        ).strip()
+        if not story_outline:
+            return ""
+
+        has_final = bool(
+            str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip()
+        )
+        if str(snapshot.get("status") or "") != "completed" or not has_final:
+            return self._fallback_story_teaser(story_outline)
+
+        cached_teaser = str(artifacts.get(STORY_TEASER_ARTIFACT) or "").strip()
+        cached_source = str(artifacts.get(STORY_TEASER_SOURCE_ARTIFACT) or "").strip()
+        if cached_teaser and cached_source == story_outline:
+            return cached_teaser
+
+        teaser = self._generate_story_teaser(story_outline) or self._fallback_story_teaser(story_outline)
+        self._cache_story_teaser(snapshot, teaser, story_outline)
+        return teaser
+
+    def _fallback_story_teaser(self, story_outline: str) -> str:
+        condensed = " ".join(str(story_outline or "").replace("\r", "\n").split())
+        return condensed[:88] if condensed else "这个作品还没有填写故事梗概。"
+
+    def _generate_story_teaser(self, story_outline: str) -> str:
+        try:
+            teaser = llm_client.chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是短剧平台编辑。请把用户给出的剧本故事大纲压缩成一句中文展示摘要。"
+                            "要求：只输出一句话；18-48字；点出主角、核心冲突和最大看点；"
+                            "不要加前缀、不要解释、不要分点。"
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"故事大纲：\n{story_outline}",
+                    },
+                ],
+                provider="deepseek",
+                temperature=0.4,
+                max_tokens=90,
+            )
+        except Exception as exc:
+            logger.warning("生成剧本摘要失败，将回退到原始梗概截断: %s", exc)
+            return ""
+        cleaned = " ".join(str(teaser or "").strip().split())
+        cleaned = cleaned.strip("“”\"' \n\r\t")
+        if cleaned.startswith("一句话摘要"):
+            cleaned = cleaned.split("：", 1)[-1].strip()
+        return cleaned[:88]
+
+    def _cache_story_teaser(
+        self,
+        snapshot: dict[str, Any],
+        teaser: str,
+        story_outline: str,
+    ) -> None:
+        project_id = int(snapshot.get("project_id") or 0)
+        if project_id <= 0 or not teaser:
+            return
+        artifacts_update = {
+            STORY_TEASER_ARTIFACT: teaser,
+            STORY_TEASER_SOURCE_ARTIFACT: story_outline,
+        }
+        record = self._projects.get(project_id)
+        if record is not None:
+            self._update_snapshot(record, artifacts=artifacts_update)
+            snapshot.setdefault("artifacts", {}).update(artifacts_update)
+            return
+
+        persisted = copy.deepcopy(snapshot)
+        persisted.setdefault("artifacts", {}).update(artifacts_update)
+        self._project_path(project_id).write_text(
+            json.dumps(persisted, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        snapshot.setdefault("artifacts", {}).update(artifacts_update)
 
     def _run_task(self, record: TaskRecord) -> None:
         self._update_snapshot(record, status="running", message="开始执行工作流。")
