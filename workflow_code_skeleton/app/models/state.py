@@ -96,6 +96,8 @@ class WorkflowState:
                 "title": self.user_input.title,
                 "episode_word_count": self.user_input.episode_word_count,
                 "total_episodes": self.user_input.total_episodes,
+                "user_expectation": self.user_input.user_expectation,
+                "character_count": self.user_input.character_count,
                 "story_outline": self.user_input.story_outline,
                 "core_scene_input": self.user_input.core_scene_input,
                 "character_bios": self.user_input.character_bios,

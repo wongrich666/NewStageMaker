@@ -15,6 +15,7 @@ from flask import (
     url_for,
 )
 
+from .models.inputs import derive_script_title
 from .services.auth_store import auth_store
 from .services.simple_fastgpt_tools import list_simple_tools, run_simple_tool
 from .services.task_manager import task_manager
@@ -240,10 +241,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def start_workflow():
         data = request.get_json(silent=True) or {}
         spec_path = _resolve_spec_path(data)
+        expectation = str(data.get("user_expectation", ""))
         payload = {
-            "title": data.get("title", ""),
-            "episode_word_count": data.get("episode_word_count", 0),
+            "title": data.get("title", "") or derive_script_title(expectation),
+            "episode_word_count": data.get("episode_word_count", 500) or 500,
             "total_episodes": data.get("total_episodes", 0),
+            "user_expectation": expectation,
+            "character_count": data.get("character_count", 0),
             "story_outline": data.get("story_outline", ""),
             "core_scene_input": data.get("core_scene_input", ""),
             "character_bios": data.get("character_bios", ""),

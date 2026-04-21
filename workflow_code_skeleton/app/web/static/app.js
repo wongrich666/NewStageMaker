@@ -17,13 +17,9 @@
 
   const els = {
     modelSelect: $("modelSelect"),
-    titleInput: $("titleInput"),
-    wordCountInput: $("wordCountInput"),
+    expectationInput: $("expectationInput"),
+    characterCountInput: $("characterCountInput"),
     episodeCountInput: $("episodeCountInput"),
-    storyOutlineInput: $("storyOutlineInput"),
-    coreSceneInput: $("coreSceneInput"),
-    characterBiosInput: $("characterBiosInput"),
-    episodePlanInput: $("episodePlanInput"),
     formHint: $("formHint"),
 
     startBtn: $("startBtn"),
@@ -229,13 +225,9 @@
 
   function saveDraft() {
     const draft = {
-      title: els.titleInput.value.trim(),
-      episode_word_count: Number(els.wordCountInput.value || 0),
+      user_expectation: els.expectationInput.value.trim(),
+      character_count: Number(els.characterCountInput.value || 0),
       total_episodes: Number(els.episodeCountInput.value || 0),
-      story_outline: els.storyOutlineInput.value,
-      core_scene_input: els.coreSceneInput.value,
-      character_bios: els.characterBiosInput.value,
-      episode_plan: els.episodePlanInput.value
     };
     storage.setItem(STORAGE.draft, JSON.stringify(draft));
     storage.setItem(STORAGE.modelId, els.modelSelect.value || "");
@@ -246,13 +238,9 @@
       const raw = storage.getItem(STORAGE.draft);
       if (!raw) return;
       const draft = JSON.parse(raw);
-      els.titleInput.value = draft.title || "";
-      els.wordCountInput.value = draft.episode_word_count || 500;
+      els.expectationInput.value = draft.user_expectation || "";
+      els.characterCountInput.value = draft.character_count || 5;
       els.episodeCountInput.value = draft.total_episodes || 10;
-      els.storyOutlineInput.value = draft.story_outline || "";
-      els.coreSceneInput.value = draft.core_scene_input || "";
-      els.characterBiosInput.value = draft.character_bios || "";
-      els.episodePlanInput.value = draft.episode_plan || "";
     } catch (_) {}
   }
 
@@ -262,23 +250,17 @@
 
   function formHasUserInput() {
     return Boolean(
-      els.titleInput.value.trim()
-      || els.storyOutlineInput.value.trim()
-      || els.coreSceneInput.value.trim()
-      || els.characterBiosInput.value.trim()
-      || els.episodePlanInput.value.trim()
+      els.expectationInput.value.trim()
+      || Number(els.characterCountInput.value || 5) !== 5
+      || Number(els.episodeCountInput.value || 10) !== 10
     );
   }
 
   function restoreInputPayload(inputPayload) {
     if (!inputPayload || formHasUserInput()) return;
-    els.titleInput.value = inputPayload.title || "";
-    els.wordCountInput.value = inputPayload.episode_word_count || 500;
+    els.expectationInput.value = inputPayload.user_expectation || "";
+    els.characterCountInput.value = inputPayload.character_count || 5;
     els.episodeCountInput.value = inputPayload.total_episodes || 10;
-    els.storyOutlineInput.value = inputPayload.story_outline || "";
-    els.coreSceneInput.value = inputPayload.core_scene_input || "";
-    els.characterBiosInput.value = inputPayload.character_bios || "";
-    els.episodePlanInput.value = inputPayload.episode_plan || "";
     saveDraft();
   }
 
@@ -475,21 +457,20 @@
 
   function buildPayload() {
     const payload = {
-      title: els.titleInput.value.trim(),
-      episode_word_count: Number(els.wordCountInput.value || 0),
+      user_expectation: els.expectationInput.value.trim(),
+      character_count: Number(els.characterCountInput.value || 0),
+      episode_word_count: 500,
       total_episodes: Number(els.episodeCountInput.value || 0),
-      story_outline: els.storyOutlineInput.value.trim(),
-      core_scene_input: els.coreSceneInput.value.trim(),
-      character_bios: els.characterBiosInput.value.trim(),
-      episode_plan: els.episodePlanInput.value.trim(),
+      title: "",
+      story_outline: "",
+      core_scene_input: "",
+      character_bios: "",
+      episode_plan: "",
       model_selection_id: els.modelSelect.value || ""
     };
 
-    if (!payload.title) throw new Error("请填写剧本标题。");
-    if (!payload.story_outline) throw new Error("请填写故事大纲。");
-    if (!payload.character_bios) throw new Error("请填写人物小传。");
-    if (!payload.episode_plan) throw new Error("请填写分集计划。");
-    if (payload.episode_word_count <= 0) throw new Error("每集正文字数必须大于 0。");
+    if (!payload.user_expectation) throw new Error("请填写用户期待。");
+    if (payload.character_count <= 0) throw new Error("角色数量必须大于 0。");
     if (payload.total_episodes <= 0) throw new Error("总集数必须大于 0。");
     if (!payload.model_selection_id) throw new Error("当前没有可用模型，请先完成 .env 配置。");
     return payload;
@@ -657,13 +638,9 @@
   function clearCurrentInput() {
     if (!requireLogin()) return;
     clearDraft();
-    els.titleInput.value = "";
-    els.wordCountInput.value = 500;
+    els.expectationInput.value = "";
+    els.characterCountInput.value = 5;
     els.episodeCountInput.value = 10;
-    els.storyOutlineInput.value = "";
-    els.coreSceneInput.value = "";
-    els.characterBiosInput.value = "";
-    els.episodePlanInput.value = "";
     els.formHint.textContent = "已清空当前编辑表单；后台任务和你的剧本资产都会保留。";
   }
 
@@ -821,7 +798,7 @@
     const artifacts = project.artifacts || {};
     state.editingProjectId = Number(projectId);
     els.editAssetTitle.value = project.title || input.title || "";
-    els.editAssetSummary.value = input.story_outline || "";
+    els.editAssetSummary.value = input.story_outline || artifacts.story_outline || "";
     els.editAssetPrivacy.value = project.visibility || "private";
     els.editAssetFinal.value = artifacts.final_output_text || artifacts.final_script || "";
     els.assetEditor.classList.remove("hidden");
@@ -968,13 +945,9 @@
 
   function bindInputs() {
     [
-      els.titleInput,
-      els.wordCountInput,
+      els.expectationInput,
+      els.characterCountInput,
       els.episodeCountInput,
-      els.storyOutlineInput,
-      els.coreSceneInput,
-      els.characterBiosInput,
-      els.episodePlanInput,
       els.modelSelect
     ].forEach((el) => {
       el.addEventListener("input", saveDraft);

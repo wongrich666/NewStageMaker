@@ -17,16 +17,21 @@ from ..orchestrators.runner import run_configured_workflow
 from .workflow_spec import WorkflowSpec
 from ..utils.logger import get_logger
 from ..workflow_ids import (
+    CHARACTER_BIOS_VAR,
     CHARACTER_VAR,
+    CORE_SCENE_INPUT_VAR,
     CORE_SCENE_FINAL_VAR,
     DIALOGUE_FINAL_VAR,
     FINAL_CHARACTER_VAR,
     FINAL_SCENE_VAR,
     HOOK_FINAL_VAR,
     MEMORY_VAR,
+    EPISODE_PLAN_VAR,
     SCENE_VAR,
     SCRIPT_CURRENT_VAR,
     SCRIPT_FINAL_VAR,
+    STORY_OUTLINE_VAR,
+    TITLE_VAR,
     WORLDVIEW_VAR,
 )
 
@@ -34,6 +39,7 @@ logger = get_logger("task_manager")
 
 PROJECT_RUNNING_STATUSES = {"pending", "running", "pausing", "paused"}
 STAGE_LABELS = {
+    "framework": "正在撰写剧本框架",
     "validation": "正在检查集数",
     "worldview": "正在整理故事规则",
     "character": "正在梳理人物",
@@ -251,9 +257,14 @@ class WorkflowRuntime:
 
     def sync_from_state(self, state: WorkflowState) -> None:
         artifacts = {
+            "script_title": state.get_var(TITLE_VAR, ""),
+            "story_outline": state.get_var(STORY_OUTLINE_VAR, ""),
+            "character_bios": state.get_var(CHARACTER_BIOS_VAR, ""),
+            "episode_plan": state.get_var(EPISODE_PLAN_VAR, ""),
             "worldview": state.get_var(WORLDVIEW_VAR, ""),
             "character_summary": state.get_var(FINAL_CHARACTER_VAR, state.get_var(CHARACTER_VAR, "")),
             "scene_json": state.get_var(SCENE_VAR, ""),
+            "core_scene_input": state.get_var(CORE_SCENE_INPUT_VAR, ""),
             "core_scene_summary": state.get_var(FINAL_SCENE_VAR, state.get_var(CORE_SCENE_FINAL_VAR, "")),
             "hook_plan": state.get_var(HOOK_FINAL_VAR, ""),
             "dialogue_plan": state.get_var(DIALOGUE_FINAL_VAR, ""),
@@ -666,7 +677,11 @@ class TaskManager:
     ) -> dict[str, Any]:
         input_payload = snapshot.get("input_payload") or {}
         artifacts = snapshot.get("artifacts") or {}
-        story_outline = str(input_payload.get("story_outline") or "").strip()
+        story_outline = str(
+            input_payload.get("story_outline")
+            or artifacts.get("story_outline")
+            or ""
+        ).strip()
         final_script = str(
             artifacts.get("final_output_text") or artifacts.get("final_script") or ""
         ).strip()

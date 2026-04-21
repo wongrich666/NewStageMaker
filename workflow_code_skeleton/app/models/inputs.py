@@ -13,11 +13,23 @@ def _pick(data: dict[str, Any], *keys: str, default: Any = "") -> Any:
     return default
 
 
+def derive_script_title(*candidates: Any) -> str:
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if not text:
+            continue
+        compact = " ".join(text.split())
+        return compact[:32] or "AI原创剧本"
+    return "AI原创剧本"
+
+
 @dataclass(slots=True)
 class WorkflowInput:
     title: str
     episode_word_count: int
     total_episodes: int
+    user_expectation: str
+    character_count: int
     story_outline: str
     core_scene_input: str
     character_bios: str
@@ -25,10 +37,27 @@ class WorkflowInput:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "WorkflowInput":
+        user_expectation = str(
+            _pick(
+                data,
+                "user_expectation",
+                "expectation",
+                "用户期待",
+                "用户想要的故事",
+                default="",
+            )
+        ).strip()
         return cls(
             title=str(
-                _pick(data, "title", "script_title", "剧本标题", default="")
-            ).strip(),
+                _pick(
+                    data,
+                    "title",
+                    "script_title",
+                    "剧本标题",
+                    default=derive_script_title(user_expectation),
+                )
+            ).strip()
+            or derive_script_title(user_expectation),
             episode_word_count=int(
                 _pick(
                     data,
@@ -40,6 +69,10 @@ class WorkflowInput:
             ),
             total_episodes=int(
                 _pick(data, "total_episodes", "总集数", default=0)
+            ),
+            user_expectation=user_expectation,
+            character_count=int(
+                _pick(data, "character_count", "角色数量", default=0)
             ),
             story_outline=str(
                 _pick(data, "story_outline", "故事大纲", default="")
@@ -68,9 +101,9 @@ class WorkflowInput:
             raise ValueError("total_episodes / 总集数 必须大于 0")
         if self.episode_word_count <= 0:
             raise ValueError("episode_word_count / 每集正文字数 必须大于 0")
-        if not self.story_outline:
-            raise ValueError("story_outline / 故事大纲 不能为空")
-        if not self.character_bios:
-            raise ValueError("character_bios / 人物小传 不能为空")
-        if not self.episode_plan:
-            raise ValueError("episode_plan / 分集计划 不能为空")
+        has_full_outline = bool(self.story_outline and self.character_bios and self.episode_plan)
+        has_framework_prompt = bool(self.user_expectation and self.character_count > 0)
+        if not has_full_outline and not has_framework_prompt:
+            raise ValueError(
+                "请提供完整的故事大纲/人物小传/分集计划，或至少提供 user_expectation / 用户期待 和 character_count / 角色数量"
+            )

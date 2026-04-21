@@ -129,12 +129,8 @@
             <select id="modelSelect"></select>
           </label>
           <label class="field">
-            <span>剧本标题</span>
-            <input id="titleInput" type="text" maxlength="100" placeholder="例如：潮汐之夜">
-          </label>
-          <label class="field">
-            <span>每集正文字数</span>
-            <input id="wordCountInput" type="number" min="50" max="10000" value="500">
+            <span>角色数量</span>
+            <input id="characterCountInput" type="number" min="1" max="50" value="5">
           </label>
           <label class="field">
             <span>总集数</span>
@@ -143,26 +139,11 @@
         </div>
 
         <label class="field">
-          <span>故事大纲</span>
-          <textarea id="storyOutlineInput" placeholder="完整梳理故事主线、核心冲突、关键转折与结局。"></textarea>
+          <span>用户期待</span>
+          <textarea id="expectationInput" placeholder="例如：我想要一个60集的末世求生复仇故事，前期压迫感强，中期升级爽，后期反转大。"></textarea>
         </label>
 
-        <label class="field">
-          <span>核心场景</span>
-          <textarea id="coreSceneInput" placeholder="可选。不填则由系统按工作流自动提炼核心场景。"></textarea>
-        </label>
-
-        <label class="field">
-          <span>人物小传</span>
-          <textarea id="characterBiosInput" placeholder="写清主角、配角的外貌、性格、背景、行为与动机。"></textarea>
-        </label>
-
-        <label class="field">
-          <span>分集计划</span>
-          <textarea id="episodePlanInput" placeholder="请按集拆分叙事节奏与核心看点，确保与总集数一致。"></textarea>
-        </label>
-
-        <p id="formHint" class="hint">你的表单草稿和最近结果会按账号缓存。</p>
+        <p id="formHint" class="hint">你只需要填写用户期待、角色数量和总集数；故事大纲、人物小传、核心场景、分集计划会先由框架阶段自动生成。</p>
       </section>
 
       <section class="card result-card">

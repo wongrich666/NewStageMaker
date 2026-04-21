@@ -27,8 +27,10 @@ from ..services.fastgpt_contracts import (
     LAST_SUMMARY,
     MAX_RETRIES,
     NORMALIZED_EPISODE_PLAN,
+    CHARACTER_COUNT,
     SCENES,
     SCRIPT_TITLE,
+    STAGE_FRAMEWORK,
     STAGE_CHARACTERS,
     STAGE_CONSISTENCY,
     STAGE_DIALOGUES,
@@ -41,6 +43,7 @@ from ..services.fastgpt_contracts import (
     STAGE_WORLDVIEW,
     STORY_OUTLINE,
     TOTAL_EPISODES,
+    USER_EXPECTATION,
     USER_CHARACTERS,
     USER_CONTENT_BASELINE,
     USER_SCENES,
@@ -50,11 +53,14 @@ from ..services.fastgpt_contracts import (
 from ..utils.episode import BatchWindow, iter_episode_batches
 from ..utils.logger import get_logger
 from ..workflow_ids import (
+    CHARACTER_BIOS_VAR,
     CHARACTER_VAR,
+    CORE_SCENE_INPUT_VAR,
     CORE_SCENE_FINAL_VAR,
     DIALOGUE_CURRENT_VAR,
     DIALOGUE_START_VAR,
     DIALOGUE_FINAL_VAR,
+    EPISODE_PLAN_VAR,
     EPISODE_PLAN_CURSOR_VAR,
     EPISODE_PLAN_NORMALIZED_VAR,
     FINAL_CHARACTER_VAR,
@@ -67,6 +73,8 @@ from ..workflow_ids import (
     SCRIPT_CURRENT_VAR,
     SCRIPT_START_VAR,
     SCRIPT_FINAL_VAR,
+    STORY_OUTLINE_VAR,
+    TITLE_VAR,
     WORLDVIEW_VAR,
 )
 from .runtime_tools import set_runtime_stage, sync_runtime_state
@@ -102,9 +110,33 @@ def run_fastgpt_hybrid_workflow(
 
     variables = _initial_fastgpt_variables(payload)
     _restore_resume_state(state, variables, resume_snapshot)
+    _apply_framework_outputs_to_variables(payload, variables)
     _apply_normalized_episode_plan_to_variables(payload, variables)
     _sync_state_variables(state, variables)
     sync_runtime_state(state)
+
+    if _has_framework_outputs(variables):
+        set_runtime_stage(
+            state,
+            "framework",
+            "已从缓存恢复剧本框架。",
+            progress_percent=4,
+        )
+    else:
+        variables.update(
+            _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_FRAMEWORK,
+                variables,
+                stage_key="framework",
+                message="正在撰写剧本框架。",
+                progress_percent=4,
+                max_retries=0,
+            )
+        )
+        _apply_framework_outputs_to_variables(payload, variables)
+    _sync_state_variables(state, variables)
 
     if _truthy(variables.get(IS_CONSISTENT)):
         consistency = {IS_CONSISTENT: True}
@@ -258,6 +290,8 @@ def _initial_fastgpt_variables(payload: WorkflowInput) -> dict[str, Any]:
         SCRIPT_TITLE: payload.title,
         TOTAL_EPISODES: payload.total_episodes,
         EPISODE_WORD_COUNT: payload.episode_word_count,
+        USER_EXPECTATION: payload.user_expectation,
+        CHARACTER_COUNT: payload.character_count,
         EPISODE_PLAN: payload.episode_plan,
         STORY_OUTLINE: payload.story_outline,
         USER_SCENES: payload.core_scene_input,
@@ -274,15 +308,19 @@ def _initial_fastgpt_variables(payload: WorkflowInput) -> dict[str, Any]:
 def _build_user_content_baseline(
     payload: WorkflowInput,
     *,
+    script_title: str | None = None,
+    story_outline_value: str | None = None,
+    user_scenes_value: str | None = None,
+    user_characters_value: str | None = None,
     episode_plan_value: str | None = None,
 ) -> str:
     baseline = {
-        SCRIPT_TITLE: payload.title,
+        SCRIPT_TITLE: script_title if script_title is not None else payload.title,
         TOTAL_EPISODES: payload.total_episodes,
         EPISODE_WORD_COUNT: payload.episode_word_count,
-        STORY_OUTLINE: payload.story_outline,
-        USER_SCENES: payload.core_scene_input,
-        USER_CHARACTERS: payload.character_bios,
+        STORY_OUTLINE: story_outline_value if story_outline_value is not None else payload.story_outline,
+        USER_SCENES: user_scenes_value if user_scenes_value is not None else payload.core_scene_input,
+        USER_CHARACTERS: user_characters_value if user_characters_value is not None else payload.character_bios,
         EPISODE_PLAN: episode_plan_value if episode_plan_value is not None else payload.episode_plan,
     }
     return json.dumps(baseline, ensure_ascii=False, indent=2)
@@ -331,7 +369,7 @@ def _run_batched_generation(
             normalized_plan,
             batch.start_episode,
             batch_size=batch.size,
-            raw_episode_plan=payload.episode_plan,
+            raw_episode_plan=str(variables.get(EPISODE_PLAN) or payload.episode_plan or ""),
         )
         variables[BATCH_START_EPISODE] = batch.start_episode
         batch_base = dict(variables)
@@ -437,7 +475,7 @@ def _run_full_fastgpt_generation(
         _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN)),
         1,
         batch_size=payload.total_episodes,
-        raw_episode_plan=payload.episode_plan,
+        raw_episode_plan=str(variables.get(EPISODE_PLAN) or payload.episode_plan or ""),
     )
     variables[BATCH_START_EPISODE] = 1
 
@@ -689,6 +727,16 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
     for key, value in variables.items():
         state.set_var(key, value)
 
+    if SCRIPT_TITLE in variables:
+        state.set_var(TITLE_VAR, variables[SCRIPT_TITLE])
+    if STORY_OUTLINE in variables:
+        state.set_var(STORY_OUTLINE_VAR, variables[STORY_OUTLINE])
+    if USER_CHARACTERS in variables:
+        state.set_var(CHARACTER_BIOS_VAR, variables[USER_CHARACTERS])
+    if USER_SCENES in variables:
+        state.set_var(CORE_SCENE_INPUT_VAR, variables[USER_SCENES])
+    if EPISODE_PLAN in variables:
+        state.set_var(EPISODE_PLAN_VAR, variables[EPISODE_PLAN])
     if WORLDVIEW in variables:
         state.set_var(WORLDVIEW_VAR, variables[WORLDVIEW])
     if CHARACTERS in variables:
@@ -809,9 +857,49 @@ def _apply_normalized_episode_plan_to_variables(
     variables[EPISODE_PLAN] = normalized_text
     variables[USER_CONTENT_BASELINE] = _build_user_content_baseline(
         payload,
+        script_title=str(variables.get(SCRIPT_TITLE) or payload.title or "").strip() or "AI原创剧本",
+        story_outline_value=str(variables.get(STORY_OUTLINE) or payload.story_outline or "").strip(),
+        user_scenes_value=str(variables.get(USER_SCENES) or payload.core_scene_input or "").strip(),
+        user_characters_value=str(variables.get(USER_CHARACTERS) or payload.character_bios or "").strip(),
         episode_plan_value=normalized_text,
     )
     return normalized_plan
+
+
+def _has_framework_outputs(variables: dict[str, Any]) -> bool:
+    return all(
+        _has_value(variables.get(name))
+        for name in (STORY_OUTLINE, USER_CHARACTERS, USER_SCENES, EPISODE_PLAN)
+    )
+
+
+def _apply_framework_outputs_to_variables(
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+) -> bool:
+    if not _has_framework_outputs(variables):
+        return False
+
+    story_outline = str(variables.get(STORY_OUTLINE) or "").strip()
+    user_characters = str(variables.get(USER_CHARACTERS) or "").strip()
+    user_scenes = str(variables.get(USER_SCENES) or "").strip()
+    episode_plan = str(variables.get(EPISODE_PLAN) or "").strip()
+    script_title = str(variables.get(SCRIPT_TITLE) or payload.title or "").strip() or "AI原创剧本"
+
+    variables[SCRIPT_TITLE] = script_title
+    variables[STORY_OUTLINE] = story_outline
+    variables[USER_CHARACTERS] = user_characters
+    variables[USER_SCENES] = user_scenes
+    variables[EPISODE_PLAN] = episode_plan
+    variables[USER_CONTENT_BASELINE] = _build_user_content_baseline(
+        payload,
+        script_title=script_title,
+        story_outline_value=story_outline,
+        user_scenes_value=user_scenes,
+        user_characters_value=user_characters,
+        episode_plan_value=episode_plan,
+    )
+    return True
 
 
 def merge_batch_object(current: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:

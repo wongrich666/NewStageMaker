@@ -19,6 +19,12 @@ from ..workflow_ids import (
     EPISODE_WORD_COUNT_VAR,
     FINAL_CHARACTER_VAR,
     FINAL_SCENE_VAR,
+    FRAMEWORK_CHARACTER_BIOS_VAR,
+    FRAMEWORK_CHARACTER_COUNT_VAR,
+    FRAMEWORK_CORE_SCENE_VAR,
+    FRAMEWORK_EPISODE_PLAN_VAR,
+    FRAMEWORK_STORY_OUTLINE_VAR,
+    FRAMEWORK_USER_EXPECTATION_VAR,
     HOOK_CURRENT_VAR,
     HOOK_FINAL_VAR,
     HOOK_START_VAR,
@@ -41,6 +47,8 @@ from .json_utils import parse_json
 SCRIPT_TITLE = "script_title"
 TOTAL_EPISODES = "total_episodes"
 EPISODE_WORD_COUNT = "episode_word_count"
+USER_EXPECTATION = "user_expectation"
+CHARACTER_COUNT = "character_count"
 EPISODE_PLAN = "episode_plan"
 STORY_OUTLINE = "story_outline"
 USER_SCENES = "user_scenes"
@@ -62,6 +70,7 @@ IS_CONSISTENT = "is_consistent"
 BATCH_START_EPISODE = "batch_start_episode"
 NORMALIZED_EPISODE_PLAN = "normalized_episode_plan"
 
+STAGE_FRAMEWORK = "framework"
 STAGE_CONSISTENCY = "consistency"
 STAGE_EPISODE_PLAN_NORMALIZE = "episode_plan_normalize"
 STAGE_WORLDVIEW = "worldview"
@@ -139,6 +148,18 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
         "用户分集计划。consistency/worldview 阶段传原始全文；hooks/dialogues/script 阶段传当前批次规范化 JSON 字符串。",
         "用户输入/本地批次裁剪",
     ),
+    USER_EXPECTATION: FastGPTVariable(
+        USER_EXPECTATION,
+        "string",
+        "用户对剧本的期待/想要的故事。",
+        "用户输入",
+    ),
+    CHARACTER_COUNT: FastGPTVariable(
+        CHARACTER_COUNT,
+        "number",
+        "角色数量。",
+        "用户输入",
+    ),
     NORMALIZED_EPISODE_PLAN: FastGPTVariable(
         NORMALIZED_EPISODE_PLAN,
         "object",
@@ -148,26 +169,26 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
     STORY_OUTLINE: FastGPTVariable(
         STORY_OUTLINE,
         "string",
-        "用户输入的故事大纲",
-        "用户输入",
+        "故事大纲。当前可由框架阶段先生成，也兼容用户直传。",
+        "框架阶段输出/用户输入兼容",
     ),
     USER_SCENES: FastGPTVariable(
         USER_SCENES,
         "string",
-        "用户输入的核心场景",
-        "用户输入",
+        "核心场景。当前可由框架阶段先生成，也兼容用户直传。",
+        "框架阶段输出/用户输入兼容",
     ),
     USER_CHARACTERS: FastGPTVariable(
         USER_CHARACTERS,
         "string",
-        "用户输入的人物小传",
-        "用户输入",
+        "人物小传。当前可由框架阶段先生成，也兼容用户直传。",
+        "框架阶段输出/用户输入兼容",
     ),
     SCRIPT_TITLE: FastGPTVariable(
         SCRIPT_TITLE,
         "string",
-        "剧本标题",
-        "用户输入",
+        "剧本标题。当前默认由本地从用户期待生成一个可用标题，也兼容用户直传。",
+        "本地生成/用户输入兼容",
     ),
     WORLDVIEW: FastGPTVariable(
         WORLDVIEW,
@@ -269,6 +290,11 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
 
 
 LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
+    STAGE_FRAMEWORK: {
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        USER_EXPECTATION: FRAMEWORK_USER_EXPECTATION_VAR,
+        CHARACTER_COUNT: FRAMEWORK_CHARACTER_COUNT_VAR,
+    },
     STAGE_CONSISTENCY: {
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
@@ -351,6 +377,12 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
 
 
 LEGACY_OUTPUT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
+    STAGE_FRAMEWORK: {
+        STORY_OUTLINE: (FRAMEWORK_STORY_OUTLINE_VAR,),
+        USER_CHARACTERS: (FRAMEWORK_CHARACTER_BIOS_VAR,),
+        USER_SCENES: (FRAMEWORK_CORE_SCENE_VAR,),
+        EPISODE_PLAN: (FRAMEWORK_EPISODE_PLAN_VAR,),
+    },
     STAGE_EPISODE_PLAN_NORMALIZE: {
         NORMALIZED_EPISODE_PLAN: (EPISODE_PLAN_NORMALIZED_VAR,),
     },
@@ -366,6 +398,19 @@ LEGACY_OUTPUT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
 
 
 STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
+    STAGE_FRAMEWORK: FastGPTStageContract(
+        stage_name=STAGE_FRAMEWORK,
+        label="剧本框架撰写",
+        input_names=(TOTAL_EPISODES, USER_EXPECTATION, CHARACTER_COUNT),
+        output_types={
+            STORY_OUTLINE: "string",
+            USER_CHARACTERS: "string",
+            USER_SCENES: "string",
+            EPISODE_PLAN: "string",
+        },
+        fastgpt_responsibility="根据用户期待、角色数量和总集数，生成故事大纲、人物小传、核心场景、分集计划。",
+        local_responsibility="缓存并复用四项框架产物，后续阶段统一读取这些结果。",
+    ),
     STAGE_CONSISTENCY: FastGPTStageContract(
         stage_name=STAGE_CONSISTENCY,
         label="集数一致性检查",
