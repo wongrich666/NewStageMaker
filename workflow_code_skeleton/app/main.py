@@ -30,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=default_workflow_spec_path(),
         help="工作流 JSON 规格文件路径",
     )
-    serve_parser.add_argument("--host", default="127.0.0.1", help="绑定地址")
+    serve_parser.add_argument("--host", default="0.0.0.0", help="绑定地址")
     serve_parser.add_argument("--port", type=int, default=5000, help="监听端口")
     serve_parser.add_argument(
         "--debug",

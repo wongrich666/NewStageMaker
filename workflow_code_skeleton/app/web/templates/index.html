@@ -36,7 +36,7 @@
       <div class="hero-panel">
         <p class="eyebrow">AI Script Studio</p>
         <h1>框架到剧本，让 AI 实现你的想法</h1>
-        <p class="hero-copy">登录后开始生成；只要不退出账户，离开页面后工作流也会继续运行，回来即可查看进度和结果。</p>
+        <p class="hero-copy">登录后可以同时开启多个任务；点击新建剧本会直接打开新的工作页面。只要不退出账户，离开页面后工作流也会继续运行，回来即可按项目查看进度、暂停继续和下载结果。</p>
         <div class="hero-actions">
           <button id="newScriptBtn" class="btn btn-primary" type="button">新建剧本</button>
           <button id="viewAssetsBtn" class="btn btn-secondary" type="button">个人中心</button>
@@ -84,8 +84,35 @@
         <button id="pauseBtn" class="btn btn-secondary" disabled>暂停生成</button>
         <button id="resumeBtn" class="btn btn-secondary" disabled>继续生成</button>
         <button id="terminateBtn" class="btn btn-danger" disabled>终止生成</button>
-        <button id="clearBtn" class="btn btn-ghost">清空全部</button>
+        <button id="clearBtn" class="btn btn-ghost">清空输入</button>
         <button id="saveBtn" class="btn btn-secondary" disabled>保存最终剧本</button>
+      </div>
+    </section>
+
+    <section class="card workspace-card">
+      <div class="section-head compact-head">
+        <div>
+          <p class="eyebrow">Workspace</p>
+          <h2>我的任务</h2>
+          <p>这里只保留简洁的任务折叠列表，鼠标悬停可查看进度和当前阶段。</p>
+        </div>
+        <button id="refreshProjectsBtn" class="btn btn-secondary" type="button">刷新任务</button>
+      </div>
+      <div class="workspace-folders">
+        <details class="workspace-folder" open>
+          <summary>
+            <span>生成中的剧本</span>
+            <em id="activeProjectCount">0</em>
+          </summary>
+          <div id="activeProjectList" class="workspace-compact-list"></div>
+        </details>
+        <details class="workspace-folder">
+          <summary>
+            <span>已完成剧本</span>
+            <em id="completedProjectCount">0</em>
+          </summary>
+          <div id="completedProjectList" class="workspace-compact-list"></div>
+        </details>
       </div>
     </section>
 
@@ -93,7 +120,7 @@
       <section class="card form-card">
         <div class="card-head">
           <h3>创作输入</h3>
-          <p>以下是必须填写的创作材料，会按你的账号自动缓存。</p>
+          <p>以下是当前编辑表单的创作材料；你可以同时开启多个任务，互不影响。</p>
         </div>
 
         <div class="field-grid compact-grid">
@@ -172,17 +199,17 @@
       <article class="card guide-card">
         <span>1</span>
         <h3>登录后创建</h3>
-        <p>填写创作材料，点击开始生成。</p>
+        <p>填写创作材料，随时都可以继续新建下一个任务。</p>
       </article>
       <article class="card guide-card">
         <span>2</span>
-        <h3>可暂停恢复</h3>
-        <p>离开页面也会继续执行，回到账户即可恢复查看。</p>
+        <h3>多任务并行</h3>
+        <p>同一账号可同时跑多个任务，离开页面后也会继续执行。</p>
       </article>
       <article class="card guide-card">
         <span>3</span>
-        <h3>资产在个人中心</h3>
-        <p>剧本可修改、删除，也可设置公开或不公开。</p>
+        <h3>随时切换恢复</h3>
+        <p>回来后从任务列表或个人中心选中项目，即可继续管理和下载。</p>
       </article>
     </section>
 
@@ -295,6 +322,7 @@
       username: {{ current_user.username|tojson if current_user else 'null' }},
       modelsUrl: "/api/models",
       latestProjectUrl: "/api/projects/latest",
+      projectsUrl: "/api/projects",
       assetsUrl: "/api/assets",
       communityUrl: "/api/community",
       toolsUrl: "/api/tools",

@@ -26,11 +26,13 @@ from ..services.fastgpt_contracts import (
     IS_CONSISTENT,
     LAST_SUMMARY,
     MAX_RETRIES,
+    NORMALIZED_EPISODE_PLAN,
     SCENES,
     SCRIPT_TITLE,
     STAGE_CHARACTERS,
     STAGE_CONSISTENCY,
     STAGE_DIALOGUES,
+    STAGE_EPISODE_PLAN_NORMALIZE,
     STAGE_FINAL,
     STAGE_HOOKS,
     STAGE_MEMORY,
@@ -53,6 +55,8 @@ from ..workflow_ids import (
     DIALOGUE_CURRENT_VAR,
     DIALOGUE_START_VAR,
     DIALOGUE_FINAL_VAR,
+    EPISODE_PLAN_CURSOR_VAR,
+    EPISODE_PLAN_NORMALIZED_VAR,
     FINAL_CHARACTER_VAR,
     FINAL_SCENE_VAR,
     HOOK_CURRENT_VAR,
@@ -98,6 +102,7 @@ def run_fastgpt_hybrid_workflow(
 
     variables = _initial_fastgpt_variables(payload)
     _restore_resume_state(state, variables, resume_snapshot)
+    _apply_normalized_episode_plan_to_variables(payload, variables)
     _sync_state_variables(state, variables)
     sync_runtime_state(state)
 
@@ -129,6 +134,34 @@ def run_fastgpt_hybrid_workflow(
         sync_runtime_state(state)
         return state
     set_runtime_stage(state, "validation", "集数一致性检查通过。", progress_percent=3)
+
+    normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
+    if _has_normalized_episode_plan(normalized_plan):
+        variables[NORMALIZED_EPISODE_PLAN] = normalized_plan
+        set_runtime_stage(
+            state,
+            "validation",
+            "已从缓存恢复规范化分集计划。",
+            progress_percent=7,
+        )
+    else:
+        variables.update(
+            _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_EPISODE_PLAN_NORMALIZE,
+                variables,
+                stage_key="validation",
+                message="正在规范化分集计划结构。",
+                progress_percent=7,
+                max_retries=0,
+            )
+        )
+        normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
+        if _has_normalized_episode_plan(normalized_plan):
+            variables[NORMALIZED_EPISODE_PLAN] = normalized_plan
+            _apply_normalized_episode_plan_to_variables(payload, variables)
+    _sync_state_variables(state, variables)
 
     if _has_value(variables.get(WORLDVIEW)):
         set_runtime_stage(
@@ -238,7 +271,11 @@ def _initial_fastgpt_variables(payload: WorkflowInput) -> dict[str, Any]:
     }
 
 
-def _build_user_content_baseline(payload: WorkflowInput) -> str:
+def _build_user_content_baseline(
+    payload: WorkflowInput,
+    *,
+    episode_plan_value: str | None = None,
+) -> str:
     baseline = {
         SCRIPT_TITLE: payload.title,
         TOTAL_EPISODES: payload.total_episodes,
@@ -246,7 +283,7 @@ def _build_user_content_baseline(payload: WorkflowInput) -> str:
         STORY_OUTLINE: payload.story_outline,
         USER_SCENES: payload.core_scene_input,
         USER_CHARACTERS: payload.character_bios,
-        EPISODE_PLAN: payload.episode_plan,
+        EPISODE_PLAN: episode_plan_value if episode_plan_value is not None else payload.episode_plan,
     }
     return json.dumps(baseline, ensure_ascii=False, indent=2)
 
@@ -285,11 +322,17 @@ def _run_batched_generation(
         total_batches,
         max(0, _safe_int(variables.get(LOCAL_COMPLETED_BATCHES), 0)),
     )
+    normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
 
     for index, batch in enumerate(batches):
         if index < completed_batches:
             continue
-        plan_for_batch = slice_episode_plan_for_batch(payload.episode_plan, batch)
+        plan_for_batch = get_episode_batch_payload(
+            normalized_plan,
+            batch.start_episode,
+            batch_size=batch.size,
+            raw_episode_plan=payload.episode_plan,
+        )
         variables[BATCH_START_EPISODE] = batch.start_episode
         batch_base = dict(variables)
         batch_base[EPISODE_PLAN] = plan_for_batch
@@ -390,7 +433,12 @@ def _run_full_fastgpt_generation(
     payload: WorkflowInput,
     variables: dict[str, Any],
 ) -> None:
-    variables[EPISODE_PLAN] = payload.episode_plan
+    variables[EPISODE_PLAN] = get_episode_batch_payload(
+        _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN)),
+        1,
+        batch_size=payload.total_episodes,
+        raw_episode_plan=payload.episode_plan,
+    )
     variables[BATCH_START_EPISODE] = 1
 
     hook_output = _run_fastgpt_stage(
@@ -487,36 +535,27 @@ def _run_fastgpt_stage(
     while True:
         attempt += 1
         _checkpoint(state)
-        visible_message = message
-        if attempt > 1:
-            visible_message = f"{message}（第 {attempt} 次尝试）"
         set_runtime_stage(
             state,
             stage_key,
-            visible_message,
+            message,
             batch_label=batch_label,
             progress_percent=progress_percent,
             generated_episodes=generated_episodes,
         )
         try:
-            input_payload = contract.build_input_payload(variables)
-            state.set_output(f"fastgpt:{stage_name}", f"attempt_{attempt}_input", input_payload)
-            _log_fastgpt_stage_start(state, stage_name, input_payload.keys())
+            contract.build_input_payload(variables)
+            _log_fastgpt_stage_start(state, contract.label, batch_label, attempt)
             output = runner.run_stage(stage_name, variables)
             output = contract.validate_output_payload(output)
-            state.set_output(f"fastgpt:{stage_name}", f"attempt_{attempt}", output)
-            _log_fastgpt_stage_done(state, stage_name, output)
+            _log_fastgpt_stage_done(state, contract.label, batch_label, output)
             _sync_state_variables(state, output)
             _checkpoint(state)
             return output
         except FastGPTTransientError as exc:
             last_error = exc
-            state.set_output(f"fastgpt:{stage_name}", f"attempt_{attempt}_transient_error", str(exc))
             delay_seconds = _transient_retry_delay(attempt)
-            retry_message = (
-                f"{contract.label} 遇到远端临时错误（HTTP {exc.status_code or '网络错误'}），"
-                f"已保留当前进度，{delay_seconds:.0f} 秒后自动继续重试。"
-            )
+            retry_message = "网络波动，已保留当前进度，正在自动重试。"
             set_runtime_stage(
                 state,
                 stage_key,
@@ -527,9 +566,11 @@ def _run_fastgpt_stage(
             )
             sync_runtime_state(state)
             logger.warning(
-                "FastGPT 阶段 %s 第 %s 次调用遇到临时错误，将自动继续重试: %s",
-                stage_name,
+                "%s%s第 %s 次尝试遇到临时错误，将在 %.0f 秒后自动重试：%s",
+                contract.label,
+                _format_batch_suffix(batch_label),
                 attempt,
+                delay_seconds,
                 exc,
             )
             _sleep_with_checkpoints(state, delay_seconds)
@@ -537,11 +578,11 @@ def _run_fastgpt_stage(
         except Exception as exc:
             last_error = exc
             contract_failures += 1
-            state.set_output(f"fastgpt:{stage_name}", f"attempt_{attempt}_error", str(exc))
             sync_runtime_state(state)
             logger.warning(
-                "FastGPT 阶段 %s 第 %s 次调用失败: %s",
-                stage_name,
+                "%s%s第 %s 次尝试失败：%s",
+                contract.label,
+                _format_batch_suffix(batch_label),
                 attempt,
                 exc,
             )
@@ -559,7 +600,7 @@ def _run_fastgpt_stage(
             set_runtime_stage(
                 state,
                 stage_key,
-                f"{contract.label} 返回不符合契约，正在重试。",
+                "阶段返回格式异常，正在自动重试。",
                 batch_label=batch_label,
                 progress_percent=progress_percent,
                 generated_episodes=generated_episodes,
@@ -568,22 +609,54 @@ def _run_fastgpt_stage(
 
 def _log_fastgpt_stage_start(
     state: WorkflowState,
-    stage_name: str,
-    input_names: Any,
+    stage_label: str,
+    batch_label: str | None,
+    attempt: int,
 ) -> None:
+    logger.info("%s%s第 %s 次尝试", stage_label, _format_batch_suffix(batch_label), attempt)
     runtime = state.runtime
     if runtime and hasattr(runtime, "fastgpt_stage_started"):
-        runtime.fastgpt_stage_started(stage_name, list(input_names))
+        runtime.fastgpt_stage_started(stage_label, batch_label=batch_label, attempt=attempt)
 
 
 def _log_fastgpt_stage_done(
     state: WorkflowState,
-    stage_name: str,
+    stage_label: str,
+    batch_label: str | None,
     output: dict[str, Any],
 ) -> None:
+    logger.info(
+        "%s%s成品已生成：%s",
+        stage_label,
+        _format_batch_suffix(batch_label),
+        _summarize_stage_output(output),
+    )
     runtime = state.runtime
     if runtime and hasattr(runtime, "fastgpt_stage_finished"):
-        runtime.fastgpt_stage_finished(stage_name, output)
+        runtime.fastgpt_stage_finished(stage_label, batch_label=batch_label, output=output)
+
+
+def _format_batch_suffix(batch_label: str | None) -> str:
+    return f" {batch_label} 集，" if batch_label else "，"
+
+
+def _summarize_stage_output(output: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key, value in output.items():
+        if isinstance(value, dict):
+            episodes = value.get("episodes")
+            if isinstance(episodes, list):
+                parts.append(f"{key}=episodes[{len(episodes)}]")
+                continue
+            keys = list(value.keys())[:4]
+            parts.append(f"{key}=dict({', '.join(str(item) for item in keys)})")
+            continue
+        if isinstance(value, list):
+            parts.append(f"{key}=list[{len(value)}]")
+            continue
+        text = " ".join(str(value or "").split())
+        parts.append(f"{key}={text[:80]}")
+    return "；".join(parts)[:240] or "阶段已完成"
 
 
 def _is_non_retryable(exc: Exception) -> bool:
@@ -625,10 +698,19 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
         state.set_var(SCENE_VAR, variables[SCENES])
         state.set_var(CORE_SCENE_FINAL_VAR, variables[SCENES])
         state.set_var(FINAL_SCENE_VAR, variables[SCENES])
+    if NORMALIZED_EPISODE_PLAN in variables:
+        normalized_plan = _normalize_episode_plan_object(variables[NORMALIZED_EPISODE_PLAN])
+        if normalized_plan is not None:
+            state.set_var(NORMALIZED_EPISODE_PLAN, normalized_plan)
+            state.set_var(
+                EPISODE_PLAN_NORMALIZED_VAR,
+                json.dumps(normalized_plan, ensure_ascii=False),
+            )
     if BATCH_START_EPISODE in variables:
         state.set_var(HOOK_START_VAR, variables[BATCH_START_EPISODE])
         state.set_var(DIALOGUE_START_VAR, variables[BATCH_START_EPISODE])
         state.set_var(SCRIPT_START_VAR, variables[BATCH_START_EPISODE])
+        state.set_var(EPISODE_PLAN_CURSOR_VAR, variables[BATCH_START_EPISODE])
     if BATCH_HOOKS in variables:
         state.set_var(HOOK_CURRENT_VAR, variables[BATCH_HOOKS])
     if ALL_HOOKS in variables:
@@ -663,6 +745,11 @@ def _restore_resume_state(
     restored_variables = debug_state.get("variables")
     if isinstance(restored_variables, dict):
         variables.update(restored_variables)
+        if NORMALIZED_EPISODE_PLAN not in variables:
+            normalized_alias = restored_variables.get(EPISODE_PLAN_NORMALIZED_VAR)
+            normalized_plan = _normalize_episode_plan_object(normalized_alias)
+            if normalized_plan is not None:
+                variables[NORMALIZED_EPISODE_PLAN] = normalized_plan
         state.variables.update(restored_variables)
 
     restored_outputs = debug_state.get("node_outputs")
@@ -709,6 +796,24 @@ def _dict_or_empty(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _apply_normalized_episode_plan_to_variables(
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+) -> dict[str, Any] | None:
+    normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
+    if not _has_normalized_episode_plan(normalized_plan):
+        return None
+
+    normalized_text = _serialize_normalized_episode_plan(normalized_plan)
+    variables[NORMALIZED_EPISODE_PLAN] = normalized_plan
+    variables[EPISODE_PLAN] = normalized_text
+    variables[USER_CONTENT_BASELINE] = _build_user_content_baseline(
+        payload,
+        episode_plan_value=normalized_text,
+    )
+    return normalized_plan
+
+
 def merge_batch_object(current: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
     merged = copy.deepcopy(current or {})
     incoming = copy.deepcopy(batch or {})
@@ -731,6 +836,103 @@ def _merge_dicts(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
     return left
 
 
+def get_episode_batch_payload(
+    normalized_plan: Any,
+    start_episode: int,
+    *,
+    batch_size: int,
+    raw_episode_plan: str,
+) -> str:
+    batch_window = BatchWindow(
+        start_episode=start_episode,
+        end_episode=max(start_episode, start_episode + max(1, batch_size) - 1),
+    )
+    batch_payload = slice_normalized_episode_plan_for_batch(normalized_plan, batch_window)
+    if batch_payload is not None:
+        return _serialize_normalized_episode_plan(batch_payload)
+    return slice_episode_plan_for_batch(raw_episode_plan, batch_window)
+
+
+def slice_normalized_episode_plan_for_batch(
+    normalized_plan: Any,
+    batch: BatchWindow,
+) -> dict[str, Any] | None:
+    normalized = _normalize_episode_plan_object(normalized_plan)
+    if not _has_normalized_episode_plan(normalized):
+        return None
+
+    selected = [
+        copy.deepcopy(item)
+        for item in normalized["episodes"]
+        if batch.start_episode <= item["episode"] <= batch.end_episode
+    ]
+    if not selected:
+        return None
+
+    return {
+        "parsed_episode_count": len(selected),
+        "episodes": selected,
+    }
+
+
+def _has_normalized_episode_plan(value: Any) -> bool:
+    normalized = _normalize_episode_plan_object(value)
+    if not isinstance(normalized, dict):
+        return False
+    episodes = normalized.get("episodes")
+    return isinstance(episodes, list) and bool(episodes)
+
+
+def _serialize_normalized_episode_plan(normalized_plan: dict[str, Any]) -> str:
+    return json.dumps(normalized_plan, ensure_ascii=False, separators=(",", ":"))
+
+
+def _normalize_episode_plan_object(value: Any) -> dict[str, Any] | None:
+    if value in (None, ""):
+        return None
+
+    candidate = value
+    if isinstance(candidate, str):
+        text = candidate.strip()
+        if not text:
+            return None
+        try:
+            candidate = json.loads(text)
+        except Exception:
+            return None
+
+    if isinstance(candidate, dict) and NORMALIZED_EPISODE_PLAN in candidate:
+        candidate = candidate.get(NORMALIZED_EPISODE_PLAN)
+        return _normalize_episode_plan_object(candidate)
+
+    if not isinstance(candidate, dict):
+        return None
+
+    episodes = candidate.get("episodes")
+    if not isinstance(episodes, list):
+        return None
+
+    normalized_episodes: list[dict[str, Any]] = []
+    for item in episodes:
+        if not isinstance(item, dict):
+            continue
+        episode_number = _coerce_episode_number(item.get("episode"))
+        if episode_number is None:
+            continue
+        normalized_episodes.append(
+            {
+                "episode": episode_number,
+                "title": str(item.get("title") or "").strip(),
+                "content": str(item.get("content") or "").strip(),
+            }
+        )
+
+    return {
+        "parsed_episode_count": len(normalized_episodes),
+        "episodes": normalized_episodes,
+    }
+
+
 def slice_episode_plan_for_batch(episode_plan: str, batch: BatchWindow) -> str:
     lines = str(episode_plan or "").splitlines()
     selected: list[str] = []
@@ -748,6 +950,22 @@ def slice_episode_plan_for_batch(episode_plan: str, batch: BatchWindow) -> str:
     if found_marker and selected:
         return "\n".join(selected).strip()
     return str(episode_plan or "").strip()
+
+
+def _coerce_episode_number(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.isdigit():
+        return int(text)
+    return _parse_chinese_number(text)
 
 
 def _extract_episode_number(line: str) -> int | None:

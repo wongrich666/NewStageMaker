@@ -87,30 +87,9 @@ class FastGPTClient:
             "Authorization": f"Bearer {endpoint.api_key}",
             "Content-Type": "application/json",
         }
-
-        logger.info(
-            "调用 FastGPT 阶段 %s，URL：%s，URL来源：%s，Key来源：%s，headers摘要：%s，变量：%s，payload摘要：%s",
-            stage_name,
-            endpoint.url,
-            endpoint.url_source,
-            endpoint.api_key_source,
-            _summarize_headers(headers),
-            ", ".join(payload_variables.keys()),
-            _summarize_payload(body),
-        )
         response = self._post_with_retries(endpoint, headers, body, stage_name)
         data = response.json()
-        logger.info(
-            "FastGPT 阶段 %s 原始响应 data：%s",
-            stage_name,
-            _json_for_log(data),
-        )
         raw_output = self._extract_output_payload(data, contract)
-        logger.info(
-            "FastGPT 阶段 %s 解析得到的原始输出：%s",
-            stage_name,
-            _json_for_log(raw_output),
-        )
         return contract.validate_output_payload(raw_output)
 
     def _post_with_retries(
@@ -130,16 +109,14 @@ class FastGPTClient:
                     endpoint.url,
                     headers=headers,
                     json=body,
-                    timeout=endpoint.timeout,
+                    timeout=36000,
                 )
             except requests.RequestException as exc:
                 last_error = exc
                 logger.warning(
-                    "FastGPT 阶段 %s 网络请求失败，URL：%s，headers摘要：%s，payload摘要：%s，错误：%s",
+                    "FastGPT 阶段 %s 网络请求失败，URL：%s，错误：%s",
                     stage_name,
                     endpoint.url,
-                    _summarize_headers(headers),
-                    _summarize_payload(body),
                     exc,
                 )
                 if attempt >= attempts:
@@ -153,14 +130,12 @@ class FastGPTClient:
 
             if response.status_code >= 400:
                 logger.warning(
-                    "FastGPT 阶段 %s 请求失败，URL：%s，HTTP %s %s，response.text：%s，headers摘要：%s，payload摘要：%s",
+                    "FastGPT 阶段 %s 请求失败，URL：%s，HTTP %s %s，response.text：%s",
                     stage_name,
                     endpoint.url,
                     response.status_code,
                     response.reason or "",
                     _safe_response_text(response),
-                    _summarize_headers(headers),
-                    _summarize_payload(body),
                 )
 
             if response.status_code in TRANSIENT_STATUS_CODES and attempt < attempts:
@@ -295,96 +270,34 @@ class FastGPTClient:
         contract: FastGPTStageContract,
     ) -> dict[str, Any]:
         expected = contract.output_names
-        logger.info(
-            "FastGPT 阶段 %s 开始解析输出，期望字段：%s",
-            contract.stage_name,
-            list(expected),
-        )
-
         choice_contents = list(_iter_choice_message_contents(data))
         for index, content in enumerate(choice_contents):
-            logger.info(
-                "FastGPT 阶段 %s choices[%s].message.content：%s",
-                contract.stage_name,
-                index,
-                content,
-            )
             parsed_content = _try_parse_json(content)
             if parsed_content is not None:
-                logger.info(
-                    "FastGPT 阶段 %s choices[%s].message.content JSON解析结果：%s",
-                    contract.stage_name,
-                    index,
-                    _json_for_log(parsed_content),
-                )
                 candidate_payload = _payload_from_candidate(parsed_content, contract)
                 if candidate_payload is not None:
-                    logger.info(
-                        "FastGPT 阶段 %s 使用 choices[%s].message.content JSON解析结果作为输出：%s",
-                        contract.stage_name,
-                        index,
-                        _json_for_log(candidate_payload),
-                    )
                     return candidate_payload
 
             if len(expected) == 1 and _can_coerce_single_output(content, contract):
                 key = expected[0]
                 payload = {key: content}
-                logger.info(
-                    "FastGPT 阶段 %s 使用 choices[%s].message.content 文本作为字段 %s：%s",
-                    contract.stage_name,
-                    index,
-                    key,
-                    content,
-                )
                 return payload
 
         for candidate in _iter_structured_output_candidates(data):
-            logger.info(
-                "FastGPT 阶段 %s 结构化解析候选：%s",
-                contract.stage_name,
-                _json_for_log(candidate),
-            )
             candidate_payload = _payload_from_candidate(candidate, contract)
             if candidate_payload is not None:
-                logger.info(
-                    "FastGPT 阶段 %s 使用结构化候选作为输出：%s",
-                    contract.stage_name,
-                    _json_for_log(candidate_payload),
-                )
                 return candidate_payload
 
         if len(expected) == 1:
             key = expected[0]
             for candidate in _iter_answer_text_candidates(data):
                 text = strip_code_fence(candidate)
-                logger.info(
-                    "FastGPT 阶段 %s 文本解析候选：%s",
-                    contract.stage_name,
-                    text,
-                )
                 parsed_text = _try_parse_json(text)
                 if parsed_text is not None:
-                    logger.info(
-                        "FastGPT 阶段 %s 文本候选 JSON解析结果：%s",
-                        contract.stage_name,
-                        _json_for_log(parsed_text),
-                    )
                     candidate_payload = _payload_from_candidate(parsed_text, contract)
                     if candidate_payload is not None:
-                        logger.info(
-                            "FastGPT 阶段 %s 使用文本候选 JSON解析结果作为输出：%s",
-                            contract.stage_name,
-                            _json_for_log(candidate_payload),
-                        )
                         return candidate_payload
                 if text and _can_coerce_single_output(text, contract):
-                    logger.info(
-                        "FastGPT 阶段 %s 使用文本候选作为字段 %s：%s",
-                        contract.stage_name,
-                        key,
-                        text,
-                    )
                     return {key: text}
 
             if contract.output_types[key] == "object":
@@ -457,64 +370,6 @@ def _safe_response_text(response: requests.Response) -> str:
         return ""
     cleaned = " ".join(text.strip().split())
     return cleaned
-
-
-def _summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    variables = payload.get("variables")
-    if isinstance(variables, dict):
-        variable_summary = {
-            key: "***" if _is_sensitive_name(key) else _summarize_value(value)
-            for key, value in variables.items()
-        }
-    else:
-        variable_summary = {}
-
-    messages = payload.get("messages")
-    message_summary: list[dict[str, Any]] = []
-    if isinstance(messages, list):
-        for item in messages[:3]:
-            if not isinstance(item, dict):
-                continue
-            message_summary.append(
-                {
-                    "role": item.get("role"),
-                    "content": _summarize_value(item.get("content")),
-                }
-            )
-
-    return {
-        "chatId": payload.get("chatId"),
-        "stream": payload.get("stream"),
-        "detail": payload.get("detail"),
-        "variables": variable_summary,
-        "messages": message_summary,
-    }
-
-
-def _summarize_headers(headers: dict[str, str]) -> dict[str, Any]:
-    authorization = headers.get("Authorization", "")
-    return {
-        "Content-Type": headers.get("Content-Type"),
-        "Authorization": "Bearer ***" if authorization.startswith("Bearer ") else "<missing>",
-    }
-
-
-def _is_sensitive_name(name: str) -> bool:
-    lowered = str(name).lower()
-    return any(
-        token in lowered
-        for token in ("key", "token", "secret", "password", "authorization")
-    )
-
-
-def _summarize_value(value: Any) -> Any:
-    if isinstance(value, (int, float, bool)) or value is None:
-        return value
-    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-    text = " ".join(str(text).split())
-    if len(text) <= 240:
-        return text
-    return f"{text[:240]}...<len={len(text)}>"
 
 
 def _json_for_log(value: Any) -> str:

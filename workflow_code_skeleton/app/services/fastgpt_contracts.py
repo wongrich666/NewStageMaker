@@ -15,6 +15,7 @@ from ..workflow_ids import (
     DIALOGUE_START_VAR,
     DIALOGUE_MAX_RETRY_VAR,
     EPISODE_PLAN_VAR,
+    EPISODE_PLAN_NORMALIZED_VAR,
     EPISODE_WORD_COUNT_VAR,
     FINAL_CHARACTER_VAR,
     FINAL_SCENE_VAR,
@@ -59,8 +60,10 @@ LAST_SUMMARY = "last_summary"
 FINAL_SCRIPT = "final_script"
 IS_CONSISTENT = "is_consistent"
 BATCH_START_EPISODE = "batch_start_episode"
+NORMALIZED_EPISODE_PLAN = "normalized_episode_plan"
 
 STAGE_CONSISTENCY = "consistency"
+STAGE_EPISODE_PLAN_NORMALIZE = "episode_plan_normalize"
 STAGE_WORLDVIEW = "worldview"
 STAGE_CHARACTERS = "characters"
 STAGE_SCENES = "scenes"
@@ -133,8 +136,14 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
     EPISODE_PLAN: FastGPTVariable(
         EPISODE_PLAN,
         "string",
-        "用户分集计划。非批处理阶段传全文；批处理阶段传当前 5 集片段。",
+        "用户分集计划。consistency/worldview 阶段传原始全文；hooks/dialogues/script 阶段传当前批次规范化 JSON 字符串。",
         "用户输入/本地批次裁剪",
+    ),
+    NORMALIZED_EPISODE_PLAN: FastGPTVariable(
+        NORMALIZED_EPISODE_PLAN,
+        "object",
+        "代码侧保存的规范化分集计划对象。",
+        "FastGPT 输出/本地缓存",
     ),
     STORY_OUTLINE: FastGPTVariable(
         STORY_OUTLINE,
@@ -264,6 +273,9 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
     },
+    STAGE_EPISODE_PLAN_NORMALIZE: {
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
+    },
     STAGE_WORLDVIEW: {
         STORY_OUTLINE: STORY_OUTLINE_VAR,
         USER_SCENES: CORE_SCENE_INPUT_VAR,
@@ -339,6 +351,9 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
 
 
 LEGACY_OUTPUT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
+    STAGE_EPISODE_PLAN_NORMALIZE: {
+        NORMALIZED_EPISODE_PLAN: (EPISODE_PLAN_NORMALIZED_VAR,),
+    },
     STAGE_WORLDVIEW: {WORLDVIEW: (WORLDVIEW_VAR,)},
     STAGE_CHARACTERS: {CHARACTERS: (CHARACTER_VAR,)},
     STAGE_SCENES: {SCENES: (CORE_SCENE_FINAL_VAR, SCENE_VAR)},
@@ -358,6 +373,14 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_types={IS_CONSISTENT: "boolean"},
         fastgpt_responsibility="判断分集计划与总集数是否一致。",
         local_responsibility="不做内容判断，只根据布尔结果继续或停止。",
+    ),
+    STAGE_EPISODE_PLAN_NORMALIZE: FastGPTStageContract(
+        stage_name=STAGE_EPISODE_PLAN_NORMALIZE,
+        label="分集计划规范化",
+        input_names=(EPISODE_PLAN,),
+        output_types={NORMALIZED_EPISODE_PLAN: "object"},
+        fastgpt_responsibility="只把原始分集计划整理成结构化 JSON，不做改写、润色、摘要或扩写。",
+        local_responsibility="缓存规范化结果，后续批处理阶段只读取当前批次需要的集数。",
     ),
     STAGE_WORLDVIEW: FastGPTStageContract(
         stage_name=STAGE_WORLDVIEW,

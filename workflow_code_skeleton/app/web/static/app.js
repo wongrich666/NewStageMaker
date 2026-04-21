@@ -2,14 +2,17 @@
   "use strict";
 
   const userKey = `user.${window.scriptMakerConfig.userId || "anon"}`;
+  const storage = window.sessionStorage;
   const STORAGE = {
     draft: `scriptmaker.web.${userKey}.draft`,
-    projectId: `scriptmaker.web.${userKey}.projectId`,
-    modelId: `scriptmaker.web.${userKey}.modelId`,
-    snapshotPrefix: `scriptmaker.web.${userKey}.snapshot.`
+    selectedProjectId: `scriptmaker.web.${userKey}.selectedProjectId`,
+    modelId: `scriptmaker.web.${userKey}.modelId`
   };
 
   const POLL_INTERVAL = 2000;
+  const RUNNING_STATUSES = new Set(["pending", "running", "pausing"]);
+  const RESUMABLE_STATUSES = new Set(["paused", "pausing", "failed", "terminated"]);
+  const TERMINATABLE_STATUSES = new Set(["pending", "running", "pausing", "paused", "failed"]);
   const $ = (id) => document.getElementById(id);
 
   const els = {
@@ -29,6 +32,12 @@
     terminateBtn: $("terminateBtn"),
     clearBtn: $("clearBtn"),
     saveBtn: $("saveBtn"),
+    refreshProjectsBtn: $("refreshProjectsBtn"),
+    activeProjectList: $("activeProjectList"),
+    completedProjectList: $("completedProjectList"),
+    activeProjectCount: $("activeProjectCount"),
+    completedProjectCount: $("completedProjectCount"),
+
     openProfileBtn: $("openProfileBtn"),
     closeProfileBtn: $("closeProfileBtn"),
     closeProfileBackdrop: $("closeProfileBackdrop"),
@@ -77,6 +86,9 @@
     pollTimer: null,
     availableModels: [],
     latestSnapshot: null,
+    projects: [],
+    projectStatusMap: {},
+    projectsInitialized: false,
     assets: [],
     editingProjectId: null,
     activeTool: "hot_review"
@@ -141,6 +153,66 @@
     return false;
   }
 
+  function normalizeNumber(value) {
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  function currentUrl() {
+    return new URL(window.location.href);
+  }
+
+  function isFreshWorkspaceMode() {
+    const url = currentUrl();
+    return url.searchParams.get("mode") === "new" && !normalizeNumber(url.searchParams.get("project_id"));
+  }
+
+  function readSelectedProjectId() {
+    const url = currentUrl();
+    if (url.searchParams.get("mode") === "new" && !normalizeNumber(url.searchParams.get("project_id"))) {
+      return null;
+    }
+    const fromUrl = normalizeNumber(url.searchParams.get("project_id"));
+    if (fromUrl) return fromUrl;
+    return normalizeNumber(storage.getItem(STORAGE.selectedProjectId));
+  }
+
+  function persistSelectedProjectId(projectId) {
+    const normalized = normalizeNumber(projectId);
+    if (normalized) {
+      storage.setItem(STORAGE.selectedProjectId, String(normalized));
+    } else {
+      storage.removeItem(STORAGE.selectedProjectId);
+    }
+    const url = currentUrl();
+    if (normalized) {
+      url.searchParams.set("project_id", String(normalized));
+      url.searchParams.delete("mode");
+    } else {
+      url.searchParams.delete("project_id");
+      if (!isFreshWorkspaceMode()) {
+        url.searchParams.delete("mode");
+      }
+    }
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  function buildWorkspaceUrl({ projectId = null, fresh = false } = {}) {
+    const url = currentUrl();
+    url.searchParams.delete("project_id");
+    url.searchParams.delete("mode");
+    if (projectId) {
+      url.searchParams.set("project_id", String(projectId));
+    } else if (fresh) {
+      url.searchParams.set("mode", "new");
+    }
+    return `${url.pathname}${url.search}${url.hash}`;
+  }
+
+  function openWorkspaceInNewPage({ projectId = null, fresh = false } = {}) {
+    window.open(buildWorkspaceUrl({ projectId, fresh }), "_blank", "noopener");
+  }
+
   function statusLabel(status) {
     const mapping = {
       idle: "待开始",
@@ -165,13 +237,13 @@
       character_bios: els.characterBiosInput.value,
       episode_plan: els.episodePlanInput.value
     };
-    localStorage.setItem(STORAGE.draft, JSON.stringify(draft));
-    localStorage.setItem(STORAGE.modelId, els.modelSelect.value || "");
+    storage.setItem(STORAGE.draft, JSON.stringify(draft));
+    storage.setItem(STORAGE.modelId, els.modelSelect.value || "");
   }
 
   function restoreDraft() {
     try {
-      const raw = localStorage.getItem(STORAGE.draft);
+      const raw = storage.getItem(STORAGE.draft);
       if (!raw) return;
       const draft = JSON.parse(raw);
       els.titleInput.value = draft.title || "";
@@ -182,6 +254,10 @@
       els.characterBiosInput.value = draft.character_bios || "";
       els.episodePlanInput.value = draft.episode_plan || "";
     } catch (_) {}
+  }
+
+  function clearDraft() {
+    storage.removeItem(STORAGE.draft);
   }
 
   function formHasUserInput() {
@@ -206,32 +282,6 @@
     saveDraft();
   }
 
-  function cacheSnapshot(snapshot) {
-    if (!snapshot || !snapshot.project_id) return;
-    localStorage.setItem(STORAGE.projectId, String(snapshot.project_id));
-    localStorage.setItem(
-      `${STORAGE.snapshotPrefix}${snapshot.project_id}`,
-      JSON.stringify(snapshot)
-    );
-  }
-
-  function readCachedSnapshot(projectId) {
-    if (!projectId) return null;
-    try {
-      const raw = localStorage.getItem(`${STORAGE.snapshotPrefix}${projectId}`);
-      return raw ? JSON.parse(raw) : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function clearCachedSnapshot(projectId) {
-    if (projectId) {
-      localStorage.removeItem(`${STORAGE.snapshotPrefix}${projectId}`);
-    }
-    localStorage.removeItem(STORAGE.projectId);
-  }
-
   function currentModelLabel() {
     const selected = state.availableModels.find((item) => item.id === els.modelSelect.value);
     return selected?.label || "未选择";
@@ -248,17 +298,20 @@
       state.projectId = null;
       state.taskId = null;
       state.status = "idle";
-      els.statusText.textContent = "待开始";
-      els.messageText.textContent = "填写创作输入后点击开始生成。";
+      els.statusText.textContent = isAuthenticated() ? "待开始" : "游客浏览";
+      els.messageText.textContent = isAuthenticated()
+        ? "从下方任务列表选择一个项目，或直接填写新输入开始生成。"
+        : "登录后可以开始生成、保存资产和管理公开状态。";
       els.stageText.textContent = "尚未运行";
       els.batchText.textContent = "-";
       els.episodeProgressText.textContent = "0 / 0";
       els.modelText.textContent = currentModelLabel();
       els.progressFill.style.width = "0%";
       els.progressText.textContent = "0%";
-      els.projectText.textContent = "项目：未创建";
-      els.taskText.textContent = "任务：未创建";
+      els.projectText.textContent = "项目：未选中";
+      els.taskText.textContent = "任务：未选中";
       els.finalOutputBox.textContent = "暂无内容";
+      renderProjectList(state.projects);
       syncButtons();
       return;
     }
@@ -283,21 +336,20 @@
     els.projectText.textContent = `项目：${snapshot.project_id}`;
     els.taskText.textContent = `任务：${snapshot.task_id || "未创建"}`;
     els.finalOutputBox.textContent = finalOutput || "暂无内容";
-
-    cacheSnapshot(snapshot);
+    persistSelectedProjectId(snapshot.project_id);
+    renderProjectList(state.projects);
     syncButtons();
   }
 
   function syncButtons() {
-    const status = state.status;
     const hasProject = Boolean(state.projectId);
     const hasFinal = Boolean(finalOutputFrom(state.latestSnapshot));
     const hasConfiguredModel = state.availableModels.some((item) => item.configured !== false);
 
-    els.startBtn.disabled = !isAuthenticated() || !hasConfiguredModel || ["running", "pending", "pausing", "paused"].includes(status);
-    els.pauseBtn.disabled = status !== "running" && status !== "pending";
-    els.resumeBtn.disabled = !["paused", "pausing", "failed", "terminated"].includes(status);
-    els.terminateBtn.disabled = !["pending", "running", "pausing", "paused", "failed"].includes(status);
+    els.startBtn.disabled = !isAuthenticated() || !hasConfiguredModel;
+    els.pauseBtn.disabled = !(state.taskId && ["running", "pending"].includes(state.status));
+    els.resumeBtn.disabled = !(state.taskId && RESUMABLE_STATUSES.has(state.status));
+    els.terminateBtn.disabled = !(state.taskId && TERMINATABLE_STATUSES.has(state.status));
     els.clearBtn.disabled = !isAuthenticated();
     els.saveBtn.disabled = !isAuthenticated() || !hasProject || !hasFinal;
   }
@@ -402,7 +454,7 @@
     const data = await requestJson(window.scriptMakerConfig.modelsUrl);
     state.availableModels = data.models || [];
     const availableModels = state.availableModels.filter((item) => item.configured !== false);
-    const cachedModelId = localStorage.getItem(STORAGE.modelId) || "";
+    const cachedModelId = storage.getItem(STORAGE.modelId) || "";
     els.modelSelect.innerHTML = state.availableModels.map((item) => {
       const disabled = item.configured === false ? " disabled" : "";
       return `<option value="${escapeHtml(item.id)}"${disabled}>${escapeHtml(item.label)}</option>`;
@@ -443,6 +495,118 @@
     return payload;
   }
 
+  function pickPreferredProjectId(projects) {
+    if (!projects.length) return null;
+    const running = projects.find((item) => RUNNING_STATUSES.has(item.status));
+    const paused = projects.find((item) => item.status === "paused");
+    return Number((running || paused || projects[0]).project_id || 0) || null;
+  }
+
+  function renderProjectList(projects) {
+    if (!els.activeProjectList || !els.completedProjectList) return;
+    if (!isAuthenticated()) {
+      const message = emptyCard("登录后才能创建和管理多任务", "登录后你可以同时开启多个项目，并在这里切换查看。");
+      els.activeProjectList.innerHTML = message;
+      els.completedProjectList.innerHTML = message;
+      if (els.activeProjectCount) els.activeProjectCount.textContent = "0";
+      if (els.completedProjectCount) els.completedProjectCount.textContent = "0";
+      return;
+    }
+
+    const completedProjects = projects.filter((item) => item.status === "completed");
+    const activeProjects = projects.filter((item) => item.status !== "completed");
+
+    const renderCompactItems = (items, emptyMessage) => {
+      if (!items.length) {
+        return `<div class="workspace-empty">${escapeHtml(emptyMessage)}</div>`;
+      }
+      return items.map((item) => {
+        const activeClass = Number(item.project_id) === Number(state.projectId) ? " active" : "";
+        const statusClass = item.status === "failed"
+          ? " failed"
+          : item.status === "completed"
+            ? " completed"
+            : "";
+        return `
+          <button
+            class="workspace-pick${activeClass}${statusClass}"
+            type="button"
+            data-action="select-project"
+            data-project-id="${escapeHtml(item.project_id)}"
+            title="${escapeHtml(projectTooltip(item))}"
+          >
+            <span class="workspace-pick-title">${escapeHtml(item.title || "未命名剧本")}</span>
+            <span class="workspace-pick-state">${escapeHtml(statusLabel(item.status))}</span>
+          </button>
+        `;
+      }).join("");
+    };
+
+    els.activeProjectList.innerHTML = renderCompactItems(activeProjects, "当前没有未完成剧本。");
+    els.completedProjectList.innerHTML = renderCompactItems(completedProjects, "当前还没有自然完成的剧本。");
+    if (els.activeProjectCount) {
+      els.activeProjectCount.textContent = String(activeProjects.length);
+    }
+    if (els.completedProjectCount) {
+      els.completedProjectCount.textContent = String(completedProjects.length);
+    }
+  }
+
+  async function loadProjectDetail(projectId, { restoreInputs = false, scroll = false } = {}) {
+    const data = await requestJson(`/api/projects/${projectId}`);
+    const project = data.project || null;
+    if (!project) {
+      persistSelectedProjectId(null);
+      renderSnapshot(null);
+      return null;
+    }
+    if (restoreInputs) {
+      restoreInputPayload(project.input_payload);
+    }
+    renderSnapshot(project);
+    if (scroll) {
+      document.querySelector(".runtime")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    return project;
+  }
+
+  async function loadProjects({ restoreSelection = true, restoreInputs = false } = {}) {
+    if (!isAuthenticated()) {
+      state.projects = [];
+      renderProjectList([]);
+      renderSnapshot(null);
+      return [];
+    }
+
+    const data = await requestJson(window.scriptMakerConfig.projectsUrl);
+    state.projects = data.projects || [];
+    summarizeProjectStatusChanges(state.projects);
+    renderProjectList(state.projects);
+
+    const freshWorkspace = isFreshWorkspaceMode();
+    let targetProjectId = restoreSelection
+      ? (state.projectId || readSelectedProjectId() || (freshWorkspace ? null : pickPreferredProjectId(state.projects)))
+      : state.projectId;
+
+    if (targetProjectId && !state.projects.some((item) => Number(item.project_id) === Number(targetProjectId))) {
+      targetProjectId = pickPreferredProjectId(state.projects);
+    }
+
+    if (targetProjectId) {
+      await loadProjectDetail(targetProjectId, { restoreInputs });
+    } else {
+      if (!freshWorkspace) {
+        persistSelectedProjectId(null);
+      }
+      renderSnapshot(null);
+    }
+    return state.projects;
+  }
+
+  function shouldContinuePolling() {
+    return state.projects.some((item) => RUNNING_STATUSES.has(item.status));
+  }
+
   async function startGeneration() {
     if (!requireLogin()) return;
     saveDraft();
@@ -452,9 +616,10 @@
       method: "POST",
       body: JSON.stringify(payload)
     });
-    renderSnapshot(data.task);
+    await loadProjects({ restoreSelection: false, restoreInputs: false });
+    await loadProjectDetail(data.task.project_id, { restoreInputs: false });
     startPolling();
-    els.formHint.textContent = "任务已启动，输入内容已缓存到当前账号。";
+    els.formHint.textContent = "新任务已启动。你可以继续填写新的输入，再开下一个任务。";
   }
 
   async function pauseTask() {
@@ -462,6 +627,7 @@
     if (!state.taskId) return;
     const data = await requestJson(`/api/tasks/${state.taskId}/pause`, { method: "POST" });
     renderSnapshot(data.task);
+    await loadProjects({ restoreSelection: true, restoreInputs: false });
     startPolling();
   }
 
@@ -473,37 +639,24 @@
       : `/api/tasks/${state.taskId}/resume`;
     const data = await requestJson(endpoint, { method: "POST" });
     renderSnapshot(data.task);
+    await loadProjects({ restoreSelection: true, restoreInputs: false });
     startPolling();
   }
 
   async function terminateTask() {
     if (!requireLogin()) return;
     if (!state.taskId) return;
-    const ok = window.confirm("确认终止当前任务吗？当前节点会在结束后停止。");
+    const ok = window.confirm("确认终止当前选中任务吗？当前节点会在结束后停止。");
     if (!ok) return;
     const data = await requestJson(`/api/tasks/${state.taskId}/terminate`, { method: "POST" });
     renderSnapshot(data.task);
+    await loadProjects({ restoreSelection: true, restoreInputs: false });
     startPolling();
   }
 
-  async function clearAll() {
+  function clearCurrentInput() {
     if (!requireLogin()) return;
-    if (["running", "pending", "pausing", "paused"].includes(state.status)) {
-      throw new Error("请先终止当前任务，再执行清空全部。");
-    }
-
-    const projectId = state.projectId;
-    if (projectId) {
-      await requestJson(`/api/projects/${projectId}`, { method: "DELETE" });
-    }
-
-    clearCachedSnapshot(projectId);
-    localStorage.removeItem(STORAGE.draft);
-    state.projectId = null;
-    state.taskId = null;
-    state.status = "idle";
-    state.latestSnapshot = null;
-    stopPolling();
+    clearDraft();
     els.titleInput.value = "";
     els.wordCountInput.value = 500;
     els.episodeCountInput.value = 10;
@@ -511,8 +664,7 @@
     els.coreSceneInput.value = "";
     els.characterBiosInput.value = "";
     els.episodePlanInput.value = "";
-    renderSnapshot(null);
-    els.formHint.textContent = "已清空当前账号下的本地草稿和当前项目展示。";
+    els.formHint.textContent = "已清空当前编辑表单；后台任务和你的剧本资产都会保留。";
   }
 
   function saveFinalScript() {
@@ -525,10 +677,6 @@
     return value === "public" ? "公开成品" : "不公开";
   }
 
-  function statusBadge(status) {
-    return statusLabel(status || "idle");
-  }
-
   function emptyCard(message, actionText = "") {
     return `
       <div class="empty-card">
@@ -536,6 +684,71 @@
         ${actionText ? `<p>${escapeHtml(actionText)}</p>` : ""}
       </div>
     `;
+  }
+
+  function ensureToastStack() {
+    let stack = document.getElementById("toastStack");
+    if (stack) return stack;
+    stack = document.createElement("div");
+    stack.id = "toastStack";
+    stack.className = "toast-stack";
+    document.body.appendChild(stack);
+    return stack;
+  }
+
+  function showToast(title, message) {
+    const stack = ensureToastStack();
+    const card = document.createElement("div");
+    card.className = "toast-card";
+    card.innerHTML = `<strong>${escapeHtml(title)}</strong><p>${escapeHtml(message)}</p>`;
+    stack.appendChild(card);
+    window.setTimeout(() => {
+      card.remove();
+      if (!stack.children.length) {
+        stack.remove();
+      }
+    }, 5000);
+  }
+
+  function projectTooltip(item) {
+    return [
+      `剧本：${item.title || "未命名剧本"}`,
+      `进度：${Number(item.progress_percent || 0)}%`,
+      `当前阶段：${item.current_stage_label || statusLabel(item.status)}`,
+      `当前状态：${statusLabel(item.status)}`
+    ].join("\n");
+  }
+
+  function summarizeProjectStatusChanges(projects) {
+    const nextMap = {};
+    for (const item of projects) {
+      nextMap[String(item.project_id)] = String(item.status || "");
+    }
+
+    if (!state.projectsInitialized) {
+      state.projectStatusMap = nextMap;
+      state.projectsInitialized = true;
+      return;
+    }
+
+    for (const item of projects) {
+      const projectId = String(item.project_id);
+      const previousStatus = state.projectStatusMap[projectId];
+      const currentStatus = String(item.status || "");
+      if (
+        previousStatus
+        && previousStatus !== "failed"
+        && currentStatus === "failed"
+        && Number(item.project_id) !== Number(state.projectId)
+      ) {
+        showToast(
+          `${item.title || "未命名剧本"} 失败了`,
+          item.message || "这个后台任务在执行过程中失败了，你可以稍后打开项目继续生成。"
+        );
+      }
+    }
+
+    state.projectStatusMap = nextMap;
   }
 
   async function loadAssets() {
@@ -564,16 +777,19 @@
     els.assetsList.innerHTML = assets.map((item) => `
       <article class="asset-tile">
         <div class="asset-topline">
-          <span>${escapeHtml(statusBadge(item.status))}</span>
+          <span>${escapeHtml(statusLabel(item.status))}</span>
           <span>${escapeHtml(visibilityLabel(item.visibility))}</span>
         </div>
         <h3>${escapeHtml(item.title)}</h3>
         <p>${escapeHtml(item.summary)}</p>
         <div class="asset-meta">
           <span>项目 ${escapeHtml(item.project_id)}</span>
-          <span>${item.has_final ? "已有成品" : "未完成"}</span>
+          <span>${escapeHtml(item.current_stage_label || "待开始")}</span>
+          <span>${escapeHtml(item.generated_episodes || 0)} / ${escapeHtml(item.total_episodes || 0)}</span>
         </div>
         <div class="asset-actions">
+          <button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>
+          <button class="btn btn-ghost" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">新页面打开</button>
           <button class="btn btn-secondary" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">修改</button>
           <button class="btn btn-ghost" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : "公开成品"}</button>
           <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除</button>
@@ -624,8 +840,11 @@
       method: "PATCH",
       body: JSON.stringify(payload)
     });
-    renderSnapshot(data.project);
+    if (Number(data.project?.project_id) === Number(state.projectId)) {
+      renderSnapshot(data.project);
+    }
     closeAssetEditor();
+    await loadProjects({ restoreSelection: true, restoreInputs: false });
     await loadAssets();
     await loadCommunity();
   }
@@ -642,6 +861,7 @@
       method: "PATCH",
       body: JSON.stringify({ visibility: nextVisibility })
     });
+    await loadProjects({ restoreSelection: true, restoreInputs: false });
     await loadAssets();
     await loadCommunity();
   }
@@ -652,8 +872,10 @@
     if (!ok) return;
     await requestJson(`/api/projects/${projectId}`, { method: "DELETE" });
     if (Number(projectId) === Number(state.projectId)) {
+      persistSelectedProjectId(null);
       renderSnapshot(null);
     }
+    await loadProjects({ restoreSelection: true, restoreInputs: false });
     await loadAssets();
     await loadCommunity();
   }
@@ -706,25 +928,22 @@
     }
   }
 
-  async function pollTask() {
-    if (!state.taskId) return;
+  async function pollWorkspace() {
     try {
-      const data = await requestJson(`/api/tasks/${state.taskId}`);
-      renderSnapshot(data.task);
-      if (["running", "pending", "pausing"].includes(data.task.status)) {
-        state.pollTimer = window.setTimeout(pollTask, POLL_INTERVAL);
-      } else {
-        stopPolling();
-      }
+      await loadProjects({ restoreSelection: true, restoreInputs: false });
     } catch (error) {
       els.messageText.textContent = error.message || String(error);
-      state.pollTimer = window.setTimeout(pollTask, POLL_INTERVAL * 2);
+    }
+    if (shouldContinuePolling()) {
+      state.pollTimer = window.setTimeout(pollWorkspace, POLL_INTERVAL);
+    } else {
+      stopPolling();
     }
   }
 
   function startPolling() {
     stopPolling();
-    state.pollTimer = window.setTimeout(pollTask, POLL_INTERVAL);
+    state.pollTimer = window.setTimeout(pollWorkspace, POLL_INTERVAL);
   }
 
   function stopPolling() {
@@ -734,30 +953,16 @@
     }
   }
 
-  async function restoreProject() {
+  async function restoreWorkspace() {
     if (!isAuthenticated()) {
+      state.projects = [];
+      renderProjectList([]);
       renderSnapshot(null);
-      els.statusText.textContent = "游客浏览";
-      els.messageText.textContent = "登录后可以开始生成、保存资产和管理公开状态。";
       return;
     }
-    const cachedProjectId = Number(localStorage.getItem(STORAGE.projectId) || 0);
-    if (cachedProjectId) {
-      const cachedSnapshot = readCachedSnapshot(cachedProjectId);
-      if (cachedSnapshot) {
-        renderSnapshot(cachedSnapshot);
-      }
-    }
-
-    const data = await requestJson(window.scriptMakerConfig.latestProjectUrl);
-    if (data.project) {
-      restoreInputPayload(data.project.input_payload);
-      renderSnapshot(data.project);
-      if (["running", "pending", "pausing"].includes(data.project.status)) {
-        startPolling();
-      }
-    } else {
-      renderSnapshot(null);
+    await loadProjects({ restoreSelection: true, restoreInputs: true });
+    if (shouldContinuePolling()) {
+      startPolling();
     }
   }
 
@@ -786,12 +991,20 @@
 
     els.newScriptBtn?.addEventListener("click", () => {
       if (!requireLogin()) return;
-      document.getElementById("create")?.scrollIntoView({ behavior: "smooth" });
+      openWorkspaceInNewPage({ fresh: true });
     });
 
     els.viewAssetsBtn?.addEventListener("click", () => {
       if (!requireLogin()) return;
       openProfilePanel();
+    });
+
+    els.refreshProjectsBtn?.addEventListener("click", async () => {
+      try {
+        await loadProjects({ restoreSelection: true, restoreInputs: false });
+      } catch (error) {
+        els.messageText.textContent = error.message || String(error);
+      }
     });
 
     els.refreshAssetsBtn?.addEventListener("click", async () => {
@@ -810,12 +1023,30 @@
       }
     });
 
+    [els.activeProjectList, els.completedProjectList].forEach((container) => container?.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) return;
+      const projectId = button.dataset.projectId;
+      try {
+        if (button.dataset.action === "select-project") {
+          await loadProjectDetail(projectId, { restoreInputs: true, scroll: true });
+        }
+      } catch (error) {
+        els.messageText.textContent = error.message || String(error);
+      }
+    }));
+
     els.assetsList?.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-action]");
       if (!button) return;
       const projectId = button.dataset.projectId;
       try {
-        if (button.dataset.action === "edit-asset") {
+        if (button.dataset.action === "open-project") {
+          closeProfilePanel();
+          await loadProjectDetail(projectId, { restoreInputs: true, scroll: true });
+        } else if (button.dataset.action === "open-project-page") {
+          openWorkspaceInNewPage({ projectId });
+        } else if (button.dataset.action === "edit-asset") {
           await openAssetEditor(projectId);
         } else if (button.dataset.action === "toggle-privacy") {
           await toggleAssetPrivacy(projectId, button.dataset.visibility);
@@ -883,9 +1114,9 @@
 
     els.clearBtn.addEventListener("click", async () => {
       try {
-        const ok = window.confirm("确认清空当前表单、本地缓存和当前项目记录吗？");
+        const ok = window.confirm("确认清空当前编辑表单吗？后台任务和剧本资产会保留。");
         if (!ok) return;
-        await clearAll();
+        clearCurrentInput();
       } catch (error) {
         els.messageText.textContent = error.message || String(error);
       }
@@ -903,11 +1134,11 @@
 
     try {
       await loadModels();
-      await restoreProject();
+      await restoreWorkspace();
       await loadAssets();
       await loadCommunity();
       if (hasConfiguredModel()) {
-        els.formHint.textContent = `已登录 ${window.scriptMakerConfig.username}，草稿会按账号自动缓存。`;
+        els.formHint.textContent = `已登录 ${window.scriptMakerConfig.username}。这个页面可以同时管理多个任务，离开后回来也能恢复。`;
       } else if (!isAuthenticated()) {
         els.formHint.textContent = "你可以先浏览说明和社区作品；登录后即可开始创作。";
       } else {
@@ -915,7 +1146,7 @@
       }
     } catch (error) {
       els.messageText.textContent = error.message || String(error);
-      els.formHint.textContent = "模型列表或历史项目恢复失败，请检查后端服务和工作流 JSON 路径。";
+      els.formHint.textContent = "模型列表或历史项目恢复失败，请检查后端服务、.env 配置和工作流 JSON 路径。";
     }
   }
 

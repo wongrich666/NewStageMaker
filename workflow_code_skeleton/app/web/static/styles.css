@@ -458,6 +458,137 @@ a {
   gap: 14px;
 }
 
+.workspace-folders {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.workspace-folder {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.74);
+  overflow: hidden;
+}
+
+.workspace-folder summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+  font-weight: 800;
+}
+
+.workspace-folder summary::-webkit-details-marker {
+  display: none;
+}
+
+.workspace-folder summary em {
+  min-width: 32px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: white;
+  font-style: normal;
+  text-align: center;
+  background: linear-gradient(135deg, var(--c-blue), var(--c-violet));
+}
+
+.workspace-compact-list {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.workspace-pick,
+.workspace-empty {
+  width: 100%;
+  min-height: 46px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--text);
+  text-align: left;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.workspace-pick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.workspace-pick:hover {
+  border-color: rgba(103, 150, 238, 0.4);
+  box-shadow: 0 10px 24px rgba(103, 150, 238, 0.12);
+  transform: translateY(-1px);
+}
+
+.workspace-pick.active {
+  border-color: rgba(103, 150, 238, 0.48);
+  box-shadow: 0 14px 28px rgba(103, 150, 238, 0.14);
+}
+
+.workspace-pick.failed {
+  border-color: rgba(172, 38, 108, 0.28);
+}
+
+.workspace-pick.completed {
+  border-color: rgba(49, 181, 253, 0.2);
+}
+
+.workspace-pick-title {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-pick-state {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  background: rgba(103, 150, 238, 0.1);
+}
+
+.toast-stack {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 90;
+  display: grid;
+  gap: 10px;
+}
+
+.toast-card {
+  min-width: min(360px, calc(100vw - 40px));
+  max-width: 420px;
+  padding: 14px 16px;
+  border: 1px solid rgba(172, 38, 108, 0.22);
+  border-radius: 18px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 20px 42px rgba(24, 34, 53, 0.14);
+}
+
+.toast-card strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.toast-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 .guide-card span,
 .asset-topline span,
 .community-tag {

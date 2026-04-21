@@ -196,6 +196,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         snapshot = task_manager.latest_project_snapshot(user_id=_require_user_id())
         return _json_ok(project=snapshot)
 
+    @app.get("/api/projects")
+    @_login_required
+    def list_projects():
+        projects = task_manager.list_user_projects(user_id=_require_user_id())
+        return _json_ok(projects=projects)
+
     @app.get("/api/assets")
     @_login_required
     def list_assets():
@@ -327,7 +333,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             path,
             as_attachment=True,
             download_name=path.name,
-            mimetype="text/plain; charset=utf-8",
+            mimetype="application/zip",
         )
 
     return app

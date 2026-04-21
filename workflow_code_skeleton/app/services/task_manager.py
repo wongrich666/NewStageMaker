@@ -4,6 +4,7 @@ import copy
 import json
 import threading
 import uuid
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +44,25 @@ STAGE_LABELS = {
     "finalize": "正在整理完整稿件",
     "finished": "已完成",
 }
+
+
+def _summarize_fastgpt_output(output: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key, value in (output or {}).items():
+        if isinstance(value, dict):
+            episodes = value.get("episodes")
+            if isinstance(episodes, list):
+                parts.append(f"{key}=episodes[{len(episodes)}]")
+                continue
+            keys = list(value.keys())[:4]
+            parts.append(f"{key}=dict({', '.join(str(item) for item in keys)})")
+            continue
+        if isinstance(value, list):
+            parts.append(f"{key}=list[{len(value)}]")
+            continue
+        text = " ".join(str(value or "").split())
+        parts.append(f"{key}={text[:80]}")
+    return "；".join(parts)[:240] or "成品已生成。"
 
 
 def now_iso() -> str:
@@ -198,25 +218,35 @@ class WorkflowRuntime:
         self.sync_from_state(state)
         self.checkpoint()
 
-    def fastgpt_stage_started(self, stage_name: str, input_names: list[str]) -> None:
+    def fastgpt_stage_started(
+        self,
+        stage_label: str,
+        *,
+        batch_label: str | None = None,
+        attempt: int = 1,
+    ) -> None:
         self.checkpoint()
+        batch_text = f" {batch_label} 集" if batch_label else ""
         self.manager._append_log(
             self.record,
-            title=f"开始 FastGPT 阶段：{stage_name}",
-            message=f"传入变量：{', '.join(input_names)}",
-            node_id=f"fastgpt:{stage_name}",
+            title=f"{stage_label}{batch_text}",
+            message=f"第 {attempt} 次尝试",
+            node_id=f"fastgpt:{stage_label}",
         )
 
-    def fastgpt_stage_finished(self, stage_name: str, output: dict[str, Any]) -> None:
-        preview_parts: list[str] = []
-        for key, value in output.items():
-            text = str(value or "").strip().replace("\n", " ")
-            preview_parts.append(f"{key}={text[:80]}")
+    def fastgpt_stage_finished(
+        self,
+        stage_label: str,
+        *,
+        batch_label: str | None = None,
+        output: dict[str, Any],
+    ) -> None:
+        batch_text = f" {batch_label} 集" if batch_label else ""
         self.manager._append_log(
             self.record,
-            title=f"完成 FastGPT 阶段：{stage_name}",
-            message="；".join(preview_parts)[:240] or "阶段已完成。",
-            node_id=f"fastgpt:{stage_name}",
+            title=f"{stage_label}{batch_text} 已完成",
+            message=_summarize_fastgpt_output(output),
+            node_id=f"fastgpt:{stage_label}",
         )
 
     def sync_from_state(self, state: WorkflowState) -> None:
@@ -544,6 +574,15 @@ class TaskManager:
         assets.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return assets
 
+    def list_user_projects(self, user_id: int) -> list[dict[str, Any]]:
+        projects = [
+            self._asset_summary(snapshot, include_private=True)
+            for snapshot in self._all_project_snapshots()
+            if self._snapshot_belongs_to_user(snapshot, user_id)
+        ]
+        projects.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+        return projects
+
     def list_public_assets(self) -> list[dict[str, Any]]:
         assets = [
             self._asset_summary(snapshot, include_private=False)
@@ -642,6 +681,14 @@ class TaskManager:
             "updated_at": snapshot.get("updated_at"),
             "created_at": snapshot.get("created_at"),
             "has_final": bool(final_script),
+            "message": snapshot.get("message") or "",
+            "current_stage": snapshot.get("current_stage"),
+            "current_stage_label": snapshot.get("current_stage_label") or "待开始",
+            "current_batch": snapshot.get("current_batch"),
+            "progress_percent": int(snapshot.get("progress_percent") or 0),
+            "generated_episodes": int(snapshot.get("generated_episodes") or 0),
+            "total_episodes": int(snapshot.get("total_episodes") or 0),
+            "model_label": ((snapshot.get("model_option") or {}).get("label") or ""),
         }
         if include_private:
             payload["final_preview"] = final_script[:500]
@@ -862,10 +909,12 @@ class TaskManager:
 
     def clear_project(self, project_id: int, user_id: int | None = None) -> None:
         record = self._projects.get(project_id)
+        owner_user_id: int | None = None
         if record:
             if user_id is not None and int(record.user_id) != int(user_id):
                 raise ValueError("您没有权限清空该项目")
             snapshot = record.clone_snapshot()
+            owner_user_id = int(snapshot.get("user_id") or record.user_id or 0)
             if snapshot.get("status") in PROJECT_RUNNING_STATUSES:
                 raise ValueError("请先终止当前任务，再执行清空。")
             self._tasks.pop(record.task_id, None)
@@ -880,11 +929,16 @@ class TaskManager:
                     snapshot = {}
                 if not self._snapshot_belongs_to_user(snapshot, user_id):
                     raise ValueError("您没有权限清空该项目")
+                owner_user_id = int(snapshot.get("user_id") or owner_user_id or 0)
             path.unlink()
 
+        latest_by_user = dict(self._index.get("latest_project_by_user", {}))
+        if owner_user_id is not None and latest_by_user.get(str(owner_user_id)) == project_id:
+            latest_by_user.pop(str(owner_user_id), None)
+            self._index["latest_project_by_user"] = latest_by_user
         if self._index.get("latest_project_id") == project_id:
             self._index["latest_project_id"] = None
-            self._save_index()
+        self._save_index()
 
     def save_final_script(self, project_id: int, user_id: int | None = None) -> Path:
         snapshot = self.get_project_snapshot(project_id, user_id=user_id)
@@ -900,8 +954,31 @@ class TaskManager:
             raise ValueError("当前项目还没有可保存的最终剧本")
         title = str(snapshot.get("title") or f"project_{project_id}").strip() or f"project_{project_id}"
         safe_title = "".join(ch if ch not in '<>:"/\\|?*' else "_" for ch in title)[:80]
-        path = self.exports_dir / f"{safe_title}_{project_id}.txt"
-        path.write_text(content, encoding="utf-8")
+        base_name = f"{safe_title}_{project_id}"
+        txt_path = self.exports_dir / f"{base_name}.txt"
+        docx_path = self.exports_dir / f"{base_name}.docx"
+        zip_path = self.exports_dir / f"{base_name}.zip"
+
+        txt_path.write_text(content, encoding="utf-8")
+        try:
+            from ..utils.txt_to_docx import convert as convert_txt_to_docx
+            convert_txt_to_docx(str(txt_path), str(docx_path))
+        except ModuleNotFoundError as exc:
+            if exc.name == "docx":
+                raise ValueError("导出 Word 失败：当前环境缺少 python-docx，请先安装该依赖。") from exc
+            raise ValueError(f"导出 Word 失败：{exc}") from exc
+        except Exception as exc:
+            logger.exception("导出 Word 失败: %s", project_id)
+            raise ValueError(f"导出 Word 失败：{exc}") from exc
+
+        try:
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.write(txt_path, arcname=txt_path.name)
+                archive.write(docx_path, arcname=docx_path.name)
+        except Exception as exc:
+            logger.exception("导出压缩包失败: %s", project_id)
+            raise ValueError(f"导出压缩包失败：{exc}") from exc
+
         self._update_snapshot(
             self._projects.get(project_id) or TaskRecord(
                 user_id=int(snapshot.get("user_id") or 0),
@@ -914,9 +991,12 @@ class TaskManager:
                 ),
                 snapshot=snapshot,
             ),
-            saved_file=str(path),
+            saved_file=str(zip_path),
+            saved_txt_file=str(txt_path),
+            saved_docx_file=str(docx_path),
+            saved_zip_file=str(zip_path),
         )
-        return path
+        return zip_path
 
 
 task_manager = TaskManager()
