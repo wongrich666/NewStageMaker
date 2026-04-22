@@ -159,7 +159,17 @@ class FastGPTStageContract:
             if name not in output:
                 missing.append(name)
                 continue
-            normalized[name] = coerce_fastgpt_value(output[name], type_name)
+            try:
+                normalized[name] = coerce_fastgpt_value(output[name], type_name)
+            except ValueError as exc:
+                value = output.get(name)
+                if type_name == "string" and _is_empty_string_output(value):
+                    raise ValueError(
+                        f"FastGPT 阶段 {self.stage_name} 输出字段 {name} 不能为空"
+                    ) from exc
+                raise ValueError(
+                    f"FastGPT 阶段 {self.stage_name} 输出字段 {name} 校验失败：{exc}"
+                ) from exc
         if missing:
             joined = ", ".join(missing)
             raise ValueError(f"FastGPT 阶段 {self.stage_name} 缺少输出变量：{joined}")
@@ -498,11 +508,11 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
 
 LEGACY_OUTPUT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
     STAGE_FRAMEWORK: {
-        SCRIPT_TITLE: (FRAMEWORK_TITLE_VAR,),
-        STORY_OUTLINE: (FRAMEWORK_STORY_OUTLINE_VAR,),
-        USER_CHARACTERS: (FRAMEWORK_CHARACTER_BIOS_VAR,),
-        USER_SCENES: (FRAMEWORK_CORE_SCENE_VAR,),
-        EPISODE_PLAN: (FRAMEWORK_EPISODE_PLAN_VAR,),
+        SCRIPT_TITLE: (FRAMEWORK_TITLE_VAR, "script_title_content"),
+        STORY_OUTLINE: (FRAMEWORK_STORY_OUTLINE_VAR, "story_outline_content"),
+        USER_CHARACTERS: (FRAMEWORK_CHARACTER_BIOS_VAR, "character_bios_content"),
+        USER_SCENES: (FRAMEWORK_CORE_SCENE_VAR, "core_scene_content"),
+        EPISODE_PLAN: (FRAMEWORK_EPISODE_PLAN_VAR, "episode_plan_content"),
     },
     STAGE_APPEARANCE_PRE_STRATEGY: {
         CHARACTER_APPEARANCE_REQUIREMENTS: (
@@ -829,6 +839,14 @@ def coerce_fastgpt_value(value: Any, type_name: str) -> Any:
         raise ValueError(f"无法转换为 object：{value!r}")
 
     raise ValueError(f"不支持的 FastGPT 类型：{type_name}")
+
+
+def _is_empty_string_output(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return False
 
 
 def to_jsonable_value(value: Any) -> Any:

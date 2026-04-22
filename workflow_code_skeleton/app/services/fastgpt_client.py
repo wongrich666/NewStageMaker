@@ -37,6 +37,7 @@ OUTPUT_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "script_title": (
         "script_title",
         "title",
+        "script_title_content",
     ),
     "story_outline": (
         "story_outline",
@@ -323,10 +324,11 @@ class FastGPTClient:
         contract: FastGPTStageContract,
     ) -> dict[str, Any]:
         expected = contract.output_names
+        payload_candidates: list[tuple[str, dict[str, Any]]] = []
         for candidate in _iter_response_data_candidates(data):
             candidate_payload = _payload_from_candidate(candidate, contract)
             if candidate_payload is not None:
-                return candidate_payload
+                payload_candidates.append(("responseData", candidate_payload))
 
         choice_contents = list(_iter_choice_message_contents(data))
         for index, content in enumerate(choice_contents):
@@ -334,17 +336,19 @@ class FastGPTClient:
             if parsed_content is not None:
                 candidate_payload = _payload_from_candidate(parsed_content, contract)
                 if candidate_payload is not None:
-                    return candidate_payload
+                    payload_candidates.append(
+                        (f"choices[{index}].message.content(json)", candidate_payload)
+                    )
 
             if len(expected) == 1 and _can_coerce_single_output(content, contract):
                 key = expected[0]
                 payload = {key: content}
-                return payload
+                payload_candidates.append((f"choices[{index}].message.content(text)", payload))
 
         for candidate in _iter_structured_output_candidates(data):
             candidate_payload = _payload_from_candidate(candidate, contract)
             if candidate_payload is not None:
-                return candidate_payload
+                payload_candidates.append(("structured", candidate_payload))
 
         if len(expected) == 1:
             key = expected[0]
@@ -354,14 +358,33 @@ class FastGPTClient:
                 if parsed_text is not None:
                     candidate_payload = _payload_from_candidate(parsed_text, contract)
                     if candidate_payload is not None:
-                        return candidate_payload
+                        payload_candidates.append(("answerText(json)", candidate_payload))
                 if text and _can_coerce_single_output(text, contract):
-                    return {key: text}
+                    payload_candidates.append(("answerText(text)", {key: text}))
 
             if contract.output_types[key] == "object":
                 for candidate in _iter_structured_output_candidates(data):
                     if isinstance(candidate, dict) and _looks_like_payload_dict(candidate):
-                        return {key: candidate}
+                        payload_candidates.append(("structured(object)", {key: candidate}))
+
+        selected = _select_best_payload(payload_candidates, contract)
+        if selected is not None:
+            source, payload, empty_fields = selected
+            log_message = (
+                "FastGPT 阶段 %s 选中 payload 来源=%s，候选数=%s，空字段=%s，payload=%s"
+            )
+            log_args = (
+                contract.stage_name,
+                source,
+                len(payload_candidates),
+                empty_fields or ["无"],
+                _truncate_log_text(_json_for_log(payload), limit=800),
+            )
+            if empty_fields:
+                logger.warning(log_message, *log_args)
+            else:
+                logger.info(log_message, *log_args)
+            return payload
 
         message = (
             f"FastGPT 阶段 {contract.stage_name} 未返回契约字段：{', '.join(expected)}；"
@@ -449,6 +472,13 @@ def _json_for_log(value: Any) -> str:
         return str(value)
 
 
+def _truncate_log_text(text: str, *, limit: int = 500) -> str:
+    compact = " ".join(str(text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[:limit]}..."
+
+
 def _iter_choice_message_contents(data: Any) -> Iterable[str]:
     if not isinstance(data, dict):
         return
@@ -527,6 +557,51 @@ def _extract_generic_alias_payload(
         if not matched:
             return None
     return payload
+
+
+def _select_best_payload(
+    candidates: list[tuple[str, dict[str, Any]]],
+    contract: FastGPTStageContract,
+) -> tuple[str, dict[str, Any], list[str]] | None:
+    best: tuple[tuple[int, int, int, int], tuple[str, dict[str, Any], list[str]]] | None = None
+    for index, (source, payload) in enumerate(candidates):
+        empty_fields = [
+            name
+            for name in contract.output_names
+            if _is_empty_output_value(payload.get(name))
+        ]
+        non_empty_count = len(contract.output_names) - len(empty_fields)
+        score = (
+            1 if not empty_fields else 0,
+            non_empty_count,
+            _payload_source_priority(source),
+            -index,
+        )
+        if best is None or score > best[0]:
+            best = (score, (source, payload, empty_fields))
+    return best[1] if best is not None else None
+
+
+def _payload_source_priority(source: str) -> int:
+    if source.startswith("responseData"):
+        return 4
+    if source.startswith("choices"):
+        return 3
+    if source.startswith("structured"):
+        return 2
+    if source.startswith("answerText"):
+        return 1
+    return 0
+
+
+def _is_empty_output_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (dict, list, tuple, set)):
+        return len(value) == 0
+    return False
 
 
 def _warn_similar_fields(candidate: dict[str, Any], contract: FastGPTStageContract) -> None:
