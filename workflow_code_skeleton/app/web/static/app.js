@@ -22,9 +22,6 @@
     expectationInput: $("expectationInput"),
     characterCountInput: $("characterCountInput"),
     episodeCountInput: $("episodeCountInput"),
-    appearanceRequirementsInput: $("appearanceRequirementsInput"),
-    aliasNamingRulesInput: $("aliasNamingRulesInput"),
-    outfitSwitchRulesInput: $("outfitSwitchRulesInput"),
     formHint: $("formHint"),
 
     startBtn: $("startBtn"),
@@ -92,6 +89,7 @@
     projectsInitialized: false,
     assets: [],
     editingProjectId: null,
+    editingProjectStatus: null,
     activeTool: "hot_review"
   };
 
@@ -220,6 +218,18 @@
     return `${url.pathname}${url.search}${url.hash}`;
   }
 
+  function switchToFreshWorkspace() {
+    state.projectId = null;
+    state.taskId = null;
+    state.status = "idle";
+    state.latestSnapshot = null;
+    persistSelectedProjectId(null);
+    pageStorage.removeItem(STORAGE.selectedProjectId);
+    const freshUrl = buildWorkspaceUrl({ fresh: true });
+    window.history.replaceState({}, "", freshUrl);
+    renderSnapshot(null);
+  }
+
   function openWorkspaceInNewPage({ projectId = null, fresh = false } = {}) {
     window.open(buildWorkspaceUrl({ projectId, fresh }), "_blank", "noopener");
   }
@@ -243,9 +253,6 @@
       user_expectation: els.expectationInput.value.trim(),
       character_count: Number(els.characterCountInput.value || 0),
       total_episodes: Number(els.episodeCountInput.value || 0),
-      character_appearance_requirements: els.appearanceRequirementsInput?.value.trim() || "",
-      character_alias_naming_rules: els.aliasNamingRulesInput?.value.trim() || "",
-      outfit_switch_rules: els.outfitSwitchRulesInput?.value.trim() || "",
     };
     draftStorage.setItem(STORAGE.draft, JSON.stringify(draft));
     draftStorage.setItem(STORAGE.modelId, els.modelSelect.value || "");
@@ -259,15 +266,6 @@
       els.expectationInput.value = draft.user_expectation || "";
       els.characterCountInput.value = draft.character_count || 5;
       els.episodeCountInput.value = draft.total_episodes || 10;
-      if (els.appearanceRequirementsInput) {
-        els.appearanceRequirementsInput.value = draft.character_appearance_requirements || "";
-      }
-      if (els.aliasNamingRulesInput) {
-        els.aliasNamingRulesInput.value = draft.character_alias_naming_rules || "";
-      }
-      if (els.outfitSwitchRulesInput) {
-        els.outfitSwitchRulesInput.value = draft.outfit_switch_rules || "";
-      }
     } catch (_) {}
   }
 
@@ -280,9 +278,6 @@
       els.expectationInput.value.trim()
       || Number(els.characterCountInput.value || 5) !== 5
       || Number(els.episodeCountInput.value || 10) !== 10
-      || (els.appearanceRequirementsInput?.value.trim() || "")
-      || (els.aliasNamingRulesInput?.value.trim() || "")
-      || (els.outfitSwitchRulesInput?.value.trim() || "")
     );
   }
 
@@ -291,23 +286,6 @@
     els.expectationInput.value = inputPayload.user_expectation || "";
     els.characterCountInput.value = inputPayload.character_count || 5;
     els.episodeCountInput.value = inputPayload.total_episodes || 10;
-    if (els.appearanceRequirementsInput) {
-      els.appearanceRequirementsInput.value =
-        inputPayload.character_appearance_requirements
-        || inputPayload.appearance_requirements
-        || "";
-    }
-    if (els.aliasNamingRulesInput) {
-      els.aliasNamingRulesInput.value =
-        inputPayload.character_alias_naming_rules
-        || inputPayload.alias_naming_rules
-        || "";
-    }
-    if (els.outfitSwitchRulesInput) {
-      els.outfitSwitchRulesInput.value =
-        inputPayload.outfit_switch_rules
-        || "";
-    }
     saveDraft();
   }
 
@@ -317,6 +295,9 @@
   }
 
   function finalOutputFrom(snapshot) {
+    if (!snapshot || snapshot.status !== "completed") {
+      return "";
+    }
     const artifacts = snapshot?.artifacts || {};
     return artifacts.final_output_text || artifacts.final_script || "";
   }
@@ -512,9 +493,6 @@
       character_count: Number(els.characterCountInput.value || 0),
       episode_word_count: 500,
       total_episodes: Number(els.episodeCountInput.value || 0),
-      character_appearance_requirements: els.appearanceRequirementsInput?.value.trim() || "",
-      character_alias_naming_rules: els.aliasNamingRulesInput?.value.trim() || "",
-      outfit_switch_rules: els.outfitSwitchRulesInput?.value.trim() || "",
       title: "",
       story_outline: "",
       core_scene_input: "",
@@ -698,15 +676,6 @@
     els.expectationInput.value = "";
     els.characterCountInput.value = 5;
     els.episodeCountInput.value = 10;
-    if (els.appearanceRequirementsInput) {
-      els.appearanceRequirementsInput.value = "";
-    }
-    if (els.aliasNamingRulesInput) {
-      els.aliasNamingRulesInput.value = "";
-    }
-    if (els.outfitSwitchRulesInput) {
-      els.outfitSwitchRulesInput.value = "";
-    }
     els.formHint.textContent = "已清空当前编辑表单；后台任务和你的剧本资产都会保留。";
   }
 
@@ -872,10 +841,13 @@
     const input = project.input_payload || {};
     const artifacts = project.artifacts || {};
     state.editingProjectId = Number(projectId);
+    state.editingProjectStatus = String(project.status || "");
     els.editAssetTitle.value = project.title || input.title || "";
     els.editAssetSummary.value = input.story_outline || artifacts.story_outline || "";
     els.editAssetPrivacy.value = project.visibility || "private";
-    els.editAssetFinal.value = artifacts.final_output_text || artifacts.final_script || "";
+    els.editAssetFinal.value = state.editingProjectStatus === "completed"
+      ? (artifacts.final_output_text || artifacts.final_script || "")
+      : "";
     els.assetEditor.classList.remove("hidden");
     els.assetEditor.scrollIntoView({ behavior: "smooth", block: "center" });
   }
@@ -885,9 +857,12 @@
     const payload = {
       title: els.editAssetTitle.value.trim(),
       story_outline: els.editAssetSummary.value.trim(),
-      visibility: els.editAssetPrivacy.value,
-      final_script: els.editAssetFinal.value
+      visibility: els.editAssetPrivacy.value
     };
+    const finalScriptText = els.editAssetFinal.value.trim();
+    if (state.editingProjectStatus === "completed" || finalScriptText) {
+      payload.final_script = finalScriptText;
+    }
     const data = await requestJson(`/api/projects/${state.editingProjectId}`, {
       method: "PATCH",
       body: JSON.stringify(payload)
@@ -903,6 +878,7 @@
 
   function closeAssetEditor() {
     state.editingProjectId = null;
+    state.editingProjectStatus = null;
     els.assetEditor.classList.add("hidden");
   }
 
@@ -922,12 +898,19 @@
     if (!requireLogin()) return;
     const ok = window.confirm("确认删除这个剧本资产吗？删除后不可恢复。");
     if (!ok) return;
+    const wasCurrentProject = Number(projectId) === Number(state.projectId);
+    const wasEditingAsset = Number(projectId) === Number(state.editingProjectId);
     await requestJson(`/api/projects/${projectId}`, { method: "DELETE" });
-    if (Number(projectId) === Number(state.projectId)) {
-      persistSelectedProjectId(null);
-      renderSnapshot(null);
+    if (wasEditingAsset) {
+      closeAssetEditor();
     }
-    await loadProjects({ restoreSelection: true, restoreInputs: false });
+    if (wasCurrentProject) {
+      switchToFreshWorkspace();
+    }
+    await loadProjects({
+      restoreSelection: !wasCurrentProject,
+      restoreInputs: false
+    });
     await loadAssets();
     await loadCommunity();
   }
@@ -1034,9 +1017,6 @@
       els.expectationInput,
       els.characterCountInput,
       els.episodeCountInput,
-      els.appearanceRequirementsInput,
-      els.aliasNamingRulesInput,
-      els.outfitSwitchRulesInput,
       els.modelSelect
     ].filter(Boolean).forEach((el) => {
       el.addEventListener("input", saveDraft);

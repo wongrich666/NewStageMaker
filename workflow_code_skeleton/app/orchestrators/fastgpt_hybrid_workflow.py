@@ -40,6 +40,7 @@ from ..services.fastgpt_contracts import (
     SCENE_APPEARANCE_REQUIREMENTS,
     SCRIPT_TITLE,
     STAGE_APPEARANCE_ALIAS_GENERATION,
+    STAGE_APPEARANCE_PRE_STRATEGY,
     STAGE_FRAMEWORK,
     STAGE_CHARACTERS,
     STAGE_CONSISTENCY,
@@ -65,6 +66,7 @@ from ..utils.logger import get_logger
 from ..workflow_ids import (
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
     APPEARANCE_MAPPING_VAR,
+    APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
     APPEARANCE_REQUIREMENTS_VAR,
     CHARACTER_BIOS_VAR,
     CHARACTER_VAR,
@@ -84,6 +86,7 @@ from ..workflow_ids import (
     HOOK_START_VAR,
     HOOK_FINAL_VAR,
     MEMORY_VAR,
+    OUTFIT_SWITCH_RULES_VAR,
     SCENE_VAR,
     SCRIPT_CURRENT_VAR,
     SCRIPT_START_VAR,
@@ -152,6 +155,30 @@ def run_fastgpt_hybrid_workflow(
             )
         )
         _apply_framework_outputs_to_variables(payload, variables)
+    _sync_state_variables(state, variables)
+
+    if _has_pre_strategy_outputs(variables):
+        _refresh_user_content_baseline(payload, variables)
+        set_runtime_stage(
+            state,
+            "appearance_strategy",
+            "已从缓存恢复服装前置策略。",
+            progress_percent=6,
+        )
+    else:
+        variables.update(
+            _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_APPEARANCE_PRE_STRATEGY,
+                variables,
+                stage_key="appearance_strategy",
+                message="正在生成服装前置策略。",
+                progress_percent=6,
+                max_retries=0,
+            )
+        )
+        _refresh_user_content_baseline(payload, variables)
     _sync_state_variables(state, variables)
 
     if _truthy(variables.get(IS_CONSISTENT)):
@@ -326,19 +353,15 @@ def run_fastgpt_hybrid_workflow(
 
 
 def _initial_fastgpt_variables(payload: WorkflowInput) -> dict[str, Any]:
-    appearance_requirements = _merge_optional_text(
-        payload.character_appearance_requirements,
-        payload.outfit_switch_rules,
-    )
     return {
         SCRIPT_TITLE: payload.title,
         TOTAL_EPISODES: payload.total_episodes,
         EPISODE_WORD_COUNT: payload.episode_word_count,
         USER_EXPECTATION: payload.user_expectation,
         CHARACTER_COUNT: payload.character_count,
-        CHARACTER_APPEARANCE_REQUIREMENTS: appearance_requirements,
-        CHARACTER_ALIAS_NAMING_RULES: payload.character_alias_naming_rules,
-        OUTFIT_SWITCH_RULES: payload.outfit_switch_rules,
+        CHARACTER_APPEARANCE_REQUIREMENTS: str(payload.character_appearance_requirements or "").strip(),
+        CHARACTER_ALIAS_NAMING_RULES: str(payload.character_alias_naming_rules or "").strip(),
+        OUTFIT_SWITCH_RULES: str(payload.outfit_switch_rules or "").strip(),
         EPISODE_PLAN: payload.episode_plan,
         STORY_OUTLINE: payload.story_outline,
         USER_SCENES: payload.core_scene_input,
@@ -398,6 +421,53 @@ def _build_user_content_baseline(
         EPISODE_PLAN: episode_plan_value if episode_plan_value is not None else payload.episode_plan,
     }
     return json.dumps(baseline, ensure_ascii=False, indent=2)
+
+
+def _current_appearance_requirements_text(
+    variables: dict[str, Any],
+    payload: WorkflowInput,
+) -> str:
+    return _merge_optional_text(
+        variables.get(CHARACTER_APPEARANCE_REQUIREMENTS),
+        variables.get(OUTFIT_SWITCH_RULES),
+        payload.character_appearance_requirements,
+        payload.outfit_switch_rules,
+    )
+
+
+def _current_alias_naming_rules_text(
+    variables: dict[str, Any],
+    payload: WorkflowInput,
+) -> str:
+    return str(
+        variables.get(CHARACTER_ALIAS_NAMING_RULES)
+        or payload.character_alias_naming_rules
+        or ""
+    ).strip()
+
+
+def _current_outfit_switch_rules_text(
+    variables: dict[str, Any],
+    payload: WorkflowInput,
+) -> str:
+    return str(variables.get(OUTFIT_SWITCH_RULES) or payload.outfit_switch_rules or "").strip()
+
+
+def _refresh_user_content_baseline(
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+) -> None:
+    variables[USER_CONTENT_BASELINE] = _build_user_content_baseline(
+        payload,
+        script_title=str(variables.get(SCRIPT_TITLE) or payload.title or "").strip() or "AI原创剧本",
+        story_outline_value=str(variables.get(STORY_OUTLINE) or payload.story_outline or "").strip(),
+        user_scenes_value=str(variables.get(USER_SCENES) or payload.core_scene_input or "").strip(),
+        user_characters_value=str(variables.get(USER_CHARACTERS) or payload.character_bios or "").strip(),
+        episode_plan_value=str(variables.get(EPISODE_PLAN) or payload.episode_plan or "").strip(),
+        appearance_requirements_value=_current_appearance_requirements_text(variables, payload),
+        alias_naming_rules_value=_current_alias_naming_rules_text(variables, payload),
+        outfit_switch_rules_value=_current_outfit_switch_rules_text(variables, payload),
+    )
 
 
 def _run_batched_generation(
@@ -838,11 +908,18 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
     if STORY_OUTLINE in variables:
         state.set_var(STORY_OUTLINE_VAR, variables[STORY_OUTLINE])
     if CHARACTER_APPEARANCE_REQUIREMENTS in variables:
-        state.set_var(APPEARANCE_REQUIREMENTS_VAR, variables[CHARACTER_APPEARANCE_REQUIREMENTS])
-        state.set_var(FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR, variables[CHARACTER_APPEARANCE_REQUIREMENTS])
+        merged_appearance_requirements = _merge_optional_text(
+            variables[CHARACTER_APPEARANCE_REQUIREMENTS],
+            variables.get(OUTFIT_SWITCH_RULES),
+        )
+        state.set_var(APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR, variables[CHARACTER_APPEARANCE_REQUIREMENTS])
+        state.set_var(APPEARANCE_REQUIREMENTS_VAR, merged_appearance_requirements)
+        state.set_var(FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR, merged_appearance_requirements)
     if CHARACTER_ALIAS_NAMING_RULES in variables:
         state.set_var(APPEARANCE_ALIAS_NAMING_RULES_VAR, variables[CHARACTER_ALIAS_NAMING_RULES])
         state.set_var(FRAMEWORK_ALIAS_NAMING_RULES_VAR, variables[CHARACTER_ALIAS_NAMING_RULES])
+    if OUTFIT_SWITCH_RULES in variables:
+        state.set_var(OUTFIT_SWITCH_RULES_VAR, variables[OUTFIT_SWITCH_RULES])
     if USER_CHARACTERS in variables:
         state.set_var(CHARACTER_BIOS_VAR, variables[USER_CHARACTERS])
     if USER_SCENES in variables:
@@ -986,23 +1063,7 @@ def _apply_normalized_episode_plan_to_variables(
     normalized_text = _serialize_normalized_episode_plan(normalized_plan)
     variables[NORMALIZED_EPISODE_PLAN] = normalized_plan
     variables[EPISODE_PLAN] = normalized_text
-    variables[USER_CONTENT_BASELINE] = _build_user_content_baseline(
-        payload,
-        script_title=str(variables.get(SCRIPT_TITLE) or payload.title or "").strip() or "AI原创剧本",
-        story_outline_value=str(variables.get(STORY_OUTLINE) or payload.story_outline or "").strip(),
-        user_scenes_value=str(variables.get(USER_SCENES) or payload.core_scene_input or "").strip(),
-        user_characters_value=str(variables.get(USER_CHARACTERS) or payload.character_bios or "").strip(),
-        episode_plan_value=normalized_text,
-        appearance_requirements_value=str(
-            variables.get(CHARACTER_APPEARANCE_REQUIREMENTS)
-            or _merge_optional_text(payload.character_appearance_requirements, payload.outfit_switch_rules)
-            or ""
-        ).strip(),
-        alias_naming_rules_value=str(
-            variables.get(CHARACTER_ALIAS_NAMING_RULES) or payload.character_alias_naming_rules or ""
-        ).strip(),
-        outfit_switch_rules_value=str(variables.get(OUTFIT_SWITCH_RULES) or payload.outfit_switch_rules or "").strip(),
-    )
+    _refresh_user_content_baseline(payload, variables)
     return normalized_plan
 
 
@@ -1010,6 +1071,17 @@ def _has_framework_outputs(variables: dict[str, Any]) -> bool:
     return all(
         _has_value(variables.get(name))
         for name in (STORY_OUTLINE, USER_CHARACTERS, USER_SCENES, EPISODE_PLAN)
+    )
+
+
+def _has_pre_strategy_outputs(variables: dict[str, Any]) -> bool:
+    return all(
+        _has_value(variables.get(name))
+        for name in (
+            CHARACTER_APPEARANCE_REQUIREMENTS,
+            CHARACTER_ALIAS_NAMING_RULES,
+            OUTFIT_SWITCH_RULES,
+        )
     )
 
 
@@ -1032,23 +1104,7 @@ def _apply_framework_outputs_to_variables(
     variables[USER_CHARACTERS] = user_characters
     variables[USER_SCENES] = user_scenes
     variables[EPISODE_PLAN] = episode_plan
-    variables[USER_CONTENT_BASELINE] = _build_user_content_baseline(
-        payload,
-        script_title=script_title,
-        story_outline_value=story_outline,
-        user_scenes_value=user_scenes,
-        user_characters_value=user_characters,
-        episode_plan_value=episode_plan,
-        appearance_requirements_value=str(
-            variables.get(CHARACTER_APPEARANCE_REQUIREMENTS)
-            or _merge_optional_text(payload.character_appearance_requirements, payload.outfit_switch_rules)
-            or ""
-        ).strip(),
-        alias_naming_rules_value=str(
-            variables.get(CHARACTER_ALIAS_NAMING_RULES) or payload.character_alias_naming_rules or ""
-        ).strip(),
-        outfit_switch_rules_value=str(variables.get(OUTFIT_SWITCH_RULES) or payload.outfit_switch_rules or "").strip(),
-    )
+    _refresh_user_content_baseline(payload, variables)
     return True
 
 

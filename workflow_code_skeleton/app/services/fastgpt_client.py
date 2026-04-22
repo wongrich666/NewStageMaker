@@ -15,10 +15,12 @@ from .fastgpt_contracts import (
     ALL_DIALOGUES,
     ALL_HOOKS,
     ALL_SCRIPT,
+    CHARACTER_APPEARANCE_REQUIREMENTS,
     LAST_SUMMARY,
     LEGACY_INPUT_ALIASES,
     LEGACY_OUTPUT_ALIASES,
     MAX_RETRIES,
+    OUTFIT_SWITCH_RULES,
     USER_CONTENT_BASELINE,
     FastGPTStageContract,
     contract_for,
@@ -231,6 +233,14 @@ class FastGPTClient:
         wire: dict[str, Any] = {}
         for canonical_name, wire_name in aliases.items():
             if canonical_name in variables:
+                if canonical_name == CHARACTER_APPEARANCE_REQUIREMENTS:
+                    wire[wire_name] = _format_wire_value(
+                        _merge_optional_text(
+                            variables.get(CHARACTER_APPEARANCE_REQUIREMENTS),
+                            variables.get(OUTFIT_SWITCH_RULES),
+                        )
+                    )
+                    continue
                 wire[wire_name] = _format_wire_value(variables[canonical_name])
                 continue
             if canonical_name == LAST_SUMMARY:
@@ -358,6 +368,18 @@ class FastGPTClient:
 
 def _env(*names: str) -> str | None:
     return _env_with_name(*names)[1]
+
+
+def _merge_optional_text(*parts: Any) -> str:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        text = str(part or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        merged.append(text)
+    return "\n".join(merged).strip()
 
 
 def _env_with_name(*names: str) -> tuple[str | None, str | None]:

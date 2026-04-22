@@ -66,6 +66,13 @@ body {
   box-shadow: 0 22px 48px rgba(15, 18, 28, 0.28);
 }
 
+.topbar-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .home-nav {
   display: flex;
   flex-wrap: wrap;
@@ -241,6 +248,37 @@ a {
 
 .brand-mark strong {
   white-space: nowrap;
+}
+
+.page-back-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.78);
+  text-decoration: none;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.page-back-link:hover {
+  color: var(--c-violet);
+  background: rgba(49, 181, 253, 0.08);
+}
+
+.page-back-link-light {
+  color: #f3f7ff;
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.page-back-link-light:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .nav-links {
@@ -965,6 +1003,13 @@ a {
   padding: 24px;
 }
 
+.auth-back-link {
+  position: fixed;
+  top: 24px;
+  left: 24px;
+  z-index: 2;
+}
+
 .auth-card {
   width: min(440px, 100%);
   padding: 28px;
@@ -1029,6 +1074,16 @@ a {
     align-items: stretch;
     flex-direction: column;
     border-radius: 20px;
+  }
+
+  .topbar-main {
+    flex-wrap: wrap;
+  }
+
+  .auth-back-link {
+    position: static;
+    margin-bottom: 8px;
+    justify-self: start;
   }
 
   .home-nav,

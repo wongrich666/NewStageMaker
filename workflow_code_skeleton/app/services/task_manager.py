@@ -52,6 +52,7 @@ logger = get_logger("task_manager")
 PROJECT_RUNNING_STATUSES = {"pending", "running", "pausing", "paused"}
 STAGE_LABELS = {
     "framework": "正在撰写剧本框架",
+    "appearance_strategy": "正在生成服装前置策略",
     "validation": "正在检查集数",
     "worldview": "正在整理故事规则",
     "character": "正在梳理人物",
@@ -65,6 +66,58 @@ STAGE_LABELS = {
 }
 STORY_TEASER_ARTIFACT = "story_teaser"
 STORY_TEASER_SOURCE_ARTIFACT = "story_teaser_source"
+PUBLIC_INPUT_PAYLOAD_KEYS = (
+    "title",
+    "story_outline",
+    "user_expectation",
+    "character_count",
+    "total_episodes",
+)
+PUBLIC_ARTIFACT_KEYS = (
+    "script_title",
+    "story_outline",
+)
+PUBLIC_COMPLETED_ARTIFACT_KEYS = (
+    "final_script",
+    "final_output_text",
+)
+COMPLETED_INPUT_PAYLOAD_KEYS = (
+    "title",
+    "story_outline",
+    "total_episodes",
+)
+COMPLETED_ARTIFACT_KEYS = (
+    "script_title",
+    "story_outline",
+    "normalized_episode_plan",
+    "character_summary",
+    "core_scene_summary",
+    "appearance_mapping",
+    "character_registry",
+    "character_alias_registry",
+    "episode_alias_plan",
+    STORY_TEASER_ARTIFACT,
+    STORY_TEASER_SOURCE_ARTIFACT,
+    "final_script",
+    "final_output_text",
+)
+
+
+def _select_non_empty_fields(
+    source: dict[str, Any] | None,
+    allowed_keys: tuple[str, ...],
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if not isinstance(source, dict):
+        return payload
+    for key in allowed_keys:
+        if key not in source:
+            continue
+        value = copy.deepcopy(source.get(key))
+        if value in (None, "", {}, []):
+            continue
+        payload[key] = value
+    return payload
 
 
 def _summarize_fastgpt_output(output: dict[str, Any]) -> str:
@@ -346,10 +399,18 @@ class TaskManager:
                 data = json.loads(path.read_text(encoding="utf-8"))
             except Exception:
                 continue
+            changed = False
             if data.get("status") in PROJECT_RUNNING_STATUSES:
                 data["status"] = "terminated"
                 data["message"] = "服务重启后，进行中的任务已停止，请重新开始或重新生成。"
                 data["updated_at"] = now_iso()
+                changed = True
+            elif str(data.get("status") or "") == "completed":
+                compacted = self._compact_completed_snapshot(data)
+                if compacted != data:
+                    data = compacted
+                    changed = True
+            if changed:
                 path.write_text(
                     json.dumps(data, ensure_ascii=False, indent=2),
                     encoding="utf-8",
@@ -361,6 +422,8 @@ class TaskManager:
     def _persist_snapshot(self, record: TaskRecord) -> None:
         path = self._project_path(record.project_id)
         with record.lock:
+            if bool(record.snapshot.get("_deleted")):
+                return
             path.write_text(
                 json.dumps(record.snapshot, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -426,6 +489,118 @@ class TaskManager:
             return True
         return int(snapshot.get("user_id") or 0) == int(user_id)
 
+    def _public_input_payload(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        return _select_non_empty_fields(
+            snapshot.get("input_payload") or {},
+            PUBLIC_INPUT_PAYLOAD_KEYS,
+        )
+
+    def _public_artifacts(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        allowed_keys = list(PUBLIC_ARTIFACT_KEYS)
+        if str(snapshot.get("status") or "") == "completed":
+            allowed_keys.extend(PUBLIC_COMPLETED_ARTIFACT_KEYS)
+        return _select_non_empty_fields(
+            snapshot.get("artifacts") or {},
+            tuple(allowed_keys),
+        )
+
+    def _public_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        artifacts = self._public_artifacts(snapshot)
+        payload: dict[str, Any] = {
+            "project_id": snapshot.get("project_id"),
+            "task_id": snapshot.get("task_id"),
+            "status": snapshot.get("status"),
+            "title": snapshot.get("title") or artifacts.get("script_title") or "未命名剧本",
+            "message": snapshot.get("message") or "",
+            "created_at": snapshot.get("created_at"),
+            "updated_at": snapshot.get("updated_at"),
+            "finished_at": snapshot.get("finished_at"),
+            "visibility": snapshot.get("visibility") or "private",
+            "model_option": copy.deepcopy(snapshot.get("model_option")),
+            "input_payload": self._public_input_payload(snapshot),
+            "artifacts": artifacts,
+            "progress_percent": int(snapshot.get("progress_percent") or 0),
+            "generated_episodes": int(snapshot.get("generated_episodes") or 0),
+            "total_episodes": int(snapshot.get("total_episodes") or 0),
+            "current_stage": snapshot.get("current_stage"),
+            "current_stage_label": snapshot.get("current_stage_label") or "待开始",
+            "current_batch": snapshot.get("current_batch"),
+            "has_final": bool(
+                str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip()
+            ),
+        }
+        return payload
+
+    def _completed_input_payload(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        input_payload = _select_non_empty_fields(
+            snapshot.get("input_payload") or {},
+            COMPLETED_INPUT_PAYLOAD_KEYS,
+        )
+        artifacts = snapshot.get("artifacts") or {}
+        title = str(
+            artifacts.get("script_title")
+            or snapshot.get("title")
+            or input_payload.get("title")
+            or ""
+        ).strip()
+        story_outline = str(
+            artifacts.get("story_outline")
+            or input_payload.get("story_outline")
+            or ""
+        ).strip()
+        total_episodes = snapshot.get("total_episodes") or input_payload.get("total_episodes")
+        if title:
+            input_payload["title"] = title
+        if story_outline:
+            input_payload["story_outline"] = story_outline
+        if total_episodes:
+            input_payload["total_episodes"] = int(total_episodes)
+        return input_payload
+
+    def _compact_completed_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        compacted = copy.deepcopy(snapshot)
+        compacted["artifacts"] = _select_non_empty_fields(
+            compacted.get("artifacts") or {},
+            COMPLETED_ARTIFACT_KEYS,
+        )
+        compacted["input_payload"] = self._completed_input_payload(compacted)
+        compacted["current_node_id"] = None
+        compacted["current_node_name"] = None
+        compacted["current_batch"] = None
+        compacted.pop("debug_state", None)
+        compacted.pop("logs", None)
+        compacted.pop("error", None)
+        compacted.pop("prompt_fixes", None)
+        return compacted
+
+    def _compact_record_after_completion(self, record: TaskRecord) -> None:
+        compacted = self._compact_completed_snapshot(record.clone_snapshot())
+        with record.lock:
+            record.snapshot = compacted
+        self._persist_snapshot(record)
+
+    def _load_project_snapshot_raw(self, project_id: int) -> dict[str, Any] | None:
+        record = self._projects.get(project_id)
+        if record:
+            return record.clone_snapshot()
+        path = self._project_path(project_id)
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _load_task_snapshot_raw(self, task_id: str) -> dict[str, Any] | None:
+        record = self._tasks.get(task_id)
+        if record:
+            return record.clone_snapshot()
+        for path in self.projects_dir.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if data.get("task_id") == task_id:
+                return data
+        return None
+
     def _model_alias(self, provider: str, index: int = 1) -> str:
         provider_name = str(provider or "").strip().lower()
         initials = {
@@ -488,7 +663,7 @@ class TaskManager:
                 key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""),
                 reverse=True,
             )
-            return candidates[0]
+            return self._public_snapshot(candidates[0])
 
         latest_project_id = self._index.get("latest_project_id")
         if not latest_project_id:
@@ -500,36 +675,28 @@ class TaskManager:
         project_id: int,
         *,
         user_id: int | None = None,
+        public_view: bool = True,
     ) -> dict[str, Any] | None:
-        record = self._projects.get(project_id)
-        if record:
-            snapshot = record.clone_snapshot()
-            return snapshot if self._snapshot_belongs_to_user(snapshot, user_id) else None
-
-        path = self._project_path(project_id)
-        if not path.exists():
+        snapshot = self._load_project_snapshot_raw(project_id)
+        if snapshot is None:
             return None
-        snapshot = json.loads(path.read_text(encoding="utf-8"))
-        return snapshot if self._snapshot_belongs_to_user(snapshot, user_id) else None
+        if not self._snapshot_belongs_to_user(snapshot, user_id):
+            return None
+        return self._public_snapshot(snapshot) if public_view else snapshot
 
     def get_task_snapshot(
         self,
         task_id: str,
         *,
         user_id: int | None = None,
+        public_view: bool = True,
     ) -> dict[str, Any] | None:
-        record = self._tasks.get(task_id)
-        if record:
-            snapshot = record.clone_snapshot()
-            return snapshot if self._snapshot_belongs_to_user(snapshot, user_id) else None
-        for path in self.projects_dir.glob("*.json"):
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            if data.get("task_id") == task_id and self._snapshot_belongs_to_user(data, user_id):
-                return data
-        return None
+        snapshot = self._load_task_snapshot_raw(task_id)
+        if snapshot is None:
+            return None
+        if not self._snapshot_belongs_to_user(snapshot, user_id):
+            return None
+        return self._public_snapshot(snapshot) if public_view else snapshot
 
     def start_task(
         self,
@@ -600,7 +767,7 @@ class TaskManager:
         )
         record.thread = thread
         thread.start()
-        return record.clone_snapshot()
+        return self._public_snapshot(record.clone_snapshot())
 
     def list_user_assets(self, user_id: int) -> list[dict[str, Any]]:
         assets = [
@@ -635,7 +802,7 @@ class TaskManager:
         return assets[:24]
 
     def get_public_asset(self, project_id: int) -> dict[str, Any] | None:
-        snapshot = self.get_project_snapshot(project_id)
+        snapshot = self.get_project_snapshot(project_id, public_view=False)
         if not snapshot:
             return None
         if str(snapshot.get("visibility") or "private") != "public":
@@ -669,11 +836,9 @@ class TaskManager:
         if record:
             snapshot = record.clone_snapshot()
         else:
-            snapshot = self.get_project_snapshot(project_id, user_id=user_id)
+            snapshot = self.get_project_snapshot(project_id, user_id=user_id, public_view=False)
         if not snapshot or not self._snapshot_belongs_to_user(snapshot, user_id):
             raise ValueError("项目不存在或无权操作")
-        if snapshot.get("status") in PROJECT_RUNNING_STATUSES:
-            raise ValueError("任务执行中，暂时不能修改资产")
 
         title = str(changes.get("title") or "").strip()
         story_outline = str(changes.get("story_outline") or "").strip()
@@ -709,7 +874,7 @@ class TaskManager:
                 json.dumps(snapshot, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-        return snapshot
+        return self._public_snapshot(snapshot)
 
     def _all_project_snapshots(self) -> list[dict[str, Any]]:
         snapshots: dict[int, dict[str, Any]] = {}
@@ -896,6 +1061,7 @@ class TaskManager:
                 generated_episodes=record.snapshot.get("total_episodes", 0),
                 prompt_fixes=state.prompt_fixes,
             )
+            self._compact_record_after_completion(record)
         except TaskTerminated as exc:
             if runtime is not None:
                 self._append_log(
@@ -938,7 +1104,7 @@ class TaskManager:
         snapshot = record.clone_snapshot()
         status = snapshot.get("status")
         if status in {"paused", "pausing"}:
-            return snapshot
+            return self._public_snapshot(snapshot)
         if status not in {"pending", "running"}:
             raise ValueError("只有进行中的任务才能暂停")
         record.control.request_pause()
@@ -952,14 +1118,14 @@ class TaskManager:
             status="pausing",
             message="暂停指令已发出，当前节点完成后会暂停。",
         )
-        return record.clone_snapshot()
+        return self._public_snapshot(record.clone_snapshot())
 
     def resume_task(self, task_id: str, user_id: int | None = None) -> dict[str, Any]:
         record = self._get_task_record_for_user(task_id, user_id)
         snapshot = record.clone_snapshot()
         status = snapshot.get("status")
         if status == "running" and not record.control.is_pause_requested():
-            return snapshot
+            return self._public_snapshot(snapshot)
         if status not in {"paused", "pausing", "running"}:
             raise ValueError("只有已暂停或正在暂停的任务才能继续")
         record.control.request_resume()
@@ -973,10 +1139,10 @@ class TaskManager:
             status="running",
             message="继续指令已发出，任务恢复执行。",
         )
-        return record.clone_snapshot()
+        return self._public_snapshot(record.clone_snapshot())
 
     def retry_task(self, task_id: str, user_id: int | None = None) -> dict[str, Any]:
-        snapshot = self.get_task_snapshot(task_id, user_id=user_id)
+        snapshot = self.get_task_snapshot(task_id, user_id=user_id, public_view=False)
         if not snapshot:
             raise ValueError("任务不存在")
         status = snapshot.get("status")
@@ -1038,13 +1204,13 @@ class TaskManager:
         )
         record.thread = thread
         thread.start()
-        return record.clone_snapshot()
+        return self._public_snapshot(record.clone_snapshot())
 
     def terminate_task(self, task_id: str, user_id: int | None = None) -> dict[str, Any]:
         record = self._get_task_record_for_user(task_id, user_id)
         snapshot = record.clone_snapshot()
         if snapshot.get("status") in {"completed", "terminated"}:
-            return snapshot
+            return self._public_snapshot(snapshot)
         if snapshot.get("status") == "failed":
             self._append_log(
                 record,
@@ -1057,7 +1223,7 @@ class TaskManager:
                 message="任务已终止，失败前的阶段和中间产物已保留，可直接重新开始。",
                 finished_at=now_iso(),
             )
-            return record.clone_snapshot()
+            return self._public_snapshot(record.clone_snapshot())
         record.control.request_terminate()
         self._append_log(
             record,
@@ -1065,7 +1231,7 @@ class TaskManager:
             message="终止指令已发出，当前节点结束后会停止。",
         )
         self._update_snapshot(record, message="终止指令已发出，当前节点结束后会停止。")
-        return record.clone_snapshot()
+        return self._public_snapshot(record.clone_snapshot())
 
     def clear_project(self, project_id: int, user_id: int | None = None) -> None:
         record = self._projects.get(project_id)
@@ -1075,8 +1241,9 @@ class TaskManager:
                 raise ValueError("您没有权限清空该项目")
             snapshot = record.clone_snapshot()
             owner_user_id = int(snapshot.get("user_id") or record.user_id or 0)
-            if snapshot.get("status") in PROJECT_RUNNING_STATUSES:
-                raise ValueError("请先终止当前任务，再执行清空。")
+            record.control.request_terminate()
+            with record.lock:
+                record.snapshot["_deleted"] = True
             self._tasks.pop(record.task_id, None)
             self._projects.pop(project_id, None)
 
@@ -1101,7 +1268,7 @@ class TaskManager:
         self._save_index()
 
     def save_final_script(self, project_id: int, user_id: int | None = None) -> Path:
-        snapshot = self.get_project_snapshot(project_id, user_id=user_id)
+        snapshot = self.get_project_snapshot(project_id, user_id=user_id, public_view=False)
         if not snapshot:
             raise ValueError("项目不存在")
         artifacts = snapshot.get("artifacts", {})

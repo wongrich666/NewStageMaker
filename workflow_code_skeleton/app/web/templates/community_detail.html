@@ -4,15 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% if asset %}{{ asset.title }}{% else %}社区好剧{% endif %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260421-4">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260422-2">
 </head>
 <body class="home-body">
   <main class="home-shell">
     <header class="home-topbar">
-      <a class="brand-mark" href="{{ url_for('index', auth_token=current_auth_token) }}">
-        <span>剧</span>
-        <strong>社区共享好剧</strong>
-      </a>
+      <div class="topbar-main">
+        <a class="page-back-link page-back-link-light" href="{{ url_for('index', auth_token=current_auth_token) }}">返回首页</a>
+        <a class="brand-mark" href="{{ url_for('index', auth_token=current_auth_token) }}">
+          <span>剧</span>
+          <strong>社区共享好剧</strong>
+        </a>
+      </div>
       <nav class="home-nav">
         <a href="{{ url_for('index', auth_token=current_auth_token) }}">首页</a>
         <a href="{{ url_for('workspace_page', auth_token=current_auth_token) if current_user else url_for('login_page') }}">工作台</a>

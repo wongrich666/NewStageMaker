@@ -7,6 +7,7 @@ from typing import Any
 from ..workflow_ids import (
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
     APPEARANCE_MAPPING_VAR,
+    APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
     APPEARANCE_REQUIREMENTS_VAR,
     CHARACTER_BIOS_VAR,
     CHARACTER_MAX_RETRY_VAR,
@@ -37,6 +38,7 @@ from ..workflow_ids import (
     HOOK_START_VAR,
     HOOK_MAX_RETRY_VAR,
     MEMORY_VAR,
+    OUTFIT_SWITCH_RULES_VAR,
     SCENE_MAX_RETRY_VAR,
     SCENE_APPEARANCE_REQUIREMENTS_VAR,
     SCENE_ALIAS_NAMING_RULES_VAR,
@@ -98,6 +100,7 @@ APPEARANCE_CONTINUITY_MEMORY = "appearance_continuity_memory"
 SCENE_APPEARANCE_REQUIREMENTS = "scene_appearance_requirements"
 
 STAGE_FRAMEWORK = "framework"
+STAGE_APPEARANCE_PRE_STRATEGY = "appearance_pre_strategy"
 STAGE_CONSISTENCY = "consistency"
 STAGE_EPISODE_PLAN_NORMALIZE = "episode_plan_normalize"
 STAGE_WORLDVIEW = "worldview"
@@ -191,20 +194,20 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
     CHARACTER_APPEARANCE_REQUIREMENTS: FastGPTVariable(
         CHARACTER_APPEARANCE_REQUIREMENTS,
         "string",
-        "用户补充的人物服装/造型/身份状态需求。当前会与 outfit_switch_rules 合并后传给 FastGPT 的服装版本需求变量。",
-        "用户输入",
+        "供后续阶段复用的服装版本需求。默认由“服装前置策略生成器”自动生成，也兼容外部直接传入。",
+        "FastGPT 输出/兼容外部输入",
     ),
     CHARACTER_ALIAS_NAMING_RULES: FastGPTVariable(
         CHARACTER_ALIAS_NAMING_RULES,
         "string",
-        "用户指定的人物别名/服装版本命名偏好，例如“顾沉（上班）/顾沉（居家）”。",
-        "用户输入",
+        "供后续阶段复用的人物别名/服装版本命名偏好，例如“顾沉（上班）/顾沉（居家）”。默认由“服装前置策略生成器”自动生成。",
+        "FastGPT 输出/兼容外部输入",
     ),
     OUTFIT_SWITCH_RULES: FastGPTVariable(
         OUTFIT_SWITCH_RULES,
         "string",
-        "用户补充的换装切换规则，会在本地并入服装版本需求后传给前置与场景/映射阶段。",
-        "用户输入",
+        "供后续阶段复用的服装切换规则。默认由“服装前置策略生成器”自动生成。",
+        "FastGPT 输出/兼容外部输入",
     ),
     NORMALIZED_EPISODE_PLAN: FastGPTVariable(
         NORMALIZED_EPISODE_PLAN,
@@ -233,7 +236,7 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
     SCRIPT_TITLE: FastGPTVariable(
         SCRIPT_TITLE,
         "string",
-        "剧本标题。优先使用框架阶段生成标题；若缺失，再回退到本地基于用户期待生成的标题。",
+        "剧本标题。优先使用框架阶段生成标题；若缺失，再回退到本地基于用户想要的剧本生成的标题。",
         "框架阶段输出/本地回退",
     ),
     WORLDVIEW: FastGPTVariable(
@@ -379,6 +382,15 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         CHARACTER_APPEARANCE_REQUIREMENTS: FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR,
         CHARACTER_ALIAS_NAMING_RULES: FRAMEWORK_ALIAS_NAMING_RULES_VAR,
     },
+    STAGE_APPEARANCE_PRE_STRATEGY: {
+        USER_EXPECTATION: FRAMEWORK_USER_EXPECTATION_VAR,
+        TOTAL_EPISODES: FRAMEWORK_TOTAL_EPISODES_VAR,
+        CHARACTER_COUNT: FRAMEWORK_CHARACTER_COUNT_VAR,
+        STORY_OUTLINE: FRAMEWORK_STORY_OUTLINE_VAR,
+        USER_CHARACTERS: FRAMEWORK_CHARACTER_BIOS_VAR,
+        USER_SCENES: FRAMEWORK_CORE_SCENE_VAR,
+        EPISODE_PLAN: FRAMEWORK_EPISODE_PLAN_VAR,
+    },
     STAGE_CONSISTENCY: {
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
@@ -492,6 +504,20 @@ LEGACY_OUTPUT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
         USER_SCENES: (FRAMEWORK_CORE_SCENE_VAR,),
         EPISODE_PLAN: (FRAMEWORK_EPISODE_PLAN_VAR,),
     },
+    STAGE_APPEARANCE_PRE_STRATEGY: {
+        CHARACTER_APPEARANCE_REQUIREMENTS: (
+            APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
+            "character_appearance_requirements",
+        ),
+        CHARACTER_ALIAS_NAMING_RULES: (
+            APPEARANCE_ALIAS_NAMING_RULES_VAR,
+            "character_alias_naming_rules",
+        ),
+        OUTFIT_SWITCH_RULES: (
+            OUTFIT_SWITCH_RULES_VAR,
+            "outfit_switch_rules",
+        ),
+    },
     STAGE_EPISODE_PLAN_NORMALIZE: {
         NORMALIZED_EPISODE_PLAN: (EPISODE_PLAN_NORMALIZED_VAR,),
     },
@@ -525,8 +551,28 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             USER_SCENES: "string",
             EPISODE_PLAN: "string",
         },
-        fastgpt_responsibility="根据用户期待、角色数量和总集数，生成剧本标题、故事大纲、人物小传、核心场景、分集计划。",
+        fastgpt_responsibility="根据用户想要的剧本、角色数量和总集数，生成剧本标题、故事大纲、人物小传、核心场景、分集计划。",
         local_responsibility="缓存并复用五项框架产物，后续阶段统一读取这些结果。",
+    ),
+    STAGE_APPEARANCE_PRE_STRATEGY: FastGPTStageContract(
+        stage_name=STAGE_APPEARANCE_PRE_STRATEGY,
+        label="服装前置策略生成器",
+        input_names=(
+            USER_EXPECTATION,
+            TOTAL_EPISODES,
+            CHARACTER_COUNT,
+            STORY_OUTLINE,
+            USER_CHARACTERS,
+            USER_SCENES,
+            EPISODE_PLAN,
+        ),
+        output_types={
+            CHARACTER_APPEARANCE_REQUIREMENTS: "string",
+            CHARACTER_ALIAS_NAMING_RULES: "string",
+            OUTFIT_SWITCH_RULES: "string",
+        },
+        fastgpt_responsibility="基于故事、人物、场景和分集计划，先生成后续阶段要统一复用的服装版本需求、命名偏好和服装切换规则。",
+        local_responsibility="缓存三项服装前置策略结果，并继续沿用现有逻辑字段供后续阶段读取。",
     ),
     STAGE_CONSISTENCY: FastGPTStageContract(
         stage_name=STAGE_CONSISTENCY,
