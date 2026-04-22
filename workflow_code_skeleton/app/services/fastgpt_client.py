@@ -563,19 +563,26 @@ def _select_best_payload(
     candidates: list[tuple[str, dict[str, Any]]],
     contract: FastGPTStageContract,
 ) -> tuple[str, dict[str, Any], list[str]] | None:
-    best: tuple[tuple[int, int, int, int], tuple[str, dict[str, Any], list[str]]] | None = None
+    best: tuple[tuple[int, int, int, int, int], tuple[str, dict[str, Any], list[str]]] | None = None
     for index, (source, payload) in enumerate(candidates):
+        qualities = {
+            name: _output_value_quality(payload.get(name), contract.output_types[name])
+            for name in contract.output_names
+        }
         empty_fields = [
             name
             for name in contract.output_names
-            if _is_empty_output_value(payload.get(name))
+            if qualities[name] <= 0
         ]
-        non_empty_count = len(contract.output_names) - len(empty_fields)
+        strong_count = sum(1 for score in qualities.values() if score >= 3)
+        usable_count = sum(1 for score in qualities.values() if score >= 2)
+        weak_count = sum(1 for score in qualities.values() if score == 1)
         score = (
-            1 if not empty_fields else 0,
-            non_empty_count,
+            1 if usable_count == len(contract.output_names) else 0,
+            strong_count,
+            usable_count,
+            -weak_count,
             _payload_source_priority(source),
-            -index,
         )
         if best is None or score > best[0]:
             best = (score, (source, payload, empty_fields))
@@ -602,6 +609,33 @@ def _is_empty_output_value(value: Any) -> bool:
     if isinstance(value, (dict, list, tuple, set)):
         return len(value) == 0
     return False
+
+
+def _output_value_quality(value: Any, type_name: str) -> int:
+    if _is_empty_output_value(value):
+        return 0
+
+    if type_name == "object":
+        if isinstance(value, dict):
+            return 3
+        if isinstance(value, str):
+            parsed = _try_parse_json(value)
+            if isinstance(parsed, dict):
+                return 3
+            return 1
+        return 1
+
+    if type_name == "string":
+        return 3 if isinstance(value, str) and value.strip() else 2
+
+    if type_name in {"boolean", "number"}:
+        try:
+            coerce_fastgpt_value(value, type_name)
+            return 3
+        except Exception:
+            return 1
+
+    return 2
 
 
 def _warn_similar_fields(candidate: dict[str, Any], contract: FastGPTStageContract) -> None:
