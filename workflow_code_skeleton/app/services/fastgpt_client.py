@@ -323,6 +323,11 @@ class FastGPTClient:
         contract: FastGPTStageContract,
     ) -> dict[str, Any]:
         expected = contract.output_names
+        for candidate in _iter_response_data_candidates(data):
+            candidate_payload = _payload_from_candidate(candidate, contract)
+            if candidate_payload is not None:
+                return candidate_payload
+
         choice_contents = list(_iter_choice_message_contents(data))
         for index, content in enumerate(choice_contents):
             parsed_content = _try_parse_json(content)
@@ -462,6 +467,7 @@ def _payload_from_candidate(
     candidate: Any,
     contract: FastGPTStageContract,
 ) -> dict[str, Any] | None:
+    candidate = _normalize_payload_candidate(candidate, contract)
     if isinstance(candidate, list):
         candidate = _dict_from_variable_items(candidate)
     expected = contract.output_names
@@ -813,6 +819,70 @@ def _extract_legacy_alias_payload(
     return payload
 
 
+def _normalize_payload_candidate(
+    candidate: Any,
+    contract: FastGPTStageContract,
+) -> Any:
+    if isinstance(candidate, list):
+        if len(candidate) == 1:
+            single = _normalize_payload_candidate(candidate[0], contract)
+            if single is not None:
+                return single
+        return candidate
+
+    if not isinstance(candidate, dict):
+        return candidate
+
+    if "key" in candidate and "value" in candidate and isinstance(candidate.get("key"), str):
+        return {str(candidate["key"]).strip(): candidate.get("value")}
+
+    variable = candidate.get("variable")
+    if "value" in candidate:
+        if isinstance(variable, str) and variable.strip():
+            return {variable.strip(): candidate.get("value")}
+        if isinstance(variable, list) and variable:
+            variable_key = str(variable[-1] or "").strip()
+            if variable_key:
+                return {variable_key: candidate.get("value")}
+
+    nested_list_keys = (
+        "updateVarResult",
+        "newVariables",
+        "variables",
+        "outputs",
+        "output",
+        "data",
+        "responseData",
+    )
+    for key in nested_list_keys:
+        value = candidate.get(key)
+        if isinstance(value, list):
+            normalized = _normalize_payload_candidate(value, contract)
+            if normalized is not None:
+                return normalized
+
+    nested_text_keys = (
+        "contract_json",
+        "answerText",
+        "answer",
+        "content",
+        "text",
+        "result",
+        "response",
+    )
+    for key in nested_text_keys:
+        value = candidate.get(key)
+        if isinstance(value, str):
+            parsed = _try_parse_json(value)
+            if parsed is None:
+                continue
+            normalized = _normalize_payload_candidate(parsed, contract)
+            if normalized is not None:
+                return normalized
+
+    return candidate
+
+
 def _dict_from_variable_items(candidate: list[Any]) -> dict[str, Any] | None:
     payload: dict[str, Any] = {}
     for item in candidate:
@@ -836,3 +906,51 @@ def _dict_from_variable_items(candidate: list[Any]) -> dict[str, Any] | None:
         if isinstance(name, str) and name.strip():
             payload[name.strip()] = value
     return payload or None
+
+
+def _iter_response_data_candidates(data: Any) -> Iterable[Any]:
+    if isinstance(data, dict):
+        priority_keys = (
+            "responseData",
+            "newVariables",
+            "variables",
+            "outputs",
+            "output",
+            "data",
+            "pluginOutput",
+            "updateVarResult",
+        )
+        for key in priority_keys:
+            if key in data:
+                yield from _iter_response_data_candidates(data[key])
+
+        skip_keys = {
+            "choices",
+            "message",
+            "delta",
+            "content",
+            "historyPreview",
+            "history",
+            "chatHistory",
+            "reasoningText",
+            "reasoning_text",
+            "system_error_text",
+            "systemErrorText",
+        }
+        for key, value in data.items():
+            if key not in priority_keys and key not in skip_keys:
+                yield from _iter_response_data_candidates(value)
+
+        yield data
+        return
+
+    if isinstance(data, list):
+        for item in data:
+            yield from _iter_response_data_candidates(item)
+        yield data
+        return
+
+    if isinstance(data, str):
+        parsed = _try_parse_json(data)
+        if parsed is not None:
+            yield from _iter_response_data_candidates(parsed)
