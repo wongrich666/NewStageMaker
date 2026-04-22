@@ -64,6 +64,8 @@ STAGE_LABELS = {
     "finalize": "正在整理完整稿件",
     "finished": "已完成",
 }
+FAILED_PUBLIC_MESSAGE = "当前步骤执行失败，任务已停在上一个成功步骤，等待手动继续生成。"
+TERMINATED_PUBLIC_MESSAGE = "任务已终止，已保留当前阶段和中间产物。"
 STORY_TEASER_ARTIFACT = "story_teaser"
 STORY_TEASER_SOURCE_ARTIFACT = "story_teaser_source"
 PUBLIC_INPUT_PAYLOAD_KEYS = (
@@ -137,6 +139,18 @@ def _summarize_fastgpt_output(output: dict[str, Any]) -> str:
         text = " ".join(str(value or "").split())
         parts.append(f"{key}={text[:80]}")
     return "；".join(parts)[:240] or "成品已生成。"
+
+
+def _public_status_message(snapshot: dict[str, Any]) -> str:
+    status = str(snapshot.get("status") or "").strip()
+    message = str(snapshot.get("message") or "").strip()
+    if status == "failed":
+        return FAILED_PUBLIC_MESSAGE
+    if status == "terminated":
+        return TERMINATED_PUBLIC_MESSAGE
+    if not message:
+        return ""
+    return message
 
 
 def now_iso() -> str:
@@ -359,6 +373,7 @@ class WorkflowRuntime:
             debug_state=state.as_debug_dict(),
             prompt_fixes=state.prompt_fixes,
         )
+        self.manager._save_resume_checkpoint(self.record)
 
 
 class TaskManager:
@@ -402,9 +417,19 @@ class TaskManager:
             changed = False
             if data.get("status") in PROJECT_RUNNING_STATUSES:
                 data["status"] = "terminated"
-                data["message"] = "服务重启后，进行中的任务已停止，请重新开始或重新生成。"
+                data["message"] = TERMINATED_PUBLIC_MESSAGE
                 data["updated_at"] = now_iso()
                 changed = True
+            elif str(data.get("status") or "") == "failed":
+                if str(data.get("message") or "").strip() != FAILED_PUBLIC_MESSAGE:
+                    data["message"] = FAILED_PUBLIC_MESSAGE
+                    data["updated_at"] = now_iso()
+                    changed = True
+            elif str(data.get("status") or "") == "terminated":
+                if str(data.get("message") or "").strip() != TERMINATED_PUBLIC_MESSAGE:
+                    data["message"] = TERMINATED_PUBLIC_MESSAGE
+                    data["updated_at"] = now_iso()
+                    changed = True
             elif str(data.get("status") or "") == "completed":
                 compacted = self._compact_completed_snapshot(data)
                 if compacted != data:
@@ -428,6 +453,49 @@ class TaskManager:
                 json.dumps(record.snapshot, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+
+    def _build_resume_checkpoint(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        checkpoint = copy.deepcopy(snapshot)
+        checkpoint.pop("_resume_checkpoint", None)
+        checkpoint.pop("logs", None)
+        checkpoint.pop("error", None)
+        checkpoint.pop("finished_at", None)
+        return checkpoint
+
+    def _save_resume_checkpoint(self, record: TaskRecord) -> None:
+        with record.lock:
+            record.snapshot["_resume_checkpoint"] = self._build_resume_checkpoint(record.snapshot)
+        self._persist_snapshot(record)
+
+    def _restore_from_resume_checkpoint(self, record: TaskRecord) -> None:
+        checkpoint = record.clone_snapshot().get("_resume_checkpoint")
+        if not isinstance(checkpoint, dict):
+            return
+        fields_to_restore = (
+            "title",
+            "artifacts",
+            "debug_state",
+            "prompt_fixes",
+            "input_payload",
+            "workflow_spec_path",
+            "model_option",
+            "total_episodes",
+            "progress_percent",
+            "generated_episodes",
+            "current_stage",
+            "current_stage_label",
+            "current_node_id",
+            "current_node_name",
+            "current_batch",
+        )
+        restored = self._build_resume_checkpoint(checkpoint)
+        with record.lock:
+            for key in fields_to_restore:
+                if key in restored:
+                    record.snapshot[key] = copy.deepcopy(restored[key])
+            record.snapshot["_resume_checkpoint"] = restored
+            record.snapshot["updated_at"] = now_iso()
+        self._persist_snapshot(record)
 
     def _append_log(
         self,
@@ -511,7 +579,7 @@ class TaskManager:
             "task_id": snapshot.get("task_id"),
             "status": snapshot.get("status"),
             "title": snapshot.get("title") or artifacts.get("script_title") or "未命名剧本",
-            "message": snapshot.get("message") or "",
+            "message": _public_status_message(snapshot),
             "created_at": snapshot.get("created_at"),
             "updated_at": snapshot.get("updated_at"),
             "finished_at": snapshot.get("finished_at"),
@@ -757,6 +825,7 @@ class TaskManager:
         )
         self._tasks[task_id] = record
         self._projects[project_id] = record
+        self._save_resume_checkpoint(record)
         self._persist_snapshot(record)
 
         thread = threading.Thread(
@@ -919,7 +988,7 @@ class TaskManager:
             "updated_at": snapshot.get("updated_at"),
             "created_at": snapshot.get("created_at"),
             "has_final": bool(final_script),
-            "message": snapshot.get("message") or "",
+            "message": _public_status_message(snapshot),
             "current_stage": snapshot.get("current_stage"),
             "current_stage_label": snapshot.get("current_stage_label") or "待开始",
             "current_batch": snapshot.get("current_batch"),
@@ -1072,7 +1141,8 @@ class TaskManager:
             self._update_snapshot(
                 record,
                 status="terminated",
-                message=str(exc),
+                message=TERMINATED_PUBLIC_MESSAGE,
+                error=str(exc),
                 finished_at=now_iso(),
             )
         except Exception as exc:
@@ -1083,10 +1153,11 @@ class TaskManager:
                     title="任务失败",
                     message=f"已保留失败前的阶段、进度和中间产物。错误：{exc}",
                 )
+            self._restore_from_resume_checkpoint(record)
             self._update_snapshot(
                 record,
                 status="failed",
-                message=f"任务失败：{exc}",
+                message=FAILED_PUBLIC_MESSAGE,
                 error=str(exc),
                 finished_at=now_iso(),
             )
@@ -1157,16 +1228,19 @@ class TaskManager:
 
         old_task_id = str(snapshot.get("task_id") or task_id)
         new_task_id = uuid.uuid4().hex[:12]
-        resume_snapshot = copy.deepcopy(snapshot)
+        resume_base = snapshot.get("_resume_checkpoint")
+        if not isinstance(resume_base, dict):
+            resume_base = snapshot
+        resume_snapshot = copy.deepcopy(resume_base)
         model_option = settings.resolve_model_selection(
             (snapshot.get("model_option") or {}).get("id")
         )
-        new_snapshot = copy.deepcopy(snapshot)
+        new_snapshot = copy.deepcopy(resume_base)
         new_snapshot.update(
             {
                 "task_id": new_task_id,
                 "status": "pending",
-                "message": "已从上次失败点创建继续任务，准备重试。",
+                "message": "已回退到上一个成功步骤，等待继续生成。",
                 "error": None,
                 "retry_of_task_id": old_task_id,
                 "updated_at": now_iso(),
@@ -1192,8 +1266,9 @@ class TaskManager:
         self._append_log(
             record,
             title="控制动作：继续失败任务",
-            message="将使用上次保存的中间产物继续执行；已完成阶段会尽量跳过，失败阶段会重新调用。",
+            message="将从上一个成功步骤继续执行；已完成步骤会跳过，失败步骤会重新尝试。",
         )
+        self._save_resume_checkpoint(record)
         self._persist_snapshot(record)
 
         thread = threading.Thread(
@@ -1282,6 +1357,7 @@ class TaskManager:
             self._projects[int(project_id)] = record
             self._remember_latest_project(int(user_id), int(project_id))
 
+        self._save_resume_checkpoint(record)
         self._persist_snapshot(record)
 
         thread = threading.Thread(

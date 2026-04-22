@@ -294,6 +294,51 @@
     return selected?.label || "未选择";
   }
 
+  function isTechnicalErrorText(text) {
+    const value = String(text || "").trim();
+    if (!value) return false;
+    if (value.length > 120) return true;
+    return [
+      "fastgpt",
+      "traceback",
+      "http ",
+      "response.text",
+      "url:",
+      "url：",
+      "requests.",
+      "exception",
+      "typeerror",
+      "bad gateway",
+      "failed to fetch",
+      "json",
+      "校验失败",
+      "无法转换",
+      ".py"
+    ].some((marker) => value.toLowerCase().includes(marker));
+  }
+
+  function friendlyErrorText(error, fallback = "操作失败，请稍后重试。") {
+    const text = String(error?.message || "").trim();
+    if (!text || isTechnicalErrorText(text)) {
+      return fallback;
+    }
+    return text;
+  }
+
+  function showStatusError(error, fallback = "操作失败，请稍后重试。") {
+    els.messageText.textContent = friendlyErrorText(error, fallback);
+  }
+
+  function showProfileError(error, fallback = "保存失败，请稍后重试。") {
+    if (!els.profileMessage) return;
+    els.profileMessage.textContent = friendlyErrorText(error, fallback);
+  }
+
+  function showToolError(error, fallback = "工具执行失败，请稍后重试。") {
+    if (!els.toolOutputBox) return;
+    els.toolOutputBox.textContent = friendlyErrorText(error, fallback);
+  }
+
   function finalOutputFrom(snapshot) {
     if (!snapshot || snapshot.status !== "completed") {
       return "";
@@ -334,9 +379,14 @@
     const totalEpisodes = Number(snapshot.total_episodes || 0);
     const generatedEpisodes = Number(snapshot.generated_episodes || 0);
     const finalOutput = finalOutputFrom(snapshot);
+    const statusMessage = snapshot.status === "failed"
+      ? "当前步骤执行失败，任务已停在上一个成功步骤，等待手动继续生成。"
+      : snapshot.status === "terminated"
+        ? "任务已终止，已保留当前进度。"
+        : (snapshot.message || "后台正在处理。");
 
     els.statusText.textContent = statusLabel(snapshot.status);
-    els.messageText.textContent = snapshot.message || "后台正在处理。";
+    els.messageText.textContent = statusMessage;
     els.stageText.textContent = snapshot.current_stage_label || "正在处理";
     els.batchText.textContent = snapshot.current_batch || "-";
     els.episodeProgressText.textContent = `${generatedEpisodes} / ${totalEpisodes}`;
@@ -425,7 +475,7 @@
     els.profilePanel?.setAttribute("aria-hidden", "false");
     updateUrlParams((params) => params.set("panel", "profile"));
     loadAssets().catch((error) => {
-      els.messageText.textContent = error.message || String(error);
+      showStatusError(error, "个人中心加载失败，请稍后重试。");
     });
   }
 
@@ -771,7 +821,7 @@
       ) {
         showToast(
           `${item.title || "未命名剧本"} 失败了`,
-          item.message || "这个后台任务在执行过程中失败了，你可以稍后打开项目继续生成。"
+          "后台任务已停在上一个成功步骤，你可以打开项目后手动继续生成。"
         );
       }
     }
@@ -948,7 +998,7 @@
       window.scriptMakerConfig.username = data.user?.username || username;
       els.profileMessage.textContent = "用户名已修改。";
     } catch (error) {
-      els.profileMessage.textContent = error.message || String(error);
+      showProfileError(error, "用户名修改失败，请稍后重试。");
     }
   }
 
@@ -969,7 +1019,7 @@
       els.confirmPasswordInput.value = "";
       els.profileMessage.textContent = "密码已修改。";
     } catch (error) {
-      els.profileMessage.textContent = error.message || String(error);
+      showProfileError(error, "密码修改失败，请稍后重试。");
     }
   }
 
@@ -977,7 +1027,7 @@
     try {
       await loadProjects({ restoreSelection: true, restoreInputs: false });
     } catch (error) {
-      els.messageText.textContent = error.message || String(error);
+      showStatusError(error, "后台状态同步失败，正在稍后重试。");
     }
     if (shouldContinuePolling()) {
       state.pollTimer = window.setTimeout(pollWorkspace, POLL_INTERVAL);
@@ -1055,7 +1105,7 @@
       try {
         await loadProjects({ restoreSelection: true, restoreInputs: false });
       } catch (error) {
-        els.messageText.textContent = error.message || String(error);
+        showStatusError(error, "任务列表刷新失败，请稍后重试。");
       }
     });
 
@@ -1063,7 +1113,7 @@
       try {
         await loadAssets();
       } catch (error) {
-        els.messageText.textContent = error.message || String(error);
+        showStatusError(error, "资产列表刷新失败，请稍后重试。");
       }
     });
 
@@ -1071,7 +1121,7 @@
       try {
         await loadCommunity();
       } catch (error) {
-        els.messageText.textContent = error.message || String(error);
+        showStatusError(error, "社区作品刷新失败，请稍后重试。");
       }
     });
 
@@ -1084,7 +1134,7 @@
           await loadProjectDetail(projectId, { restoreInputs: true, scroll: true });
         }
       } catch (error) {
-        els.messageText.textContent = error.message || String(error);
+        showStatusError(error, "项目加载失败，请稍后重试。");
       }
     }));
 
@@ -1106,7 +1156,7 @@
           await deleteAsset(projectId);
         }
       } catch (error) {
-        els.messageText.textContent = error.message || String(error);
+        showStatusError(error, "资产操作失败，请稍后重试。");
       }
     });
 
@@ -1114,7 +1164,7 @@
       try {
         await saveAssetEdit();
       } catch (error) {
-        els.messageText.textContent = error.message || String(error);
+        showStatusError(error, "资产保存失败，请稍后重试。");
       }
     });
 
@@ -1128,7 +1178,7 @@
       try {
         await runActiveTool();
       } catch (error) {
-        els.toolOutputBox.textContent = error.message || String(error);
+        showToolError(error, "工具执行失败，请查看后台日志。");
       }
     });
 
@@ -1136,7 +1186,7 @@
       try {
         await startGeneration();
       } catch (error) {
-        els.messageText.textContent = error.message || String(error);
+        showStatusError(error, "启动任务失败，请稍后重试。");
       }
     });
 
@@ -1144,7 +1194,7 @@
       try {
         await pauseTask();
       } catch (error) {
-        els.messageText.textContent = error.message || String(error);
+        showStatusError(error, "暂停失败，请稍后重试。");
       }
     });
 
@@ -1152,7 +1202,7 @@
       try {
         await resumeTask();
       } catch (error) {
-        els.messageText.textContent = error.message || String(error);
+        showStatusError(error, "继续失败，请稍后重试。");
       }
     });
 
@@ -1160,7 +1210,7 @@
       try {
         await terminateTask();
       } catch (error) {
-        els.messageText.textContent = error.message || String(error);
+        showStatusError(error, "终止失败，请稍后重试。");
       }
     });
 
@@ -1170,7 +1220,7 @@
         if (!ok) return;
         clearCurrentInput();
       } catch (error) {
-        els.messageText.textContent = error.message || String(error);
+        showStatusError(error, "清空输入失败，请稍后重试。");
       }
     });
 
@@ -1197,7 +1247,7 @@
         els.formHint.textContent = "当前没有已配置模型，请先在 .env 中补齐模型服务配置。";
       }
     } catch (error) {
-      els.messageText.textContent = error.message || String(error);
+      showStatusError(error, "页面初始化失败，请稍后刷新重试。");
       els.formHint.textContent = "模型列表或历史项目恢复失败，请检查后端服务、.env 配置和工作流 JSON 路径。";
     }
   }

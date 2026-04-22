@@ -39,8 +39,43 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def _json_ok(**payload):
         return jsonify({"success": True, **payload})
 
-    def _json_error(message: str, status: int = 400):
-        return jsonify({"success": False, "message": message}), status
+    def _sanitize_error_message(
+        message: str,
+        *,
+        status: int,
+        fallback: str | None = None,
+    ) -> str:
+        text = str(message or "").strip()
+        if status >= 500:
+            return fallback or "服务暂时不可用，请稍后重试。"
+        if not text:
+            return fallback or "请求未能完成，请稍后重试。"
+        technical_markers = (
+            "fastgpt",
+            "traceback",
+            "http ",
+            "response.text",
+            "url:",
+            "url：",
+            "requests.",
+            "exception",
+            "typeerror",
+            "keyerror",
+            "bad gateway",
+            "failed to fetch",
+            "json",
+            "校验失败",
+            "无法转换",
+            ".py",
+        )
+        lowered = text.lower()
+        if len(text) > 120 or any(marker in lowered for marker in technical_markers):
+            return fallback or "请求未能完成，请稍后重试。"
+        return text
+
+    def _json_error(message: str, status: int = 400, *, fallback: str | None = None):
+        public_message = _sanitize_error_message(message, status=status, fallback=fallback)
+        return jsonify({"success": False, "message": public_message}), status
 
     def _request_auth_token() -> str:
         auth_header = str(request.headers.get("Authorization") or "").strip()
@@ -214,7 +249,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         try:
             models = task_manager.list_model_options(spec_path)
         except Exception as exc:
-            return _json_error(str(exc), status=500)
+            return _json_error(str(exc), status=500, fallback="模型列表加载失败，请稍后重试。")
         return _json_ok(models=models, workflow_spec_path=spec_path)
 
     @app.get("/api/tools")
@@ -229,7 +264,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         try:
             result = run_simple_tool(tool_key, data)
         except Exception as exc:
-            return _json_error(str(exc), status=400)
+            return _json_error(str(exc), status=400, fallback="工具执行失败，请稍后重试。")
         return _json_ok(result=result)
 
     @app.get("/api/projects/latest")
@@ -312,7 +347,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 model_selection_id=data.get("model_selection_id"),
             )
         except Exception as exc:
-            return _json_error(str(exc), status=400)
+            return _json_error(str(exc), status=400, fallback="任务创建失败，请稍后重试。")
         return _json_ok(task=snapshot)
 
     @app.post("/api/projects/<int:project_id>/restart")
@@ -344,7 +379,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 model_selection_id=data.get("model_selection_id"),
             )
         except Exception as exc:
-            return _json_error(str(exc), status=400)
+            return _json_error(str(exc), status=400, fallback="重新开始失败，请稍后重试。")
         return _json_ok(task=snapshot)
 
     @app.get("/api/tasks/<task_id>")
@@ -406,7 +441,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         try:
             path = task_manager.save_final_script(project_id, user_id=_require_user_id())
         except ValueError as exc:
-            return _json_error(str(exc), status=400)
+            return _json_error(str(exc), status=400, fallback="当前剧本暂时无法导出，请确认已生成完成后再试。")
         return _json_ok(project_id=project_id, saved_file=str(path))
 
     @app.get("/api/projects/<int:project_id>/download")
@@ -415,7 +450,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         try:
             path = task_manager.save_final_script(project_id, user_id=_require_user_id())
         except ValueError as exc:
-            return _json_error(str(exc), status=400)
+            return _json_error(str(exc), status=400, fallback="当前剧本暂时无法下载，请确认已生成完成后再试。")
         return send_file(
             path,
             as_attachment=True,

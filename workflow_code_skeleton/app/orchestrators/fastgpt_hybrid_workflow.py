@@ -100,6 +100,8 @@ from .runtime_tools import set_runtime_stage, sync_runtime_state
 logger = get_logger("fastgpt_hybrid_workflow")
 LOCAL_COMPLETED_BATCHES = "_completed_batches"
 LOCAL_COMMITTED_SCRIPT = "_committed_all_script"
+LOCAL_CURRENT_BATCH_INDEX = "_current_batch_index"
+LOCAL_CURRENT_BATCH_STAGE = "_current_batch_stage"
 
 
 class FastGPTRunner(Protocol):
@@ -492,24 +494,27 @@ def _run_batched_generation(
     total_batches = max(1, len(batches))
     all_hooks: dict[str, Any] = {}
     all_dialogues: dict[str, Any] = {}
-    all_script_parts: list[str] = []
     all_hooks = _dict_or_empty(variables.get(ALL_HOOKS))
     all_dialogues = _dict_or_empty(variables.get(ALL_DIALOGUES))
     committed_script = str(
         variables.get(LOCAL_COMMITTED_SCRIPT) or variables.get(ALL_SCRIPT) or ""
     ).strip()
-    if committed_script:
-        all_script_parts = [committed_script]
     completed_batches = min(
         total_batches,
         max(0, _safe_int(variables.get(LOCAL_COMPLETED_BATCHES), 0)),
     )
+    current_batch_index = max(
+        completed_batches,
+        _safe_int(variables.get(LOCAL_CURRENT_BATCH_INDEX), completed_batches),
+    )
+    current_batch_stage = str(variables.get(LOCAL_CURRENT_BATCH_STAGE) or "").strip().lower()
     normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
     episode_alias_plan = _normalize_episode_alias_plan_object(variables.get(EPISODE_ALIAS_PLAN))
 
     for index, batch in enumerate(batches):
         if index < completed_batches:
             continue
+        resume_stage = current_batch_stage if index == current_batch_index else ""
         plan_for_batch = get_episode_batch_payload(
             normalized_plan,
             batch.start_episode,
@@ -518,6 +523,7 @@ def _run_batched_generation(
         )
         alias_plan_for_batch = slice_episode_alias_plan_for_batch(episode_alias_plan, batch)
         variables[BATCH_START_EPISODE] = batch.start_episode
+        variables[LOCAL_CURRENT_BATCH_INDEX] = index
         batch_base = dict(variables)
         batch_base[EPISODE_PLAN] = plan_for_batch
         batch_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
@@ -527,19 +533,29 @@ def _run_batched_generation(
         )
 
         hook_progress = 36 + int((index / total_batches) * 12)
-        hook_output = _run_fastgpt_stage(
-            state,
-            runner,
-            STAGE_HOOKS,
-            batch_base,
-            stage_key="hook",
-            message=f"正在生成第 {batch.label} 集的开头冲突钩子。",
-            batch_label=batch.label,
-            progress_percent=hook_progress,
-        )
-        all_hooks = merge_batch_object(all_hooks, hook_output[BATCH_HOOKS])
-        variables[BATCH_HOOKS] = hook_output[BATCH_HOOKS]
-        variables[ALL_HOOKS] = all_hooks
+        if resume_stage in {"hook", "dialogue", "script"} and _has_value(variables.get(BATCH_HOOKS)):
+            set_runtime_stage(
+                state,
+                "hook",
+                f"已停在第 {batch.label} 集开头冲突钩子的成功检查点。",
+                batch_label=batch.label,
+                progress_percent=hook_progress,
+            )
+        else:
+            hook_output = _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_HOOKS,
+                batch_base,
+                stage_key="hook",
+                message=f"正在生成第 {batch.label} 集的开头冲突钩子。",
+                batch_label=batch.label,
+                progress_percent=hook_progress,
+            )
+            all_hooks = merge_batch_object(all_hooks, hook_output[BATCH_HOOKS])
+            variables[BATCH_HOOKS] = hook_output[BATCH_HOOKS]
+            variables[ALL_HOOKS] = all_hooks
+            variables[LOCAL_CURRENT_BATCH_STAGE] = "hook"
         _sync_state_variables(state, variables)
 
         dialogue_base = dict(variables)
@@ -551,19 +567,29 @@ def _run_batched_generation(
             alias_plan_for_batch,
         )
         dialogue_progress = 50 + int((index / total_batches) * 12)
-        dialogue_output = _run_fastgpt_stage(
-            state,
-            runner,
-            STAGE_DIALOGUES,
-            dialogue_base,
-            stage_key="dialogue",
-            message=f"正在生成第 {batch.label} 集的角色对话。",
-            batch_label=batch.label,
-            progress_percent=dialogue_progress,
-        )
-        all_dialogues = merge_batch_object(all_dialogues, dialogue_output[BATCH_DIALOGUES])
-        variables[BATCH_DIALOGUES] = dialogue_output[BATCH_DIALOGUES]
-        variables[ALL_DIALOGUES] = all_dialogues
+        if resume_stage in {"dialogue", "script"} and _has_value(variables.get(BATCH_DIALOGUES)):
+            set_runtime_stage(
+                state,
+                "dialogue",
+                f"已停在第 {batch.label} 集角色对话的成功检查点。",
+                batch_label=batch.label,
+                progress_percent=dialogue_progress,
+            )
+        else:
+            dialogue_output = _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_DIALOGUES,
+                dialogue_base,
+                stage_key="dialogue",
+                message=f"正在生成第 {batch.label} 集的角色对话。",
+                batch_label=batch.label,
+                progress_percent=dialogue_progress,
+            )
+            all_dialogues = merge_batch_object(all_dialogues, dialogue_output[BATCH_DIALOGUES])
+            variables[BATCH_DIALOGUES] = dialogue_output[BATCH_DIALOGUES]
+            variables[ALL_DIALOGUES] = all_dialogues
+            variables[LOCAL_CURRENT_BATCH_STAGE] = "dialogue"
         _sync_state_variables(state, variables)
 
         script_base = dict(variables)
@@ -575,21 +601,35 @@ def _run_batched_generation(
             alias_plan_for_batch,
         )
         script_progress = 68 + int((index / total_batches) * 26)
-        script_output = _run_fastgpt_stage(
-            state,
-            runner,
-            STAGE_SCRIPT,
-            script_base,
-            stage_key="script",
-            message=f"正在生成第 {batch.label} 集的剧本正文。",
-            batch_label=batch.label,
-            progress_percent=script_progress,
-            generated_episodes=min(total_episodes, index * batch_size),
-        )
-        batch_script = script_output[BATCH_SCRIPT].strip()
-        all_script_parts.append(batch_script)
-        variables[BATCH_SCRIPT] = batch_script
-        variables[ALL_SCRIPT] = "\n\n".join(part for part in all_script_parts if part)
+        if resume_stage == "script" and _has_value(variables.get(BATCH_SCRIPT)):
+            batch_script = str(variables.get(BATCH_SCRIPT) or "").strip()
+            variables[ALL_SCRIPT] = str(
+                variables.get(ALL_SCRIPT) or _join_script_parts(committed_script, batch_script)
+            )
+            set_runtime_stage(
+                state,
+                "script",
+                f"已停在第 {batch.label} 集剧本正文的成功检查点。",
+                batch_label=batch.label,
+                progress_percent=script_progress,
+                generated_episodes=min(total_episodes, index * batch_size),
+            )
+        else:
+            script_output = _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_SCRIPT,
+                script_base,
+                stage_key="script",
+                message=f"正在生成第 {batch.label} 集的剧本正文。",
+                batch_label=batch.label,
+                progress_percent=script_progress,
+                generated_episodes=min(total_episodes, index * batch_size),
+            )
+            batch_script = script_output[BATCH_SCRIPT].strip()
+            variables[BATCH_SCRIPT] = batch_script
+            variables[ALL_SCRIPT] = _join_script_parts(committed_script, batch_script)
+            variables[LOCAL_CURRENT_BATCH_STAGE] = "script"
         _sync_state_variables(state, variables)
 
         memory_output = _run_fastgpt_stage(
@@ -612,6 +652,9 @@ def _run_batched_generation(
         )
         variables[LOCAL_COMPLETED_BATCHES] = index + 1
         variables[LOCAL_COMMITTED_SCRIPT] = variables[ALL_SCRIPT]
+        committed_script = str(variables.get(LOCAL_COMMITTED_SCRIPT) or "").strip()
+        variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
+        variables[LOCAL_CURRENT_BATCH_STAGE] = ""
         _sync_state_variables(state, variables)
 
     set_runtime_stage(
@@ -629,6 +672,15 @@ def _effective_batch_mode() -> str:
     if mode == "auto":
         return "local"
     return mode
+
+
+def _join_script_parts(*parts: Any) -> str:
+    normalized: list[str] = []
+    for part in parts:
+        text = str(part or "").strip()
+        if text:
+            normalized.append(text)
+    return "\n\n".join(normalized)
 
 
 def _run_full_fastgpt_generation(
