@@ -1,0 +1,1672 @@
+﻿{
+  "nodes": [
+    {
+      "nodeId": "userGuide",
+      "name": "common:core.module.template.system_config",
+      "intro": "common:core.module.template.system_config_info",
+      "avatar": "core/workflow/template/systemConfig",
+      "flowNodeType": "userGuide",
+      "position": {
+        "x": -3855,
+        "y": -4157
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "welcomeText",
+          "label": "core.app.Welcome Text",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": ""
+        },
+        {
+          "key": "variables",
+          "label": "core.app.Chat Variable",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": []
+        },
+        {
+          "key": "questionGuide",
+          "label": "core.app.Question Guide",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false
+          }
+        },
+        {
+          "key": "tts",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "type": "web"
+          }
+        },
+        {
+          "key": "whisper",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false,
+            "autoSend": false,
+            "autoTTSResponse": false
+          }
+        },
+        {
+          "key": "scheduleTrigger",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": null
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "448745",
+      "name": "common:core.module.template.work_start",
+      "intro": "",
+      "avatar": "core/workflow/template/workflowStart",
+      "flowNodeType": "workflowStart",
+      "position": {
+        "x": -3225,
+        "y": -4157
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "userChatInput",
+          "key": "userChatInput",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.input.label.user question",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "cvt3JNPAvyamsowV",
+      "name": "用户内容提取",
+      "intro": "根据用户输入的故事梗概、核心场景、人物小传和剧本大纲，提炼出一份“世界观审核基准”。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": -750,
+        "y": -4335
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“用户内容提取器”。\n\n你的任务是根据用户输入的故事大纲、核心场景、人物小传和分集计划，提炼出一份“世界观审核基准”。\n\n注意：\n- 你的任务不是重写故事\n- 你的任务不是扩写剧情\n- 你的任务是提炼出后续“世界观生成”和“世界观审核”必须遵守的边界条件\n- 结果必须简洁、明确、可执行\n- 所有内容使用中文\n- 只输出合法 JSON\n- 不要输出 JSON 之外的任何文字\n- 不要使用 markdown 代码块\n- 所有字段必须填写\n- 所有数组字段至少输出 3 条内容\n\n【故事大纲】\n{{$VARIABLE_NODE_ID.ayxWwSpE$}}\n\n【核心场景】\n{{$VARIABLE_NODE_ID.rxmvq2lS$}}\n\n【人物小传】\n{{$VARIABLE_NODE_ID.yYYOuumm$}}\n\n【分集计划】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n提炼要求：\n1. 总结题材、风格和整体基调\n2. 明确必须满足的时代或背景类型\n3. 提炼世界观不能偏离的设定边界\n4. 提炼世界观必须支撑成立的核心场景\n5. 提炼世界观必须兼容的关键人物类型\n6. 提炼世界观必须支撑的剧情方向\n7. 明确禁止偏离的错误方向\n\n再次强调：最终回复必须且只能是一个合法 JSON 对象，禁止输出任何解释、标题、注释、代码块标记或多余文本。请严格输出为以下 JSON 结构：\n{\n  \"genre_and_tone\": \"题材、风格、情绪基调的简洁总结\",\n  \"required_era_or_setting\": \"必须符合的时代或背景类型，例如古风架空、古代宫廷、现代都市等\",\n  \"setting_constraints\": [\n    \"世界观必须遵守的设定边界1\",\n    \"世界观必须遵守的设定边界2\",\n    \"世界观必须遵守的设定边界3\"\n  ],\n  \"required_scenes\": [\n    \"必须能成立的核心场景1\",\n    \"必须能成立的核心场景2\",\n    \"必须能成立的核心场景3\"\n  ],\n  \"required_characters\": [\n    \"必须兼容的关键人物或人物类型1\",\n    \"必须兼容的关键人物或人物类型2\",\n    \"必须兼容的关键人物或人物类型3\"\n  ],\n  \"plot_support_points\": [\n    \"世界观必须支撑的剧情方向1\",\n    \"世界观必须支撑的剧情方向2\",\n    \"世界观必须支撑的剧情方向3\"\n  ],\n  \"forbidden_deviations\": [\n    \"明确禁止偏离的方向1\",\n    \"明确禁止偏离的方向2\",\n    \"明确禁止偏离的方向3\"\n  ]\n}\n\n再次强调：你的最终回复必须且只能是一个合法 JSON 对象，禁止输出任何解释、标题、注释、代码块标记或多余文本。",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成用户内容提取任务即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "hHCb00c6JSlNKdrf",
+      "name": "世界观生成编剧",
+      "intro": "世界观生成编剧A负责根据用户已经提供的基础设定，生成完整世界观。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 195,
+        "y": -4335
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你现在扮演“世界观生成编剧A”，负责根据用户已经提供的基础设定，生成完整世界观。\n\n请严格基于以下内容创作，用户输入是最高优先级，不得偏离、覆盖或重写用户原意。\n\n【故事大纲】\n{{$VARIABLE_NODE_ID.ayxWwSpE$}}\n\n【核心场景】\n{{$VARIABLE_NODE_ID.rxmvq2lS$}}\n\n【人物小传】\n{{$VARIABLE_NODE_ID.yYYOuumm$}}\n\n【分集计划】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n\n你的任务是生成一份完整的世界观设定。\n\n世界观内容必须覆盖：\n1. 世界观总述\n2. 时代背景\n3. 社会环境与运行规则\n4. 故事发生空间的底层逻辑\n5. 与人物命运相关的关键设定\n6. 与剧情冲突直接相关的规则、禁忌或机制\n7. 视觉与氛围关键词\n\n生成要求：\n- 不能脱离用户输入\n- 不能和人物、场景、分集计划冲突\n- 不要写剧本正文\n- 不要推进具体情节\n- 不要空泛堆砌设定\n- 所有内容使用中文\n- 输出必须是合法 JSON\n- 不要输出 JSON 之外的任何说明文字\n- 不要使用 markdown 代码块\n- 所有字段必须填写\n- key_settings 至少输出 3 条\n- conflict_mechanisms 至少输出 3 条\n- visual_keywords 至少输出 3 条\n- \n再次强调：最终回复必须且只能是一个合法 JSON 对象，禁止输出任何解释、标题、注释、代码块标记或多余文本。请严格输出为以下 JSON 结构：\n{\n  \"worldview_summary\": \"对整个世界观的总体概述，1到3段中文\",\n  \"era_background\": \"时代背景与宏观环境\",\n  \"social_rules\": \"社会环境、秩序、运行规则、普遍共识或制度约束\",\n  \"space_logic\": \"故事主要发生空间的底层逻辑，包括地点特征、空间规则、环境限制\",\n  \"key_settings\": [\n    \"与人物命运密切相关的关键设定1\",\n    \"与人物命运密切相关的关键设定2\",\n    \"与人物命运密切相关的关键设定3\"\n  ],\n  \"conflict_mechanisms\": [\n    \"与剧情冲突直接相关的规则、禁忌或机制1\",\n    \"与剧情冲突直接相关的规则、禁忌或机制2\",\n    \"与剧情冲突直接相关的规则、禁忌或机制3\"\n  ],\n  \"visual_keywords\": [\n    \"视觉或氛围关键词1\",\n    \"视觉或氛围关键词2\",\n    \"视觉或氛围关键词3\"\n  ]\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成世界观生成任务即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "n5t1xBRqFus6CS4y",
+      "name": "变量更新#2",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 1080,
+        "y": -4335
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "yuozoGpo"
+              ],
+              "value": [
+                "",
+                "{{$hHCb00c6JSlNKdrf.answerText$}}"
+              ],
+              "valueType": "string",
+              "renderType": "input"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "ruNPueyXzH9WCSNw",
+      "name": "世界观审核和修订编剧",
+      "intro": "由 AI 自主决定工具调用。",
+      "avatar": "core/workflow/template/toolCall",
+      "flowNodeType": "tools",
+      "showStatus": true,
+      "position": {
+        "x": 2220,
+        "y": -5640
+      },
+      "version": "4.9.2",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "useAgentSandbox",
+          "label": "app:use_agent_sandbox",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "switch"
+          ],
+          "value": false,
+          "debugLabel": "",
+          "description": "app:use_computer_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“世界观阶段总控编排器”。\n\n已知信息：\n你的唯一任务：\n围绕全局变量“世界观内容”执行完整的【审核 -> 修订 -> 更新变量 -> 再审核 -> 再修订 -> 再更新变量】循环，直到世界观终稿的内容通过审核，或达到最大修订轮次（10次）为止。如果世界观终稿的内容通过审核，或达到最大修订轮次，无论审核情况如何，都不再改动当前世界观终稿的内容，直接输出或终止调用。你的职责是严格按照既定流程调用工具、判断结果、控制循环，并在每次修订后更新全局变量。\n\n【你要使用的工具】\n1. 世界观审核编辑\n2. 世界观修订编剧\n3. 更新{{$VARIABLE_NODE_ID.yuozoGpo$}}全局变量工具\n\n【输入上下文】\n你已经拿到以下信息：\n- 世界观审核基准JSON：{{$cvt3JNPAvyamsowV.answerText$}}\n- 当前世界观内容：{{$VARIABLE_NODE_ID.yuozoGpo$}}\n【核心流程】\n你必须严格按以下顺序执行，不得跳步，不得省略：\n\n第一步：调用“世界观审核编剧”的AI对话工具\n- 输入：世界观审核基准JSON + 当前世界观全局变量\n- 目标：判断当前世界观是否合格\n- 审核工具将会返回合法JSON，结构至少包含：\n{\n\"approved\": true,\n\"suggestions\": []\n}\n或\n{\n\"approved\": false,\n\"suggestions\": [\"修改建议1\", \"修改建议2\"...]\n}\n审核完之后将审核意见保存在“世界观审核内容”的全局变量\n\n第二步：判断审核结果\n·如果世界观审核编辑返回的结果含有\"approved\": true：\n- 说明当前世界观已经通过审核\n- 此时绝对不要再调用修订工具\n- 直接结束本阶段循环，进入变量更新阶段\n- 保留当前世界观全局变量作为最终通过版本\n·如果世界观审核编辑返回的结果含有\"approved\": false：\n- 说明当前世界观被打回\n- 进入下一步“轮次判断”\n\n第三步：若审核不通过需要重写，判断是否超过最大修订轮次\n- 先确定当前重写次数是否还小于等于10\n- 如果当前循环次数已经超过最大值：\n- 停止继续修订\n- 不再调用修订工具\n- 直接结束本阶段循环\n- 保留当前世界观全局变量作为本阶段最终结果\n- 如果当前循环次数仍在允许范围内：\n- 允许进入修订流程\n\n第四步：调用名为“世界观修订编剧”的AI对话工具\n- 输入必须包含以下三部分：\n1. 世界观审核基准JSON\n2. 当前世界观全局变量\n3. 最新审核结果JSON\n- 修订目标：\n- 必须逐条解决审核意见\n- 保留符合审核基准的有效设定\n- 删除偏离审核基准的错误设定\n- 修复与场景、人物、剧情方向冲突的部分\n- 输出完整的新世界观JSON\n- 修订工具输出必须仍然是完整合法JSON，而不是局部补丁\n修订后的修订版本会由自动变量更新工具更新最新的世界观\n\n第六步：回到第一步，再次调用“世界观审核工具”\n- 注意：再次审核时，输入必须是“更新后的当前世界观全局变量”\n- 不得继续审核旧版本内容\n- 循环重复，直到：\n1. 审核通过；或\n2. 达到最大修订轮次\n\n【你的行为约束】\n1. 你不能跳过审核直接修订\n2. 你不能在审核通过后继续修订\n3. 你不能用旧版本世界观进入下一轮审核\n4. 你不能让循环无限进行，必须受“最大修订轮次”约束\n5. 每一轮修订都必须基于“最新世界观全局变量 + 最新审核结果”\n6. 修订工具输出的是“新完整世界观”，不是“修改说明”\n7. 审核工具输出的是“是否通过 + 修改建议”，不是重写世界观\n8. 如果达到最大轮次仍未通过，也必须停调用，并保留当前全局变量内容作为本阶段结果\n\n【你最终要确保的结果】\n- 世界观阶段输出的一定是“当前全局变量中的最新世界观版本”\n- 这个版本要么是审核通过后的结果\n- 要么是达到最大修订次数后被迫停止时的最后版本\n\n【执行原则】\n- 严格流程化执行\n- 严格工具调用顺序\n- 严格使用最新变量\n- 严格控制循环次数\n- 不自由发挥，不擅自省略步骤，不擅自更改流程\n\n\n严格按流程执行，不要自由发挥，不要省略步骤。最后你不需要输出或者只输出一个空格，只需要调用工具让工具完成任务即可。",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成世界观审核或修订任务即可。",
+          "debugLabel": "",
+          "toolDescription": "user question"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发"
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "xt6r48tWl1NnqqXw",
+      "name": "世界观审核编剧",
+      "intro": "根据用户最初输入的基础设定，审核“编剧A”生成的世界观是否合格",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 2070,
+        "y": -4170
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“世界观审核员”。\n\n你的任务是根据“世界观审核基准”，审核“当前世界观”是否合格。\n\n注意：\n- 只根据审核基准进行判断，不要自由发挥\n- 如果当前世界观满足审核基准，approved 必须为 true\n- 如果当前世界观不满足审核基准，approved 必须为 false，并给出明确、可执行的修改建议\n- 所有内容使用中文\n- 只输出合法 JSON\n- 不要输出 JSON 之外的任何文字\n- 不要使用 markdown 代码块\n- 如果 approved 为 true，suggestions 必须为空数组\n- 如果 approved 为 false，suggestions 至少输出 2 条具体建议\n\n【用户内容提取出的世界观审核基准JSON】\n{{$cvt3JNPAvyamsowV.answerText$}}\n【当前世界观JSON】\n{{$VARIABLE_NODE_ID.yuozoGpo$}}\n\n审核标准：\n1. 是否符合题材、时代和风格基调\n2. 是否能支撑核心场景成立\n3. 是否与关键人物设定兼容\n4. 是否能支撑剧情主线推进\n5. 是否存在明显偏离、逻辑冲突或空泛设定\n\n再次强调：你的最终回复必须且只能是一个合法 JSON 对象，禁止输出任何解释、标题、注释、代码块标记或多余文本。请严格输出为以下 JSON 结构：\n{\n  \"approved\": true,\n  \"suggestions\": [\n    \"修改建议1\",\n    \"修改建议2\"\n  ]\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": "按照提示词完成世界观审核任务即可。",
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成世界观审核任务即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "w2DqISmG4Ecz4dj2",
+      "name": "世界观修订编剧",
+      "intro": "根据用户原始输入和审核意见，重写世界观，使其满足审核要求。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 3285,
+        "y": -4170
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“世界观修订编剧”。\n\n你的任务是根据“世界观审核基准”和“审核结果”，修订当前世界观，使其满足审核要求。\n\n注意：\n- 你的任务是修订世界观，不是重写故事梗概\n- 必须忠于审核基准\n- 必须逐条解决审核意见中的问题\n- 不要写剧本正文\n- 不要推进具体剧情\n- 所有内容使用中文\n- 只输出合法 JSON\n- 不要输出 JSON 之外的任何文字\n- 所有字段必须填写\n- key_settings、conflict_mechanisms、visual_keywords 数组至少各输出 3 条内容\n\n【用户内容提取基准】\n{{$VARIABLE_NODE_ID.nvZuO5uH$}}\n【当前世界观JSON】\n{{$VARIABLE_NODE_ID.yuozoGpo$}}\n【审核结果JSON】\n{{$ruNPueyXzH9WCSNw.answerText$}}\n\n修订要求：\n1. 保留与审核基准一致的有效设定\n2. 删除偏离审核基准的错误设定\n3. 修复与场景、人物、剧情方向冲突的部分\n4. 强化世界观对剧情推进和人物命运的支撑\n5. 输出完整、可直接使用的最终世界观\n\n再次强调：最终回复必须且只能是一个合法 JSON 对象，禁止输出任何解释、标题、注释、代码块标记或多余文本。请严格输出为以下 JSON 结构：\n\n{\n  \"worldview_summary\": \"对整个世界观的总体概述，中文\",\n  \"era_background\": \"时代背景与宏观环境\",\n  \"social_rules\": \"社会环境、秩序、运行规则、制度约束\",\n  \"space_logic\": \"故事主要发生空间的底层逻辑\",\n  \"key_settings\": [\n    \"与人物命运密切相关的关键设定1\",\n    \"与人物命运密切相关的关键设定2\",\n    \"与人物命运密切相关的关键设定3\"\n  ],\n  \"conflict_mechanisms\": [\n    \"与剧情冲突直接相关的规则、禁忌或机制1\",\n    \"与剧情冲突直接相关的规则、禁忌或机制2\",\n    \"与剧情冲突直接相关的规则、禁忌或机制3\"\n  ],\n  \"visual_keywords\": [\n    \"视觉或氛围关键词1\",\n    \"视觉或氛围关键词2\",\n    \"视觉或氛围关键词3\"\n  ]\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": "按照提示词完成世界观修订任务即可。",
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成世界观修订任务即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "iGoMbWEmQRGE8aJF",
+      "name": "世界观审核更新",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 2820,
+        "y": -4170
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "nvZuO5uH"
+              ],
+              "value": [
+                "xt6r48tWl1NnqqXw",
+                "answerText"
+              ],
+              "valueType": "string",
+              "renderType": "reference"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "yWU9N3lNmo9StwPi",
+      "name": "世界观内容更新",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 4050,
+        "y": -4170
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "yuozoGpo"
+              ],
+              "value": [
+                "ruNPueyXzH9WCSNw",
+                "answerText"
+              ],
+              "valueType": "string",
+              "renderType": "reference"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "hm7UDUToELgTMZj4",
+      "name": "输出世界观内容",
+      "intro": "该模块可以直接回复一段指定的内容。常用于引导、提示。非字符串内容传入时，会转成字符串进行输出。",
+      "avatar": "core/workflow/template/reply",
+      "flowNodeType": "answerNode",
+      "position": {
+        "x": 3255,
+        "y": -4785
+      },
+      "inputs": [
+        {
+          "key": "text",
+          "label": "common:core.module.input.label.Response content",
+          "valueType": "any",
+          "required": true,
+          "isRichText": false,
+          "placeholder": "common:core.module.input.description.Response content",
+          "maxLength": 100000,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": [
+            "VARIABLE_NODE_ID",
+            "yuozoGpo"
+          ],
+          "debugLabel": "",
+          "description": "common:core.module.input.description.Response content",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "448745",
+      "target": "cvt3JNPAvyamsowV",
+      "sourceHandle": "448745-source-right",
+      "targetHandle": "cvt3JNPAvyamsowV-target-left"
+    },
+    {
+      "source": "hHCb00c6JSlNKdrf",
+      "target": "n5t1xBRqFus6CS4y",
+      "sourceHandle": "hHCb00c6JSlNKdrf-source-right",
+      "targetHandle": "n5t1xBRqFus6CS4y-target-left"
+    },
+    {
+      "source": "cvt3JNPAvyamsowV",
+      "target": "hHCb00c6JSlNKdrf",
+      "sourceHandle": "cvt3JNPAvyamsowV-source-right",
+      "targetHandle": "hHCb00c6JSlNKdrf-target-left"
+    },
+    {
+      "source": "ruNPueyXzH9WCSNw",
+      "target": "xt6r48tWl1NnqqXw",
+      "sourceHandle": "selectedTools",
+      "targetHandle": "selectedTools"
+    },
+    {
+      "source": "ruNPueyXzH9WCSNw",
+      "target": "w2DqISmG4Ecz4dj2",
+      "sourceHandle": "selectedTools",
+      "targetHandle": "selectedTools"
+    },
+    {
+      "source": "n5t1xBRqFus6CS4y",
+      "target": "ruNPueyXzH9WCSNw",
+      "sourceHandle": "n5t1xBRqFus6CS4y-source-right",
+      "targetHandle": "ruNPueyXzH9WCSNw-target-left"
+    },
+    {
+      "source": "ruNPueyXzH9WCSNw",
+      "target": "hm7UDUToELgTMZj4",
+      "sourceHandle": "ruNPueyXzH9WCSNw-source-right",
+      "targetHandle": "hm7UDUToELgTMZj4-target-left"
+    },
+    {
+      "source": "xt6r48tWl1NnqqXw",
+      "target": "iGoMbWEmQRGE8aJF",
+      "sourceHandle": "xt6r48tWl1NnqqXw-source-right",
+      "targetHandle": "iGoMbWEmQRGE8aJF-target-left"
+    },
+    {
+      "source": "w2DqISmG4Ecz4dj2",
+      "target": "yWU9N3lNmo9StwPi",
+      "sourceHandle": "w2DqISmG4Ecz4dj2-source-right",
+      "targetHandle": "yWU9N3lNmo9StwPi-target-left"
+    }
+  ],
+  "chatConfig": {
+    "variables": [
+      {
+        "key": "ayxWwSpE",
+        "label": "故事大纲",
+        "valueType": "string",
+        "required": true,
+        "maxLength": 10000,
+        "type": "input",
+        "description": "是全剧核心主线与情节脉络的高度浓缩，完整梳理故事起承转合、关键转折与最终结局，帮助模型快速把握剧本主旨、核心冲突与整体叙事逻辑。"
+      },
+      {
+        "key": "nvZuO5uH",
+        "label": "世界观审核内容",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": ""
+      },
+      {
+        "key": "pxtQY7p2",
+        "label": "分集计划",
+        "valueType": "string",
+        "required": true,
+        "defaultValue": "",
+        "type": "input",
+        "description": "按剧集拆解开场引入、冲突升级、高潮爆发、结尾留钩的结构设计，明确每集叙事节奏与核心看点，为剧本初稿搭建稳定的框架基础。"
+      },
+      {
+        "key": "rxmvq2lS",
+        "label": "核心场景",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "input",
+        "description": "明确标注各关键情节的场景地点、空间属性与环境特征，规范剧本场景书写格式，保障场景切换有序、空间逻辑清晰，为剧本场景搭建提供精准依据。"
+      },
+      {
+        "key": "yYYOuumm",
+        "label": "人物小传",
+        "valueType": "string",
+        "required": true,
+        "defaultValue": "",
+        "type": "input",
+        "description": "涵盖主角、配角的外貌特征、性格特质、家庭背景、行为习惯与核心动机，性格决定行为逻辑，背景解释行为动因，多维度信息环环相扣，助力模型精准塑造人物、把握角色行为尺度。"
+      },
+      {
+        "key": "yuozoGpo",
+        "label": "世界观内容",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "用于更新记录每一次新修订的世界观内容"
+      }
+    ],
+    "scheduledTriggerConfig": {
+      "cronString": "",
+      "timezone": "Asia/Shanghai",
+      "defaultPrompt": ""
+    },
+    "_id": "69dc6addf962df93355c3026"
+  }
+}
