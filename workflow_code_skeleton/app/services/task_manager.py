@@ -1206,6 +1206,94 @@ class TaskManager:
         thread.start()
         return self._public_snapshot(record.clone_snapshot())
 
+    def restart_project(
+        self,
+        project_id: int,
+        *,
+        user_id: int,
+        input_payload: dict[str, Any],
+        workflow_spec_path: str,
+        model_selection_id: str | None,
+    ) -> dict[str, Any]:
+        snapshot = self.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+        if not snapshot:
+            raise ValueError("项目不存在或无权操作")
+
+        status = str(snapshot.get("status") or "")
+        if status in PROJECT_RUNNING_STATUSES:
+            raise ValueError("任务仍在执行中，不能重新开始")
+
+        old_task_id = str(snapshot.get("task_id") or "").strip()
+        new_task_id = uuid.uuid4().hex[:12]
+        model_option = settings.resolve_model_selection(model_selection_id)
+
+        new_snapshot = {
+            "user_id": int(user_id),
+            "project_id": int(project_id),
+            "task_id": new_task_id,
+            "status": "pending",
+            "title": str(input_payload.get("title", "")).strip() or str(snapshot.get("title") or "").strip(),
+            "message": "正在同一资产下重新开始生成。",
+            "created_at": snapshot.get("created_at") or now_iso(),
+            "updated_at": now_iso(),
+            "workflow_spec_path": workflow_spec_path,
+            "visibility": str(snapshot.get("visibility") or "private"),
+            "model_option": {
+                "id": model_option.id,
+                "label": self._model_alias(model_option.provider),
+                "provider": model_option.provider,
+                "model": model_option.model,
+            }
+            if model_option
+            else None,
+            "input_payload": copy.deepcopy(input_payload),
+            "artifacts": {},
+            "logs": [],
+            "prompt_fixes": [],
+            "progress_percent": 0,
+            "generated_episodes": 0,
+            "total_episodes": int(input_payload.get("total_episodes", 0) or 0),
+            "current_stage": "validation",
+            "current_stage_label": STAGE_LABELS["validation"],
+            "current_node_id": None,
+            "current_node_name": None,
+            "current_batch": None,
+            "debug_state": {},
+            "restart_of_task_id": old_task_id or None,
+            "finished_at": None,
+            "error": None,
+        }
+
+        record = TaskRecord(
+            user_id=int(user_id),
+            project_id=int(project_id),
+            task_id=new_task_id,
+            workflow_spec_path=workflow_spec_path,
+            input_payload=copy.deepcopy(input_payload),
+            model_option=model_option,
+            snapshot=new_snapshot,
+            resume_snapshot=None,
+        )
+
+        with self._lock:
+            if old_task_id:
+                self._tasks.pop(old_task_id, None)
+            self._tasks[new_task_id] = record
+            self._projects[int(project_id)] = record
+            self._remember_latest_project(int(user_id), int(project_id))
+
+        self._persist_snapshot(record)
+
+        thread = threading.Thread(
+            target=self._run_task,
+            args=(record,),
+            daemon=True,
+            name=f"workflow-task-{new_task_id}",
+        )
+        record.thread = thread
+        thread.start()
+        return self._public_snapshot(record.clone_snapshot())
+
     def terminate_task(self, task_id: str, user_id: int | None = None) -> dict[str, Any]:
         record = self._get_task_record_for_user(task_id, user_id)
         snapshot = record.clone_snapshot()

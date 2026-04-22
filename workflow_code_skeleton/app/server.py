@@ -315,6 +315,38 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=400)
         return _json_ok(task=snapshot)
 
+    @app.post("/api/projects/<int:project_id>/restart")
+    @_login_required
+    def restart_project(project_id: int):
+        data = request.get_json(silent=True) or {}
+        spec_path = _resolve_spec_path(data)
+        expectation = str(data.get("user_expectation", ""))
+        payload = {
+            "title": data.get("title", "") or derive_script_title(expectation),
+            "episode_word_count": data.get("episode_word_count", 500) or 500,
+            "total_episodes": data.get("total_episodes", 0),
+            "user_expectation": expectation,
+            "character_count": data.get("character_count", 0),
+            "character_appearance_requirements": "",
+            "character_alias_naming_rules": "",
+            "outfit_switch_rules": "",
+            "story_outline": data.get("story_outline", ""),
+            "core_scene_input": data.get("core_scene_input", ""),
+            "character_bios": data.get("character_bios", ""),
+            "episode_plan": data.get("episode_plan", ""),
+        }
+        try:
+            snapshot = task_manager.restart_project(
+                project_id,
+                user_id=_require_user_id(),
+                input_payload=payload,
+                workflow_spec_path=spec_path,
+                model_selection_id=data.get("model_selection_id"),
+            )
+        except Exception as exc:
+            return _json_error(str(exc), status=400)
+        return _json_ok(task=snapshot)
+
     @app.get("/api/tasks/<task_id>")
     @_login_required
     def get_task(task_id: str):

@@ -627,15 +627,25 @@
     if (!requireLogin()) return;
     saveDraft();
     const payload = buildPayload();
-    els.formHint.textContent = "正在创建任务，请稍候。";
-    const data = await requestJson(window.scriptMakerConfig.startUrl, {
+    const restartingCurrentProject = Boolean(
+      state.projectId && ["failed", "terminated"].includes(state.status)
+    );
+    els.formHint.textContent = restartingCurrentProject
+      ? "正在基于当前资产重新开始生成，请稍候。"
+      : "正在创建任务，请稍候。";
+    const endpoint = restartingCurrentProject
+      ? `/api/projects/${state.projectId}/restart`
+      : window.scriptMakerConfig.startUrl;
+    const data = await requestJson(endpoint, {
       method: "POST",
       body: JSON.stringify(payload)
     });
     await loadProjects({ restoreSelection: false, restoreInputs: false });
     await loadProjectDetail(data.task.project_id, { restoreInputs: false });
     startPolling();
-    els.formHint.textContent = "新任务已启动。你可以继续填写新的输入，再开下一个任务。";
+    els.formHint.textContent = restartingCurrentProject
+      ? "当前资产已在原 ID 下重新开始生成。"
+      : "新任务已启动。你可以继续填写新的输入，再开下一个任务。";
   }
 
   async function pauseTask() {
