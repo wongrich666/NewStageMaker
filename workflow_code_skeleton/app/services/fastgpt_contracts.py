@@ -525,7 +525,7 @@ LEGACY_OUTPUT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
     STAGE_DIALOGUES: {BATCH_DIALOGUES: (DIALOGUE_OUTPUT_VAR, DIALOGUE_CURRENT_VAR, DIALOGUE_FINAL_VAR)},
     STAGE_SCRIPT: {BATCH_SCRIPT: (SCRIPT_CURRENT_VAR, SCRIPT_FINAL_VAR)},
     STAGE_MEMORY: {LAST_SUMMARY: (MEMORY_VAR,)},
-    STAGE_FINAL: {FINAL_SCRIPT: (SCRIPT_FINAL_VAR,)},
+    STAGE_FINAL: {},
 }
 
 
@@ -726,7 +726,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         ),
         output_types={FINAL_SCRIPT: "string"},
         fastgpt_responsibility="输出最终完整剧本。",
-        local_responsibility="无额外内容生成，只接收 final_script。",
+        local_responsibility="调用最终拼接工作流，并以最终回复文本作为 final_script。",
     ),
 }
 

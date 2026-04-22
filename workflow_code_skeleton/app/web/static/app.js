@@ -30,6 +30,10 @@
     terminateBtn: $("terminateBtn"),
     clearBtn: $("clearBtn"),
     saveBtn: $("saveBtn"),
+    confirmCompletionBtn: $("confirmCompletionBtn"),
+    rollbackRewriteBtn: $("rollbackRewriteBtn"),
+    rollbackStageSelect: $("rollbackStageSelect"),
+    cacheNoticeText: $("cacheNoticeText"),
     refreshProjectsBtn: $("refreshProjectsBtn"),
     activeProjectList: $("activeProjectList"),
     completedProjectList: $("completedProjectList"),
@@ -347,6 +351,18 @@
     return artifacts.final_output_text || artifacts.final_script || "";
   }
 
+  function renderRollbackOptions(options, selectedValue = "") {
+    if (!els.rollbackStageSelect) return;
+    const normalized = Array.isArray(options) ? options : [];
+    els.rollbackStageSelect.innerHTML = [
+      `<option value="">选择回退步骤</option>`,
+      ...normalized.map((item) => `<option value="${escapeHtml(item.key)}">${escapeHtml(item.label)}</option>`)
+    ].join("");
+    if (selectedValue && normalized.some((item) => item.key === selectedValue)) {
+      els.rollbackStageSelect.value = selectedValue;
+    }
+  }
+
   function renderSnapshot(snapshot) {
     state.latestSnapshot = snapshot || null;
     if (!snapshot) {
@@ -366,6 +382,10 @@
       els.projectText.textContent = "项目：未选中";
       els.taskText.textContent = "任务：未选中";
       els.finalOutputBox.textContent = "暂无内容";
+      if (els.cacheNoticeText) {
+        els.cacheNoticeText.textContent = "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。";
+      }
+      renderRollbackOptions([]);
       renderProjectList(state.projects);
       syncButtons();
       return;
@@ -396,6 +416,10 @@
     els.projectText.textContent = `项目：${snapshot.project_id}`;
     els.taskText.textContent = `任务：${snapshot.task_id || "未创建"}`;
     els.finalOutputBox.textContent = finalOutput || "暂无内容";
+    if (els.cacheNoticeText) {
+      els.cacheNoticeText.textContent = snapshot.cache_notice || "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。";
+    }
+    renderRollbackOptions(snapshot.rollback_stage_options || [], els.rollbackStageSelect?.value || "");
     persistSelectedProjectId(snapshot.project_id);
     renderProjectList(state.projects);
     syncButtons();
@@ -405,6 +429,9 @@
     const hasProject = Boolean(state.projectId);
     const hasFinal = Boolean(finalOutputFrom(state.latestSnapshot));
     const hasConfiguredModel = state.availableModels.some((item) => item.configured !== false);
+    const canConfirmCompletion = Boolean(state.latestSnapshot?.can_confirm_completion);
+    const canStageRollback = Boolean(state.latestSnapshot?.can_stage_rollback);
+    const hasRollbackSelection = Boolean(els.rollbackStageSelect?.value);
 
     els.startBtn.disabled = !isAuthenticated() || !hasConfiguredModel;
     els.pauseBtn.disabled = !(state.taskId && ["running", "pending"].includes(state.status));
@@ -412,6 +439,15 @@
     els.terminateBtn.disabled = !(state.taskId && TERMINATABLE_STATUSES.has(state.status));
     els.clearBtn.disabled = !isAuthenticated();
     els.saveBtn.disabled = !isAuthenticated() || !hasProject || !hasFinal;
+    if (els.confirmCompletionBtn) {
+      els.confirmCompletionBtn.disabled = !isAuthenticated() || !canConfirmCompletion;
+    }
+    if (els.rollbackStageSelect) {
+      els.rollbackStageSelect.disabled = !isAuthenticated() || !canStageRollback;
+    }
+    if (els.rollbackRewriteBtn) {
+      els.rollbackRewriteBtn.disabled = !isAuthenticated() || !canStageRollback || !hasRollbackSelection;
+    }
   }
 
   function hasConfiguredModel() {
@@ -730,6 +766,39 @@
     startPolling();
   }
 
+  async function confirmCompletion() {
+    if (!requireLogin()) return;
+    if (!state.projectId || !state.latestSnapshot?.can_confirm_completion) return;
+    const ok = window.confirm("确认当前剧本已经满意完成吗？确认后系统会清理执行缓存并锁定成品，之后不能再直接修改。");
+    if (!ok) return;
+    const data = await requestJson(`/api/projects/${state.projectId}/confirm-completion`, {
+      method: "POST"
+    });
+    renderSnapshot(data.project);
+    await loadProjects({ restoreSelection: true, restoreInputs: false });
+    await loadAssets();
+    await loadCommunity();
+  }
+
+  async function rollbackRewrite() {
+    if (!requireLogin()) return;
+    if (!state.projectId || !state.latestSnapshot?.can_stage_rollback) return;
+    const stageKey = els.rollbackStageSelect?.value || "";
+    if (!stageKey) {
+      throw new Error("请选择一个回退步骤。");
+    }
+    const selectedLabel = els.rollbackStageSelect?.selectedOptions?.[0]?.textContent?.trim() || "所选步骤";
+    const ok = window.confirm(`确认回退到“${selectedLabel}”并从该步骤重新生成吗？前面的结果会保留，后面的结果会被清空重做。`);
+    if (!ok) return;
+    const data = await requestJson(`/api/projects/${state.projectId}/rollback`, {
+      method: "POST",
+      body: JSON.stringify({ stage_key: stageKey })
+    });
+    renderSnapshot(data.task);
+    await loadProjects({ restoreSelection: true, restoreInputs: false });
+    startPolling();
+  }
+
   function clearCurrentInput() {
     if (!requireLogin()) return;
     clearDraft();
@@ -856,6 +925,7 @@
       <article class="asset-tile">
         <div class="asset-topline">
           <span class="status-pill ${item.status === "completed" ? "status-pill-completed" : ""}">${escapeHtml(statusLabel(item.status))}</span>
+          ${item.completion_confirmed ? '<span class="status-pill status-pill-locked">已锁定</span>' : item.awaiting_user_confirmation ? '<span class="status-pill status-pill-pending">待确认</span>' : ""}
           <span class="status-pill ${item.visibility === "public" ? "status-pill-public" : "status-pill-private"}">${escapeHtml(visibilityLabel(item.visibility))}</span>
         </div>
         <h3>${escapeHtml(item.title)}</h3>
@@ -868,8 +938,8 @@
         <div class="asset-actions">
           <button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>
           <button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">新页面打开</button>
-          <button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">修改</button>
-          <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : "公开成品"}</button>
+          ${item.completion_confirmed ? "" : `<button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">修改</button>`}
+          ${item.completion_confirmed ? "" : `<button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : "公开成品"}</button>`}
           <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除</button>
         </div>
       </article>
@@ -902,12 +972,20 @@
     const artifacts = project.artifacts || {};
     state.editingProjectId = Number(projectId);
     state.editingProjectStatus = String(project.status || "");
+    const locked = Boolean(project.completion_confirmed);
     els.editAssetTitle.value = project.title || input.title || "";
     els.editAssetSummary.value = input.story_outline || artifacts.story_outline || "";
     els.editAssetPrivacy.value = project.visibility || "private";
     els.editAssetFinal.value = state.editingProjectStatus === "completed"
       ? (artifacts.final_output_text || artifacts.final_script || "")
       : "";
+    [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].forEach((field) => {
+      if (field) field.disabled = locked;
+    });
+    if (els.saveAssetEditBtn) {
+      els.saveAssetEditBtn.disabled = locked;
+      els.saveAssetEditBtn.textContent = locked ? "已锁定不可修改" : "保存修改";
+    }
     els.assetEditor.classList.remove("hidden");
     els.assetEditor.scrollIntoView({ behavior: "smooth", block: "center" });
   }
@@ -939,6 +1017,13 @@
   function closeAssetEditor() {
     state.editingProjectId = null;
     state.editingProjectStatus = null;
+    [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].forEach((field) => {
+      if (field) field.disabled = false;
+    });
+    if (els.saveAssetEditBtn) {
+      els.saveAssetEditBtn.disabled = false;
+      els.saveAssetEditBtn.textContent = "保存修改";
+    }
     els.assetEditor.classList.add("hidden");
   }
 
@@ -1211,6 +1296,24 @@
         await terminateTask();
       } catch (error) {
         showStatusError(error, "终止失败，请稍后重试。");
+      }
+    });
+
+    els.confirmCompletionBtn?.addEventListener("click", async () => {
+      try {
+        await confirmCompletion();
+      } catch (error) {
+        showStatusError(error, "确认完成失败，请稍后重试。");
+      }
+    });
+
+    els.rollbackStageSelect?.addEventListener("change", syncButtons);
+
+    els.rollbackRewriteBtn?.addEventListener("click", async () => {
+      try {
+        await rollbackRewrite();
+      } catch (error) {
+        showStatusError(error, "阶段回退失败，请稍后重试。");
       }
     });
 

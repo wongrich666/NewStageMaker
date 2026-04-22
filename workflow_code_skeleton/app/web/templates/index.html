@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>IDEA TO SCRIPT  剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260422-2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260422-3">
 </head>
 <body>
   <main class="shell">
@@ -90,6 +90,21 @@
         <button id="terminateBtn" class="btn btn-danger" disabled>终止生成</button>
         <button id="clearBtn" class="btn btn-ghost">清空输入</button>
         <button id="saveBtn" class="btn btn-secondary" disabled>保存最终剧本</button>
+      </div>
+      <div class="completion-panel">
+        <div class="completion-copy">
+          <h3>缓存与完成确认</h3>
+          <p id="cacheNoticeText">系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。</p>
+        </div>
+        <div class="completion-actions">
+          <button id="confirmCompletionBtn" class="btn btn-success" type="button" disabled>确认剧本满意完成</button>
+          <div class="rollback-group">
+            <select id="rollbackStageSelect" class="compact-select" disabled>
+              <option value="">选择回退步骤</option>
+            </select>
+            <button id="rollbackRewriteBtn" class="btn btn-secondary" type="button" disabled>部分步骤回退重写</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -313,9 +328,11 @@
       communityDetailBaseUrl: "/community",
       toolsUrl: "/api/tools",
       startUrl: "/api/workflows/start",
+      confirmCompletionUrlBase: "/api/projects",
+      rollbackUrlBase: "/api/projects",
       loginUrl: "{{ url_for('login_page') }}"
     };
   </script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260422-2"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260422-3"></script>
 </body>
 </html>

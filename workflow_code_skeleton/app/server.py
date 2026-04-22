@@ -319,6 +319,32 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=400)
         return _json_ok(project=snapshot)
 
+    @app.post("/api/projects/<int:project_id>/confirm-completion")
+    @_login_required
+    def confirm_project_completion(project_id: int):
+        try:
+            snapshot = task_manager.confirm_project_completion(
+                project_id,
+                user_id=_require_user_id(),
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        return _json_ok(project=snapshot)
+
+    @app.post("/api/projects/<int:project_id>/rollback")
+    @_login_required
+    def rollback_project(project_id: int):
+        data = request.get_json(silent=True) or {}
+        try:
+            snapshot = task_manager.rollback_project_to_stage(
+                project_id,
+                user_id=_require_user_id(),
+                stage_key=str(data.get("stage_key") or ""),
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        return _json_ok(task=snapshot)
+
     @app.post("/api/workflows/start")
     @_login_required
     def start_workflow():

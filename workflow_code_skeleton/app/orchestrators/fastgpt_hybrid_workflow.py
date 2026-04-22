@@ -102,6 +102,7 @@ LOCAL_COMPLETED_BATCHES = "_completed_batches"
 LOCAL_COMMITTED_SCRIPT = "_committed_all_script"
 LOCAL_CURRENT_BATCH_INDEX = "_current_batch_index"
 LOCAL_CURRENT_BATCH_STAGE = "_current_batch_stage"
+LOCAL_REWRITE_FROM_STAGE = "_rewrite_from_stage"
 
 
 class FastGPTRunner(Protocol):
@@ -508,8 +509,21 @@ def _run_batched_generation(
         _safe_int(variables.get(LOCAL_CURRENT_BATCH_INDEX), completed_batches),
     )
     current_batch_stage = str(variables.get(LOCAL_CURRENT_BATCH_STAGE) or "").strip().lower()
+    rewrite_from_stage = str(variables.get(LOCAL_REWRITE_FROM_STAGE) or "").strip().lower()
     normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
     episode_alias_plan = _normalize_episode_alias_plan_object(variables.get(EPISODE_ALIAS_PLAN))
+
+    if rewrite_from_stage == "final" and _has_value(variables.get(ALL_SCRIPT)):
+        set_runtime_stage(
+            state,
+            "script",
+            "已保留剧本正文，将直接重新执行最终剧本拼接。",
+            progress_percent=98,
+            generated_episodes=total_episodes,
+        )
+        variables[LOCAL_REWRITE_FROM_STAGE] = ""
+        _sync_state_variables(state, variables)
+        return
 
     for index, batch in enumerate(batches):
         if index < completed_batches:
@@ -533,7 +547,21 @@ def _run_batched_generation(
         )
 
         hook_progress = 36 + int((index / total_batches) * 12)
-        if resume_stage in {"hook", "dialogue", "script"} and _has_value(variables.get(BATCH_HOOKS)):
+        force_skip_hook = rewrite_from_stage in {"dialogue", "script"} and bool(all_hooks)
+        cached_batch_hooks = (
+            slice_object_episodes_for_batch(all_hooks, batch) if force_skip_hook else {}
+        )
+        if force_skip_hook and cached_batch_hooks:
+            variables[BATCH_HOOKS] = cached_batch_hooks
+            variables[LOCAL_CURRENT_BATCH_STAGE] = "hook"
+            set_runtime_stage(
+                state,
+                "hook",
+                f"已保留第 {batch.label} 集开头冲突钩子，将从后续步骤开始重写。",
+                batch_label=batch.label,
+                progress_percent=hook_progress,
+            )
+        elif resume_stage in {"hook", "dialogue", "script"} and _has_value(variables.get(BATCH_HOOKS)):
             set_runtime_stage(
                 state,
                 "hook",
@@ -567,7 +595,21 @@ def _run_batched_generation(
             alias_plan_for_batch,
         )
         dialogue_progress = 50 + int((index / total_batches) * 12)
-        if resume_stage in {"dialogue", "script"} and _has_value(variables.get(BATCH_DIALOGUES)):
+        force_skip_dialogue = rewrite_from_stage == "script" and bool(all_dialogues)
+        cached_batch_dialogues = (
+            slice_object_episodes_for_batch(all_dialogues, batch) if force_skip_dialogue else {}
+        )
+        if force_skip_dialogue and cached_batch_dialogues:
+            variables[BATCH_DIALOGUES] = cached_batch_dialogues
+            variables[LOCAL_CURRENT_BATCH_STAGE] = "dialogue"
+            set_runtime_stage(
+                state,
+                "dialogue",
+                f"已保留第 {batch.label} 集角色对白，将从剧本正文开始重写。",
+                batch_label=batch.label,
+                progress_percent=dialogue_progress,
+            )
+        elif resume_stage in {"dialogue", "script"} and _has_value(variables.get(BATCH_DIALOGUES)):
             set_runtime_stage(
                 state,
                 "dialogue",
@@ -655,6 +697,7 @@ def _run_batched_generation(
         committed_script = str(variables.get(LOCAL_COMMITTED_SCRIPT) or "").strip()
         variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
         variables[LOCAL_CURRENT_BATCH_STAGE] = ""
+        variables[LOCAL_REWRITE_FROM_STAGE] = ""
         _sync_state_variables(state, variables)
 
     set_runtime_stage(
@@ -1733,6 +1776,33 @@ def merge_batch_object(current: dict[str, Any], batch: dict[str, Any]) -> dict[s
     merged = copy.deepcopy(current or {})
     incoming = copy.deepcopy(batch or {})
     return _merge_dicts(merged, incoming)
+
+
+def slice_object_episodes_for_batch(value: Any, batch: BatchWindow) -> dict[str, Any]:
+    payload = _dict_or_empty(value)
+    if not payload:
+        return {}
+    episodes = payload.get("episodes")
+    if not isinstance(episodes, list):
+        return copy.deepcopy(payload)
+    selected = []
+    for item in episodes:
+        if not isinstance(item, dict):
+            continue
+        episode_no = _safe_int(item.get("episode"), 0)
+        if batch.start_episode <= episode_no <= batch.end_episode:
+            selected.append(copy.deepcopy(item))
+    if not selected:
+        return {}
+    sliced = copy.deepcopy(payload)
+    sliced["episodes"] = selected
+    batch_meta = sliced.get("batch_meta")
+    if isinstance(batch_meta, dict):
+        updated_meta = copy.deepcopy(batch_meta)
+        updated_meta["start_episode"] = batch.start_episode
+        updated_meta["end_episode"] = batch.end_episode
+        sliced["batch_meta"] = updated_meta
+    return sliced
 
 
 def _merge_dicts(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:

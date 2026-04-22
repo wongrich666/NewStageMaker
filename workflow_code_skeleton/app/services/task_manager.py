@@ -15,33 +15,67 @@ from ..models.inputs import WorkflowInput
 from ..models.state import WorkflowState
 from ..orchestrators.runner import run_configured_workflow
 from .fastgpt_contracts import (
+    ALL_DIALOGUES,
+    ALL_HOOKS,
+    ALL_SCRIPT,
     APPEARANCE_CONTINUITY_MEMORY,
     APPEARANCE_MAPPING,
+    BATCH_DIALOGUES,
+    BATCH_HOOKS,
+    BATCH_SCRIPT,
+    BATCH_START_EPISODE,
+    CHARACTERS,
     CHARACTER_ALIAS_NAMING_RULES,
     CHARACTER_ALIAS_REGISTRY,
     CHARACTER_APPEARANCE_REQUIREMENTS,
     CHARACTER_REGISTRY,
     EPISODE_ALIAS_PLAN,
+    EPISODE_PLAN,
+    FINAL_SCRIPT,
+    IS_CONSISTENT,
+    LAST_SUMMARY,
     NORMALIZED_EPISODE_PLAN,
     OUTFIT_SWITCH_RULES,
+    SCENES,
+    SCENE_APPEARANCE_REQUIREMENTS,
+    SCRIPT_TITLE,
+    STORY_OUTLINE,
+    USER_CHARACTERS,
+    USER_CONTENT_BASELINE,
+    USER_SCENES,
+    WORLDVIEW,
 )
 from .llm_client import llm_client
 from .workflow_spec import WorkflowSpec
 from ..utils.logger import get_logger
 from ..workflow_ids import (
+    APPEARANCE_ALIAS_NAMING_RULES_VAR,
+    APPEARANCE_MAPPING_VAR,
+    APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
+    APPEARANCE_REQUIREMENTS_VAR,
     CHARACTER_BIOS_VAR,
     CHARACTER_VAR,
     CORE_SCENE_INPUT_VAR,
     CORE_SCENE_FINAL_VAR,
     DIALOGUE_FINAL_VAR,
+    DIALOGUE_CURRENT_VAR,
+    DIALOGUE_START_VAR,
+    EPISODE_PLAN_CURSOR_VAR,
+    EPISODE_PLAN_NORMALIZED_VAR,
     FINAL_CHARACTER_VAR,
     FINAL_SCENE_VAR,
+    FRAMEWORK_ALIAS_NAMING_RULES_VAR,
+    FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR,
     HOOK_FINAL_VAR,
+    HOOK_CURRENT_VAR,
+    HOOK_START_VAR,
     MEMORY_VAR,
+    OUTFIT_SWITCH_RULES_VAR,
     EPISODE_PLAN_VAR,
     SCENE_VAR,
     SCRIPT_CURRENT_VAR,
     SCRIPT_FINAL_VAR,
+    SCRIPT_START_VAR,
     STORY_OUTLINE_VAR,
     TITLE_VAR,
     WORLDVIEW_VAR,
@@ -103,6 +137,521 @@ COMPLETED_ARTIFACT_KEYS = (
     "final_script",
     "final_output_text",
 )
+COMPLETION_PENDING_MESSAGE = "剧本已生成完成。请确认是否满意；确认后将清理缓存并锁定成品。"
+COMPLETION_CONFIRMED_MESSAGE = "已确认剧本满意完成，缓存已清理，成品已锁定。"
+COMPLETION_PENDING_NOTICE = (
+    "当前剧本已经生成完成，系统暂时保留执行缓存，方便你回退到任意工作流重写。"
+    "如果确认满意完成，系统会清理缓存并锁定当前成品；如需继续调整，请先选择回退重写。"
+)
+COMPLETION_CONFIRMED_NOTICE = (
+    "你已确认当前剧本满意完成。执行缓存已经清理，当前成品不可再直接修改；如需调整，请重新生成。"
+)
+RUNTIME_CACHE_NOTICE = "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。"
+LOCAL_REWRITE_FROM_STAGE = "_rewrite_from_stage"
+ROLLBACK_STAGE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("framework", "剧本框架撰写"),
+    ("appearance_strategy", "服装前置策略生成"),
+    ("consistency", "集数一致性检查"),
+    ("episode_plan_normalize", "分集计划规范化"),
+    ("worldview", "世界观生成"),
+    ("characters", "人物设定生成"),
+    ("scenes", "核心场景生成"),
+    ("appearance", "服装版本映射"),
+    ("hooks", "开头冲突钩子"),
+    ("dialogues", "角色对白"),
+    ("script", "剧本正文"),
+    ("final", "最终剧本拼接"),
+)
+ROLLBACK_STAGE_LABELS = {key: label for key, label in ROLLBACK_STAGE_OPTIONS}
+DEBUG_VARIABLE_MIRRORS: dict[str, tuple[str, ...]] = {
+    SCRIPT_TITLE: (TITLE_VAR,),
+    STORY_OUTLINE: (STORY_OUTLINE_VAR,),
+    USER_CHARACTERS: (CHARACTER_BIOS_VAR,),
+    USER_SCENES: (CORE_SCENE_INPUT_VAR,),
+    EPISODE_PLAN: (EPISODE_PLAN_VAR,),
+    NORMALIZED_EPISODE_PLAN: (EPISODE_PLAN_NORMALIZED_VAR,),
+    CHARACTER_APPEARANCE_REQUIREMENTS: (
+        APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
+        APPEARANCE_REQUIREMENTS_VAR,
+        FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR,
+    ),
+    CHARACTER_ALIAS_NAMING_RULES: (
+        APPEARANCE_ALIAS_NAMING_RULES_VAR,
+        FRAMEWORK_ALIAS_NAMING_RULES_VAR,
+    ),
+    OUTFIT_SWITCH_RULES: (OUTFIT_SWITCH_RULES_VAR,),
+    WORLDVIEW: (WORLDVIEW_VAR,),
+    CHARACTERS: (CHARACTER_VAR, FINAL_CHARACTER_VAR),
+    SCENES: (SCENE_VAR, CORE_SCENE_FINAL_VAR, FINAL_SCENE_VAR),
+    BATCH_START_EPISODE: (
+        HOOK_START_VAR,
+        DIALOGUE_START_VAR,
+        SCRIPT_START_VAR,
+        EPISODE_PLAN_CURSOR_VAR,
+    ),
+    BATCH_HOOKS: (HOOK_CURRENT_VAR,),
+    ALL_HOOKS: (HOOK_FINAL_VAR,),
+    BATCH_DIALOGUES: (DIALOGUE_CURRENT_VAR,),
+    ALL_DIALOGUES: (DIALOGUE_FINAL_VAR,),
+    BATCH_SCRIPT: (SCRIPT_CURRENT_VAR,),
+    ALL_SCRIPT: (SCRIPT_FINAL_VAR,),
+    LAST_SUMMARY: (MEMORY_VAR,),
+    APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,),
+    FINAL_SCRIPT: (SCRIPT_FINAL_VAR,),
+}
+ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
+    "framework": (
+        SCRIPT_TITLE,
+        STORY_OUTLINE,
+        USER_CHARACTERS,
+        USER_SCENES,
+        EPISODE_PLAN,
+        USER_CONTENT_BASELINE,
+        CHARACTER_APPEARANCE_REQUIREMENTS,
+        CHARACTER_ALIAS_NAMING_RULES,
+        OUTFIT_SWITCH_RULES,
+        IS_CONSISTENT,
+        NORMALIZED_EPISODE_PLAN,
+        WORLDVIEW,
+        CHARACTERS,
+        SCENES,
+        SCENE_APPEARANCE_REQUIREMENTS,
+        APPEARANCE_MAPPING,
+        CHARACTER_REGISTRY,
+        CHARACTER_ALIAS_REGISTRY,
+        EPISODE_ALIAS_PLAN,
+        APPEARANCE_CONTINUITY_MEMORY,
+        ALL_HOOKS,
+        BATCH_HOOKS,
+        ALL_DIALOGUES,
+        BATCH_DIALOGUES,
+        ALL_SCRIPT,
+        BATCH_SCRIPT,
+        LAST_SUMMARY,
+        FINAL_SCRIPT,
+        BATCH_START_EPISODE,
+        "_completed_batches",
+        "_committed_all_script",
+        "_current_batch_index",
+        "_current_batch_stage",
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "appearance_strategy": (
+        USER_CONTENT_BASELINE,
+        CHARACTER_APPEARANCE_REQUIREMENTS,
+        CHARACTER_ALIAS_NAMING_RULES,
+        OUTFIT_SWITCH_RULES,
+        IS_CONSISTENT,
+        NORMALIZED_EPISODE_PLAN,
+        WORLDVIEW,
+        CHARACTERS,
+        SCENES,
+        SCENE_APPEARANCE_REQUIREMENTS,
+        APPEARANCE_MAPPING,
+        CHARACTER_REGISTRY,
+        CHARACTER_ALIAS_REGISTRY,
+        EPISODE_ALIAS_PLAN,
+        APPEARANCE_CONTINUITY_MEMORY,
+        ALL_HOOKS,
+        BATCH_HOOKS,
+        ALL_DIALOGUES,
+        BATCH_DIALOGUES,
+        ALL_SCRIPT,
+        BATCH_SCRIPT,
+        LAST_SUMMARY,
+        FINAL_SCRIPT,
+        BATCH_START_EPISODE,
+        "_completed_batches",
+        "_committed_all_script",
+        "_current_batch_index",
+        "_current_batch_stage",
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "consistency": (
+        IS_CONSISTENT,
+        NORMALIZED_EPISODE_PLAN,
+        USER_CONTENT_BASELINE,
+        WORLDVIEW,
+        CHARACTERS,
+        SCENES,
+        SCENE_APPEARANCE_REQUIREMENTS,
+        APPEARANCE_MAPPING,
+        CHARACTER_REGISTRY,
+        CHARACTER_ALIAS_REGISTRY,
+        EPISODE_ALIAS_PLAN,
+        APPEARANCE_CONTINUITY_MEMORY,
+        ALL_HOOKS,
+        BATCH_HOOKS,
+        ALL_DIALOGUES,
+        BATCH_DIALOGUES,
+        ALL_SCRIPT,
+        BATCH_SCRIPT,
+        LAST_SUMMARY,
+        FINAL_SCRIPT,
+        BATCH_START_EPISODE,
+        "_completed_batches",
+        "_committed_all_script",
+        "_current_batch_index",
+        "_current_batch_stage",
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "episode_plan_normalize": (
+        NORMALIZED_EPISODE_PLAN,
+        USER_CONTENT_BASELINE,
+        WORLDVIEW,
+        CHARACTERS,
+        SCENES,
+        SCENE_APPEARANCE_REQUIREMENTS,
+        APPEARANCE_MAPPING,
+        CHARACTER_REGISTRY,
+        CHARACTER_ALIAS_REGISTRY,
+        EPISODE_ALIAS_PLAN,
+        APPEARANCE_CONTINUITY_MEMORY,
+        ALL_HOOKS,
+        BATCH_HOOKS,
+        ALL_DIALOGUES,
+        BATCH_DIALOGUES,
+        ALL_SCRIPT,
+        BATCH_SCRIPT,
+        LAST_SUMMARY,
+        FINAL_SCRIPT,
+        BATCH_START_EPISODE,
+        "_completed_batches",
+        "_committed_all_script",
+        "_current_batch_index",
+        "_current_batch_stage",
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "worldview": (
+        WORLDVIEW,
+        CHARACTERS,
+        SCENES,
+        SCENE_APPEARANCE_REQUIREMENTS,
+        APPEARANCE_MAPPING,
+        CHARACTER_REGISTRY,
+        CHARACTER_ALIAS_REGISTRY,
+        EPISODE_ALIAS_PLAN,
+        APPEARANCE_CONTINUITY_MEMORY,
+        ALL_HOOKS,
+        BATCH_HOOKS,
+        ALL_DIALOGUES,
+        BATCH_DIALOGUES,
+        ALL_SCRIPT,
+        BATCH_SCRIPT,
+        LAST_SUMMARY,
+        FINAL_SCRIPT,
+        BATCH_START_EPISODE,
+        "_completed_batches",
+        "_committed_all_script",
+        "_current_batch_index",
+        "_current_batch_stage",
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "characters": (
+        CHARACTERS,
+        SCENES,
+        SCENE_APPEARANCE_REQUIREMENTS,
+        APPEARANCE_MAPPING,
+        CHARACTER_REGISTRY,
+        CHARACTER_ALIAS_REGISTRY,
+        EPISODE_ALIAS_PLAN,
+        APPEARANCE_CONTINUITY_MEMORY,
+        ALL_HOOKS,
+        BATCH_HOOKS,
+        ALL_DIALOGUES,
+        BATCH_DIALOGUES,
+        ALL_SCRIPT,
+        BATCH_SCRIPT,
+        LAST_SUMMARY,
+        FINAL_SCRIPT,
+        BATCH_START_EPISODE,
+        "_completed_batches",
+        "_committed_all_script",
+        "_current_batch_index",
+        "_current_batch_stage",
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "scenes": (
+        SCENES,
+        SCENE_APPEARANCE_REQUIREMENTS,
+        APPEARANCE_MAPPING,
+        CHARACTER_REGISTRY,
+        CHARACTER_ALIAS_REGISTRY,
+        EPISODE_ALIAS_PLAN,
+        APPEARANCE_CONTINUITY_MEMORY,
+        ALL_HOOKS,
+        BATCH_HOOKS,
+        ALL_DIALOGUES,
+        BATCH_DIALOGUES,
+        ALL_SCRIPT,
+        BATCH_SCRIPT,
+        LAST_SUMMARY,
+        FINAL_SCRIPT,
+        BATCH_START_EPISODE,
+        "_completed_batches",
+        "_committed_all_script",
+        "_current_batch_index",
+        "_current_batch_stage",
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "appearance": (
+        SCENE_APPEARANCE_REQUIREMENTS,
+        APPEARANCE_MAPPING,
+        CHARACTER_REGISTRY,
+        CHARACTER_ALIAS_REGISTRY,
+        EPISODE_ALIAS_PLAN,
+        APPEARANCE_CONTINUITY_MEMORY,
+        ALL_HOOKS,
+        BATCH_HOOKS,
+        ALL_DIALOGUES,
+        BATCH_DIALOGUES,
+        ALL_SCRIPT,
+        BATCH_SCRIPT,
+        LAST_SUMMARY,
+        FINAL_SCRIPT,
+        BATCH_START_EPISODE,
+        "_completed_batches",
+        "_committed_all_script",
+        "_current_batch_index",
+        "_current_batch_stage",
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "hooks": (
+        APPEARANCE_CONTINUITY_MEMORY,
+        ALL_HOOKS,
+        BATCH_HOOKS,
+        ALL_DIALOGUES,
+        BATCH_DIALOGUES,
+        ALL_SCRIPT,
+        BATCH_SCRIPT,
+        LAST_SUMMARY,
+        FINAL_SCRIPT,
+        BATCH_START_EPISODE,
+        "_completed_batches",
+        "_committed_all_script",
+        "_current_batch_index",
+        "_current_batch_stage",
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "dialogues": (
+        APPEARANCE_CONTINUITY_MEMORY,
+        ALL_DIALOGUES,
+        BATCH_DIALOGUES,
+        ALL_SCRIPT,
+        BATCH_SCRIPT,
+        LAST_SUMMARY,
+        FINAL_SCRIPT,
+        BATCH_START_EPISODE,
+        "_completed_batches",
+        "_committed_all_script",
+        "_current_batch_index",
+        "_current_batch_stage",
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "script": (
+        APPEARANCE_CONTINUITY_MEMORY,
+        ALL_SCRIPT,
+        BATCH_SCRIPT,
+        LAST_SUMMARY,
+        FINAL_SCRIPT,
+        BATCH_START_EPISODE,
+        "_completed_batches",
+        "_committed_all_script",
+        "_current_batch_index",
+        "_current_batch_stage",
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "final": (
+        FINAL_SCRIPT,
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+}
+ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
+    "framework": (
+        "script_title",
+        "story_outline",
+        "character_bios",
+        "episode_plan",
+        "normalized_episode_plan",
+        "worldview",
+        "character_summary",
+        "scene_json",
+        "core_scene_input",
+        "core_scene_summary",
+        "character_appearance_requirements",
+        "character_alias_naming_rules",
+        "outfit_switch_rules",
+        "appearance_mapping",
+        "character_registry",
+        "character_alias_registry",
+        "episode_alias_plan",
+        "appearance_continuity_memory",
+        "hook_plan",
+        "dialogue_plan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "appearance_strategy": (
+        "normalized_episode_plan",
+        "worldview",
+        "character_summary",
+        "scene_json",
+        "core_scene_summary",
+        "character_appearance_requirements",
+        "character_alias_naming_rules",
+        "outfit_switch_rules",
+        "appearance_mapping",
+        "character_registry",
+        "character_alias_registry",
+        "episode_alias_plan",
+        "appearance_continuity_memory",
+        "hook_plan",
+        "dialogue_plan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "consistency": (
+        "normalized_episode_plan",
+        "worldview",
+        "character_summary",
+        "scene_json",
+        "core_scene_summary",
+        "appearance_mapping",
+        "character_registry",
+        "character_alias_registry",
+        "episode_alias_plan",
+        "appearance_continuity_memory",
+        "hook_plan",
+        "dialogue_plan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "episode_plan_normalize": (
+        "normalized_episode_plan",
+        "worldview",
+        "character_summary",
+        "scene_json",
+        "core_scene_summary",
+        "appearance_mapping",
+        "character_registry",
+        "character_alias_registry",
+        "episode_alias_plan",
+        "appearance_continuity_memory",
+        "hook_plan",
+        "dialogue_plan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "worldview": (
+        "worldview",
+        "character_summary",
+        "scene_json",
+        "core_scene_summary",
+        "appearance_mapping",
+        "character_registry",
+        "character_alias_registry",
+        "episode_alias_plan",
+        "appearance_continuity_memory",
+        "hook_plan",
+        "dialogue_plan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "characters": (
+        "character_summary",
+        "scene_json",
+        "core_scene_summary",
+        "appearance_mapping",
+        "character_registry",
+        "character_alias_registry",
+        "episode_alias_plan",
+        "appearance_continuity_memory",
+        "hook_plan",
+        "dialogue_plan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "scenes": (
+        "scene_json",
+        "core_scene_summary",
+        "appearance_mapping",
+        "character_registry",
+        "character_alias_registry",
+        "episode_alias_plan",
+        "appearance_continuity_memory",
+        "hook_plan",
+        "dialogue_plan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "appearance": (
+        "appearance_mapping",
+        "character_registry",
+        "character_alias_registry",
+        "episode_alias_plan",
+        "appearance_continuity_memory",
+        "hook_plan",
+        "dialogue_plan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "hooks": (
+        "appearance_continuity_memory",
+        "hook_plan",
+        "dialogue_plan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "dialogues": (
+        "appearance_continuity_memory",
+        "dialogue_plan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "script": (
+        "appearance_continuity_memory",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "final": (
+        "final_script",
+        "final_output_text",
+        "halted_message",
+    ),
+}
 
 
 def _select_non_empty_fields(
@@ -151,6 +700,35 @@ def _public_status_message(snapshot: dict[str, Any]) -> str:
     if not message:
         return ""
     return message
+
+
+def _completion_confirmed(snapshot: dict[str, Any] | None) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    return bool(snapshot.get("completion_confirmed"))
+
+
+def _awaiting_completion_confirmation(snapshot: dict[str, Any] | None) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    if str(snapshot.get("status") or "") != "completed":
+        return False
+    if _completion_confirmed(snapshot):
+        return False
+    if snapshot.get("awaiting_user_confirmation") is not None:
+        return bool(snapshot.get("awaiting_user_confirmation"))
+    artifacts = snapshot.get("artifacts") or {}
+    return bool(
+        str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip()
+    )
+
+
+def _cache_notice(snapshot: dict[str, Any]) -> str:
+    if _completion_confirmed(snapshot):
+        return COMPLETION_CONFIRMED_NOTICE
+    if _awaiting_completion_confirmation(snapshot):
+        return COMPLETION_PENDING_NOTICE
+    return RUNTIME_CACHE_NOTICE
 
 
 def now_iso() -> str:
@@ -431,10 +1009,26 @@ class TaskManager:
                     data["updated_at"] = now_iso()
                     changed = True
             elif str(data.get("status") or "") == "completed":
-                compacted = self._compact_completed_snapshot(data)
-                if compacted != data:
-                    data = compacted
+                if "completion_confirmed" not in data:
+                    data["completion_confirmed"] = True
+                    data["awaiting_user_confirmation"] = False
+                    data["cache_retained"] = False
                     changed = True
+                if _completion_confirmed(data):
+                    compacted = self._compact_completed_snapshot(data)
+                    if compacted != data:
+                        data = compacted
+                        changed = True
+                else:
+                    if not _awaiting_completion_confirmation(data):
+                        data["awaiting_user_confirmation"] = True
+                        changed = True
+                    if not data.get("cache_retained"):
+                        data["cache_retained"] = True
+                        changed = True
+                    if str(data.get("message") or "").strip() != COMPLETION_PENDING_MESSAGE:
+                        data["message"] = COMPLETION_PENDING_MESSAGE
+                        changed = True
             if changed:
                 path.write_text(
                     json.dumps(data, ensure_ascii=False, indent=2),
@@ -574,6 +1168,8 @@ class TaskManager:
 
     def _public_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         artifacts = self._public_artifacts(snapshot)
+        completion_confirmed = _completion_confirmed(snapshot)
+        awaiting_confirmation = _awaiting_completion_confirmation(snapshot)
         payload: dict[str, Any] = {
             "project_id": snapshot.get("project_id"),
             "task_id": snapshot.get("task_id"),
@@ -593,6 +1189,15 @@ class TaskManager:
             "current_stage": snapshot.get("current_stage"),
             "current_stage_label": snapshot.get("current_stage_label") or "待开始",
             "current_batch": snapshot.get("current_batch"),
+            "completion_confirmed": completion_confirmed,
+            "awaiting_user_confirmation": awaiting_confirmation,
+            "cache_retained": bool(snapshot.get("cache_retained", False) or awaiting_confirmation),
+            "cache_notice": _cache_notice(snapshot),
+            "can_confirm_completion": awaiting_confirmation,
+            "can_stage_rollback": awaiting_confirmation,
+            "rollback_stage_options": [
+                {"key": key, "label": label} for key, label in ROLLBACK_STAGE_OPTIONS
+            ] if awaiting_confirmation else [],
             "has_final": bool(
                 str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip()
             ),
@@ -639,6 +1244,10 @@ class TaskManager:
         compacted.pop("logs", None)
         compacted.pop("error", None)
         compacted.pop("prompt_fixes", None)
+        compacted["completion_confirmed"] = True
+        compacted["awaiting_user_confirmation"] = False
+        compacted["cache_retained"] = False
+        compacted["message"] = COMPLETION_CONFIRMED_MESSAGE
         return compacted
 
     def _compact_record_after_completion(self, record: TaskRecord) -> None:
@@ -811,6 +1420,9 @@ class TaskManager:
             "current_node_id": None,
             "current_node_name": None,
             "current_batch": None,
+            "completion_confirmed": False,
+            "awaiting_user_confirmation": False,
+            "cache_retained": True,
             "debug_state": {},
         }
 
@@ -862,6 +1474,7 @@ class TaskManager:
             for snapshot in self._all_project_snapshots()
             if str(snapshot.get("visibility") or "private") == "public"
             and str(snapshot.get("status") or "") == "completed"
+            and _completion_confirmed(snapshot)
             and bool(
                 (snapshot.get("artifacts") or {}).get("final_output_text")
                 or (snapshot.get("artifacts") or {}).get("final_script")
@@ -877,6 +1490,8 @@ class TaskManager:
         if str(snapshot.get("visibility") or "private") != "public":
             return None
         if str(snapshot.get("status") or "") != "completed":
+            return None
+        if not _completion_confirmed(snapshot):
             return None
         artifacts = snapshot.get("artifacts") or {}
         final_script = str(
@@ -908,6 +1523,8 @@ class TaskManager:
             snapshot = self.get_project_snapshot(project_id, user_id=user_id, public_view=False)
         if not snapshot or not self._snapshot_belongs_to_user(snapshot, user_id):
             raise ValueError("项目不存在或无权操作")
+        if _completion_confirmed(snapshot):
+            raise ValueError("该剧本已确认满意完成并清理缓存，如需调整请重新生成。")
 
         title = str(changes.get("title") or "").strip()
         story_outline = str(changes.get("story_outline") or "").strip()
@@ -945,6 +1562,132 @@ class TaskManager:
             )
         return self._public_snapshot(snapshot)
 
+    def confirm_project_completion(
+        self,
+        project_id: int,
+        *,
+        user_id: int,
+    ) -> dict[str, Any]:
+        snapshot = self.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+        if not snapshot or not self._snapshot_belongs_to_user(snapshot, user_id):
+            raise ValueError("项目不存在或无权操作")
+        if str(snapshot.get("status") or "") != "completed":
+            raise ValueError("只有已完成的剧本才能确认满意完成")
+        if _completion_confirmed(snapshot):
+            return self._public_snapshot(snapshot)
+
+        record = self._projects.get(project_id)
+        if record:
+            self._update_snapshot(
+                record,
+                completion_confirmed=True,
+                awaiting_user_confirmation=False,
+                cache_retained=False,
+                message=COMPLETION_CONFIRMED_MESSAGE,
+                finished_at=snapshot.get("finished_at") or now_iso(),
+            )
+            self._compact_record_after_completion(record)
+            return self._public_snapshot(record.clone_snapshot())
+
+        snapshot.update(
+            {
+                "completion_confirmed": True,
+                "awaiting_user_confirmation": False,
+                "cache_retained": False,
+                "message": COMPLETION_CONFIRMED_MESSAGE,
+                "finished_at": snapshot.get("finished_at") or now_iso(),
+            }
+        )
+        compacted = self._compact_completed_snapshot(snapshot)
+        self._project_path(project_id).write_text(
+            json.dumps(compacted, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return self._public_snapshot(compacted)
+
+    def rollback_project_to_stage(
+        self,
+        project_id: int,
+        *,
+        user_id: int,
+        stage_key: str,
+    ) -> dict[str, Any]:
+        rollback_stage = str(stage_key or "").strip()
+        if rollback_stage not in ROLLBACK_STAGE_LABELS:
+            raise ValueError("请选择有效的回退阶段")
+
+        snapshot = self.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+        if not snapshot or not self._snapshot_belongs_to_user(snapshot, user_id):
+            raise ValueError("项目不存在或无权操作")
+        if str(snapshot.get("status") or "") in PROJECT_RUNNING_STATUSES:
+            raise ValueError("任务仍在执行中，不能回退重写")
+        if str(snapshot.get("status") or "") != "completed":
+            raise ValueError("只有已完成且缓存仍在的剧本才能执行阶段回退")
+        if _completion_confirmed(snapshot):
+            raise ValueError("该剧本已确认满意完成并清理缓存，如需调整请重新生成。")
+
+        debug_state = snapshot.get("debug_state")
+        if not isinstance(debug_state, dict) or not isinstance(debug_state.get("variables"), dict):
+            raise ValueError("当前项目缺少可回退的执行缓存，无法按阶段重写。")
+
+        old_task_id = str(snapshot.get("task_id") or "").strip()
+        new_task_id = uuid.uuid4().hex[:12]
+        rollback_snapshot = self._build_stage_rollback_snapshot(snapshot, rollback_stage)
+        model_option = settings.resolve_model_selection(
+            (snapshot.get("model_option") or {}).get("id")
+        )
+        stage_label = ROLLBACK_STAGE_LABELS[rollback_stage]
+        new_snapshot = copy.deepcopy(rollback_snapshot)
+        new_snapshot.update(
+            {
+                "task_id": new_task_id,
+                "status": "pending",
+                "message": f"已回退到“{stage_label}”，准备从该步骤重新生成。",
+                "error": None,
+                "rollback_of_task_id": old_task_id or None,
+                "rollback_stage": rollback_stage,
+                "updated_at": now_iso(),
+                "finished_at": None,
+                "completion_confirmed": False,
+                "awaiting_user_confirmation": False,
+                "cache_retained": True,
+            }
+        )
+
+        record = TaskRecord(
+            user_id=int(snapshot.get("user_id") or user_id or 0),
+            project_id=int(project_id),
+            task_id=new_task_id,
+            workflow_spec_path=str(snapshot.get("workflow_spec_path", "")),
+            input_payload=copy.deepcopy(snapshot.get("input_payload") or {}),
+            model_option=model_option,
+            snapshot=new_snapshot,
+            resume_snapshot=rollback_snapshot,
+        )
+        with self._lock:
+            if old_task_id:
+                self._tasks.pop(old_task_id, None)
+            self._tasks[new_task_id] = record
+            self._projects[int(project_id)] = record
+            self._remember_latest_project(int(user_id), int(project_id))
+        self._append_log(
+            record,
+            title="控制动作：阶段回退重写",
+            message=f"已保留前序阶段结果，并从“{stage_label}”开始重新生成。",
+        )
+        self._save_resume_checkpoint(record)
+        self._persist_snapshot(record)
+
+        thread = threading.Thread(
+            target=self._run_task,
+            args=(record,),
+            daemon=True,
+            name=f"workflow-task-{new_task_id}",
+        )
+        record.thread = thread
+        thread.start()
+        return self._public_snapshot(record.clone_snapshot())
+
     def _all_project_snapshots(self) -> list[dict[str, Any]]:
         snapshots: dict[int, dict[str, Any]] = {}
         for project_id, record in self._projects.items():
@@ -957,6 +1700,88 @@ class TaskManager:
             project_id = int(data.get("project_id") or path.stem or 0)
             snapshots.setdefault(project_id, data)
         return list(snapshots.values())
+
+    def _build_stage_rollback_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        stage_key: str,
+    ) -> dict[str, Any]:
+        rollback = copy.deepcopy(snapshot)
+        rollback["artifacts"] = self._rolled_back_artifacts(snapshot, stage_key)
+        rollback["debug_state"] = self._rolled_back_debug_state(snapshot, stage_key)
+        rollback["prompt_fixes"] = []
+        rollback["current_node_id"] = None
+        rollback["current_node_name"] = None
+        rollback["current_batch"] = None
+        rollback["progress_percent"] = self._rollback_progress_percent(stage_key)
+        rollback["generated_episodes"] = 0
+        rollback["current_stage"] = stage_key
+        rollback["current_stage_label"] = ROLLBACK_STAGE_LABELS.get(stage_key, stage_key)
+        rollback["message"] = f"已回退到“{ROLLBACK_STAGE_LABELS.get(stage_key, stage_key)}”，等待重新生成。"
+        rollback["error"] = None
+        rollback["finished_at"] = None
+        rollback["cache_retained"] = True
+        rollback["awaiting_user_confirmation"] = False
+        rollback["completion_confirmed"] = False
+        return rollback
+
+    def _rolled_back_artifacts(
+        self,
+        snapshot: dict[str, Any],
+        stage_key: str,
+    ) -> dict[str, Any]:
+        artifacts = copy.deepcopy(snapshot.get("artifacts") or {})
+        for key in ROLLBACK_ARTIFACT_CLEAR_RULES.get(stage_key, ()):
+            artifacts.pop(key, None)
+        artifacts.pop(STORY_TEASER_ARTIFACT, None)
+        artifacts.pop(STORY_TEASER_SOURCE_ARTIFACT, None)
+        return artifacts
+
+    def _rolled_back_debug_state(
+        self,
+        snapshot: dict[str, Any],
+        stage_key: str,
+    ) -> dict[str, Any]:
+        debug_state = copy.deepcopy(snapshot.get("debug_state") or {})
+        variables = debug_state.get("variables")
+        if not isinstance(variables, dict):
+            variables = {}
+
+        clear_keys = set(ROLLBACK_DEBUG_CLEAR_RULES.get(stage_key, ()))
+        for key in list(clear_keys):
+            clear_keys.update(DEBUG_VARIABLE_MIRRORS.get(key, ()))
+        for key in clear_keys:
+            variables.pop(key, None)
+
+        if stage_key in {"dialogues", "script", "final"}:
+            variables[LOCAL_REWRITE_FROM_STAGE] = (
+                "dialogue" if stage_key == "dialogues"
+                else "script" if stage_key == "script"
+                else "final"
+            )
+
+        debug_state["variables"] = variables
+        debug_state["node_outputs"] = {}
+        debug_state["halted_message"] = None
+        debug_state["final_output_text"] = ""
+        return debug_state
+
+    def _rollback_progress_percent(self, stage_key: str) -> int:
+        defaults = {
+            "framework": 0,
+            "appearance_strategy": 4,
+            "consistency": 1,
+            "episode_plan_normalize": 3,
+            "worldview": 7,
+            "characters": 12,
+            "scenes": 24,
+            "appearance": 30,
+            "hooks": 36,
+            "dialogues": 50,
+            "script": 68,
+            "final": 98,
+        }
+        return int(defaults.get(stage_key, 0))
 
     def _asset_summary(
         self,
@@ -996,6 +1821,9 @@ class TaskManager:
             "generated_episodes": int(snapshot.get("generated_episodes") or 0),
             "total_episodes": int(snapshot.get("total_episodes") or 0),
             "model_label": ((snapshot.get("model_option") or {}).get("label") or ""),
+            "completion_confirmed": _completion_confirmed(snapshot),
+            "awaiting_user_confirmation": _awaiting_completion_confirmation(snapshot),
+            "cache_notice": _cache_notice(snapshot),
         }
         if include_private:
             payload["final_preview"] = final_script[:500]
@@ -1124,13 +1952,15 @@ class TaskManager:
                 status="completed",
                 current_stage="finished",
                 current_stage_label=STAGE_LABELS["finished"],
-                message="剧本生成完成。",
+                message=COMPLETION_PENDING_MESSAGE,
                 finished_at=now_iso(),
                 progress_percent=100,
                 generated_episodes=record.snapshot.get("total_episodes", 0),
                 prompt_fixes=state.prompt_fixes,
+                completion_confirmed=False,
+                awaiting_user_confirmation=True,
+                cache_retained=True,
             )
-            self._compact_record_after_completion(record)
         except TaskTerminated as exc:
             if runtime is not None:
                 self._append_log(
@@ -1245,6 +2075,9 @@ class TaskManager:
                 "retry_of_task_id": old_task_id,
                 "updated_at": now_iso(),
                 "finished_at": None,
+                "completion_confirmed": False,
+                "awaiting_user_confirmation": False,
+                "cache_retained": True,
             }
         )
 
@@ -1333,6 +2166,9 @@ class TaskManager:
             "current_node_id": None,
             "current_node_name": None,
             "current_batch": None,
+            "completion_confirmed": False,
+            "awaiting_user_confirmation": False,
+            "cache_retained": True,
             "debug_state": {},
             "restart_of_task_id": old_task_id or None,
             "finished_at": None,

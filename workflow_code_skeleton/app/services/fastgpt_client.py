@@ -78,6 +78,11 @@ OUTPUT_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
         "scriptContent",
         "script_content",
     ),
+    "final_script": (
+        "final_script",
+        "system_text",
+        "final_output_text",
+    ),
     "is_consistent": (
         "is_consistent",
         "passed",

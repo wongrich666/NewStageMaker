@@ -992,6 +992,67 @@ a {
   background: rgba(255, 255, 255, 0.72);
 }
 
+.completion-panel {
+  margin-top: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  display: grid;
+  gap: 14px;
+}
+
+.completion-panel h3 {
+  margin: 0 0 8px;
+}
+
+.completion-panel p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.completion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rollback-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.compact-select {
+  min-width: 240px;
+  min-height: 46px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--ink);
+}
+
+.btn-success {
+  color: white;
+  background: #31E373;
+  box-shadow: 0 10px 24px rgba(49, 227, 115, 0.24);
+}
+
+.status-pill-locked {
+  color: #5B647A;
+  background: rgba(203, 185, 234, 0.34);
+}
+
+.status-pill-pending {
+  color: #6D5A14;
+  background: rgba(227, 177, 49, 0.22);
+}
+
 .tall-textarea {
   min-height: 280px !important;
 }
@@ -1105,6 +1166,17 @@ a {
   .tool-field-grid,
   .profile-grid {
     grid-template-columns: 1fr;
+  }
+
+  .completion-actions,
+  .rollback-group {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .compact-select {
+    min-width: 100%;
+    width: 100%;
   }
 
   .community-detail-head {
