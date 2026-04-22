@@ -56,6 +56,25 @@ OUTPUT_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
         "episodeplan",
         "episode_plan_content",
     ),
+    "normalized_episode_plan": (
+        "normalized_episode_plan",
+        "epPlanNormJson",
+    ),
+    "appearance_mapping": (
+        "appearance_mapping",
+        "appearanceMapping",
+        "h2KpLm91",
+    ),
+    "batch_dialogues": (
+        "batch_dialogues",
+        "dialogueContent",
+        "dialogue_content",
+    ),
+    "batch_script": (
+        "batch_script",
+        "scriptContent",
+        "script_content",
+    ),
     "is_consistent": (
         "is_consistent",
         "passed",

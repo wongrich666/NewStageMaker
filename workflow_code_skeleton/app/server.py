@@ -104,6 +104,23 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             current_auth_token=_current_auth_token(),
         )
 
+    @app.get("/community/<int:project_id>")
+    def community_detail_page(project_id: int):
+        asset = task_manager.get_public_asset(project_id)
+        if not asset:
+            return render_template(
+                "community_detail.html",
+                current_user=_current_user(),
+                current_auth_token=_current_auth_token(),
+                asset=None,
+            ), 404
+        return render_template(
+            "community_detail.html",
+            current_user=_current_user(),
+            current_auth_token=_current_auth_token(),
+            asset=asset,
+        )
+
     @app.get("/login")
     def login_page():
         if _current_user():
@@ -238,6 +255,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         assets = task_manager.list_public_assets()
         return _json_ok(assets=assets)
 
+    @app.get("/api/community/<int:project_id>")
+    def community_asset_detail(project_id: int):
+        asset = task_manager.get_public_asset(project_id)
+        if not asset:
+            return _json_error("公开作品不存在", status=404)
+        return _json_ok(asset=asset)
+
     @app.get("/api/projects/<int:project_id>")
     @_login_required
     def get_project(project_id: int):
@@ -272,6 +296,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "total_episodes": data.get("total_episodes", 0),
             "user_expectation": expectation,
             "character_count": data.get("character_count", 0),
+            "character_appearance_requirements": data.get("character_appearance_requirements", ""),
+            "character_alias_naming_rules": data.get("character_alias_naming_rules", ""),
+            "outfit_switch_rules": data.get("outfit_switch_rules", ""),
             "story_outline": data.get("story_outline", ""),
             "core_scene_input": data.get("core_scene_input", ""),
             "character_bios": data.get("character_bios", ""),

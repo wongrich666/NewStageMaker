@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..workflow_ids import (
+    APPEARANCE_ALIAS_NAMING_RULES_VAR,
+    APPEARANCE_MAPPING_VAR,
+    APPEARANCE_REQUIREMENTS_VAR,
     CHARACTER_BIOS_VAR,
     CHARACTER_MAX_RETRY_VAR,
     CHARACTER_VAR,
@@ -23,6 +26,8 @@ from ..workflow_ids import (
     FRAMEWORK_CHARACTER_COUNT_VAR,
     FRAMEWORK_CORE_SCENE_VAR,
     FRAMEWORK_EPISODE_PLAN_VAR,
+    FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR,
+    FRAMEWORK_ALIAS_NAMING_RULES_VAR,
     FRAMEWORK_TITLE_VAR,
     FRAMEWORK_TOTAL_EPISODES_VAR,
     FRAMEWORK_STORY_OUTLINE_VAR,
@@ -33,9 +38,20 @@ from ..workflow_ids import (
     HOOK_MAX_RETRY_VAR,
     MEMORY_VAR,
     SCENE_MAX_RETRY_VAR,
+    SCENE_APPEARANCE_REQUIREMENTS_VAR,
+    SCENE_ALIAS_NAMING_RULES_VAR,
     SCENE_VAR,
+    DIALOGUE_CHARACTER_INPUT_VAR,
     SCRIPT_CURRENT_VAR,
     SCRIPT_FINAL_VAR,
+    DIALOGUE_EPISODE_PLAN_INPUT_VAR,
+    DIALOGUE_HOOK_INPUT_VAR,
+    DIALOGUE_MAX_RETRY_INPUT_VAR,
+    DIALOGUE_OUTPUT_VAR,
+    DIALOGUE_SCENE_INPUT_VAR,
+    DIALOGUE_START_INPUT_VAR,
+    DIALOGUE_TOTAL_EPISODES_INPUT_VAR,
+    DIALOGUE_WORLDVIEW_INPUT_VAR,
     SCRIPT_START_VAR,
     SCRIPT_MAX_RETRY_VAR,
     STORY_OUTLINE_VAR,
@@ -51,6 +67,9 @@ TOTAL_EPISODES = "total_episodes"
 EPISODE_WORD_COUNT = "episode_word_count"
 USER_EXPECTATION = "user_expectation"
 CHARACTER_COUNT = "character_count"
+CHARACTER_APPEARANCE_REQUIREMENTS = "character_appearance_requirements"
+CHARACTER_ALIAS_NAMING_RULES = "character_alias_naming_rules"
+OUTFIT_SWITCH_RULES = "outfit_switch_rules"
 EPISODE_PLAN = "episode_plan"
 STORY_OUTLINE = "story_outline"
 USER_SCENES = "user_scenes"
@@ -71,6 +90,12 @@ FINAL_SCRIPT = "final_script"
 IS_CONSISTENT = "is_consistent"
 BATCH_START_EPISODE = "batch_start_episode"
 NORMALIZED_EPISODE_PLAN = "normalized_episode_plan"
+APPEARANCE_MAPPING = "appearance_mapping"
+CHARACTER_REGISTRY = "character_registry"
+CHARACTER_ALIAS_REGISTRY = "character_alias_registry"
+EPISODE_ALIAS_PLAN = "episode_alias_plan"
+APPEARANCE_CONTINUITY_MEMORY = "appearance_continuity_memory"
+SCENE_APPEARANCE_REQUIREMENTS = "scene_appearance_requirements"
 
 STAGE_FRAMEWORK = "framework"
 STAGE_CONSISTENCY = "consistency"
@@ -78,6 +103,7 @@ STAGE_EPISODE_PLAN_NORMALIZE = "episode_plan_normalize"
 STAGE_WORLDVIEW = "worldview"
 STAGE_CHARACTERS = "characters"
 STAGE_SCENES = "scenes"
+STAGE_APPEARANCE_ALIAS_GENERATION = "appearance_alias_generation"
 STAGE_HOOKS = "hooks"
 STAGE_DIALOGUES = "dialogues"
 STAGE_SCRIPT = "script"
@@ -162,6 +188,24 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
         "角色数量。",
         "用户输入",
     ),
+    CHARACTER_APPEARANCE_REQUIREMENTS: FastGPTVariable(
+        CHARACTER_APPEARANCE_REQUIREMENTS,
+        "string",
+        "用户补充的人物服装/造型/身份状态需求。当前会与 outfit_switch_rules 合并后传给 FastGPT 的服装版本需求变量。",
+        "用户输入",
+    ),
+    CHARACTER_ALIAS_NAMING_RULES: FastGPTVariable(
+        CHARACTER_ALIAS_NAMING_RULES,
+        "string",
+        "用户指定的人物别名/服装版本命名偏好，例如“顾沉（上班）/顾沉（居家）”。",
+        "用户输入",
+    ),
+    OUTFIT_SWITCH_RULES: FastGPTVariable(
+        OUTFIT_SWITCH_RULES,
+        "string",
+        "用户补充的换装切换规则，会在本地并入服装版本需求后传给前置与场景/映射阶段。",
+        "用户输入",
+    ),
     NORMALIZED_EPISODE_PLAN: FastGPTVariable(
         NORMALIZED_EPISODE_PLAN,
         "object",
@@ -209,6 +253,42 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
         "string",
         "生成的核心场景内容",
         "FastGPT 输出",
+    ),
+    SCENE_APPEARANCE_REQUIREMENTS: FastGPTVariable(
+        SCENE_APPEARANCE_REQUIREMENTS,
+        "object",
+        "从场景 JSON 中提炼出的视觉条件、造型条件、命名条件与 alias 使用规则摘要。",
+        "本地从场景阶段结果提炼",
+    ),
+    APPEARANCE_MAPPING: FastGPTVariable(
+        APPEARANCE_MAPPING,
+        "object",
+        "人物服装版本映射 JSON。内部保存 canonical 角色与 outfit variant / alias 的对应关系。",
+        "FastGPT 输出/本地缓存",
+    ),
+    CHARACTER_REGISTRY: FastGPTVariable(
+        CHARACTER_REGISTRY,
+        "object",
+        "角色基础身份注册表。保存 canonical 角色本体与稳定识别锚点。",
+        "本地从 appearance_mapping 提炼",
+    ),
+    CHARACTER_ALIAS_REGISTRY: FastGPTVariable(
+        CHARACTER_ALIAS_REGISTRY,
+        "object",
+        "角色别名注册表。保存 alias_name 与 canonical 角色的映射关系。",
+        "本地从 appearance_mapping 提炼",
+    ),
+    EPISODE_ALIAS_PLAN: FastGPTVariable(
+        EPISODE_ALIAS_PLAN,
+        "object",
+        "逐集 alias 使用计划。为当前批次切片后供 hooks / dialogues / script 使用。",
+        "本地从 normalized_episode_plan + appearance_mapping 提炼",
+    ),
+    APPEARANCE_CONTINUITY_MEMORY: FastGPTVariable(
+        APPEARANCE_CONTINUITY_MEMORY,
+        "object",
+        "跨批次保存的角色当前服装/别名状态记忆。",
+        "本地维护",
     ),
     BATCH_HOOKS: FastGPTVariable(
         BATCH_HOOKS,
@@ -296,6 +376,8 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         TOTAL_EPISODES: FRAMEWORK_TOTAL_EPISODES_VAR,
         USER_EXPECTATION: FRAMEWORK_USER_EXPECTATION_VAR,
         CHARACTER_COUNT: FRAMEWORK_CHARACTER_COUNT_VAR,
+        CHARACTER_APPEARANCE_REQUIREMENTS: FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR,
+        CHARACTER_ALIAS_NAMING_RULES: FRAMEWORK_ALIAS_NAMING_RULES_VAR,
     },
     STAGE_CONSISTENCY: {
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
@@ -303,6 +385,10 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
     },
     STAGE_EPISODE_PLAN_NORMALIZE: {
         EPISODE_PLAN: EPISODE_PLAN_VAR,
+        STORY_OUTLINE: STORY_OUTLINE_VAR,
+        USER_CHARACTERS: CHARACTER_BIOS_VAR,
+        WORLDVIEW: WORLDVIEW_VAR,
+        CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
     },
     STAGE_WORLDVIEW: {
         STORY_OUTLINE: STORY_OUTLINE_VAR,
@@ -315,6 +401,9 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         WORLDVIEW: WORLDVIEW_VAR,
         USER_CHARACTERS: CHARACTER_BIOS_VAR,
         STORY_OUTLINE: STORY_OUTLINE_VAR,
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
+        CHARACTER_APPEARANCE_REQUIREMENTS: APPEARANCE_REQUIREMENTS_VAR,
+        CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
         USER_CONTENT_BASELINE: "userContentBaselineJson",
         MAX_RETRIES: CHARACTER_MAX_RETRY_VAR,
     },
@@ -325,7 +414,20 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         STORY_OUTLINE: STORY_OUTLINE_VAR,
         USER_CHARACTERS: CHARACTER_BIOS_VAR,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
+        CHARACTER_APPEARANCE_REQUIREMENTS: SCENE_APPEARANCE_REQUIREMENTS_VAR,
+        CHARACTER_ALIAS_NAMING_RULES: SCENE_ALIAS_NAMING_RULES_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         MAX_RETRIES: SCENE_MAX_RETRY_VAR,
+    },
+    STAGE_APPEARANCE_ALIAS_GENERATION: {
+        WORLDVIEW: WORLDVIEW_VAR,
+        STORY_OUTLINE: STORY_OUTLINE_VAR,
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
+        USER_CHARACTERS: CHARACTER_BIOS_VAR,
+        CHARACTERS: CHARACTER_VAR,
+        SCENES: SCENE_VAR,
+        CHARACTER_APPEARANCE_REQUIREMENTS: APPEARANCE_REQUIREMENTS_VAR,
+        CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
     },
     STAGE_HOOKS: {
         WORLDVIEW: WORLDVIEW_VAR,
@@ -333,29 +435,33 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         SCENES: SCENE_VAR,
         STORY_OUTLINE: STORY_OUTLINE_VAR,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         BATCH_START_EPISODE: HOOK_START_VAR,
         ALL_HOOKS: HOOK_FINAL_VAR,
         MAX_RETRIES: HOOK_MAX_RETRY_VAR,
     },
     STAGE_DIALOGUES: {
-        WORLDVIEW: WORLDVIEW_VAR,
-        CHARACTERS: CHARACTER_VAR,
-        SCENES: SCENE_VAR,
-        ALL_HOOKS: HOOK_FINAL_VAR,
-        EPISODE_PLAN: EPISODE_PLAN_VAR,
-        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
-        BATCH_START_EPISODE: DIALOGUE_START_VAR,
+        WORLDVIEW: DIALOGUE_WORLDVIEW_INPUT_VAR,
+        CHARACTERS: DIALOGUE_CHARACTER_INPUT_VAR,
+        SCENES: DIALOGUE_SCENE_INPUT_VAR,
+        ALL_HOOKS: DIALOGUE_HOOK_INPUT_VAR,
+        EPISODE_PLAN: DIALOGUE_EPISODE_PLAN_INPUT_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        TOTAL_EPISODES: DIALOGUE_TOTAL_EPISODES_INPUT_VAR,
+        BATCH_START_EPISODE: DIALOGUE_START_INPUT_VAR,
         ALL_DIALOGUES: DIALOGUE_FINAL_VAR,
-        MAX_RETRIES: DIALOGUE_MAX_RETRY_VAR,
+        MAX_RETRIES: DIALOGUE_MAX_RETRY_INPUT_VAR,
     },
     STAGE_SCRIPT: {
         WORLDVIEW: WORLDVIEW_VAR,
         CHARACTERS: CHARACTER_VAR,
+        SCENES: SCENE_VAR,
         ALL_HOOKS: HOOK_FINAL_VAR,
         ALL_DIALOGUES: DIALOGUE_FINAL_VAR,
         STORY_OUTLINE: STORY_OUTLINE_VAR,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         EPISODE_WORD_COUNT: EPISODE_WORD_COUNT_VAR,
         LAST_SUMMARY: MEMORY_VAR,
@@ -392,8 +498,9 @@ LEGACY_OUTPUT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
     STAGE_WORLDVIEW: {WORLDVIEW: (WORLDVIEW_VAR,)},
     STAGE_CHARACTERS: {CHARACTERS: (CHARACTER_VAR,)},
     STAGE_SCENES: {SCENES: (CORE_SCENE_FINAL_VAR, SCENE_VAR)},
+    STAGE_APPEARANCE_ALIAS_GENERATION: {APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,)},
     STAGE_HOOKS: {BATCH_HOOKS: (HOOK_CURRENT_VAR, HOOK_FINAL_VAR)},
-    STAGE_DIALOGUES: {BATCH_DIALOGUES: (DIALOGUE_CURRENT_VAR, DIALOGUE_FINAL_VAR)},
+    STAGE_DIALOGUES: {BATCH_DIALOGUES: (DIALOGUE_OUTPUT_VAR, DIALOGUE_CURRENT_VAR, DIALOGUE_FINAL_VAR)},
     STAGE_SCRIPT: {BATCH_SCRIPT: (SCRIPT_CURRENT_VAR, SCRIPT_FINAL_VAR)},
     STAGE_MEMORY: {LAST_SUMMARY: (MEMORY_VAR,)},
     STAGE_FINAL: {FINAL_SCRIPT: (SCRIPT_FINAL_VAR,)},
@@ -404,7 +511,13 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
     STAGE_FRAMEWORK: FastGPTStageContract(
         stage_name=STAGE_FRAMEWORK,
         label="剧本框架撰写",
-        input_names=(TOTAL_EPISODES, USER_EXPECTATION, CHARACTER_COUNT),
+        input_names=(
+            TOTAL_EPISODES,
+            USER_EXPECTATION,
+            CHARACTER_COUNT,
+            CHARACTER_APPEARANCE_REQUIREMENTS,
+            CHARACTER_ALIAS_NAMING_RULES,
+        ),
         output_types={
             SCRIPT_TITLE: "string",
             STORY_OUTLINE: "string",
@@ -426,10 +539,10 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
     STAGE_EPISODE_PLAN_NORMALIZE: FastGPTStageContract(
         stage_name=STAGE_EPISODE_PLAN_NORMALIZE,
         label="分集计划规范化",
-        input_names=(EPISODE_PLAN,),
+        input_names=(EPISODE_PLAN, STORY_OUTLINE, USER_CHARACTERS, CHARACTER_ALIAS_NAMING_RULES),
         output_types={NORMALIZED_EPISODE_PLAN: "object"},
         fastgpt_responsibility="只把原始分集计划整理成结构化 JSON，不做改写、润色、摘要或扩写。",
-        local_responsibility="缓存规范化结果，后续批处理阶段只读取当前批次需要的集数。",
+        local_responsibility="缓存规范化结果，并从中提炼逐集 alias 使用计划供后续批处理阶段读取当前批次需要的集数。",
     ),
     STAGE_WORLDVIEW: FastGPTStageContract(
         stage_name=STAGE_WORLDVIEW,
@@ -442,7 +555,14 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
     STAGE_CHARACTERS: FastGPTStageContract(
         stage_name=STAGE_CHARACTERS,
         label="人物设定生成与审核",
-        input_names=(USER_CHARACTERS, WORLDVIEW),
+        input_names=(
+            USER_CHARACTERS,
+            WORLDVIEW,
+            STORY_OUTLINE,
+            EPISODE_PLAN,
+            CHARACTER_APPEARANCE_REQUIREMENTS,
+            CHARACTER_ALIAS_NAMING_RULES,
+        ),
         output_types={CHARACTERS: "string"},
         fastgpt_responsibility="完成人设生成、审核、修订、整理。",
         local_responsibility="不做业务审核循环，只校验 characters 是否按契约返回并缓存。",
@@ -450,10 +570,35 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
     STAGE_SCENES: FastGPTStageContract(
         stage_name=STAGE_SCENES,
         label="核心场景生成与审核",
-        input_names=(USER_SCENES, WORLDVIEW),
+        input_names=(
+            USER_SCENES,
+            WORLDVIEW,
+            STORY_OUTLINE,
+            USER_CHARACTERS,
+            EPISODE_PLAN,
+            CHARACTER_APPEARANCE_REQUIREMENTS,
+            CHARACTER_ALIAS_NAMING_RULES,
+        ),
         output_types={SCENES: "string"},
         fastgpt_responsibility="完成核心场景提炼/复用、生成、审核、修订、整理。",
         local_responsibility="不做业务审核循环，只校验 scenes 是否按契约返回并缓存。",
+    ),
+    STAGE_APPEARANCE_ALIAS_GENERATION: FastGPTStageContract(
+        stage_name=STAGE_APPEARANCE_ALIAS_GENERATION,
+        label="人物服装版本映射",
+        input_names=(
+            WORLDVIEW,
+            STORY_OUTLINE,
+            EPISODE_PLAN,
+            USER_CHARACTERS,
+            CHARACTERS,
+            SCENES,
+            CHARACTER_APPEARANCE_REQUIREMENTS,
+            CHARACTER_ALIAS_NAMING_RULES,
+        ),
+        output_types={APPEARANCE_MAPPING: "object"},
+        fastgpt_responsibility="基于人物、场景、分集计划与命名偏好，生成人物服装版本映射与 alias registry。",
+        local_responsibility="缓存服装版本映射，并提炼 canonical 角色注册表、alias 注册表与逐集 alias 计划。",
     ),
     STAGE_HOOKS: FastGPTStageContract(
         stage_name=STAGE_HOOKS,
@@ -461,7 +606,12 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         input_names=(
             WORLDVIEW,
             CHARACTERS,
+            SCENES,
             EPISODE_PLAN,
+            APPEARANCE_MAPPING,
+            CHARACTER_ALIAS_REGISTRY,
+            EPISODE_ALIAS_PLAN,
+            APPEARANCE_CONTINUITY_MEMORY,
             TOTAL_EPISODES,
             LAST_SUMMARY,
             BATCH_START_EPISODE,
@@ -474,8 +624,15 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         stage_name=STAGE_DIALOGUES,
         label="角色对话批处理",
         input_names=(
+            WORLDVIEW,
             CHARACTERS,
+            SCENES,
+            ALL_HOOKS,
             EPISODE_PLAN,
+            APPEARANCE_MAPPING,
+            CHARACTER_ALIAS_REGISTRY,
+            EPISODE_ALIAS_PLAN,
+            APPEARANCE_CONTINUITY_MEMORY,
             TOTAL_EPISODES,
             LAST_SUMMARY,
             BATCH_START_EPISODE,
@@ -489,9 +646,15 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         label="剧本正文批处理",
         input_names=(
             WORLDVIEW,
+            CHARACTERS,
+            SCENES,
             ALL_HOOKS,
             ALL_DIALOGUES,
             EPISODE_PLAN,
+            APPEARANCE_MAPPING,
+            CHARACTER_ALIAS_REGISTRY,
+            EPISODE_ALIAS_PLAN,
+            APPEARANCE_CONTINUITY_MEMORY,
             TOTAL_EPISODES,
             LAST_SUMMARY,
             BATCH_START_EPISODE,

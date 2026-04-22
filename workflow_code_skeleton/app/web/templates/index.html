@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>IDEA TO SCRIPT  剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260421-3">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260421-5">
 </head>
 <body>
   <main class="shell">
@@ -141,6 +141,22 @@
           <span>用户期待</span>
           <textarea id="expectationInput" placeholder="例如：我想要一个60集的末世求生复仇故事，前期压迫感强，中期升级爽，后期反转大。"></textarea>
         </label>
+
+        <details class="advanced-inputs">
+          <summary>服装与命名高级设置（可选）</summary>
+          <label class="field">
+            <span>服装版本需求</span>
+            <textarea id="appearanceRequirementsInput" placeholder="例如：男主 1-10 集保持上班装，11-20 集潜伏伪装；女主职场态与居家态分开。"></textarea>
+          </label>
+          <label class="field">
+            <span>命名偏好</span>
+            <textarea id="aliasNamingRulesInput" placeholder="例如：统一使用“角色名（场景/状态）”，如 顾沉（上班）/顾沉（居家）。"></textarea>
+          </label>
+          <label class="field">
+            <span>服装切换规则</span>
+            <textarea id="outfitSwitchRulesInput" placeholder="例如：进入办公室场景优先职场态；进入居家夜晚场景切到生活态；黑化后全程切换黑化态别名。"></textarea>
+          </label>
+        </details>
 
         <p id="formHint" class="hint">你只需要填写用户期待、角色数量和总集数；剧本标题、故事大纲、人物小传、核心场景、分集计划都会先由框架阶段自动生成。</p>
       </section>
@@ -307,11 +323,12 @@
       projectsUrl: "/api/projects",
       assetsUrl: "/api/assets",
       communityUrl: "/api/community",
+      communityDetailBaseUrl: "/community",
       toolsUrl: "/api/tools",
       startUrl: "/api/workflows/start",
       loginUrl: "{{ url_for('login_page') }}"
     };
   </script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260421-3"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260421-5"></script>
 </body>
 </html>

@@ -30,6 +30,9 @@ class WorkflowInput:
     total_episodes: int
     user_expectation: str
     character_count: int
+    character_appearance_requirements: str
+    character_alias_naming_rules: str
+    outfit_switch_rules: str
     story_outline: str
     core_scene_input: str
     character_bios: str
@@ -74,6 +77,35 @@ class WorkflowInput:
             character_count=int(
                 _pick(data, "character_count", "角色数量", default=0)
             ),
+            character_appearance_requirements=str(
+                _pick(
+                    data,
+                    "character_appearance_requirements",
+                    "appearance_requirements",
+                    "服装版本需求",
+                    "人物服装要求",
+                    default="",
+                )
+            ).strip(),
+            character_alias_naming_rules=str(
+                _pick(
+                    data,
+                    "character_alias_naming_rules",
+                    "alias_naming_rules",
+                    "命名偏好",
+                    "人物别名命名规则",
+                    default="",
+                )
+            ).strip(),
+            outfit_switch_rules=str(
+                _pick(
+                    data,
+                    "outfit_switch_rules",
+                    "服装切换规则",
+                    "换装规则",
+                    default="",
+                )
+            ).strip(),
             story_outline=str(
                 _pick(data, "story_outline", "故事大纲", default="")
             ).strip(),

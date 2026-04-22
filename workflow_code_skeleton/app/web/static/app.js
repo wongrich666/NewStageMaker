@@ -22,6 +22,9 @@
     expectationInput: $("expectationInput"),
     characterCountInput: $("characterCountInput"),
     episodeCountInput: $("episodeCountInput"),
+    appearanceRequirementsInput: $("appearanceRequirementsInput"),
+    aliasNamingRulesInput: $("aliasNamingRulesInput"),
+    outfitSwitchRulesInput: $("outfitSwitchRulesInput"),
     formHint: $("formHint"),
 
     startBtn: $("startBtn"),
@@ -240,6 +243,9 @@
       user_expectation: els.expectationInput.value.trim(),
       character_count: Number(els.characterCountInput.value || 0),
       total_episodes: Number(els.episodeCountInput.value || 0),
+      character_appearance_requirements: els.appearanceRequirementsInput?.value.trim() || "",
+      character_alias_naming_rules: els.aliasNamingRulesInput?.value.trim() || "",
+      outfit_switch_rules: els.outfitSwitchRulesInput?.value.trim() || "",
     };
     draftStorage.setItem(STORAGE.draft, JSON.stringify(draft));
     draftStorage.setItem(STORAGE.modelId, els.modelSelect.value || "");
@@ -253,6 +259,15 @@
       els.expectationInput.value = draft.user_expectation || "";
       els.characterCountInput.value = draft.character_count || 5;
       els.episodeCountInput.value = draft.total_episodes || 10;
+      if (els.appearanceRequirementsInput) {
+        els.appearanceRequirementsInput.value = draft.character_appearance_requirements || "";
+      }
+      if (els.aliasNamingRulesInput) {
+        els.aliasNamingRulesInput.value = draft.character_alias_naming_rules || "";
+      }
+      if (els.outfitSwitchRulesInput) {
+        els.outfitSwitchRulesInput.value = draft.outfit_switch_rules || "";
+      }
     } catch (_) {}
   }
 
@@ -265,6 +280,9 @@
       els.expectationInput.value.trim()
       || Number(els.characterCountInput.value || 5) !== 5
       || Number(els.episodeCountInput.value || 10) !== 10
+      || (els.appearanceRequirementsInput?.value.trim() || "")
+      || (els.aliasNamingRulesInput?.value.trim() || "")
+      || (els.outfitSwitchRulesInput?.value.trim() || "")
     );
   }
 
@@ -273,6 +291,23 @@
     els.expectationInput.value = inputPayload.user_expectation || "";
     els.characterCountInput.value = inputPayload.character_count || 5;
     els.episodeCountInput.value = inputPayload.total_episodes || 10;
+    if (els.appearanceRequirementsInput) {
+      els.appearanceRequirementsInput.value =
+        inputPayload.character_appearance_requirements
+        || inputPayload.appearance_requirements
+        || "";
+    }
+    if (els.aliasNamingRulesInput) {
+      els.aliasNamingRulesInput.value =
+        inputPayload.character_alias_naming_rules
+        || inputPayload.alias_naming_rules
+        || "";
+    }
+    if (els.outfitSwitchRulesInput) {
+      els.outfitSwitchRulesInput.value =
+        inputPayload.outfit_switch_rules
+        || "";
+    }
     saveDraft();
   }
 
@@ -477,6 +512,9 @@
       character_count: Number(els.characterCountInput.value || 0),
       episode_word_count: 500,
       total_episodes: Number(els.episodeCountInput.value || 0),
+      character_appearance_requirements: els.appearanceRequirementsInput?.value.trim() || "",
+      character_alias_naming_rules: els.aliasNamingRulesInput?.value.trim() || "",
+      outfit_switch_rules: els.outfitSwitchRulesInput?.value.trim() || "",
       title: "",
       story_outline: "",
       core_scene_input: "",
@@ -660,6 +698,15 @@
     els.expectationInput.value = "";
     els.characterCountInput.value = 5;
     els.episodeCountInput.value = 10;
+    if (els.appearanceRequirementsInput) {
+      els.appearanceRequirementsInput.value = "";
+    }
+    if (els.aliasNamingRulesInput) {
+      els.aliasNamingRulesInput.value = "";
+    }
+    if (els.outfitSwitchRulesInput) {
+      els.outfitSwitchRulesInput.value = "";
+    }
     els.formHint.textContent = "已清空当前编辑表单；后台任务和你的剧本资产都会保留。";
   }
 
@@ -673,6 +720,10 @@
 
   function visibilityLabel(value) {
     return value === "public" ? "公开成品" : "不公开";
+  }
+
+  function communityDetailUrl(projectId) {
+    return `${window.scriptMakerConfig.communityDetailBaseUrl || "/community"}/${encodeURIComponent(projectId)}`;
   }
 
   function emptyCard(message, actionText = "") {
@@ -775,8 +826,8 @@
     els.assetsList.innerHTML = assets.map((item) => `
       <article class="asset-tile">
         <div class="asset-topline">
-          <span>${escapeHtml(statusLabel(item.status))}</span>
-          <span>${escapeHtml(visibilityLabel(item.visibility))}</span>
+          <span class="status-pill ${item.status === "completed" ? "status-pill-completed" : ""}">${escapeHtml(statusLabel(item.status))}</span>
+          <span class="status-pill ${item.visibility === "public" ? "status-pill-public" : "status-pill-private"}">${escapeHtml(visibilityLabel(item.visibility))}</span>
         </div>
         <h3>${escapeHtml(item.title)}</h3>
         <p>${escapeHtml(item.summary)}</p>
@@ -787,9 +838,9 @@
         </div>
         <div class="asset-actions">
           <button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>
-          <button class="btn btn-ghost" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">新页面打开</button>
-          <button class="btn btn-secondary" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">修改</button>
-          <button class="btn btn-ghost" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : "公开成品"}</button>
+          <button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">新页面打开</button>
+          <button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">修改</button>
+          <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : "公开成品"}</button>
           <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除</button>
         </div>
       </article>
@@ -804,9 +855,12 @@
     }
     els.communityList.innerHTML = assets.map((item) => `
       <article class="community-tile">
-        <span class="community-tag">公开成品</span>
+        <span class="community-tag status-pill-public">公开成品</span>
         <h3>${escapeHtml(item.title)}</h3>
         <p>${escapeHtml(item.summary)}</p>
+        <div class="community-actions">
+          <a class="btn btn-secondary" href="${escapeHtml(communityDetailUrl(item.project_id))}" target="_blank" rel="noopener">查看全文</a>
+        </div>
       </article>
     `).join("");
   }
@@ -980,8 +1034,11 @@
       els.expectationInput,
       els.characterCountInput,
       els.episodeCountInput,
+      els.appearanceRequirementsInput,
+      els.aliasNamingRulesInput,
+      els.outfitSwitchRulesInput,
       els.modelSelect
-    ].forEach((el) => {
+    ].filter(Boolean).forEach((el) => {
       el.addEventListener("input", saveDraft);
       el.addEventListener("change", saveDraft);
     });

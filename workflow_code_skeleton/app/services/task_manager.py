@@ -14,6 +14,17 @@ from ..config import ModelOption, settings
 from ..models.inputs import WorkflowInput
 from ..models.state import WorkflowState
 from ..orchestrators.runner import run_configured_workflow
+from .fastgpt_contracts import (
+    APPEARANCE_CONTINUITY_MEMORY,
+    APPEARANCE_MAPPING,
+    CHARACTER_ALIAS_NAMING_RULES,
+    CHARACTER_ALIAS_REGISTRY,
+    CHARACTER_APPEARANCE_REQUIREMENTS,
+    CHARACTER_REGISTRY,
+    EPISODE_ALIAS_PLAN,
+    NORMALIZED_EPISODE_PLAN,
+    OUTFIT_SWITCH_RULES,
+)
 from .llm_client import llm_client
 from .workflow_spec import WorkflowSpec
 from ..utils.logger import get_logger
@@ -45,6 +56,7 @@ STAGE_LABELS = {
     "worldview": "正在整理故事规则",
     "character": "正在梳理人物",
     "scene": "正在整理关键场景",
+    "appearance": "正在生成服装版本映射",
     "hook": "正在设计开场冲突",
     "dialogue": "正在补充人物对白",
     "script": "正在生成正文",
@@ -265,11 +277,20 @@ class WorkflowRuntime:
             "story_outline": state.get_var(STORY_OUTLINE_VAR, ""),
             "character_bios": state.get_var(CHARACTER_BIOS_VAR, ""),
             "episode_plan": state.get_var(EPISODE_PLAN_VAR, ""),
+            "normalized_episode_plan": state.get_var(NORMALIZED_EPISODE_PLAN, ""),
             "worldview": state.get_var(WORLDVIEW_VAR, ""),
             "character_summary": state.get_var(FINAL_CHARACTER_VAR, state.get_var(CHARACTER_VAR, "")),
             "scene_json": state.get_var(SCENE_VAR, ""),
             "core_scene_input": state.get_var(CORE_SCENE_INPUT_VAR, ""),
             "core_scene_summary": state.get_var(FINAL_SCENE_VAR, state.get_var(CORE_SCENE_FINAL_VAR, "")),
+            "character_appearance_requirements": state.get_var(CHARACTER_APPEARANCE_REQUIREMENTS, ""),
+            "character_alias_naming_rules": state.get_var(CHARACTER_ALIAS_NAMING_RULES, ""),
+            "outfit_switch_rules": state.get_var(OUTFIT_SWITCH_RULES, ""),
+            "appearance_mapping": state.get_var(APPEARANCE_MAPPING, ""),
+            "character_registry": state.get_var(CHARACTER_REGISTRY, ""),
+            "character_alias_registry": state.get_var(CHARACTER_ALIAS_REGISTRY, ""),
+            "episode_alias_plan": state.get_var(EPISODE_ALIAS_PLAN, ""),
+            "appearance_continuity_memory": state.get_var(APPEARANCE_CONTINUITY_MEMORY, ""),
             "hook_plan": state.get_var(HOOK_FINAL_VAR, ""),
             "dialogue_plan": state.get_var(DIALOGUE_FINAL_VAR, ""),
             "script_batch": state.get_var(SCRIPT_CURRENT_VAR, ""),
@@ -612,6 +633,30 @@ class TaskManager:
         ]
         assets.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return assets[:24]
+
+    def get_public_asset(self, project_id: int) -> dict[str, Any] | None:
+        snapshot = self.get_project_snapshot(project_id)
+        if not snapshot:
+            return None
+        if str(snapshot.get("visibility") or "private") != "public":
+            return None
+        if str(snapshot.get("status") or "") != "completed":
+            return None
+        artifacts = snapshot.get("artifacts") or {}
+        final_script = str(
+            artifacts.get("final_output_text") or artifacts.get("final_script") or ""
+        ).strip()
+        if not final_script:
+            return None
+
+        payload = self._asset_summary(snapshot, include_private=False, use_teaser=True)
+        payload["final_script"] = final_script
+        payload["story_outline"] = str(
+            artifacts.get("story_outline")
+            or (snapshot.get("input_payload") or {}).get("story_outline")
+            or ""
+        ).strip()
+        return payload
 
     def update_project_asset(
         self,
@@ -1073,23 +1118,73 @@ class TaskManager:
         txt_path = self.exports_dir / f"{base_name}.txt"
         docx_path = self.exports_dir / f"{base_name}.docx"
         zip_path = self.exports_dir / f"{base_name}.zip"
+        notice_path = self.exports_dir / f"{base_name}_导出说明.txt"
+        json_exports: list[tuple[str, Path]] = [
+            ("character_registry", self.exports_dir / f"{base_name}_character_registry.json"),
+            ("character_alias_registry", self.exports_dir / f"{base_name}_character_alias_registry.json"),
+            ("episode_alias_plan", self.exports_dir / f"{base_name}_episode_alias_plan.json"),
+            ("appearance_mapping", self.exports_dir / f"{base_name}_appearance_mapping.json"),
+            ("appearance_continuity_memory", self.exports_dir / f"{base_name}_appearance_continuity_memory.json"),
+            ("normalized_episode_plan", self.exports_dir / f"{base_name}_normalized_episode_plan.json"),
+        ]
 
         txt_path.write_text(content, encoding="utf-8")
+        exported_json_files: dict[str, str] = {}
+        for artifact_key, file_path in json_exports:
+            value = artifacts.get(artifact_key)
+            if value in (None, "", {}, []):
+                if file_path.exists():
+                    file_path.unlink()
+                continue
+            try:
+                if isinstance(value, str):
+                    text = value.strip()
+                    if not text:
+                        continue
+                    parsed = json.loads(text)
+                    file_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
+                else:
+                    file_path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+                exported_json_files[artifact_key] = str(file_path)
+            except Exception:
+                logger.warning("导出结构化 JSON 失败: %s %s", project_id, artifact_key, exc_info=True)
+        docx_available = False
+        export_notice = ""
         try:
             from ..utils.txt_to_docx import convert as convert_txt_to_docx
             convert_txt_to_docx(str(txt_path), str(docx_path))
+            docx_available = True
         except ModuleNotFoundError as exc:
             if exc.name == "docx":
-                raise ValueError("导出 Word 失败：当前环境缺少 python-docx，请先安装该依赖。") from exc
-            raise ValueError(f"导出 Word 失败：{exc}") from exc
+                export_notice = (
+                    "当前环境缺少 python-docx，已先为你导出完整 TXT 版本。\n"
+                    "如需同时导出 Word，请执行：python -m pip install python-docx\n"
+                )
+            else:
+                raise ValueError(f"导出 Word 失败：{exc}") from exc
         except Exception as exc:
             logger.exception("导出 Word 失败: %s", project_id)
-            raise ValueError(f"导出 Word 失败：{exc}") from exc
+            export_notice = (
+                "本次 Word 导出失败，但完整 TXT 版本已经保留。\n"
+                f"失败原因：{exc}\n"
+            )
+
+        if export_notice:
+            notice_path.write_text(export_notice, encoding="utf-8")
+        elif notice_path.exists():
+            notice_path.unlink()
 
         try:
             with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 archive.write(txt_path, arcname=txt_path.name)
-                archive.write(docx_path, arcname=docx_path.name)
+                if docx_available and docx_path.exists():
+                    archive.write(docx_path, arcname=docx_path.name)
+                for file_path in exported_json_files.values():
+                    path_obj = Path(file_path)
+                    if path_obj.exists():
+                        archive.write(path_obj, arcname=path_obj.name)
+                if export_notice and notice_path.exists():
+                    archive.write(notice_path, arcname=notice_path.name)
         except Exception as exc:
             logger.exception("导出压缩包失败: %s", project_id)
             raise ValueError(f"导出压缩包失败：{exc}") from exc
@@ -1108,8 +1203,10 @@ class TaskManager:
             ),
             saved_file=str(zip_path),
             saved_txt_file=str(txt_path),
-            saved_docx_file=str(docx_path),
+            saved_docx_file=str(docx_path) if docx_available and docx_path.exists() else "",
             saved_zip_file=str(zip_path),
+            export_notice=export_notice,
+            saved_json_files=exported_json_files,
         )
         return zip_path
 

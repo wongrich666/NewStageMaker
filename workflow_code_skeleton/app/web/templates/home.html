@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>剧本生成平台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260421-3">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260421-4">
 </head>
 <body class="home-body">
   <main class="home-shell">
@@ -91,9 +91,12 @@
         {% if community_assets %}
           {% for item in community_assets %}
             <article class="community-tile">
-              <span class="community-tag">公开成品</span>
+              <span class="community-tag status-pill-public">公开成品</span>
               <h3>{{ item.title }}</h3>
               <p>{{ item.summary }}</p>
+              <div class="community-actions">
+                <a class="btn btn-secondary" href="{{ url_for('community_detail_page', project_id=item.project_id, auth_token=current_auth_token) }}">查看全文</a>
+              </div>
             </article>
           {% endfor %}
         {% else %}

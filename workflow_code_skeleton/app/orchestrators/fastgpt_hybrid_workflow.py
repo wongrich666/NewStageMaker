@@ -15,21 +15,31 @@ from ..services.fastgpt_contracts import (
     ALL_DIALOGUES,
     ALL_HOOKS,
     ALL_SCRIPT,
+    APPEARANCE_CONTINUITY_MEMORY,
+    APPEARANCE_MAPPING,
     BATCH_START_EPISODE,
     BATCH_DIALOGUES,
     BATCH_HOOKS,
     BATCH_SCRIPT,
     CHARACTERS,
+    CHARACTER_ALIAS_NAMING_RULES,
+    CHARACTER_ALIAS_REGISTRY,
+    CHARACTER_APPEARANCE_REQUIREMENTS,
+    CHARACTER_REGISTRY,
     EPISODE_WORD_COUNT,
     EPISODE_PLAN,
+    EPISODE_ALIAS_PLAN,
     FINAL_SCRIPT,
     IS_CONSISTENT,
     LAST_SUMMARY,
     MAX_RETRIES,
     NORMALIZED_EPISODE_PLAN,
     CHARACTER_COUNT,
+    OUTFIT_SWITCH_RULES,
     SCENES,
+    SCENE_APPEARANCE_REQUIREMENTS,
     SCRIPT_TITLE,
+    STAGE_APPEARANCE_ALIAS_GENERATION,
     STAGE_FRAMEWORK,
     STAGE_CHARACTERS,
     STAGE_CONSISTENCY,
@@ -53,6 +63,9 @@ from ..services.fastgpt_contracts import (
 from ..utils.episode import BatchWindow, iter_episode_batches
 from ..utils.logger import get_logger
 from ..workflow_ids import (
+    APPEARANCE_ALIAS_NAMING_RULES_VAR,
+    APPEARANCE_MAPPING_VAR,
+    APPEARANCE_REQUIREMENTS_VAR,
     CHARACTER_BIOS_VAR,
     CHARACTER_VAR,
     CORE_SCENE_INPUT_VAR,
@@ -65,6 +78,8 @@ from ..workflow_ids import (
     EPISODE_PLAN_NORMALIZED_VAR,
     FINAL_CHARACTER_VAR,
     FINAL_SCENE_VAR,
+    FRAMEWORK_ALIAS_NAMING_RULES_VAR,
+    FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR,
     HOOK_CURRENT_VAR,
     HOOK_START_VAR,
     HOOK_FINAL_VAR,
@@ -112,6 +127,7 @@ def run_fastgpt_hybrid_workflow(
     _restore_resume_state(state, variables, resume_snapshot)
     _apply_framework_outputs_to_variables(payload, variables)
     _apply_normalized_episode_plan_to_variables(payload, variables)
+    _apply_appearance_outputs_to_variables(variables)
     _sync_state_variables(state, variables)
     sync_runtime_state(state)
 
@@ -258,6 +274,30 @@ def run_fastgpt_hybrid_workflow(
         )
     _sync_state_variables(state, variables)
 
+    if _normalize_appearance_mapping_object(variables.get(APPEARANCE_MAPPING)):
+        _apply_appearance_outputs_to_variables(variables)
+        set_runtime_stage(
+            state,
+            "appearance",
+            "已从缓存恢复人物服装版本映射。",
+            progress_percent=42,
+        )
+    else:
+        variables.update(
+            _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                variables,
+                stage_key="appearance",
+                message="正在生成人物服装版本映射。",
+                progress_percent=42,
+            )
+        )
+        if not _apply_appearance_outputs_to_variables(variables):
+            raise ValueError("人物服装版本映射阶段返回内容不可解析，未得到合法 appearance_mapping。")
+    _sync_state_variables(state, variables)
+
     _run_batched_generation(state, runner, payload, variables)
 
     final_output = _run_fastgpt_stage(
@@ -286,16 +326,29 @@ def run_fastgpt_hybrid_workflow(
 
 
 def _initial_fastgpt_variables(payload: WorkflowInput) -> dict[str, Any]:
+    appearance_requirements = _merge_optional_text(
+        payload.character_appearance_requirements,
+        payload.outfit_switch_rules,
+    )
     return {
         SCRIPT_TITLE: payload.title,
         TOTAL_EPISODES: payload.total_episodes,
         EPISODE_WORD_COUNT: payload.episode_word_count,
         USER_EXPECTATION: payload.user_expectation,
         CHARACTER_COUNT: payload.character_count,
+        CHARACTER_APPEARANCE_REQUIREMENTS: appearance_requirements,
+        CHARACTER_ALIAS_NAMING_RULES: payload.character_alias_naming_rules,
+        OUTFIT_SWITCH_RULES: payload.outfit_switch_rules,
         EPISODE_PLAN: payload.episode_plan,
         STORY_OUTLINE: payload.story_outline,
         USER_SCENES: payload.core_scene_input,
         USER_CHARACTERS: payload.character_bios,
+        APPEARANCE_MAPPING: {},
+        CHARACTER_REGISTRY: {},
+        CHARACTER_ALIAS_REGISTRY: {},
+        EPISODE_ALIAS_PLAN: {},
+        APPEARANCE_CONTINUITY_MEMORY: {},
+        SCENE_APPEARANCE_REQUIREMENTS: {},
         USER_CONTENT_BASELINE: _build_user_content_baseline(payload),
         MAX_RETRIES: settings.max_retries_default,
         LAST_SUMMARY: "",
@@ -313,11 +366,32 @@ def _build_user_content_baseline(
     user_scenes_value: str | None = None,
     user_characters_value: str | None = None,
     episode_plan_value: str | None = None,
+    appearance_requirements_value: str | None = None,
+    alias_naming_rules_value: str | None = None,
+    outfit_switch_rules_value: str | None = None,
 ) -> str:
     baseline = {
         SCRIPT_TITLE: script_title if script_title is not None else payload.title,
         TOTAL_EPISODES: payload.total_episodes,
         EPISODE_WORD_COUNT: payload.episode_word_count,
+        CHARACTER_APPEARANCE_REQUIREMENTS: (
+            appearance_requirements_value
+            if appearance_requirements_value is not None
+            else _merge_optional_text(
+                payload.character_appearance_requirements,
+                payload.outfit_switch_rules,
+            )
+        ),
+        CHARACTER_ALIAS_NAMING_RULES: (
+            alias_naming_rules_value
+            if alias_naming_rules_value is not None
+            else payload.character_alias_naming_rules
+        ),
+        OUTFIT_SWITCH_RULES: (
+            outfit_switch_rules_value
+            if outfit_switch_rules_value is not None
+            else payload.outfit_switch_rules
+        ),
         STORY_OUTLINE: story_outline_value if story_outline_value is not None else payload.story_outline,
         USER_SCENES: user_scenes_value if user_scenes_value is not None else payload.core_scene_input,
         USER_CHARACTERS: user_characters_value if user_characters_value is not None else payload.character_bios,
@@ -361,6 +435,7 @@ def _run_batched_generation(
         max(0, _safe_int(variables.get(LOCAL_COMPLETED_BATCHES), 0)),
     )
     normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
+    episode_alias_plan = _normalize_episode_alias_plan_object(variables.get(EPISODE_ALIAS_PLAN))
 
     for index, batch in enumerate(batches):
         if index < completed_batches:
@@ -371,9 +446,15 @@ def _run_batched_generation(
             batch_size=batch.size,
             raw_episode_plan=str(variables.get(EPISODE_PLAN) or payload.episode_plan or ""),
         )
+        alias_plan_for_batch = slice_episode_alias_plan_for_batch(episode_alias_plan, batch)
         variables[BATCH_START_EPISODE] = batch.start_episode
         batch_base = dict(variables)
         batch_base[EPISODE_PLAN] = plan_for_batch
+        batch_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
+        batch_base[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
+            variables.get(APPEARANCE_CONTINUITY_MEMORY),
+            alias_plan_for_batch,
+        )
 
         hook_progress = 36 + int((index / total_batches) * 12)
         hook_output = _run_fastgpt_stage(
@@ -394,6 +475,11 @@ def _run_batched_generation(
         dialogue_base = dict(variables)
         dialogue_base[EPISODE_PLAN] = plan_for_batch
         dialogue_base[BATCH_START_EPISODE] = batch.start_episode
+        dialogue_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
+        dialogue_base[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
+            variables.get(APPEARANCE_CONTINUITY_MEMORY),
+            alias_plan_for_batch,
+        )
         dialogue_progress = 50 + int((index / total_batches) * 12)
         dialogue_output = _run_fastgpt_stage(
             state,
@@ -413,6 +499,11 @@ def _run_batched_generation(
         script_base = dict(variables)
         script_base[EPISODE_PLAN] = plan_for_batch
         script_base[BATCH_START_EPISODE] = batch.start_episode
+        script_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
+        script_base[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
+            variables.get(APPEARANCE_CONTINUITY_MEMORY),
+            alias_plan_for_batch,
+        )
         script_progress = 68 + int((index / total_batches) * 26)
         script_output = _run_fastgpt_stage(
             state,
@@ -444,6 +535,11 @@ def _run_batched_generation(
             max_retries=0,
         )
         variables[LAST_SUMMARY] = memory_output[LAST_SUMMARY]
+        variables[APPEARANCE_CONTINUITY_MEMORY] = _update_appearance_continuity_memory(
+            variables.get(APPEARANCE_CONTINUITY_MEMORY),
+            alias_plan_for_batch,
+            batch=batch,
+        )
         variables[LOCAL_COMPLETED_BATCHES] = index + 1
         variables[LOCAL_COMMITTED_SCRIPT] = variables[ALL_SCRIPT]
         _sync_state_variables(state, variables)
@@ -471,6 +567,7 @@ def _run_full_fastgpt_generation(
     payload: WorkflowInput,
     variables: dict[str, Any],
 ) -> None:
+    alias_plan = _normalize_episode_alias_plan_object(variables.get(EPISODE_ALIAS_PLAN))
     variables[EPISODE_PLAN] = get_episode_batch_payload(
         _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN)),
         1,
@@ -478,6 +575,10 @@ def _run_full_fastgpt_generation(
         raw_episode_plan=str(variables.get(EPISODE_PLAN) or payload.episode_plan or ""),
     )
     variables[BATCH_START_EPISODE] = 1
+    variables[EPISODE_ALIAS_PLAN] = slice_episode_alias_plan_for_batch(
+        alias_plan,
+        BatchWindow(start_episode=1, end_episode=max(1, payload.total_episodes)),
+    ) or {}
 
     hook_output = _run_fastgpt_stage(
         state,
@@ -535,6 +636,11 @@ def _run_full_fastgpt_generation(
         max_retries=0,
     )
     variables[LAST_SUMMARY] = memory_output[LAST_SUMMARY]
+    variables[APPEARANCE_CONTINUITY_MEMORY] = _update_appearance_continuity_memory(
+        variables.get(APPEARANCE_CONTINUITY_MEMORY),
+        variables.get(EPISODE_ALIAS_PLAN),
+        batch=BatchWindow(start_episode=1, end_episode=max(1, payload.total_episodes)),
+    )
     _sync_state_variables(state, variables)
 
     set_runtime_stage(
@@ -731,6 +837,12 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
         state.set_var(TITLE_VAR, variables[SCRIPT_TITLE])
     if STORY_OUTLINE in variables:
         state.set_var(STORY_OUTLINE_VAR, variables[STORY_OUTLINE])
+    if CHARACTER_APPEARANCE_REQUIREMENTS in variables:
+        state.set_var(APPEARANCE_REQUIREMENTS_VAR, variables[CHARACTER_APPEARANCE_REQUIREMENTS])
+        state.set_var(FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR, variables[CHARACTER_APPEARANCE_REQUIREMENTS])
+    if CHARACTER_ALIAS_NAMING_RULES in variables:
+        state.set_var(APPEARANCE_ALIAS_NAMING_RULES_VAR, variables[CHARACTER_ALIAS_NAMING_RULES])
+        state.set_var(FRAMEWORK_ALIAS_NAMING_RULES_VAR, variables[CHARACTER_ALIAS_NAMING_RULES])
     if USER_CHARACTERS in variables:
         state.set_var(CHARACTER_BIOS_VAR, variables[USER_CHARACTERS])
     if USER_SCENES in variables:
@@ -746,6 +858,8 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
         state.set_var(SCENE_VAR, variables[SCENES])
         state.set_var(CORE_SCENE_FINAL_VAR, variables[SCENES])
         state.set_var(FINAL_SCENE_VAR, variables[SCENES])
+    if SCENE_APPEARANCE_REQUIREMENTS in variables:
+        state.set_var(SCENE_APPEARANCE_REQUIREMENTS, variables[SCENE_APPEARANCE_REQUIREMENTS])
     if NORMALIZED_EPISODE_PLAN in variables:
         normalized_plan = _normalize_episode_plan_object(variables[NORMALIZED_EPISODE_PLAN])
         if normalized_plan is not None:
@@ -773,6 +887,23 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
         state.set_var(SCRIPT_FINAL_VAR, variables[ALL_SCRIPT])
     if LAST_SUMMARY in variables:
         state.set_var(MEMORY_VAR, variables[LAST_SUMMARY])
+    if APPEARANCE_MAPPING in variables:
+        normalized_mapping = _normalize_appearance_mapping_object(variables[APPEARANCE_MAPPING])
+        if normalized_mapping is not None:
+            state.set_var(APPEARANCE_MAPPING, normalized_mapping)
+            state.set_var(APPEARANCE_MAPPING_VAR, json.dumps(normalized_mapping, ensure_ascii=False))
+    if CHARACTER_REGISTRY in variables:
+        state.set_var(CHARACTER_REGISTRY, variables[CHARACTER_REGISTRY])
+    if CHARACTER_ALIAS_REGISTRY in variables:
+        state.set_var(CHARACTER_ALIAS_REGISTRY, variables[CHARACTER_ALIAS_REGISTRY])
+    if EPISODE_ALIAS_PLAN in variables:
+        normalized_alias_plan = _normalize_episode_alias_plan_object(variables[EPISODE_ALIAS_PLAN])
+        if normalized_alias_plan is not None:
+            state.set_var(EPISODE_ALIAS_PLAN, normalized_alias_plan)
+    if APPEARANCE_CONTINUITY_MEMORY in variables:
+        normalized_memory = _normalize_appearance_memory(variables[APPEARANCE_CONTINUITY_MEMORY])
+        if normalized_memory is not None:
+            state.set_var(APPEARANCE_CONTINUITY_MEMORY, normalized_memory)
     if FINAL_SCRIPT in variables:
         state.set_var(SCRIPT_FINAL_VAR, variables[FINAL_SCRIPT])
 
@@ -862,6 +993,15 @@ def _apply_normalized_episode_plan_to_variables(
         user_scenes_value=str(variables.get(USER_SCENES) or payload.core_scene_input or "").strip(),
         user_characters_value=str(variables.get(USER_CHARACTERS) or payload.character_bios or "").strip(),
         episode_plan_value=normalized_text,
+        appearance_requirements_value=str(
+            variables.get(CHARACTER_APPEARANCE_REQUIREMENTS)
+            or _merge_optional_text(payload.character_appearance_requirements, payload.outfit_switch_rules)
+            or ""
+        ).strip(),
+        alias_naming_rules_value=str(
+            variables.get(CHARACTER_ALIAS_NAMING_RULES) or payload.character_alias_naming_rules or ""
+        ).strip(),
+        outfit_switch_rules_value=str(variables.get(OUTFIT_SWITCH_RULES) or payload.outfit_switch_rules or "").strip(),
     )
     return normalized_plan
 
@@ -899,8 +1039,586 @@ def _apply_framework_outputs_to_variables(
         user_scenes_value=user_scenes,
         user_characters_value=user_characters,
         episode_plan_value=episode_plan,
+        appearance_requirements_value=str(
+            variables.get(CHARACTER_APPEARANCE_REQUIREMENTS)
+            or _merge_optional_text(payload.character_appearance_requirements, payload.outfit_switch_rules)
+            or ""
+        ).strip(),
+        alias_naming_rules_value=str(
+            variables.get(CHARACTER_ALIAS_NAMING_RULES) or payload.character_alias_naming_rules or ""
+        ).strip(),
+        outfit_switch_rules_value=str(variables.get(OUTFIT_SWITCH_RULES) or payload.outfit_switch_rules or "").strip(),
     )
     return True
+
+
+def _merge_optional_text(*parts: Any) -> str:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        text = str(part or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        merged.append(text)
+    return "\n".join(merged).strip()
+
+
+def _apply_appearance_outputs_to_variables(variables: dict[str, Any]) -> bool:
+    normalized_mapping = _normalize_appearance_mapping_object(variables.get(APPEARANCE_MAPPING))
+    if normalized_mapping is None:
+        return False
+
+    normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
+    character_registry = _build_character_registry(normalized_mapping)
+    character_alias_registry = _build_character_alias_registry(normalized_mapping)
+    episode_alias_plan = _build_episode_alias_plan(normalized_plan, normalized_mapping)
+    scene_requirements = _extract_scene_appearance_requirements(variables.get(SCENES))
+
+    variables[APPEARANCE_MAPPING] = normalized_mapping
+    variables[CHARACTER_REGISTRY] = character_registry
+    variables[CHARACTER_ALIAS_REGISTRY] = character_alias_registry
+    variables[EPISODE_ALIAS_PLAN] = episode_alias_plan
+    variables[SCENE_APPEARANCE_REQUIREMENTS] = scene_requirements
+    if not _normalize_appearance_memory(variables.get(APPEARANCE_CONTINUITY_MEMORY)):
+        variables[APPEARANCE_CONTINUITY_MEMORY] = _initialize_appearance_continuity_memory(
+            character_registry,
+            character_alias_registry,
+        )
+    return True
+
+
+def _normalize_appearance_mapping_object(value: Any) -> dict[str, Any] | None:
+    candidate = value
+    if candidate in (None, ""):
+        return None
+    if isinstance(candidate, str):
+        text = candidate.strip()
+        if not text:
+            return None
+        try:
+            candidate = json.loads(text)
+        except Exception:
+            return None
+    if not isinstance(candidate, dict):
+        return None
+    mapping = candidate.get("appearance_mapping") if isinstance(candidate.get("appearance_mapping"), dict) else candidate
+    characters = mapping.get("characters")
+    if not isinstance(characters, list):
+        return None
+
+    normalized_characters: list[dict[str, Any]] = []
+    for item in characters:
+        if not isinstance(item, dict):
+            continue
+        character_id = str(item.get("character_id") or "").strip()
+        canonical_name = str(item.get("canonical_name") or "").strip()
+        if not character_id and not canonical_name:
+            continue
+        variants: list[dict[str, Any]] = []
+        for variant in item.get("outfit_variants") or []:
+            if not isinstance(variant, dict):
+                continue
+            alias_name = str(variant.get("alias_name") or "").strip()
+            if not alias_name:
+                continue
+            variants.append(
+                {
+                    "variant_id": str(variant.get("variant_id") or alias_name).strip(),
+                    "alias_name": alias_name,
+                    "applicable_identity_state": str(variant.get("applicable_identity_state") or "").strip(),
+                    "outfit_type": str(variant.get("outfit_type") or "").strip(),
+                    "outfit_description": str(variant.get("outfit_description") or "").strip(),
+                    "visual_keypoints": _string_list(variant.get("visual_keypoints")),
+                    "episode_range_hint": str(variant.get("episode_range_hint") or "").strip(),
+                    "scene_trigger_rules": _normalize_scene_trigger_rules(variant.get("scene_trigger_rules")),
+                    "usage_rule": str(variant.get("usage_rule") or "").strip(),
+                    "must_use_when_triggered": bool(variant.get("must_use_when_triggered", True)),
+                    "fallback_allowed": bool(variant.get("fallback_allowed", False)),
+                    "same_person_confirmation": str(variant.get("same_person_confirmation") or "").strip(),
+                }
+            )
+
+        normalized_characters.append(
+            {
+                "character_id": character_id or canonical_name,
+                "canonical_name": canonical_name or character_id,
+                "story_role": str(item.get("story_role") or "").strip(),
+                "same_person_anchor": _normalize_same_person_anchor(item.get("same_person_anchor")),
+                "default_name": str(item.get("default_name") or canonical_name or character_id).strip(),
+                "forbidden_generic_names": _string_list(item.get("forbidden_generic_names")),
+                "outfit_variants": variants,
+            }
+        )
+
+    if not normalized_characters:
+        return None
+
+    normalized = {
+        "appearance_mapping": {
+            "mapping_principle": str(mapping.get("mapping_principle") or "").strip(),
+            "global_naming_style": str(mapping.get("global_naming_style") or "").strip(),
+            "characters": normalized_characters,
+            "episode_level_usage_plan": _normalize_usage_plan_items(mapping.get("episode_level_usage_plan")),
+            "scene_level_usage_plan": _normalize_scene_usage_plan(mapping.get("scene_level_usage_plan")),
+            "special_naming_rules": _string_list(mapping.get("special_naming_rules")),
+        }
+    }
+    return normalized
+
+
+def _normalize_same_person_anchor(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        value = {}
+    return {
+        "stable_appearance_traits": _string_list(value.get("stable_appearance_traits")),
+        "stable_recognition_points": _string_list(value.get("stable_recognition_points")),
+        "unchanged_core_impression": str(value.get("unchanged_core_impression") or "").strip(),
+    }
+
+
+def _normalize_scene_trigger_rules(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        value = {}
+    return {
+        "scene_names": _string_list(value.get("scene_names")),
+        "scene_types": _string_list(value.get("scene_types")),
+        "environment_or_time": _string_list(value.get("environment_or_time")),
+        "status_conditions": _string_list(value.get("status_conditions")),
+    }
+
+
+def _normalize_usage_plan_items(items: Any) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    if not isinstance(items, list):
+        return normalized
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "episode_range": str(item.get("episode_range") or "").strip(),
+                "main_character_aliases": _normalize_alias_usage_list(item.get("main_character_aliases")),
+            }
+        )
+    return normalized
+
+
+def _normalize_scene_usage_plan(items: Any) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    if not isinstance(items, list):
+        return normalized
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "scene_name": str(item.get("scene_name") or "").strip(),
+                "expected_alias_usage": _normalize_alias_usage_list(item.get("expected_alias_usage")),
+            }
+        )
+    return normalized
+
+
+def _normalize_alias_usage_list(items: Any) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    if not isinstance(items, list):
+        return normalized
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "character_id": str(item.get("character_id") or item.get("character_name") or "").strip(),
+                "character_name": str(item.get("character_name") or item.get("canonical_name") or "").strip(),
+                "recommended_alias_name": str(item.get("recommended_alias_name") or item.get("alias_name") or "").strip(),
+                "switch_type": str(item.get("switch_type") or "").strip(),
+                "reason": str(item.get("reason") or "").strip(),
+            }
+        )
+    return [item for item in normalized if item["recommended_alias_name"]]
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text:
+            result.append(text)
+    return result
+
+
+def _build_character_registry(appearance_mapping: dict[str, Any]) -> dict[str, Any]:
+    mapping = appearance_mapping.get("appearance_mapping") or {}
+    characters = mapping.get("characters") or []
+    return {
+        "global_naming_style": str(mapping.get("global_naming_style") or "").strip(),
+        "characters": [
+            {
+                "character_id": item.get("character_id"),
+                "canonical_name": item.get("canonical_name"),
+                "story_role": item.get("story_role"),
+                "default_name": item.get("default_name"),
+                "same_person_anchor": copy.deepcopy(item.get("same_person_anchor") or {}),
+                "forbidden_generic_names": copy.deepcopy(item.get("forbidden_generic_names") or []),
+            }
+            for item in characters
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def _build_character_alias_registry(appearance_mapping: dict[str, Any]) -> dict[str, Any]:
+    mapping = appearance_mapping.get("appearance_mapping") or {}
+    characters = mapping.get("characters") or []
+    aliases_by_name: dict[str, dict[str, Any]] = {}
+    character_entries: list[dict[str, Any]] = []
+    for item in characters:
+        if not isinstance(item, dict):
+            continue
+        aliases: list[dict[str, Any]] = []
+        for variant in item.get("outfit_variants") or []:
+            if not isinstance(variant, dict):
+                continue
+            alias_name = str(variant.get("alias_name") or "").strip()
+            if not alias_name:
+                continue
+            alias_entry = {
+                "character_id": item.get("character_id"),
+                "canonical_name": item.get("canonical_name"),
+                "alias_name": alias_name,
+                "variant_id": str(variant.get("variant_id") or alias_name).strip(),
+                "usage_rule": str(variant.get("usage_rule") or "").strip(),
+                "scene_trigger_rules": copy.deepcopy(variant.get("scene_trigger_rules") or {}),
+                "fallback_allowed": bool(variant.get("fallback_allowed", False)),
+                "must_use_when_triggered": bool(variant.get("must_use_when_triggered", True)),
+            }
+            aliases.append(alias_entry)
+            aliases_by_name[alias_name] = alias_entry
+        character_entries.append(
+            {
+                "character_id": item.get("character_id"),
+                "canonical_name": item.get("canonical_name"),
+                "default_name": item.get("default_name"),
+                "forbidden_generic_names": copy.deepcopy(item.get("forbidden_generic_names") or []),
+                "aliases": aliases,
+            }
+        )
+    return {
+        "global_naming_style": str(mapping.get("global_naming_style") or "").strip(),
+        "mapping_principle": str(mapping.get("mapping_principle") or "").strip(),
+        "characters": character_entries,
+        "aliases_by_name": aliases_by_name,
+    }
+
+
+def _build_episode_alias_plan(
+    normalized_plan: dict[str, Any] | None,
+    appearance_mapping: dict[str, Any],
+) -> dict[str, Any]:
+    mapping = appearance_mapping.get("appearance_mapping") or {}
+    normalized = _normalize_episode_plan_object(normalized_plan) or {"parsed_episode_count": 0, "episodes": []}
+    planning = normalized.get("appearance_alias_planning") or {}
+    episode_usage = mapping.get("episode_level_usage_plan") or []
+
+    episodes: list[dict[str, Any]] = []
+    for episode_item in normalized.get("episodes") or []:
+        if not isinstance(episode_item, dict):
+            continue
+        episode_no = _coerce_episode_number(episode_item.get("episode"))
+        if episode_no is None:
+            continue
+        merged_aliases = list(episode_item.get("main_character_aliases") or [])
+        for usage in episode_usage:
+            if not isinstance(usage, dict):
+                continue
+            if _episode_in_range(episode_no, str(usage.get("episode_range") or "")):
+                merged_aliases.extend(usage.get("main_character_aliases") or [])
+        episodes.append(
+            {
+                "episode": episode_no,
+                "title": str(episode_item.get("title") or "").strip(),
+                "content": str(episode_item.get("content") or "").strip(),
+                "main_character_aliases": _dedupe_alias_usage_items(merged_aliases),
+                "appearance_events": _string_list(episode_item.get("appearance_events")),
+                "long_term_stage_flags": _string_list(episode_item.get("long_term_stage_flags")),
+                "scene_based_alias_hints": _normalize_alias_usage_list(episode_item.get("scene_based_alias_hints")),
+            }
+        )
+
+    return {
+        "planning_scope": str(planning.get("planning_scope") or mapping.get("mapping_principle") or "").strip(),
+        "global_naming_style": str(
+            planning.get("global_naming_style") or mapping.get("global_naming_style") or ""
+        ).strip(),
+        "global_rules": _string_list(planning.get("global_rules")) + _string_list(mapping.get("special_naming_rules")),
+        "episodes": episodes,
+        "scene_level_usage_plan": copy.deepcopy(mapping.get("scene_level_usage_plan") or []),
+        "uncertain_or_missing_items": _string_list(planning.get("uncertain_or_missing_items")),
+    }
+
+
+def _dedupe_alias_usage_items(items: list[Any]) -> list[dict[str, Any]]:
+    normalized = _normalize_alias_usage_list(items)
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in normalized:
+        key = (str(item.get("character_id") or item.get("character_name") or ""), item["recommended_alias_name"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _episode_in_range(episode_no: int, raw_range: str) -> bool:
+    text = str(raw_range or "").strip()
+    if not text:
+        return False
+    numbers = [int(match) for match in re.findall(r"\d+", text)]
+    if not numbers:
+        return False
+    if len(numbers) == 1:
+        return numbers[0] == episode_no
+    start, end = numbers[0], numbers[1]
+    if start > end:
+        start, end = end, start
+    return start <= episode_no <= end
+
+
+def _extract_scene_appearance_requirements(value: Any) -> dict[str, Any]:
+    if not value:
+        return {}
+    candidate = value
+    if isinstance(candidate, str):
+        text = candidate.strip()
+        if not text:
+            return {}
+        try:
+            candidate = json.loads(text)
+        except Exception:
+            return {}
+    if not isinstance(candidate, dict):
+        return {}
+    setting = candidate.get("scene_setting") if isinstance(candidate.get("scene_setting"), dict) else candidate
+    scenes = setting.get("scenes")
+    if not isinstance(scenes, list):
+        return {}
+    return {
+        "scene_design_principle": str(setting.get("scene_design_principle") or "").strip(),
+        "scene_visual_styling_naming_strategy": str(
+            setting.get("scene_visual_styling_naming_strategy") or ""
+        ).strip(),
+        "scenes": [
+            {
+                "scene_name": str(scene.get("scene_name") or "").strip(),
+                "scene_type": str(scene.get("scene_type") or "").strip(),
+                "visual_condition_summary": str(scene.get("visual_condition_summary") or "").strip(),
+                "styling_condition_summary": str(scene.get("styling_condition_summary") or "").strip(),
+                "naming_condition_summary": str(scene.get("naming_condition_summary") or "").strip(),
+                "outfit_requirements": _normalize_alias_usage_list(scene.get("outfit_requirements")),
+                "alias_usage_rules": _normalize_alias_usage_list(scene.get("alias_usage_rules")),
+            }
+            for scene in scenes
+            if isinstance(scene, dict)
+        ],
+    }
+
+
+def _normalize_episode_alias_plan_object(value: Any) -> dict[str, Any] | None:
+    if value in (None, "", {}):
+        return None
+    candidate = value
+    if isinstance(candidate, str):
+        text = candidate.strip()
+        if not text:
+            return None
+        try:
+            candidate = json.loads(text)
+        except Exception:
+            return None
+    if not isinstance(candidate, dict):
+        return None
+    episodes = candidate.get("episodes")
+    if not isinstance(episodes, list):
+        return None
+    normalized_episodes: list[dict[str, Any]] = []
+    for item in episodes:
+        if not isinstance(item, dict):
+            continue
+        episode_no = _coerce_episode_number(item.get("episode"))
+        if episode_no is None:
+            continue
+        normalized_episodes.append(
+            {
+                "episode": episode_no,
+                "title": str(item.get("title") or "").strip(),
+                "content": str(item.get("content") or "").strip(),
+                "main_character_aliases": _normalize_alias_usage_list(item.get("main_character_aliases")),
+                "appearance_events": _string_list(item.get("appearance_events")),
+                "long_term_stage_flags": _string_list(item.get("long_term_stage_flags")),
+                "scene_based_alias_hints": _normalize_alias_usage_list(item.get("scene_based_alias_hints")),
+            }
+        )
+    return {
+        "planning_scope": str(candidate.get("planning_scope") or "").strip(),
+        "global_naming_style": str(candidate.get("global_naming_style") or "").strip(),
+        "global_rules": _string_list(candidate.get("global_rules")),
+        "episodes": normalized_episodes,
+        "scene_level_usage_plan": _normalize_scene_usage_plan(candidate.get("scene_level_usage_plan")),
+        "uncertain_or_missing_items": _string_list(candidate.get("uncertain_or_missing_items")),
+    }
+
+
+def slice_episode_alias_plan_for_batch(
+    episode_alias_plan: Any,
+    batch: BatchWindow,
+) -> dict[str, Any] | None:
+    normalized = _normalize_episode_alias_plan_object(episode_alias_plan)
+    if not normalized:
+        return None
+    selected = [
+        copy.deepcopy(item)
+        for item in normalized["episodes"]
+        if batch.start_episode <= item["episode"] <= batch.end_episode
+    ]
+    if not selected:
+        return None
+    return {
+        "planning_scope": normalized.get("planning_scope") or "",
+        "global_naming_style": normalized.get("global_naming_style") or "",
+        "global_rules": copy.deepcopy(normalized.get("global_rules") or []),
+        "episodes": selected,
+        "scene_level_usage_plan": copy.deepcopy(normalized.get("scene_level_usage_plan") or []),
+        "uncertain_or_missing_items": copy.deepcopy(normalized.get("uncertain_or_missing_items") or []),
+    }
+
+
+def _normalize_appearance_memory(value: Any) -> dict[str, Any] | None:
+    if value in (None, "", {}):
+        return None
+    candidate = value
+    if isinstance(candidate, str):
+        text = candidate.strip()
+        if not text:
+            return None
+        try:
+            candidate = json.loads(text)
+        except Exception:
+            return None
+    if not isinstance(candidate, dict):
+        return None
+    aliases = candidate.get("current_aliases")
+    if not isinstance(aliases, dict):
+        aliases = {}
+    return {
+        "last_processed_episode": _safe_int(candidate.get("last_processed_episode"), 0),
+        "current_aliases": {
+            str(key): str(val or "").strip()
+            for key, val in aliases.items()
+            if str(key).strip() and str(val or "").strip()
+        },
+        "recent_stage_flags": _string_list(candidate.get("recent_stage_flags")),
+        "recent_appearance_events": _string_list(candidate.get("recent_appearance_events")),
+    }
+
+
+def _initialize_appearance_continuity_memory(
+    character_registry: dict[str, Any],
+    character_alias_registry: dict[str, Any],
+) -> dict[str, Any]:
+    current_aliases: dict[str, str] = {}
+    alias_by_name = character_alias_registry.get("aliases_by_name") or {}
+    for character in character_registry.get("characters") or []:
+        if not isinstance(character, dict):
+            continue
+        character_id = str(character.get("character_id") or "").strip()
+        default_name = str(character.get("default_name") or "").strip()
+        if character_id and default_name:
+            current_aliases[character_id] = default_name
+            continue
+        canonical_name = str(character.get("canonical_name") or "").strip()
+        if character_id and canonical_name:
+            current_aliases[character_id] = canonical_name
+    for alias_name, alias_info in alias_by_name.items():
+        if not isinstance(alias_info, dict):
+            continue
+        character_id = str(alias_info.get("character_id") or "").strip()
+        if character_id and character_id not in current_aliases:
+            current_aliases[character_id] = alias_name
+    return {
+        "last_processed_episode": 0,
+        "current_aliases": current_aliases,
+        "recent_stage_flags": [],
+        "recent_appearance_events": [],
+    }
+
+
+def _appearance_memory_for_batch(
+    current_memory: Any,
+    alias_plan_for_batch: dict[str, Any] | None,
+) -> dict[str, Any]:
+    memory = _normalize_appearance_memory(current_memory) or {
+        "last_processed_episode": 0,
+        "current_aliases": {},
+        "recent_stage_flags": [],
+        "recent_appearance_events": [],
+    }
+    if not alias_plan_for_batch:
+        return memory
+    batch_aliases = dict(memory.get("current_aliases") or {})
+    for episode in alias_plan_for_batch.get("episodes") or []:
+        if not isinstance(episode, dict):
+            continue
+        for alias in episode.get("main_character_aliases") or []:
+            if not isinstance(alias, dict):
+                continue
+            character_id = str(alias.get("character_id") or alias.get("character_name") or "").strip()
+            alias_name = str(alias.get("recommended_alias_name") or "").strip()
+            if character_id and alias_name:
+                batch_aliases[character_id] = alias_name
+    preview = dict(memory)
+    preview["current_aliases"] = batch_aliases
+    preview["recent_stage_flags"] = _collect_batch_stage_flags(alias_plan_for_batch)
+    preview["recent_appearance_events"] = _collect_batch_appearance_events(alias_plan_for_batch)
+    return preview
+
+
+def _update_appearance_continuity_memory(
+    current_memory: Any,
+    alias_plan_for_batch: dict[str, Any] | None,
+    *,
+    batch: BatchWindow,
+) -> dict[str, Any]:
+    updated = _appearance_memory_for_batch(current_memory, alias_plan_for_batch)
+    updated["last_processed_episode"] = batch.end_episode
+    return updated
+
+
+def _collect_batch_stage_flags(alias_plan_for_batch: dict[str, Any] | None) -> list[str]:
+    flags: list[str] = []
+    for episode in (alias_plan_for_batch or {}).get("episodes") or []:
+        if not isinstance(episode, dict):
+            continue
+        for flag in episode.get("long_term_stage_flags") or []:
+            text = str(flag or "").strip()
+            if text and text not in flags:
+                flags.append(text)
+    return flags
+
+
+def _collect_batch_appearance_events(alias_plan_for_batch: dict[str, Any] | None) -> list[str]:
+    events: list[str] = []
+    for episode in (alias_plan_for_batch or {}).get("episodes") or []:
+        if not isinstance(episode, dict):
+            continue
+        for event in episode.get("appearance_events") or []:
+            text = str(event or "").strip()
+            if text and text not in events:
+                events.append(text)
+    return events
 
 
 def merge_batch_object(current: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
@@ -960,6 +1678,7 @@ def slice_normalized_episode_plan_for_batch(
 
     return {
         "parsed_episode_count": len(selected),
+        "appearance_alias_planning": copy.deepcopy(normalized.get("appearance_alias_planning") or {}),
         "episodes": selected,
     }
 
@@ -1013,12 +1732,61 @@ def _normalize_episode_plan_object(value: Any) -> dict[str, Any] | None:
                 "episode": episode_number,
                 "title": str(item.get("title") or "").strip(),
                 "content": str(item.get("content") or "").strip(),
+                "main_character_aliases": _normalize_alias_usage_list(item.get("main_character_aliases")),
+                "appearance_events": _string_list(item.get("appearance_events")),
+                "long_term_stage_flags": _string_list(item.get("long_term_stage_flags")),
+                "scene_based_alias_hints": _normalize_alias_usage_list(item.get("scene_based_alias_hints")),
             }
         )
 
     return {
         "parsed_episode_count": len(normalized_episodes),
+        "appearance_alias_planning": _normalize_appearance_alias_planning(
+            candidate.get("appearance_alias_planning")
+        ),
         "episodes": normalized_episodes,
+    }
+
+
+def _normalize_appearance_alias_planning(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    characters = value.get("characters_with_multiple_variants")
+    normalized_characters: list[dict[str, Any]] = []
+    if isinstance(characters, list):
+        for item in characters:
+            if not isinstance(item, dict):
+                continue
+            normalized_characters.append(
+                {
+                    "character_name": str(item.get("character_name") or "").strip(),
+                    "switch_dimensions": _string_list(item.get("switch_dimensions")),
+                    "long_term_stage_switches": [
+                        {
+                            "episode_range": str(entry.get("episode_range") or "").strip(),
+                            "recommended_alias_name": str(entry.get("recommended_alias_name") or "").strip(),
+                            "reason": str(entry.get("reason") or "").strip(),
+                        }
+                        for entry in (item.get("long_term_stage_switches") or [])
+                        if isinstance(entry, dict)
+                    ],
+                    "scene_based_switches": [
+                        {
+                            "scene_or_condition": str(entry.get("scene_or_condition") or "").strip(),
+                            "recommended_alias_name": str(entry.get("recommended_alias_name") or "").strip(),
+                            "reason": str(entry.get("reason") or "").strip(),
+                        }
+                        for entry in (item.get("scene_based_switches") or [])
+                        if isinstance(entry, dict)
+                    ],
+                }
+            )
+    return {
+        "planning_scope": str(value.get("planning_scope") or "").strip(),
+        "global_naming_style": str(value.get("global_naming_style") or "").strip(),
+        "characters_with_multiple_variants": normalized_characters,
+        "global_rules": _string_list(value.get("global_rules")),
+        "uncertain_or_missing_items": _string_list(value.get("uncertain_or_missing_items")),
     }
 
 

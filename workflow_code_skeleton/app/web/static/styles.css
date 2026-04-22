@@ -378,14 +378,29 @@ a {
   background: linear-gradient(135deg, var(--c-peri), var(--c-plum));
 }
 
+.btn-neutral {
+  color: white;
+  background: linear-gradient(135deg, #39445a, #222834);
+}
+
 .btn-ghost {
   background: rgba(255, 255, 255, 0.75);
   border-color: var(--line);
 }
 
+.btn-edit {
+  color: #2d2640;
+  background: #cbb9ea;
+}
+
+.btn-public {
+  color: #44330c;
+  background: #e3b131;
+}
+
 .btn-danger {
   color: white;
-  background: linear-gradient(135deg, var(--c-plum), var(--c-berry));
+  background: #e36431;
 }
 
 .runtime,
@@ -492,6 +507,37 @@ a {
 .profile-grid {
   display: grid;
   gap: 12px;
+}
+
+.advanced-inputs {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.68);
+  overflow: hidden;
+}
+
+.advanced-inputs summary {
+  padding: 14px 16px;
+  cursor: pointer;
+  font-weight: 800;
+  list-style: none;
+}
+
+.advanced-inputs summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-inputs[open] {
+  padding-bottom: 14px;
+}
+
+.advanced-inputs[open] summary {
+  margin-bottom: 4px;
+}
+
+.advanced-inputs .field {
+  padding: 0 14px;
 }
 
 .compact-grid,
@@ -744,7 +790,6 @@ a {
 }
 
 .guide-card span,
-.asset-topline span,
 .community-tag {
   display: inline-flex;
   align-items: center;
@@ -756,6 +801,34 @@ a {
   color: white;
   font-weight: 800;
   background: linear-gradient(135deg, var(--c-blue), var(--c-berry));
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: white;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--c-blue), var(--c-violet));
+}
+
+.status-pill-completed {
+  color: #082812;
+  background: #31e373;
+}
+
+.status-pill-public {
+  color: #4b3608;
+  background: #e3b131;
+}
+
+.status-pill-private {
+  color: white;
+  background: linear-gradient(135deg, #4d5b73, #364055);
 }
 
 .guide-card p,
@@ -778,7 +851,9 @@ a {
 
 .asset-topline,
 .asset-meta,
-.asset-actions {
+.asset-actions,
+.community-actions,
+.detail-pill-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -793,8 +868,51 @@ a {
   margin-top: 12px;
 }
 
+.community-actions {
+  margin-top: 14px;
+}
+
 .asset-actions .btn {
   padding: 9px 12px;
+}
+
+.community-detail-card {
+  color: var(--text);
+}
+
+.community-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.community-detail-head h1 {
+  margin: 12px 0 0;
+}
+
+.community-detail-summary {
+  max-width: 880px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  line-height: 1.8;
+}
+
+.detail-block {
+  margin-top: 20px;
+}
+
+.detail-block h2 {
+  margin: 0 0 12px;
+}
+
+.detail-output {
+  min-height: 180px;
+}
+
+.large-detail-output {
+  min-height: 560px;
+  max-height: none;
 }
 
 .hidden {
@@ -932,6 +1050,10 @@ a {
   .tool-field-grid,
   .profile-grid {
     grid-template-columns: 1fr;
+  }
+
+  .community-detail-head {
+    flex-direction: column;
   }
 
   .hero-panel h1 {
