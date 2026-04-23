@@ -36,6 +36,9 @@
     rollbackScriptStartSelect: $("rollbackScriptStartSelect"),
     cacheNoticeText: $("cacheNoticeText"),
     refreshProjectsBtn: $("refreshProjectsBtn"),
+    workspaceCard: $("workspaceCard"),
+    activeWorkspaceFolder: $("activeWorkspaceFolder"),
+    completedWorkspaceFolder: $("completedWorkspaceFolder"),
     activeProjectList: $("activeProjectList"),
     completedProjectList: $("completedProjectList"),
     activeProjectCount: $("activeProjectCount"),
@@ -93,8 +96,10 @@
     assets: [],
     editingProjectId: null,
     editingProjectStatus: null,
+    editingAssetLocked: false,
     activeTool: "hot_review",
-    elapsedTimer: null
+    elapsedTimer: null,
+    workspaceCollapseTimer: null
   };
 
   const TOOL_DEFINITIONS = {
@@ -270,14 +275,14 @@
     return `${String(minutes).padStart(2, "0")}:${ss}`;
   }
 
-  function snapshotElapsedMs(snapshot) {
+  function snapshotWaitMs(snapshot) {
     if (!snapshot) return 0;
-    const startText = snapshot.created_at || snapshot.updated_at || "";
-    const start = Date.parse(startText);
-    if (!Number.isFinite(start)) return 0;
-    const finished = snapshot.finished_at ? Date.parse(snapshot.finished_at) : NaN;
-    const end = Number.isFinite(finished) ? finished : Date.now();
-    return Math.max(0, end - start);
+    const base = Number(snapshot.wait_elapsed_ms || 0);
+    const liveStart = Date.parse(snapshot.wait_started_at || "");
+    if (RUNNING_STATUSES.has(snapshot.status) && Number.isFinite(liveStart)) {
+      return Math.max(0, base + (Date.now() - liveStart));
+    }
+    return Math.max(0, base);
   }
 
   function renderWaitDuration(snapshot = state.latestSnapshot) {
@@ -286,7 +291,7 @@
       els.waitDurationText.textContent = "00:00";
       return;
     }
-    els.waitDurationText.textContent = formatDuration(snapshotElapsedMs(snapshot));
+    els.waitDurationText.textContent = formatDuration(snapshotWaitMs(snapshot));
   }
 
   function startElapsedTimer() {
@@ -304,7 +309,11 @@
   }
 
   function syncElapsedTimer(snapshot = state.latestSnapshot) {
-    const hasLiveElapsed = Boolean(snapshot && (snapshot.created_at || snapshot.updated_at) && !snapshot.finished_at);
+    const hasLiveElapsed = Boolean(
+      snapshot
+      && RUNNING_STATUSES.has(snapshot.status)
+      && snapshot.wait_started_at
+    );
     if (hasLiveElapsed) {
       startElapsedTimer();
     } else {
@@ -516,6 +525,7 @@
       els.progressFill.style.width = "0%";
       els.progressText.textContent = "0%";
       els.projectText.textContent = "当前剧本：未选中";
+      els.projectText.title = "当前剧本：未选中";
       els.taskText.textContent = "任务：未选中";
       els.finalOutputBox.textContent = "暂无内容";
       syncElapsedTimer(null);
@@ -548,6 +558,7 @@
     els.progressFill.style.width = `${progress}%`;
     els.progressText.textContent = `${progress}%`;
     els.projectText.textContent = `当前剧本：${projectTitle}`;
+    els.projectText.title = `当前剧本：${projectTitle}`;
     els.taskText.textContent = `任务：${snapshot.task_id || "未创建"}`;
     els.finalOutputBox.textContent = finalOutput || "暂无内容";
     syncElapsedTimer(snapshot);
@@ -800,6 +811,34 @@
     }
   }
 
+  function workspaceFolders() {
+    return [els.activeWorkspaceFolder, els.completedWorkspaceFolder].filter(Boolean);
+  }
+
+  function cancelWorkspaceAutoCollapse() {
+    if (state.workspaceCollapseTimer) {
+      window.clearTimeout(state.workspaceCollapseTimer);
+      state.workspaceCollapseTimer = null;
+    }
+  }
+
+  function collapseWorkspaceFolders() {
+    workspaceFolders().forEach((folder) => {
+      folder.open = false;
+    });
+  }
+
+  function scheduleWorkspaceAutoCollapse() {
+    cancelWorkspaceAutoCollapse();
+    if (!workspaceFolders().some((folder) => folder.open)) {
+      return;
+    }
+    state.workspaceCollapseTimer = window.setTimeout(() => {
+      collapseWorkspaceFolders();
+      state.workspaceCollapseTimer = null;
+    }, 10000);
+  }
+
   async function loadProjectDetail(projectId, { restoreInputs = false, scroll = false } = {}) {
     const data = await requestJson(`/api/projects/${projectId}`);
     const project = data.project || null;
@@ -949,6 +988,7 @@
         start_episode: stageKey === "script" ? startEpisodeValue : null
       })
     });
+    restoreInputPayload(data.task?.input_payload, { force: true });
     renderSnapshot(data.task);
     await loadProjects({ restoreSelection: true, restoreInputs: false });
     startPolling();
@@ -1094,7 +1134,7 @@
           <button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>
           <button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">新页面打开</button>
           ${item.completion_confirmed ? "" : `<button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">修改</button>`}
-          ${item.completion_confirmed ? "" : `<button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : "公开成品"}</button>`}
+          <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : "公开成品"}</button>
           <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除</button>
         </div>
       </article>
@@ -1127,19 +1167,21 @@
     const artifacts = project.artifacts || {};
     state.editingProjectId = Number(projectId);
     state.editingProjectStatus = String(project.status || "");
-    const locked = Boolean(project.completion_confirmed);
+    state.editingAssetLocked = Boolean(project.completion_confirmed);
+    const locked = state.editingAssetLocked;
     els.editAssetTitle.value = project.title || input.title || "";
     els.editAssetSummary.value = input.story_outline || artifacts.story_outline || "";
     els.editAssetPrivacy.value = project.visibility || "private";
     els.editAssetFinal.value = state.editingProjectStatus === "completed"
       ? (artifacts.final_output_text || artifacts.final_script || "")
       : "";
-    [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].forEach((field) => {
-      if (field) field.disabled = locked;
-    });
+    if (els.editAssetTitle) els.editAssetTitle.disabled = locked;
+    if (els.editAssetSummary) els.editAssetSummary.disabled = locked;
+    if (els.editAssetFinal) els.editAssetFinal.disabled = locked;
+    if (els.editAssetPrivacy) els.editAssetPrivacy.disabled = false;
     if (els.saveAssetEditBtn) {
-      els.saveAssetEditBtn.disabled = locked;
-      els.saveAssetEditBtn.textContent = locked ? "已锁定不可修改" : "保存修改";
+      els.saveAssetEditBtn.disabled = false;
+      els.saveAssetEditBtn.textContent = locked ? "仅保存公开设置" : "保存修改";
     }
     els.assetEditor.classList.remove("hidden");
     els.assetEditor.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1148,13 +1190,15 @@
   async function saveAssetEdit() {
     if (!requireLogin() || !state.editingProjectId) return;
     const payload = {
-      title: els.editAssetTitle.value.trim(),
-      story_outline: els.editAssetSummary.value.trim(),
       visibility: els.editAssetPrivacy.value
     };
-    const finalScriptText = els.editAssetFinal.value.trim();
-    if (state.editingProjectStatus === "completed" || finalScriptText) {
-      payload.final_script = finalScriptText;
+    if (!state.editingAssetLocked) {
+      payload.title = els.editAssetTitle.value.trim();
+      payload.story_outline = els.editAssetSummary.value.trim();
+      const finalScriptText = els.editAssetFinal.value.trim();
+      if (state.editingProjectStatus === "completed" || finalScriptText) {
+        payload.final_script = finalScriptText;
+      }
     }
     const data = await requestJson(`/api/projects/${state.editingProjectId}`, {
       method: "PATCH",
@@ -1172,6 +1216,7 @@
   function closeAssetEditor() {
     state.editingProjectId = null;
     state.editingProjectStatus = null;
+    state.editingAssetLocked = false;
     [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].forEach((field) => {
       if (field) field.disabled = false;
     });
@@ -1339,6 +1384,26 @@
     els.viewAssetsBtn?.addEventListener("click", () => {
       if (!requireLogin()) return;
       openProfilePanel();
+    });
+
+    els.workspaceCard?.addEventListener("mouseenter", cancelWorkspaceAutoCollapse);
+    els.workspaceCard?.addEventListener("mouseleave", scheduleWorkspaceAutoCollapse);
+    els.workspaceCard?.addEventListener("focusin", cancelWorkspaceAutoCollapse);
+    els.workspaceCard?.addEventListener("focusout", () => {
+      window.setTimeout(() => {
+        if (!els.workspaceCard?.matches(":focus-within")) {
+          scheduleWorkspaceAutoCollapse();
+        }
+      }, 0);
+    });
+    workspaceFolders().forEach((folder) => {
+      folder.addEventListener("toggle", () => {
+        if (folder.open) {
+          cancelWorkspaceAutoCollapse();
+        } else {
+          scheduleWorkspaceAutoCollapse();
+        }
+      });
     });
 
     els.refreshProjectsBtn?.addEventListener("click", async () => {

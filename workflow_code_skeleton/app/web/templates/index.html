@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>IDEA TO SCRIPT  剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260422-6">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260423-1">
 </head>
 <body>
   <main class="shell">
@@ -43,7 +43,6 @@
         <p class="hero-copy">登录后可以同时生成多个剧本；点击【新建剧本】会直接打开新的工作页面。只要不退出登录，离开页面后工作流也会继续运行。</p>
         <div class="hero-actions">
           <button id="newScriptBtn" class="btn btn-primary" type="button">新建剧本</button>
-          <button id="viewAssetsBtn" class="btn btn-secondary" type="button">个人中心</button>
           <a class="btn btn-ghost btn-link" href="#tools">使用辅助工具</a>
         </div>
       </div>
@@ -54,6 +53,7 @@
         <div>
           <p class="runtime-label">当前状态</p>
           <h2 id="statusText">待开始</h2>
+          <div id="projectText" class="runtime-project-badge">当前剧本：未选中</div>
           <p id="messageText" class="muted">填写创作输入后点击开始生成。</p>
         </div>
         <div class="runtime-meta">
@@ -72,7 +72,6 @@
       </div>
       <div class="runtime-foot">
         <span id="progressText">0%</span>
-        <span id="projectText">当前剧本：未选中</span>
         <span id="taskText">任务：未创建</span>
       </div>
       <div class="control-row">
@@ -103,60 +102,62 @@
       </div>
     </section>
 
-    <section class="card workspace-card">
-      <div class="section-head compact-head">
-        <div>
-          <p class="eyebrow">Workspace</p>
-          <h2>我的任务</h2>
-          <p>默认折叠，点开后查看任务进度。</p>
-        </div>
-        <button id="refreshProjectsBtn" class="btn btn-secondary" type="button">刷新任务</button>
-      </div>
-      <div class="workspace-folders">
-        <details class="workspace-folder">
-          <summary>
-            <span>生成中的剧本</span>
-          </summary>
-          <div id="activeProjectList" class="workspace-compact-list"></div>
-        </details>
-        <details class="workspace-folder">
-          <summary>
-            <span>已完成剧本</span>
-          </summary>
-          <div id="completedProjectList" class="workspace-compact-list"></div>
-        </details>
-      </div>
-    </section>
-
     <div class="layout">
-      <section class="card form-card">
-        <div class="card-head">
-          <h3>创作输入</h3>
-          <p>这里只需要填写最少输入项；剧本标题、故事大纲、人物小传、核心场景、分集计划都会由前置框架工作流自动生成。</p>
-        </div>
+      <div class="workbench-column">
+        <section class="card form-card">
+          <div class="card-head">
+            <h3>创作输入</h3>
+            <p>这里只需要填写最少输入项；剧本标题、故事大纲、人物小传、核心场景、分集计划都会由前置框架工作流自动生成。</p>
+          </div>
 
-        <div class="field-grid compact-grid">
-          <label class="field">
-            <span>模型选择</span>
-            <select id="modelSelect"></select>
-          </label>
-          <label class="field">
-            <span>角色数量</span>
-            <input id="characterCountInput" type="number" min="1" max="50" value="5">
-          </label>
-          <label class="field">
-            <span>总集数</span>
-            <input id="episodeCountInput" type="number" min="1" max="100" value="10">
-          </label>
-        </div>
+          <div class="field-grid compact-grid">
+            <label class="field">
+              <span>模型选择</span>
+              <select id="modelSelect"></select>
+            </label>
+            <label class="field">
+              <span>角色数量</span>
+              <input id="characterCountInput" type="number" min="1" max="50" value="5">
+            </label>
+            <label class="field">
+              <span>总集数</span>
+              <input id="episodeCountInput" type="number" min="1" max="100" value="10">
+            </label>
+          </div>
 
-        <label class="field">
-          <span>想要的剧本</span>
-          <textarea id="expectationInput" placeholder="例如：我想要一个60集的末世求生复仇故事，前期压迫感强，中期升级爽，后期反转大。"></textarea>
-        </label>
+          <label class="field">
+            <span>想要的剧本</span>
+            <textarea id="expectationInput" placeholder="例如：我想要一个60集的末世求生复仇故事，前期压迫感强，中期升级爽，后期反转大。"></textarea>
+          </label>
 
-        <p id="formHint" class="hint">你只需要填写想要的剧本、角色数量和总集数；剧本标题、故事大纲、人物小传、核心场景、分集计划，以及服装前置策略都会由前置智能体自动生成。</p>
-      </section>
+          <p id="formHint" class="hint">你只需要填写想要的剧本、角色数量和总集数；剧本标题、故事大纲、人物小传、核心场景、分集计划，以及服装前置策略都会由前置智能体自动生成。</p>
+        </section>
+
+        <section id="workspaceCard" class="card workspace-card">
+          <div class="section-head compact-head">
+            <div>
+              <p class="eyebrow">Workspace</p>
+              <h2>我的任务</h2>
+              <p>默认折叠，展开后查看任务进度；鼠标离开 10 秒会自动收起。</p>
+            </div>
+            <button id="refreshProjectsBtn" class="btn btn-secondary" type="button">刷新任务</button>
+          </div>
+          <div class="workspace-folders">
+            <details id="activeWorkspaceFolder" class="workspace-folder">
+              <summary>
+                <span>生成中的剧本</span>
+              </summary>
+              <div id="activeProjectList" class="workspace-compact-list"></div>
+            </details>
+            <details id="completedWorkspaceFolder" class="workspace-folder">
+              <summary>
+                <span>已完成剧本</span>
+              </summary>
+              <div id="completedProjectList" class="workspace-compact-list"></div>
+            </details>
+          </div>
+        </section>
+      </div>
 
       <section class="card result-card">
         <div class="card-head">
@@ -328,6 +329,6 @@
       loginUrl: "{{ url_for('login_page') }}"
     };
   </script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260422-3"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260423-1"></script>
 </body>
 </html>

@@ -85,6 +85,7 @@ from ..workflow_ids import (
 logger = get_logger("task_manager")
 
 PROJECT_RUNNING_STATUSES = {"pending", "running", "pausing", "paused"}
+WAITING_STATUSES = {"pending", "running", "pausing"}
 STAGE_LABELS = {
     "framework": "正在撰写剧本框架",
     "appearance_strategy": "正在生成服装前置策略",
@@ -145,7 +146,7 @@ COMPLETION_PENDING_NOTICE = (
     "如果确认满意完成，系统会清理缓存并锁定当前成品；如需继续调整，请先选择回退重写。"
 )
 COMPLETION_CONFIRMED_NOTICE = (
-    "你已确认当前剧本满意完成。执行缓存已经清理，当前成品不可再直接修改；如需调整，请重新生成。"
+    "你已确认当前剧本满意完成。执行缓存已经清理，当前成品正文不可再直接修改；公开/私有仍可随时切换。"
 )
 RUNTIME_CACHE_NOTICE = "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。请谨慎选择。"
 LOCAL_COMPLETED_BATCHES = "_completed_batches"
@@ -763,6 +764,51 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat()
 
 
+def _is_waiting_status(status: Any) -> bool:
+    return str(status or "").strip() in WAITING_STATUSES
+
+
+def _iso_to_epoch_ms(value: Any) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp() * 1000)
+
+
+def _sync_wait_tracking(
+    snapshot: dict[str, Any],
+    *,
+    previous_status: Any,
+    current_status: Any,
+    current_time_iso: str,
+) -> None:
+    elapsed_ms = _safe_int(snapshot.get("wait_elapsed_ms"), 0)
+    previous_waiting = _is_waiting_status(previous_status)
+    current_waiting = _is_waiting_status(current_status)
+    started_at = snapshot.get("wait_started_at")
+
+    if previous_waiting and not current_waiting:
+        started_ms = _iso_to_epoch_ms(started_at)
+        current_ms = _iso_to_epoch_ms(current_time_iso)
+        if started_ms is not None and current_ms is not None:
+            elapsed_ms += max(0, current_ms - started_ms)
+        snapshot["wait_elapsed_ms"] = elapsed_ms
+        snapshot["wait_started_at"] = None
+        return
+
+    snapshot["wait_elapsed_ms"] = elapsed_ms
+    if current_waiting:
+        snapshot["wait_started_at"] = started_at or current_time_iso
+    else:
+        snapshot["wait_started_at"] = None
+
+
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
@@ -1215,13 +1261,22 @@ class TaskManager:
 
     def _update_snapshot(self, record: TaskRecord, **changes: Any) -> None:
         with record.lock:
+            previous_status = record.snapshot.get("status")
             if "artifacts" in changes and isinstance(changes["artifacts"], dict):
                 merged_artifacts = dict(record.snapshot.get("artifacts", {}))
                 merged_artifacts.update(changes.pop("artifacts"))
                 record.snapshot["artifacts"] = merged_artifacts
 
             record.snapshot.update(changes)
-            record.snapshot["updated_at"] = now_iso()
+            current_time = now_iso()
+            current_status = record.snapshot.get("status", previous_status)
+            _sync_wait_tracking(
+                record.snapshot,
+                previous_status=previous_status,
+                current_status=current_status,
+                current_time_iso=current_time,
+            )
+            record.snapshot["updated_at"] = current_time
         self._persist_snapshot(record)
 
     def _next_project_id(self) -> int:
@@ -1282,6 +1337,8 @@ class TaskManager:
             "created_at": snapshot.get("created_at"),
             "updated_at": snapshot.get("updated_at"),
             "finished_at": snapshot.get("finished_at"),
+            "wait_elapsed_ms": _safe_int(snapshot.get("wait_elapsed_ms"), 0),
+            "wait_started_at": snapshot.get("wait_started_at"),
             "visibility": snapshot.get("visibility") or "private",
             "model_option": copy.deepcopy(snapshot.get("model_option")),
             "input_payload": self._public_input_payload(snapshot),
@@ -1566,6 +1623,8 @@ class TaskManager:
             "awaiting_user_confirmation": False,
             "cache_retained": True,
             "debug_state": {},
+            "wait_elapsed_ms": 0,
+            "wait_started_at": now_iso(),
         }
 
         record = TaskRecord(
@@ -1665,8 +1724,10 @@ class TaskManager:
             snapshot = self.get_project_snapshot(project_id, user_id=user_id, public_view=False)
         if not snapshot or not self._snapshot_belongs_to_user(snapshot, user_id):
             raise ValueError("项目不存在或无权操作")
-        if _completion_confirmed(snapshot):
-            raise ValueError("该剧本已确认满意完成并清理缓存，如需调整请重新生成。")
+        if _completion_confirmed(snapshot) and any(
+            key in changes for key in ("title", "story_outline", "final_script")
+        ):
+            raise ValueError("该剧本已确认满意完成，正文内容已锁定；如需调整请重新生成。公开/私有仍可随时切换。")
 
         title = str(changes.get("title") or "").strip()
         story_outline = str(changes.get("story_outline") or "").strip()
@@ -1813,6 +1874,8 @@ class TaskManager:
                 "completion_confirmed": False,
                 "awaiting_user_confirmation": False,
                 "cache_retained": True,
+                "wait_elapsed_ms": 0,
+                "wait_started_at": now_iso(),
             }
         )
 
@@ -2344,6 +2407,8 @@ class TaskManager:
                 "completion_confirmed": False,
                 "awaiting_user_confirmation": False,
                 "cache_retained": True,
+                "wait_elapsed_ms": 0,
+                "wait_started_at": now_iso(),
             }
         )
 
@@ -2439,6 +2504,8 @@ class TaskManager:
             "restart_of_task_id": old_task_id or None,
             "finished_at": None,
             "error": None,
+            "wait_elapsed_ms": 0,
+            "wait_started_at": now_iso(),
         }
 
         record = TaskRecord(
