@@ -63,7 +63,7 @@ from ..services.fastgpt_contracts import (
     contract_for,
     to_jsonable_value,
 )
-from ..utils.episode import BatchWindow, iter_episode_batches
+from ..utils.episode import BatchWindow, iter_episode_batches, iter_episode_batches_from
 from ..utils.logger import get_logger
 from ..workflow_ids import (
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
@@ -106,6 +106,7 @@ LOCAL_CURRENT_BATCH_INDEX = "_current_batch_index"
 LOCAL_CURRENT_BATCH_STAGE = "_current_batch_stage"
 LOCAL_REWRITE_FROM_STAGE = "_rewrite_from_stage"
 LOCAL_SCRIPT_BATCHES = "_script_batches"
+LOCAL_SCRIPT_EPISODES = "_script_episode_cache"
 LOCAL_SUMMARY_BY_BATCH = "_summary_by_batch"
 LOCAL_APPEARANCE_MEMORY_BY_BATCH = "_appearance_memory_by_batch"
 SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT = 32000
@@ -497,8 +498,6 @@ def _run_batched_generation(
 
     total_episodes = int(variables[TOTAL_EPISODES])
     batch_size = max(1, int(settings.batch_size or 5))
-    batches = list(iter_episode_batches(total_episodes, batch_size=batch_size))
-    total_batches = max(1, len(batches))
     all_hooks: dict[str, Any] = {}
     all_dialogues: dict[str, Any] = {}
     all_hooks = _dict_or_empty(variables.get(ALL_HOOKS))
@@ -507,20 +506,40 @@ def _run_batched_generation(
         variables.get(LOCAL_COMMITTED_SCRIPT) or variables.get(ALL_SCRIPT) or ""
     ).strip()
     script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
+    script_episode_cache = _normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES))
     summary_by_batch = _normalize_batch_text_map(variables.get(LOCAL_SUMMARY_BY_BATCH))
     appearance_memory_by_batch = _normalize_batch_object_map(
         variables.get(LOCAL_APPEARANCE_MEMORY_BY_BATCH)
     )
+    rewrite_from_stage = str(variables.get(LOCAL_REWRITE_FROM_STAGE) or "").strip().lower()
+    rewrite_start_episode = max(1, _safe_int(variables.get(BATCH_START_EPISODE), 1))
+    custom_script_rewrite = rewrite_from_stage == "script" and rewrite_start_episode > 1
+    if custom_script_rewrite:
+        batches = list(
+            iter_episode_batches_from(
+                rewrite_start_episode,
+                total_episodes,
+                batch_size=batch_size,
+            )
+        )
+        completed_batches = 0
+        current_batch_index = 0
+    else:
+        batches = list(iter_episode_batches(total_episodes, batch_size=batch_size))
+        completed_batches = min(
+            max(1, len(batches)),
+            max(0, _safe_int(variables.get(LOCAL_COMPLETED_BATCHES), 0)),
+        )
+        current_batch_index = max(
+            completed_batches,
+            _safe_int(variables.get(LOCAL_CURRENT_BATCH_INDEX), completed_batches),
+        )
+    total_batches = max(1, len(batches))
     completed_batches = min(
         total_batches,
-        max(0, _safe_int(variables.get(LOCAL_COMPLETED_BATCHES), 0)),
-    )
-    current_batch_index = max(
         completed_batches,
-        _safe_int(variables.get(LOCAL_CURRENT_BATCH_INDEX), completed_batches),
     )
     current_batch_stage = str(variables.get(LOCAL_CURRENT_BATCH_STAGE) or "").strip().lower()
-    rewrite_from_stage = str(variables.get(LOCAL_REWRITE_FROM_STAGE) or "").strip().lower()
     normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
     episode_alias_plan = _normalize_episode_alias_plan_object(variables.get(EPISODE_ALIAS_PLAN))
 
@@ -540,6 +559,11 @@ def _run_batched_generation(
         if index < completed_batches:
             continue
         resume_stage = current_batch_stage if index == current_batch_index else ""
+        generated_before_batch = (
+            max(0, batch.start_episode - 1)
+            if custom_script_rewrite
+            else min(total_episodes, index * batch_size)
+        )
         plan_for_batch = get_episode_batch_payload(
             normalized_plan,
             batch.start_episode,
@@ -652,22 +676,27 @@ def _run_batched_generation(
             alias_plan_for_batch=alias_plan_for_batch,
             committed_script=committed_script,
             script_batches=script_batches,
+            script_episode_cache=script_episode_cache,
         )
         script_progress = 68 + int((index / total_batches) * 26)
         if resume_stage == "script" and _has_value(variables.get(BATCH_SCRIPT)):
             batch_script = str(variables.get(BATCH_SCRIPT) or "").strip()
-            variables[ALL_SCRIPT] = str(
-                variables.get(ALL_SCRIPT) or _join_script_parts(committed_script, batch_script)
+            script_episode_cache.update(_extract_script_episode_map(batch_script, batch))
+            variables[ALL_SCRIPT] = (
+                _join_script_episode_map(script_episode_cache)
+                if script_episode_cache
+                else str(variables.get(ALL_SCRIPT) or _join_script_parts(committed_script, batch_script))
             )
             script_batches[batch.start_episode] = batch_script
             variables[LOCAL_SCRIPT_BATCHES] = _string_keyed_batch_map(script_batches)
+            variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(script_episode_cache)
             set_runtime_stage(
                 state,
                 "script",
                 f"已停在第 {batch.label} 集剧本正文的成功检查点。",
                 batch_label=batch.label,
                 progress_percent=script_progress,
-                generated_episodes=min(total_episodes, index * batch_size),
+                generated_episodes=generated_before_batch,
             )
         else:
             script_output = _run_fastgpt_stage(
@@ -679,13 +708,18 @@ def _run_batched_generation(
                 message=f"正在生成第 {batch.label} 集的剧本正文。",
                 batch_label=batch.label,
                 progress_percent=script_progress,
-                generated_episodes=min(total_episodes, index * batch_size),
+                generated_episodes=generated_before_batch,
             )
             batch_script = script_output[BATCH_SCRIPT].strip()
             variables[BATCH_SCRIPT] = batch_script
-            variables[ALL_SCRIPT] = _join_script_parts(committed_script, batch_script)
+            script_episode_cache.update(_extract_script_episode_map(batch_script, batch))
+            if script_episode_cache:
+                variables[ALL_SCRIPT] = _join_script_episode_map(script_episode_cache)
+            else:
+                variables[ALL_SCRIPT] = _join_script_parts(committed_script, batch_script)
             script_batches[batch.start_episode] = batch_script
             variables[LOCAL_SCRIPT_BATCHES] = _string_keyed_batch_map(script_batches)
+            variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(script_episode_cache)
             variables[LOCAL_CURRENT_BATCH_STAGE] = "script"
         _sync_state_variables(state, variables)
 
@@ -698,7 +732,7 @@ def _run_batched_generation(
             message=f"正在整理第 {batch.label} 集的上下文记忆。",
             batch_label=batch.label,
             progress_percent=70 + int(((index + 1) / total_batches) * 26),
-            generated_episodes=min(total_episodes, (index + 1) * batch_size),
+            generated_episodes=batch.end_episode,
             max_retries=0,
         )
         variables[LAST_SUMMARY] = memory_output[LAST_SUMMARY]
@@ -715,6 +749,7 @@ def _run_batched_generation(
         variables[LOCAL_APPEARANCE_MEMORY_BY_BATCH] = _string_keyed_batch_map(
             appearance_memory_by_batch
         )
+        variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(script_episode_cache)
         variables[LOCAL_COMPLETED_BATCHES] = index + 1
         variables[LOCAL_COMMITTED_SCRIPT] = variables[ALL_SCRIPT]
         committed_script = str(variables.get(LOCAL_COMMITTED_SCRIPT) or "").strip()
@@ -775,8 +810,100 @@ def _normalize_batch_object_map(value: Any) -> dict[int, dict[str, Any]]:
     return normalized
 
 
+def _normalize_episode_script_map(value: Any) -> dict[int, str]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[int, str] = {}
+    for key, item in value.items():
+        episode = _safe_int(key, 0)
+        text = str(item or "").strip()
+        if episode > 0 and text:
+            normalized[episode] = text
+    return normalized
+
+
 def _string_keyed_batch_map(value: dict[int, Any]) -> dict[str, Any]:
     return {str(int(key)): copy.deepcopy(item) for key, item in sorted(value.items()) if int(key) > 0}
+
+
+def _join_script_episode_map(value: dict[int, str]) -> str:
+    return "\n\n".join(
+        str(value[episode]).strip()
+        for episode in sorted(value)
+        if str(value.get(episode) or "").strip()
+    ).strip()
+
+
+def _extract_script_episode_map(
+    batch_script: str,
+    batch: BatchWindow,
+) -> dict[int, str]:
+    text = str(batch_script or "").strip()
+    if not text:
+        return {}
+
+    pattern = re.compile(
+        r"(?=^第\s*([0-9０-９一二三四五六七八九十百千万两零〇]+)\s*集)",
+        re.MULTILINE,
+    )
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return {}
+
+    extracted: dict[int, str] = {}
+    for index, match in enumerate(matches):
+        start = match.start()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        episode = _parse_episode_token(match.group(1))
+        if episode is None:
+            continue
+        if batch.start_episode <= episode <= batch.end_episode:
+            chunk = text[start:end].strip()
+            if chunk:
+                extracted[episode] = chunk
+    return extracted
+
+
+def _parse_episode_token(value: str) -> int | None:
+    token = str(value or "").strip()
+    if not token:
+        return None
+
+    fullwidth_digits = str.maketrans("０１２３４５６７８９", "0123456789")
+    normalized = token.translate(fullwidth_digits)
+    if normalized.isdigit():
+        return int(normalized)
+
+    numerals = {
+        "零": 0,
+        "〇": 0,
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
+    units = {"十": 10, "百": 100, "千": 1000, "万": 10000}
+    total = 0
+    current = 0
+    for char in normalized:
+        if char in numerals:
+            current = numerals[char]
+            continue
+        unit = units.get(char)
+        if unit is None:
+            return None
+        if current == 0:
+            current = 1
+        total += current * unit
+        current = 0
+    total += current
+    return total or None
 
 
 def _run_full_fastgpt_generation(
@@ -831,6 +958,7 @@ def _run_full_fastgpt_generation(
         alias_plan_for_batch=variables.get(EPISODE_ALIAS_PLAN) or {},
         committed_script=str(variables.get(ALL_SCRIPT) or "").strip(),
         script_batches=_normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES)),
+        script_episode_cache=_normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES)),
     )
     script_output = _run_fastgpt_stage(
         state,
@@ -845,6 +973,13 @@ def _run_full_fastgpt_generation(
     all_script = script_output[BATCH_SCRIPT].strip()
     variables[BATCH_SCRIPT] = all_script
     variables[ALL_SCRIPT] = all_script
+    variables[LOCAL_SCRIPT_BATCHES] = {"1": all_script}
+    variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(
+        _extract_script_episode_map(
+            all_script,
+            BatchWindow(start_episode=1, end_episode=max(1, payload.total_episodes)),
+        )
+    )
     _sync_state_variables(state, variables)
 
     memory_output = _run_fastgpt_stage(
@@ -887,6 +1022,7 @@ def _build_script_stage_context(
     alias_plan_for_batch: dict[str, Any] | None,
     committed_script: str,
     script_batches: dict[int, str] | None = None,
+    script_episode_cache: dict[int, str] | None = None,
 ) -> dict[str, Any]:
     context = dict(variables)
     context[EPISODE_PLAN] = plan_for_batch
@@ -900,6 +1036,7 @@ def _build_script_stage_context(
     context[ALL_DIALOGUES] = slice_object_episodes_for_batch(variables.get(ALL_DIALOGUES), batch)
     context[ALL_SCRIPT] = _build_previous_script_context(
         script_batches or {},
+        script_episode_cache or {},
         committed_script,
         current_batch_start=batch.start_episode,
     )
@@ -921,12 +1058,21 @@ def _build_script_stage_context(
 
 def _build_previous_script_context(
     script_batches: dict[int, str],
+    script_episode_cache: dict[int, str],
     committed_script: str,
     *,
     current_batch_start: int,
 ) -> str:
     if current_batch_start <= 1:
         return ""
+
+    previous_episode_parts = [
+        text
+        for episode, text in sorted(script_episode_cache.items())
+        if episode < current_batch_start and str(text or "").strip()
+    ]
+    if previous_episode_parts:
+        return _trim_text_tail(_join_script_parts(*previous_episode_parts), max_chars=12000)
 
     previous_parts: list[str] = []
     previous_starts = sorted(start for start in script_batches if start < current_batch_start)

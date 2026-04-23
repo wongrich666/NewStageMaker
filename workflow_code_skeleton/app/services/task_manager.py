@@ -147,13 +147,14 @@ COMPLETION_PENDING_NOTICE = (
 COMPLETION_CONFIRMED_NOTICE = (
     "你已确认当前剧本满意完成。执行缓存已经清理，当前成品不可再直接修改；如需调整，请重新生成。"
 )
-RUNTIME_CACHE_NOTICE = "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。"
+RUNTIME_CACHE_NOTICE = "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。请谨慎选择。"
 LOCAL_COMPLETED_BATCHES = "_completed_batches"
 LOCAL_COMMITTED_SCRIPT = "_committed_all_script"
 LOCAL_CURRENT_BATCH_INDEX = "_current_batch_index"
 LOCAL_CURRENT_BATCH_STAGE = "_current_batch_stage"
 LOCAL_REWRITE_FROM_STAGE = "_rewrite_from_stage"
 LOCAL_SCRIPT_BATCHES = "_script_batches"
+LOCAL_SCRIPT_EPISODES = "_script_episode_cache"
 LOCAL_SUMMARY_BY_BATCH = "_summary_by_batch"
 LOCAL_APPEARANCE_MEMORY_BY_BATCH = "_appearance_memory_by_batch"
 ROLLBACK_STAGE_OPTIONS: tuple[tuple[str, str], ...] = (
@@ -488,6 +489,7 @@ for _stage_key in (
 ):
     ROLLBACK_DEBUG_CLEAR_RULES[_stage_key] = ROLLBACK_DEBUG_CLEAR_RULES[_stage_key] + (
         LOCAL_SCRIPT_BATCHES,
+        LOCAL_SCRIPT_EPISODES,
         LOCAL_SUMMARY_BY_BATCH,
         LOCAL_APPEARANCE_MEMORY_BY_BATCH,
     )
@@ -791,6 +793,18 @@ def _normalize_batch_text_map(value: Any) -> dict[int, str]:
     return normalized
 
 
+def _normalize_episode_script_map(value: Any) -> dict[int, str]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[int, str] = {}
+    for key, item in value.items():
+        episode = _safe_int(key, 0)
+        text = str(item or "").strip()
+        if episode > 0 and text:
+            normalized[episode] = text
+    return normalized
+
+
 def _normalize_batch_object_map(value: Any) -> dict[int, dict[str, Any]]:
     if not isinstance(value, dict):
         return {}
@@ -805,6 +819,14 @@ def _normalize_batch_object_map(value: Any) -> dict[int, dict[str, Any]]:
 
 def _string_keyed_batch_map(value: dict[int, Any]) -> dict[str, Any]:
     return {str(int(key)): copy.deepcopy(item) for key, item in sorted(value.items()) if int(key) > 0}
+
+
+def _join_script_episode_map(value: dict[int, str]) -> str:
+    return "\n\n".join(
+        str(value[episode]).strip()
+        for episode in sorted(value)
+        if str(value.get(episode) or "").strip()
+    ).strip()
 
 
 def use_fastgpt_backend() -> bool:
@@ -1299,13 +1321,23 @@ class TaskManager:
 
         batch_starts = [batch.start_episode for batch in iter_episode_batches(total_episodes, batch_size=batch_size)]
         script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
-        if not script_batches:
+        script_episodes = _normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES))
+        if script_episodes:
+            candidate_starts = list(range(1, total_episodes + 1))
+        elif script_batches:
+            candidate_starts = batch_starts
+        else:
             batch_starts = batch_starts[:1]
+            candidate_starts = batch_starts
 
         options: list[dict[str, Any]] = []
-        for start_episode in batch_starts:
+        for start_episode in candidate_starts:
             end_episode = min(total_episodes, start_episode + batch_size - 1)
-            label = f"从第 {start_episode}-{end_episode} 集开始重写正文"
+            label = (
+                f"从第 {start_episode} 集开始重写正文（本轮将覆盖第 {start_episode}-{end_episode} 集及后续）"
+                if script_episodes
+                else f"从第 {start_episode}-{end_episode} 集开始重写正文"
+            )
             options.append(
                 {
                     "value": start_episode,
@@ -1927,13 +1959,26 @@ class TaskManager:
             original_variables = {}
 
         script_batches = _normalize_batch_text_map(original_variables.get(LOCAL_SCRIPT_BATCHES))
+        script_episodes = _normalize_episode_script_map(original_variables.get(LOCAL_SCRIPT_EPISODES))
         summary_by_batch = _normalize_batch_text_map(original_variables.get(LOCAL_SUMMARY_BY_BATCH))
         appearance_memory_by_batch = _normalize_batch_object_map(
             original_variables.get(LOCAL_APPEARANCE_MEMORY_BY_BATCH)
         )
 
+        preserved_script_episodes = {
+            episode: text for episode, text in script_episodes.items() if episode < start_episode
+        }
+        batch_size = max(1, int(settings.batch_size or 5))
         preserved_script_batches = {
-            episode: text for episode, text in script_batches.items() if episode < start_episode
+            episode: text
+            for episode, text in script_batches.items()
+            if (
+                episode < start_episode
+                and (
+                    not preserved_script_episodes
+                    or episode + batch_size - 1 < start_episode
+                )
+            )
         }
         preserved_summary_batches = {
             episode: text for episode, text in summary_by_batch.items() if episode < start_episode
@@ -1943,8 +1988,17 @@ class TaskManager:
         }
 
         preserved_starts = sorted(preserved_script_batches)
-        preserved_script = _join_script_parts(*(preserved_script_batches[episode] for episode in preserved_starts))
-        previous_batch_start = preserved_starts[-1] if preserved_starts else None
+        preserved_script = (
+            _join_script_episode_map(preserved_script_episodes)
+            if preserved_script_episodes
+            else _join_script_parts(*(preserved_script_batches[episode] for episode in preserved_starts))
+        )
+        previous_batch_candidates = [
+            episode
+            for episode in sorted(summary_by_batch)
+            if episode + batch_size - 1 < start_episode
+        ]
+        previous_batch_start = previous_batch_candidates[-1] if previous_batch_candidates else None
 
         if preserved_script:
             variables[ALL_SCRIPT] = preserved_script
@@ -1969,10 +2023,11 @@ class TaskManager:
             variables.pop(APPEARANCE_CONTINUITY_MEMORY, None)
 
         variables[LOCAL_SCRIPT_BATCHES] = _string_keyed_batch_map(preserved_script_batches)
+        variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(preserved_script_episodes)
         variables[LOCAL_SUMMARY_BY_BATCH] = _string_keyed_batch_map(preserved_summary_batches)
         variables[LOCAL_APPEARANCE_MEMORY_BY_BATCH] = _string_keyed_batch_map(preserved_appearance_batches)
-        variables[LOCAL_COMPLETED_BATCHES] = len(preserved_starts)
-        variables[LOCAL_CURRENT_BATCH_INDEX] = len(preserved_starts)
+        variables[LOCAL_COMPLETED_BATCHES] = 0
+        variables[LOCAL_CURRENT_BATCH_INDEX] = 0
         variables[LOCAL_CURRENT_BATCH_STAGE] = ""
         variables[BATCH_START_EPISODE] = int(start_episode)
         variables.pop(BATCH_SCRIPT, None)

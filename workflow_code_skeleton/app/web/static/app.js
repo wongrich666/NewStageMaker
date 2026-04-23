@@ -520,7 +520,7 @@
       els.finalOutputBox.textContent = "暂无内容";
       syncElapsedTimer(null);
       if (els.cacheNoticeText) {
-        els.cacheNoticeText.textContent = "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。";
+        els.cacheNoticeText.textContent = "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。请谨慎选择。";
       }
       renderRollbackOptions([]);
       renderRollbackScriptStartOptions([]);
@@ -552,7 +552,7 @@
     els.finalOutputBox.textContent = finalOutput || "暂无内容";
     syncElapsedTimer(snapshot);
     if (els.cacheNoticeText) {
-      els.cacheNoticeText.textContent = snapshot.cache_notice || "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。";
+      els.cacheNoticeText.textContent = snapshot.cache_notice || "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。请谨慎选择。";
     }
     renderRollbackOptions(snapshot.rollback_stage_options || [], els.rollbackStageSelect?.value || "");
     renderRollbackScriptStartOptions(

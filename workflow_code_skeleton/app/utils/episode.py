@@ -29,3 +29,14 @@ def iter_episode_batches(total_episodes: int, batch_size: int = 5):
     while start <= total_episodes:
         yield BatchWindow.from_start(start, total_episodes, batch_size=batch_size)
         start += batch_size
+
+
+def iter_episode_batches_from(
+    start_episode: int,
+    total_episodes: int,
+    batch_size: int = 5,
+):
+    start = max(1, int(start_episode))
+    while start <= total_episodes:
+        yield BatchWindow.from_start(start, total_episodes, batch_size=batch_size)
+        start += batch_size
