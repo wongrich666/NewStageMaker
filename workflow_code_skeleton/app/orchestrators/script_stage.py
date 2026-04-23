@@ -29,13 +29,9 @@ logger = get_logger("script_stage")
 def run_script_stage(state, spec: WorkflowSpec):
     logger.info("开始执行剧本正文批处理阶段")
 
-    state.set_var(SCRIPT_START_VAR, 1)
-    state.set_var(SCRIPT_RETRY_VAR, 0)
-    state.set_var(SCRIPT_FINAL_VAR, "")
-    state.set_var(LOCAL_SCRIPT_EPISODE_CACHE_VAR, {})
-    sync_runtime_state(state)
-
     total_episodes = state.get_int_var(TOTAL_EPISODES_VAR)
+    _initialize_script_stage_state(state, total_episodes=total_episodes)
+    sync_runtime_state(state)
     total_batches = max(1, (total_episodes + 4) // 5)
 
     while state.get_int_var(SCRIPT_START_VAR) <= total_episodes:
@@ -114,6 +110,45 @@ def run_script_stage(state, spec: WorkflowSpec):
         generated_episodes=total_episodes,
     )
     return state
+
+
+def _initialize_script_stage_state(state, *, total_episodes: int) -> None:
+    preserved_start = max(1, state.get_int_var(SCRIPT_START_VAR, 1))
+    episode_cache = _normalize_episode_cache(state.get_var(LOCAL_SCRIPT_EPISODE_CACHE_VAR, {}))
+    final_text = str(state.get_var(SCRIPT_FINAL_VAR, "") or "").strip()
+
+    if not episode_cache and final_text:
+        episode_cache = _rebuild_episode_cache_from_final_text(
+            final_text,
+            total_episodes=total_episodes,
+        )
+
+    if episode_cache and not final_text:
+        final_text = _join_episode_cache(episode_cache)
+
+    if preserved_start > 1 and not episode_cache and not final_text:
+        logger.warning(
+            "剧本正文阶段收到从第 %s 集继续的起点，但未发现任何已缓存正文；"
+            "为避免最终成品缺失前文，已回退为从第 1 集重新开始。",
+            preserved_start,
+        )
+        preserved_start = 1
+
+    state.set_var(SCRIPT_START_VAR, preserved_start)
+    state.set_var(SCRIPT_RETRY_VAR, 0)
+    state.set_var(SCRIPT_FINAL_VAR, final_text)
+    state.set_var(LOCAL_SCRIPT_EPISODE_CACHE_VAR, episode_cache)
+
+
+def _rebuild_episode_cache_from_final_text(
+    final_text: str,
+    *,
+    total_episodes: int,
+) -> dict[int, str]:
+    if not final_text.strip():
+        return {}
+    full_window = BatchWindow(start_episode=1, end_episode=max(1, total_episodes))
+    return _extract_script_episode_map(final_text, full_window)
 
 
 def _resolve_rewrite_start_episode(
