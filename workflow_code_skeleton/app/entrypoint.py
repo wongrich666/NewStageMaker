@@ -74,7 +74,7 @@ def _serve_web(args) -> int:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
-    # PyCharm 直接运行 main.py 时通常不会传参数；默认启动网页服务。
+    # PyCharm 直接运行根目录 main.py 时通常不会传参数；默认启动网页服务。
     if not argv:
         argv = ["serve"]
 

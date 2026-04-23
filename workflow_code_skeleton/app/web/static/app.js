@@ -512,6 +512,8 @@
   }
 
   function renderSnapshot(snapshot) {
+    const previousProjectId = state.projectId;
+    const previousTaskId = state.taskId;
     state.latestSnapshot = snapshot || null;
     if (!snapshot) {
       state.projectId = null;
@@ -565,11 +567,38 @@
     if (els.cacheNoticeText) {
       els.cacheNoticeText.textContent = snapshot.cache_notice || "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。请谨慎选择。";
     }
-    renderRollbackOptions(snapshot.rollback_stage_options || [], els.rollbackStageSelect?.value || "");
-    renderRollbackScriptStartOptions(
-      snapshot.rollback_script_start_options || [],
-      els.rollbackScriptStartSelect?.value || ""
+    const snapshotChanged = (
+      Number(previousProjectId || 0) !== Number(state.projectId || 0)
+      || String(previousTaskId || "") !== String(state.taskId || "")
     );
+    const rollbackStageOptions = snapshot.rollback_stage_options || [];
+    const rollbackScriptStartOptions = snapshot.rollback_script_start_options || [];
+    const defaultRollbackStage = snapshot.rollback_stage_default || "";
+    const defaultRollbackStart = snapshot.rollback_start_episode_default
+      ? String(snapshot.rollback_start_episode_default)
+      : "";
+    const currentRollbackStage = snapshotChanged ? "" : (els.rollbackStageSelect?.value || "");
+    const desiredRollbackStage = (
+      currentRollbackStage
+      && rollbackStageOptions.some((item) => item.key === currentRollbackStage)
+    )
+      ? currentRollbackStage
+      : defaultRollbackStage;
+    renderRollbackOptions(rollbackStageOptions, desiredRollbackStage);
+    const currentRollbackStart = snapshotChanged ? "" : (els.rollbackScriptStartSelect?.value || "");
+    const desiredRollbackStart = (
+      desiredRollbackStage === "script"
+      && currentRollbackStart
+      && rollbackScriptStartOptions.some((item) => String(item.value) === String(currentRollbackStart))
+    )
+      ? currentRollbackStart
+      : desiredRollbackStage === "script"
+        ? defaultRollbackStart
+        : "";
+    renderRollbackScriptStartOptions(rollbackScriptStartOptions, desiredRollbackStart);
+    if (desiredRollbackStage !== "script" && els.rollbackScriptStartSelect) {
+      els.rollbackScriptStartSelect.value = "";
+    }
     persistSelectedProjectId(snapshot.project_id);
     renderProjectList(state.projects);
     syncButtons();
@@ -1531,9 +1560,12 @@
       if ((els.rollbackStageSelect?.value || "") !== "script" && els.rollbackScriptStartSelect) {
         els.rollbackScriptStartSelect.value = "";
       }
+      const defaultScriptStart = (els.rollbackStageSelect?.value || "") === "script"
+        ? String(state.latestSnapshot?.rollback_start_episode_default || "")
+        : "";
       renderRollbackScriptStartOptions(
         state.latestSnapshot?.rollback_script_start_options || [],
-        els.rollbackScriptStartSelect?.value || ""
+        els.rollbackScriptStartSelect?.value || defaultScriptStart
       );
       syncButtons();
     });

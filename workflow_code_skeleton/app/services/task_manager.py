@@ -95,7 +95,7 @@ STAGE_LABELS = {
     "scene": "正在整理关键场景",
     "appearance": "正在生成服装版本映射",
     "hook": "正在设计开场冲突",
-    "dialogue": "正在补充人物对白",
+    "dialogue": "正在补充角色对话",
     "script": "正在生成正文",
     "finalize": "正在整理完整稿件",
     "finished": "已完成",
@@ -758,9 +758,9 @@ def _can_stage_rollback(snapshot: dict[str, Any] | None) -> bool:
     if _completion_confirmed(snapshot):
         return False
     status = str(snapshot.get("status") or "").strip()
-    if status in {"pending", "running", "pausing"}:
+    if status in {"pending", "running"}:
         return False
-    if status not in {"completed", "paused", "terminated", "failed"}:
+    if status not in {"completed", "paused", "pausing", "terminated", "failed"}:
         return False
     debug_state = snapshot.get("debug_state")
     return isinstance(debug_state, dict) and isinstance(debug_state.get("variables"), dict)
@@ -828,6 +828,80 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _normalize_rollback_stage_key(value: Any) -> str:
+    stage = str(value or "").strip().lower()
+    mapping = {
+        "hook": "hooks",
+        "hooks": "hooks",
+        "dialogue": "dialogues",
+        "dialogues": "dialogues",
+        "script": "script",
+        "final": "final",
+    }
+    return mapping.get(stage, stage)
+
+
+def _batch_end_episode(total_episodes: int, start_episode: int) -> int:
+    batch_size = max(1, int(settings.batch_size or 5))
+    return min(max(0, total_episodes), start_episode + batch_size - 1)
+
+
+def _slice_episode_object_before(value: Any, start_episode: int) -> dict[str, Any]:
+    payload = copy.deepcopy(value) if isinstance(value, dict) else {}
+    episodes = payload.get("episodes")
+    if not isinstance(episodes, list):
+        return payload if payload else {}
+
+    selected = []
+    for item in episodes:
+        if not isinstance(item, dict):
+            continue
+        episode_no = _safe_int(item.get("episode"), 0)
+        if 0 < episode_no < start_episode:
+            selected.append(copy.deepcopy(item))
+
+    if not selected:
+        return {}
+
+    payload["episodes"] = selected
+    batch_meta = payload.get("batch_meta")
+    if isinstance(batch_meta, dict):
+        payload["batch_meta"] = {
+            **copy.deepcopy(batch_meta),
+            "start_episode": selected[0].get("episode") or 1,
+            "end_episode": selected[-1].get("episode") or max(1, start_episode - 1),
+        }
+    return payload
+
+
+def _slice_episode_object_through(value: Any, end_episode: int) -> dict[str, Any]:
+    payload = copy.deepcopy(value) if isinstance(value, dict) else {}
+    episodes = payload.get("episodes")
+    if not isinstance(episodes, list):
+        return payload if payload else {}
+
+    selected = []
+    for item in episodes:
+        if not isinstance(item, dict):
+            continue
+        episode_no = _safe_int(item.get("episode"), 0)
+        if 0 < episode_no <= end_episode:
+            selected.append(copy.deepcopy(item))
+
+    if not selected:
+        return {}
+
+    payload["episodes"] = selected
+    batch_meta = payload.get("batch_meta")
+    if isinstance(batch_meta, dict):
+        payload["batch_meta"] = {
+            **copy.deepcopy(batch_meta),
+            "start_episode": selected[0].get("episode") or 1,
+            "end_episode": selected[-1].get("episode") or end_episode,
+        }
+    return payload
 
 
 def _join_script_parts(*parts: Any) -> str:
@@ -1340,6 +1414,7 @@ class TaskManager:
         completion_confirmed = _completion_confirmed(snapshot)
         awaiting_confirmation = _awaiting_completion_confirmation(snapshot)
         can_stage_rollback = _can_stage_rollback(snapshot)
+        rollback_stage_default, rollback_start_episode_default = self._rollback_defaults(snapshot)
         rollback_script_start_options = (
             self._script_rollback_start_options(snapshot) if can_stage_rollback else []
         )
@@ -1370,7 +1445,9 @@ class TaskManager:
             "rollback_stage_options": [
                 {"key": key, "label": label} for key, label in ROLLBACK_STAGE_OPTIONS
             ] if can_stage_rollback else [],
+            "rollback_stage_default": rollback_stage_default if can_stage_rollback else "",
             "rollback_script_start_options": rollback_script_start_options,
+            "rollback_start_episode_default": rollback_start_episode_default if can_stage_rollback else None,
             "has_final": bool(
                 str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip()
             ),
@@ -1391,13 +1468,16 @@ class TaskManager:
         batch_starts = [batch.start_episode for batch in iter_episode_batches(total_episodes, batch_size=batch_size)]
         script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
         script_episodes = _normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES))
+        interrupted_start = self._interrupted_batch_start_episode(snapshot)
         if script_episodes:
             candidate_starts = list(range(1, total_episodes + 1))
         elif script_batches:
             candidate_starts = batch_starts
         else:
-            batch_starts = batch_starts[:1]
-            candidate_starts = batch_starts
+            candidate_starts = [interrupted_start] if interrupted_start else batch_starts[:1]
+
+        if interrupted_start and interrupted_start not in candidate_starts:
+            candidate_starts = sorted({*candidate_starts, interrupted_start})
 
         options: list[dict[str, Any]] = []
         for start_episode in candidate_starts:
@@ -1414,6 +1494,49 @@ class TaskManager:
                 }
             )
         return options
+
+    def _rollback_defaults(self, snapshot: dict[str, Any]) -> tuple[str, int | None]:
+        debug_state = snapshot.get("debug_state") or {}
+        variables = debug_state.get("variables") if isinstance(debug_state, dict) else {}
+        if not isinstance(variables, dict):
+            variables = {}
+
+        current_stage = _normalize_rollback_stage_key(snapshot.get("current_stage"))
+        rewrite_stage = _normalize_rollback_stage_key(variables.get(LOCAL_REWRITE_FROM_STAGE))
+        batch_stage = _normalize_rollback_stage_key(variables.get(LOCAL_CURRENT_BATCH_STAGE))
+
+        for candidate in (rewrite_stage, current_stage, batch_stage):
+            if candidate in {"hooks", "dialogues", "script"}:
+                return candidate, self._interrupted_batch_start_episode(snapshot)
+
+        for candidate in (current_stage, rewrite_stage, batch_stage):
+            if candidate in ROLLBACK_STAGE_LABELS:
+                return candidate, None
+        return "", None
+
+    def _interrupted_batch_start_episode(self, snapshot: dict[str, Any]) -> int | None:
+        debug_state = snapshot.get("debug_state") or {}
+        variables = debug_state.get("variables") if isinstance(debug_state, dict) else {}
+        if not isinstance(variables, dict):
+            variables = {}
+
+        start_episode = _safe_int(
+            variables.get(BATCH_START_EPISODE)
+            or variables.get(HOOK_START_VAR)
+            or variables.get(DIALOGUE_START_VAR)
+            or variables.get(SCRIPT_START_VAR),
+            0,
+        )
+        if start_episode > 0:
+            return start_episode
+
+        current_batch = str(snapshot.get("current_batch") or "").strip()
+        if current_batch:
+            prefix = current_batch.split("-", 1)[0].strip()
+            parsed = _safe_int(prefix, 0)
+            if parsed > 0:
+                return parsed
+        return None
 
     def _completed_input_payload(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         input_payload = _select_non_empty_fields(
@@ -1836,9 +1959,9 @@ class TaskManager:
         if not snapshot or not self._snapshot_belongs_to_user(snapshot, user_id):
             raise ValueError("项目不存在或无权操作")
         status = str(snapshot.get("status") or "")
-        if status in {"pending", "running", "pausing"}:
+        if status in {"pending", "running"}:
             raise ValueError("任务仍在执行中，不能回退重写")
-        if status not in {"completed", "paused", "terminated", "failed"}:
+        if status not in {"completed", "paused", "pausing", "terminated", "failed"}:
             raise ValueError("当前状态不支持阶段回退重写")
         if _completion_confirmed(snapshot):
             raise ValueError("该剧本已确认满意完成并清理缓存，如需调整请重新生成。")
@@ -1847,9 +1970,12 @@ class TaskManager:
         if not isinstance(debug_state, dict) or not isinstance(debug_state.get("variables"), dict):
             raise ValueError("当前项目缺少可回退的执行缓存，无法按阶段重写。")
 
+        _, default_start_episode = self._rollback_defaults(snapshot)
         rollback_start_episode: int | None = None
         if rollback_stage == "script":
             rollback_start_episode = _safe_int(start_episode, 0) or None
+            if rollback_start_episode is None and default_start_episode:
+                rollback_start_episode = int(default_start_episode)
             rollback_options = self._script_rollback_start_options(snapshot)
             valid_start_episodes = {int(option["value"]) for option in rollback_options if _safe_int(option.get("value"), 0) > 0}
             if rollback_start_episode is None:
@@ -1859,7 +1985,7 @@ class TaskManager:
 
         old_task_id = str(snapshot.get("task_id") or "").strip()
         old_record = self._projects.get(project_id)
-        if old_record and status == "paused":
+        if old_record and status in {"paused", "pausing", "terminated"}:
             self._prepare_record_for_replacement(old_record)
 
         new_task_id = uuid.uuid4().hex[:12]
@@ -1937,7 +2063,7 @@ class TaskManager:
         record.control.request_terminate()
         thread.join(timeout=3.0)
         if thread.is_alive():
-            raise ValueError("当前暂停任务仍在收尾，暂时无法回退重写，请稍后再试。")
+            raise ValueError("当前任务仍在收尾，暂时无法回退重写，请稍后再试。")
 
     def _all_project_snapshots(self) -> list[dict[str, Any]]:
         snapshots: dict[int, dict[str, Any]] = {}
@@ -1959,20 +2085,33 @@ class TaskManager:
         *,
         start_episode: int | None = None,
     ) -> dict[str, Any]:
+        effective_start_episode = (
+            int(start_episode)
+            if _safe_int(start_episode, 0) > 0
+            else self._interrupted_batch_start_episode(snapshot)
+            if stage_key in {"hooks", "dialogues", "script"}
+            else None
+        )
         rollback = copy.deepcopy(snapshot)
         rollback["artifacts"] = self._rolled_back_artifacts(snapshot, stage_key)
-        rollback["debug_state"] = self._rolled_back_debug_state(snapshot, stage_key, start_episode=start_episode)
+        rollback["debug_state"] = self._rolled_back_debug_state(
+            snapshot,
+            stage_key,
+            start_episode=effective_start_episode,
+        )
         rollback["prompt_fixes"] = []
         rollback["current_node_id"] = None
         rollback["current_node_name"] = None
         rollback["current_batch"] = (
-            f"{start_episode}-{min(int(snapshot.get('total_episodes') or 0), start_episode + max(1, int(settings.batch_size or 5)) - 1)}"
-            if stage_key == "script" and start_episode
+            f"{effective_start_episode}-{_batch_end_episode(int(snapshot.get('total_episodes') or 0), effective_start_episode)}"
+            if stage_key in {"hooks", "dialogues", "script"} and effective_start_episode
             else None
         )
         rollback["progress_percent"] = self._rollback_progress_percent(stage_key)
         rollback["generated_episodes"] = (
-            max(0, int(start_episode or 0) - 1) if stage_key == "script" and start_episode else 0
+            max(0, int(effective_start_episode or 0) - 1)
+            if stage_key in {"hooks", "dialogues", "script"} and effective_start_episode
+            else 0
         )
         rollback["current_stage"] = stage_key
         rollback["current_stage_label"] = ROLLBACK_STAGE_LABELS.get(stage_key, stage_key)
@@ -1982,7 +2121,7 @@ class TaskManager:
         rollback["cache_retained"] = True
         rollback["awaiting_user_confirmation"] = False
         rollback["completion_confirmed"] = False
-        rollback["rollback_start_episode"] = start_episode
+        rollback["rollback_start_episode"] = effective_start_episode
         return rollback
 
     def _rolled_back_artifacts(
@@ -2022,6 +2161,13 @@ class TaskManager:
                 else "final"
             )
 
+        if stage_key in {"hooks", "dialogues"} and start_episode:
+            self._apply_batched_stage_rollback(
+                snapshot,
+                variables,
+                stage_key=stage_key,
+                start_episode=start_episode,
+            )
         if stage_key == "script" and start_episode:
             self._apply_script_partial_rollback(
                 snapshot,
@@ -2034,6 +2180,89 @@ class TaskManager:
         debug_state["halted_message"] = None
         debug_state["final_output_text"] = ""
         return debug_state
+
+    def _apply_batched_stage_rollback(
+        self,
+        snapshot: dict[str, Any],
+        variables: dict[str, Any],
+        *,
+        stage_key: str,
+        start_episode: int,
+    ) -> None:
+        debug_state = snapshot.get("debug_state") or {}
+        original_variables = debug_state.get("variables") if isinstance(debug_state, dict) else {}
+        if not isinstance(original_variables, dict):
+            original_variables = {}
+
+        total_episodes = int(snapshot.get("total_episodes") or 0)
+        batch_size = max(1, int(settings.batch_size or 5))
+        batch_end_episode = _batch_end_episode(total_episodes, start_episode)
+        completed_batches = len(
+            [batch for batch in iter_episode_batches(total_episodes, batch_size=batch_size) if batch.start_episode < start_episode]
+        )
+
+        original_hooks = copy.deepcopy(original_variables.get(ALL_HOOKS) or {})
+        original_dialogues = copy.deepcopy(original_variables.get(ALL_DIALOGUES) or {})
+        summary_by_batch = _normalize_batch_text_map(original_variables.get(LOCAL_SUMMARY_BY_BATCH))
+        appearance_memory_by_batch = _normalize_batch_object_map(
+            original_variables.get(LOCAL_APPEARANCE_MEMORY_BY_BATCH)
+        )
+
+        if stage_key == "hooks":
+            preserved_hooks = _slice_episode_object_before(original_hooks, start_episode)
+            if preserved_hooks:
+                variables[ALL_HOOKS] = preserved_hooks
+            else:
+                variables.pop(ALL_HOOKS, None)
+        elif stage_key == "dialogues":
+            preserved_hooks = _slice_episode_object_through(original_hooks, batch_end_episode)
+            if preserved_hooks:
+                variables[ALL_HOOKS] = preserved_hooks
+            else:
+                variables.pop(ALL_HOOKS, None)
+            preserved_dialogues = _slice_episode_object_before(original_dialogues, start_episode)
+            if preserved_dialogues:
+                variables[ALL_DIALOGUES] = preserved_dialogues
+            else:
+                variables.pop(ALL_DIALOGUES, None)
+
+        previous_batch_candidates = [
+            episode
+            for episode in sorted(summary_by_batch)
+            if episode + batch_size - 1 < start_episode
+        ]
+        previous_batch_start = previous_batch_candidates[-1] if previous_batch_candidates else None
+        preserved_summary_batches = {
+            episode: text for episode, text in summary_by_batch.items() if episode < start_episode
+        }
+        preserved_appearance_batches = {
+            episode: value for episode, value in appearance_memory_by_batch.items() if episode < start_episode
+        }
+
+        if previous_batch_start and preserved_summary_batches.get(previous_batch_start):
+            variables[LAST_SUMMARY] = preserved_summary_batches[previous_batch_start]
+        else:
+            variables.pop(LAST_SUMMARY, None)
+
+        preserved_appearance_memory = (
+            copy.deepcopy(preserved_appearance_batches.get(previous_batch_start))
+            if previous_batch_start in preserved_appearance_batches
+            else {}
+        )
+        if preserved_appearance_memory:
+            variables[APPEARANCE_CONTINUITY_MEMORY] = preserved_appearance_memory
+        else:
+            variables.pop(APPEARANCE_CONTINUITY_MEMORY, None)
+
+        variables[LOCAL_SUMMARY_BY_BATCH] = _string_keyed_batch_map(preserved_summary_batches)
+        variables[LOCAL_APPEARANCE_MEMORY_BY_BATCH] = _string_keyed_batch_map(preserved_appearance_batches)
+        variables[LOCAL_COMPLETED_BATCHES] = completed_batches
+        variables[LOCAL_CURRENT_BATCH_INDEX] = completed_batches
+        variables[LOCAL_CURRENT_BATCH_STAGE] = ""
+        variables[BATCH_START_EPISODE] = int(start_episode)
+        variables.pop(BATCH_HOOKS, None)
+        variables.pop(BATCH_DIALOGUES, None)
+        variables.pop(BATCH_SCRIPT, None)
 
     def _apply_script_partial_rollback(
         self,
@@ -2589,7 +2818,12 @@ class TaskManager:
             title="控制动作：终止请求",
             message="终止指令已发出，当前节点结束后会停止。",
         )
-        self._update_snapshot(record, message="终止指令已发出，当前节点结束后会停止。")
+        self._update_snapshot(
+            record,
+            status="terminated",
+            message=TERMINATED_PUBLIC_MESSAGE,
+            finished_at=now_iso(),
+        )
         return self._public_snapshot(record.clone_snapshot())
 
     def clear_project(self, project_id: int, user_id: int | None = None) -> None:
