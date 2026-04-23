@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>IDEA TO SCRIPT  剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260422-3">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260422-6">
 </head>
 <body>
   <main class="shell">
@@ -62,16 +62,8 @@
             <strong id="stageText">尚未运行</strong>
           </div>
           <div class="metric">
-            <span>当前批次</span>
-            <strong id="batchText">-</strong>
-          </div>
-          <div class="metric">
-            <span>生成进度</span>
-            <strong id="episodeProgressText">0 / 0</strong>
-          </div>
-          <div class="metric">
-            <span>模型</span>
-            <strong id="modelText">未选择</strong>
+            <span>已等待时长</span>
+            <strong id="waitDurationText">00:00</strong>
           </div>
         </div>
       </div>
@@ -80,7 +72,7 @@
       </div>
       <div class="runtime-foot">
         <span id="progressText">0%</span>
-        <span id="projectText">项目：未创建</span>
+        <span id="projectText">当前剧本：未选中</span>
         <span id="taskText">任务：未创建</span>
       </div>
       <div class="control-row">
@@ -101,6 +93,9 @@
           <div class="rollback-group">
             <select id="rollbackStageSelect" class="compact-select" disabled>
               <option value="">选择回退步骤</option>
+            </select>
+            <select id="rollbackScriptStartSelect" class="compact-select hidden" disabled>
+              <option value="">选择正文开始重写的集数</option>
             </select>
             <button id="rollbackRewriteBtn" class="btn btn-secondary" type="button" disabled>部分步骤回退重写</button>
           </div>

@@ -48,6 +48,7 @@ from .fastgpt_contracts import (
 from .llm_client import llm_client
 from .workflow_spec import WorkflowSpec
 from ..utils.logger import get_logger
+from ..utils.episode import iter_episode_batches
 from ..workflow_ids import (
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
     APPEARANCE_MAPPING_VAR,
@@ -147,7 +148,14 @@ COMPLETION_CONFIRMED_NOTICE = (
     "你已确认当前剧本满意完成。执行缓存已经清理，当前成品不可再直接修改；如需调整，请重新生成。"
 )
 RUNTIME_CACHE_NOTICE = "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。"
+LOCAL_COMPLETED_BATCHES = "_completed_batches"
+LOCAL_COMMITTED_SCRIPT = "_committed_all_script"
+LOCAL_CURRENT_BATCH_INDEX = "_current_batch_index"
+LOCAL_CURRENT_BATCH_STAGE = "_current_batch_stage"
 LOCAL_REWRITE_FROM_STAGE = "_rewrite_from_stage"
+LOCAL_SCRIPT_BATCHES = "_script_batches"
+LOCAL_SUMMARY_BY_BATCH = "_summary_by_batch"
+LOCAL_APPEARANCE_MEMORY_BY_BATCH = "_appearance_memory_by_batch"
 ROLLBACK_STAGE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("framework", "剧本框架撰写"),
     ("appearance_strategy", "服装前置策略生成"),
@@ -194,10 +202,10 @@ DEBUG_VARIABLE_MIRRORS: dict[str, tuple[str, ...]] = {
     BATCH_DIALOGUES: (DIALOGUE_CURRENT_VAR,),
     ALL_DIALOGUES: (DIALOGUE_FINAL_VAR,),
     BATCH_SCRIPT: (SCRIPT_CURRENT_VAR,),
-    ALL_SCRIPT: (SCRIPT_FINAL_VAR,),
+    ALL_SCRIPT: (ALL_SCRIPT, SCRIPT_FINAL_VAR),
     LAST_SUMMARY: (MEMORY_VAR,),
     APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,),
-    FINAL_SCRIPT: (SCRIPT_FINAL_VAR,),
+    FINAL_SCRIPT: (FINAL_SCRIPT,),
 }
 ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
     "framework": (
@@ -466,6 +474,24 @@ ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         LOCAL_REWRITE_FROM_STAGE,
     ),
 }
+for _stage_key in (
+    "framework",
+    "appearance_strategy",
+    "consistency",
+    "episode_plan_normalize",
+    "worldview",
+    "characters",
+    "scenes",
+    "appearance",
+    "hooks",
+    "dialogues",
+):
+    ROLLBACK_DEBUG_CLEAR_RULES[_stage_key] = ROLLBACK_DEBUG_CLEAR_RULES[_stage_key] + (
+        LOCAL_SCRIPT_BATCHES,
+        LOCAL_SUMMARY_BY_BATCH,
+        LOCAL_APPEARANCE_MEMORY_BY_BATCH,
+    )
+
 ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
     "framework": (
         "script_title",
@@ -735,6 +761,52 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat()
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _join_script_parts(*parts: Any) -> str:
+    normalized: list[str] = []
+    for part in parts:
+        text = str(part or "").strip()
+        if text:
+            normalized.append(text)
+    return "\n\n".join(normalized)
+
+
+def _normalize_batch_text_map(value: Any) -> dict[int, str]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[int, str] = {}
+    for key, item in value.items():
+        episode = _safe_int(key, 0)
+        if episode <= 0:
+            continue
+        text = str(item or "").strip()
+        if text:
+            normalized[episode] = text
+    return normalized
+
+
+def _normalize_batch_object_map(value: Any) -> dict[int, dict[str, Any]]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[int, dict[str, Any]] = {}
+    for key, item in value.items():
+        episode = _safe_int(key, 0)
+        if episode <= 0 or not isinstance(item, dict):
+            continue
+        normalized[episode] = copy.deepcopy(item)
+    return normalized
+
+
+def _string_keyed_batch_map(value: dict[int, Any]) -> dict[str, Any]:
+    return {str(int(key)): copy.deepcopy(item) for key, item in sorted(value.items()) if int(key) > 0}
+
+
 def use_fastgpt_backend() -> bool:
     return settings.workflow_backend in {"fastgpt", "hybrid", "fastgpt_hybrid"}
 
@@ -917,6 +989,12 @@ class WorkflowRuntime:
 
     def sync_from_state(self, state: WorkflowState) -> None:
         script_title = str(state.get_var(TITLE_VAR, "") or "").strip()
+        final_script_text = str(
+            state.final_output_text
+            or state.get_var(FINAL_SCRIPT, "")
+            or state.get_var(SCRIPT_FINAL_VAR, "")
+            or ""
+        ).strip()
         artifacts = {
             "script_title": script_title,
             "story_outline": state.get_var(STORY_OUTLINE_VAR, ""),
@@ -939,10 +1017,10 @@ class WorkflowRuntime:
             "hook_plan": state.get_var(HOOK_FINAL_VAR, ""),
             "dialogue_plan": state.get_var(DIALOGUE_FINAL_VAR, ""),
             "script_batch": state.get_var(SCRIPT_CURRENT_VAR, ""),
-            "final_script": state.get_var(SCRIPT_FINAL_VAR, ""),
+            "final_script": final_script_text,
             "continuity_memory": state.get_var(MEMORY_VAR, ""),
             "halted_message": state.halted_message or "",
-            "final_output_text": state.final_output_text or "",
+            "final_output_text": final_script_text,
         }
         self.manager._update_snapshot(
             self.record,
@@ -1170,6 +1248,9 @@ class TaskManager:
         artifacts = self._public_artifacts(snapshot)
         completion_confirmed = _completion_confirmed(snapshot)
         awaiting_confirmation = _awaiting_completion_confirmation(snapshot)
+        rollback_script_start_options = (
+            self._script_rollback_start_options(snapshot) if awaiting_confirmation else []
+        )
         payload: dict[str, Any] = {
             "project_id": snapshot.get("project_id"),
             "task_id": snapshot.get("task_id"),
@@ -1198,11 +1279,40 @@ class TaskManager:
             "rollback_stage_options": [
                 {"key": key, "label": label} for key, label in ROLLBACK_STAGE_OPTIONS
             ] if awaiting_confirmation else [],
+            "rollback_script_start_options": rollback_script_start_options,
             "has_final": bool(
                 str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip()
             ),
         }
         return payload
+
+    def _script_rollback_start_options(self, snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+        debug_state = snapshot.get("debug_state") or {}
+        variables = debug_state.get("variables") if isinstance(debug_state, dict) else {}
+        if not isinstance(variables, dict):
+            variables = {}
+
+        batch_size = max(1, int(settings.batch_size or 5))
+        total_episodes = int(snapshot.get("total_episodes") or 0)
+        if total_episodes <= 0:
+            return []
+
+        batch_starts = [batch.start_episode for batch in iter_episode_batches(total_episodes, batch_size=batch_size)]
+        script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
+        if not script_batches:
+            batch_starts = batch_starts[:1]
+
+        options: list[dict[str, Any]] = []
+        for start_episode in batch_starts:
+            end_episode = min(total_episodes, start_episode + batch_size - 1)
+            label = f"从第 {start_episode}-{end_episode} 集开始重写正文"
+            options.append(
+                {
+                    "value": start_episode,
+                    "label": label,
+                }
+            )
+        return options
 
     def _completed_input_payload(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         input_payload = _select_non_empty_fields(
@@ -1611,6 +1721,7 @@ class TaskManager:
         *,
         user_id: int,
         stage_key: str,
+        start_episode: int | None = None,
     ) -> dict[str, Any]:
         rollback_stage = str(stage_key or "").strip()
         if rollback_stage not in ROLLBACK_STAGE_LABELS:
@@ -1630,13 +1741,31 @@ class TaskManager:
         if not isinstance(debug_state, dict) or not isinstance(debug_state.get("variables"), dict):
             raise ValueError("当前项目缺少可回退的执行缓存，无法按阶段重写。")
 
+        rollback_start_episode: int | None = None
+        if rollback_stage == "script":
+            rollback_start_episode = _safe_int(start_episode, 0) or None
+            rollback_options = self._script_rollback_start_options(snapshot)
+            valid_start_episodes = {int(option["value"]) for option in rollback_options if _safe_int(option.get("value"), 0) > 0}
+            if rollback_start_episode is None:
+                raise ValueError("请选择正文开始重写的集数")
+            if rollback_start_episode not in valid_start_episodes:
+                raise ValueError("请选择有效的正文重写起始集数")
+
         old_task_id = str(snapshot.get("task_id") or "").strip()
         new_task_id = uuid.uuid4().hex[:12]
-        rollback_snapshot = self._build_stage_rollback_snapshot(snapshot, rollback_stage)
+        rollback_snapshot = self._build_stage_rollback_snapshot(
+            snapshot,
+            rollback_stage,
+            start_episode=rollback_start_episode,
+        )
         model_option = settings.resolve_model_selection(
             (snapshot.get("model_option") or {}).get("id")
         )
         stage_label = ROLLBACK_STAGE_LABELS[rollback_stage]
+        if rollback_stage == "script" and rollback_start_episode:
+            batch_size = max(1, int(settings.batch_size or 5))
+            end_episode = min(int(snapshot.get("total_episodes") or 0), rollback_start_episode + batch_size - 1)
+            stage_label = f"{stage_label}（从第 {rollback_start_episode}-{end_episode} 集开始）"
         new_snapshot = copy.deepcopy(rollback_snapshot)
         new_snapshot.update(
             {
@@ -1646,6 +1775,7 @@ class TaskManager:
                 "error": None,
                 "rollback_of_task_id": old_task_id or None,
                 "rollback_stage": rollback_stage,
+                "rollback_start_episode": rollback_start_episode,
                 "updated_at": now_iso(),
                 "finished_at": None,
                 "completion_confirmed": False,
@@ -1705,16 +1835,24 @@ class TaskManager:
         self,
         snapshot: dict[str, Any],
         stage_key: str,
+        *,
+        start_episode: int | None = None,
     ) -> dict[str, Any]:
         rollback = copy.deepcopy(snapshot)
         rollback["artifacts"] = self._rolled_back_artifacts(snapshot, stage_key)
-        rollback["debug_state"] = self._rolled_back_debug_state(snapshot, stage_key)
+        rollback["debug_state"] = self._rolled_back_debug_state(snapshot, stage_key, start_episode=start_episode)
         rollback["prompt_fixes"] = []
         rollback["current_node_id"] = None
         rollback["current_node_name"] = None
-        rollback["current_batch"] = None
+        rollback["current_batch"] = (
+            f"{start_episode}-{min(int(snapshot.get('total_episodes') or 0), start_episode + max(1, int(settings.batch_size or 5)) - 1)}"
+            if stage_key == "script" and start_episode
+            else None
+        )
         rollback["progress_percent"] = self._rollback_progress_percent(stage_key)
-        rollback["generated_episodes"] = 0
+        rollback["generated_episodes"] = (
+            max(0, int(start_episode or 0) - 1) if stage_key == "script" and start_episode else 0
+        )
         rollback["current_stage"] = stage_key
         rollback["current_stage_label"] = ROLLBACK_STAGE_LABELS.get(stage_key, stage_key)
         rollback["message"] = f"已回退到“{ROLLBACK_STAGE_LABELS.get(stage_key, stage_key)}”，等待重新生成。"
@@ -1723,6 +1861,7 @@ class TaskManager:
         rollback["cache_retained"] = True
         rollback["awaiting_user_confirmation"] = False
         rollback["completion_confirmed"] = False
+        rollback["rollback_start_episode"] = start_episode
         return rollback
 
     def _rolled_back_artifacts(
@@ -1741,6 +1880,8 @@ class TaskManager:
         self,
         snapshot: dict[str, Any],
         stage_key: str,
+        *,
+        start_episode: int | None = None,
     ) -> dict[str, Any]:
         debug_state = copy.deepcopy(snapshot.get("debug_state") or {})
         variables = debug_state.get("variables")
@@ -1760,11 +1901,81 @@ class TaskManager:
                 else "final"
             )
 
+        if stage_key == "script" and start_episode:
+            self._apply_script_partial_rollback(
+                snapshot,
+                variables,
+                start_episode=start_episode,
+            )
+
         debug_state["variables"] = variables
         debug_state["node_outputs"] = {}
         debug_state["halted_message"] = None
         debug_state["final_output_text"] = ""
         return debug_state
+
+    def _apply_script_partial_rollback(
+        self,
+        snapshot: dict[str, Any],
+        variables: dict[str, Any],
+        *,
+        start_episode: int,
+    ) -> None:
+        debug_state = snapshot.get("debug_state") or {}
+        original_variables = debug_state.get("variables") if isinstance(debug_state, dict) else {}
+        if not isinstance(original_variables, dict):
+            original_variables = {}
+
+        script_batches = _normalize_batch_text_map(original_variables.get(LOCAL_SCRIPT_BATCHES))
+        summary_by_batch = _normalize_batch_text_map(original_variables.get(LOCAL_SUMMARY_BY_BATCH))
+        appearance_memory_by_batch = _normalize_batch_object_map(
+            original_variables.get(LOCAL_APPEARANCE_MEMORY_BY_BATCH)
+        )
+
+        preserved_script_batches = {
+            episode: text for episode, text in script_batches.items() if episode < start_episode
+        }
+        preserved_summary_batches = {
+            episode: text for episode, text in summary_by_batch.items() if episode < start_episode
+        }
+        preserved_appearance_batches = {
+            episode: value for episode, value in appearance_memory_by_batch.items() if episode < start_episode
+        }
+
+        preserved_starts = sorted(preserved_script_batches)
+        preserved_script = _join_script_parts(*(preserved_script_batches[episode] for episode in preserved_starts))
+        previous_batch_start = preserved_starts[-1] if preserved_starts else None
+
+        if preserved_script:
+            variables[ALL_SCRIPT] = preserved_script
+            variables[LOCAL_COMMITTED_SCRIPT] = preserved_script
+        else:
+            variables.pop(ALL_SCRIPT, None)
+            variables.pop(LOCAL_COMMITTED_SCRIPT, None)
+
+        if previous_batch_start and preserved_summary_batches.get(previous_batch_start):
+            variables[LAST_SUMMARY] = preserved_summary_batches[previous_batch_start]
+        else:
+            variables.pop(LAST_SUMMARY, None)
+
+        preserved_appearance_memory = (
+            copy.deepcopy(preserved_appearance_batches.get(previous_batch_start))
+            if previous_batch_start in preserved_appearance_batches
+            else {}
+        )
+        if preserved_appearance_memory:
+            variables[APPEARANCE_CONTINUITY_MEMORY] = preserved_appearance_memory
+        else:
+            variables.pop(APPEARANCE_CONTINUITY_MEMORY, None)
+
+        variables[LOCAL_SCRIPT_BATCHES] = _string_keyed_batch_map(preserved_script_batches)
+        variables[LOCAL_SUMMARY_BY_BATCH] = _string_keyed_batch_map(preserved_summary_batches)
+        variables[LOCAL_APPEARANCE_MEMORY_BY_BATCH] = _string_keyed_batch_map(preserved_appearance_batches)
+        variables[LOCAL_COMPLETED_BATCHES] = len(preserved_starts)
+        variables[LOCAL_CURRENT_BATCH_INDEX] = len(preserved_starts)
+        variables[LOCAL_CURRENT_BATCH_STAGE] = ""
+        variables[BATCH_START_EPISODE] = int(start_episode)
+        variables.pop(BATCH_SCRIPT, None)
 
     def _rollback_progress_percent(self, stage_key: str) -> int:
         defaults = {

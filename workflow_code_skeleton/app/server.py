@@ -340,6 +340,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 project_id,
                 user_id=_require_user_id(),
                 stage_key=str(data.get("stage_key") or ""),
+                start_episode=data.get("start_episode"),
             )
         except ValueError as exc:
             return _json_error(str(exc), status=400)

@@ -32,6 +32,7 @@ from ..services.fastgpt_contracts import (
     FINAL_SCRIPT,
     IS_CONSISTENT,
     LAST_SUMMARY,
+    LEGACY_INPUT_ALIASES,
     MAX_RETRIES,
     NORMALIZED_EPISODE_PLAN,
     CHARACTER_COUNT,
@@ -60,6 +61,7 @@ from ..services.fastgpt_contracts import (
     USER_SCENES,
     WORLDVIEW,
     contract_for,
+    to_jsonable_value,
 )
 from ..utils.episode import BatchWindow, iter_episode_batches
 from ..utils.logger import get_logger
@@ -103,6 +105,11 @@ LOCAL_COMMITTED_SCRIPT = "_committed_all_script"
 LOCAL_CURRENT_BATCH_INDEX = "_current_batch_index"
 LOCAL_CURRENT_BATCH_STAGE = "_current_batch_stage"
 LOCAL_REWRITE_FROM_STAGE = "_rewrite_from_stage"
+LOCAL_SCRIPT_BATCHES = "_script_batches"
+LOCAL_SUMMARY_BY_BATCH = "_summary_by_batch"
+LOCAL_APPEARANCE_MEMORY_BY_BATCH = "_appearance_memory_by_batch"
+SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT = 32000
+SCRIPT_STAGE_PREVIOUS_SCRIPT_BATCHES = 2
 
 
 class FastGPTRunner(Protocol):
@@ -342,7 +349,6 @@ def run_fastgpt_hybrid_workflow(
     )
     variables.update(final_output)
     state.final_output_text = final_output[FINAL_SCRIPT]
-    state.set_var(SCRIPT_FINAL_VAR, final_output[FINAL_SCRIPT])
     _sync_state_variables(state, variables)
     set_runtime_stage(
         state,
@@ -500,6 +506,11 @@ def _run_batched_generation(
     committed_script = str(
         variables.get(LOCAL_COMMITTED_SCRIPT) or variables.get(ALL_SCRIPT) or ""
     ).strip()
+    script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
+    summary_by_batch = _normalize_batch_text_map(variables.get(LOCAL_SUMMARY_BY_BATCH))
+    appearance_memory_by_batch = _normalize_batch_object_map(
+        variables.get(LOCAL_APPEARANCE_MEMORY_BY_BATCH)
+    )
     completed_batches = min(
         total_batches,
         max(0, _safe_int(variables.get(LOCAL_COMPLETED_BATCHES), 0)),
@@ -634,13 +645,13 @@ def _run_batched_generation(
             variables[LOCAL_CURRENT_BATCH_STAGE] = "dialogue"
         _sync_state_variables(state, variables)
 
-        script_base = dict(variables)
-        script_base[EPISODE_PLAN] = plan_for_batch
-        script_base[BATCH_START_EPISODE] = batch.start_episode
-        script_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
-        script_base[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
-            variables.get(APPEARANCE_CONTINUITY_MEMORY),
-            alias_plan_for_batch,
+        script_base = _build_script_stage_context(
+            variables,
+            batch=batch,
+            plan_for_batch=plan_for_batch,
+            alias_plan_for_batch=alias_plan_for_batch,
+            committed_script=committed_script,
+            script_batches=script_batches,
         )
         script_progress = 68 + int((index / total_batches) * 26)
         if resume_stage == "script" and _has_value(variables.get(BATCH_SCRIPT)):
@@ -648,6 +659,8 @@ def _run_batched_generation(
             variables[ALL_SCRIPT] = str(
                 variables.get(ALL_SCRIPT) or _join_script_parts(committed_script, batch_script)
             )
+            script_batches[batch.start_episode] = batch_script
+            variables[LOCAL_SCRIPT_BATCHES] = _string_keyed_batch_map(script_batches)
             set_runtime_stage(
                 state,
                 "script",
@@ -671,6 +684,8 @@ def _run_batched_generation(
             batch_script = script_output[BATCH_SCRIPT].strip()
             variables[BATCH_SCRIPT] = batch_script
             variables[ALL_SCRIPT] = _join_script_parts(committed_script, batch_script)
+            script_batches[batch.start_episode] = batch_script
+            variables[LOCAL_SCRIPT_BATCHES] = _string_keyed_batch_map(script_batches)
             variables[LOCAL_CURRENT_BATCH_STAGE] = "script"
         _sync_state_variables(state, variables)
 
@@ -691,6 +706,14 @@ def _run_batched_generation(
             variables.get(APPEARANCE_CONTINUITY_MEMORY),
             alias_plan_for_batch,
             batch=batch,
+        )
+        summary_by_batch[batch.start_episode] = str(variables[LAST_SUMMARY] or "").strip()
+        appearance_memory_by_batch[batch.start_episode] = copy.deepcopy(
+            _normalize_appearance_memory(variables.get(APPEARANCE_CONTINUITY_MEMORY)) or {}
+        )
+        variables[LOCAL_SUMMARY_BY_BATCH] = _string_keyed_batch_map(summary_by_batch)
+        variables[LOCAL_APPEARANCE_MEMORY_BY_BATCH] = _string_keyed_batch_map(
+            appearance_memory_by_batch
         )
         variables[LOCAL_COMPLETED_BATCHES] = index + 1
         variables[LOCAL_COMMITTED_SCRIPT] = variables[ALL_SCRIPT]
@@ -724,6 +747,36 @@ def _join_script_parts(*parts: Any) -> str:
         if text:
             normalized.append(text)
     return "\n\n".join(normalized)
+
+
+def _normalize_batch_text_map(value: Any) -> dict[int, str]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[int, str] = {}
+    for key, item in value.items():
+        episode = _safe_int(key, 0)
+        if episode <= 0:
+            continue
+        text = str(item or "").strip()
+        if text:
+            normalized[episode] = text
+    return normalized
+
+
+def _normalize_batch_object_map(value: Any) -> dict[int, dict[str, Any]]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[int, dict[str, Any]] = {}
+    for key, item in value.items():
+        episode = _safe_int(key, 0)
+        if episode <= 0 or not isinstance(item, dict):
+            continue
+        normalized[episode] = copy.deepcopy(item)
+    return normalized
+
+
+def _string_keyed_batch_map(value: dict[int, Any]) -> dict[str, Any]:
+    return {str(int(key)): copy.deepcopy(item) for key, item in sorted(value.items()) if int(key) > 0}
 
 
 def _run_full_fastgpt_generation(
@@ -771,11 +824,19 @@ def _run_full_fastgpt_generation(
     variables[ALL_DIALOGUES] = dialogue_output[BATCH_DIALOGUES]
     _sync_state_variables(state, variables)
 
+    script_variables = _build_script_stage_context(
+        variables,
+        batch=BatchWindow(start_episode=1, end_episode=max(1, payload.total_episodes)),
+        plan_for_batch=variables[EPISODE_PLAN],
+        alias_plan_for_batch=variables.get(EPISODE_ALIAS_PLAN) or {},
+        committed_script=str(variables.get(ALL_SCRIPT) or "").strip(),
+        script_batches=_normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES)),
+    )
     script_output = _run_fastgpt_stage(
         state,
         runner,
         STAGE_SCRIPT,
-        variables,
+        script_variables,
         stage_key="script",
         message="正在生成全量剧本正文。",
         progress_percent=86,
@@ -816,6 +877,204 @@ def _run_full_fastgpt_generation(
         generated_episodes=payload.total_episodes,
     )
     sync_runtime_state(state)
+
+
+def _build_script_stage_context(
+    variables: dict[str, Any],
+    *,
+    batch: BatchWindow,
+    plan_for_batch: str,
+    alias_plan_for_batch: dict[str, Any] | None,
+    committed_script: str,
+    script_batches: dict[int, str] | None = None,
+) -> dict[str, Any]:
+    context = dict(variables)
+    context[EPISODE_PLAN] = plan_for_batch
+    context[BATCH_START_EPISODE] = batch.start_episode
+    context[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
+    context[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
+        variables.get(APPEARANCE_CONTINUITY_MEMORY),
+        alias_plan_for_batch,
+    )
+    context[ALL_HOOKS] = slice_object_episodes_for_batch(variables.get(ALL_HOOKS), batch)
+    context[ALL_DIALOGUES] = slice_object_episodes_for_batch(variables.get(ALL_DIALOGUES), batch)
+    context[ALL_SCRIPT] = _build_previous_script_context(
+        script_batches or {},
+        committed_script,
+        current_batch_start=batch.start_episode,
+    )
+
+    estimated_before = _estimate_stage_payload_length(STAGE_SCRIPT, context)
+    estimated_after, compressed_fields = _apply_script_stage_length_guard(context, estimated_before)
+    if compressed_fields:
+        logger.warning(
+            "剧本正文 %s 集上下文过长，已压缩：%s；payload 估算长度 %s -> %s",
+            batch.label,
+            "、".join(compressed_fields),
+            estimated_before,
+            estimated_after,
+        )
+    else:
+        logger.info("剧本正文 %s 集 payload 估算长度：%s", batch.label, estimated_after)
+    return context
+
+
+def _build_previous_script_context(
+    script_batches: dict[int, str],
+    committed_script: str,
+    *,
+    current_batch_start: int,
+) -> str:
+    if current_batch_start <= 1:
+        return ""
+
+    previous_parts: list[str] = []
+    previous_starts = sorted(start for start in script_batches if start < current_batch_start)
+    for start in previous_starts[-SCRIPT_STAGE_PREVIOUS_SCRIPT_BATCHES:]:
+        text = str(script_batches.get(start) or "").strip()
+        if text:
+            previous_parts.append(text)
+    if previous_parts:
+        return _join_script_parts(*previous_parts)
+    return _trim_text_tail(committed_script, max_chars=12000)
+
+
+def _apply_script_stage_length_guard(
+    context: dict[str, Any],
+    initial_estimate: int | None = None,
+) -> tuple[int, list[str]]:
+    estimate = initial_estimate or _estimate_stage_payload_length(STAGE_SCRIPT, context)
+    if estimate <= SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT:
+        return estimate, []
+
+    compressed_fields: list[str] = []
+    strategies: tuple[tuple[str, str, tuple[int, ...], Any], ...] = (
+        (ALL_SCRIPT, "previous_batch_summary", (12000, 8000, 5000), _trim_text_tail),
+        (ALL_DIALOGUES, "dialogues", (520, 320, 200), _compact_nested_strings),
+        (LAST_SUMMARY, "script_memory", (3600, 2200, 1200), _trim_text_tail),
+        (ALL_HOOKS, "hooks", (520, 320, 200), _compact_nested_strings),
+    )
+
+    for field_name, label, limits, compressor in strategies:
+        if estimate <= SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT:
+            break
+        for limit in limits:
+            current_value = context.get(field_name)
+            if not _has_value(current_value):
+                break
+            candidate = compressor(current_value, max_chars=limit)
+            if candidate == current_value:
+                continue
+            context[field_name] = candidate
+            if label not in compressed_fields:
+                compressed_fields.append(label)
+            estimate = _estimate_stage_payload_length(STAGE_SCRIPT, context)
+            if estimate <= SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT:
+                break
+
+    return estimate, compressed_fields
+
+
+def _estimate_stage_payload_length(stage_name: str, variables: dict[str, Any]) -> int:
+    return len(
+        json.dumps(
+            _build_stage_wire_payload_preview(stage_name, variables),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        )
+    )
+
+
+def _build_stage_wire_payload_preview(stage_name: str, variables: dict[str, Any]) -> dict[str, Any]:
+    aliases = LEGACY_INPUT_ALIASES.get(stage_name)
+    if not aliases:
+        return contract_for(stage_name).build_input_payload(variables)
+
+    payload: dict[str, Any] = {}
+    for canonical_name, wire_name in aliases.items():
+        if canonical_name in variables:
+            value = variables[canonical_name]
+            if canonical_name == CHARACTER_APPEARANCE_REQUIREMENTS:
+                value = _merge_optional_text(
+                    variables.get(CHARACTER_APPEARANCE_REQUIREMENTS),
+                    variables.get(OUTFIT_SWITCH_RULES),
+                )
+            payload[wire_name] = _format_wire_value_for_estimate(value)
+            continue
+        if canonical_name == LAST_SUMMARY:
+            payload[wire_name] = ""
+        elif canonical_name in {ALL_HOOKS, ALL_DIALOGUES, ALL_SCRIPT}:
+            payload[wire_name] = ""
+        elif canonical_name == USER_CONTENT_BASELINE:
+            payload[wire_name] = "{}"
+        elif canonical_name == MAX_RETRIES:
+            payload[wire_name] = settings.max_retries_default
+    return payload
+
+
+def _format_wire_value_for_estimate(value: Any) -> Any:
+    jsonable = to_jsonable_value(value)
+    if (
+        isinstance(jsonable, dict)
+        and set(jsonable.keys()) == {"raw"}
+        and isinstance(jsonable.get("raw"), str)
+    ):
+        return jsonable["raw"]
+    if isinstance(jsonable, (dict, list)):
+        return json.dumps(jsonable, ensure_ascii=False, separators=(",", ":"))
+    return jsonable
+
+
+def _trim_text_tail(value: Any, *, max_chars: int) -> str:
+    text = str(value or "").strip()
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+
+    parts = [part.strip() for part in re.split(r"\n{2,}", text) if part.strip()]
+    if not parts:
+        return text[-max_chars:]
+
+    selected: list[str] = []
+    remaining = max_chars
+    for part in reversed(parts):
+        if not part:
+            continue
+        extra = len(part) + (2 if selected else 0)
+        if extra > remaining and selected:
+            break
+        if extra > remaining:
+            selected.append(part[-remaining:])
+            remaining = 0
+            break
+        selected.append(part)
+        remaining -= extra
+        if remaining <= 0:
+            break
+    return "\n\n".join(reversed(selected)).strip() or text[-max_chars:]
+
+
+def _compact_nested_strings(value: Any, *, max_chars: int) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _compact_nested_strings(item, max_chars=max_chars)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_compact_nested_strings(item, max_chars=max_chars) for item in value]
+    if not isinstance(value, str):
+        return value
+
+    text = value.strip()
+    if len(text) <= max_chars:
+        return text
+    if max_chars <= 16:
+        return text[:max_chars]
+    head = max_chars * 3 // 5
+    tail = max_chars - head - 5
+    if tail <= 0:
+        return text[:max_chars]
+    return f"{text[:head].rstrip()}\n...\n{text[-tail:].lstrip()}"
 
 
 def _run_fastgpt_stage(
@@ -886,6 +1145,28 @@ def _run_fastgpt_stage(
             continue
         except Exception as exc:
             last_error = exc
+            if _is_model_connection_error(exc):
+                delay_seconds = _transient_retry_delay(attempt)
+                retry_message = "模型连接波动，已保留当前进度，正在自动重试。"
+                set_runtime_stage(
+                    state,
+                    stage_key,
+                    retry_message,
+                    batch_label=batch_label,
+                    progress_percent=progress_percent,
+                    generated_episodes=generated_episodes,
+                )
+                sync_runtime_state(state)
+                logger.warning(
+                    "%s%s第 %s 次尝试遇到模型连接异常，将在 %.0f 秒后自动重试：%s",
+                    contract.label,
+                    _format_batch_suffix(batch_label),
+                    attempt,
+                    delay_seconds,
+                    exc,
+                )
+                _sleep_with_checkpoints(state, delay_seconds)
+                continue
             contract_failures += 1
             sync_runtime_state(state)
             logger.warning(
@@ -973,6 +1254,41 @@ def _is_non_retryable(exc: Exception) -> bool:
     return "缺少 FastGPT API Key" in text or "401" in text or "403" in text
 
 
+def _is_model_connection_error(exc: Exception) -> bool:
+    text = str(exc or "").lower()
+    if not text:
+        return False
+    markers = (
+        "model connection",
+        "model service",
+        "upstream model",
+        "upstream service",
+        "temporarily unavailable",
+        "connection reset",
+        "connection aborted",
+        "connection refused",
+        "connection timed out",
+        "read timed out",
+        "connect timeout",
+        "socket hang up",
+        "broken pipe",
+        "bad gateway",
+        "service unavailable",
+        "gateway timeout",
+        "eof",
+        "模型连接",
+        "模型服务",
+        "上游模型",
+        "连接异常",
+        "连接失败",
+        "连接超时",
+        "读取超时",
+        "网关错误",
+        "服务不可用",
+    )
+    return any(marker in text for marker in markers)
+
+
 def _checkpoint(state: WorkflowState) -> None:
     runtime = state.runtime
     if runtime and hasattr(runtime, "checkpoint"):
@@ -1056,7 +1372,7 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
     if BATCH_SCRIPT in variables:
         state.set_var(SCRIPT_CURRENT_VAR, variables[BATCH_SCRIPT])
     if ALL_SCRIPT in variables:
-        state.set_var(SCRIPT_FINAL_VAR, variables[ALL_SCRIPT])
+        state.set_var(ALL_SCRIPT, variables[ALL_SCRIPT])
     if LAST_SUMMARY in variables:
         state.set_var(MEMORY_VAR, variables[LAST_SUMMARY])
     if APPEARANCE_MAPPING in variables:
@@ -1077,7 +1393,8 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
         if normalized_memory is not None:
             state.set_var(APPEARANCE_CONTINUITY_MEMORY, normalized_memory)
     if FINAL_SCRIPT in variables:
-        state.set_var(SCRIPT_FINAL_VAR, variables[FINAL_SCRIPT])
+        state.set_var(FINAL_SCRIPT, variables[FINAL_SCRIPT])
+        state.final_output_text = str(variables[FINAL_SCRIPT] or "").strip()
 
     sync_runtime_state(state)
 
@@ -1096,12 +1413,31 @@ def _restore_resume_state(
     restored_variables = debug_state.get("variables")
     if isinstance(restored_variables, dict):
         variables.update(restored_variables)
+        if ALL_SCRIPT not in variables:
+            restored_all_script = restored_variables.get(ALL_SCRIPT)
+            if not _has_value(restored_all_script):
+                restored_all_script = restored_variables.get(SCRIPT_FINAL_VAR)
+            if _has_value(restored_all_script):
+                variables[ALL_SCRIPT] = restored_all_script
+        if FINAL_SCRIPT not in variables:
+            restored_final_script = restored_variables.get(FINAL_SCRIPT)
+            if not _has_value(restored_final_script):
+                restored_final_script = debug_state.get("final_output_text")
+            if _has_value(restored_final_script):
+                variables[FINAL_SCRIPT] = restored_final_script
         if NORMALIZED_EPISODE_PLAN not in variables:
             normalized_alias = restored_variables.get(EPISODE_PLAN_NORMALIZED_VAR)
             normalized_plan = _normalize_episode_plan_object(normalized_alias)
             if normalized_plan is not None:
                 variables[NORMALIZED_EPISODE_PLAN] = normalized_plan
         state.variables.update(restored_variables)
+        if ALL_SCRIPT in variables:
+            state.set_var(ALL_SCRIPT, variables[ALL_SCRIPT])
+        if FINAL_SCRIPT in variables:
+            state.set_var(FINAL_SCRIPT, variables[FINAL_SCRIPT])
+        restored_final_text = str(debug_state.get("final_output_text") or variables.get(FINAL_SCRIPT) or "").strip()
+        if restored_final_text:
+            state.final_output_text = restored_final_text
 
     restored_outputs = debug_state.get("node_outputs")
     if isinstance(restored_outputs, dict):
@@ -1270,7 +1606,7 @@ def _normalize_appearance_mapping_object(value: Any) -> dict[str, Any] | None:
         for variant in item.get("outfit_variants") or []:
             if not isinstance(variant, dict):
                 continue
-            alias_name = str(variant.get("alias_name") or "").strip()
+            alias_name = _normalize_alias_display_name(variant.get("alias_name") or "")
             if not alias_name:
                 continue
             variants.append(
@@ -1382,7 +1718,9 @@ def _normalize_alias_usage_list(items: Any) -> list[dict[str, Any]]:
             {
                 "character_id": str(item.get("character_id") or item.get("character_name") or "").strip(),
                 "character_name": str(item.get("character_name") or item.get("canonical_name") or "").strip(),
-                "recommended_alias_name": str(item.get("recommended_alias_name") or item.get("alias_name") or "").strip(),
+                "recommended_alias_name": _normalize_alias_display_name(
+                    item.get("recommended_alias_name") or item.get("alias_name") or ""
+                ),
                 "switch_type": str(item.get("switch_type") or "").strip(),
                 "reason": str(item.get("reason") or "").strip(),
             }
@@ -1399,6 +1737,27 @@ def _string_list(value: Any) -> list[str]:
         if text:
             result.append(text)
     return result
+
+
+def _normalize_alias_display_name(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if "【" in text and "】" in text:
+        return text
+    if "_" not in text:
+        return text
+
+    base, note = text.split("_", 1)
+    base = base.strip()
+    note = note.strip()
+    if not base or not note:
+        return text
+    if not re.search(r"[\u4e00-\u9fff]", base):
+        return text
+    if any(bracket in note for bracket in "【】[]()（）"):
+        return text
+    return f"{base}【{note}】"
 
 
 def _build_character_registry(appearance_mapping: dict[str, Any]) -> dict[str, Any]:
@@ -1433,7 +1792,7 @@ def _build_character_alias_registry(appearance_mapping: dict[str, Any]) -> dict[
         for variant in item.get("outfit_variants") or []:
             if not isinstance(variant, dict):
                 continue
-            alias_name = str(variant.get("alias_name") or "").strip()
+            alias_name = _normalize_alias_display_name(variant.get("alias_name") or "")
             if not alias_name:
                 continue
             alias_entry = {
@@ -1667,9 +2026,9 @@ def _normalize_appearance_memory(value: Any) -> dict[str, Any] | None:
     return {
         "last_processed_episode": _safe_int(candidate.get("last_processed_episode"), 0),
         "current_aliases": {
-            str(key): str(val or "").strip()
+            str(key): _normalize_alias_display_name(val)
             for key, val in aliases.items()
-            if str(key).strip() and str(val or "").strip()
+            if str(key).strip() and _normalize_alias_display_name(val)
         },
         "recent_stage_flags": _string_list(candidate.get("recent_stage_flags")),
         "recent_appearance_events": _string_list(candidate.get("recent_appearance_events")),
@@ -1727,7 +2086,7 @@ def _appearance_memory_for_batch(
             if not isinstance(alias, dict):
                 continue
             character_id = str(alias.get("character_id") or alias.get("character_name") or "").strip()
-            alias_name = str(alias.get("recommended_alias_name") or "").strip()
+            alias_name = _normalize_alias_display_name(alias.get("recommended_alias_name") or "")
             if character_id and alias_name:
                 batch_aliases[character_id] = alias_name
     preview = dict(memory)
@@ -1942,7 +2301,9 @@ def _normalize_appearance_alias_planning(value: Any) -> dict[str, Any]:
                     "long_term_stage_switches": [
                         {
                             "episode_range": str(entry.get("episode_range") or "").strip(),
-                            "recommended_alias_name": str(entry.get("recommended_alias_name") or "").strip(),
+                            "recommended_alias_name": _normalize_alias_display_name(
+                                entry.get("recommended_alias_name") or ""
+                            ),
                             "reason": str(entry.get("reason") or "").strip(),
                         }
                         for entry in (item.get("long_term_stage_switches") or [])
@@ -1951,7 +2312,9 @@ def _normalize_appearance_alias_planning(value: Any) -> dict[str, Any]:
                     "scene_based_switches": [
                         {
                             "scene_or_condition": str(entry.get("scene_or_condition") or "").strip(),
-                            "recommended_alias_name": str(entry.get("recommended_alias_name") or "").strip(),
+                            "recommended_alias_name": _normalize_alias_display_name(
+                                entry.get("recommended_alias_name") or ""
+                            ),
                             "reason": str(entry.get("reason") or "").strip(),
                         }
                         for entry in (item.get("scene_based_switches") or [])

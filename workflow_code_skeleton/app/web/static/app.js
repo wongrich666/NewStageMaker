@@ -33,6 +33,7 @@
     confirmCompletionBtn: $("confirmCompletionBtn"),
     rollbackRewriteBtn: $("rollbackRewriteBtn"),
     rollbackStageSelect: $("rollbackStageSelect"),
+    rollbackScriptStartSelect: $("rollbackScriptStartSelect"),
     cacheNoticeText: $("cacheNoticeText"),
     refreshProjectsBtn: $("refreshProjectsBtn"),
     activeProjectList: $("activeProjectList"),
@@ -71,9 +72,7 @@
     statusText: $("statusText"),
     messageText: $("messageText"),
     stageText: $("stageText"),
-    batchText: $("batchText"),
-    episodeProgressText: $("episodeProgressText"),
-    modelText: $("modelText"),
+    waitDurationText: $("waitDurationText"),
     progressFill: $("progressFill"),
     progressText: $("progressText"),
     projectText: $("projectText"),
@@ -94,7 +93,8 @@
     assets: [],
     editingProjectId: null,
     editingProjectStatus: null,
-    activeTool: "hot_review"
+    activeTool: "hot_review",
+    elapsedTimer: null
   };
 
   const TOOL_DEFINITIONS = {
@@ -252,6 +252,67 @@
     return mapping[status] || status || "待开始";
   }
 
+  function formatDuration(ms) {
+    const totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const hh = String(hours).padStart(2, "0");
+    const mm = String(minutes).padStart(2, "0");
+    const ss = String(seconds).padStart(2, "0");
+    if (days > 0) {
+      return `${days}天 ${hh}:${mm}:${ss}`;
+    }
+    if (hours > 0) {
+      return `${hh}:${mm}:${ss}`;
+    }
+    return `${String(minutes).padStart(2, "0")}:${ss}`;
+  }
+
+  function snapshotElapsedMs(snapshot) {
+    if (!snapshot) return 0;
+    const startText = snapshot.created_at || snapshot.updated_at || "";
+    const start = Date.parse(startText);
+    if (!Number.isFinite(start)) return 0;
+    const finished = snapshot.finished_at ? Date.parse(snapshot.finished_at) : NaN;
+    const end = Number.isFinite(finished) ? finished : Date.now();
+    return Math.max(0, end - start);
+  }
+
+  function renderWaitDuration(snapshot = state.latestSnapshot) {
+    if (!els.waitDurationText) return;
+    if (!snapshot) {
+      els.waitDurationText.textContent = "00:00";
+      return;
+    }
+    els.waitDurationText.textContent = formatDuration(snapshotElapsedMs(snapshot));
+  }
+
+  function startElapsedTimer() {
+    if (state.elapsedTimer) return;
+    state.elapsedTimer = window.setInterval(() => {
+      renderWaitDuration(state.latestSnapshot);
+    }, 1000);
+  }
+
+  function stopElapsedTimer() {
+    if (state.elapsedTimer) {
+      window.clearInterval(state.elapsedTimer);
+      state.elapsedTimer = null;
+    }
+  }
+
+  function syncElapsedTimer(snapshot = state.latestSnapshot) {
+    const hasLiveElapsed = Boolean(snapshot && (snapshot.created_at || snapshot.updated_at) && !snapshot.finished_at);
+    if (hasLiveElapsed) {
+      startElapsedTimer();
+    } else {
+      stopElapsedTimer();
+    }
+    renderWaitDuration(snapshot);
+  }
+
   function saveDraft() {
     const draft = {
       user_expectation: els.expectationInput.value.trim(),
@@ -277,6 +338,69 @@
     draftStorage.removeItem(STORAGE.draft);
   }
 
+  function normalizeProjectText(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+  }
+
+  function shortenProjectText(value, maxLength = 18) {
+    const text = normalizeProjectText(value);
+    if (!text) return "";
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength)}...`;
+  }
+
+  function projectDisplayTitle(projectLike) {
+    if (!projectLike) return "未选中";
+    const artifacts = projectLike.artifacts || {};
+    const inputPayload = projectLike.input_payload || {};
+    const directTitle = [
+      projectLike.title,
+      artifacts.script_title,
+      projectLike.script_title,
+      inputPayload.title
+    ].map(normalizeProjectText).find(Boolean);
+    if (directTitle) {
+      return directTitle;
+    }
+    const expectationText = [
+      inputPayload.user_expectation,
+      projectLike.user_expectation
+    ].map(normalizeProjectText).find(Boolean);
+    if (expectationText) {
+      return shortenProjectText(expectationText);
+    }
+    const projectId = normalizeNumber(projectLike.project_id);
+    return projectId ? `项目 ${projectId}` : "未命名剧本";
+  }
+
+  function runtimeProjectDisplayTitle(projectLike) {
+    if (!projectLike) return "未选中";
+    const artifacts = projectLike.artifacts || {};
+    const inputPayload = projectLike.input_payload || {};
+    const generatedTitle = [
+      artifacts.script_title,
+      projectLike.script_title
+    ].map(normalizeProjectText).find(Boolean);
+    if (generatedTitle) {
+      return generatedTitle;
+    }
+    const savedTitle = [
+      projectLike.title,
+      inputPayload.title
+    ].map(normalizeProjectText).find(Boolean);
+    if (savedTitle) {
+      return savedTitle;
+    }
+    const expectationText = [
+      inputPayload.user_expectation,
+      projectLike.user_expectation
+    ].map(normalizeProjectText).find(Boolean);
+    if (expectationText) {
+      return shortenProjectText(expectationText);
+    }
+    return projectDisplayTitle(projectLike);
+  }
+
   function formHasUserInput() {
     return Boolean(
       els.expectationInput.value.trim()
@@ -285,8 +409,8 @@
     );
   }
 
-  function restoreInputPayload(inputPayload) {
-    if (!inputPayload || formHasUserInput()) return;
+  function restoreInputPayload(inputPayload, { force = false } = {}) {
+    if (!inputPayload || (!force && formHasUserInput())) return;
     els.expectationInput.value = inputPayload.user_expectation || "";
     els.characterCountInput.value = inputPayload.character_count || 5;
     els.episodeCountInput.value = inputPayload.total_episodes || 10;
@@ -363,6 +487,21 @@
     }
   }
 
+  function renderRollbackScriptStartOptions(options, selectedValue = "") {
+    if (!els.rollbackScriptStartSelect) return;
+    const normalized = Array.isArray(options) ? options : [];
+    const show = normalized.length > 0 && (els.rollbackStageSelect?.value || "") === "script";
+    els.rollbackScriptStartSelect.innerHTML = [
+      `<option value="">选择正文开始重写的集数</option>`,
+      ...normalized.map((item) => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`)
+    ].join("");
+    if (selectedValue && normalized.some((item) => String(item.value) === String(selectedValue))) {
+      els.rollbackScriptStartSelect.value = String(selectedValue);
+    }
+    els.rollbackScriptStartSelect.classList.toggle("hidden", !show);
+    els.rollbackScriptStartSelect.disabled = !show || !Boolean(state.latestSnapshot?.can_stage_rollback);
+  }
+
   function renderSnapshot(snapshot) {
     state.latestSnapshot = snapshot || null;
     if (!snapshot) {
@@ -374,18 +513,17 @@
         ? "从下方任务列表选择一个项目，或直接填写新输入开始生成。"
         : "登录后可以开始生成、保存资产和管理公开状态。";
       els.stageText.textContent = "尚未运行";
-      els.batchText.textContent = "-";
-      els.episodeProgressText.textContent = "0 / 0";
-      els.modelText.textContent = currentModelLabel();
       els.progressFill.style.width = "0%";
       els.progressText.textContent = "0%";
-      els.projectText.textContent = "项目：未选中";
+      els.projectText.textContent = "当前剧本：未选中";
       els.taskText.textContent = "任务：未选中";
       els.finalOutputBox.textContent = "暂无内容";
+      syncElapsedTimer(null);
       if (els.cacheNoticeText) {
         els.cacheNoticeText.textContent = "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。";
       }
       renderRollbackOptions([]);
+      renderRollbackScriptStartOptions([]);
       renderProjectList(state.projects);
       syncButtons();
       return;
@@ -396,9 +534,8 @@
     state.status = snapshot.status || "idle";
 
     const progress = Number(snapshot.progress_percent || 0);
-    const totalEpisodes = Number(snapshot.total_episodes || 0);
-    const generatedEpisodes = Number(snapshot.generated_episodes || 0);
     const finalOutput = finalOutputFrom(snapshot);
+    const projectTitle = runtimeProjectDisplayTitle(snapshot);
     const statusMessage = snapshot.status === "failed"
       ? "当前步骤执行失败，任务已停在上一个成功步骤，等待手动继续生成。"
       : snapshot.status === "terminated"
@@ -408,18 +545,20 @@
     els.statusText.textContent = statusLabel(snapshot.status);
     els.messageText.textContent = statusMessage;
     els.stageText.textContent = snapshot.current_stage_label || "正在处理";
-    els.batchText.textContent = snapshot.current_batch || "-";
-    els.episodeProgressText.textContent = `${generatedEpisodes} / ${totalEpisodes}`;
-    els.modelText.textContent = snapshot.model_option?.label || currentModelLabel();
     els.progressFill.style.width = `${progress}%`;
     els.progressText.textContent = `${progress}%`;
-    els.projectText.textContent = `项目：${snapshot.project_id}`;
+    els.projectText.textContent = `当前剧本：${projectTitle}`;
     els.taskText.textContent = `任务：${snapshot.task_id || "未创建"}`;
     els.finalOutputBox.textContent = finalOutput || "暂无内容";
+    syncElapsedTimer(snapshot);
     if (els.cacheNoticeText) {
       els.cacheNoticeText.textContent = snapshot.cache_notice || "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。";
     }
     renderRollbackOptions(snapshot.rollback_stage_options || [], els.rollbackStageSelect?.value || "");
+    renderRollbackScriptStartOptions(
+      snapshot.rollback_script_start_options || [],
+      els.rollbackScriptStartSelect?.value || ""
+    );
     persistSelectedProjectId(snapshot.project_id);
     renderProjectList(state.projects);
     syncButtons();
@@ -431,7 +570,11 @@
     const hasConfiguredModel = state.availableModels.some((item) => item.configured !== false);
     const canConfirmCompletion = Boolean(state.latestSnapshot?.can_confirm_completion);
     const canStageRollback = Boolean(state.latestSnapshot?.can_stage_rollback);
-    const hasRollbackSelection = Boolean(els.rollbackStageSelect?.value);
+    const selectedRollbackStage = els.rollbackStageSelect?.value || "";
+    const requiresScriptStart = selectedRollbackStage === "script";
+    const hasRollbackSelection = Boolean(
+      selectedRollbackStage && (!requiresScriptStart || (els.rollbackScriptStartSelect?.value || ""))
+    );
 
     els.startBtn.disabled = !isAuthenticated() || !hasConfiguredModel;
     els.pauseBtn.disabled = !(state.taskId && ["running", "pending"].includes(state.status));
@@ -444,6 +587,11 @@
     }
     if (els.rollbackStageSelect) {
       els.rollbackStageSelect.disabled = !isAuthenticated() || !canStageRollback;
+    }
+    if (els.rollbackScriptStartSelect) {
+      const showScriptStart = canStageRollback && selectedRollbackStage === "script";
+      els.rollbackScriptStartSelect.classList.toggle("hidden", !showScriptStart);
+      els.rollbackScriptStartSelect.disabled = !showScriptStart;
     }
     if (els.rollbackRewriteBtn) {
       els.rollbackRewriteBtn.disabled = !isAuthenticated() || !canStageRollback || !hasRollbackSelection;
@@ -547,7 +695,6 @@
       state.availableModels = [];
       els.modelSelect.innerHTML = `<option value="">登录后选择模型</option>`;
       els.modelSelect.disabled = true;
-      els.modelText.textContent = "登录后可用";
       syncButtons();
       return;
     }
@@ -569,7 +716,6 @@
       els.modelSelect.value = defaultModel.id;
     }
     els.modelSelect.disabled = availableModels.length === 0;
-    els.modelText.textContent = currentModelLabel();
     syncButtons();
   }
 
@@ -635,7 +781,7 @@
             title="${escapeHtml(projectTooltip(item))}"
           >
             <span class="workspace-pick-main">
-              <span class="workspace-pick-title">${escapeHtml(item.title || "未命名剧本")}</span>
+              <span class="workspace-pick-title">${escapeHtml(projectDisplayTitle(item))}</span>
               <span class="workspace-pick-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${item.current_stage_label || statusLabel(item.status)}`)}</span>
             </span>
             <span class="workspace-pick-state">${escapeHtml(statusLabel(item.status))}</span>
@@ -663,7 +809,7 @@
       return null;
     }
     if (restoreInputs) {
-      restoreInputPayload(project.input_payload);
+      restoreInputPayload(project.input_payload, { force: true });
     }
     renderSnapshot(project);
     if (scroll) {
@@ -695,7 +841,8 @@
     }
 
     if (targetProjectId) {
-      await loadProjectDetail(targetProjectId, { restoreInputs });
+      const shouldRestoreInputs = restoreInputs || Number(targetProjectId) !== Number(state.projectId);
+      await loadProjectDetail(targetProjectId, { restoreInputs: shouldRestoreInputs });
     } else {
       if (!freshWorkspace) {
         persistSelectedProjectId(null);
@@ -788,11 +935,19 @@
       throw new Error("请选择一个回退步骤。");
     }
     const selectedLabel = els.rollbackStageSelect?.selectedOptions?.[0]?.textContent?.trim() || "所选步骤";
-    const ok = window.confirm(`确认回退到“${selectedLabel}”并从该步骤重新生成吗？前面的结果会保留，后面的结果会被清空重做。`);
+    const startEpisodeValue = stageKey === "script" ? Number(els.rollbackScriptStartSelect?.value || 0) : 0;
+    if (stageKey === "script" && startEpisodeValue <= 0) {
+      throw new Error("请选择正文开始重写的集数。");
+    }
+    const detailSuffix = stageKey === "script" ? `，从第 ${startEpisodeValue} 集开始重写后续正文` : "";
+    const ok = window.confirm(`确认回退到“${selectedLabel}”${detailSuffix}吗？前面的结果会保留，后面的结果会被清空重做。`);
     if (!ok) return;
     const data = await requestJson(`/api/projects/${state.projectId}/rollback`, {
       method: "POST",
-      body: JSON.stringify({ stage_key: stageKey })
+      body: JSON.stringify({
+        stage_key: stageKey,
+        start_episode: stageKey === "script" ? startEpisodeValue : null
+      })
     });
     renderSnapshot(data.task);
     await loadProjects({ restoreSelection: true, restoreInputs: false });
@@ -858,8 +1013,8 @@
   }
 
   function projectTooltip(item) {
-    return [
-      `剧本：${item.title || "未命名剧本"}`,
+      return [
+      `剧本：${projectDisplayTitle(item)}`,
       `进度：${Number(item.progress_percent || 0)}%`,
       `当前阶段：${item.current_stage_label || statusLabel(item.status)}`,
       `当前状态：${statusLabel(item.status)}`
@@ -928,7 +1083,7 @@
           ${item.completion_confirmed ? '<span class="status-pill status-pill-locked">已锁定</span>' : item.awaiting_user_confirmation ? '<span class="status-pill status-pill-pending">待确认</span>' : ""}
           <span class="status-pill ${item.visibility === "public" ? "status-pill-public" : "status-pill-private"}">${escapeHtml(visibilityLabel(item.visibility))}</span>
         </div>
-        <h3>${escapeHtml(item.title)}</h3>
+        <h3>${escapeHtml(projectDisplayTitle(item))}</h3>
         <p>${escapeHtml(item.summary)}</p>
         <div class="asset-meta">
           <span>项目 ${escapeHtml(item.project_id)}</span>
@@ -1307,7 +1462,17 @@
       }
     });
 
-    els.rollbackStageSelect?.addEventListener("change", syncButtons);
+    els.rollbackStageSelect?.addEventListener("change", () => {
+      if ((els.rollbackStageSelect?.value || "") !== "script" && els.rollbackScriptStartSelect) {
+        els.rollbackScriptStartSelect.value = "";
+      }
+      renderRollbackScriptStartOptions(
+        state.latestSnapshot?.rollback_script_start_options || [],
+        els.rollbackScriptStartSelect?.value || ""
+      );
+      syncButtons();
+    });
+    els.rollbackScriptStartSelect?.addEventListener("change", syncButtons);
 
     els.rollbackRewriteBtn?.addEventListener("click", async () => {
       try {

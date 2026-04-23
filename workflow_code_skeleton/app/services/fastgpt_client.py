@@ -317,7 +317,7 @@ class FastGPTClient:
                     "content": (
                         f"执行阶段：{contract.label}。"
                         "请严格读取 variables 中的输入变量，"
-                        "并只返回约定的 JSON 输出字段。"
+                        "并只返回约定的输出字段。"
                     ),
                 }
             ],
