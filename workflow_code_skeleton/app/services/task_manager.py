@@ -90,13 +90,13 @@ STAGE_LABELS = {
     "framework": "正在撰写剧本框架",
     "appearance_strategy": "正在生成服装前置策略",
     "validation": "正在检查集数",
-    "worldview": "正在整理故事规则",
-    "character": "正在梳理人物",
-    "scene": "正在整理关键场景",
-    "appearance": "正在生成服装版本映射",
-    "hook": "正在设计开场冲突",
-    "dialogue": "正在补充角色对话",
-    "script": "正在生成正文",
+    "worldview": "正在整理世界观",
+    "character": "正在梳理角色",
+    "scene": "正在整理核心场景",
+    "appearance": "正在给不同服饰的人物进行处理",
+    "hook": "正在设计开场，冲突，钩子",
+    "dialogue": "正在创作角色对话",
+    "script": "正在写作剧本正文",
     "finalize": "正在整理完整稿件",
     "finished": "已完成",
 }
@@ -153,6 +153,9 @@ LOCAL_COMPLETED_BATCHES = "_completed_batches"
 LOCAL_COMMITTED_SCRIPT = "_committed_all_script"
 LOCAL_CURRENT_BATCH_INDEX = "_current_batch_index"
 LOCAL_CURRENT_BATCH_STAGE = "_current_batch_stage"
+LOCAL_HOOK_CHECKPOINT_START = "_batch_hooks_start_episode"
+LOCAL_DIALOGUE_CHECKPOINT_START = "_batch_dialogues_start_episode"
+LOCAL_SCRIPT_CHECKPOINT_START = "_batch_script_start_episode"
 LOCAL_REWRITE_FROM_STAGE = "_rewrite_from_stage"
 LOCAL_SCRIPT_BATCHES = "_script_batches"
 LOCAL_SCRIPT_EPISODES = "_script_episode_cache"
@@ -244,6 +247,9 @@ ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "_committed_all_script",
         "_current_batch_index",
         "_current_batch_stage",
+        LOCAL_HOOK_CHECKPOINT_START,
+        LOCAL_DIALOGUE_CHECKPOINT_START,
+        LOCAL_SCRIPT_CHECKPOINT_START,
         LOCAL_REWRITE_FROM_STAGE,
     ),
     "appearance_strategy": (
@@ -275,6 +281,9 @@ ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "_committed_all_script",
         "_current_batch_index",
         "_current_batch_stage",
+        LOCAL_HOOK_CHECKPOINT_START,
+        LOCAL_DIALOGUE_CHECKPOINT_START,
+        LOCAL_SCRIPT_CHECKPOINT_START,
         LOCAL_REWRITE_FROM_STAGE,
     ),
     "consistency": (
@@ -303,6 +312,9 @@ ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "_committed_all_script",
         "_current_batch_index",
         "_current_batch_stage",
+        LOCAL_HOOK_CHECKPOINT_START,
+        LOCAL_DIALOGUE_CHECKPOINT_START,
+        LOCAL_SCRIPT_CHECKPOINT_START,
         LOCAL_REWRITE_FROM_STAGE,
     ),
     "episode_plan_normalize": (
@@ -330,6 +342,9 @@ ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "_committed_all_script",
         "_current_batch_index",
         "_current_batch_stage",
+        LOCAL_HOOK_CHECKPOINT_START,
+        LOCAL_DIALOGUE_CHECKPOINT_START,
+        LOCAL_SCRIPT_CHECKPOINT_START,
         LOCAL_REWRITE_FROM_STAGE,
     ),
     "worldview": (
@@ -355,6 +370,9 @@ ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "_committed_all_script",
         "_current_batch_index",
         "_current_batch_stage",
+        LOCAL_HOOK_CHECKPOINT_START,
+        LOCAL_DIALOGUE_CHECKPOINT_START,
+        LOCAL_SCRIPT_CHECKPOINT_START,
         LOCAL_REWRITE_FROM_STAGE,
     ),
     "characters": (
@@ -379,6 +397,9 @@ ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "_committed_all_script",
         "_current_batch_index",
         "_current_batch_stage",
+        LOCAL_HOOK_CHECKPOINT_START,
+        LOCAL_DIALOGUE_CHECKPOINT_START,
+        LOCAL_SCRIPT_CHECKPOINT_START,
         LOCAL_REWRITE_FROM_STAGE,
     ),
     "scenes": (
@@ -402,6 +423,9 @@ ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "_committed_all_script",
         "_current_batch_index",
         "_current_batch_stage",
+        LOCAL_HOOK_CHECKPOINT_START,
+        LOCAL_DIALOGUE_CHECKPOINT_START,
+        LOCAL_SCRIPT_CHECKPOINT_START,
         LOCAL_REWRITE_FROM_STAGE,
     ),
     "appearance": (
@@ -424,6 +448,9 @@ ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "_committed_all_script",
         "_current_batch_index",
         "_current_batch_stage",
+        LOCAL_HOOK_CHECKPOINT_START,
+        LOCAL_DIALOGUE_CHECKPOINT_START,
+        LOCAL_SCRIPT_CHECKPOINT_START,
         LOCAL_REWRITE_FROM_STAGE,
     ),
     "hooks": (
@@ -441,6 +468,9 @@ ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "_committed_all_script",
         "_current_batch_index",
         "_current_batch_stage",
+        LOCAL_HOOK_CHECKPOINT_START,
+        LOCAL_DIALOGUE_CHECKPOINT_START,
+        LOCAL_SCRIPT_CHECKPOINT_START,
         LOCAL_REWRITE_FROM_STAGE,
     ),
     "dialogues": (
@@ -2263,6 +2293,9 @@ class TaskManager:
         variables.pop(BATCH_HOOKS, None)
         variables.pop(BATCH_DIALOGUES, None)
         variables.pop(BATCH_SCRIPT, None)
+        variables.pop(LOCAL_HOOK_CHECKPOINT_START, None)
+        variables.pop(LOCAL_DIALOGUE_CHECKPOINT_START, None)
+        variables.pop(LOCAL_SCRIPT_CHECKPOINT_START, None)
 
     def _apply_script_partial_rollback(
         self,
@@ -2349,6 +2382,9 @@ class TaskManager:
         variables[LOCAL_CURRENT_BATCH_STAGE] = ""
         variables[BATCH_START_EPISODE] = int(start_episode)
         variables.pop(BATCH_SCRIPT, None)
+        variables.pop(LOCAL_HOOK_CHECKPOINT_START, None)
+        variables.pop(LOCAL_DIALOGUE_CHECKPOINT_START, None)
+        variables.pop(LOCAL_SCRIPT_CHECKPOINT_START, None)
 
     def _rollback_progress_percent(self, stage_key: str) -> int:
         defaults = {

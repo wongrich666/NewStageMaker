@@ -104,6 +104,9 @@ LOCAL_COMPLETED_BATCHES = "_completed_batches"
 LOCAL_COMMITTED_SCRIPT = "_committed_all_script"
 LOCAL_CURRENT_BATCH_INDEX = "_current_batch_index"
 LOCAL_CURRENT_BATCH_STAGE = "_current_batch_stage"
+LOCAL_HOOK_CHECKPOINT_START = "_batch_hooks_start_episode"
+LOCAL_DIALOGUE_CHECKPOINT_START = "_batch_dialogues_start_episode"
+LOCAL_SCRIPT_CHECKPOINT_START = "_batch_script_start_episode"
 LOCAL_REWRITE_FROM_STAGE = "_rewrite_from_stage"
 LOCAL_SCRIPT_BATCHES = "_script_batches"
 LOCAL_SCRIPT_EPISODES = "_script_episode_cache"
@@ -254,7 +257,7 @@ def run_fastgpt_hybrid_workflow(
         set_runtime_stage(
             state,
             "worldview",
-            "已从缓存恢复故事规则。",
+            "已从缓存恢复世界观。",
             progress_percent=12,
         )
     else:
@@ -265,7 +268,7 @@ def run_fastgpt_hybrid_workflow(
                 STAGE_WORLDVIEW,
                 variables,
                 stage_key="worldview",
-                message="正在生成并校正故事规则。",
+                message="正在生成并校正世界观。",
                 progress_percent=12,
             )
         )
@@ -575,7 +578,7 @@ def _run_batched_generation(
     else:
         batches = list(iter_episode_batches(total_episodes, batch_size=batch_size))
         completed_batches = min(
-            max(1, len(batches)),
+            len(batches),
             max(0, _safe_int(variables.get(LOCAL_COMPLETED_BATCHES), 0)),
         )
         current_batch_index = max(
@@ -629,11 +632,19 @@ def _run_batched_generation(
             batch_size=batch.size,
             raw_episode_plan=str(variables.get(EPISODE_PLAN) or payload.episode_plan or ""),
         )
+        _ensure_plan_matches_batch(plan_for_batch, batch=batch, stage_label="批处理上下文")
         alias_plan_for_batch = slice_episode_alias_plan_for_batch(episode_alias_plan, batch)
 
         variables[BATCH_START_EPISODE] = batch.start_episode
         variables[LOCAL_CURRENT_BATCH_INDEX] = index
         variables[LOCAL_CURRENT_BATCH_STAGE] = resume_stage or ""  # 新增：批次阶段先预落盘
+        if not resume_stage:
+            variables.pop(BATCH_HOOKS, None)
+            variables.pop(BATCH_DIALOGUES, None)
+            variables.pop(BATCH_SCRIPT, None)
+            variables.pop(LOCAL_HOOK_CHECKPOINT_START, None)
+            variables.pop(LOCAL_DIALOGUE_CHECKPOINT_START, None)
+            variables.pop(LOCAL_SCRIPT_CHECKPOINT_START, None)
         _sync_state_variables(state, variables)
         sync_runtime_state(state)  # 新增：批次起点检查点
 
@@ -653,6 +664,7 @@ def _run_batched_generation(
 
         if force_skip_hook and cached_batch_hooks:
             variables[BATCH_HOOKS] = cached_batch_hooks
+            variables[LOCAL_HOOK_CHECKPOINT_START] = batch.start_episode
             variables[LOCAL_CURRENT_BATCH_STAGE] = "hook"
             set_runtime_stage(
                 state,
@@ -661,7 +673,14 @@ def _run_batched_generation(
                 batch_label=batch.label,
                 progress_percent=hook_progress,
             )
-        elif resume_stage in {"hook", "dialogue", "script"} and _has_value(variables.get(BATCH_HOOKS)):
+        elif (
+            resume_stage in {"hook", "dialogue", "script"}
+            and _has_matching_batch_object_checkpoint(
+                variables.get(BATCH_HOOKS),
+                batch=batch,
+                saved_start_episode=variables.get(LOCAL_HOOK_CHECKPOINT_START),
+            )
+        ):
             set_runtime_stage(
                 state,
                 "hook",
@@ -683,6 +702,7 @@ def _run_batched_generation(
             all_hooks = merge_batch_object(all_hooks, hook_output[BATCH_HOOKS])
             variables[BATCH_HOOKS] = hook_output[BATCH_HOOKS]
             variables[ALL_HOOKS] = all_hooks
+            variables[LOCAL_HOOK_CHECKPOINT_START] = batch.start_episode
             variables[LOCAL_CURRENT_BATCH_STAGE] = "hook"
 
         _sync_state_variables(state, variables)
@@ -691,10 +711,20 @@ def _run_batched_generation(
         dialogue_base = dict(variables)
         dialogue_base[EPISODE_PLAN] = plan_for_batch
         dialogue_base[BATCH_START_EPISODE] = batch.start_episode
+        dialogue_base[ALL_HOOKS] = variables.get(BATCH_HOOKS) or slice_object_episodes_for_batch(
+            all_hooks,
+            batch,
+        )
         dialogue_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
         dialogue_base[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
             variables.get(APPEARANCE_CONTINUITY_MEMORY),
             alias_plan_for_batch,
+        )
+        _ensure_batch_object_matches(
+            dialogue_base.get(ALL_HOOKS),
+            batch=batch,
+            stage_label="角色对话",
+            field_label="开头冲突钩子",
         )
 
         dialogue_progress = 50 + int((index / total_batches) * 12)
@@ -705,6 +735,7 @@ def _run_batched_generation(
 
         if force_skip_dialogue and cached_batch_dialogues:
             variables[BATCH_DIALOGUES] = cached_batch_dialogues
+            variables[LOCAL_DIALOGUE_CHECKPOINT_START] = batch.start_episode
             variables[LOCAL_CURRENT_BATCH_STAGE] = "dialogue"
             set_runtime_stage(
                 state,
@@ -713,7 +744,14 @@ def _run_batched_generation(
                 batch_label=batch.label,
                 progress_percent=dialogue_progress,
             )
-        elif resume_stage in {"dialogue", "script"} and _has_value(variables.get(BATCH_DIALOGUES)):
+        elif (
+            resume_stage in {"dialogue", "script"}
+            and _has_matching_batch_object_checkpoint(
+                variables.get(BATCH_DIALOGUES),
+                batch=batch,
+                saved_start_episode=variables.get(LOCAL_DIALOGUE_CHECKPOINT_START),
+            )
+        ):
             set_runtime_stage(
                 state,
                 "dialogue",
@@ -735,6 +773,7 @@ def _run_batched_generation(
             all_dialogues = merge_batch_object(all_dialogues, dialogue_output[BATCH_DIALOGUES])
             variables[BATCH_DIALOGUES] = dialogue_output[BATCH_DIALOGUES]
             variables[ALL_DIALOGUES] = all_dialogues
+            variables[LOCAL_DIALOGUE_CHECKPOINT_START] = batch.start_episode
             variables[LOCAL_CURRENT_BATCH_STAGE] = "dialogue"
 
         _sync_state_variables(state, variables)
@@ -749,10 +788,26 @@ def _run_batched_generation(
             script_batches=script_batches,
             script_episode_cache=script_episode_cache,
         )
+        _ensure_batch_object_matches(
+            script_base.get(ALL_HOOKS),
+            batch=batch,
+            stage_label="剧本正文",
+            field_label="开头冲突钩子",
+        )
+        _ensure_batch_object_matches(
+            script_base.get(ALL_DIALOGUES),
+            batch=batch,
+            stage_label="剧本正文",
+            field_label="角色对白",
+        )
 
         script_progress = 68 + int((index / total_batches) * 26)
 
-        if resume_stage == "script" and _has_value(variables.get(BATCH_SCRIPT)):
+        if resume_stage == "script" and _has_matching_batch_script_checkpoint(
+            variables.get(BATCH_SCRIPT),
+            batch=batch,
+            saved_start_episode=variables.get(LOCAL_SCRIPT_CHECKPOINT_START),
+        ):
             batch_script = str(variables.get(BATCH_SCRIPT) or "").strip()
             script_episode_cache.update(_extract_script_episode_map(batch_script, batch))
             variables[ALL_SCRIPT] = (
@@ -763,6 +818,7 @@ def _run_batched_generation(
             script_batches[batch.start_episode] = batch_script
             variables[LOCAL_SCRIPT_BATCHES] = _string_keyed_batch_map(script_batches)
             variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(script_episode_cache)
+            variables[LOCAL_SCRIPT_CHECKPOINT_START] = batch.start_episode
             variables[LOCAL_CURRENT_BATCH_STAGE] = "script"  # 新增：恢复脚本时也显式标记
             set_runtime_stage(
                 state,
@@ -794,6 +850,7 @@ def _run_batched_generation(
             script_batches[batch.start_episode] = batch_script
             variables[LOCAL_SCRIPT_BATCHES] = _string_keyed_batch_map(script_batches)
             variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(script_episode_cache)
+            variables[LOCAL_SCRIPT_CHECKPOINT_START] = batch.start_episode
             variables[LOCAL_CURRENT_BATCH_STAGE] = "script"
 
         _sync_state_variables(state, variables)
@@ -803,7 +860,13 @@ def _run_batched_generation(
             state,
             runner,
             STAGE_MEMORY,
-            {BATCH_SCRIPT: batch_script},
+            {
+                BATCH_SCRIPT: batch_script,
+                LAST_SUMMARY: variables.get(LAST_SUMMARY) or "",
+                APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING) or {},
+                CHARACTER_ALIAS_NAMING_RULES: variables.get(CHARACTER_ALIAS_NAMING_RULES)
+                or "",
+            },
             stage_key="script",
             message=f"正在整理第 {batch.label} 集的上下文记忆。",
             batch_label=batch.label,
@@ -827,6 +890,7 @@ def _run_batched_generation(
             appearance_memory_by_batch
         )
         variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(script_episode_cache)
+        variables[BATCH_START_EPISODE] = batch.end_episode + 1
         variables[LOCAL_COMPLETED_BATCHES] = index + 1
         variables[LOCAL_COMMITTED_SCRIPT] = variables[ALL_SCRIPT]
         committed_script = str(variables.get(LOCAL_COMMITTED_SCRIPT) or "").strip()
@@ -1066,7 +1130,10 @@ def _run_full_fastgpt_generation(
         STAGE_MEMORY,
         {
             BATCH_SCRIPT: all_script,
-            LAST_SUMMARY: "",
+            LAST_SUMMARY: variables.get(LAST_SUMMARY) or "",
+            APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING) or {},
+            CHARACTER_ALIAS_NAMING_RULES: variables.get(CHARACTER_ALIAS_NAMING_RULES)
+            or "",
         },
         stage_key="script",
         message="正在整理全量剧本记忆。",
@@ -1110,8 +1177,16 @@ def _build_script_stage_context(
         variables.get(APPEARANCE_CONTINUITY_MEMORY),
         alias_plan_for_batch,
     )
-    context[ALL_HOOKS] = slice_object_episodes_for_batch(variables.get(ALL_HOOKS), batch)
-    context[ALL_DIALOGUES] = slice_object_episodes_for_batch(variables.get(ALL_DIALOGUES), batch)
+    context[ALL_HOOKS] = _current_batch_object_payload(
+        variables.get(BATCH_HOOKS),
+        variables.get(ALL_HOOKS),
+        batch=batch,
+    )
+    context[ALL_DIALOGUES] = _current_batch_object_payload(
+        variables.get(BATCH_DIALOGUES),
+        variables.get(ALL_DIALOGUES),
+        batch=batch,
+    )
     context[ALL_SCRIPT] = _build_previous_script_context(
         script_batches or {},
         script_episode_cache or {},
@@ -2360,6 +2435,143 @@ def merge_batch_object(current: dict[str, Any], batch: dict[str, Any]) -> dict[s
     merged = copy.deepcopy(current or {})
     incoming = copy.deepcopy(batch or {})
     return _merge_dicts(merged, incoming)
+
+
+def _has_matching_batch_object_checkpoint(
+    value: Any,
+    *,
+    batch: BatchWindow,
+    saved_start_episode: Any,
+) -> bool:
+    saved_start = _safe_int(saved_start_episode, 0)
+    if saved_start > 0 and saved_start != batch.start_episode:
+        return False
+    payload = _dict_or_empty(value)
+    if not payload:
+        return False
+    return _batch_object_covers_window(payload, batch)
+
+
+def _has_matching_batch_script_checkpoint(
+    value: Any,
+    *,
+    batch: BatchWindow,
+    saved_start_episode: Any,
+) -> bool:
+    saved_start = _safe_int(saved_start_episode, 0)
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if saved_start > 0:
+        return saved_start == batch.start_episode
+
+    episode_map = _extract_script_episode_map(text, batch)
+    expected = list(range(batch.start_episode, batch.end_episode + 1))
+    return bool(episode_map) and sorted(episode_map) == expected
+
+
+def _current_batch_object_payload(
+    current_value: Any,
+    aggregate_value: Any,
+    *,
+    batch: BatchWindow,
+) -> dict[str, Any]:
+    current_payload = _dict_or_empty(current_value)
+    if _batch_object_covers_window(current_payload, batch):
+        return current_payload
+    return slice_object_episodes_for_batch(aggregate_value, batch)
+
+
+def _batch_object_covers_window(value: Any, batch: BatchWindow) -> bool:
+    payload = _dict_or_empty(value)
+    if not payload:
+        return False
+
+    batch_meta = payload.get("batch_meta")
+    if isinstance(batch_meta, dict):
+        meta_start = _safe_int(batch_meta.get("start_episode"), 0)
+        meta_end = _safe_int(batch_meta.get("end_episode"), 0)
+        if meta_start == batch.start_episode and meta_end == batch.end_episode:
+            return True
+
+    episodes = payload.get("episodes")
+    if not isinstance(episodes, list):
+        return False
+
+    episode_numbers: list[int] = []
+    for item in episodes:
+        if not isinstance(item, dict):
+            continue
+        episode_no = _safe_int(item.get("episode"), 0)
+        if batch.start_episode <= episode_no <= batch.end_episode:
+            episode_numbers.append(episode_no)
+
+    if not episode_numbers:
+        return False
+
+    expected = list(range(batch.start_episode, batch.end_episode + 1))
+    return sorted(dict.fromkeys(episode_numbers)) == expected
+
+
+def _ensure_batch_object_matches(
+    value: Any,
+    *,
+    batch: BatchWindow,
+    stage_label: str,
+    field_label: str,
+) -> None:
+    if _batch_object_covers_window(value, batch):
+        logger.info(
+            "%s %s 集输入校验通过：%s覆盖当前批次。",
+            stage_label,
+            batch.label,
+            field_label,
+        )
+        return
+    raise ValueError(
+        f"{stage_label} {batch.label} 集输入异常：{field_label}未正确覆盖当前批次。"
+    )
+
+
+def _ensure_plan_matches_batch(
+    plan_payload: Any,
+    *,
+    batch: BatchWindow,
+    stage_label: str,
+) -> None:
+    episode_numbers = _extract_batch_episode_numbers_from_plan(plan_payload)
+    if not episode_numbers:
+        logger.warning(
+            "%s %s 集分集计划未能解析为结构化集数，将继续沿用原始文本。",
+            stage_label,
+            batch.label,
+        )
+        return
+    expected = list(range(batch.start_episode, batch.end_episode + 1))
+    if episode_numbers == expected:
+        logger.info(
+            "%s %s 集输入校验通过：分集计划范围=%s-%s。",
+            stage_label,
+            batch.label,
+            episode_numbers[0],
+            episode_numbers[-1],
+        )
+        return
+    raise ValueError(
+        f"{stage_label} {batch.label} 集输入异常：分集计划范围={episode_numbers}，期望={expected}。"
+    )
+
+
+def _extract_batch_episode_numbers_from_plan(plan_payload: Any) -> list[int]:
+    normalized = _normalize_episode_plan_object(plan_payload)
+    if not normalized:
+        return []
+    episode_numbers = [
+        _safe_int(item.get("episode"), 0)
+        for item in normalized.get("episodes", [])
+        if isinstance(item, dict)
+    ]
+    return [episode for episode in episode_numbers if episode > 0]
 
 
 def slice_object_episodes_for_batch(value: Any, batch: BatchWindow) -> dict[str, Any]:

@@ -15,12 +15,15 @@ from .fastgpt_contracts import (
     ALL_DIALOGUES,
     ALL_HOOKS,
     ALL_SCRIPT,
+    CHARACTERS,
     CHARACTER_APPEARANCE_REQUIREMENTS,
     LAST_SUMMARY,
     LEGACY_INPUT_ALIASES,
     LEGACY_OUTPUT_ALIASES,
     MAX_RETRIES,
     OUTFIT_SWITCH_RULES,
+    SCENES,
+    STAGE_SCRIPT,
     USER_CONTENT_BASELINE,
     FastGPTStageContract,
     contract_for,
@@ -239,6 +242,16 @@ class FastGPTClient:
         wire: dict[str, Any] = {}
         for canonical_name, wire_name in aliases.items():
             if canonical_name in variables:
+                if stage_name == STAGE_SCRIPT and canonical_name == CHARACTERS:
+                    wire[wire_name] = _format_wire_value(
+                        _build_script_character_scene_bundle(
+                            variables.get(CHARACTERS),
+                            variables.get(SCENES),
+                        )
+                    )
+                    continue
+                if stage_name == STAGE_SCRIPT and canonical_name == SCENES:
+                    continue
                 if canonical_name == CHARACTER_APPEARANCE_REQUIREMENTS:
                     wire[wire_name] = _format_wire_value(
                         _merge_optional_text(
@@ -413,6 +426,19 @@ def _merge_optional_text(*parts: Any) -> str:
         seen.add(text)
         merged.append(text)
     return "\n".join(merged).strip()
+
+
+def _build_script_character_scene_bundle(characters: Any, scenes: Any) -> str:
+    character_text = str(characters or "").strip()
+    scene_text = str(scenes or "").strip()
+    if character_text and scene_text:
+        return (
+            "【人设结果JSON】\n"
+            f"{character_text}\n\n"
+            "【场景结果JSON】\n"
+            f"{scene_text}"
+        ).strip()
+    return character_text or scene_text
 
 
 def _env_with_name(*names: str) -> tuple[str | None, str | None]:
