@@ -432,7 +432,7 @@ def _build_user_content_baseline(
     }
     return json.dumps(baseline, ensure_ascii=False, indent=2)
 
-
+# 这个是用来获取当前衣服规则的，本来接到网页现在缩到后天里面完成
 def _current_appearance_requirements_text(
     variables: dict[str, Any],
     payload: WorkflowInput,
@@ -444,7 +444,7 @@ def _current_appearance_requirements_text(
         payload.outfit_switch_rules,
     )
 
-
+# 当前服饰明明规则
 def _current_alias_naming_rules_text(
     variables: dict[str, Any],
     payload: WorkflowInput,
@@ -514,6 +514,7 @@ def _run_batched_generation(
     rewrite_from_stage = str(variables.get(LOCAL_REWRITE_FROM_STAGE) or "").strip().lower()
     rewrite_start_episode = max(1, _safe_int(variables.get(BATCH_START_EPISODE), 1))
     custom_script_rewrite = rewrite_from_stage == "script" and rewrite_start_episode > 1
+
     if custom_script_rewrite:
         batches = list(
             iter_episode_batches_from(
@@ -534,11 +535,9 @@ def _run_batched_generation(
             completed_batches,
             _safe_int(variables.get(LOCAL_CURRENT_BATCH_INDEX), completed_batches),
         )
+
     total_batches = max(1, len(batches))
-    completed_batches = min(
-        total_batches,
-        completed_batches,
-    )
+    completed_batches = min(total_batches, completed_batches)
     current_batch_stage = str(variables.get(LOCAL_CURRENT_BATCH_STAGE) or "").strip().lower()
     normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
     episode_alias_plan = _normalize_episode_alias_plan_object(variables.get(EPISODE_ALIAS_PLAN))
@@ -553,17 +552,20 @@ def _run_batched_generation(
         )
         variables[LOCAL_REWRITE_FROM_STAGE] = ""
         _sync_state_variables(state, variables)
+        sync_runtime_state(state)  # 新增：让 final 重写分支也成为可恢复检查点
         return
-
+    # 判断起始集和批次如果没写完就继续写
     for index, batch in enumerate(batches):
         if index < completed_batches:
             continue
+
         resume_stage = current_batch_stage if index == current_batch_index else ""
         generated_before_batch = (
             max(0, batch.start_episode - 1)
             if custom_script_rewrite
             else min(total_episodes, index * batch_size)
         )
+
         plan_for_batch = get_episode_batch_payload(
             normalized_plan,
             batch.start_episode,
@@ -571,8 +573,13 @@ def _run_batched_generation(
             raw_episode_plan=str(variables.get(EPISODE_PLAN) or payload.episode_plan or ""),
         )
         alias_plan_for_batch = slice_episode_alias_plan_for_batch(episode_alias_plan, batch)
+
         variables[BATCH_START_EPISODE] = batch.start_episode
         variables[LOCAL_CURRENT_BATCH_INDEX] = index
+        variables[LOCAL_CURRENT_BATCH_STAGE] = resume_stage or ""  # 新增：批次阶段先预落盘
+        _sync_state_variables(state, variables)
+        sync_runtime_state(state)  # 新增：批次起点检查点
+
         batch_base = dict(variables)
         batch_base[EPISODE_PLAN] = plan_for_batch
         batch_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
@@ -586,6 +593,7 @@ def _run_batched_generation(
         cached_batch_hooks = (
             slice_object_episodes_for_batch(all_hooks, batch) if force_skip_hook else {}
         )
+
         if force_skip_hook and cached_batch_hooks:
             variables[BATCH_HOOKS] = cached_batch_hooks
             variables[LOCAL_CURRENT_BATCH_STAGE] = "hook"
@@ -619,7 +627,9 @@ def _run_batched_generation(
             variables[BATCH_HOOKS] = hook_output[BATCH_HOOKS]
             variables[ALL_HOOKS] = all_hooks
             variables[LOCAL_CURRENT_BATCH_STAGE] = "hook"
+
         _sync_state_variables(state, variables)
+        sync_runtime_state(state)  # 新增：hook 成功检查点
 
         dialogue_base = dict(variables)
         dialogue_base[EPISODE_PLAN] = plan_for_batch
@@ -629,11 +639,13 @@ def _run_batched_generation(
             variables.get(APPEARANCE_CONTINUITY_MEMORY),
             alias_plan_for_batch,
         )
+
         dialogue_progress = 50 + int((index / total_batches) * 12)
         force_skip_dialogue = rewrite_from_stage == "script" and bool(all_dialogues)
         cached_batch_dialogues = (
             slice_object_episodes_for_batch(all_dialogues, batch) if force_skip_dialogue else {}
         )
+
         if force_skip_dialogue and cached_batch_dialogues:
             variables[BATCH_DIALOGUES] = cached_batch_dialogues
             variables[LOCAL_CURRENT_BATCH_STAGE] = "dialogue"
@@ -667,7 +679,9 @@ def _run_batched_generation(
             variables[BATCH_DIALOGUES] = dialogue_output[BATCH_DIALOGUES]
             variables[ALL_DIALOGUES] = all_dialogues
             variables[LOCAL_CURRENT_BATCH_STAGE] = "dialogue"
+
         _sync_state_variables(state, variables)
+        sync_runtime_state(state)  # 新增：dialogue 成功检查点
 
         script_base = _build_script_stage_context(
             variables,
@@ -678,7 +692,9 @@ def _run_batched_generation(
             script_batches=script_batches,
             script_episode_cache=script_episode_cache,
         )
+
         script_progress = 68 + int((index / total_batches) * 26)
+
         if resume_stage == "script" and _has_value(variables.get(BATCH_SCRIPT)):
             batch_script = str(variables.get(BATCH_SCRIPT) or "").strip()
             script_episode_cache.update(_extract_script_episode_map(batch_script, batch))
@@ -690,6 +706,7 @@ def _run_batched_generation(
             script_batches[batch.start_episode] = batch_script
             variables[LOCAL_SCRIPT_BATCHES] = _string_keyed_batch_map(script_batches)
             variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(script_episode_cache)
+            variables[LOCAL_CURRENT_BATCH_STAGE] = "script"  # 新增：恢复脚本时也显式标记
             set_runtime_stage(
                 state,
                 "script",
@@ -721,7 +738,9 @@ def _run_batched_generation(
             variables[LOCAL_SCRIPT_BATCHES] = _string_keyed_batch_map(script_batches)
             variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(script_episode_cache)
             variables[LOCAL_CURRENT_BATCH_STAGE] = "script"
+
         _sync_state_variables(state, variables)
+        sync_runtime_state(state)  # 新增：script 正文先落盘，再去做 memory
 
         memory_output = _run_fastgpt_stage(
             state,
@@ -735,6 +754,7 @@ def _run_batched_generation(
             generated_episodes=batch.end_episode,
             max_retries=0,
         )
+
         variables[LAST_SUMMARY] = memory_output[LAST_SUMMARY]
         variables[APPEARANCE_CONTINUITY_MEMORY] = _update_appearance_continuity_memory(
             variables.get(APPEARANCE_CONTINUITY_MEMORY),
@@ -756,7 +776,9 @@ def _run_batched_generation(
         variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
         variables[LOCAL_CURRENT_BATCH_STAGE] = ""
         variables[LOCAL_REWRITE_FROM_STAGE] = ""
+
         _sync_state_variables(state, variables)
+        sync_runtime_state(state)  # 新增：memory/提交完成检查点
 
     set_runtime_stage(
         state,
@@ -766,7 +788,6 @@ def _run_batched_generation(
         generated_episodes=total_episodes,
     )
     sync_runtime_state(state)
-
 
 def _effective_batch_mode() -> str:
     mode = settings.fastgpt_batch_mode

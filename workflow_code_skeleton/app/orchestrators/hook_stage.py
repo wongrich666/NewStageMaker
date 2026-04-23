@@ -25,18 +25,21 @@ logger = get_logger("hook_stage")
 def run_hook_stage(state, spec: WorkflowSpec):
     logger.info("开始执行开头冲突钩子批处理阶段")
 
-    state.set_var(HOOK_START_VAR, 1)
+    start_episode = state.get_int_var(HOOK_START_VAR)
+    if start_episode < 1:
+        start_episode = 1
+    state.set_var(HOOK_START_VAR, start_episode)
     state.set_var(HOOK_RETRY_VAR, 0)
     sync_runtime_state(state)
 
     total_episodes = state.get_int_var(TOTAL_EPISODES_VAR)
     total_batches = max(1, (total_episodes + 4) // 5)
     completed_batches = 0
+
     while state.get_int_var(HOOK_START_VAR) <= total_episodes:
-        batch = BatchWindow.from_start(
-            state.get_int_var(HOOK_START_VAR),
-            total_episodes,
-        )
+        current_start = state.get_int_var(HOOK_START_VAR)
+        batch = BatchWindow.from_start(current_start, total_episodes)
+
         set_runtime_stage(
             state,
             "hook",
@@ -49,17 +52,19 @@ def run_hook_stage(state, spec: WorkflowSpec):
         hook_bundle = execute_chat_node(state, spec, GENERATE_NODE_ID, expect_json=True)
         ensure_dict(hook_bundle)
         state.set_var(HOOK_CURRENT_VAR, hook_bundle)
-        state.set_var(HOOK_START_VAR, state.get_int_var(HOOK_START_VAR) + 5)
         sync_runtime_state(state)
 
         review = normalize_pass_review(
             ensure_dict(execute_chat_node(state, spec, REVIEW_NODE_ID, expect_json=True))
         )
-        while not review.approved and should_retry(
-            state.get_int_var(HOOK_RETRY_VAR),
-            state.get_int_var(HOOK_MAX_RETRY_VAR),
+
+        while (
+            not review.approved
+            and should_retry(
+                state.get_int_var(HOOK_RETRY_VAR),
+                state.get_int_var(HOOK_MAX_RETRY_VAR),
+            )
         ):
-            state.set_var(HOOK_START_VAR, state.get_int_var(HOOK_START_VAR) - 5)
             set_runtime_stage(
                 state,
                 "hook",
@@ -67,18 +72,20 @@ def run_hook_stage(state, spec: WorkflowSpec):
                 batch_label=batch.label,
                 progress_percent=32 + int((completed_batches / total_batches) * 18),
             )
+
             hook_bundle = execute_chat_node(state, spec, REVISE_NODE_ID, expect_json=True)
             ensure_dict(hook_bundle)
             state.set_var(HOOK_CURRENT_VAR, hook_bundle)
             state.set_var(HOOK_RETRY_VAR, state.get_int_var(HOOK_RETRY_VAR) + 1)
-            state.set_var(HOOK_START_VAR, state.get_int_var(HOOK_START_VAR) + 5)
             sync_runtime_state(state)
+
             review = normalize_pass_review(
                 ensure_dict(execute_chat_node(state, spec, REVIEW_NODE_ID, expect_json=True))
             )
 
         state.set_var(HOOK_FINAL_VAR, execute_text_editor_node(state, spec, APPEND_HOOKS_NODE_ID))
         state.set_var(HOOK_RETRY_VAR, 0)
+        state.set_var(HOOK_START_VAR, current_start + 5)
         completed_batches += 1
         sync_runtime_state(state)
 

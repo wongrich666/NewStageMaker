@@ -7,6 +7,7 @@ def sync_runtime_state(state: WorkflowState) -> None:
     runtime = state.runtime
     if runtime:
         runtime.sync_from_state(state)
+        runtime.checkpoint()
 
 
 def set_runtime_stage(
