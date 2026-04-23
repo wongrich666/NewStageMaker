@@ -32,7 +32,6 @@ def run_script_stage(state, spec: WorkflowSpec):
     total_episodes = state.get_int_var(TOTAL_EPISODES_VAR)
     _initialize_script_stage_state(state, total_episodes=total_episodes)
     sync_runtime_state(state)
-    total_batches = max(1, (total_episodes + 4) // 5)
 
     while state.get_int_var(SCRIPT_START_VAR) <= total_episodes:
         current_start = state.get_int_var(SCRIPT_START_VAR)
@@ -73,6 +72,7 @@ def run_script_stage(state, spec: WorkflowSpec):
             state.set_var(SCRIPT_RETRY_VAR, state.get_int_var(SCRIPT_RETRY_VAR) + 1)
             _rollback_script_episode_cache(state, rewrite_start_episode)
             state.set_var(SCRIPT_START_VAR, rewrite_start_episode)
+
             set_runtime_stage(
                 state,
                 "script",
@@ -84,9 +84,9 @@ def run_script_stage(state, spec: WorkflowSpec):
             sync_runtime_state(state)
             continue
 
+        # 先提交正文批次缓存，但此时先不要推进 SCRIPT_START_VAR
         _commit_script_batch(state, batch, script_text)
         state.set_var(SCRIPT_RETRY_VAR, 0)
-        state.set_var(SCRIPT_START_VAR, batch.end_episode + 1)
         sync_runtime_state(state)
 
         set_runtime_stage(
@@ -97,9 +97,13 @@ def run_script_stage(state, spec: WorkflowSpec):
             progress_percent=70 + int((batch.end_episode / max(1, total_episodes)) * 28),
             generated_episodes=batch.end_episode,
         )
+
         memory_packet = execute_chat_node(state, spec, MEMORY_NODE_ID, expect_json=True)
         state.set_output(MEMORY_NODE_ID, "answerText", memory_packet)
         state.set_var(MEMORY_VAR, execute_text_editor_node(state, spec, APPEND_MEMORY_NODE_ID))
+
+        # memory 成功后，才正式推进到下一批
+        state.set_var(SCRIPT_START_VAR, batch.end_episode + 1)
         sync_runtime_state(state)
 
     set_runtime_stage(

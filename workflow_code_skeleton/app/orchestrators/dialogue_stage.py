@@ -25,18 +25,21 @@ logger = get_logger("dialogue_stage")
 def run_dialogue_stage(state, spec: WorkflowSpec):
     logger.info("开始执行角色对话批处理阶段")
 
-    state.set_var(DIALOGUE_START_VAR, 1)
+    start_episode = state.get_int_var(DIALOGUE_START_VAR)
+    if start_episode < 1:
+        start_episode = 1
+    state.set_var(DIALOGUE_START_VAR, start_episode)
     state.set_var(DIALOGUE_RETRY_VAR, 0)
     sync_runtime_state(state)
 
     total_episodes = state.get_int_var(TOTAL_EPISODES_VAR)
     total_batches = max(1, (total_episodes + 4) // 5)
     completed_batches = 0
+
     while state.get_int_var(DIALOGUE_START_VAR) <= total_episodes:
-        batch = BatchWindow.from_start(
-            state.get_int_var(DIALOGUE_START_VAR),
-            total_episodes,
-        )
+        current_start = state.get_int_var(DIALOGUE_START_VAR)
+        batch = BatchWindow.from_start(current_start, total_episodes)
+
         set_runtime_stage(
             state,
             "dialogue",
@@ -54,17 +57,19 @@ def run_dialogue_stage(state, spec: WorkflowSpec):
         )
         ensure_dict(dialogue_bundle)
         state.set_var(DIALOGUE_CURRENT_VAR, dialogue_bundle)
-        state.set_var(DIALOGUE_START_VAR, state.get_int_var(DIALOGUE_START_VAR) + 5)
         sync_runtime_state(state)
 
         review = normalize_pass_review(
             ensure_dict(execute_chat_node(state, spec, REVIEW_NODE_ID, expect_json=True))
         )
-        while not review.approved and should_retry(
-            state.get_int_var(DIALOGUE_RETRY_VAR),
-            state.get_int_var(DIALOGUE_MAX_RETRY_VAR),
+
+        while (
+            not review.approved
+            and should_retry(
+                state.get_int_var(DIALOGUE_RETRY_VAR),
+                state.get_int_var(DIALOGUE_MAX_RETRY_VAR),
+            )
         ):
-            state.set_var(DIALOGUE_START_VAR, state.get_int_var(DIALOGUE_START_VAR) - 5)
             set_runtime_stage(
                 state,
                 "dialogue",
@@ -72,6 +77,7 @@ def run_dialogue_stage(state, spec: WorkflowSpec):
                 batch_label=batch.label,
                 progress_percent=50 + int((completed_batches / total_batches) * 18),
             )
+
             dialogue_bundle = execute_chat_node(
                 state,
                 spec,
@@ -84,17 +90,21 @@ def run_dialogue_stage(state, spec: WorkflowSpec):
                 DIALOGUE_RETRY_VAR,
                 state.get_int_var(DIALOGUE_RETRY_VAR) + 1,
             )
-            state.set_var(DIALOGUE_START_VAR, state.get_int_var(DIALOGUE_START_VAR) + 5)
             sync_runtime_state(state)
+
             review = normalize_pass_review(
                 ensure_dict(execute_chat_node(state, spec, REVIEW_NODE_ID, expect_json=True))
             )
+
+        if not review.approved:
+            raise RuntimeError("角色对话审核未通过，且已达到最大修订次数。")
 
         state.set_var(
             DIALOGUE_FINAL_VAR,
             execute_text_editor_node(state, spec, APPEND_DIALOGUES_NODE_ID),
         )
         state.set_var(DIALOGUE_RETRY_VAR, 0)
+        state.set_var(DIALOGUE_START_VAR, current_start + 5)
         completed_batches += 1
         sync_runtime_state(state)
 

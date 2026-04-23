@@ -167,6 +167,7 @@ def run_fastgpt_hybrid_workflow(
         )
         _apply_framework_outputs_to_variables(payload, variables)
     _sync_state_variables(state, variables)
+    sync_runtime_state(state)
 
     if _has_pre_strategy_outputs(variables):
         _refresh_user_content_baseline(payload, variables)
@@ -191,6 +192,7 @@ def run_fastgpt_hybrid_workflow(
         )
         _refresh_user_content_baseline(payload, variables)
     _sync_state_variables(state, variables)
+    sync_runtime_state(state)
 
     if _truthy(variables.get(IS_CONSISTENT)):
         consistency = {IS_CONSISTENT: True}
@@ -269,6 +271,7 @@ def run_fastgpt_hybrid_workflow(
             )
         )
     _sync_state_variables(state, variables)
+    sync_runtime_state(state)
 
     if _has_value(variables.get(CHARACTERS)):
         set_runtime_stage(
@@ -290,6 +293,7 @@ def run_fastgpt_hybrid_workflow(
             )
         )
     _sync_state_variables(state, variables)
+    sync_runtime_state(state)
 
     if _has_value(variables.get(SCENES)):
         set_runtime_stage(
@@ -311,6 +315,7 @@ def run_fastgpt_hybrid_workflow(
             )
         )
     _sync_state_variables(state, variables)
+    sync_runtime_state(state)
 
     if _normalize_appearance_mapping_object(variables.get(APPEARANCE_MAPPING)):
         _apply_appearance_outputs_to_variables(variables)
@@ -335,6 +340,7 @@ def run_fastgpt_hybrid_workflow(
         if not _apply_appearance_outputs_to_variables(variables):
             raise ValueError("人物服装版本映射阶段返回内容不可解析，未得到合法 appearance_mapping。")
     _sync_state_variables(state, variables)
+    sync_runtime_state(state)
 
     _run_batched_generation(state, runner, payload, variables)
 
@@ -351,6 +357,7 @@ def run_fastgpt_hybrid_workflow(
     variables.update(final_output)
     state.final_output_text = final_output[FINAL_SCRIPT]
     _sync_state_variables(state, variables)
+    sync_runtime_state(state)
     set_runtime_stage(
         state,
         "finalize",
@@ -958,6 +965,7 @@ def _run_full_fastgpt_generation(
     variables[BATCH_HOOKS] = hook_output[BATCH_HOOKS]
     variables[ALL_HOOKS] = hook_output[BATCH_HOOKS]
     _sync_state_variables(state, variables)
+    sync_runtime_state(state)
 
     dialogue_output = _run_fastgpt_stage(
         state,
@@ -971,6 +979,7 @@ def _run_full_fastgpt_generation(
     variables[BATCH_DIALOGUES] = dialogue_output[BATCH_DIALOGUES]
     variables[ALL_DIALOGUES] = dialogue_output[BATCH_DIALOGUES]
     _sync_state_variables(state, variables)
+    sync_runtime_state(state)
 
     script_variables = _build_script_stage_context(
         variables,
@@ -1002,6 +1011,7 @@ def _run_full_fastgpt_generation(
         )
     )
     _sync_state_variables(state, variables)
+    sync_runtime_state(state)
 
     memory_output = _run_fastgpt_stage(
         state,
@@ -1024,6 +1034,7 @@ def _run_full_fastgpt_generation(
         batch=BatchWindow(start_episode=1, end_episode=max(1, payload.total_episodes)),
     )
     _sync_state_variables(state, variables)
+    sync_runtime_state(state)
 
     set_runtime_stage(
         state,
