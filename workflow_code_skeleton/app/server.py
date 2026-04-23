@@ -354,7 +354,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         expectation = str(data.get("user_expectation", ""))
         payload = {
             "title": data.get("title", "") or derive_script_title(expectation),
-            "episode_word_count": data.get("episode_word_count", 500) or 500,
+            "episode_word_count": data.get("episode_word_count", 600) or 600,
             "total_episodes": data.get("total_episodes", 0),
             "user_expectation": expectation,
             "character_count": data.get("character_count", 0),
@@ -385,7 +385,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         expectation = str(data.get("user_expectation", ""))
         payload = {
             "title": data.get("title", "") or derive_script_title(expectation),
-            "episode_word_count": data.get("episode_word_count", 500) or 500,
+            "episode_word_count": data.get("episode_word_count", 600) or 600,
             "total_episodes": data.get("total_episodes", 0),
             "user_expectation": expectation,
             "character_count": data.get("character_count", 0),

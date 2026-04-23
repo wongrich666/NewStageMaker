@@ -734,7 +734,7 @@
     const payload = {
       user_expectation: els.expectationInput.value.trim(),
       character_count: Number(els.characterCountInput.value || 0),
-      episode_word_count: 500,
+      episode_word_count: 600,
       total_episodes: Number(els.episodeCountInput.value || 0),
       title: "",
       story_outline: "",

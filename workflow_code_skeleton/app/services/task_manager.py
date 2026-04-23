@@ -752,6 +752,20 @@ def _awaiting_completion_confirmation(snapshot: dict[str, Any] | None) -> bool:
     )
 
 
+def _can_stage_rollback(snapshot: dict[str, Any] | None) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    if _completion_confirmed(snapshot):
+        return False
+    status = str(snapshot.get("status") or "").strip()
+    if status in {"pending", "running", "pausing"}:
+        return False
+    if status not in {"completed", "paused", "terminated", "failed"}:
+        return False
+    debug_state = snapshot.get("debug_state")
+    return isinstance(debug_state, dict) and isinstance(debug_state.get("variables"), dict)
+
+
 def _cache_notice(snapshot: dict[str, Any]) -> str:
     if _completion_confirmed(snapshot):
         return COMPLETION_CONFIRMED_NOTICE
@@ -1325,8 +1339,9 @@ class TaskManager:
         artifacts = self._public_artifacts(snapshot)
         completion_confirmed = _completion_confirmed(snapshot)
         awaiting_confirmation = _awaiting_completion_confirmation(snapshot)
+        can_stage_rollback = _can_stage_rollback(snapshot)
         rollback_script_start_options = (
-            self._script_rollback_start_options(snapshot) if awaiting_confirmation else []
+            self._script_rollback_start_options(snapshot) if can_stage_rollback else []
         )
         payload: dict[str, Any] = {
             "project_id": snapshot.get("project_id"),
@@ -1340,24 +1355,21 @@ class TaskManager:
             "wait_elapsed_ms": _safe_int(snapshot.get("wait_elapsed_ms"), 0),
             "wait_started_at": snapshot.get("wait_started_at"),
             "visibility": snapshot.get("visibility") or "private",
-            "model_option": copy.deepcopy(snapshot.get("model_option")),
             "input_payload": self._public_input_payload(snapshot),
             "artifacts": artifacts,
             "progress_percent": int(snapshot.get("progress_percent") or 0),
-            "generated_episodes": int(snapshot.get("generated_episodes") or 0),
             "total_episodes": int(snapshot.get("total_episodes") or 0),
             "current_stage": snapshot.get("current_stage"),
             "current_stage_label": snapshot.get("current_stage_label") or "待开始",
-            "current_batch": snapshot.get("current_batch"),
             "completion_confirmed": completion_confirmed,
             "awaiting_user_confirmation": awaiting_confirmation,
             "cache_retained": bool(snapshot.get("cache_retained", False) or awaiting_confirmation),
             "cache_notice": _cache_notice(snapshot),
             "can_confirm_completion": awaiting_confirmation,
-            "can_stage_rollback": awaiting_confirmation,
+            "can_stage_rollback": can_stage_rollback,
             "rollback_stage_options": [
                 {"key": key, "label": label} for key, label in ROLLBACK_STAGE_OPTIONS
-            ] if awaiting_confirmation else [],
+            ] if can_stage_rollback else [],
             "rollback_script_start_options": rollback_script_start_options,
             "has_final": bool(
                 str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip()
@@ -1823,10 +1835,11 @@ class TaskManager:
         snapshot = self.get_project_snapshot(project_id, user_id=user_id, public_view=False)
         if not snapshot or not self._snapshot_belongs_to_user(snapshot, user_id):
             raise ValueError("项目不存在或无权操作")
-        if str(snapshot.get("status") or "") in PROJECT_RUNNING_STATUSES:
+        status = str(snapshot.get("status") or "")
+        if status in {"pending", "running", "pausing"}:
             raise ValueError("任务仍在执行中，不能回退重写")
-        if str(snapshot.get("status") or "") != "completed":
-            raise ValueError("只有已完成且缓存仍在的剧本才能执行阶段回退")
+        if status not in {"completed", "paused", "terminated", "failed"}:
+            raise ValueError("当前状态不支持阶段回退重写")
         if _completion_confirmed(snapshot):
             raise ValueError("该剧本已确认满意完成并清理缓存，如需调整请重新生成。")
 
@@ -1845,6 +1858,10 @@ class TaskManager:
                 raise ValueError("请选择有效的正文重写起始集数")
 
         old_task_id = str(snapshot.get("task_id") or "").strip()
+        old_record = self._projects.get(project_id)
+        if old_record and status == "paused":
+            self._prepare_record_for_replacement(old_record)
+
         new_task_id = uuid.uuid4().hex[:12]
         rollback_snapshot = self._build_stage_rollback_snapshot(
             snapshot,
@@ -1912,6 +1929,15 @@ class TaskManager:
         record.thread = thread
         thread.start()
         return self._public_snapshot(record.clone_snapshot())
+
+    def _prepare_record_for_replacement(self, record: TaskRecord) -> None:
+        thread = record.thread
+        if thread is None or not thread.is_alive():
+            return
+        record.control.request_terminate()
+        thread.join(timeout=3.0)
+        if thread.is_alive():
+            raise ValueError("当前暂停任务仍在收尾，暂时无法回退重写，请稍后再试。")
 
     def _all_project_snapshots(self) -> list[dict[str, Any]]:
         snapshots: dict[int, dict[str, Any]] = {}

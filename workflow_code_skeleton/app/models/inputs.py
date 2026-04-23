@@ -67,7 +67,7 @@ class WorkflowInput:
                     "episode_word_count",
                     "per_episode_word_count",
                     "每集正文字数",
-                    default=500,
+                    default=600,
                 )
             ),
             total_episodes=int(
