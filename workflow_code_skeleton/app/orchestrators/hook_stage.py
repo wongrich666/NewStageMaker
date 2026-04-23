@@ -83,6 +83,9 @@ def run_hook_stage(state, spec: WorkflowSpec):
                 ensure_dict(execute_chat_node(state, spec, REVIEW_NODE_ID, expect_json=True))
             )
 
+        if not review.approved:
+            raise RuntimeError("开头冲突钩子审核未通过，且已达到最大修订次数。")
+
         state.set_var(HOOK_FINAL_VAR, execute_text_editor_node(state, spec, APPEND_HOOKS_NODE_ID))
         state.set_var(HOOK_RETRY_VAR, 0)
         state.set_var(HOOK_START_VAR, current_start + 5)

@@ -22,6 +22,7 @@ from ..workflow_ids import (
 
 APPEND_MEMORY_NODE_ID = "r2KI2sJgoEqfXBen"
 LOCAL_SCRIPT_EPISODE_CACHE_VAR = "_local_script_episode_cache"
+LOCAL_SCRIPT_BATCH_CACHE_VAR = "_local_script_batch_cache"
 
 logger = get_logger("script_stage")
 
@@ -84,7 +85,6 @@ def run_script_stage(state, spec: WorkflowSpec):
             sync_runtime_state(state)
             continue
 
-        # 先提交正文批次缓存，但此时先不要推进 SCRIPT_START_VAR
         _commit_script_batch(state, batch, script_text)
         state.set_var(SCRIPT_RETRY_VAR, 0)
         sync_runtime_state(state)
@@ -102,7 +102,6 @@ def run_script_stage(state, spec: WorkflowSpec):
         state.set_output(MEMORY_NODE_ID, "answerText", memory_packet)
         state.set_var(MEMORY_VAR, execute_text_editor_node(state, spec, APPEND_MEMORY_NODE_ID))
 
-        # memory 成功后，才正式推进到下一批
         state.set_var(SCRIPT_START_VAR, batch.end_episode + 1)
         sync_runtime_state(state)
 
@@ -113,12 +112,14 @@ def run_script_stage(state, spec: WorkflowSpec):
         progress_percent=98,
         generated_episodes=total_episodes,
     )
+    sync_runtime_state(state)
     return state
 
 
 def _initialize_script_stage_state(state, *, total_episodes: int) -> None:
     preserved_start = max(1, state.get_int_var(SCRIPT_START_VAR, 1))
     episode_cache = _normalize_episode_cache(state.get_var(LOCAL_SCRIPT_EPISODE_CACHE_VAR, {}))
+    batch_cache = _normalize_batch_cache(state.get_var(LOCAL_SCRIPT_BATCH_CACHE_VAR, {}))
     final_text = str(state.get_var(SCRIPT_FINAL_VAR, "") or "").strip()
 
     if not episode_cache and final_text:
@@ -129,8 +130,13 @@ def _initialize_script_stage_state(state, *, total_episodes: int) -> None:
 
     if episode_cache and not final_text:
         final_text = _join_episode_cache(episode_cache)
+    elif batch_cache and not final_text:
+        final_text = _join_batch_cache(batch_cache)
+    elif final_text and not episode_cache and not batch_cache:
+        # 兼容旧缓存：至少保底留住整段已有正文，避免后续覆盖丢失
+        batch_cache = {1: final_text}
 
-    if preserved_start > 1 and not episode_cache and not final_text:
+    if preserved_start > 1 and not episode_cache and not batch_cache and not final_text:
         logger.warning(
             "剧本正文阶段收到从第 %s 集继续的起点，但未发现任何已缓存正文；"
             "为避免最终成品缺失前文，已回退为从第 1 集重新开始。",
@@ -142,6 +148,7 @@ def _initialize_script_stage_state(state, *, total_episodes: int) -> None:
     state.set_var(SCRIPT_RETRY_VAR, 0)
     state.set_var(SCRIPT_FINAL_VAR, final_text)
     state.set_var(LOCAL_SCRIPT_EPISODE_CACHE_VAR, episode_cache)
+    state.set_var(LOCAL_SCRIPT_BATCH_CACHE_VAR, batch_cache)
 
 
 def _rebuild_episode_cache_from_final_text(
@@ -170,29 +177,49 @@ def _resolve_rewrite_start_episode(
 
 
 def _commit_script_batch(state, batch: BatchWindow, script_text: str) -> None:
-    episode_cache = _normalize_episode_cache(state.get_var(LOCAL_SCRIPT_EPISODE_CACHE_VAR, {}))
-    episode_cache.update(_extract_script_episode_map(script_text, batch))
-    state.set_var(LOCAL_SCRIPT_EPISODE_CACHE_VAR, episode_cache)
+    batch_text = str(script_text or "").strip()
 
-    if episode_cache:
+    episode_cache = _normalize_episode_cache(state.get_var(LOCAL_SCRIPT_EPISODE_CACHE_VAR, {}))
+    batch_cache = _normalize_batch_cache(state.get_var(LOCAL_SCRIPT_BATCH_CACHE_VAR, {}))
+
+    extracted = _extract_script_episode_map(batch_text, batch)
+    batch_cache[batch.start_episode] = batch_text
+
+    if extracted:
+        episode_cache.update(extracted)
+        state.set_var(LOCAL_SCRIPT_EPISODE_CACHE_VAR, episode_cache)
         state.set_var(SCRIPT_FINAL_VAR, _join_episode_cache(episode_cache))
     else:
-        current_final = str(state.get_var(SCRIPT_FINAL_VAR, "") or "").strip()
-        state.set_var(
-            SCRIPT_FINAL_VAR,
-            "\n\n".join(part for part in (current_final, script_text.strip()) if part).strip(),
-        )
+        state.set_var(LOCAL_SCRIPT_EPISODE_CACHE_VAR, episode_cache)
+        state.set_var(SCRIPT_FINAL_VAR, _join_batch_cache(batch_cache))
+
+    state.set_var(LOCAL_SCRIPT_BATCH_CACHE_VAR, batch_cache)
 
 
 def _rollback_script_episode_cache(state, rewrite_start_episode: int) -> None:
     episode_cache = _normalize_episode_cache(state.get_var(LOCAL_SCRIPT_EPISODE_CACHE_VAR, {}))
-    preserved = {
+    batch_cache = _normalize_batch_cache(state.get_var(LOCAL_SCRIPT_BATCH_CACHE_VAR, {}))
+
+    preserved_episodes = {
         episode: text
         for episode, text in episode_cache.items()
         if episode < rewrite_start_episode
     }
-    state.set_var(LOCAL_SCRIPT_EPISODE_CACHE_VAR, preserved)
-    state.set_var(SCRIPT_FINAL_VAR, _join_episode_cache(preserved))
+    preserved_batches = {
+        start: text
+        for start, text in batch_cache.items()
+        if start < rewrite_start_episode
+    }
+
+    state.set_var(LOCAL_SCRIPT_EPISODE_CACHE_VAR, preserved_episodes)
+    state.set_var(LOCAL_SCRIPT_BATCH_CACHE_VAR, preserved_batches)
+
+    if preserved_episodes:
+        final_text = _join_episode_cache(preserved_episodes)
+    else:
+        final_text = _join_batch_cache(preserved_batches)
+
+    state.set_var(SCRIPT_FINAL_VAR, final_text)
     state.set_var(SCRIPT_CURRENT_VAR, "")
 
 
@@ -211,11 +238,34 @@ def _normalize_episode_cache(value) -> dict[int, str]:
     return normalized
 
 
+def _normalize_batch_cache(value) -> dict[int, str]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[int, str] = {}
+    for key, item in value.items():
+        try:
+            batch_start = int(key)
+        except (TypeError, ValueError):
+            continue
+        text = str(item or "").strip()
+        if batch_start > 0 and text:
+            normalized[batch_start] = text
+    return normalized
+
+
 def _join_episode_cache(cache: dict[int, str]) -> str:
     return "\n\n".join(
         cache[episode].strip()
         for episode in sorted(cache)
         if cache[episode].strip()
+    ).strip()
+
+
+def _join_batch_cache(cache: dict[int, str]) -> str:
+    return "\n\n".join(
+        cache[start].strip()
+        for start in sorted(cache)
+        if cache[start].strip()
     ).strip()
 
 

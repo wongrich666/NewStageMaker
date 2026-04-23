@@ -167,7 +167,7 @@ def run_fastgpt_hybrid_workflow(
         )
         _apply_framework_outputs_to_variables(payload, variables)
     _sync_state_variables(state, variables)
-    sync_runtime_state(state)
+
 
     if _has_pre_strategy_outputs(variables):
         _refresh_user_content_baseline(payload, variables)
@@ -192,7 +192,6 @@ def run_fastgpt_hybrid_workflow(
         )
         _refresh_user_content_baseline(payload, variables)
     _sync_state_variables(state, variables)
-    sync_runtime_state(state)
 
     if _truthy(variables.get(IS_CONSISTENT)):
         consistency = {IS_CONSISTENT: True}
@@ -271,7 +270,6 @@ def run_fastgpt_hybrid_workflow(
             )
         )
     _sync_state_variables(state, variables)
-    sync_runtime_state(state)
 
     if _has_value(variables.get(CHARACTERS)):
         set_runtime_stage(
@@ -293,7 +291,6 @@ def run_fastgpt_hybrid_workflow(
             )
         )
     _sync_state_variables(state, variables)
-    sync_runtime_state(state)
 
     if _has_value(variables.get(SCENES)):
         set_runtime_stage(
@@ -315,7 +312,6 @@ def run_fastgpt_hybrid_workflow(
             )
         )
     _sync_state_variables(state, variables)
-    sync_runtime_state(state)
 
     if _normalize_appearance_mapping_object(variables.get(APPEARANCE_MAPPING)):
         _apply_appearance_outputs_to_variables(variables)
@@ -340,7 +336,6 @@ def run_fastgpt_hybrid_workflow(
         if not _apply_appearance_outputs_to_variables(variables):
             raise ValueError("人物服装版本映射阶段返回内容不可解析，未得到合法 appearance_mapping。")
     _sync_state_variables(state, variables)
-    sync_runtime_state(state)
 
     _run_batched_generation(state, runner, payload, variables)
 
@@ -357,7 +352,6 @@ def run_fastgpt_hybrid_workflow(
     variables.update(final_output)
     state.final_output_text = final_output[FINAL_SCRIPT]
     _sync_state_variables(state, variables)
-    sync_runtime_state(state)
     set_runtime_stage(
         state,
         "finalize",
@@ -486,6 +480,52 @@ def _refresh_user_content_baseline(
         outfit_switch_rules_value=_current_outfit_switch_rules_text(variables, payload),
     )
 
+def _find_batch_index_by_start(
+    batches: list[BatchWindow],
+    start_episode: int,
+) -> int:
+    if not batches:
+        return 0
+    if start_episode > batches[-1].end_episode:
+        return len(batches)
+
+    for index, batch in enumerate(batches):
+        if batch.start_episode <= start_episode <= batch.end_episode:
+            return index
+        if start_episode < batch.start_episode:
+            return index
+    return len(batches)
+
+
+def _resolve_batch_resume_position(
+    batches: list[BatchWindow],
+    *,
+    saved_batch_start: int,
+    current_batch_stage: str,
+    saved_completed_batches: int,
+    saved_current_batch_index: int,
+) -> tuple[int, int]:
+    total_batches = len(batches)
+    if total_batches <= 0:
+        return 0, 0
+
+    absolute_index = _find_batch_index_by_start(batches, saved_batch_start)
+
+    if current_batch_stage:
+        completed_batches = min(total_batches, absolute_index)
+        current_batch_index = min(total_batches - 1, absolute_index)
+        return completed_batches, current_batch_index
+
+    completed_batches = min(
+        total_batches,
+        max(absolute_index, saved_completed_batches),
+    )
+    current_batch_index = min(
+        total_batches,
+        max(completed_batches, saved_current_batch_index),
+    )
+    return completed_batches, current_batch_index
+
 
 def _run_batched_generation(
     state: WorkflowState,
@@ -548,6 +588,16 @@ def _run_batched_generation(
     current_batch_stage = str(variables.get(LOCAL_CURRENT_BATCH_STAGE) or "").strip().lower()
     normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
     episode_alias_plan = _normalize_episode_alias_plan_object(variables.get(EPISODE_ALIAS_PLAN))
+
+    if not custom_script_rewrite:
+        saved_batch_start = max(1, _safe_int(variables.get(BATCH_START_EPISODE), 1))
+        completed_batches, current_batch_index = _resolve_batch_resume_position(
+            batches,
+            saved_batch_start=saved_batch_start,
+            current_batch_stage=current_batch_stage,
+            saved_completed_batches=completed_batches,
+            saved_current_batch_index=current_batch_index,
+        )
 
     if rewrite_from_stage == "final" and _has_value(variables.get(ALL_SCRIPT)):
         set_runtime_stage(
@@ -965,7 +1015,6 @@ def _run_full_fastgpt_generation(
     variables[BATCH_HOOKS] = hook_output[BATCH_HOOKS]
     variables[ALL_HOOKS] = hook_output[BATCH_HOOKS]
     _sync_state_variables(state, variables)
-    sync_runtime_state(state)
 
     dialogue_output = _run_fastgpt_stage(
         state,
@@ -979,7 +1028,6 @@ def _run_full_fastgpt_generation(
     variables[BATCH_DIALOGUES] = dialogue_output[BATCH_DIALOGUES]
     variables[ALL_DIALOGUES] = dialogue_output[BATCH_DIALOGUES]
     _sync_state_variables(state, variables)
-    sync_runtime_state(state)
 
     script_variables = _build_script_stage_context(
         variables,
@@ -1011,7 +1059,6 @@ def _run_full_fastgpt_generation(
         )
     )
     _sync_state_variables(state, variables)
-    sync_runtime_state(state)
 
     memory_output = _run_fastgpt_stage(
         state,
@@ -1034,7 +1081,6 @@ def _run_full_fastgpt_generation(
         batch=BatchWindow(start_episode=1, end_episode=max(1, payload.total_episodes)),
     )
     _sync_state_variables(state, variables)
-    sync_runtime_state(state)
 
     set_runtime_stage(
         state,
@@ -1551,6 +1597,7 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
         state.set_var(SCRIPT_CURRENT_VAR, variables[BATCH_SCRIPT])
     if ALL_SCRIPT in variables:
         state.set_var(ALL_SCRIPT, variables[ALL_SCRIPT])
+        state.set_var(SCRIPT_FINAL_VAR, variables[ALL_SCRIPT])
     if LAST_SUMMARY in variables:
         state.set_var(MEMORY_VAR, variables[LAST_SUMMARY])
     if APPEARANCE_MAPPING in variables:
