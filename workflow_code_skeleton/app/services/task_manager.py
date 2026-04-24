@@ -107,6 +107,8 @@ STORY_TEASER_SOURCE_ARTIFACT = "story_teaser_source"
 STAGE_PREVIEW_TEXT_ARTIFACT = "stage_preview_text"
 STAGE_PREVIEW_STAGE_ARTIFACT = "stage_preview_stage"
 STAGE_PREVIEW_SOURCE_HASH_ARTIFACT = "stage_preview_source_hash"
+EPISODE_PLAN_DISPLAY_ARTIFACT = "episode_plan_display"
+EPISODE_PLAN_DISPLAY_SOURCE_HASH_ARTIFACT = "episode_plan_display_source_hash"
 PUBLIC_INPUT_PAYLOAD_KEYS = (
     "title",
     "story_outline",
@@ -1446,10 +1448,167 @@ class TaskManager:
         allowed_keys = list(PUBLIC_ARTIFACT_KEYS)
         if str(snapshot.get("status") or "") == "completed":
             allowed_keys.extend(PUBLIC_COMPLETED_ARTIFACT_KEYS)
-        return _select_non_empty_fields(
+        artifacts = _select_non_empty_fields(
             snapshot.get("artifacts") or {},
             tuple(allowed_keys),
         )
+        episode_plan_display = self._episode_plan_display_text(snapshot, snapshot.get("artifacts") or {})
+        if episode_plan_display:
+            artifacts[EPISODE_PLAN_DISPLAY_ARTIFACT] = episode_plan_display
+        return artifacts
+
+    def _episode_plan_display_text(
+        self,
+        snapshot: dict[str, Any],
+        artifacts: dict[str, Any],
+    ) -> str:
+        raw_episode_plan = str(artifacts.get("episode_plan") or "").strip()
+        if not raw_episode_plan:
+            return ""
+        parsed = self._parse_episode_plan_display_json(raw_episode_plan)
+        if parsed is None:
+            return raw_episode_plan
+
+        text_hash = self._hash_text(raw_episode_plan)
+        cached_text = str(artifacts.get(EPISODE_PLAN_DISPLAY_ARTIFACT) or "").strip()
+        cached_hash = str(artifacts.get(EPISODE_PLAN_DISPLAY_SOURCE_HASH_ARTIFACT) or "").strip()
+        if cached_text and cached_hash == text_hash:
+            return cached_text
+
+        source_text = self._episode_plan_display_source_text(parsed) or raw_episode_plan
+        display_text = self._generate_episode_plan_display(source_text)
+        if not display_text:
+            display_text = self._fallback_episode_plan_display(parsed)
+        if not display_text:
+            display_text = raw_episode_plan
+        if display_text:
+            self._cache_episode_plan_display(snapshot, display_text, text_hash)
+        return display_text
+
+    def _parse_episode_plan_display_json(self, raw_episode_plan: str) -> Any | None:
+        text = str(raw_episode_plan or "").strip()
+        if not text or text[0] not in "[{":
+            return None
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return None
+        if isinstance(parsed, (dict, list)):
+            return parsed
+        return None
+
+    def _episode_plan_display_source_text(self, parsed: Any) -> str:
+        if isinstance(parsed, dict):
+            nested_episode_plan = parsed.get("episode_plan")
+            if isinstance(nested_episode_plan, str):
+                nested_parsed = self._parse_episode_plan_display_json(nested_episode_plan)
+                if nested_parsed is not None:
+                    return self._episode_plan_display_source_text(nested_parsed)
+            if isinstance(parsed.get("episodes"), list):
+                parts: list[str] = []
+                for item in parsed.get("episodes") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    episode_no = _safe_int(item.get("episode"), 0)
+                    if episode_no <= 0:
+                        continue
+                    title = str(item.get("title") or "").strip()
+                    content = str(item.get("content") or "").strip()
+                    section = f"第{episode_no}集"
+                    if title:
+                        section += f"《{title}》"
+                    if content:
+                        section += f"\n{content}"
+                    parts.append(section)
+                if parts:
+                    return "\n\n".join(parts)
+        if isinstance(parsed, list):
+            parts = []
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                episode_no = _safe_int(
+                    item.get("episode")
+                    or item.get("episode_no")
+                    or item.get("episodeNumber"),
+                    0,
+                )
+                title = str(item.get("title") or "").strip()
+                content = str(item.get("content") or item.get("summary") or "").strip()
+                if episode_no <= 0 and not content:
+                    continue
+                section = f"第{episode_no}集" if episode_no > 0 else "分集内容"
+                if title:
+                    section += f"《{title}》"
+                if content:
+                    section += f"\n{content}"
+                parts.append(section)
+            if parts:
+                return "\n\n".join(parts)
+        return ""
+
+    def _generate_episode_plan_display(self, source_text: str) -> str:
+        text = str(source_text or "").strip()
+        if not text:
+            return ""
+        try:
+            display = llm_client.chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是短剧创作平台的展示转换助手。"
+                            "请把输入的分集计划JSON信息改写成给前端展示的自然语言正文。"
+                            "要求：只输出中文正文；不要JSON，不要Markdown，不要代码块，不要项目符号，不要解释过程；"
+                            "按集数顺序写，可使用“第X集：”开头；只依据输入，不补编不存在的信息。"
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"请把下面的分集计划信息转成自然语言展示稿：\n\n{text}",
+                    },
+                ],
+                provider="deepseek",
+                temperature=0.4,
+                max_tokens=2400,
+            )
+        except Exception as exc:
+            logger.warning("分集计划展示转换失败，将使用本地回退文案: %s", exc)
+            return ""
+        return str(display or "").strip()
+
+    def _fallback_episode_plan_display(self, parsed: Any) -> str:
+        text = self._episode_plan_display_source_text(parsed)
+        if not text:
+            return ""
+        return text
+
+    def _cache_episode_plan_display(
+        self,
+        snapshot: dict[str, Any],
+        display_text: str,
+        text_hash: str,
+    ) -> None:
+        project_id = int(snapshot.get("project_id") or 0)
+        if project_id <= 0 or not display_text:
+            return
+        artifacts_update = {
+            EPISODE_PLAN_DISPLAY_ARTIFACT: display_text,
+            EPISODE_PLAN_DISPLAY_SOURCE_HASH_ARTIFACT: text_hash,
+        }
+        record = self._projects.get(project_id)
+        if record is not None:
+            self._update_snapshot(record, artifacts=artifacts_update)
+            snapshot.setdefault("artifacts", {}).update(artifacts_update)
+            return
+
+        persisted = copy.deepcopy(snapshot)
+        persisted.setdefault("artifacts", {}).update(artifacts_update)
+        self._project_path(project_id).write_text(
+            json.dumps(persisted, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        snapshot.setdefault("artifacts", {}).update(artifacts_update)
 
     def _available_rollback_stage_options(self, snapshot: dict[str, Any]) -> list[tuple[str, str]]:
         """只返回当前项目已经走到的阶段，避免前端展示未来还没执行的回退选项。"""
@@ -1612,7 +1771,11 @@ class TaskManager:
         story_outline = str(artifacts.get("story_outline") or "").strip()
         character_bios = str(artifacts.get("character_bios") or "").strip()
         core_scene_input = str(artifacts.get("core_scene_input") or "").strip()
-        episode_plan = str(artifacts.get("episode_plan") or "").strip()
+        episode_plan = str(
+            artifacts.get(EPISODE_PLAN_DISPLAY_ARTIFACT)
+            or artifacts.get("episode_plan")
+            or ""
+        ).strip()
         parts: list[str] = []
         if title:
             parts.append(f"剧本标题\n{title}")
@@ -2475,6 +2638,8 @@ class TaskManager:
             artifacts.pop(key, None)
         artifacts.pop(STORY_TEASER_ARTIFACT, None)
         artifacts.pop(STORY_TEASER_SOURCE_ARTIFACT, None)
+        artifacts.pop(EPISODE_PLAN_DISPLAY_ARTIFACT, None)
+        artifacts.pop(EPISODE_PLAN_DISPLAY_SOURCE_HASH_ARTIFACT, None)
         return artifacts
 
     def _rolled_back_debug_state(
@@ -2688,8 +2853,16 @@ class TaskManager:
         variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(preserved_script_episodes)
         variables[LOCAL_SUMMARY_BY_BATCH] = _string_keyed_batch_map(preserved_summary_batches)
         variables[LOCAL_APPEARANCE_MEMORY_BY_BATCH] = _string_keyed_batch_map(preserved_appearance_batches)
-        variables[LOCAL_COMPLETED_BATCHES] = 0
-        variables[LOCAL_CURRENT_BATCH_INDEX] = 0
+        total_episodes = int(snapshot.get("total_episodes") or 0)
+        completed_batches = len(
+            [
+                batch
+                for batch in iter_episode_batches(total_episodes, batch_size=batch_size)
+                if batch.start_episode < start_episode
+            ]
+        )
+        variables[LOCAL_COMPLETED_BATCHES] = completed_batches
+        variables[LOCAL_CURRENT_BATCH_INDEX] = completed_batches
         variables[LOCAL_CURRENT_BATCH_STAGE] = ""
         variables[BATCH_START_EPISODE] = int(start_episode)
         variables.pop(BATCH_SCRIPT, None)
