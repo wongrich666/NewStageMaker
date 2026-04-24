@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>IDEA TO SCRIPT 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260424-2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260424-5">
 </head>
 <body class="workspace-body">
   <main class="chat-workspace-shell">
@@ -17,87 +17,123 @@
             <span></span>
           </button>
           <a class="sidebar-brand" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">
-            <span class="sidebar-brand-mark">剧</span>
+            <span class="sidebar-brand-mark">I</span>
             <span class="sidebar-brand-text">
-              <strong>IDEA TO SCRIPT</strong>
-              <em>剧本资产会话</em>
+              <strong>idea to script</strong>
+              <em>剧本平台</em>
             </span>
           </a>
         </div>
-        <a class="sidebar-home-link" href="{{ url_for('index', auth_token=current_auth_token) }}">返回首页</a>
       </div>
 
       <div class="sidebar-primary">
-        <button id="newScriptBtn" class="sidebar-create-btn" type="button">新建剧本</button>
+        <button id="newScriptBtn" class="sidebar-create-btn" type="button">＋ 新建剧本</button>
       </div>
 
-      <section class="sidebar-section">
-        <div class="sidebar-section-head">
-          <span>资产会话</span>
-          <button id="refreshProjectsBtn" class="sidebar-refresh-btn" type="button">刷新</button>
-        </div>
-        <div class="sidebar-folders">
-          <details id="activeWorkspaceFolder" class="workspace-folder" open>
+      <div class="sidebar-nav">
+        <section class="sidebar-group">
+          <div class="sidebar-group-label">我的剧本</div>
+          <div class="sidebar-section-head sidebar-section-head-compact">
+            <span>资产会话</span>
+            <button id="refreshProjectsBtn" class="sidebar-refresh-btn" type="button">刷新</button>
+          </div>
+          <div class="sidebar-folders">
+            <details id="activeWorkspaceFolder" class="workspace-folder" open>
+              <summary>
+                <span>生成中的剧本</span>
+              </summary>
+              <div id="activeProjectList" class="workspace-compact-list"></div>
+            </details>
+            <details id="completedWorkspaceFolder" class="workspace-folder">
+              <summary>
+                <span>已完成剧本</span>
+              </summary>
+              <div id="completedProjectList" class="workspace-compact-list"></div>
+            </details>
+          </div>
+        </section>
+
+        <section class="sidebar-group sidebar-tools-section">
+          <details id="assistantToolsFolder" class="workspace-folder tools-folder">
             <summary>
-              <span>生成中的剧本</span>
+              <span>辅助工具</span>
             </summary>
-            <div id="activeProjectList" class="workspace-compact-list"></div>
+            <div id="toolList" class="tool-shortcut-list"></div>
           </details>
-          <details id="completedWorkspaceFolder" class="workspace-folder">
-            <summary>
-              <span>已完成剧本</span>
-            </summary>
-            <div id="completedProjectList" class="workspace-compact-list"></div>
-          </details>
+        </section>
+
+        <div class="sidebar-group sidebar-links">
+          <a class="sidebar-text-link" href="{{ url_for('index', auth_token=current_auth_token) }}">社区好剧</a>
         </div>
-      </section>
+      </div>
 
       <div class="sidebar-footer">
         {% if current_user %}
-          <button id="openProfileBtn" class="sidebar-profile-btn" type="button">
-            <span class="sidebar-profile-avatar">{{ current_user.username[:1] }}</span>
-            <span class="sidebar-footer-text">个人中心</span>
-          </button>
-          <a class="sidebar-logout-link" href="{{ url_for('logout', auth_token=current_auth_token) }}">退出登录</a>
+          <div class="sidebar-footer-links">
+            <button id="openProfileBtn" class="sidebar-profile-btn" type="button">
+              <span class="sidebar-profile-avatar">{{ current_user.username[:1] }}</span>
+              <span class="sidebar-footer-text">个人中心</span>
+            </button>
+            <a class="sidebar-logout-link" href="{{ url_for('logout', auth_token=current_auth_token) }}">退出登录</a>
+          </div>
         {% else %}
-          <a class="sidebar-profile-btn" href="{{ url_for('login_page') }}">
-            <span class="sidebar-profile-avatar">游</span>
-            <span class="sidebar-footer-text">登录后创作</span>
-          </a>
-          <a class="sidebar-logout-link" href="{{ url_for('register_page') }}">注册</a>
+          <div class="sidebar-footer-links">
+            <a class="sidebar-profile-btn" href="{{ url_for('login_page') }}">
+              <span class="sidebar-profile-avatar">游</span>
+              <span class="sidebar-footer-text">登录后创作</span>
+            </a>
+            <a class="sidebar-logout-link" href="{{ url_for('register_page') }}">注册</a>
+          </div>
         {% endif %}
       </div>
     </aside>
 
     <section class="chat-main">
       <header class="workspace-runtime runtime">
-        <div class="runtime-grid">
-          <div class="runtime-block runtime-block-project">
-            <span class="runtime-kicker">当前剧本</span>
+        <div class="progress-bar progress-bar-fixed runtime-progress-top">
+          <div id="progressFill" class="progress-fill"></div>
+        </div>
+        <div class="runtime-strip">
+          <div class="runtime-brandline">
+            <span class="runtime-app-label">idea to script 剧本平台</span>
             <strong id="projectText">当前剧本：未选中</strong>
           </div>
-          <div class="runtime-block">
-            <span class="runtime-kicker">当前状态</span>
-            <strong id="statusText">待开始</strong>
-          </div>
-          <div class="runtime-block">
-            <span class="runtime-kicker">当前阶段</span>
-            <strong id="stageText">待开始</strong>
-          </div>
-          <div class="runtime-block">
-            <span class="runtime-kicker">等待时长</span>
-            <strong id="waitDurationText">00:00</strong>
+          <div class="runtime-meta-strip">
+            <div class="runtime-pill">
+              <span class="runtime-kicker">状态</span>
+              <strong id="statusText">待开始</strong>
+            </div>
+            <div class="runtime-pill">
+              <span class="runtime-kicker">阶段</span>
+              <strong id="stageText">待开始</strong>
+            </div>
+            <div class="runtime-pill">
+              <span class="runtime-kicker">等待</span>
+              <strong id="waitDurationText">00:00</strong>
+            </div>
           </div>
         </div>
         <p id="messageText" class="runtime-note hidden"></p>
-        <div class="progress-bar progress-bar-fixed">
-          <div id="progressFill" class="progress-fill"></div>
-        </div>
         <div class="runtime-foot">
           <span id="progressText">0%</span>
           <span id="taskText">任务：未选中</span>
         </div>
       </header>
+
+      <section id="toolPanel" class="tool-panel hidden">
+        <div class="tool-panel-head">
+          <div>
+            <span class="tool-panel-kicker">辅助工具</span>
+            <h3 id="toolPanelTitle">选择工具</h3>
+          </div>
+          <button id="closeToolPanelBtn" class="btn btn-ghost" type="button">关闭</button>
+        </div>
+        <div id="toolForms" class="tool-forms"></div>
+        <div class="tool-panel-actions">
+          <button id="runToolBtn" class="btn btn-primary" type="button">运行辅助工具</button>
+        </div>
+        <pre id="toolOutputBox" class="output-box tool-panel-output">这里会显示辅助工具结果。</pre>
+      </section>
 
       <section class="chat-view">
         <div id="chatTranscript" class="chat-transcript"></div>
@@ -111,28 +147,33 @@
           </label>
         </div>
 
-        <div class="composer-grid">
-          <label class="composer-field composer-field-wide">
-            <span>想要的剧本</span>
-            <textarea id="expectationInput" placeholder="例如：我想要一个 60 集的末世求生复仇故事，前期压迫感强，中期升级爽，后期大反转。"></textarea>
-          </label>
-          <label class="composer-field">
-            <span>角色数量</span>
-            <input id="characterCountInput" type="number" min="1" max="50" value="5">
-          </label>
-          <label class="composer-field">
-            <span>总集数</span>
-            <input id="episodeCountInput" type="number" min="1" max="100" value="10">
-          </label>
+        <div class="composer-actions composer-actions-inline">
+          <button id="pauseBtn" class="btn btn-secondary" type="button" disabled>暂停生成</button>
+          <button id="resumeBtn" class="btn btn-secondary" type="button" disabled>继续生成</button>
+          <button id="terminateBtn" class="btn btn-danger" type="button" disabled>终止生成</button>
+          <button id="saveBtn" class="btn btn-secondary" type="button" disabled>下载成品</button>
+          <button id="clearBtn" class="btn btn-ghost" type="button">清空输入</button>
         </div>
 
-        <div class="composer-actions">
-          <button id="startBtn" class="btn btn-primary" type="button">开始生成</button>
-          <button id="pauseBtn" class="btn btn-secondary" type="button" disabled>暂停</button>
-          <button id="resumeBtn" class="btn btn-secondary" type="button" disabled>继续</button>
-          <button id="terminateBtn" class="btn btn-danger" type="button" disabled>结束</button>
-          <button id="clearBtn" class="btn btn-ghost" type="button">清空</button>
-          <button id="saveBtn" class="btn btn-secondary" type="button" disabled>下载成品</button>
+        <div class="chat-composer-shell">
+          <div class="chat-composer-plus">＋</div>
+          <div class="chat-composer-main">
+            <label class="composer-field composer-field-wide">
+              <span class="visually-hidden">想要的剧本</span>
+              <textarea id="expectationInput" placeholder="今天写什么剧本"></textarea>
+            </label>
+            <div class="composer-grid composer-grid-inline">
+              <label class="composer-field composer-field-mini">
+                <span>角色</span>
+                <input id="characterCountInput" type="number" min="1" max="50" value="5">
+              </label>
+              <label class="composer-field composer-field-mini">
+                <span>集数</span>
+                <input id="episodeCountInput" type="number" min="1" max="100" value="10">
+              </label>
+            </div>
+          </div>
+          <button id="startBtn" class="composer-send-btn" type="button" aria-label="开始生成">开始</button>
         </div>
 
         <p id="formHint" class="composer-hint">只需要填写故事期待、角色数量和总集数。</p>
@@ -157,10 +198,6 @@
           <h3 id="outputTitle">当前阶段输出</h3>
           <pre id="outputNaturalBox"></pre>
           <pre id="finalOutputBox"></pre>
-          <div id="toolForms"></div>
-          <button id="runToolBtn" type="button"></button>
-          <pre id="toolOutputBox"></pre>
-          <div id="communityList"></div>
         </section>
       </section>
     </section>
@@ -271,6 +308,6 @@
       loginUrl: "{{ url_for('login_page') }}"
     };
   </script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260424-2"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260424-5"></script>
 </body>
 </html>

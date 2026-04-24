@@ -273,7 +273,7 @@
             "textarea",
             "reference"
           ],
-          "value": "检查用户输入{{$VARIABLE_NODE_ID.blkSS7dY$}}与分集计划中实际集数{{$VARIABLE_NODE_ID.pxtQY7p2$}}是否一致，如果一致请回复“true”，如果不一致，或者有重复的集数，有跳跃的集数，请回复“false”。禁止输出其他回答。禁止把一个字段重复输出两次。仔细检查。",
+          "value": "剧本分集计划：{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n\n你的工作是仔细检查用户输入总集数：共{{$VARIABLE_NODE_ID.blkSS7dY$}}集  与分集计划中实际集数是否一致，如果一致请回复“true”，如果不一致或者有重复的集数有跳跃的集数，请回复“false”。禁止输出其他回答。禁止把一个字段重复输出两次。检查。",
           "debugLabel": "",
           "description": "common:core.app.tip.systemPromptTip",
           "toolDescription": ""

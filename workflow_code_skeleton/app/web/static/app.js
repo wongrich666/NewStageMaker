@@ -19,8 +19,14 @@
   const currentAuthToken = () => new URL(window.location.href).searchParams.get("auth_token") || "";
 
   const els = {
+    workspaceShell: document.querySelector(".chat-workspace-shell"),
     workspaceSidebar: $("workspaceCard"),
     sidebarToggleBtn: $("sidebarToggleBtn"),
+    assistantToolsFolder: $("assistantToolsFolder"),
+    toolList: $("toolList"),
+    toolPanel: $("toolPanel"),
+    toolPanelTitle: $("toolPanelTitle"),
+    closeToolPanelBtn: $("closeToolPanelBtn"),
     modelSelect: $("modelSelect"),
     expectationInput: $("expectationInput"),
     characterCountInput: $("characterCountInput"),
@@ -104,57 +110,70 @@
     editingProjectId: null,
     editingProjectStatus: null,
     editingAssetLocked: false,
+    toolDefinitions: {},
     activeTool: "hot_review",
     elapsedTimer: null,
     workspaceCollapseTimer: null
   };
 
-  const TOOL_DEFINITIONS = {
+  const DEFAULT_TOOL_DEFINITIONS = {
     hot_review: {
-      title: "爆款文审核",
+      key: "hot_review",
+      label: "爆款文审核",
       help: "提交剧本正文、故事大纲、分集计划或局部片段，系统会评估爆款元素、风险和修改建议。",
       fields: [
-        ["text", "待检测文本", "textarea", "粘贴需要审核的剧本正文 / 小说原著 / 大纲 / 分集计划。"]
-      ]
+        { name: "text", label: "待检测文本", type: "textarea", placeholder: "粘贴需要审核的剧本正文 / 小说原著 / 大纲 / 分集计划。", required: true }
+      ],
+      configured: false,
+      source: "fallback"
     },
     reskin: {
-      title: "换皮",
+      key: "reskin",
+      label: "换皮",
       help: "输入源剧本材料和目标风格，调用换皮工作流生成新版本结果。",
       fields: [
-        ["title", "剧本标题", "input", "新剧本标题。"],
-        ["source_outline", "源剧本梗概", "textarea", "源故事梗概。"],
-        ["core_scenes", "源剧本核心场景", "textarea", "可选，源剧本核心场景。"],
-        ["source_characters", "源剧本人物小传", "textarea", "源人物小传。"],
-        ["source_script", "源剧本正文", "textarea", "源剧本正文，可为空但效果会受影响。"],
-        ["target_style", "目标风格", "textarea", "希望换成的题材、风格、爽点方向。"],
-        ["total_episodes", "总集数", "number", "例如 60。"],
-        ["episode_word_count", "每集字数", "number", "例如 500。"]
-      ]
+        { name: "title", label: "剧本标题", type: "input", placeholder: "新剧本标题。", required: true },
+        { name: "source_outline", label: "源剧本梗概", type: "textarea", placeholder: "源故事梗概。", required: true },
+        { name: "core_scenes", label: "源剧本核心场景", type: "textarea", placeholder: "可选，源剧本核心场景。", required: false },
+        { name: "source_characters", label: "源剧本人物小传", type: "textarea", placeholder: "源人物小传。", required: true },
+        { name: "source_script", label: "源剧本正文", type: "textarea", placeholder: "源剧本正文，可为空但效果会受影响。", required: true },
+        { name: "target_style", label: "目标风格", type: "textarea", placeholder: "希望换成的题材、风格、爽点方向。", required: true },
+        { name: "total_episodes", label: "总集数", type: "number", placeholder: "例如 60。", required: true },
+        { name: "episode_word_count", label: "每集字数", type: "number", placeholder: "例如 500。", required: true }
+      ],
+      configured: false,
+      source: "fallback"
     },
     punchup: {
-      title: "增加爽感",
+      key: "punchup",
+      label: "增加爽感",
       help: "在不改情节事实的前提下，强化台词网感、黄金 7 秒和爽点表达。",
       fields: [
-        ["title", "剧本名", "input", "原剧本名。"],
-        ["story_outline", "故事梗概", "textarea", "故事梗概。"],
-        ["characters", "人物小传", "textarea", "人物设定。"],
-        ["core_scenes", "核心场景", "textarea", "核心场景。"],
-        ["script", "剧本正文", "textarea", "需要增爽的剧本正文。"],
-        ["total_episodes", "总集数", "number", "总集数。"]
-      ]
+        { name: "title", label: "剧本名", type: "input", placeholder: "原剧本名。", required: true },
+        { name: "story_outline", label: "故事梗概", type: "textarea", placeholder: "故事梗概。", required: true },
+        { name: "characters", label: "人物小传", type: "textarea", placeholder: "人物设定。", required: true },
+        { name: "core_scenes", label: "核心场景", type: "textarea", placeholder: "核心场景。", required: true },
+        { name: "script", label: "剧本正文", type: "textarea", placeholder: "需要增爽的剧本正文。", required: true },
+        { name: "total_episodes", label: "总集数", type: "number", placeholder: "总集数。", required: true }
+      ],
+      configured: false,
+      source: "fallback"
     },
     character_reskin: {
-      title: "换皮只换人设",
+      key: "character_reskin",
+      label: "只换人设",
       help: "保留主剧情结构，重点替换人物小传和角色设定。",
       fields: [
-        ["title", "剧本标题", "input", "新剧本标题。"],
-        ["story_outline", "故事大纲", "textarea", "故事大纲。"],
-        ["characters", "人物小传", "textarea", "需要换皮的人物小传。"],
-        ["core_scenes", "核心场景", "textarea", "核心场景。"],
-        ["source_script", "原剧本正文", "textarea", "原剧本正文。"],
-        ["total_episodes", "总集数", "number", "总集数。"],
-        ["episode_word_count", "每集正文字数", "number", "每集字数。"]
-      ]
+        { name: "title", label: "剧本标题", type: "input", placeholder: "新剧本标题。", required: true },
+        { name: "story_outline", label: "故事大纲", type: "textarea", placeholder: "故事大纲。", required: true },
+        { name: "characters", label: "人物小传", type: "textarea", placeholder: "需要换皮的人物小传。", required: true },
+        { name: "core_scenes", label: "核心场景", type: "textarea", placeholder: "核心场景。", required: true },
+        { name: "source_script", label: "原剧本正文", type: "textarea", placeholder: "原剧本正文。", required: true },
+        { name: "total_episodes", label: "总集数", type: "number", placeholder: "总集数。", required: true },
+        { name: "episode_word_count", label: "每集正文字数", type: "number", placeholder: "每集字数。", required: true }
+      ],
+      configured: false,
+      source: "fallback"
     }
   };
 
@@ -358,6 +377,7 @@
   function applySidebarCollapsed(collapsed) {
     if (!els.workspaceSidebar) return;
     els.workspaceSidebar.classList.toggle("is-collapsed", Boolean(collapsed));
+    els.workspaceShell?.classList.toggle("sidebar-collapsed", Boolean(collapsed));
     draftStorage.setItem(STORAGE.sidebarCollapsed, collapsed ? "1" : "0");
   }
 
@@ -545,9 +565,9 @@
   function normalizeStageKey(stageKey) {
     const mapping = {
       framework: "framework",
-      appearance_strategy: "framework",
-      consistency: "framework",
-      episode_plan_normalize: "framework",
+      appearance_strategy: "internal",
+      consistency: "internal",
+      episode_plan_normalize: "internal",
       worldview: "worldview",
       character: "characters",
       characters: "characters",
@@ -689,7 +709,7 @@
             <pre class="chat-bubble-content">${escapeHtml(message.output)}</pre>
             ${message.natural ? `
               <div class="chat-bubble-preview">
-                <span class="chat-bubble-preview-label">自然语言速览</span>
+                <span class="chat-bubble-preview-label">阶段说明</span>
                 <p class="chat-bubble-preview-text">${escapeHtml(message.natural)}</p>
               </div>
             ` : ""}
@@ -734,10 +754,16 @@
   function renderChatTranscript(snapshot) {
     if (!els.chatTranscript) return;
     if (!snapshot) {
+      const suggestions = Object.values(toolDefinitions()).slice(0, 3).map((tool) => `
+        <button class="chat-suggestion-btn" type="button" data-suggestion-tool="${escapeHtml(tool.key)}">
+          ${escapeHtml(tool.label)}
+        </button>
+      `).join("");
       els.chatTranscript.innerHTML = `
         <section class="chat-empty-state">
-          <strong>框架到剧本，让 AI 实现你的想法</strong>
-          <p>从左侧切换已有剧本，或者直接在下方输入你的创作需求。平台会把正式阶段产物按对话方式展示，中间过程统一折叠为思考分析。</p>
+          <strong>今天写什么剧本</strong>
+          <p>直接输入你的创作需求，平台会把框架、人设、场景和最终剧本按对话流展示，中间处理统一折叠为思考分析。</p>
+          <div class="chat-empty-tools">${suggestions}</div>
         </section>
       `;
       return;
@@ -754,7 +780,6 @@
     }
 
     els.chatTranscript.innerHTML = messages.join("");
-    els.chatTranscript.scrollTop = els.chatTranscript.scrollHeight;
   }
 
   // 只渲染后端允许回退到的阶段，不展示还没执行过的未来步骤。
@@ -834,7 +859,7 @@
     els.statusText.textContent = statusLabel(snapshot.status);
     els.messageText.textContent = statusMessage;
     els.messageText.classList.toggle("hidden", !statusMessage);
-    els.stageText.textContent = snapshot.current_stage_label || "正在处理";
+    els.stageText.textContent = snapshot.current_stage_label || snapshot.display_stage_title || "正在处理";
     els.progressFill.style.width = `${progress}%`;
     els.progressText.textContent = `${progress}%`;
     els.projectText.textContent = `当前剧本：${projectTitle}`;
@@ -943,37 +968,133 @@
       .replace(/'/g, "&#39;");
   }
 
+  // 优先使用后端返回的辅助工具定义，拿不到时退回本地默认配置，保证主页面不会被工具区拖垮。
+  function toolDefinitions() {
+    return Object.keys(state.toolDefinitions || {}).length
+      ? state.toolDefinitions
+      : DEFAULT_TOOL_DEFINITIONS;
+  }
+
+  function toolConfig(toolKey) {
+    const definitions = toolDefinitions();
+    return definitions[toolKey] || definitions.hot_review || Object.values(definitions)[0];
+  }
+
+  function normalizeToolDefinition(tool) {
+    if (!tool?.key) return null;
+    const fallback = DEFAULT_TOOL_DEFINITIONS[tool.key] || {};
+    return {
+      key: tool.key,
+      label: tool.label || fallback.label || tool.key,
+      help: tool.help || fallback.help || "",
+      configured: tool.configured !== false,
+      source: tool.source || fallback.source || "fallback",
+      jsonFile: tool.json_file || null,
+      fields: Array.isArray(tool.fields) && tool.fields.length
+        ? tool.fields.map((field) => ({
+          name: field.name,
+          label: field.label || field.name,
+          type: field.type || "input",
+          placeholder: field.placeholder || "",
+          required: Boolean(field.required)
+        }))
+        : (fallback.fields || []).map((field) => ({ ...field }))
+    };
+  }
+
+  function renderToolList() {
+    if (!els.toolList) return;
+    const definitions = Object.values(toolDefinitions());
+    els.toolList.innerHTML = definitions.map((tool) => `
+      <button
+        class="tool-shortcut${tool.key === state.activeTool ? " active" : ""}"
+        type="button"
+        data-tool-key="${escapeHtml(tool.key)}"
+      >
+        <span>${escapeHtml(tool.label)}</span>
+        <small>${escapeHtml(tool.configured ? "可直接运行" : "待配置 API Key")}</small>
+      </button>
+    `).join("");
+  }
+
+  function openToolPanel(toolKey) {
+    const tool = toolConfig(toolKey);
+    state.activeTool = tool.key;
+    renderToolList();
+    renderToolForm(tool.key);
+    els.toolPanel?.classList.remove("hidden");
+  }
+
+  function closeToolPanel() {
+    els.toolPanel?.classList.add("hidden");
+  }
+
+  async function loadTools() {
+    state.toolDefinitions = { ...DEFAULT_TOOL_DEFINITIONS };
+    if (!isAuthenticated()) {
+      renderToolList();
+      renderToolForm(state.activeTool);
+      return;
+    }
+    try {
+      const data = await requestJson(window.scriptMakerConfig.toolsUrl);
+      const merged = { ...DEFAULT_TOOL_DEFINITIONS };
+      for (const item of data.tools || []) {
+        const normalized = normalizeToolDefinition(item);
+        if (!normalized) continue;
+        merged[normalized.key] = normalized;
+      }
+      state.toolDefinitions = merged;
+    } catch (_) {
+      state.toolDefinitions = { ...DEFAULT_TOOL_DEFINITIONS };
+    }
+    if (!toolConfig(state.activeTool)) {
+      state.activeTool = Object.keys(toolDefinitions())[0] || "hot_review";
+    }
+    renderToolList();
+    renderToolForm(state.activeTool);
+  }
+
   function renderToolForm(toolKey) {
     if (!els.toolForms) return;
-    const tool = TOOL_DEFINITIONS[toolKey] || TOOL_DEFINITIONS.hot_review;
-    state.activeTool = toolKey;
-    document.querySelectorAll(".tool-tab").forEach((button) => {
-      button.classList.toggle("active", button.dataset.tool === toolKey);
-    });
+    const tool = toolConfig(toolKey);
+    state.activeTool = tool.key;
+    if (els.toolPanelTitle) {
+      els.toolPanelTitle.textContent = tool.label;
+    }
     els.toolForms.innerHTML = `
       <div class="tool-form-head">
-        <h3>${escapeHtml(tool.title)}</h3>
+        <h3>${escapeHtml(tool.label)}</h3>
         <p>${escapeHtml(tool.help)}</p>
       </div>
       <div class="tool-field-grid">
-        ${tool.fields.map(([name, label, type, placeholder]) => {
-          if (type === "textarea") {
+        ${tool.fields.map((field) => {
+          if (field.type === "textarea") {
             return `
               <label class="field tool-field wide-field">
-                <span>${escapeHtml(label)}</span>
-                <textarea data-tool-field="${escapeHtml(name)}" placeholder="${escapeHtml(placeholder)}"></textarea>
+                <span>${escapeHtml(field.label)}${field.required ? " *" : ""}</span>
+                <textarea data-tool-field="${escapeHtml(field.name)}" placeholder="${escapeHtml(field.placeholder)}"></textarea>
               </label>
             `;
           }
           return `
             <label class="field tool-field">
-              <span>${escapeHtml(label)}</span>
-              <input data-tool-field="${escapeHtml(name)}" type="${escapeHtml(type)}" placeholder="${escapeHtml(placeholder)}">
+              <span>${escapeHtml(field.label)}${field.required ? " *" : ""}</span>
+              <input data-tool-field="${escapeHtml(field.name)}" type="${escapeHtml(field.type === "number" ? "number" : "text")}" placeholder="${escapeHtml(field.placeholder)}">
             </label>
           `;
         }).join("")}
       </div>
     `;
+    if (els.runToolBtn) {
+      els.runToolBtn.disabled = !tool.configured;
+      els.runToolBtn.textContent = tool.configured ? `运行${tool.label}` : `${tool.label} 待配置`;
+    }
+    if (els.toolOutputBox) {
+      els.toolOutputBox.textContent = tool.configured
+        ? "这里会显示辅助工具结果。"
+        : "当前工具还未配置 API Key，配置后即可运行。";
+    }
   }
 
   function collectToolPayload() {
@@ -1066,7 +1187,7 @@
       model_selection_id: els.modelSelect.value || ""
     };
 
-    if (!payload.user_expectation) throw new Error("请填写用户期待。");
+    if (!payload.user_expectation) throw new Error("请填写想要的剧本。");
     if (payload.character_count <= 0) throw new Error("角色数量必须大于 0。");
     if (payload.total_episodes <= 0) throw new Error("总集数必须大于 0。");
     if (!payload.model_selection_id) throw new Error("当前没有可用模型，请先完成 .env 配置。");
@@ -1173,9 +1294,10 @@
     if (restoreInputs) {
       restoreInputPayload(project.input_payload, { force: true });
     }
+    persistSelectedProjectId(project.project_id);
     renderSnapshot(project);
     if (scroll) {
-      document.querySelector(".runtime")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.querySelector(".workspace-runtime")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
     return project;
   }
@@ -1431,6 +1553,7 @@
   }
 
   async function loadCommunity() {
+    if (!els.communityList) return;
     const data = await requestJson(window.scriptMakerConfig.communityUrl);
     renderCommunity(data.assets || []);
   }
@@ -1700,6 +1823,10 @@
     els.closeProfileBackdrop?.addEventListener("click", closeProfilePanel);
     els.usernameForm?.addEventListener("submit", updateUsername);
     els.passwordForm?.addEventListener("submit", updatePassword);
+    els.sidebarToggleBtn?.addEventListener("click", () => {
+      const nextCollapsed = !els.workspaceSidebar?.classList.contains("is-collapsed");
+      applySidebarCollapsed(nextCollapsed);
+    });
 
     els.newScriptBtn?.addEventListener("click", () => {
       if (!requireLogin()) return;
@@ -1761,7 +1888,7 @@
       const projectId = button.dataset.projectId;
       try {
         if (button.dataset.action === "select-project") {
-          await loadProjectDetail(projectId, { restoreInputs: true, scroll: true });
+          await loadProjectDetail(projectId, { restoreInputs: true, scroll: false });
         }
       } catch (error) {
         showStatusError(error, "项目加载失败，请稍后重试。");
@@ -1775,7 +1902,7 @@
       try {
         if (button.dataset.action === "open-project") {
           closeProfilePanel();
-          await loadProjectDetail(projectId, { restoreInputs: true, scroll: true });
+          await loadProjectDetail(projectId, { restoreInputs: true, scroll: false });
         } else if (button.dataset.action === "open-project-page") {
           openWorkspaceInNewPage({ projectId });
         } else if (button.dataset.action === "edit-asset") {
@@ -1800,9 +1927,19 @@
 
     els.cancelAssetEditBtn?.addEventListener("click", closeAssetEditor);
 
-    document.querySelectorAll(".tool-tab").forEach((button) => {
-      button.addEventListener("click", () => renderToolForm(button.dataset.tool));
+    els.toolList?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-tool-key]");
+      if (!button) return;
+      openToolPanel(button.dataset.toolKey || state.activeTool);
     });
+
+    els.chatTranscript?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-suggestion-tool]");
+      if (!button) return;
+      openToolPanel(button.dataset.suggestionTool || state.activeTool);
+    });
+
+    els.closeToolPanelBtn?.addEventListener("click", closeToolPanel);
 
     els.runToolBtn?.addEventListener("click", async () => {
       try {
@@ -1890,6 +2027,9 @@
 
   async function init() {
     restoreDraft();
+    restoreSidebarCollapsed();
+    state.toolDefinitions = { ...DEFAULT_TOOL_DEFINITIONS };
+    renderToolList();
     renderToolForm(state.activeTool);
     bindInputs();
     bindActions();
@@ -1897,19 +2037,20 @@
 
     try {
       await loadModels();
+      await loadTools();
       await restoreWorkspace();
       await loadAssets();
       await loadCommunity();
       if (hasConfiguredModel()) {
-        els.formHint.textContent = `已登录 ${window.scriptMakerConfig.username}。这个页面可以同时管理多个任务，离开后回来也能恢复。`;
+        els.formHint.textContent = `已登录 ${window.scriptMakerConfig.username}。`;
       } else if (!isAuthenticated()) {
-        els.formHint.textContent = "你可以先浏览说明和社区作品；登录后即可开始创作。";
+        els.formHint.textContent = "登录后即可开始创作。";
       } else {
-        els.formHint.textContent = "当前没有已配置模型，请先在 .env 中补齐模型服务配置。";
+        els.formHint.textContent = "当前没有可用模型。";
       }
     } catch (error) {
       showStatusError(error, "页面初始化失败，请稍后刷新重试。");
-      els.formHint.textContent = "模型列表或历史项目恢复失败，请检查后端服务、.env 配置和工作流 JSON 路径。";
+      els.formHint.textContent = "初始化失败，请检查服务配置。";
     }
   }
 

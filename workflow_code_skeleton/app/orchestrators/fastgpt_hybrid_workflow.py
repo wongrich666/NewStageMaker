@@ -536,11 +536,14 @@ def _run_batched_generation(
     payload: WorkflowInput,
     variables: dict[str, Any],
 ) -> None:
-    """按阶段完成本地批处理：先全量钩子，再全量对白，最后全量正文与记忆。"""
+    """按同一批次串行推进 hooks、dialogues、script，避免各阶段各自跳批。"""
     batch_mode = _effective_batch_mode()
     if batch_mode in {"fastgpt_full", "full", "legacy_full"}:
-        _run_full_fastgpt_generation(state, runner, payload, variables)
-        return
+        logger.warning(
+            "检测到 FASTGPT_BATCH_MODE=%s，但当前项目已强制使用按批同步模式：hooks -> dialogues -> script。",
+            batch_mode,
+        )
+        batch_mode = "local"
     if batch_mode != "local":
         raise ValueError(
             "FASTGPT_BATCH_MODE 只能是 auto、local 或 fastgpt_full，"
@@ -567,36 +570,45 @@ def _run_batched_generation(
         sync_runtime_state(state)
         return
 
-    _run_hook_batches(
-        state,
-        runner,
-        payload,
-        variables,
-        batches=batches,
-        normalized_plan=normalized_plan,
-        episode_alias_plan=episode_alias_plan,
-        rewrite_from_stage=rewrite_from_stage,
-    )
-    _run_dialogue_batches(
-        state,
-        runner,
-        payload,
-        variables,
-        batches=batches,
-        normalized_plan=normalized_plan,
-        episode_alias_plan=episode_alias_plan,
-        rewrite_from_stage=rewrite_from_stage,
-    )
-    _run_script_batches(
-        state,
-        runner,
-        payload,
-        variables,
-        batches=batches,
-        normalized_plan=normalized_plan,
-        episode_alias_plan=episode_alias_plan,
-        rewrite_from_stage=rewrite_from_stage,
-    )
+    total_batches = len(batches)
+    for batch_index, batch in enumerate(batches):
+        single_batch = [batch]
+        _run_hook_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=single_batch,
+            normalized_plan=normalized_plan,
+            episode_alias_plan=episode_alias_plan,
+            rewrite_from_stage=rewrite_from_stage,
+            batch_index_offset=batch_index,
+            total_batches=total_batches,
+        )
+        _run_dialogue_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=single_batch,
+            normalized_plan=normalized_plan,
+            episode_alias_plan=episode_alias_plan,
+            rewrite_from_stage=rewrite_from_stage,
+            batch_index_offset=batch_index,
+            total_batches=total_batches,
+        )
+        _run_script_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=single_batch,
+            normalized_plan=normalized_plan,
+            episode_alias_plan=episode_alias_plan,
+            rewrite_from_stage=rewrite_from_stage,
+            batch_index_offset=batch_index,
+            total_batches=total_batches,
+        )
 
     variables[LOCAL_CURRENT_BATCH_STAGE] = ""
     variables[LOCAL_REWRITE_FROM_STAGE] = ""
@@ -621,9 +633,11 @@ def _run_hook_batches(
     normalized_plan: dict[str, Any] | None,
     episode_alias_plan: dict[str, Any] | None,
     rewrite_from_stage: str,
+    batch_index_offset: int = 0,
+    total_batches: int | None = None,
 ) -> None:
     """承接前置设定阶段，为所有批次补齐开头冲突钩子。"""
-    total_batches = max(1, len(batches))
+    total_batches = max(1, total_batches or len(batches))
     all_hooks = _dict_or_empty(variables.get(ALL_HOOKS))
     if rewrite_from_stage in {"dialogue", "script", "final"} and _phase_object_complete(all_hooks, batches):
         set_runtime_stage(
@@ -635,13 +649,14 @@ def _run_hook_batches(
         return
 
     for index, batch in enumerate(batches):
+        actual_index = batch_index_offset + index
         existing_batch_hooks = slice_object_episodes_for_batch(all_hooks, batch)
         if _batch_object_covers_window(existing_batch_hooks, batch):
             variables[BATCH_HOOKS] = existing_batch_hooks
             variables[LOCAL_HOOK_CHECKPOINT_START] = batch.start_episode
             variables[BATCH_START_EPISODE] = batch.end_episode + 1
-            variables[LOCAL_COMPLETED_BATCHES] = index + 1
-            variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
+            variables[LOCAL_COMPLETED_BATCHES] = actual_index + 1
+            variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index + 1
             continue
 
         plan_for_batch = get_episode_batch_payload(
@@ -654,8 +669,8 @@ def _run_hook_batches(
         alias_plan_for_batch = slice_episode_alias_plan_for_batch(episode_alias_plan, batch)
 
         variables[BATCH_START_EPISODE] = batch.start_episode
-        variables[LOCAL_COMPLETED_BATCHES] = index
-        variables[LOCAL_CURRENT_BATCH_INDEX] = index
+        variables[LOCAL_COMPLETED_BATCHES] = actual_index
+        variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index
         variables[LOCAL_CURRENT_BATCH_STAGE] = "hook"
         variables.pop(BATCH_HOOKS, None)
         _sync_state_variables(state, variables)
@@ -669,7 +684,7 @@ def _run_hook_batches(
             alias_plan_for_batch,
         )
 
-        progress = 42 + int(((index + 1) / total_batches) * 14)
+        progress = 42 + int(((actual_index + 1) / total_batches) * 14)
         hook_output = _run_fastgpt_stage(
             state,
             runner,
@@ -685,8 +700,8 @@ def _run_hook_batches(
         variables[ALL_HOOKS] = all_hooks
         variables[LOCAL_HOOK_CHECKPOINT_START] = batch.start_episode
         variables[BATCH_START_EPISODE] = batch.end_episode + 1
-        variables[LOCAL_COMPLETED_BATCHES] = index + 1
-        variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
+        variables[LOCAL_COMPLETED_BATCHES] = actual_index + 1
+        variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index + 1
         _sync_state_variables(state, variables)
         sync_runtime_state(state)
 
@@ -701,9 +716,11 @@ def _run_dialogue_batches(
     normalized_plan: dict[str, Any] | None,
     episode_alias_plan: dict[str, Any] | None,
     rewrite_from_stage: str,
+    batch_index_offset: int = 0,
+    total_batches: int | None = None,
 ) -> None:
     """承接开头冲突钩子阶段，为所有批次补齐角色对白。"""
-    total_batches = max(1, len(batches))
+    total_batches = max(1, total_batches or len(batches))
     all_hooks = _dict_or_empty(variables.get(ALL_HOOKS))
     all_dialogues = _dict_or_empty(variables.get(ALL_DIALOGUES))
     if rewrite_from_stage in {"script", "final"} and _phase_object_complete(all_dialogues, batches):
@@ -716,13 +733,14 @@ def _run_dialogue_batches(
         return
 
     for index, batch in enumerate(batches):
+        actual_index = batch_index_offset + index
         existing_batch_dialogues = slice_object_episodes_for_batch(all_dialogues, batch)
         if _batch_object_covers_window(existing_batch_dialogues, batch):
             variables[BATCH_DIALOGUES] = existing_batch_dialogues
             variables[LOCAL_DIALOGUE_CHECKPOINT_START] = batch.start_episode
             variables[BATCH_START_EPISODE] = batch.end_episode + 1
-            variables[LOCAL_COMPLETED_BATCHES] = index + 1
-            variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
+            variables[LOCAL_COMPLETED_BATCHES] = actual_index + 1
+            variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index + 1
             continue
 
         plan_for_batch = get_episode_batch_payload(
@@ -742,8 +760,8 @@ def _run_dialogue_batches(
         )
 
         variables[BATCH_START_EPISODE] = batch.start_episode
-        variables[LOCAL_COMPLETED_BATCHES] = index
-        variables[LOCAL_CURRENT_BATCH_INDEX] = index
+        variables[LOCAL_COMPLETED_BATCHES] = actual_index
+        variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index
         variables[LOCAL_CURRENT_BATCH_STAGE] = "dialogue"
         variables.pop(BATCH_DIALOGUES, None)
         _sync_state_variables(state, variables)
@@ -758,7 +776,7 @@ def _run_dialogue_batches(
             alias_plan_for_batch,
         )
 
-        progress = 58 + int(((index + 1) / total_batches) * 14)
+        progress = 58 + int(((actual_index + 1) / total_batches) * 14)
         dialogue_output = _run_fastgpt_stage(
             state,
             runner,
@@ -774,8 +792,8 @@ def _run_dialogue_batches(
         variables[ALL_DIALOGUES] = all_dialogues
         variables[LOCAL_DIALOGUE_CHECKPOINT_START] = batch.start_episode
         variables[BATCH_START_EPISODE] = batch.end_episode + 1
-        variables[LOCAL_COMPLETED_BATCHES] = index + 1
-        variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
+        variables[LOCAL_COMPLETED_BATCHES] = actual_index + 1
+        variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index + 1
         _sync_state_variables(state, variables)
         sync_runtime_state(state)
 
@@ -790,9 +808,11 @@ def _run_script_batches(
     normalized_plan: dict[str, Any] | None,
     episode_alias_plan: dict[str, Any] | None,
     rewrite_from_stage: str,
+    batch_index_offset: int = 0,
+    total_batches: int | None = None,
 ) -> None:
     """承接对白阶段，逐批生成正文并把记忆覆盖到下一批上下文里。"""
-    total_batches = max(1, len(batches))
+    total_batches = max(1, total_batches or len(batches))
     all_hooks = _dict_or_empty(variables.get(ALL_HOOKS))
     all_dialogues = _dict_or_empty(variables.get(ALL_DIALOGUES))
     committed_script = str(
@@ -806,6 +826,7 @@ def _run_script_batches(
     )
 
     for index, batch in enumerate(batches):
+        actual_index = batch_index_offset + index
         plan_for_batch = get_episode_batch_payload(
             normalized_plan,
             batch.start_episode,
@@ -844,14 +865,14 @@ def _run_script_batches(
                 variables[APPEARANCE_CONTINUITY_MEMORY] = existing_memory
             variables[LOCAL_SCRIPT_CHECKPOINT_START] = batch.start_episode
             variables[BATCH_START_EPISODE] = batch.end_episode + 1
-            variables[LOCAL_COMPLETED_BATCHES] = index + 1
-            variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
+            variables[LOCAL_COMPLETED_BATCHES] = actual_index + 1
+            variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index + 1
             continue
 
         generated_before_batch = max(0, batch.start_episode - 1)
         variables[BATCH_START_EPISODE] = batch.start_episode
-        variables[LOCAL_COMPLETED_BATCHES] = index
-        variables[LOCAL_CURRENT_BATCH_INDEX] = index
+        variables[LOCAL_COMPLETED_BATCHES] = actual_index
+        variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index
         variables[LOCAL_CURRENT_BATCH_STAGE] = "script"
         _sync_state_variables(state, variables)
         sync_runtime_state(state)
@@ -869,7 +890,7 @@ def _run_script_batches(
             )
             script_base[ALL_HOOKS] = hook_payload
             script_base[ALL_DIALOGUES] = dialogue_payload
-            progress = 72 + int((index / total_batches) * 20)
+            progress = 72 + int((actual_index / total_batches) * 20)
             script_output = _run_fastgpt_stage(
                 state,
                 runner,
@@ -898,7 +919,7 @@ def _run_script_batches(
         else:
             variables[BATCH_SCRIPT] = batch_script
 
-        memory_progress = 78 + int(((index + 1) / total_batches) * 20)
+        memory_progress = 78 + int(((actual_index + 1) / total_batches) * 20)
         memory_output = _run_fastgpt_stage(
             state,
             runner,
@@ -932,10 +953,10 @@ def _run_script_batches(
             appearance_memory_by_batch
         )
         variables[BATCH_START_EPISODE] = batch.end_episode + 1
-        variables[LOCAL_COMPLETED_BATCHES] = index + 1
+        variables[LOCAL_COMPLETED_BATCHES] = actual_index + 1
         variables[LOCAL_COMMITTED_SCRIPT] = variables.get(ALL_SCRIPT) or committed_script
         committed_script = str(variables.get(LOCAL_COMMITTED_SCRIPT) or committed_script).strip()
-        variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
+        variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index + 1
         variables[LOCAL_CURRENT_BATCH_STAGE] = ""
         _sync_state_variables(state, variables)
         sync_runtime_state(state)

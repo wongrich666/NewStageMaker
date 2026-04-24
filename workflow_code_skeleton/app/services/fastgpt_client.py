@@ -329,7 +329,7 @@ class FastGPTClient:
                     "role": "user",
                     "content": (
                         f"执行阶段：{contract.label}。"
-                        "请严格读取 variables 中的输入变量，"
+                        "读取输入，"
                         "并只返回约定的输出字段。"
                     ),
                 }
