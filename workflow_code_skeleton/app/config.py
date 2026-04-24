@@ -67,6 +67,12 @@ class Settings:
         self.fastgpt_http_retry_delay = float(
             _getenv("FASTGPT_HTTP_RETRY_DELAY", default="1.5")
         )
+        self.fastgpt_script_payload_soft_limit = int(
+            _getenv("FASTGPT_SCRIPT_PAYLOAD_SOFT_LIMIT", default="180000")
+        )
+        self.fastgpt_script_payload_hard_limit = int(
+            _getenv("FASTGPT_SCRIPT_PAYLOAD_HARD_LIMIT", default="240000")
+        )
         self.fastgpt_api_key = _getenv("FASTGPT_API_KEY")
         self.fastgpt_variable_mode = _getenv("FASTGPT_VARIABLE_MODE", default="legacy").lower()
         self.fastgpt_batch_mode = _getenv("FASTGPT_BATCH_MODE", default="local").lower()

@@ -113,8 +113,25 @@ LOCAL_SCRIPT_EPISODES = "_script_episode_cache"
 LOCAL_SUMMARY_BY_BATCH = "_summary_by_batch"
 LOCAL_APPEARANCE_MEMORY_BY_BATCH = "_appearance_memory_by_batch"
 LOCAL_RAW_EPISODE_PLAN = "_raw_episode_plan"
-SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT = 32000
+SCRIPT_STAGE_PAYLOAD_HARD_LIMIT = max(
+    int(getattr(settings, "fastgpt_script_payload_hard_limit", 240000)),
+)
+SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT = min(
+    SCRIPT_STAGE_PAYLOAD_HARD_LIMIT - 20000,
+    max(
+        32000,
+        int(getattr(settings, "fastgpt_script_payload_soft_limit", 200000)),
+    ),
+)
 SCRIPT_STAGE_PREVIOUS_SCRIPT_BATCHES = 2
+SCRIPT_STAGE_PREVIOUS_BATCH_SUMMARY_MAX_CHARS = max(
+    1200,
+    int(getattr(settings, "fastgpt_script_previous_batch_summary_max_chars", 4500)),
+)
+SCRIPT_STAGE_MEMORY_MAX_CHARS = max(
+    2000,
+    int(getattr(settings, "fastgpt_script_memory_max_chars", 8000)),
+)
 FRAMEWORK_TITLE_MIN_LENGTH = 2
 FRAMEWORK_TEXT_MIN_LENGTH = 10
 
@@ -531,6 +548,13 @@ def _run_batched_generation(
 
     total_batches = len(batches)
     for batch_index, batch in enumerate(batches):
+        logger.info(
+            "batch_sync 对齐结果：当前批次=%s（第 %s/%s 批），rewrite_from_stage=%s。",
+            batch.label,
+            batch_index + 1,
+            total_batches,
+            rewrite_from_stage or "none",
+        )
         single_batch = [batch]
         _run_hook_batches(
             state,
@@ -580,6 +604,50 @@ def _run_batched_generation(
         generated_episodes=total_episodes,
     )
     sync_runtime_state(state)
+
+
+def _stage_input_context(stage_name: str, variables: dict[str, Any]) -> dict[str, Any]:
+    """只保留当前阶段契约真正会读取的字段，避免旧缓存把无关上下文一并带入。"""
+    contract = contract_for(stage_name)
+    context: dict[str, Any] = {}
+    for field_name in contract.input_names:
+        if field_name in variables:
+            context[field_name] = copy.deepcopy(variables[field_name])
+    return context
+
+
+def _log_batched_stage_input(
+    stage_name: str,
+    *,
+    stage_label: str,
+    batch_label: str,
+    fields: dict[str, Any],
+    wire_context: dict[str, Any],
+    memory_fields: tuple[str, ...] = (),
+) -> None:
+    """记录每个批处理阶段实际读取了哪些字段、长度多少、记忆字段占比如何。"""
+    lengths = {
+        field_name: _estimate_payload_value_length(value)
+        for field_name, value in fields.items()
+        if _has_value(value)
+    }
+    memory_desc = (
+        "、".join(
+            f"{field_name}={lengths[field_name]}"
+            for field_name in memory_fields
+            if field_name in lengths
+        )
+        or "无"
+    )
+    logger.info(
+        "%s %s 集读取字段：%s；总长度=%s；记忆字段=%s；wire长度=%s。",
+        stage_label,
+        batch_label,
+        _format_script_payload_breakdown(lengths),
+        sum(lengths.values()),
+        memory_desc,
+        _estimate_stage_payload_length(stage_name, wire_context),
+    )
 
 
 def _run_hook_batches(
@@ -636,16 +704,25 @@ def _run_hook_batches(
         _sync_state_variables(state, variables)
         sync_runtime_state(state)
 
-        hook_base = dict(variables)
+        hook_base = _stage_input_context(STAGE_HOOKS, variables)
         _apply_batch_episode_plan_context(
             hook_base,
             plan_for_batch=plan_for_batch,
             normalized_plan_for_batch=normalized_plan_for_batch,
         )
-        hook_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
-        hook_base[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
-            variables.get(APPEARANCE_CONTINUITY_MEMORY),
-            alias_plan_for_batch,
+        _log_batched_stage_input(
+            STAGE_HOOKS,
+            stage_label="开头冲突钩子",
+            batch_label=batch.label,
+            fields={
+                "batch_plan": hook_base.get(EPISODE_PLAN),
+                "worldview": hook_base.get(WORLDVIEW),
+                "characters": hook_base.get(CHARACTERS),
+                "scenes": hook_base.get(SCENES),
+                "story_outline": hook_base.get(STORY_OUTLINE),
+                "appearance_mapping": hook_base.get(APPEARANCE_MAPPING),
+            },
+            wire_context=hook_base,
         )
 
         progress = 42 + int(((actual_index + 1) / total_batches) * 14)
@@ -655,7 +732,7 @@ def _run_hook_batches(
             STAGE_HOOKS,
             hook_base,
             stage_key="hook",
-            message=f"正在生成第 {batch.label} 集的开头冲突钩子。",
+            message=f"开头冲突钩子 {batch.label} 集",
             batch_label=batch.label,
             progress_percent=progress,
         )
@@ -732,17 +809,26 @@ def _run_dialogue_batches(
         _sync_state_variables(state, variables)
         sync_runtime_state(state)
 
-        dialogue_base = dict(variables)
+        dialogue_base = _stage_input_context(STAGE_DIALOGUES, variables)
         _apply_batch_episode_plan_context(
             dialogue_base,
             plan_for_batch=plan_for_batch,
             normalized_plan_for_batch=normalized_plan_for_batch,
         )
         dialogue_base[ALL_HOOKS] = hook_payload
-        dialogue_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
-        dialogue_base[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
-            variables.get(APPEARANCE_CONTINUITY_MEMORY),
-            alias_plan_for_batch,
+        _log_batched_stage_input(
+            STAGE_DIALOGUES,
+            stage_label="角色对话",
+            batch_label=batch.label,
+            fields={
+                "batch_plan": dialogue_base.get(EPISODE_PLAN),
+                "batch_hooks": dialogue_base.get(ALL_HOOKS),
+                "worldview": dialogue_base.get(WORLDVIEW),
+                "characters": dialogue_base.get(CHARACTERS),
+                "scenes": dialogue_base.get(SCENES),
+                "appearance_mapping": dialogue_base.get(APPEARANCE_MAPPING),
+            },
+            wire_context=dialogue_base,
         )
 
         progress = 58 + int(((actual_index + 1) / total_batches) * 14)
@@ -752,7 +838,7 @@ def _run_dialogue_batches(
             STAGE_DIALOGUES,
             dialogue_base,
             stage_key="dialogue",
-            message=f"正在生成第 {batch.label} 集的角色对话。",
+            message=f"角色对话 {batch.label} 集",
             batch_label=batch.label,
             progress_percent=progress,
         )
@@ -829,7 +915,7 @@ def _run_script_batches(
 
         if existing_batch_script and existing_summary:
             variables[BATCH_SCRIPT] = existing_batch_script
-            variables[LAST_SUMMARY] = existing_summary
+            variables[LAST_SUMMARY] = _bounded_script_memory(existing_summary)
             if existing_memory:
                 variables[APPEARANCE_CONTINUITY_MEMORY] = existing_memory
             else:
@@ -851,18 +937,44 @@ def _run_script_batches(
 
         batch_script = existing_batch_script
         if not batch_script:
+            previous_batch_summary = _build_previous_script_context(
+                script_batches,
+                script_episode_cache,
+                committed_script,
+                current_batch_start=batch.start_episode,
+            )
+            script_memory = _bounded_script_memory(variables.get(LAST_SUMMARY))
             script_base = _build_script_stage_context(
                 variables,
                 batch=batch,
                 plan_for_batch=plan_for_batch,
                 normalized_plan_for_batch=normalized_plan_for_batch,
                 alias_plan_for_batch=alias_plan_for_batch,
-                committed_script=committed_script,
-                script_batches=script_batches,
-                script_episode_cache=script_episode_cache,
+                hook_payload=hook_payload,
+                dialogue_payload=dialogue_payload,
+                previous_batch_summary=previous_batch_summary,
+                script_memory=script_memory,
             )
-            script_base[ALL_HOOKS] = hook_payload
-            script_base[ALL_DIALOGUES] = dialogue_payload
+            _log_batched_stage_input(
+                STAGE_SCRIPT,
+                stage_label="剧本正文",
+                batch_label=batch.label,
+                fields={
+                    "batch_plan": script_base.get(EPISODE_PLAN),
+                    "batch_hooks": script_base.get(ALL_HOOKS),
+                    "batch_dialogues": script_base.get(ALL_DIALOGUES),
+                    "previous_batch_summary": script_base.get(ALL_SCRIPT),
+                    "script_memory": script_base.get(LAST_SUMMARY),
+                    "appearance_mapping": script_base.get(APPEARANCE_MAPPING),
+                    "character_scene_bundle": _build_script_character_scene_bundle_for_estimate(
+                        script_base.get(CHARACTERS),
+                        script_base.get(SCENES),
+                    ),
+                    "worldview": script_base.get(WORLDVIEW),
+                },
+                wire_context=script_base,
+                memory_fields=("previous_batch_summary", "script_memory"),
+            )
             progress = 72 + int((actual_index / total_batches) * 20)
             script_output = _run_fastgpt_stage(
                 state,
@@ -870,7 +982,7 @@ def _run_script_batches(
                 STAGE_SCRIPT,
                 script_base,
                 stage_key="script",
-                message=f"正在生成第 {batch.label} 集的剧本正文。",
+                message=f"剧本正文 {batch.label} 集",
                 batch_label=batch.label,
                 progress_percent=progress,
                 generated_episodes=generated_before_batch,
@@ -899,19 +1011,19 @@ def _run_script_batches(
             STAGE_MEMORY,
             {
                 BATCH_SCRIPT: batch_script,
-                LAST_SUMMARY: variables.get(LAST_SUMMARY) or "",
+                LAST_SUMMARY: _bounded_script_memory(variables.get(LAST_SUMMARY)),
                 APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING) or {},
                 CHARACTER_ALIAS_NAMING_RULES: variables.get(CHARACTER_ALIAS_NAMING_RULES) or "",
             },
             stage_key="script",
-            message=f"正在整理第 {batch.label} 集的上下文记忆。",
+            message=f"剧本正文 {batch.label} 集",
             batch_label=batch.label,
             progress_percent=memory_progress,
             generated_episodes=batch.end_episode,
             max_retries=0,
         )
 
-        variables[LAST_SUMMARY] = memory_output[LAST_SUMMARY]
+        variables[LAST_SUMMARY] = _bounded_script_memory(memory_output[LAST_SUMMARY])
         variables[APPEARANCE_CONTINUITY_MEMORY] = _update_appearance_continuity_memory(
             variables.get(APPEARANCE_CONTINUITY_MEMORY),
             alias_plan_for_batch,
@@ -1160,6 +1272,8 @@ def _run_full_fastgpt_generation(
         ),
         alias_plan_for_batch=variables.get(EPISODE_ALIAS_PLAN) or {},
         committed_script=str(variables.get(ALL_SCRIPT) or "").strip(),
+        hook_payload=variables.get(ALL_HOOKS) if isinstance(variables.get(ALL_HOOKS), dict) else None,
+        dialogue_payload=variables.get(ALL_DIALOGUES) if isinstance(variables.get(ALL_DIALOGUES), dict) else None,
         script_batches=_normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES)),
         script_episode_cache=_normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES)),
     )
@@ -1226,53 +1340,63 @@ def _build_script_stage_context(
     batch: BatchWindow,
     plan_for_batch: str,
     normalized_plan_for_batch: dict[str, Any] | None,
-    alias_plan_for_batch: dict[str, Any] | None,
-    committed_script: str,
-    script_batches: dict[int, str] | None = None,
-    script_episode_cache: dict[int, str] | None = None,
+    hook_payload: dict[str, Any] | None = None,
+    dialogue_payload: dict[str, Any] | None = None,
+    previous_batch_summary: str,
+    script_memory: str,
 ) -> dict[str, Any]:
     """承接对白阶段，把当前批正文真正需要的最小上下文收束出来再发给 FastGPT。"""
-    context = dict(variables)
+    context = _stage_input_context(STAGE_SCRIPT, variables)
     _apply_batch_episode_plan_context(
         context,
         plan_for_batch=plan_for_batch,
         normalized_plan_for_batch=normalized_plan_for_batch,
     )
     context[BATCH_START_EPISODE] = batch.start_episode
-    context[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
-    context[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
-        variables.get(APPEARANCE_CONTINUITY_MEMORY),
-        alias_plan_for_batch,
-    )
-    context[ALL_HOOKS] = _current_batch_object_payload(
+    context[ALL_HOOKS] = copy.deepcopy(hook_payload) if isinstance(hook_payload, dict) else _current_batch_object_payload(
         variables.get(BATCH_HOOKS),
         variables.get(ALL_HOOKS),
         batch=batch,
     )
-    context[ALL_DIALOGUES] = _current_batch_object_payload(
+    context[ALL_DIALOGUES] = copy.deepcopy(dialogue_payload) if isinstance(dialogue_payload, dict) else _current_batch_object_payload(
         variables.get(BATCH_DIALOGUES),
         variables.get(ALL_DIALOGUES),
         batch=batch,
     )
-    context[ALL_SCRIPT] = _build_previous_script_context(
-        script_batches or {},
-        script_episode_cache or {},
-        committed_script,
-        current_batch_start=batch.start_episode,
-    )
+    if previous_batch_summary:
+        context[ALL_SCRIPT] = previous_batch_summary
+    else:
+        context.pop(ALL_SCRIPT, None)
+    if script_memory:
+        context[LAST_SUMMARY] = _bounded_script_memory(script_memory)
+    else:
+        context.pop(LAST_SUMMARY, None)
 
     estimated_before = _estimate_stage_payload_length(STAGE_SCRIPT, context)
+    breakdown_before = _script_stage_payload_breakdown(context)
     estimated_after, compressed_fields = _apply_script_stage_length_guard(context, estimated_before)
+    breakdown_after = _script_stage_payload_breakdown(context)
     if compressed_fields:
         logger.warning(
-            "剧本正文 %s 集上下文过长，已压缩：%s；payload 估算长度 %s -> %s",
+            "剧本正文 %s 集 payload 保护生效：soft=%s hard=%s；压缩字段=%s；长度 %s -> %s；压缩前=%s；压缩后=%s",
             batch.label,
+            SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT,
+            SCRIPT_STAGE_PAYLOAD_HARD_LIMIT,
             "、".join(compressed_fields),
             estimated_before,
             estimated_after,
+            _format_script_payload_breakdown(breakdown_before),
+            _format_script_payload_breakdown(breakdown_after),
         )
     else:
-        logger.info("剧本正文 %s 集 payload 估算长度：%s", batch.label, estimated_after)
+        logger.info(
+            "剧本正文 %s 集 payload 阈值：soft=%s hard=%s；当前长度=%s；字段占比=%s",
+            batch.label,
+            SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT,
+            SCRIPT_STAGE_PAYLOAD_HARD_LIMIT,
+            estimated_after,
+            _format_script_payload_breakdown(breakdown_before),
+        )
     return context
 
 
@@ -1283,48 +1407,103 @@ def _build_previous_script_context(
     *,
     current_batch_start: int,
 ) -> str:
-    """从已完成正文里提炼前情，只把当前批之前最需要的连续正文带进来。"""
+    """只保留上一批正文的压缩摘要，避免把更早批次原文再次塞回 script 上下文。"""
     if current_batch_start <= 1:
         return ""
 
+    previous_starts = sorted(start for start in script_batches if start < current_batch_start)
+    if previous_starts:
+        previous_text = str(script_batches.get(previous_starts[-1]) or "").strip()
+        if previous_text:
+            return _local_batch_script_summary(previous_text)
+
+    batch_size = max(1, int(settings.batch_size or 5))
+    previous_batch_start = max(1, current_batch_start - batch_size)
     previous_episode_parts = [
         text
         for episode, text in sorted(script_episode_cache.items())
-        if episode < current_batch_start and str(text or "").strip()
+        if previous_batch_start <= episode < current_batch_start and str(text or "").strip()
     ]
     if previous_episode_parts:
-        return _trim_text_tail(_join_script_parts(*previous_episode_parts), max_chars=12000)
+        return _local_batch_script_summary(_join_script_parts(*previous_episode_parts))
+    return _local_batch_script_summary(committed_script)
 
-    previous_parts: list[str] = []
-    previous_starts = sorted(start for start in script_batches if start < current_batch_start)
-    for start in previous_starts[-SCRIPT_STAGE_PREVIOUS_SCRIPT_BATCHES:]:
-        text = str(script_batches.get(start) or "").strip()
-        if text:
-            previous_parts.append(text)
-    if previous_parts:
-        return _join_script_parts(*previous_parts)
-    return _trim_text_tail(committed_script, max_chars=12000)
+
+def _local_batch_script_summary(value: Any) -> str:
+    """本地把上一批正文压成简短摘要，避免为了展示/记忆额外请求模型。"""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    blocks = [block.strip() for block in re.split(r"\n{2,}", text) if block.strip()]
+    condensed = []
+    for block in blocks:
+        compact = " ".join(block.split())
+        if compact:
+            condensed.append(compact[:260])
+    return _trim_text_tail(
+        "\n".join(condensed) if condensed else text,
+        max_chars=SCRIPT_STAGE_PREVIOUS_BATCH_SUMMARY_MAX_CHARS,
+    )
+
+
+def _bounded_script_memory(value: Any) -> str:
+    """LAST_SUMMARY 只保留滚动压缩记忆，不允许随批次无限累加原文。"""
+    return _trim_text_tail(value, max_chars=SCRIPT_STAGE_MEMORY_MAX_CHARS)
 
 
 def _apply_script_stage_length_guard(
     context: dict[str, Any],
     initial_estimate: int | None = None,
 ) -> tuple[int, list[str]]:
-    """在不破坏批次逻辑的前提下，优先压缩最容易超长的正文上下文字段。"""
+    """在不破坏批次上下文的前提下，先压前情记忆，再在硬上限前做最后保护。"""
     estimate = initial_estimate or _estimate_stage_payload_length(STAGE_SCRIPT, context)
     if estimate <= SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT:
         return estimate, []
 
     compressed_fields: list[str] = []
-    strategies: tuple[tuple[str, str, tuple[int, ...], Any], ...] = (
-        (ALL_SCRIPT, "previous_batch_summary", (12000, 8000, 5000), _trim_text_tail),
-        (ALL_DIALOGUES, "dialogues", (520, 320, 200), _compact_nested_strings),
-        (LAST_SUMMARY, "script_memory", (3600, 2200, 1200), _trim_text_tail),
-        (ALL_HOOKS, "hooks", (520, 320, 200), _compact_nested_strings),
+    soft_strategies: tuple[tuple[str, str, tuple[int, ...], Any], ...] = (
+        (ALL_SCRIPT, "previous_batch_summary", (24000, 18000, 12000, 8000), _trim_text_tail),
+        (LAST_SUMMARY, "script_memory", (9000, 6000, 3600, 2200), _trim_text_tail),
+        (APPEARANCE_CONTINUITY_MEMORY, "appearance_memory", (6000, 4000, 2500), _compact_nested_strings),
+    )
+    hard_strategies: tuple[tuple[str, str, tuple[int, ...], Any], ...] = (
+        (ALL_HOOKS, "hooks", (2200, 1600, 1000, 700), _compact_nested_strings),
+        (ALL_DIALOGUES, "dialogues", (2200, 1600, 1000, 700), _compact_nested_strings),
+        (ALL_SCRIPT, "previous_batch_summary", (6000, 4000), _trim_text_tail),
+        (LAST_SUMMARY, "script_memory", (1600, 1000, 700), _trim_text_tail),
     )
 
+    estimate = _apply_script_stage_compression_strategies(
+        context,
+        estimate,
+        target_limit=SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT,
+        strategies=soft_strategies,
+        compressed_fields=compressed_fields,
+    )
+    if estimate > SCRIPT_STAGE_PAYLOAD_HARD_LIMIT:
+        estimate = _apply_script_stage_compression_strategies(
+            context,
+            estimate,
+            target_limit=SCRIPT_STAGE_PAYLOAD_HARD_LIMIT,
+            strategies=hard_strategies,
+            compressed_fields=compressed_fields,
+        )
+
+    return estimate, compressed_fields
+
+
+def _apply_script_stage_compression_strategies(
+    context: dict[str, Any],
+    estimate: int,
+    *,
+    target_limit: int,
+    strategies: tuple[tuple[str, str, tuple[int, ...], Any], ...],
+    compressed_fields: list[str],
+) -> int:
+    """按给定阈值分阶段压缩字段，优先保住当前批次最重要的 plan/hooks/dialogues。"""
     for field_name, label, limits, compressor in strategies:
-        if estimate <= SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT:
+        if estimate <= target_limit:
             break
         for limit in limits:
             current_value = context.get(field_name)
@@ -1337,10 +1516,56 @@ def _apply_script_stage_length_guard(
             if label not in compressed_fields:
                 compressed_fields.append(label)
             estimate = _estimate_stage_payload_length(STAGE_SCRIPT, context)
-            if estimate <= SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT:
+            if estimate <= target_limit:
                 break
+    return estimate
 
-    return estimate, compressed_fields
+
+def _script_stage_payload_breakdown(context: dict[str, Any]) -> dict[str, int]:
+    """统计正文阶段主要输入块的估算长度，便于观察是谁把 payload 撑大了。"""
+    parts = {
+        "batch_plan": context.get(EPISODE_PLAN),
+        "batch_hooks": context.get(ALL_HOOKS),
+        "batch_dialogues": context.get(ALL_DIALOGUES),
+        "previous_batch_summary": context.get(ALL_SCRIPT),
+        "script_memory": context.get(LAST_SUMMARY),
+        "appearance_mapping": context.get(APPEARANCE_MAPPING),
+        "appearance_memory": context.get(APPEARANCE_CONTINUITY_MEMORY),
+        "character_scene_bundle": _build_script_character_scene_bundle_for_estimate(
+            context.get(CHARACTERS),
+            context.get(SCENES),
+        ),
+        "worldview": context.get(WORLDVIEW),
+    }
+    return {
+        label: _estimate_payload_value_length(value)
+        for label, value in parts.items()
+        if _has_value(value)
+    }
+
+
+def _estimate_payload_value_length(value: Any) -> int:
+    """用和 wire payload 一致的 JSON 估算方式统计单个字段大概会占多少长度。"""
+    return len(
+        json.dumps(
+            _format_wire_value_for_estimate(value),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        )
+    )
+
+
+def _format_script_payload_breakdown(lengths: dict[str, int]) -> str:
+    """把正文 payload 各大块长度格式化成日志里的占比摘要。"""
+    if not lengths:
+        return "无"
+    total = sum(lengths.values()) or 1
+    parts = []
+    for label, size in sorted(lengths.items(), key=lambda item: item[1], reverse=True):
+        ratio = int(round((size / total) * 100))
+        parts.append(f"{label}={size}({ratio}%)")
+    return "，".join(parts)
 
 
 def _estimate_stage_payload_length(stage_name: str, variables: dict[str, Any]) -> int:
@@ -1506,8 +1731,10 @@ def _run_fastgpt_stage(
         try:
             contract.build_input_payload(variables)
             _log_fastgpt_stage_start(state, contract.label, batch_label, attempt)
-            output = runner.run_stage(stage_name, variables)
-            output = contract.validate_output_payload(output)
+            raw_output = runner.run_stage(stage_name, variables)
+            validated_output = contract.validate_output_payload(raw_output)
+            output = dict(raw_output)
+            output.update(validated_output)
             _log_fastgpt_stage_done(state, contract.label, batch_label, output)
             _sync_state_variables(state, output)
             _checkpoint(state)
@@ -1881,12 +2108,21 @@ def _sanitize_restored_batch_progress(variables: dict[str, Any]) -> None:
         variables[LOCAL_CURRENT_BATCH_INDEX] = derived_completed_batches
         if derived_start > total_episodes and current_stage in {"hook", "dialogue", "script"}:
             variables[LOCAL_CURRENT_BATCH_STAGE] = ""
+        logger.info(
+            "恢复快照批次已重新对齐：stage=%s rewrite=%s start_episode=%s completed_batches=%s/%s。",
+            current_stage or "none",
+            rewrite_stage or "none",
+            derived_start,
+            derived_completed_batches,
+            total_batches,
+        )
         return
 
     if not has_batched_outputs and not current_stage and saved_start > 1:
         variables[BATCH_START_EPISODE] = 1
         variables[LOCAL_COMPLETED_BATCHES] = 0
         variables[LOCAL_CURRENT_BATCH_INDEX] = 0
+        logger.info("恢复快照未发现可信批次缓存，已回退到第 1 批重新开始。")
 
 
 def _derive_restored_batch_progress(

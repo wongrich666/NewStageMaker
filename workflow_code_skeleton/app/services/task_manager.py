@@ -45,7 +45,6 @@ from .fastgpt_contracts import (
     USER_SCENES,
     WORLDVIEW,
 )
-from .llm_client import llm_client
 from .workflow_spec import WorkflowSpec
 from ..utils.logger import get_logger
 from ..utils.episode import BatchWindow, iter_episode_batches
@@ -55,6 +54,7 @@ from ..workflow_ids import (
     APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
     APPEARANCE_REQUIREMENTS_VAR,
     CHARACTER_BIOS_VAR,
+    CHARACTER_NATURAL_LANGUAGE_VAR,
     CHARACTER_VAR,
     CORE_SCENE_INPUT_VAR,
     CORE_SCENE_FINAL_VAR,
@@ -74,6 +74,7 @@ from ..workflow_ids import (
     OUTFIT_SWITCH_RULES_VAR,
     EPISODE_PLAN_VAR,
     SCENE_VAR,
+    SCENE_NATURAL_LANGUAGE_VAR,
     SCRIPT_CURRENT_VAR,
     SCRIPT_FINAL_VAR,
     SCRIPT_START_VAR,
@@ -87,17 +88,17 @@ logger = get_logger("task_manager")
 PROJECT_RUNNING_STATUSES = {"pending", "running", "pausing", "paused"}
 WAITING_STATUSES = {"pending", "running", "pausing"}
 STAGE_LABELS = {
-    "framework": "正在撰写剧本框架",
-    "appearance_strategy": "正在生成服装前置策略",
-    "validation": "正在检查集数",
-    "worldview": "正在整理世界观",
-    "character": "正在梳理角色",
-    "scene": "正在整理核心场景",
-    "appearance": "正在给不同服饰的人物进行处理",
-    "hook": "正在设计开场，冲突，钩子",
-    "dialogue": "正在创作角色对话",
-    "script": "正在写作剧本正文",
-    "finalize": "正在整理完整稿件",
+    "framework": "剧本框架",
+    "appearance_strategy": "服装前置策略",
+    "validation": "集数检查",
+    "worldview": "世界观",
+    "character": "角色设定",
+    "scene": "核心场景",
+    "appearance": "服装映射",
+    "hook": "开头冲突钩子",
+    "dialogue": "角色对话",
+    "script": "剧本正文",
+    "finalize": "最终剧本",
     "finished": "已完成",
 }
 FAILED_PUBLIC_MESSAGE = "当前步骤执行失败，任务已停在上一个成功步骤，等待手动继续生成。"
@@ -1209,10 +1210,19 @@ class WorkflowRuntime:
             "episode_plan": state.get_var(EPISODE_PLAN_VAR, ""),
             "normalized_episode_plan": state.get_var(NORMALIZED_EPISODE_PLAN, ""),
             "worldview": state.get_var(WORLDVIEW_VAR, ""),
-            "character_summary": state.get_var(FINAL_CHARACTER_VAR, state.get_var(CHARACTER_VAR, "")),
+            "character_summary": state.get_var(
+                CHARACTER_NATURAL_LANGUAGE_VAR,
+                state.get_var(FINAL_CHARACTER_VAR, state.get_var(CHARACTER_VAR, "")),
+            ),
             "scene_json": state.get_var(SCENE_VAR, ""),
-            "core_scene_input": state.get_var(CORE_SCENE_INPUT_VAR, ""),
-            "core_scene_summary": state.get_var(FINAL_SCENE_VAR, state.get_var(CORE_SCENE_FINAL_VAR, "")),
+            "core_scene_input": state.get_var(
+                SCENE_NATURAL_LANGUAGE_VAR,
+                state.get_var(CORE_SCENE_INPUT_VAR, ""),
+            ),
+            "core_scene_summary": state.get_var(
+                SCENE_NATURAL_LANGUAGE_VAR,
+                state.get_var(SCENE_VAR, state.get_var(FINAL_SCENE_VAR, state.get_var(CORE_SCENE_FINAL_VAR, ""))),
+            ),
             "character_appearance_requirements": state.get_var(CHARACTER_APPEARANCE_REQUIREMENTS, ""),
             "character_alias_naming_rules": state.get_var(CHARACTER_ALIAS_NAMING_RULES, ""),
             "outfit_switch_rules": state.get_var(OUTFIT_SWITCH_RULES, ""),
@@ -1568,34 +1578,8 @@ class TaskManager:
         return ""
 
     def _generate_episode_plan_display(self, source_text: str) -> str:
-        text = str(source_text or "").strip()
-        if not text:
-            return ""
-        try:
-            display = llm_client.chat(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "你是短剧创作平台的展示转换助手。"
-                            "请把输入的分集计划JSON信息改写成给前端展示的自然语言正文。"
-                            "要求：只输出中文正文；不要JSON，不要Markdown，不要代码块，不要项目符号，不要解释过程；"
-                            "按集数顺序写，可使用“第X集：”开头；只依据输入，不补编不存在的信息。"
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"请把下面这份分集计划 JSON 转成自然语言展示稿：\n\n{text}",
-                    },
-                ],
-                provider="deepseek",
-                temperature=0.4,
-                max_tokens=2400,
-            )
-        except Exception as exc:
-            logger.warning("分集计划展示转换失败，将使用本地回退文案: %s", exc)
-            return ""
-        return str(display or "").strip()
+        """不再额外调用模型润色分集计划展示，统一走本地回退整理。"""
+        return ""
 
     def _fallback_episode_plan_display(self, parsed: Any) -> str:
         text = self._episode_plan_display_source_text(parsed)
@@ -1805,7 +1789,11 @@ class TaskManager:
         title = str(artifacts.get("script_title_content") or "").strip()
         story_outline = str(artifacts.get("story_outline") or "").strip()
         character_bios = str(artifacts.get("character_bios") or "").strip()
-        core_scene_input = str(artifacts.get("core_scene_input") or "").strip()
+        core_scene_input = str(
+            artifacts.get("core_scene_summary")
+            or artifacts.get("core_scene_input")
+            or ""
+        ).strip()
         episode_plan = str(
             artifacts.get(EPISODE_PLAN_DISPLAY_ARTIFACT)
             or artifacts.get("episode_plan")
@@ -1844,7 +1832,7 @@ class TaskManager:
         if cached_text and cached_stage == stage_key and cached_hash == text_hash:
             return cached_text
 
-        preview = self._generate_stage_preview(stage_title, text) or self._fallback_stage_preview(stage_title, text)
+        preview = self._fallback_stage_preview(stage_title, text)
         self._cache_stage_preview(snapshot, stage_key=stage_key, text_hash=text_hash, preview=preview)
         return preview
 
@@ -1853,32 +1841,8 @@ class TaskManager:
         return hashlib.sha1(str(value or "").encode("utf-8")).hexdigest()
 
     def _generate_stage_preview(self, stage_title: str, raw_output: str) -> str:
-        """调用摘要模型，把阶段原文转成用户更容易读懂的自然语言版本。"""
-        preview_source = self._preview_source_text(raw_output)
-        try:
-            preview = llm_client.chat(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "你是短剧创作平台的阶段讲解助手。"
-                            "请把给定阶段产物改写成更容易理解的自然语言说明。"
-                            "要求：只输出 2-4 句中文；保留关键信息，不要编造，不要分点，不要说自己是 AI。"
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"阶段：{stage_title}\n\n阶段产物：\n{preview_source}",
-                    },
-                ],
-                provider="deepseek",
-                temperature=0.4,
-                max_tokens=220,
-            )
-        except Exception as exc:
-            logger.warning("生成阶段自然语言摘要失败，将使用本地回退文案: %s", exc)
-            return ""
-        return " ".join(str(preview or "").strip().split())[:260]
+        """保留接口位置，但不再额外调用模型生成阶段摘要。"""
+        return ""
 
     def _preview_source_text(self, raw_output: str) -> str:
         """把阶段原文裁成适合摘要模型理解的长度，避免长正文拖慢详情接口。"""
@@ -3100,34 +3064,8 @@ class TaskManager:
         return condensed[:88] if condensed else "这个作品还没有填写故事梗概。"
 
     def _generate_story_teaser(self, story_outline: str) -> str:
-        try:
-            teaser = llm_client.chat(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "你是短剧平台编辑。请把用户给出的剧本故事大纲压缩成一句中文展示摘要。"
-                            "要求：只输出一句话；18-48字；点出主角、核心冲突和最大看点；"
-                            "不要加前缀、不要解释、不要分点。"
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"故事大纲：\n{story_outline}",
-                    },
-                ],
-                provider="deepseek",
-                temperature=0.4,
-                max_tokens=90,
-            )
-        except Exception as exc:
-            logger.warning("生成剧本摘要失败，将回退到原始梗概截断: %s", exc)
-            return ""
-        cleaned = " ".join(str(teaser or "").strip().split())
-        cleaned = cleaned.strip("“”\"' \n\r\t")
-        if cleaned.startswith("一句话摘要"):
-            cleaned = cleaned.split("：", 1)[-1].strip()
-        return cleaned[:88]
+        """社区/资产摘要不再额外调用模型生成，统一走本地梗概截断。"""
+        return ""
 
     def _cache_story_teaser(
         self,

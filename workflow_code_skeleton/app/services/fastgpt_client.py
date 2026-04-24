@@ -11,6 +11,11 @@ import requests
 
 from ..config import settings
 from ..utils.logger import get_logger
+from ..workflow_ids import (
+    APPEARANCE_NATURAL_LANGUAGE_VAR,
+    CHARACTER_NATURAL_LANGUAGE_VAR,
+    SCENE_NATURAL_LANGUAGE_VAR,
+)
 from .fastgpt_contracts import (
     ALL_DIALOGUES,
     ALL_HOOKS,
@@ -35,6 +40,11 @@ logger = get_logger("fastgpt_client")
 
 
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
+STAGE_AUXILIARY_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
+    "characters": (CHARACTER_NATURAL_LANGUAGE_VAR,),
+    "scenes": (SCENE_NATURAL_LANGUAGE_VAR,),
+    "appearance_alias_generation": (APPEARANCE_NATURAL_LANGUAGE_VAR,),
+}
 
 
 class FastGPTTransientError(RuntimeError):
@@ -108,7 +118,18 @@ class FastGPTClient:
         response = self._post_with_retries(endpoint, headers, body, stage_name)
         data = response.json()
         raw_output = self._extract_output_payload(data, contract)
-        return contract.validate_output_payload(raw_output)
+        validated_output = contract.validate_output_payload(raw_output)
+        auxiliary_output = _extract_stage_auxiliary_outputs(data, stage_name)
+        if auxiliary_output:
+            logger.info(
+                "FastGPT 阶段 %s 捕获到辅助输出：%s",
+                stage_name,
+                auxiliary_output.keys(),
+            )
+        return {
+            **auxiliary_output,
+            **validated_output,
+        }
 
     def _post_with_retries(
         self,
@@ -738,6 +759,30 @@ def _yield_named_text_fields(prefix: str, data: dict[str, Any]) -> Iterable[tupl
         value = data.get(key)
         if isinstance(value, str):
             yield (f"{prefix}.{key}", strip_code_fence(value))
+
+
+def _extract_stage_auxiliary_outputs(data: dict[str, Any], stage_name: str) -> dict[str, Any]:
+    """从响应里捞回少量仅用于展示的内部变量，不影响阶段主契约字段。"""
+    wanted_keys = STAGE_AUXILIARY_OUTPUT_KEYS.get(stage_name, ())
+    if not wanted_keys:
+        return {}
+
+    found: dict[str, Any] = {}
+    for _, candidate in _iter_named_structured_candidates(data):
+        normalized = _normalize_payload_candidate(candidate, contract_for(stage_name))
+        if isinstance(normalized, list):
+            normalized = _dict_from_variable_items(normalized)
+        if not isinstance(normalized, dict):
+            continue
+        for key in wanted_keys:
+            if key in found:
+                continue
+            value = normalized.get(key)
+            if isinstance(value, str):
+                value = value.strip()
+            if value not in (None, "", [], {}):
+                found[key] = value
+    return found
 
 
 def _try_parse_json(text: str) -> Any | None:
