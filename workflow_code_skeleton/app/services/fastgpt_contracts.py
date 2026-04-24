@@ -65,6 +65,7 @@ from ..workflow_ids import (
 from .json_utils import parse_json
 
 script_title_content = "script_title_content"
+SCRIPT_TITLE = script_title_content
 TOTAL_EPISODES = "total_episodes"
 EPISODE_WORD_COUNT = "episode_word_count"
 USER_EXPECTATION = "user_expectation"
@@ -595,7 +596,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             EPISODE_PLAN: "string",
         },
         output_aliases={
-            script_title_content: (FRAMEWORK_TITLE_VAR, "title", "script_title_content_content"),
+            script_title_content: (FRAMEWORK_TITLE_VAR,),
             STORY_OUTLINE: (FRAMEWORK_STORY_OUTLINE_VAR, "story_outline_content"),
             USER_CHARACTERS: (FRAMEWORK_CHARACTER_BIOS_VAR, "character_bios_content"),
             USER_SCENES: (FRAMEWORK_CORE_SCENE_VAR, "core_scene_content"),
@@ -622,15 +623,8 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             OUTFIT_SWITCH_RULES: "string",
         },
         output_aliases={
-            CHARACTER_APPEARANCE_REQUIREMENTS: (
-                APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
-                APPEARANCE_REQUIREMENTS_VAR,
-                FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR,
-            ),
-            CHARACTER_ALIAS_NAMING_RULES: (
-                APPEARANCE_ALIAS_NAMING_RULES_VAR,
-                FRAMEWORK_ALIAS_NAMING_RULES_VAR,
-            ),
+            CHARACTER_APPEARANCE_REQUIREMENTS: (APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,),
+            CHARACTER_ALIAS_NAMING_RULES: (APPEARANCE_ALIAS_NAMING_RULES_VAR,),
             OUTFIT_SWITCH_RULES: (OUTFIT_SWITCH_RULES_VAR,),
         },
         fastgpt_responsibility="基于故事、人物、场景和分集计划，先生成后续阶段要统一复用的服装版本需求、命名偏好和服装切换规则。",

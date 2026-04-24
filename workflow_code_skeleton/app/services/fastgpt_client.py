@@ -521,6 +521,7 @@ def _extract_contract_payload(
     candidate: dict[str, Any],
     contract: FastGPTStageContract,
 ) -> StageOutputMatch | None:
+    """只按当前阶段契约字段和本阶段登记过的别名提取输出，拒绝通用相似字段猜测。"""
     payload: dict[str, Any] = {}
     matched_keys: dict[str, str] = {}
     canonical_hits = 0
@@ -557,6 +558,7 @@ def _match_contract_output_key(
     lowered_candidate: dict[str, Any],
     contract: FastGPTStageContract,
 ) -> str | None:
+    """按“契约字段本名 -> 同名大小写变体 -> 阶段专属别名”的顺序寻找真实输出键。"""
     if expected_name in candidate:
         return expected_name
 
@@ -574,6 +576,7 @@ def _match_contract_output_key(
 def _select_best_validated_output(
     candidates: list[ValidatedStageOutput],
 ) -> ValidatedStageOutput | None:
+    """在已通过契约校验的候选里，优先选择契约本名命中更多、alias 更少的来源。"""
     best: tuple[tuple[int, int, int, int], ValidatedStageOutput] | None = None
     for candidate in candidates:
         score = (
@@ -610,6 +613,7 @@ def _payload_source_priority(source: str) -> int:
 def _format_rejected_candidate_details(
     rejected: list[tuple[str, str, dict[str, Any] | None]],
 ) -> str:
+    """把若干失败候选压成一条错误摘要，方便排查到底是哪类输出不合契约。"""
     if not rejected:
         return "没有发现任何可映射到阶段契约的候选输出"
     preview = []
@@ -675,6 +679,7 @@ def _can_coerce_single_output(value: Any, contract: FastGPTStageContract) -> boo
 
 
 def _iter_named_structured_candidates(data: Any) -> Iterable[tuple[str, Any]]:
+    """只从 FastGPT 常见结构化输出槽位取候选，避免把输入回显 variables 当正式输出。"""
     if not isinstance(data, dict):
         return
 
@@ -686,6 +691,7 @@ def _iter_named_structured_candidates(data: Any) -> Iterable[tuple[str, Any]]:
 
 
 def _yield_named_branch_candidates(prefix: str, data: dict[str, Any]) -> Iterable[tuple[str, Any]]:
+    """按固定白名单枚举某个响应分支里的结构化候选来源。"""
     if not isinstance(data, dict):
         return
     priority_keys = (
@@ -710,6 +716,7 @@ def _yield_named_branch_candidates(prefix: str, data: dict[str, Any]) -> Iterabl
 
 
 def _iter_named_text_candidates(data: Any) -> Iterable[tuple[str, str]]:
+    """只读取 choices/answerText 等真实文本输出槽位，避免递归扫到中间元数据。"""
     if not isinstance(data, dict):
         return
 
@@ -724,6 +731,7 @@ def _iter_named_text_candidates(data: Any) -> Iterable[tuple[str, str]]:
 
 
 def _yield_named_text_fields(prefix: str, data: dict[str, Any]) -> Iterable[tuple[str, str]]:
+    """枚举某个响应分支里的文本字段，供单字段阶段做 JSON/纯文本双路解析。"""
     if not isinstance(data, dict):
         return
     for key in ("answerText", "answer", "response", "result", "content", "text"):
