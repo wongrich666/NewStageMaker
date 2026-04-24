@@ -7,10 +7,11 @@
   const STORAGE = {
     draft: `scriptmaker.web.${userKey}.draft`,
     selectedProjectId: `scriptmaker.web.${userKey}.selectedProjectId`,
-    modelId: `scriptmaker.web.${userKey}.modelId`
+    modelId: `scriptmaker.web.${userKey}.modelId`,
+    sidebarCollapsed: `scriptmaker.web.${userKey}.sidebarCollapsed`
   };
 
-  const POLL_INTERVAL = 2000;
+  const POLL_INTERVAL = 1500;
   const RUNNING_STATUSES = new Set(["pending", "running", "pausing"]);
   const RESUMABLE_STATUSES = new Set(["paused", "pausing", "failed", "terminated"]);
   const TERMINATABLE_STATUSES = new Set(["pending", "running", "pausing", "paused", "failed"]);
@@ -18,6 +19,8 @@
   const currentAuthToken = () => new URL(window.location.href).searchParams.get("auth_token") || "";
 
   const els = {
+    workspaceSidebar: $("workspaceCard"),
+    sidebarToggleBtn: $("sidebarToggleBtn"),
     modelSelect: $("modelSelect"),
     expectationInput: $("expectationInput"),
     characterCountInput: $("characterCountInput"),
@@ -30,6 +33,7 @@
     terminateBtn: $("terminateBtn"),
     clearBtn: $("clearBtn"),
     saveBtn: $("saveBtn"),
+    completionPanel: $("completionPanel"),
     confirmCompletionBtn: $("confirmCompletionBtn"),
     rollbackRewriteBtn: $("rollbackRewriteBtn"),
     rollbackStageSelect: $("rollbackStageSelect"),
@@ -80,6 +84,9 @@
     progressText: $("progressText"),
     projectText: $("projectText"),
     taskText: $("taskText"),
+    chatTranscript: $("chatTranscript"),
+    outputTitle: $("outputTitle"),
+    outputNaturalBox: $("outputNaturalBox"),
     finalOutputBox: $("finalOutputBox")
   };
 
@@ -347,6 +354,17 @@
     draftStorage.removeItem(STORAGE.draft);
   }
 
+  // 记住侧边栏折叠状态，让用户切页面回来后仍保持同一工作台布局。
+  function applySidebarCollapsed(collapsed) {
+    if (!els.workspaceSidebar) return;
+    els.workspaceSidebar.classList.toggle("is-collapsed", Boolean(collapsed));
+    draftStorage.setItem(STORAGE.sidebarCollapsed, collapsed ? "1" : "0");
+  }
+
+  function restoreSidebarCollapsed() {
+    applySidebarCollapsed(draftStorage.getItem(STORAGE.sidebarCollapsed) === "1");
+  }
+
   function normalizeProjectText(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
   }
@@ -464,6 +482,7 @@
 
   function showStatusError(error, fallback = "操作失败，请稍后重试。") {
     els.messageText.textContent = friendlyErrorText(error, fallback);
+    els.messageText.classList.toggle("hidden", !els.messageText.textContent);
   }
 
   function showProfileError(error, fallback = "保存失败，请稍后重试。") {
@@ -476,14 +495,269 @@
     els.toolOutputBox.textContent = friendlyErrorText(error, fallback);
   }
 
+  // 只在确认有最终成品时，给下载和保存按钮提供最终剧本文本。
   function finalOutputFrom(snapshot) {
-    if (!snapshot || snapshot.status !== "completed") {
-      return "";
-    }
+    if (!snapshot) return "";
     const artifacts = snapshot?.artifacts || {};
     return artifacts.final_output_text || artifacts.final_script || "";
   }
 
+  // 只展示用户真正关心的正式阶段内容，避免把中间过程直接摊开。
+  function stageDisplayPayload(snapshot) {
+    if (!snapshot) {
+      return {
+        title: "当前阶段输出",
+        output: "",
+        natural: ""
+      };
+    }
+    return {
+      title: snapshot.display_stage_title || "当前阶段输出",
+      output: snapshot.display_stage_output || "",
+      natural: snapshot.display_stage_output_natural || ""
+    };
+  }
+
+  // 当前状态下只保留必要提示，避免和“当前阶段”重复。
+  function statusNoteFrom(snapshot) {
+    if (!snapshot) return "";
+    if (snapshot.status === "failed") {
+      return "当前步骤执行失败，任务已停在上一个成功步骤。";
+    }
+    if (snapshot.status === "terminated") {
+      return "任务已终止，已保留当前进度。";
+    }
+    if (snapshot.status === "paused" || snapshot.status === "pausing") {
+      return snapshot.message || "已暂停，等待继续。";
+    }
+    if (snapshot.status === "completed") {
+      return snapshot.awaiting_user_confirmation
+        ? "剧本已生成完成，等待你确认是否满意。"
+        : "剧本已完成。";
+    }
+    const runtimeMessage = String(snapshot.message || "").trim();
+    if (!runtimeMessage) return "";
+    const markers = ["自动重试", "已继续执行", "网络波动", "模型连接波动"];
+    return markers.some((marker) => runtimeMessage.includes(marker)) ? runtimeMessage : "";
+  }
+
+  // 把后端阶段名统一折叠成前端可识别的正式阶段键。
+  function normalizeStageKey(stageKey) {
+    const mapping = {
+      framework: "framework",
+      appearance_strategy: "framework",
+      consistency: "framework",
+      episode_plan_normalize: "framework",
+      worldview: "worldview",
+      character: "characters",
+      characters: "characters",
+      scene: "scenes",
+      scenes: "scenes",
+      appearance: "scenes",
+      hook: "internal",
+      hooks: "internal",
+      dialogue: "internal",
+      dialogues: "internal",
+      script: "internal",
+      memory: "internal",
+      final: "final",
+      finalize: "final",
+      finished: "final"
+    };
+    return mapping[String(stageKey || "").trim().toLowerCase()] || "";
+  }
+
+  // 把框架阶段的多个正式产物拼成一个完整回复，方便在聊天流里整体展示。
+  function frameworkStageOutput(snapshot) {
+    const artifacts = snapshot?.artifacts || {};
+    const parts = [];
+    const title = String(artifacts.script_title || "").trim();
+    const storyOutline = String(artifacts.story_outline || "").trim();
+    const characterBios = String(artifacts.character_bios || "").trim();
+    const coreSceneInput = String(artifacts.core_scene_input || "").trim();
+    const episodePlan = String(artifacts.episode_plan || "").trim();
+
+    if (title) parts.push(`剧本标题\n${title}`);
+    if (storyOutline) parts.push(`故事大纲\n${storyOutline}`);
+    if (characterBios) parts.push(`人物小传\n${characterBios}`);
+    if (coreSceneInput) parts.push(`核心场景\n${coreSceneInput}`);
+    if (episodePlan) parts.push(`分集计划\n${episodePlan}`);
+    return parts.join("\n\n").trim();
+  }
+
+  // 只把平台真正对外公开的正式阶段产物整理成聊天消息。
+  function visibleStageMessages(snapshot) {
+    if (!snapshot) return [];
+    const artifacts = snapshot?.artifacts || {};
+    const currentDisplayKey = normalizeStageKey(snapshot.display_stage_key);
+    const currentNatural = String(snapshot.display_stage_output_natural || "").trim();
+    const messages = [
+      {
+        key: "framework",
+        title: "剧本框架",
+        output: frameworkStageOutput(snapshot)
+      },
+      {
+        key: "worldview",
+        title: "世界观",
+        output: String(artifacts.worldview || "").trim()
+      },
+      {
+        key: "characters",
+        title: "人物设定",
+        output: String(artifacts.character_summary || "").trim()
+      },
+      {
+        key: "scenes",
+        title: "核心场景",
+        output: String(artifacts.core_scene_summary || "").trim()
+      },
+      {
+        key: "final",
+        title: "最终剧本",
+        output: String(artifacts.final_output_text || artifacts.final_script || "").trim()
+      }
+    ].filter((item) => item.output);
+
+    return messages.map((item) => ({
+      ...item,
+      natural: currentDisplayKey === item.key ? currentNatural : ""
+    }));
+  }
+
+  // 内部阶段统一折叠成“思考分析”，避免把中间工作流细节直接暴露给用户。
+  function thinkingStateFrom(snapshot) {
+    if (!snapshot) return null;
+    const normalizedCurrentStage = normalizeStageKey(snapshot.current_stage);
+    const visibleMessages = visibleStageMessages(snapshot);
+    const hasVisibleCurrentOutput = Boolean(
+      visibleMessages.find((item) => item.key === normalizeStageKey(snapshot.display_stage_key))
+    );
+    const isRunning = RUNNING_STATUSES.has(snapshot.status);
+    const shouldFoldToThinking = normalizedCurrentStage === "internal" || (isRunning && !hasVisibleCurrentOutput);
+    if (!shouldFoldToThinking) return null;
+    return {
+      loading: isRunning,
+      stageLabel: snapshot.current_stage_label || "处理中",
+      note: statusNoteFrom(snapshot) || ""
+    };
+  }
+
+  function userPromptSummary(snapshot) {
+    const inputPayload = snapshot?.input_payload || {};
+    return {
+      expectation: String(inputPayload.user_expectation || "").trim(),
+      characterCount: Number(inputPayload.character_count || 0),
+      totalEpisodes: Number(inputPayload.total_episodes || 0)
+    };
+  }
+
+  function renderUserPromptBubble(snapshot) {
+    const prompt = userPromptSummary(snapshot);
+    const expectation = prompt.expectation || "还没有填写创作需求。";
+    const chips = [
+      prompt.characterCount > 0 ? `角色数量 ${prompt.characterCount}` : "",
+      prompt.totalEpisodes > 0 ? `总集数 ${prompt.totalEpisodes}` : ""
+    ].filter(Boolean);
+    return `
+      <article class="chat-message user">
+        <div class="chat-bubble-row">
+          <div class="chat-avatar">我</div>
+          <div class="chat-bubble">
+            <div class="chat-bubble-head">
+              <span class="chat-bubble-title">创作指令</span>
+              <span class="chat-bubble-meta">输入</span>
+            </div>
+            <pre class="chat-bubble-content">${escapeHtml(expectation)}</pre>
+            ${chips.length ? `<div class="chat-user-meta">${chips.map((item) => `<span class="chat-chip">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+          </div>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderAssistantStageBubble(message) {
+    return `
+      <article class="chat-message assistant">
+        <div class="chat-bubble-row">
+          <div class="chat-avatar">AI</div>
+          <div class="chat-bubble">
+            <div class="chat-bubble-head">
+              <span class="chat-bubble-title">${escapeHtml(message.title)}</span>
+              <span class="chat-bubble-meta">阶段产出</span>
+            </div>
+            <pre class="chat-bubble-content">${escapeHtml(message.output)}</pre>
+            ${message.natural ? `
+              <div class="chat-bubble-preview">
+                <span class="chat-bubble-preview-label">自然语言速览</span>
+                <p class="chat-bubble-preview-text">${escapeHtml(message.natural)}</p>
+              </div>
+            ` : ""}
+          </div>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderThinkingBubble(thinkingState) {
+    const body = thinkingState.loading
+      ? `
+        <div class="chat-thinking">
+          <span>思考分析</span>
+          <span class="chat-thinking-dots"><span></span><span></span><span></span></span>
+        </div>
+      `
+      : `<span>${escapeHtml(thinkingState.note || "当前步骤已暂停，等待你的下一步操作。")}</span>`;
+    return `
+      <article class="chat-message system">
+        <div class="chat-bubble-row">
+          <div class="chat-avatar">AI</div>
+          <div class="chat-bubble">
+            <div class="chat-bubble-head">
+              <span class="chat-bubble-title">思考分析</span>
+              <span class="chat-bubble-meta">${escapeHtml(thinkingState.stageLabel || "处理中")}</span>
+            </div>
+            <div class="chat-bubble-content">${body}</div>
+            ${thinkingState.loading ? "" : thinkingState.note ? `
+              <div class="chat-bubble-preview">
+                <span class="chat-bubble-preview-label">状态说明</span>
+                <p class="chat-bubble-preview-text">${escapeHtml(thinkingState.note)}</p>
+              </div>
+            ` : ""}
+          </div>
+        </div>
+      </article>
+    `;
+  }
+
+  // 把当前项目压成对话流，只展示用户需要看的正式回复与一个统一的思考状态。
+  function renderChatTranscript(snapshot) {
+    if (!els.chatTranscript) return;
+    if (!snapshot) {
+      els.chatTranscript.innerHTML = `
+        <section class="chat-empty-state">
+          <strong>框架到剧本，让 AI 实现你的想法</strong>
+          <p>从左侧切换已有剧本，或者直接在下方输入你的创作需求。平台会把正式阶段产物按对话方式展示，中间过程统一折叠为思考分析。</p>
+        </section>
+      `;
+      return;
+    }
+
+    const messages = [renderUserPromptBubble(snapshot)];
+    visibleStageMessages(snapshot).forEach((item) => {
+      messages.push(renderAssistantStageBubble(item));
+    });
+
+    const thinkingState = thinkingStateFrom(snapshot);
+    if (thinkingState) {
+      messages.push(renderThinkingBubble(thinkingState));
+    }
+
+    els.chatTranscript.innerHTML = messages.join("");
+    els.chatTranscript.scrollTop = els.chatTranscript.scrollHeight;
+  }
+
+  // 只渲染后端允许回退到的阶段，不展示还没执行过的未来步骤。
   function renderRollbackOptions(options, selectedValue = "") {
     if (!els.rollbackStageSelect) return;
     const normalized = Array.isArray(options) ? options : [];
@@ -496,6 +770,7 @@
     }
   }
 
+  // 当回退到正文阶段时，让用户按集数选择从哪一批开始重写。
   function renderRollbackScriptStartOptions(options, selectedValue = "") {
     if (!els.rollbackScriptStartSelect) return;
     const normalized = Array.isArray(options) ? options : [];
@@ -511,6 +786,7 @@
     els.rollbackScriptStartSelect.disabled = !show || !Boolean(state.latestSnapshot?.can_stage_rollback);
   }
 
+  // 承接后端项目快照，把运行状态、阶段输出和可操作按钮同步到页面。
   function renderSnapshot(snapshot) {
     const previousProjectId = state.projectId;
     const previousTaskId = state.taskId;
@@ -520,19 +796,23 @@
       state.taskId = null;
       state.status = "idle";
       els.statusText.textContent = isAuthenticated() ? "待开始" : "游客浏览";
-      els.messageText.textContent = isAuthenticated()
-        ? "从下方任务列表选择一个项目，或直接填写新输入开始生成。"
-        : "登录后可以开始生成、保存资产和管理公开状态。";
-      els.stageText.textContent = "尚未运行";
+      els.messageText.textContent = "";
+      els.messageText.classList.add("hidden");
+      els.stageText.textContent = "待开始";
       els.progressFill.style.width = "0%";
       els.progressText.textContent = "0%";
       els.projectText.textContent = "当前剧本：未选中";
       els.projectText.title = "当前剧本：未选中";
       els.taskText.textContent = "任务：未选中";
+      if (els.outputTitle) els.outputTitle.textContent = "当前阶段输出";
+      if (els.outputNaturalBox) {
+        els.outputNaturalBox.textContent = "当前还没有阶段成品。";
+      }
       els.finalOutputBox.textContent = "暂无内容";
+      renderChatTranscript(null);
       syncElapsedTimer(null);
       if (els.cacheNoticeText) {
-        els.cacheNoticeText.textContent = "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。请谨慎选择。";
+        els.cacheNoticeText.textContent = "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。";
       }
       renderRollbackOptions([]);
       renderRollbackScriptStartOptions([]);
@@ -546,26 +826,31 @@
     state.status = snapshot.status || "idle";
 
     const progress = Number(snapshot.progress_percent || 0);
-    const finalOutput = finalOutputFrom(snapshot);
+    const displayPayload = stageDisplayPayload(snapshot);
+    const finalOutput = displayPayload.output || "暂无内容";
     const projectTitle = runtimeProjectDisplayTitle(snapshot);
-    const statusMessage = snapshot.status === "failed"
-      ? "当前步骤执行失败，任务已停在上一个成功步骤，等待手动继续生成。"
-      : snapshot.status === "terminated"
-        ? "任务已终止，已保留当前进度。"
-        : (snapshot.message || "后台正在处理。");
+    const statusMessage = statusNoteFrom(snapshot);
 
     els.statusText.textContent = statusLabel(snapshot.status);
     els.messageText.textContent = statusMessage;
+    els.messageText.classList.toggle("hidden", !statusMessage);
     els.stageText.textContent = snapshot.current_stage_label || "正在处理";
     els.progressFill.style.width = `${progress}%`;
     els.progressText.textContent = `${progress}%`;
     els.projectText.textContent = `当前剧本：${projectTitle}`;
     els.projectText.title = `当前剧本：${projectTitle}`;
     els.taskText.textContent = `任务：${snapshot.task_id || "未创建"}`;
-    els.finalOutputBox.textContent = finalOutput || "暂无内容";
+    if (els.outputTitle) {
+      els.outputTitle.textContent = displayPayload.title || "当前阶段输出";
+    }
+    if (els.outputNaturalBox) {
+      els.outputNaturalBox.textContent = displayPayload.natural || "当前阶段产出生成后，会在这里显示更容易阅读的自然语言速览。";
+    }
+    els.finalOutputBox.textContent = finalOutput;
+    renderChatTranscript(snapshot);
     syncElapsedTimer(snapshot);
     if (els.cacheNoticeText) {
-      els.cacheNoticeText.textContent = snapshot.cache_notice || "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。请谨慎选择。";
+      els.cacheNoticeText.textContent = snapshot.cache_notice || "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。";
     }
     const snapshotChanged = (
       Number(previousProjectId || 0) !== Number(state.projectId || 0)
@@ -604,9 +889,10 @@
     syncButtons();
   }
 
+  // 根据当前项目状态统一收口按钮权限，避免用户点到不该点的操作。
   function syncButtons() {
     const hasProject = Boolean(state.projectId);
-    const hasFinal = Boolean(finalOutputFrom(state.latestSnapshot));
+    const hasFinal = Boolean(state.latestSnapshot?.has_final || finalOutputFrom(state.latestSnapshot));
     const hasConfiguredModel = state.availableModels.some((item) => item.configured !== false);
     const canConfirmCompletion = Boolean(state.latestSnapshot?.can_confirm_completion);
     const canStageRollback = Boolean(state.latestSnapshot?.can_stage_rollback);
@@ -635,6 +921,12 @@
     }
     if (els.rollbackRewriteBtn) {
       els.rollbackRewriteBtn.disabled = !isAuthenticated() || !canStageRollback || !hasRollbackSelection;
+    }
+    if (els.completionPanel) {
+      const shouldShowCompletionPanel = Boolean(
+        hasProject && (hasFinal || canConfirmCompletion || canStageRollback)
+      );
+      els.completionPanel.classList.toggle("hidden", !shouldShowCompletionPanel);
     }
   }
 
@@ -759,6 +1051,7 @@
     syncButtons();
   }
 
+  // 只把当前表单里真正需要的最小输入打包给后端启动主流程。
   function buildPayload() {
     const payload = {
       user_expectation: els.expectationInput.value.trim(),
@@ -787,10 +1080,11 @@
     return Number((running || paused || projects[0]).project_id || 0) || null;
   }
 
+  // 把后台项目压成简洁任务列表，方便在同一账号下快速切换工作台。
   function renderProjectList(projects) {
     if (!els.activeProjectList || !els.completedProjectList) return;
     if (!isAuthenticated()) {
-      const message = emptyCard("登录后才能创建和管理多任务", "登录后你可以同时开启多个项目，并在这里切换查看。");
+      const message = emptyCard("登录后查看任务");
       els.activeProjectList.innerHTML = message;
       els.completedProjectList.innerHTML = message;
       if (els.activeProjectCount) els.activeProjectCount.textContent = "0";
@@ -924,6 +1218,7 @@
     return state.projects.some((item) => RUNNING_STATUSES.has(item.status));
   }
 
+  // 新建任务或在原资产 ID 上重新启动失败任务。
   async function startGeneration() {
     if (!requireLogin()) return;
     saveDraft();
@@ -932,8 +1227,8 @@
       state.projectId && ["failed", "terminated"].includes(state.status)
     );
     els.formHint.textContent = restartingCurrentProject
-      ? "正在基于当前资产重新开始生成，请稍候。"
-      : "正在创建任务，请稍候。";
+      ? "正在基于当前资产重新开始生成。"
+      : "正在创建任务。";
     const endpoint = restartingCurrentProject
       ? `/api/projects/${state.projectId}/restart`
       : window.scriptMakerConfig.startUrl;
@@ -946,7 +1241,7 @@
     startPolling();
     els.formHint.textContent = restartingCurrentProject
       ? "当前资产已在原 ID 下重新开始生成。"
-      : "新任务已启动。你可以继续填写新的输入，再开下一个任务。";
+      : "新任务已启动。";
   }
 
   async function pauseTask() {
@@ -995,6 +1290,7 @@
     await loadCommunity();
   }
 
+  // 把项目回退到指定阶段或指定正文起始集，并保留前面已经确认的结果。
   async function rollbackRewrite() {
     if (!requireLogin()) return;
     if (!state.projectId || !state.latestSnapshot?.can_stage_rollback) return;
@@ -1029,7 +1325,7 @@
     els.expectationInput.value = "";
     els.characterCountInput.value = 5;
     els.episodeCountInput.value = 10;
-    els.formHint.textContent = "已清空当前编辑表单；后台任务和你的剧本资产都会保留。";
+    els.formHint.textContent = "输入已清空。";
   }
 
   function saveFinalScript() {
@@ -1125,7 +1421,7 @@
   async function loadAssets() {
     if (!isAuthenticated()) {
       if (els.assetsList) {
-        els.assetsList.innerHTML = emptyCard("登录后查看和处置你的剧本资产", "你可以修改、删除、设置公开或不公开。");
+        els.assetsList.innerHTML = emptyCard("登录后查看剧本资产");
       }
       return;
     }
@@ -1142,7 +1438,7 @@
   function renderAssets(assets) {
     if (!els.assetsList) return;
     if (!assets.length) {
-      els.assetsList.innerHTML = emptyCard("还没有剧本资产", "先新建一个剧本，生成结果会自动归档到这里。");
+      els.assetsList.innerHTML = emptyCard("还没有剧本资产");
       return;
     }
     els.assetsList.innerHTML = assets.map((item) => `
@@ -1173,7 +1469,7 @@
   function renderCommunity(assets) {
     if (!els.communityList) return;
     if (!assets.length) {
-      els.communityList.innerHTML = emptyCard("社区里暂时还没有公开作品", "当用户把成品设置为公开后，会展示在这里。");
+      els.communityList.innerHTML = emptyCard("社区里暂时还没有公开作品");
       return;
     }
     els.communityList.innerHTML = assets.map((item) => `

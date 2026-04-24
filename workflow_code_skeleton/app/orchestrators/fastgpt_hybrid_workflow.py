@@ -536,6 +536,7 @@ def _run_batched_generation(
     payload: WorkflowInput,
     variables: dict[str, Any],
 ) -> None:
+    """按阶段完成本地批处理：先全量钩子，再全量对白，最后全量正文与记忆。"""
     batch_mode = _effective_batch_mode()
     if batch_mode in {"fastgpt_full", "full", "legacy_full"}:
         _run_full_fastgpt_generation(state, runner, payload, variables)
@@ -548,59 +549,10 @@ def _run_batched_generation(
 
     total_episodes = int(variables[TOTAL_EPISODES])
     batch_size = max(1, int(settings.batch_size or 5))
-    all_hooks: dict[str, Any] = {}
-    all_dialogues: dict[str, Any] = {}
-    all_hooks = _dict_or_empty(variables.get(ALL_HOOKS))
-    all_dialogues = _dict_or_empty(variables.get(ALL_DIALOGUES))
-    committed_script = str(
-        variables.get(LOCAL_COMMITTED_SCRIPT) or variables.get(ALL_SCRIPT) or ""
-    ).strip()
-    script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
-    script_episode_cache = _normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES))
-    summary_by_batch = _normalize_batch_text_map(variables.get(LOCAL_SUMMARY_BY_BATCH))
-    appearance_memory_by_batch = _normalize_batch_object_map(
-        variables.get(LOCAL_APPEARANCE_MEMORY_BY_BATCH)
-    )
-    rewrite_from_stage = str(variables.get(LOCAL_REWRITE_FROM_STAGE) or "").strip().lower()
-    rewrite_start_episode = max(1, _safe_int(variables.get(BATCH_START_EPISODE), 1))
-    custom_script_rewrite = rewrite_from_stage == "script" and rewrite_start_episode > 1
-
-    if custom_script_rewrite:
-        batches = list(
-            iter_episode_batches_from(
-                rewrite_start_episode,
-                total_episodes,
-                batch_size=batch_size,
-            )
-        )
-        completed_batches = 0
-        current_batch_index = 0
-    else:
-        batches = list(iter_episode_batches(total_episodes, batch_size=batch_size))
-        completed_batches = min(
-            len(batches),
-            max(0, _safe_int(variables.get(LOCAL_COMPLETED_BATCHES), 0)),
-        )
-        current_batch_index = max(
-            completed_batches,
-            _safe_int(variables.get(LOCAL_CURRENT_BATCH_INDEX), completed_batches),
-        )
-
-    total_batches = max(1, len(batches))
-    completed_batches = min(total_batches, completed_batches)
-    current_batch_stage = str(variables.get(LOCAL_CURRENT_BATCH_STAGE) or "").strip().lower()
+    batches = list(iter_episode_batches(total_episodes, batch_size=batch_size))
     normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
     episode_alias_plan = _normalize_episode_alias_plan_object(variables.get(EPISODE_ALIAS_PLAN))
-
-    if not custom_script_rewrite:
-        saved_batch_start = max(1, _safe_int(variables.get(BATCH_START_EPISODE), 1))
-        completed_batches, current_batch_index = _resolve_batch_resume_position(
-            batches,
-            saved_batch_start=saved_batch_start,
-            current_batch_stage=current_batch_stage,
-            saved_completed_batches=completed_batches,
-            saved_current_batch_index=current_batch_index,
-        )
+    rewrite_from_stage = str(variables.get(LOCAL_REWRITE_FROM_STAGE) or "").strip().lower()
 
     if rewrite_from_stage == "final" and _has_value(variables.get(ALL_SCRIPT)):
         set_runtime_stage(
@@ -612,19 +564,85 @@ def _run_batched_generation(
         )
         variables[LOCAL_REWRITE_FROM_STAGE] = ""
         _sync_state_variables(state, variables)
-        sync_runtime_state(state)  # 新增：让 final 重写分支也成为可恢复检查点
+        sync_runtime_state(state)
         return
-    # 判断起始集和批次如果没写完就继续写
-    for index, batch in enumerate(batches):
-        if index < completed_batches:
-            continue
 
-        resume_stage = current_batch_stage if index == current_batch_index else ""
-        generated_before_batch = (
-            max(0, batch.start_episode - 1)
-            if custom_script_rewrite
-            else min(total_episodes, index * batch_size)
+    _run_hook_batches(
+        state,
+        runner,
+        payload,
+        variables,
+        batches=batches,
+        normalized_plan=normalized_plan,
+        episode_alias_plan=episode_alias_plan,
+        rewrite_from_stage=rewrite_from_stage,
+    )
+    _run_dialogue_batches(
+        state,
+        runner,
+        payload,
+        variables,
+        batches=batches,
+        normalized_plan=normalized_plan,
+        episode_alias_plan=episode_alias_plan,
+        rewrite_from_stage=rewrite_from_stage,
+    )
+    _run_script_batches(
+        state,
+        runner,
+        payload,
+        variables,
+        batches=batches,
+        normalized_plan=normalized_plan,
+        episode_alias_plan=episode_alias_plan,
+        rewrite_from_stage=rewrite_from_stage,
+    )
+
+    variables[LOCAL_CURRENT_BATCH_STAGE] = ""
+    variables[LOCAL_REWRITE_FROM_STAGE] = ""
+    _sync_state_variables(state, variables)
+    set_runtime_stage(
+        state,
+        "script",
+        "剧本正文阶段完成。",
+        progress_percent=98,
+        generated_episodes=total_episodes,
+    )
+    sync_runtime_state(state)
+
+
+def _run_hook_batches(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+    *,
+    batches: list[BatchWindow],
+    normalized_plan: dict[str, Any] | None,
+    episode_alias_plan: dict[str, Any] | None,
+    rewrite_from_stage: str,
+) -> None:
+    """承接前置设定阶段，为所有批次补齐开头冲突钩子。"""
+    total_batches = max(1, len(batches))
+    all_hooks = _dict_or_empty(variables.get(ALL_HOOKS))
+    if rewrite_from_stage in {"dialogue", "script", "final"} and _phase_object_complete(all_hooks, batches):
+        set_runtime_stage(
+            state,
+            "hook",
+            "已保留完整开头冲突钩子，直接进入后续阶段。",
+            progress_percent=56,
         )
+        return
+
+    for index, batch in enumerate(batches):
+        existing_batch_hooks = slice_object_episodes_for_batch(all_hooks, batch)
+        if _batch_object_covers_window(existing_batch_hooks, batch):
+            variables[BATCH_HOOKS] = existing_batch_hooks
+            variables[LOCAL_HOOK_CHECKPOINT_START] = batch.start_episode
+            variables[BATCH_START_EPISODE] = batch.end_episode + 1
+            variables[LOCAL_COMPLETED_BATCHES] = index + 1
+            variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
+            continue
 
         plan_for_batch = get_episode_batch_payload(
             normalized_plan,
@@ -632,203 +650,226 @@ def _run_batched_generation(
             batch_size=batch.size,
             raw_episode_plan=str(variables.get(EPISODE_PLAN) or payload.episode_plan or ""),
         )
-        _ensure_plan_matches_batch(plan_for_batch, batch=batch, stage_label="批处理上下文")
+        _ensure_plan_matches_batch(plan_for_batch, batch=batch, stage_label="开头冲突钩子")
         alias_plan_for_batch = slice_episode_alias_plan_for_batch(episode_alias_plan, batch)
 
         variables[BATCH_START_EPISODE] = batch.start_episode
+        variables[LOCAL_COMPLETED_BATCHES] = index
         variables[LOCAL_CURRENT_BATCH_INDEX] = index
-        variables[LOCAL_CURRENT_BATCH_STAGE] = resume_stage or ""  # 新增：批次阶段先预落盘
-        if not resume_stage:
-            variables.pop(BATCH_HOOKS, None)
-            variables.pop(BATCH_DIALOGUES, None)
-            variables.pop(BATCH_SCRIPT, None)
-            variables.pop(LOCAL_HOOK_CHECKPOINT_START, None)
-            variables.pop(LOCAL_DIALOGUE_CHECKPOINT_START, None)
-            variables.pop(LOCAL_SCRIPT_CHECKPOINT_START, None)
+        variables[LOCAL_CURRENT_BATCH_STAGE] = "hook"
+        variables.pop(BATCH_HOOKS, None)
         _sync_state_variables(state, variables)
-        sync_runtime_state(state)  # 新增：批次起点检查点
+        sync_runtime_state(state)
 
-        batch_base = dict(variables)
-        batch_base[EPISODE_PLAN] = plan_for_batch
-        batch_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
-        batch_base[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
+        hook_base = dict(variables)
+        hook_base[EPISODE_PLAN] = plan_for_batch
+        hook_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
+        hook_base[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
             variables.get(APPEARANCE_CONTINUITY_MEMORY),
             alias_plan_for_batch,
         )
 
-        hook_progress = 36 + int((index / total_batches) * 12)
-        force_skip_hook = rewrite_from_stage in {"dialogue", "script"} and bool(all_hooks)
-        cached_batch_hooks = (
-            slice_object_episodes_for_batch(all_hooks, batch) if force_skip_hook else {}
+        progress = 42 + int(((index + 1) / total_batches) * 14)
+        hook_output = _run_fastgpt_stage(
+            state,
+            runner,
+            STAGE_HOOKS,
+            hook_base,
+            stage_key="hook",
+            message=f"正在生成第 {batch.label} 集的开头冲突钩子。",
+            batch_label=batch.label,
+            progress_percent=progress,
         )
-
-        if force_skip_hook and cached_batch_hooks:
-            variables[BATCH_HOOKS] = cached_batch_hooks
-            variables[LOCAL_HOOK_CHECKPOINT_START] = batch.start_episode
-            variables[LOCAL_CURRENT_BATCH_STAGE] = "hook"
-            set_runtime_stage(
-                state,
-                "hook",
-                f"已保留第 {batch.label} 集开头冲突钩子，将从后续步骤开始重写。",
-                batch_label=batch.label,
-                progress_percent=hook_progress,
-            )
-        elif (
-            resume_stage in {"hook", "dialogue", "script"}
-            and _has_matching_batch_object_checkpoint(
-                variables.get(BATCH_HOOKS),
-                batch=batch,
-                saved_start_episode=variables.get(LOCAL_HOOK_CHECKPOINT_START),
-            )
-        ):
-            set_runtime_stage(
-                state,
-                "hook",
-                f"已停在第 {batch.label} 集开头冲突钩子的成功检查点。",
-                batch_label=batch.label,
-                progress_percent=hook_progress,
-            )
-        else:
-            hook_output = _run_fastgpt_stage(
-                state,
-                runner,
-                STAGE_HOOKS,
-                batch_base,
-                stage_key="hook",
-                message=f"正在生成第 {batch.label} 集的开头冲突钩子。",
-                batch_label=batch.label,
-                progress_percent=hook_progress,
-            )
-            all_hooks = merge_batch_object(all_hooks, hook_output[BATCH_HOOKS])
-            variables[BATCH_HOOKS] = hook_output[BATCH_HOOKS]
-            variables[ALL_HOOKS] = all_hooks
-            variables[LOCAL_HOOK_CHECKPOINT_START] = batch.start_episode
-            variables[LOCAL_CURRENT_BATCH_STAGE] = "hook"
-
+        all_hooks = merge_batch_object(all_hooks, hook_output[BATCH_HOOKS])
+        variables[BATCH_HOOKS] = hook_output[BATCH_HOOKS]
+        variables[ALL_HOOKS] = all_hooks
+        variables[LOCAL_HOOK_CHECKPOINT_START] = batch.start_episode
+        variables[BATCH_START_EPISODE] = batch.end_episode + 1
+        variables[LOCAL_COMPLETED_BATCHES] = index + 1
+        variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
         _sync_state_variables(state, variables)
-        sync_runtime_state(state)  # 新增：hook 成功检查点
+        sync_runtime_state(state)
 
-        dialogue_base = dict(variables)
-        dialogue_base[EPISODE_PLAN] = plan_for_batch
-        dialogue_base[BATCH_START_EPISODE] = batch.start_episode
-        dialogue_base[ALL_HOOKS] = variables.get(BATCH_HOOKS) or slice_object_episodes_for_batch(
-            all_hooks,
-            batch,
+
+def _run_dialogue_batches(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+    *,
+    batches: list[BatchWindow],
+    normalized_plan: dict[str, Any] | None,
+    episode_alias_plan: dict[str, Any] | None,
+    rewrite_from_stage: str,
+) -> None:
+    """承接开头冲突钩子阶段，为所有批次补齐角色对白。"""
+    total_batches = max(1, len(batches))
+    all_hooks = _dict_or_empty(variables.get(ALL_HOOKS))
+    all_dialogues = _dict_or_empty(variables.get(ALL_DIALOGUES))
+    if rewrite_from_stage in {"script", "final"} and _phase_object_complete(all_dialogues, batches):
+        set_runtime_stage(
+            state,
+            "dialogue",
+            "已保留完整角色对白，直接进入正文阶段。",
+            progress_percent=70,
         )
-        dialogue_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
-        dialogue_base[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
-            variables.get(APPEARANCE_CONTINUITY_MEMORY),
-            alias_plan_for_batch,
+        return
+
+    for index, batch in enumerate(batches):
+        existing_batch_dialogues = slice_object_episodes_for_batch(all_dialogues, batch)
+        if _batch_object_covers_window(existing_batch_dialogues, batch):
+            variables[BATCH_DIALOGUES] = existing_batch_dialogues
+            variables[LOCAL_DIALOGUE_CHECKPOINT_START] = batch.start_episode
+            variables[BATCH_START_EPISODE] = batch.end_episode + 1
+            variables[LOCAL_COMPLETED_BATCHES] = index + 1
+            variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
+            continue
+
+        plan_for_batch = get_episode_batch_payload(
+            normalized_plan,
+            batch.start_episode,
+            batch_size=batch.size,
+            raw_episode_plan=str(variables.get(EPISODE_PLAN) or payload.episode_plan or ""),
         )
+        _ensure_plan_matches_batch(plan_for_batch, batch=batch, stage_label="角色对话")
+        alias_plan_for_batch = slice_episode_alias_plan_for_batch(episode_alias_plan, batch)
+        hook_payload = slice_object_episodes_for_batch(all_hooks, batch)
         _ensure_batch_object_matches(
-            dialogue_base.get(ALL_HOOKS),
+            hook_payload,
             batch=batch,
             stage_label="角色对话",
             field_label="开头冲突钩子",
         )
 
-        dialogue_progress = 50 + int((index / total_batches) * 12)
-        force_skip_dialogue = rewrite_from_stage == "script" and bool(all_dialogues)
-        cached_batch_dialogues = (
-            slice_object_episodes_for_batch(all_dialogues, batch) if force_skip_dialogue else {}
-        )
-
-        if force_skip_dialogue and cached_batch_dialogues:
-            variables[BATCH_DIALOGUES] = cached_batch_dialogues
-            variables[LOCAL_DIALOGUE_CHECKPOINT_START] = batch.start_episode
-            variables[LOCAL_CURRENT_BATCH_STAGE] = "dialogue"
-            set_runtime_stage(
-                state,
-                "dialogue",
-                f"已保留第 {batch.label} 集角色对白，将从剧本正文开始重写。",
-                batch_label=batch.label,
-                progress_percent=dialogue_progress,
-            )
-        elif (
-            resume_stage in {"dialogue", "script"}
-            and _has_matching_batch_object_checkpoint(
-                variables.get(BATCH_DIALOGUES),
-                batch=batch,
-                saved_start_episode=variables.get(LOCAL_DIALOGUE_CHECKPOINT_START),
-            )
-        ):
-            set_runtime_stage(
-                state,
-                "dialogue",
-                f"已停在第 {batch.label} 集角色对话的成功检查点。",
-                batch_label=batch.label,
-                progress_percent=dialogue_progress,
-            )
-        else:
-            dialogue_output = _run_fastgpt_stage(
-                state,
-                runner,
-                STAGE_DIALOGUES,
-                dialogue_base,
-                stage_key="dialogue",
-                message=f"正在生成第 {batch.label} 集的角色对话。",
-                batch_label=batch.label,
-                progress_percent=dialogue_progress,
-            )
-            all_dialogues = merge_batch_object(all_dialogues, dialogue_output[BATCH_DIALOGUES])
-            variables[BATCH_DIALOGUES] = dialogue_output[BATCH_DIALOGUES]
-            variables[ALL_DIALOGUES] = all_dialogues
-            variables[LOCAL_DIALOGUE_CHECKPOINT_START] = batch.start_episode
-            variables[LOCAL_CURRENT_BATCH_STAGE] = "dialogue"
-
+        variables[BATCH_START_EPISODE] = batch.start_episode
+        variables[LOCAL_COMPLETED_BATCHES] = index
+        variables[LOCAL_CURRENT_BATCH_INDEX] = index
+        variables[LOCAL_CURRENT_BATCH_STAGE] = "dialogue"
+        variables.pop(BATCH_DIALOGUES, None)
         _sync_state_variables(state, variables)
-        sync_runtime_state(state)  # 新增：dialogue 成功检查点
+        sync_runtime_state(state)
 
-        script_base = _build_script_stage_context(
-            variables,
-            batch=batch,
-            plan_for_batch=plan_for_batch,
-            alias_plan_for_batch=alias_plan_for_batch,
-            committed_script=committed_script,
-            script_batches=script_batches,
-            script_episode_cache=script_episode_cache,
+        dialogue_base = dict(variables)
+        dialogue_base[EPISODE_PLAN] = plan_for_batch
+        dialogue_base[ALL_HOOKS] = hook_payload
+        dialogue_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
+        dialogue_base[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
+            variables.get(APPEARANCE_CONTINUITY_MEMORY),
+            alias_plan_for_batch,
         )
+
+        progress = 58 + int(((index + 1) / total_batches) * 14)
+        dialogue_output = _run_fastgpt_stage(
+            state,
+            runner,
+            STAGE_DIALOGUES,
+            dialogue_base,
+            stage_key="dialogue",
+            message=f"正在生成第 {batch.label} 集的角色对话。",
+            batch_label=batch.label,
+            progress_percent=progress,
+        )
+        all_dialogues = merge_batch_object(all_dialogues, dialogue_output[BATCH_DIALOGUES])
+        variables[BATCH_DIALOGUES] = dialogue_output[BATCH_DIALOGUES]
+        variables[ALL_DIALOGUES] = all_dialogues
+        variables[LOCAL_DIALOGUE_CHECKPOINT_START] = batch.start_episode
+        variables[BATCH_START_EPISODE] = batch.end_episode + 1
+        variables[LOCAL_COMPLETED_BATCHES] = index + 1
+        variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
+        _sync_state_variables(state, variables)
+        sync_runtime_state(state)
+
+
+def _run_script_batches(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+    *,
+    batches: list[BatchWindow],
+    normalized_plan: dict[str, Any] | None,
+    episode_alias_plan: dict[str, Any] | None,
+    rewrite_from_stage: str,
+) -> None:
+    """承接对白阶段，逐批生成正文并把记忆覆盖到下一批上下文里。"""
+    total_batches = max(1, len(batches))
+    all_hooks = _dict_or_empty(variables.get(ALL_HOOKS))
+    all_dialogues = _dict_or_empty(variables.get(ALL_DIALOGUES))
+    committed_script = str(
+        variables.get(LOCAL_COMMITTED_SCRIPT) or variables.get(ALL_SCRIPT) or ""
+    ).strip()
+    script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
+    script_episode_cache = _normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES))
+    summary_by_batch = _normalize_batch_text_map(variables.get(LOCAL_SUMMARY_BY_BATCH))
+    appearance_memory_by_batch = _normalize_batch_object_map(
+        variables.get(LOCAL_APPEARANCE_MEMORY_BY_BATCH)
+    )
+
+    for index, batch in enumerate(batches):
+        plan_for_batch = get_episode_batch_payload(
+            normalized_plan,
+            batch.start_episode,
+            batch_size=batch.size,
+            raw_episode_plan=str(variables.get(EPISODE_PLAN) or payload.episode_plan or ""),
+        )
+        _ensure_plan_matches_batch(plan_for_batch, batch=batch, stage_label="剧本正文")
+        alias_plan_for_batch = slice_episode_alias_plan_for_batch(episode_alias_plan, batch)
+        hook_payload = slice_object_episodes_for_batch(all_hooks, batch)
+        dialogue_payload = slice_object_episodes_for_batch(all_dialogues, batch)
         _ensure_batch_object_matches(
-            script_base.get(ALL_HOOKS),
+            hook_payload,
             batch=batch,
             stage_label="剧本正文",
             field_label="开头冲突钩子",
         )
         _ensure_batch_object_matches(
-            script_base.get(ALL_DIALOGUES),
+            dialogue_payload,
             batch=batch,
             stage_label="剧本正文",
             field_label="角色对白",
         )
 
-        script_progress = 68 + int((index / total_batches) * 26)
+        existing_batch_script = _existing_batch_script_text(
+            batch,
+            script_batches=script_batches,
+            script_episode_cache=script_episode_cache,
+        )
+        existing_summary = str(summary_by_batch.get(batch.start_episode) or "").strip()
+        existing_memory = copy.deepcopy(appearance_memory_by_batch.get(batch.start_episode) or {})
 
-        if resume_stage == "script" and _has_matching_batch_script_checkpoint(
-            variables.get(BATCH_SCRIPT),
-            batch=batch,
-            saved_start_episode=variables.get(LOCAL_SCRIPT_CHECKPOINT_START),
-        ):
-            batch_script = str(variables.get(BATCH_SCRIPT) or "").strip()
-            script_episode_cache.update(_extract_script_episode_map(batch_script, batch))
-            variables[ALL_SCRIPT] = (
-                _join_script_episode_map(script_episode_cache)
-                if script_episode_cache
-                else str(variables.get(ALL_SCRIPT) or _join_script_parts(committed_script, batch_script))
-            )
-            script_batches[batch.start_episode] = batch_script
-            variables[LOCAL_SCRIPT_BATCHES] = _string_keyed_batch_map(script_batches)
-            variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(script_episode_cache)
+        if existing_batch_script and existing_summary:
+            variables[BATCH_SCRIPT] = existing_batch_script
+            variables[LAST_SUMMARY] = existing_summary
+            if existing_memory:
+                variables[APPEARANCE_CONTINUITY_MEMORY] = existing_memory
             variables[LOCAL_SCRIPT_CHECKPOINT_START] = batch.start_episode
-            variables[LOCAL_CURRENT_BATCH_STAGE] = "script"  # 新增：恢复脚本时也显式标记
-            set_runtime_stage(
-                state,
-                "script",
-                f"已停在第 {batch.label} 集剧本正文的成功检查点。",
-                batch_label=batch.label,
-                progress_percent=script_progress,
-                generated_episodes=generated_before_batch,
+            variables[BATCH_START_EPISODE] = batch.end_episode + 1
+            variables[LOCAL_COMPLETED_BATCHES] = index + 1
+            variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
+            continue
+
+        generated_before_batch = max(0, batch.start_episode - 1)
+        variables[BATCH_START_EPISODE] = batch.start_episode
+        variables[LOCAL_COMPLETED_BATCHES] = index
+        variables[LOCAL_CURRENT_BATCH_INDEX] = index
+        variables[LOCAL_CURRENT_BATCH_STAGE] = "script"
+        _sync_state_variables(state, variables)
+        sync_runtime_state(state)
+
+        batch_script = existing_batch_script
+        if not batch_script:
+            script_base = _build_script_stage_context(
+                variables,
+                batch=batch,
+                plan_for_batch=plan_for_batch,
+                alias_plan_for_batch=alias_plan_for_batch,
+                committed_script=committed_script,
+                script_batches=script_batches,
+                script_episode_cache=script_episode_cache,
             )
-        else:
+            script_base[ALL_HOOKS] = hook_payload
+            script_base[ALL_DIALOGUES] = dialogue_payload
+            progress = 72 + int((index / total_batches) * 20)
             script_output = _run_fastgpt_stage(
                 state,
                 runner,
@@ -837,25 +878,27 @@ def _run_batched_generation(
                 stage_key="script",
                 message=f"正在生成第 {batch.label} 集的剧本正文。",
                 batch_label=batch.label,
-                progress_percent=script_progress,
+                progress_percent=progress,
                 generated_episodes=generated_before_batch,
             )
             batch_script = script_output[BATCH_SCRIPT].strip()
             variables[BATCH_SCRIPT] = batch_script
             script_episode_cache.update(_extract_script_episode_map(batch_script, batch))
-            if script_episode_cache:
-                variables[ALL_SCRIPT] = _join_script_episode_map(script_episode_cache)
-            else:
-                variables[ALL_SCRIPT] = _join_script_parts(committed_script, batch_script)
             script_batches[batch.start_episode] = batch_script
             variables[LOCAL_SCRIPT_BATCHES] = _string_keyed_batch_map(script_batches)
             variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(script_episode_cache)
             variables[LOCAL_SCRIPT_CHECKPOINT_START] = batch.start_episode
-            variables[LOCAL_CURRENT_BATCH_STAGE] = "script"
+            if script_episode_cache:
+                variables[ALL_SCRIPT] = _join_script_episode_map(script_episode_cache)
+            else:
+                variables[ALL_SCRIPT] = _join_script_parts(committed_script, batch_script)
+            committed_script = str(variables.get(ALL_SCRIPT) or "").strip()
+            _sync_state_variables(state, variables)
+            sync_runtime_state(state)
+        else:
+            variables[BATCH_SCRIPT] = batch_script
 
-        _sync_state_variables(state, variables)
-        sync_runtime_state(state)  # 新增：script 正文先落盘，再去做 memory
-
+        memory_progress = 78 + int(((index + 1) / total_batches) * 20)
         memory_output = _run_fastgpt_stage(
             state,
             runner,
@@ -864,13 +907,12 @@ def _run_batched_generation(
                 BATCH_SCRIPT: batch_script,
                 LAST_SUMMARY: variables.get(LAST_SUMMARY) or "",
                 APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING) or {},
-                CHARACTER_ALIAS_NAMING_RULES: variables.get(CHARACTER_ALIAS_NAMING_RULES)
-                or "",
+                CHARACTER_ALIAS_NAMING_RULES: variables.get(CHARACTER_ALIAS_NAMING_RULES) or "",
             },
             stage_key="script",
             message=f"正在整理第 {batch.label} 集的上下文记忆。",
             batch_label=batch.label,
-            progress_percent=70 + int(((index + 1) / total_batches) * 26),
+            progress_percent=memory_progress,
             generated_episodes=batch.end_episode,
             max_retries=0,
         )
@@ -889,26 +931,43 @@ def _run_batched_generation(
         variables[LOCAL_APPEARANCE_MEMORY_BY_BATCH] = _string_keyed_batch_map(
             appearance_memory_by_batch
         )
-        variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(script_episode_cache)
         variables[BATCH_START_EPISODE] = batch.end_episode + 1
         variables[LOCAL_COMPLETED_BATCHES] = index + 1
-        variables[LOCAL_COMMITTED_SCRIPT] = variables[ALL_SCRIPT]
-        committed_script = str(variables.get(LOCAL_COMMITTED_SCRIPT) or "").strip()
+        variables[LOCAL_COMMITTED_SCRIPT] = variables.get(ALL_SCRIPT) or committed_script
+        committed_script = str(variables.get(LOCAL_COMMITTED_SCRIPT) or committed_script).strip()
         variables[LOCAL_CURRENT_BATCH_INDEX] = index + 1
         variables[LOCAL_CURRENT_BATCH_STAGE] = ""
-        variables[LOCAL_REWRITE_FROM_STAGE] = ""
-
         _sync_state_variables(state, variables)
-        sync_runtime_state(state)  # 新增：memory/提交完成检查点
+        sync_runtime_state(state)
 
-    set_runtime_stage(
-        state,
-        "script",
-        "剧本正文阶段完成。",
-        progress_percent=98,
-        generated_episodes=total_episodes,
-    )
-    sync_runtime_state(state)
+
+def _phase_object_complete(value: Any, batches: list[BatchWindow]) -> bool:
+    """判断某个阶段的累计对象是否已经覆盖了全部批次。"""
+    payload = _dict_or_empty(value)
+    if not payload:
+        return False
+    return all(_batch_object_covers_window(slice_object_episodes_for_batch(payload, batch), batch) for batch in batches)
+
+
+def _existing_batch_script_text(
+    batch: BatchWindow,
+    *,
+    script_batches: dict[int, str],
+    script_episode_cache: dict[int, str],
+) -> str:
+    """优先从已缓存的正文里取出当前批次文本，避免重复请求同一批。"""
+    cached_batch = str(script_batches.get(batch.start_episode) or "").strip()
+    if cached_batch and _has_matching_batch_script_checkpoint(cached_batch, batch=batch, saved_start_episode=batch.start_episode):
+        return cached_batch
+
+    episode_parts = [
+        text
+        for episode, text in sorted(script_episode_cache.items())
+        if batch.start_episode <= episode <= batch.end_episode and str(text or "").strip()
+    ]
+    if len(episode_parts) == batch.size:
+        return _join_script_parts(*episode_parts)
+    return ""
 
 def _effective_batch_mode() -> str:
     mode = settings.fastgpt_batch_mode
@@ -1169,6 +1228,7 @@ def _build_script_stage_context(
     script_batches: dict[int, str] | None = None,
     script_episode_cache: dict[int, str] | None = None,
 ) -> dict[str, Any]:
+    """承接对白阶段，把当前批正文真正需要的最小上下文收束出来再发给 FastGPT。"""
     context = dict(variables)
     context[EPISODE_PLAN] = plan_for_batch
     context[BATCH_START_EPISODE] = batch.start_episode
@@ -1216,6 +1276,7 @@ def _build_previous_script_context(
     *,
     current_batch_start: int,
 ) -> str:
+    """从已完成正文里提炼前情，只把当前批之前最需要的连续正文带进来。"""
     if current_batch_start <= 1:
         return ""
 
@@ -1242,6 +1303,7 @@ def _apply_script_stage_length_guard(
     context: dict[str, Any],
     initial_estimate: int | None = None,
 ) -> tuple[int, list[str]]:
+    """在不破坏批次逻辑的前提下，优先压缩最容易超长的正文上下文字段。"""
     estimate = initial_estimate or _estimate_stage_payload_length(STAGE_SCRIPT, context)
     if estimate <= SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT:
         return estimate, []
@@ -2286,6 +2348,7 @@ def slice_episode_alias_plan_for_batch(
     episode_alias_plan: Any,
     batch: BatchWindow,
 ) -> dict[str, Any] | None:
+    """从逐集 alias 计划里切出当前批次，让命名规则跟着批次一起走。"""
     normalized = _normalize_episode_alias_plan_object(episode_alias_plan)
     if not normalized:
         return None
@@ -2370,6 +2433,7 @@ def _appearance_memory_for_batch(
     current_memory: Any,
     alias_plan_for_batch: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    """承接上一批外观记忆，预演本批角色该沿用哪些 alias 和服装状态。"""
     memory = _normalize_appearance_memory(current_memory) or {
         "last_processed_episode": 0,
         "current_aliases": {},
@@ -2476,6 +2540,7 @@ def _current_batch_object_payload(
     *,
     batch: BatchWindow,
 ) -> dict[str, Any]:
+    """优先拿当前批缓存，拿不到时再从全量对象里切出本批所需集数。"""
     current_payload = _dict_or_empty(current_value)
     if _batch_object_covers_window(current_payload, batch):
         return current_payload
@@ -2539,6 +2604,7 @@ def _ensure_plan_matches_batch(
     batch: BatchWindow,
     stage_label: str,
 ) -> None:
+    """校验当前批分集计划是否真的只覆盖了本批，避免 1-5 和 6-10 串批。"""
     episode_numbers = _extract_batch_episode_numbers_from_plan(plan_payload)
     if not episode_numbers:
         logger.warning(
@@ -2575,6 +2641,7 @@ def _extract_batch_episode_numbers_from_plan(plan_payload: Any) -> list[int]:
 
 
 def slice_object_episodes_for_batch(value: Any, batch: BatchWindow) -> dict[str, Any]:
+    """把 hooks / dialogues 这类按集对象切成当前批窗口，供下游阶段直接消费。"""
     payload = _dict_or_empty(value)
     if not payload:
         return {}
@@ -2624,6 +2691,7 @@ def get_episode_batch_payload(
     batch_size: int,
     raw_episode_plan: str,
 ) -> str:
+    """优先从规范化分集计划里切本批 JSON，异常时再回退原始文本切片。"""
     batch_window = BatchWindow(
         start_episode=start_episode,
         end_episode=max(start_episode, start_episode + max(1, batch_size) - 1),
@@ -2670,6 +2738,7 @@ def _serialize_normalized_episode_plan(normalized_plan: dict[str, Any]) -> str:
 
 
 def _normalize_episode_plan_object(value: Any) -> dict[str, Any] | None:
+    """把 FastGPT 返回的分集计划统一整理成代码里稳定可切片的结构。"""
     if value in (None, ""):
         return None
 

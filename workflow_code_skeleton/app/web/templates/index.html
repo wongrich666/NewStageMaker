@@ -3,220 +3,166 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>IDEA TO SCRIPT  剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260423-2">
+  <title>IDEA TO SCRIPT 剧本生成工作台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260424-2">
 </head>
-<body>
-  <main class="shell">
-    <header class="topbar">
-      <div class="topbar-main">
-        <a class="page-back-link" href="{{ url_for('index', auth_token=current_auth_token) }}">返回首页</a>
-        <a class="brand-mark" href="{{ url_for('index', auth_token=current_auth_token) }}">
-          <span>剧</span>
-          <strong>IDEA TO SCRIPT  剧本生成工作台</strong>
-        </a>
+<body class="workspace-body">
+  <main class="chat-workspace-shell">
+    <aside id="workspaceCard" class="workspace-sidebar">
+      <div class="sidebar-top">
+        <div class="sidebar-brand-row">
+          <button id="sidebarToggleBtn" class="sidebar-toggle" type="button" aria-label="折叠侧边栏">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+          <a class="sidebar-brand" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">
+            <span class="sidebar-brand-mark">剧</span>
+            <span class="sidebar-brand-text">
+              <strong>IDEA TO SCRIPT</strong>
+              <em>剧本资产会话</em>
+            </span>
+          </a>
+        </div>
+        <a class="sidebar-home-link" href="{{ url_for('index', auth_token=current_auth_token) }}">返回首页</a>
       </div>
-      <nav class="nav-links">
-        <a href="{{ url_for('index', auth_token=current_auth_token) }}">首页</a>
-        <a href="#create">新建剧本</a>
-        <a href="#tools">辅助工具</a>
-        <a href="#guide">使用说明</a>
-        <a href="#community">社区好剧</a>
-      </nav>
-      <div class="user-chip">
+
+      <div class="sidebar-primary">
+        <button id="newScriptBtn" class="sidebar-create-btn" type="button">新建剧本</button>
+      </div>
+
+      <section class="sidebar-section">
+        <div class="sidebar-section-head">
+          <span>资产会话</span>
+          <button id="refreshProjectsBtn" class="sidebar-refresh-btn" type="button">刷新</button>
+        </div>
+        <div class="sidebar-folders">
+          <details id="activeWorkspaceFolder" class="workspace-folder" open>
+            <summary>
+              <span>生成中的剧本</span>
+            </summary>
+            <div id="activeProjectList" class="workspace-compact-list"></div>
+          </details>
+          <details id="completedWorkspaceFolder" class="workspace-folder">
+            <summary>
+              <span>已完成剧本</span>
+            </summary>
+            <div id="completedProjectList" class="workspace-compact-list"></div>
+          </details>
+        </div>
+      </section>
+
+      <div class="sidebar-footer">
         {% if current_user %}
-          <span class="avatar">{{ current_user.username[:1] }}</span>
-          <button id="openProfileBtn" class="link-button" type="button">个人中心</button>
-          <a class="logout-link" href="{{ url_for('logout', auth_token=current_auth_token) }}">退出</a>
+          <button id="openProfileBtn" class="sidebar-profile-btn" type="button">
+            <span class="sidebar-profile-avatar">{{ current_user.username[:1] }}</span>
+            <span class="sidebar-footer-text">个人中心</span>
+          </button>
+          <a class="sidebar-logout-link" href="{{ url_for('logout', auth_token=current_auth_token) }}">退出登录</a>
         {% else %}
-          <span class="avatar">游</span>
-          <a href="{{ url_for('login_page') }}">登录</a>
-          <a class="logout-link" href="{{ url_for('register_page') }}">注册</a>
+          <a class="sidebar-profile-btn" href="{{ url_for('login_page') }}">
+            <span class="sidebar-profile-avatar">游</span>
+            <span class="sidebar-footer-text">登录后创作</span>
+          </a>
+          <a class="sidebar-logout-link" href="{{ url_for('register_page') }}">注册</a>
         {% endif %}
       </div>
-    </header>
+    </aside>
 
-    <section class="landing-hero">
-      <div class="hero-panel">
-        <p class="eyebrow">AI Script Studio</p>
-        <h1>框架到剧本，让 AI 实现你的想法</h1>
-        <p class="hero-copy">登录后可以同时生成多个剧本；点击【新建剧本】会直接打开新的工作页面。只要不退出登录，离开页面后工作流也会继续运行。</p>
-        <div class="hero-actions">
-          <button id="newScriptBtn" class="btn btn-primary" type="button">新建剧本</button>
-          <a class="btn btn-ghost btn-link" href="#tools">使用辅助工具</a>
-        </div>
-      </div>
-    </section>
-
-    <section id="create" class="runtime card">
-      <div class="runtime-head">
-        <div>
-          <p class="runtime-label">当前状态</p>
-          <h2 id="statusText">待开始</h2>
-          <div id="projectText" class="runtime-project-badge">当前剧本：未选中</div>
-          <p id="messageText" class="muted">填写创作输入后点击开始生成。</p>
-        </div>
-        <div class="runtime-meta">
-          <div class="metric">
-            <span>当前阶段</span>
-            <strong id="stageText">尚未运行</strong>
+    <section class="chat-main">
+      <header class="workspace-runtime runtime">
+        <div class="runtime-grid">
+          <div class="runtime-block runtime-block-project">
+            <span class="runtime-kicker">当前剧本</span>
+            <strong id="projectText">当前剧本：未选中</strong>
           </div>
-          <div class="metric">
-            <span>已等待时长</span>
+          <div class="runtime-block">
+            <span class="runtime-kicker">当前状态</span>
+            <strong id="statusText">待开始</strong>
+          </div>
+          <div class="runtime-block">
+            <span class="runtime-kicker">当前阶段</span>
+            <strong id="stageText">待开始</strong>
+          </div>
+          <div class="runtime-block">
+            <span class="runtime-kicker">等待时长</span>
             <strong id="waitDurationText">00:00</strong>
           </div>
         </div>
-      </div>
-      <div class="progress-bar">
-        <div id="progressFill" class="progress-fill"></div>
-      </div>
-      <div class="runtime-foot">
-        <span id="progressText">0%</span>
-        <span id="taskText">任务：未创建</span>
-      </div>
-      <div class="control-row">
-        <button id="startBtn" class="btn btn-primary">开始生成</button>
-        <button id="pauseBtn" class="btn btn-secondary" disabled>暂停生成</button>
-        <button id="resumeBtn" class="btn btn-secondary" disabled>继续生成</button>
-        <button id="terminateBtn" class="btn btn-danger" disabled>终止生成</button>
-        <button id="clearBtn" class="btn btn-ghost">清空输入</button>
-        <button id="saveBtn" class="btn btn-secondary" disabled>保存最终剧本</button>
-      </div>
-      <div class="completion-panel">
-        <div class="completion-copy">
-          <h3>缓存与完成确认</h3>
-          <p id="cacheNoticeText">系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。请谨慎选择。</p>
+        <p id="messageText" class="runtime-note hidden"></p>
+        <div class="progress-bar progress-bar-fixed">
+          <div id="progressFill" class="progress-fill"></div>
         </div>
-        <div class="completion-actions">
-          <button id="confirmCompletionBtn" class="btn btn-success" type="button" disabled>确认剧本满意完成（谨慎选择，不可回退修改）</button>
-          <div class="rollback-group">
-            <select id="rollbackStageSelect" class="compact-select" disabled>
-              <option value="">选择回退步骤</option>
-            </select>
-            <select id="rollbackScriptStartSelect" class="compact-select hidden" disabled>
-              <option value="">选择正文开始重写的集数</option>
-            </select>
-            <button id="rollbackRewriteBtn" class="btn btn-secondary" type="button" disabled>部分步骤回退重写</button>
-          </div>
+        <div class="runtime-foot">
+          <span id="progressText">0%</span>
+          <span id="taskText">任务：未选中</span>
         </div>
-      </div>
-    </section>
+      </header>
 
-    <div class="layout">
-      <div class="workbench-column">
-        <section class="card form-card">
-          <div class="card-head">
-            <h3>创作输入</h3>
-            <p>这里只需要填写最少输入项；剧本标题、故事大纲、人物小传、核心场景、分集计划都会由前置框架工作流自动生成。</p>
-          </div>
-
-          <div class="field-grid compact-grid">
-            <label class="field">
-              <span>模型选择</span>
-              <select id="modelSelect"></select>
-            </label>
-            <label class="field">
-              <span>角色数量</span>
-              <input id="characterCountInput" type="number" min="1" max="50" value="5">
-            </label>
-            <label class="field">
-              <span>总集数</span>
-              <input id="episodeCountInput" type="number" min="1" max="100" value="10">
-            </label>
-          </div>
-
-          <label class="field">
-            <span>想要的剧本</span>
-            <textarea id="expectationInput" placeholder="例如：我想要一个60集的末世求生复仇故事，前期压迫感强，中期升级爽，后期反转大。"></textarea>
-          </label>
-
-          <p id="formHint" class="hint">你只需要填写想要的剧本、角色数量和总集数；剧本标题、故事大纲、人物小传、核心场景、分集计划，以及服装前置策略都会由前置智能体自动生成。</p>
-        </section>
-
-        <section id="workspaceCard" class="card workspace-card">
-          <div class="section-head compact-head">
-            <div>
-              <p class="eyebrow">Workspace</p>
-              <h2>我的任务</h2>
-              <p>默认折叠，展开后查看任务进度；鼠标离开 10 秒会自动收起。</p>
-            </div>
-            <button id="refreshProjectsBtn" class="btn btn-secondary" type="button">刷新任务</button>
-          </div>
-          <div class="workspace-folders">
-            <details id="activeWorkspaceFolder" class="workspace-folder">
-              <summary>
-                <span>生成中的剧本</span>
-              </summary>
-              <div id="activeProjectList" class="workspace-compact-list"></div>
-            </details>
-            <details id="completedWorkspaceFolder" class="workspace-folder">
-              <summary>
-                <span>已完成剧本</span>
-              </summary>
-              <div id="completedProjectList" class="workspace-compact-list"></div>
-            </details>
-          </div>
-        </section>
-      </div>
-
-      <section class="card result-card">
-        <div class="card-head">
-          <h3>最终完整剧本</h3>
-          <p>生成完成后，这里只显示最终拼接版完整稿件。</p>
-        </div>
-        <pre id="finalOutputBox" class="output-box large-output">暂无内容</pre>
+      <section class="chat-view">
+        <div id="chatTranscript" class="chat-transcript"></div>
       </section>
-    </div>
 
-    <section id="tools" class="card tool-card">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">One-Shot Tools</p>
-          <h2>辅助工作流</h2>
-          <p>单次调用，不影响主剧本生成流程。</p>
+      <section class="composer-card">
+        <div class="visually-hidden" aria-hidden="true">
+          <label>
+            <span>模型选择</span>
+            <select id="modelSelect"></select>
+          </label>
         </div>
-      </div>
-      <div class="tool-tabs">
-        <button class="tool-tab active" data-tool="hot_review" type="button">爆款文审核</button>
-        <button class="tool-tab" data-tool="reskin" type="button">换皮</button>
-        <button class="tool-tab" data-tool="punchup" type="button">增加爽感</button>
-        <button class="tool-tab" data-tool="character_reskin" type="button">只换人设</button>
-      </div>
-      <div id="toolForms" class="tool-forms"></div>
-      <div class="control-row">
-        <button id="runToolBtn" class="btn btn-primary" type="button">运行当前工具</button>
-      </div>
-      <pre id="toolOutputBox" class="output-box tool-output">工具结果会显示在这里。</pre>
-    </section>
 
-    <section id="guide" class="guide-grid">
-      <article class="card guide-card">
-        <span>1</span>
-        <h3>登录后创建</h3>
-        <p>填写创作材料，随时都可以继续新建下一个任务。</p>
-      </article>
-      <article class="card guide-card">
-        <span>2</span>
-        <h3>多任务并行</h3>
-        <p>同一账号可同时跑多个任务，离开页面后也会继续执行。</p>
-      </article>
-      <article class="card guide-card">
-        <span>3</span>
-        <h3>随时切换恢复</h3>
-        <p>回来后从任务列表或个人中心选中项目，即可继续管理和下载。</p>
-      </article>
-    </section>
-
-    <section id="community" class="card community-card">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">Community Picks</p>
-          <h2>社区共享好剧</h2>
-          <p>展示用户设置为公开成品的剧本。</p>
+        <div class="composer-grid">
+          <label class="composer-field composer-field-wide">
+            <span>想要的剧本</span>
+            <textarea id="expectationInput" placeholder="例如：我想要一个 60 集的末世求生复仇故事，前期压迫感强，中期升级爽，后期大反转。"></textarea>
+          </label>
+          <label class="composer-field">
+            <span>角色数量</span>
+            <input id="characterCountInput" type="number" min="1" max="50" value="5">
+          </label>
+          <label class="composer-field">
+            <span>总集数</span>
+            <input id="episodeCountInput" type="number" min="1" max="100" value="10">
+          </label>
         </div>
-        <button id="refreshCommunityBtn" class="btn btn-secondary" type="button">刷新社区</button>
-      </div>
-      <div id="communityList" class="community-grid"></div>
+
+        <div class="composer-actions">
+          <button id="startBtn" class="btn btn-primary" type="button">开始生成</button>
+          <button id="pauseBtn" class="btn btn-secondary" type="button" disabled>暂停</button>
+          <button id="resumeBtn" class="btn btn-secondary" type="button" disabled>继续</button>
+          <button id="terminateBtn" class="btn btn-danger" type="button" disabled>结束</button>
+          <button id="clearBtn" class="btn btn-ghost" type="button">清空</button>
+          <button id="saveBtn" class="btn btn-secondary" type="button" disabled>下载成品</button>
+        </div>
+
+        <p id="formHint" class="composer-hint">只需要填写故事期待、角色数量和总集数。</p>
+
+        <div id="completionPanel" class="completion-panel compact-completion">
+          <p id="cacheNoticeText" class="muted">系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。</p>
+          <div class="completion-actions">
+            <button id="confirmCompletionBtn" class="btn btn-success" type="button" disabled>确认剧本满意完成</button>
+            <div class="rollback-group">
+              <select id="rollbackStageSelect" class="compact-select" disabled>
+                <option value="">选择回退步骤</option>
+              </select>
+              <select id="rollbackScriptStartSelect" class="compact-select hidden" disabled>
+                <option value="">选择正文开始重写的集数</option>
+              </select>
+              <button id="rollbackRewriteBtn" class="btn btn-secondary" type="button" disabled>回退重写</button>
+            </div>
+          </div>
+        </div>
+
+        <section class="hidden" aria-hidden="true">
+          <h3 id="outputTitle">当前阶段输出</h3>
+          <pre id="outputNaturalBox"></pre>
+          <pre id="finalOutputBox"></pre>
+          <div id="toolForms"></div>
+          <button id="runToolBtn" type="button"></button>
+          <pre id="toolOutputBox"></pre>
+          <div id="communityList"></div>
+        </section>
+      </section>
     </section>
   </main>
 
@@ -227,7 +173,6 @@
         <div>
           <p class="eyebrow">Profile</p>
           <h2>个人中心</h2>
-          <p>管理账号和剧本资产。</p>
         </div>
         <button id="closeProfileBtn" class="btn btn-ghost" type="button">关闭</button>
       </div>
@@ -236,7 +181,6 @@
         <form id="usernameForm" class="card mini-card">
           <div class="card-head">
             <h3>修改用户名</h3>
-            <p>用户名不能重复。</p>
           </div>
           <label class="field">
             <span>新用户名</span>
@@ -249,7 +193,6 @@
         <form id="passwordForm" class="card mini-card">
           <div class="card-head">
             <h3>修改密码</h3>
-            <p>密码至少 6 位。</p>
           </div>
           <label class="field">
             <span>当前密码</span>
@@ -270,7 +213,6 @@
       <div class="section-head compact-head">
         <div>
           <h3>我的资产</h3>
-          <p>修改、删除、公开或隐藏你的剧本。</p>
         </div>
         <button id="refreshAssetsBtn" class="btn btn-secondary" type="button">刷新资产</button>
       </div>
@@ -329,6 +271,6 @@
       loginUrl: "{{ url_for('login_page') }}"
     };
   </script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260423-2"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260424-2"></script>
 </body>
 </html>

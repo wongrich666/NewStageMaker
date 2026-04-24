@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import threading
 import uuid
@@ -104,6 +105,9 @@ FAILED_PUBLIC_MESSAGE = "当前步骤执行失败，任务已停在上一个成�
 TERMINATED_PUBLIC_MESSAGE = "任务已终止，已保留当前阶段和中间产物。"
 STORY_TEASER_ARTIFACT = "story_teaser"
 STORY_TEASER_SOURCE_ARTIFACT = "story_teaser_source"
+STAGE_PREVIEW_TEXT_ARTIFACT = "stage_preview_text"
+STAGE_PREVIEW_STAGE_ARTIFACT = "stage_preview_stage"
+STAGE_PREVIEW_SOURCE_HASH_ARTIFACT = "stage_preview_source_hash"
 PUBLIC_INPUT_PAYLOAD_KEYS = (
     "title",
     "story_outline",
@@ -114,6 +118,12 @@ PUBLIC_INPUT_PAYLOAD_KEYS = (
 PUBLIC_ARTIFACT_KEYS = (
     "script_title",
     "story_outline",
+    "character_bios",
+    "core_scene_input",
+    "episode_plan",
+    "worldview",
+    "character_summary",
+    "core_scene_summary",
 )
 PUBLIC_COMPLETED_ARTIFACT_KEYS = (
     "final_script",
@@ -1431,6 +1441,7 @@ class TaskManager:
         )
 
     def _public_artifacts(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        """只把前端允许展示的正式产物挑出来，避免中间变量泄露。"""
         allowed_keys = list(PUBLIC_ARTIFACT_KEYS)
         if str(snapshot.get("status") or "") == "completed":
             allowed_keys.extend(PUBLIC_COMPLETED_ARTIFACT_KEYS)
@@ -1439,15 +1450,297 @@ class TaskManager:
             tuple(allowed_keys),
         )
 
+    def _available_rollback_stage_options(self, snapshot: dict[str, Any]) -> list[tuple[str, str]]:
+        """只返回当前项目已经走到的阶段，避免前端展示未来还没执行的回退选项。"""
+        max_index = self._max_reached_rollback_stage_index(snapshot)
+        if max_index < 0:
+            return []
+        return list(ROLLBACK_STAGE_OPTIONS[: max_index + 1])
+
+    def _max_reached_rollback_stage_index(self, snapshot: dict[str, Any]) -> int:
+        """根据正式产物、缓存变量和当前阶段，推断用户真正已经到达的最深阶段。"""
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        debug_state = snapshot.get("debug_state") if isinstance(snapshot.get("debug_state"), dict) else {}
+        variables = debug_state.get("variables") if isinstance(debug_state.get("variables"), dict) else {}
+
+        reached: set[str] = set()
+        if any(str(artifacts.get(key) or "").strip() for key in ("script_title", "story_outline", "character_bios", "core_scene_input", "episode_plan")):
+            reached.add("framework")
+        if any(str(variables.get(key) or "").strip() for key in (
+            USER_CONTENT_BASELINE,
+            CHARACTER_APPEARANCE_REQUIREMENTS,
+            CHARACTER_ALIAS_NAMING_RULES,
+            OUTFIT_SWITCH_RULES,
+        )):
+            reached.add("appearance_strategy")
+        if variables.get(IS_CONSISTENT) is not None:
+            reached.add("consistency")
+        if variables.get(NORMALIZED_EPISODE_PLAN):
+            reached.add("episode_plan_normalize")
+        if str(artifacts.get("worldview") or "").strip():
+            reached.add("worldview")
+        if str(artifacts.get("character_summary") or "").strip():
+            reached.add("characters")
+        if str(artifacts.get("core_scene_summary") or "").strip():
+            reached.add("scenes")
+        if variables.get(APPEARANCE_MAPPING):
+            reached.add("appearance")
+        if variables.get(ALL_HOOKS) or variables.get(BATCH_HOOKS):
+            reached.add("hooks")
+        if variables.get(ALL_DIALOGUES) or variables.get(BATCH_DIALOGUES):
+            reached.add("dialogues")
+        if variables.get(ALL_SCRIPT) or variables.get(BATCH_SCRIPT):
+            reached.add("script")
+        if any(str(artifacts.get(key) or "").strip() for key in ("final_output_text", "final_script")):
+            reached.add("final")
+
+        current_stage = self._snapshot_stage_to_rollback_stage(snapshot, variables)
+        if current_stage:
+            reached.add(current_stage)
+
+        indexes = [index for index, (key, _) in enumerate(ROLLBACK_STAGE_OPTIONS) if key in reached]
+        return max(indexes) if indexes else -1
+
+    def _snapshot_stage_to_rollback_stage(
+        self,
+        snapshot: dict[str, Any],
+        variables: dict[str, Any],
+    ) -> str:
+        """把运行时阶段名映射成回退阶段名，保证前后端对阶段理解一致。"""
+        current_stage = str(snapshot.get("current_stage") or "").strip().lower()
+        if current_stage == "validation":
+            return "episode_plan_normalize" if variables.get(NORMALIZED_EPISODE_PLAN) else "consistency"
+        mapping = {
+            "framework": "framework",
+            "appearance_strategy": "appearance_strategy",
+            "worldview": "worldview",
+            "character": "characters",
+            "characters": "characters",
+            "scene": "scenes",
+            "scenes": "scenes",
+            "appearance": "appearance",
+            "hook": "hooks",
+            "hooks": "hooks",
+            "dialogue": "dialogues",
+            "dialogues": "dialogues",
+            "script": "script",
+            "finalize": "final",
+            "final": "final",
+            "finished": "final",
+        }
+        return mapping.get(current_stage, "")
+
+    def _current_stage_display_payload(
+        self,
+        snapshot: dict[str, Any],
+        artifacts: dict[str, Any],
+    ) -> dict[str, str]:
+        """只挑用户需要看的正式阶段内容，并补一段自然语言版摘要减轻等待焦虑。"""
+        stage_order = ("framework", "worldview", "characters", "scenes", "final")
+        stage_title_map = {
+            "framework": "剧本框架",
+            "worldview": "世界观",
+            "characters": "人物设定",
+            "scenes": "核心场景",
+            "final": "最终剧本",
+        }
+        stage_outputs = {
+            "framework": self._framework_stage_output_text(artifacts),
+            "worldview": str(artifacts.get("worldview") or "").strip(),
+            "characters": str(artifacts.get("character_summary") or "").strip(),
+            "scenes": str(artifacts.get("core_scene_summary") or "").strip(),
+            "final": str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip(),
+        }
+
+        current_stage = self._snapshot_stage_to_rollback_stage(
+            snapshot,
+            (snapshot.get("debug_state") or {}).get("variables") if isinstance(snapshot.get("debug_state"), dict) else {},
+        )
+        stage_ceiling_map = {
+            "framework": "framework",
+            "appearance_strategy": "framework",
+            "consistency": "framework",
+            "episode_plan_normalize": "framework",
+            "worldview": "worldview",
+            "characters": "characters",
+            "scenes": "scenes",
+            "appearance": "scenes",
+            "hooks": "scenes",
+            "dialogues": "scenes",
+            "script": "scenes",
+            "final": "final",
+        }
+        ceiling_stage = stage_ceiling_map.get(current_stage, "framework")
+        ceiling_index = stage_order.index(ceiling_stage)
+
+        chosen_stage = ""
+        for stage_key in reversed(stage_order[: ceiling_index + 1]):
+            if stage_outputs.get(stage_key):
+                chosen_stage = stage_key
+                break
+        if not chosen_stage:
+            for stage_key in stage_order:
+                if stage_outputs.get(stage_key):
+                    chosen_stage = stage_key
+                    break
+        if not chosen_stage:
+            return {
+                "stage_key": "",
+                "stage_title": "当前阶段输出",
+                "output": "",
+                "natural_output": "",
+            }
+
+        raw_output = stage_outputs[chosen_stage]
+        natural_output = self._stage_preview_text(
+            snapshot,
+            stage_key=chosen_stage,
+            stage_title=stage_title_map[chosen_stage],
+            raw_output=raw_output,
+        )
+        return {
+            "stage_key": chosen_stage,
+            "stage_title": stage_title_map[chosen_stage],
+            "output": raw_output,
+            "natural_output": natural_output,
+        }
+
+    def _framework_stage_output_text(self, artifacts: dict[str, Any]) -> str:
+        """把框架阶段的几个正式字段拼成一份可直接阅读的阶段成品。"""
+        title = str(artifacts.get("script_title") or "").strip()
+        story_outline = str(artifacts.get("story_outline") or "").strip()
+        character_bios = str(artifacts.get("character_bios") or "").strip()
+        core_scene_input = str(artifacts.get("core_scene_input") or "").strip()
+        episode_plan = str(artifacts.get("episode_plan") or "").strip()
+        parts: list[str] = []
+        if title:
+            parts.append(f"剧本标题\n{title}")
+        if story_outline:
+            parts.append(f"故事大纲\n{story_outline}")
+        if character_bios:
+            parts.append(f"人物小传\n{character_bios}")
+        if core_scene_input:
+            parts.append(f"核心场景\n{core_scene_input}")
+        if episode_plan:
+            parts.append(f"分集计划\n{episode_plan}")
+        return "\n\n".join(parts).strip()
+
+    def _stage_preview_text(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        stage_key: str,
+        stage_title: str,
+        raw_output: str,
+    ) -> str:
+        """优先复用缓存的自然语言摘要，避免轮询时反复请求模型。"""
+        text = str(raw_output or "").strip()
+        if not text:
+            return ""
+        text_hash = self._hash_text(text)
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        cached_text = str(artifacts.get(STAGE_PREVIEW_TEXT_ARTIFACT) or "").strip()
+        cached_stage = str(artifacts.get(STAGE_PREVIEW_STAGE_ARTIFACT) or "").strip()
+        cached_hash = str(artifacts.get(STAGE_PREVIEW_SOURCE_HASH_ARTIFACT) or "").strip()
+        if cached_text and cached_stage == stage_key and cached_hash == text_hash:
+            return cached_text
+
+        preview = self._generate_stage_preview(stage_title, text) or self._fallback_stage_preview(stage_title, text)
+        self._cache_stage_preview(snapshot, stage_key=stage_key, text_hash=text_hash, preview=preview)
+        return preview
+
+    def _hash_text(self, value: str) -> str:
+        """用内容哈希判断阶段产物是否变化，避免重复生成摘要。"""
+        return hashlib.sha1(str(value or "").encode("utf-8")).hexdigest()
+
+    def _generate_stage_preview(self, stage_title: str, raw_output: str) -> str:
+        """调用摘要模型，把阶段原文转成用户更容易读懂的自然语言版本。"""
+        preview_source = self._preview_source_text(raw_output)
+        try:
+            preview = llm_client.chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是短剧创作平台的阶段讲解助手。"
+                            "请把给定阶段产物改写成更容易理解的自然语言说明。"
+                            "要求：只输出 2-4 句中文；保留关键信息，不要编造，不要分点，不要说自己是 AI。"
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"阶段：{stage_title}\n\n阶段产物：\n{preview_source}",
+                    },
+                ],
+                provider="deepseek",
+                temperature=0.4,
+                max_tokens=220,
+            )
+        except Exception as exc:
+            logger.warning("生成阶段自然语言摘要失败，将使用本地回退文案: %s", exc)
+            return ""
+        return " ".join(str(preview or "").strip().split())[:260]
+
+    def _preview_source_text(self, raw_output: str) -> str:
+        """把阶段原文裁成适合摘要模型理解的长度，避免长正文拖慢详情接口。"""
+        text = str(raw_output or "").strip()
+        if len(text) <= 6000:
+            return text
+        head = text[:3600].strip()
+        tail = text[-1800:].strip()
+        if not tail:
+            return head
+        return f"{head}\n\n【后段摘要参考】\n{tail}"
+
+    def _fallback_stage_preview(self, stage_title: str, raw_output: str) -> str:
+        """模型不可用时，给用户一段稳定的本地说明，避免输出区域空白。"""
+        condensed = " ".join(str(raw_output or "").replace("\r", "\n").split())
+        if not condensed:
+            return ""
+        return f"{stage_title}已经产出内容，当前展示的是该阶段的正式结果：{condensed[:180]}"
+
+    def _cache_stage_preview(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        stage_key: str,
+        text_hash: str,
+        preview: str,
+    ) -> None:
+        """把阶段摘要写回项目快照，减少轮询时的重复计算。"""
+        project_id = int(snapshot.get("project_id") or 0)
+        if project_id <= 0 or not preview:
+            return
+        artifacts_update = {
+            STAGE_PREVIEW_TEXT_ARTIFACT: preview,
+            STAGE_PREVIEW_STAGE_ARTIFACT: stage_key,
+            STAGE_PREVIEW_SOURCE_HASH_ARTIFACT: text_hash,
+        }
+        record = self._projects.get(project_id)
+        if record is not None:
+            self._update_snapshot(record, artifacts=artifacts_update)
+            snapshot.setdefault("artifacts", {}).update(artifacts_update)
+            return
+        persisted = copy.deepcopy(snapshot)
+        persisted.setdefault("artifacts", {}).update(artifacts_update)
+        self._project_path(project_id).write_text(
+            json.dumps(persisted, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        snapshot.setdefault("artifacts", {}).update(artifacts_update)
+
     def _public_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        """把内部任务快照裁成安全、简洁、适合前端直接消费的公开视图。"""
         artifacts = self._public_artifacts(snapshot)
         completion_confirmed = _completion_confirmed(snapshot)
         awaiting_confirmation = _awaiting_completion_confirmation(snapshot)
         can_stage_rollback = _can_stage_rollback(snapshot)
+        display_payload = self._current_stage_display_payload(snapshot, artifacts)
         rollback_stage_default, rollback_start_episode_default = self._rollback_defaults(snapshot)
         rollback_script_start_options = (
             self._script_rollback_start_options(snapshot) if can_stage_rollback else []
         )
+        rollback_stage_options = self._available_rollback_stage_options(snapshot) if can_stage_rollback else []
         payload: dict[str, Any] = {
             "project_id": snapshot.get("project_id"),
             "task_id": snapshot.get("task_id"),
@@ -1473,11 +1766,15 @@ class TaskManager:
             "can_confirm_completion": awaiting_confirmation,
             "can_stage_rollback": can_stage_rollback,
             "rollback_stage_options": [
-                {"key": key, "label": label} for key, label in ROLLBACK_STAGE_OPTIONS
+                {"key": key, "label": label} for key, label in rollback_stage_options
             ] if can_stage_rollback else [],
             "rollback_stage_default": rollback_stage_default if can_stage_rollback else "",
             "rollback_script_start_options": rollback_script_start_options,
             "rollback_start_episode_default": rollback_start_episode_default if can_stage_rollback else None,
+            "display_stage_key": display_payload["stage_key"],
+            "display_stage_title": display_payload["stage_title"],
+            "display_stage_output": display_payload["output"],
+            "display_stage_output_natural": display_payload["natural_output"],
             "has_final": bool(
                 str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip()
             ),
@@ -2915,35 +3212,36 @@ class TaskManager:
         docx_path = self.exports_dir / f"{base_name}.docx"
         zip_path = self.exports_dir / f"{base_name}.zip"
         notice_path = self.exports_dir / f"{base_name}_导出说明.txt"
-        json_exports: list[tuple[str, Path]] = [
-            ("character_registry", self.exports_dir / f"{base_name}_character_registry.json"),
-            ("character_alias_registry", self.exports_dir / f"{base_name}_character_alias_registry.json"),
-            ("episode_alias_plan", self.exports_dir / f"{base_name}_episode_alias_plan.json"),
-            ("appearance_mapping", self.exports_dir / f"{base_name}_appearance_mapping.json"),
-            ("appearance_continuity_memory", self.exports_dir / f"{base_name}_appearance_continuity_memory.json"),
-            ("normalized_episode_plan", self.exports_dir / f"{base_name}_normalized_episode_plan.json"),
-        ]
+        # json_exports: list[tuple[str, Path]] = [
+        #     ("character_registry", self.exports_dir / f"{base_name}_character_registry.json"),
+        #     ("character_alias_registry", self.exports_dir / f"{base_name}_character_alias_registry.json"),
+        #     ("episode_alias_plan", self.exports_dir / f"{base_name}_episode_alias_plan.json"),
+        #     ("appearance_mapping", self.exports_dir / f"{base_name}_appearance_mapping.json"),
+        #     ("appearance_continuity_memory", self.exports_dir / f"{base_name}_appearance_continuity_memory.json"),
+        #     ("normalized_episode_plan", self.exports_dir / f"{base_name}_normalized_episode_plan.json"),
+        # ]
 
         txt_path.write_text(content, encoding="utf-8")
         exported_json_files: dict[str, str] = {}
-        for artifact_key, file_path in json_exports:
-            value = artifacts.get(artifact_key)
-            if value in (None, "", {}, []):
-                if file_path.exists():
-                    file_path.unlink()
-                continue
-            try:
-                if isinstance(value, str):
-                    text = value.strip()
-                    if not text:
-                        continue
-                    parsed = json.loads(text)
-                    file_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
-                else:
-                    file_path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-                exported_json_files[artifact_key] = str(file_path)
-            except Exception:
-                logger.warning("导出结构化 JSON 失败: %s %s", project_id, artifact_key, exc_info=True)
+        # for artifact_key, file_path in json_exports:
+        #     value = artifacts.get(artifact_key)
+        #     if value in (None, "", {}, []):
+        #         if file_path.exists():
+        #             file_path.unlink()
+        #         continue
+        #     try:
+        #         if isinstance(value, str):
+        #             text = value.strip()
+        #             if not text:
+        #                 continue
+        #             parsed = json.loads(text)
+        #             file_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
+        #         else:
+        #             file_path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+        #         exported_json_files[artifact_key] = str(file_path)
+        #     except Exception:
+        #         logger.warning("导出结构化 JSON 失败: %s %s", project_id, artifact_key, exc_info=True)
+        #
         docx_available = False
         export_notice = ""
         try:
