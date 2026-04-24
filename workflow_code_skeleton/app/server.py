@@ -15,7 +15,7 @@ from flask import (
     url_for,
 )
 
-from .models.inputs import derive_script_title
+from .models.inputs import derive_script_title_content
 from .services.auth_store import auth_store
 from .services.simple_fastgpt_tools import list_simple_tools, run_simple_tool
 from .services.task_manager import task_manager
@@ -353,7 +353,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         spec_path = _resolve_spec_path(data)
         expectation = str(data.get("user_expectation", ""))
         payload = {
-            "title": data.get("title", "") or derive_script_title(expectation),
+            "title": data.get("title", "") or derive_script_title_content(expectation),
             "episode_word_count": data.get("episode_word_count", 600) or 600,
             "total_episodes": data.get("total_episodes", 0),
             "user_expectation": expectation,
@@ -384,7 +384,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         spec_path = _resolve_spec_path(data)
         expectation = str(data.get("user_expectation", ""))
         payload = {
-            "title": data.get("title", "") or derive_script_title(expectation),
+            "title": data.get("title", "") or derive_script_title_content(expectation),
             "episode_word_count": data.get("episode_word_count", 600) or 600,
             "total_episodes": data.get("total_episodes", 0),
             "user_expectation": expectation,

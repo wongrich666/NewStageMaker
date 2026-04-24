@@ -360,8 +360,8 @@
     const inputPayload = projectLike.input_payload || {};
     const directTitle = [
       projectLike.title,
-      artifacts.script_title,
-      projectLike.script_title,
+      artifacts.script_title_content,
+      projectLike.script_title_content,
       inputPayload.title
     ].map(normalizeProjectText).find(Boolean);
     if (directTitle) {
@@ -383,8 +383,8 @@
     const artifacts = projectLike.artifacts || {};
     const inputPayload = projectLike.input_payload || {};
     const generatedTitle = [
-      artifacts.script_title,
-      projectLike.script_title
+      artifacts.script_title_content,
+      projectLike.script_title_content
     ].map(normalizeProjectText).find(Boolean);
     if (generatedTitle) {
       return generatedTitle;
@@ -535,11 +535,11 @@
       appearance_strategy: "internal",
       consistency: "internal",
       episode_plan_normalize: "internal",
-      worldview: "internal",
-      character: "internal",
-      characters: "internal",
-      scene: "internal",
-      scenes: "internal",
+      worldview: "worldview",
+      character: "characters",
+      characters: "characters",
+      scene: "scenes",
+      scenes: "scenes",
       appearance: "internal",
       hook: "internal",
       hooks: "internal",
@@ -558,11 +558,11 @@
   function frameworkStageOutput(snapshot) {
     const artifacts = snapshot?.artifacts || {};
     const parts = [];
-    const title = String(artifacts.script_title || "").trim();
+    const title = String(artifacts.script_title_content || "").trim();
     const storyOutline = String(artifacts.story_outline || "").trim();
     const characterBios = String(artifacts.character_bios || "").trim();
     const coreSceneInput = String(artifacts.core_scene_input || "").trim();
-    const episodePlan = String(artifacts.episode_plan || "").trim();
+    const episodePlan = String(artifacts.episode_plan_display || artifacts.episode_plan || "").trim();
 
     if (title) parts.push(`剧本标题\n${title}`);
     if (storyOutline) parts.push(`故事大纲\n${storyOutline}`);
@@ -585,8 +585,23 @@
         output: frameworkStageOutput(snapshot)
       },
       {
+        key: "worldview",
+        title: "世界观",
+        output: String(artifacts.worldview || "").trim()
+      },
+      {
+        key: "characters",
+        title: "人物设定",
+        output: String(artifacts.character_summary || "").trim()
+      },
+      {
+        key: "scenes",
+        title: "核心场景",
+        output: String(artifacts.core_scene_summary || "").trim()
+      },
+      {
         key: "final",
-        title: "剧本正文",
+        title: "最终剧本",
         output: String(artifacts.final_output_text || artifacts.final_script || "").trim()
       }
     ].filter((item) => item.output);
@@ -609,10 +624,10 @@
     const shouldFoldToThinking = (
       normalizedCurrentStage === "internal"
       || (isRunning && !hasVisibleCurrentOutput)
-      || snapshot.status === "completed"
     );
     if (!shouldFoldToThinking) return null;
     return {
+      stageLabel: snapshot.current_stage_label || snapshot.display_stage_title || "正在处理",
       stateLabel: creationStatusLabel(snapshot),
       note: isRunning || snapshot.status === "completed" ? "" : (statusNoteFrom(snapshot) || "")
     };
@@ -675,16 +690,21 @@
   }
 
   function renderThinkingBubble(thinkingState) {
+    const stageLabel = String(thinkingState.stageLabel || "正在处理").trim();
+    const stateLabel = String(thinkingState.stateLabel || "创作中").trim();
+    const content = stateLabel === "创作中"
+      ? `正在处理：${stageLabel}`
+      : stateLabel;
     return `
       <article class="chat-message system">
         <div class="chat-bubble-row">
           <div class="chat-avatar">AI</div>
           <div class="chat-bubble">
             <div class="chat-bubble-head">
-              <span class="chat-bubble-title">创作状态</span>
-              <span class="chat-bubble-meta">${escapeHtml(thinkingState.stateLabel || "创作中")}</span>
+              <span class="chat-bubble-title">思考分析</span>
+              <span class="chat-bubble-meta">${escapeHtml(stageLabel)}</span>
             </div>
-            <div class="chat-bubble-content"><span>${escapeHtml(thinkingState.stateLabel || "创作中")}</span></div>
+            <div class="chat-bubble-content"><span>${escapeHtml(content)}</span></div>
             ${thinkingState.note ? `
               <div class="chat-bubble-preview">
                 <span class="chat-bubble-preview-label">状态说明</span>
@@ -718,19 +738,13 @@
 
     const messages = [renderUserPromptBubble(snapshot)];
     const stageMessages = visibleStageMessages(snapshot);
-    const frameworkMessage = stageMessages.find((item) => item.key === "framework");
-    const finalMessage = stageMessages.find((item) => item.key === "final");
-    if (frameworkMessage) {
-      messages.push(renderAssistantStageBubble(frameworkMessage));
-    }
+    stageMessages.forEach((message) => {
+      messages.push(renderAssistantStageBubble(message));
+    });
 
     const thinkingState = thinkingStateFrom(snapshot);
     if (thinkingState) {
       messages.push(renderThinkingBubble(thinkingState));
-    }
-
-    if (finalMessage) {
-      messages.push(renderAssistantStageBubble(finalMessage));
     }
 
     els.chatTranscript.innerHTML = messages.join("");

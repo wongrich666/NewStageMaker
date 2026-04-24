@@ -19,7 +19,6 @@ from .fastgpt_contracts import (
     CHARACTER_APPEARANCE_REQUIREMENTS,
     LAST_SUMMARY,
     LEGACY_INPUT_ALIASES,
-    LEGACY_OUTPUT_ALIASES,
     MAX_RETRIES,
     OUTFIT_SWITCH_RULES,
     SCENES,
@@ -28,7 +27,6 @@ from .fastgpt_contracts import (
     FastGPTStageContract,
     contract_for,
     coerce_fastgpt_value,
-    describe_stage_output_shape_issue,
     to_jsonable_value,
 )
 from .json_utils import parse_json, strip_code_fence
@@ -37,54 +35,6 @@ logger = get_logger("fastgpt_client")
 
 
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
-OUTPUT_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
-    "script_title": (
-        "script_title",
-        "title",
-        "script_title_content",
-    ),
-    "story_outline": (
-        "story_outline",
-        "storyoutline",
-        "story_outline_content",
-    ),
-    "user_characters": (
-        "user_characters",
-        "characterbios",
-        "character_bios_content",
-    ),
-    "user_scenes": (
-        "user_scenes",
-        "corescene",
-        "core_scene_content",
-    ),
-    "episode_plan": (
-        "episode_plan",
-        "episodeplan",
-        "episode_plan_content",
-    ),
-    "appearance_mapping": (
-        "appearance_mapping",
-        "appearanceMapping",
-        "h2KpLm91",
-    ),
-    "batch_script": (
-        "batch_script",
-        "scriptContent",
-        "script_content",
-    ),
-    "final_script": (
-        "final_script",
-        "system_text",
-        "final_output_text",
-    ),
-    "is_consistent": (
-        "is_consistent",
-        "passed",
-        "approved",
-        "consistent",
-    ),
-}
 
 
 class FastGPTTransientError(RuntimeError):
@@ -114,6 +64,28 @@ class FastGPTEndpoint:
     api_key_source: str
     chat_id: str
     timeout: int
+
+
+@dataclass(frozen=True, slots=True)
+class StageOutputMatch:
+    """记录单个候选来源是如何映射到阶段契约字段的。"""
+
+    payload: dict[str, Any]
+    matched_keys: dict[str, str]
+    canonical_hits: int
+    alias_hits: int
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedStageOutput:
+    """记录通过契约校验后的候选输出，供多来源候选之间做稳定排序。"""
+
+    source: str
+    payload: dict[str, Any]
+    validated_payload: dict[str, Any]
+    matched_keys: dict[str, str]
+    canonical_hits: int
+    alias_hits: int
 
 
 class FastGPTClient:
@@ -334,71 +306,87 @@ class FastGPTClient:
         contract: FastGPTStageContract,
     ) -> dict[str, Any]:
         expected = contract.output_names
-        payload_candidates: list[tuple[str, dict[str, Any]]] = []
-        for candidate in _iter_response_data_candidates(data):
-            candidate_payload = _payload_from_candidate(candidate, contract)
-            if candidate_payload is not None:
-                payload_candidates.append(("responseData", candidate_payload))
+        validated_candidates: list[ValidatedStageOutput] = []
+        rejected_candidates: list[tuple[str, str, dict[str, Any] | None]] = []
 
-        choice_contents = list(_iter_choice_message_contents(data))
-        for index, content in enumerate(choice_contents):
-            parsed_content = _try_parse_json(content)
-            if parsed_content is not None:
-                candidate_payload = _payload_from_candidate(parsed_content, contract)
-                if candidate_payload is not None:
-                    payload_candidates.append(
-                        (f"choices[{index}].message.content(json)", candidate_payload)
-                    )
-
-            if len(expected) == 1 and _can_coerce_single_output(content, contract):
-                key = expected[0]
-                payload = {key: content}
-                payload_candidates.append((f"choices[{index}].message.content(text)", payload))
-
-        for candidate in _iter_structured_output_candidates(data):
-            candidate_payload = _payload_from_candidate(candidate, contract)
-            if candidate_payload is not None:
-                payload_candidates.append(("structured", candidate_payload))
+        for source, candidate in _iter_named_structured_candidates(data):
+            match = _payload_from_candidate(candidate, contract)
+            if match is None:
+                continue
+            try:
+                validated_payload = contract.validate_output_payload(match.payload)
+            except ValueError as exc:
+                rejected_candidates.append((source, str(exc), match.payload))
+                continue
+            validated_candidates.append(
+                ValidatedStageOutput(
+                    source=source,
+                    payload=match.payload,
+                    validated_payload=validated_payload,
+                    matched_keys=match.matched_keys,
+                    canonical_hits=match.canonical_hits,
+                    alias_hits=match.alias_hits,
+                )
+            )
 
         if len(expected) == 1:
-            key = expected[0]
-            for candidate in _iter_answer_text_candidates(data):
-                text = strip_code_fence(candidate)
+            single_key = expected[0]
+            for source, text in _iter_named_text_candidates(data):
+                if not text:
+                    continue
                 parsed_text = _try_parse_json(text)
                 if parsed_text is not None:
-                    candidate_payload = _payload_from_candidate(parsed_text, contract)
-                    if candidate_payload is not None:
-                        payload_candidates.append(("answerText(json)", candidate_payload))
-                if text and _can_coerce_single_output(text, contract):
-                    payload_candidates.append(("answerText(text)", {key: text}))
+                    match = _payload_from_candidate(parsed_text, contract)
+                    if match is not None:
+                        try:
+                            validated_payload = contract.validate_output_payload(match.payload)
+                        except ValueError as exc:
+                            rejected_candidates.append((f"{source}(json)", str(exc), match.payload))
+                        else:
+                            validated_candidates.append(
+                                ValidatedStageOutput(
+                                    source=f"{source}(json)",
+                                    payload=match.payload,
+                                    validated_payload=validated_payload,
+                                    matched_keys=match.matched_keys,
+                                    canonical_hits=match.canonical_hits,
+                                    alias_hits=match.alias_hits,
+                                )
+                            )
+                if _can_coerce_single_output(text, contract):
+                    raw_payload = {single_key: text}
+                    try:
+                        validated_payload = contract.validate_output_payload(raw_payload)
+                    except ValueError as exc:
+                        rejected_candidates.append((f"{source}(text)", str(exc), raw_payload))
+                    else:
+                        validated_candidates.append(
+                            ValidatedStageOutput(
+                                source=f"{source}(text)",
+                                payload=raw_payload,
+                                validated_payload=validated_payload,
+                                matched_keys={single_key: single_key},
+                                canonical_hits=1,
+                                alias_hits=0,
+                            )
+                        )
 
-            if contract.output_types[key] == "object":
-                for candidate in _iter_structured_output_candidates(data):
-                    if isinstance(candidate, dict) and _looks_like_payload_dict(candidate):
-                        payload_candidates.append(("structured(object)", {key: candidate}))
-
-        selected = _select_best_payload(payload_candidates, contract)
+        selected = _select_best_validated_output(validated_candidates)
         if selected is not None:
-            source, payload, empty_fields = selected
-            log_message = (
-                "FastGPT 阶段 %s 选中 payload 来源=%s，候选数=%s，空字段=%s，payload=%s"
-            )
-            log_args = (
+            logger.info(
+                "FastGPT 阶段 %s 选中输出来源=%s，匹配字段=%s，alias_hits=%s，payload=%s",
                 contract.stage_name,
-                source,
-                len(payload_candidates),
-                empty_fields or ["无"],
-                _truncate_log_text(_json_for_log(payload), limit=800),
+                selected.source,
+                selected.matched_keys,
+                selected.alias_hits,
+                _truncate_log_text(_json_for_log(selected.validated_payload), limit=800),
             )
-            if empty_fields:
-                logger.warning(log_message, *log_args)
-            else:
-                logger.info(log_message, *log_args)
-            return payload
+            return selected.validated_payload
 
+        details = _format_rejected_candidate_details(rejected_candidates)
         message = (
             f"FastGPT 阶段 {contract.stage_name} 未返回契约字段：{', '.join(expected)}；"
-            f"实际返回内容：{_json_for_log(data)}"
+            f"未找到通过校验的候选输出。{details}；实际返回内容：{_json_for_log(data)}"
         )
         logger.error(message)
         raise ValueError(message)
@@ -519,183 +507,117 @@ def _iter_choice_message_contents(data: Any) -> Iterable[str]:
 def _payload_from_candidate(
     candidate: Any,
     contract: FastGPTStageContract,
-) -> dict[str, Any] | None:
+) -> StageOutputMatch | None:
     candidate = _normalize_payload_candidate(candidate, contract)
     if isinstance(candidate, list):
         candidate = _dict_from_variable_items(candidate)
-    expected = contract.output_names
     if not isinstance(candidate, dict):
         return None
     if _is_non_output_metadata(candidate):
         return None
+    return _extract_contract_payload(candidate, contract)
 
-    if all(name in candidate for name in expected):
-        return {name: candidate[name] for name in expected}
+def _extract_contract_payload(
+    candidate: dict[str, Any],
+    contract: FastGPTStageContract,
+) -> StageOutputMatch | None:
+    payload: dict[str, Any] = {}
+    matched_keys: dict[str, str] = {}
+    canonical_hits = 0
+    alias_hits = 0
+    lowered_candidate = {str(key).lower(): key for key in candidate.keys()}
 
-    alias_payload = _extract_generic_alias_payload(candidate, contract)
-    if alias_payload is not None:
-        logger.warning(
-            "FastGPT 阶段 %s 返回字段与契约不完全一致，已按别名映射：期望=%s，实际字段=%s，映射结果=%s",
-            contract.stage_name,
-            list(expected),
-            list(candidate.keys()),
-            _json_for_log(alias_payload),
+    for expected_name in contract.output_names:
+        actual_key = _match_contract_output_key(
+            expected_name,
+            candidate,
+            lowered_candidate,
+            contract,
         )
-        return alias_payload
+        if actual_key is None:
+            return None
+        payload[expected_name] = candidate[actual_key]
+        matched_keys[expected_name] = actual_key
+        if actual_key == expected_name:
+            canonical_hits += 1
+        else:
+            alias_hits += 1
 
-    legacy_payload = _extract_legacy_alias_payload(candidate, contract)
-    if legacy_payload is not None:
-        logger.warning(
-            "FastGPT 阶段 %s 返回 legacy 字段，已映射到契约字段：期望=%s，实际字段=%s，映射结果=%s",
-            contract.stage_name,
-            list(expected),
-            list(candidate.keys()),
-            _json_for_log(legacy_payload),
-        )
-        return legacy_payload
+    return StageOutputMatch(
+        payload=payload,
+        matched_keys=matched_keys,
+        canonical_hits=canonical_hits,
+        alias_hits=alias_hits,
+    )
 
-    _warn_similar_fields(candidate, contract)
+
+def _match_contract_output_key(
+    expected_name: str,
+    candidate: dict[str, Any],
+    lowered_candidate: dict[str, Any],
+    contract: FastGPTStageContract,
+) -> str | None:
+    if expected_name in candidate:
+        return expected_name
+
+    exact_name = lowered_candidate.get(expected_name.lower())
+    if exact_name is not None:
+        return str(exact_name)
+
+    for alias in contract.aliases_for_output(expected_name):
+        alias_key = lowered_candidate.get(str(alias).lower())
+        if alias_key is not None:
+            return str(alias_key)
     return None
 
 
-def _extract_generic_alias_payload(
-    candidate: dict[str, Any],
-    contract: FastGPTStageContract,
-) -> dict[str, Any] | None:
-    if _is_non_output_metadata(candidate):
-        return None
-    payload: dict[str, Any] = {}
-    lowered_candidate = {key.lower(): key for key in candidate.keys()}
-    for expected_name in contract.output_names:
-        if expected_name in candidate:
-            payload[expected_name] = candidate[expected_name]
-            continue
-        matched = False
-        for alias in OUTPUT_FIELD_ALIASES.get(expected_name, ()):
-            actual_key = lowered_candidate.get(alias.lower())
-            if actual_key is not None:
-                payload[expected_name] = candidate[actual_key]
-                matched = True
-                break
-        if not matched:
-            return None
-    return payload
-
-
-def _select_best_payload(
-    candidates: list[tuple[str, dict[str, Any]]],
-    contract: FastGPTStageContract,
-) -> tuple[str, dict[str, Any], list[str]] | None:
-    best: tuple[tuple[int, int, int, int, int], tuple[str, dict[str, Any], list[str]]] | None = None
-    for index, (source, payload) in enumerate(candidates):
-        qualities = {
-            name: _output_quality_for_stage(
-                contract,
-                name,
-                payload.get(name),
-            )
-            for name in contract.output_names
-        }
-        empty_fields = [
-            name
-            for name in contract.output_names
-            if qualities[name] <= 0
-        ]
-        strong_count = sum(1 for score in qualities.values() if score >= 3)
-        usable_count = sum(1 for score in qualities.values() if score >= 2)
-        weak_count = sum(1 for score in qualities.values() if score == 1)
+def _select_best_validated_output(
+    candidates: list[ValidatedStageOutput],
+) -> ValidatedStageOutput | None:
+    best: tuple[tuple[int, int, int, int], ValidatedStageOutput] | None = None
+    for candidate in candidates:
         score = (
-            1 if usable_count == len(contract.output_names) else 0,
-            strong_count,
-            usable_count,
-            -weak_count,
-            _payload_source_priority(source),
+            candidate.canonical_hits,
+            -candidate.alias_hits,
+            _payload_source_priority(candidate.source),
+            -len(candidate.source),
         )
         if best is None or score > best[0]:
-            best = (score, (source, payload, empty_fields))
+            best = (score, candidate)
     return best[1] if best is not None else None
 
 
 def _payload_source_priority(source: str) -> int:
-    if source.startswith("responseData"):
+    if source.startswith("responseData.contract_json"):
+        return 8
+    if source.startswith("responseData.updateVarResult"):
+        return 7
+    if source.startswith("responseData.newVariables"):
+        return 6
+    if source.startswith("responseData.output") or source.startswith("responseData.outputs"):
+        return 5
+    if source.startswith("responseData.pluginOutput") or source.startswith("responseData.data"):
         return 4
     if source.startswith("choices"):
         return 3
-    if source.startswith("structured"):
+    if source.startswith("answerText") or source.startswith("responseData.answerText"):
         return 2
-    if source.startswith("answerText"):
+    if source == "root":
         return 1
     return 0
 
 
-def _is_empty_output_value(value: Any) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return not value.strip()
-    if isinstance(value, (dict, list, tuple, set)):
-        return len(value) == 0
-    return False
-
-
-def _output_value_quality(value: Any, type_name: str) -> int:
-    if _is_empty_output_value(value):
-        return 0
-
-    if type_name == "object":
-        if isinstance(value, dict):
-            return 3
-        if isinstance(value, str):
-            parsed = _try_parse_json(value)
-            if isinstance(parsed, dict):
-                return 3
-            return 1
-        return 1
-
-    if type_name == "string":
-        return 3 if isinstance(value, str) and value.strip() else 2
-
-    if type_name in {"boolean", "number"}:
-        try:
-            coerce_fastgpt_value(value, type_name)
-            return 3
-        except Exception:
-            return 1
-
-    return 2
-
-
-def _output_quality_for_stage(
-    contract: FastGPTStageContract,
-    field_name: str,
-    value: Any,
-) -> int:
-    quality = _output_value_quality(value, contract.output_types[field_name])
-    if quality <= 0:
-        return quality
-    issue = describe_stage_output_shape_issue(contract.stage_name, field_name, value)
-    if issue:
-        return 1
-    return quality
-
-
-def _warn_similar_fields(candidate: dict[str, Any], contract: FastGPTStageContract) -> None:
-    candidate_keys = {key.lower(): key for key in candidate.keys()}
-    for expected_name in contract.output_names:
-        if expected_name in candidate:
-            continue
-        found = [
-            candidate_keys[alias.lower()]
-            for alias in OUTPUT_FIELD_ALIASES.get(expected_name, ())
-            if alias.lower() in candidate_keys
-        ]
-        if found:
-            logger.warning(
-                "FastGPT 阶段 %s 未返回契约字段 %s，但发现相似字段 %s；请考虑改 FastGPT 输出提示词或 Python 映射。",
-                contract.stage_name,
-                expected_name,
-                found,
-            )
+def _format_rejected_candidate_details(
+    rejected: list[tuple[str, str, dict[str, Any] | None]],
+) -> str:
+    if not rejected:
+        return "没有发现任何可映射到阶段契约的候选输出"
+    preview = []
+    for source, error, payload in rejected[:4]:
+        preview.append(
+            f"{source}: {error}（payload={_truncate_log_text(_json_for_log(payload), limit=260)}）"
+        )
+    return "候选输出校验失败：" + "；".join(preview)
 
 
 def _is_non_output_metadata(candidate: dict[str, Any]) -> bool:
@@ -752,146 +674,62 @@ def _can_coerce_single_output(value: Any, contract: FastGPTStageContract) -> boo
         return False
 
 
-def _iter_output_candidates(data: Any) -> Iterable[Any]:
-    yield data
+def _iter_named_structured_candidates(data: Any) -> Iterable[tuple[str, Any]]:
+    if not isinstance(data, dict):
+        return
 
-    if isinstance(data, dict):
-        priority_keys = (
-            "pluginOutput",
-            "output",
-            "outputs",
-            "newVariables",
-            "variables",
-            "responseData",
-            "data",
-            "answer",
-            "content",
-            "choices",
-            "message",
-        )
-        for key in priority_keys:
-            if key in data:
-                yield from _iter_output_candidates(data[key])
-        for key, value in data.items():
-            if key not in priority_keys:
-                yield from _iter_output_candidates(value)
+    response_data = data.get("responseData")
+    if isinstance(response_data, dict):
+        yield from _yield_named_branch_candidates("responseData", response_data)
 
-    elif isinstance(data, list):
-        for item in data:
-            yield from _iter_output_candidates(item)
-
-    elif isinstance(data, str):
-        parsed = _try_parse_json(data)
-        if parsed is not None:
-            yield parsed
+    yield from _yield_named_branch_candidates("root", data)
 
 
-def _iter_structured_output_candidates(data: Any) -> Iterable[Any]:
-    yield data
-    if isinstance(data, dict):
-        if _is_non_output_metadata(data):
-            return
-        priority_keys = (
-            "choices",
-            "message",
-            "responseData",
-            "pluginOutput",
-            "output",
-            "outputs",
-            "newVariables",
-            "variables",
-            "data",
-            "answer",
-            "content",
-        )
-        skip_keys = {
-            "historyPreview",
-            "history",
-            "chatHistory",
-            "reasoningText",
-            "reasoning_text",
-            "system_error_text",
-            "systemErrorText",
-            "quoteList",
-            "obj",
-            "value",
-        }
-        for key in priority_keys:
-            if key in data and key not in skip_keys:
-                yield from _iter_structured_output_candidates(data[key])
-        for key, value in data.items():
-            if key not in priority_keys and key not in skip_keys:
-                yield from _iter_structured_output_candidates(value)
-    elif isinstance(data, list):
-        for item in data:
-            yield from _iter_structured_output_candidates(item)
-    elif isinstance(data, str):
-        parsed = _try_parse_json(data)
-        if parsed is not None:
-            yield parsed
+def _yield_named_branch_candidates(prefix: str, data: dict[str, Any]) -> Iterable[tuple[str, Any]]:
+    if not isinstance(data, dict):
+        return
+    priority_keys = (
+        "contract_json",
+        "updateVarResult",
+        "newVariables",
+        "output",
+        "outputs",
+        "pluginOutput",
+        "data",
+        "answerText",
+        "answer",
+        "response",
+        "result",
+        "content",
+        "text",
+    )
+    for key in priority_keys:
+        if key in data:
+            yield (f"{prefix}.{key}", data[key])
+    yield (prefix, data)
 
 
-def _iter_answer_text_candidates(data: Any) -> Iterable[str]:
-    if isinstance(data, dict):
-        if _is_non_output_metadata(data):
-            return
-        choices = data.get("choices")
-        if isinstance(choices, list):
-            for choice in choices:
-                if not isinstance(choice, dict):
-                    continue
-                message = choice.get("message")
-                if isinstance(message, dict):
-                    yield from _iter_text_from_content(message.get("content"))
-                delta = choice.get("delta")
-                if isinstance(delta, dict) and isinstance(delta.get("content"), str):
-                    yield delta["content"]
-                if isinstance(choice.get("text"), str):
-                    yield choice["text"]
+def _iter_named_text_candidates(data: Any) -> Iterable[tuple[str, str]]:
+    if not isinstance(data, dict):
+        return
 
-        text_keys = (
-            "answerText",
-            "system_text",
-            "answer",
-            "content",
-            "text",
-            "response",
-            "result",
-        )
-        for key in text_keys:
-            value = data.get(key)
-            if isinstance(value, str):
-                yield value
+    for index, content in enumerate(_iter_choice_message_contents(data)):
+        yield (f"choices[{index}].message.content", strip_code_fence(content))
 
-        skip_keys = {
-            "variables",
-            "newVariables",
-            "inputs",
-            "input",
-            "request",
-            "messages",
-            "historyPreview",
-            "history",
-            "chatHistory",
-            "reasoningText",
-            "reasoning_text",
-            "system_error_text",
-            "systemErrorText",
-            "quoteList",
-            "obj",
-            "value",
-        }
-        priority_keys = ("responseData", "pluginOutput", "output", "outputs", "data")
-        for key in priority_keys:
-            if key in data:
-                yield from _iter_answer_text_candidates(data[key])
-        for key, value in data.items():
-            if key not in skip_keys and key not in priority_keys and key not in text_keys:
-                yield from _iter_answer_text_candidates(value)
+    response_data = data.get("responseData")
+    if isinstance(response_data, dict):
+        yield from _yield_named_text_fields("responseData", response_data)
 
-    elif isinstance(data, list):
-        for item in data:
-            yield from _iter_answer_text_candidates(item)
+    yield from _yield_named_text_fields("root", data)
+
+
+def _yield_named_text_fields(prefix: str, data: dict[str, Any]) -> Iterable[tuple[str, str]]:
+    if not isinstance(data, dict):
+        return
+    for key in ("answerText", "answer", "response", "result", "content", "text"):
+        value = data.get(key)
+        if isinstance(value, str):
+            yield (f"{prefix}.{key}", strip_code_fence(value))
 
 
 def _try_parse_json(text: str) -> Any | None:
@@ -943,32 +781,6 @@ def _format_wire_value(value: Any) -> Any:
     return jsonable
 
 
-def _extract_legacy_alias_payload(
-    candidate: Any,
-    contract: FastGPTStageContract,
-) -> dict[str, Any] | None:
-    if isinstance(candidate, list):
-        candidate = _dict_from_variable_items(candidate)
-    if not isinstance(candidate, dict):
-        return None
-    aliases = LEGACY_OUTPUT_ALIASES.get(contract.stage_name, {})
-    if not aliases:
-        return None
-
-    payload: dict[str, Any] = {}
-    for expected_name in contract.output_names:
-        if expected_name in candidate:
-            payload[expected_name] = candidate[expected_name]
-            continue
-        for alias in aliases.get(expected_name, ()):
-            if alias in candidate:
-                payload[expected_name] = candidate[alias]
-                break
-        if expected_name not in payload:
-            return None
-    return payload
-
-
 def _normalize_payload_candidate(
     candidate: Any,
     contract: FastGPTStageContract,
@@ -995,22 +807,6 @@ def _normalize_payload_candidate(
             if variable_key:
                 return {variable_key: candidate.get("value")}
 
-    nested_list_keys = (
-        "updateVarResult",
-        "newVariables",
-        "variables",
-        "outputs",
-        "output",
-        "data",
-        "responseData",
-    )
-    for key in nested_list_keys:
-        value = candidate.get(key)
-        if isinstance(value, list):
-            normalized = _normalize_payload_candidate(value, contract)
-            if normalized is not None:
-                return normalized
-
     nested_text_keys = (
         "contract_json",
         "answerText",
@@ -1027,6 +823,22 @@ def _normalize_payload_candidate(
             if parsed is None:
                 continue
             normalized = _normalize_payload_candidate(parsed, contract)
+            if normalized is not None:
+                return normalized
+
+    nested_list_keys = (
+        "updateVarResult",
+        "newVariables",
+        "outputs",
+        "output",
+        "data",
+        "responseData",
+        "pluginOutput",
+    )
+    for key in nested_list_keys:
+        value = candidate.get(key)
+        if isinstance(value, (list, dict)):
+            normalized = _normalize_payload_candidate(value, contract)
             if normalized is not None:
                 return normalized
 
@@ -1056,51 +868,3 @@ def _dict_from_variable_items(candidate: list[Any]) -> dict[str, Any] | None:
         if isinstance(name, str) and name.strip():
             payload[name.strip()] = value
     return payload or None
-
-
-def _iter_response_data_candidates(data: Any) -> Iterable[Any]:
-    if isinstance(data, dict):
-        priority_keys = (
-            "responseData",
-            "newVariables",
-            "variables",
-            "outputs",
-            "output",
-            "data",
-            "pluginOutput",
-            "updateVarResult",
-        )
-        for key in priority_keys:
-            if key in data:
-                yield from _iter_response_data_candidates(data[key])
-
-        skip_keys = {
-            "choices",
-            "message",
-            "delta",
-            "content",
-            "historyPreview",
-            "history",
-            "chatHistory",
-            "reasoningText",
-            "reasoning_text",
-            "system_error_text",
-            "systemErrorText",
-        }
-        for key, value in data.items():
-            if key not in priority_keys and key not in skip_keys:
-                yield from _iter_response_data_candidates(value)
-
-        yield data
-        return
-
-    if isinstance(data, list):
-        for item in data:
-            yield from _iter_response_data_candidates(item)
-        yield data
-        return
-
-    if isinstance(data, str):
-        parsed = _try_parse_json(data)
-        if parsed is not None:
-            yield from _iter_response_data_candidates(parsed)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ..workflow_ids import (
@@ -64,7 +64,7 @@ from ..workflow_ids import (
 )
 from .json_utils import parse_json
 
-SCRIPT_TITLE = "script_title"
+script_title_content = "script_title_content"
 TOTAL_EPISODES = "total_episodes"
 EPISODE_WORD_COUNT = "episode_word_count"
 USER_EXPECTATION = "user_expectation"
@@ -130,10 +130,14 @@ class FastGPTStageContract:
     output_types: dict[str, str]
     fastgpt_responsibility: str
     local_responsibility: str
+    output_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     @property
     def output_names(self) -> tuple[str, ...]:
         return tuple(self.output_types.keys())
+
+    def aliases_for_output(self, field_name: str) -> tuple[str, ...]:
+        return tuple(self.output_aliases.get(field_name, ()))
 
     def build_input_payload(self, variables: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {}
@@ -241,6 +245,17 @@ def describe_stage_output_shape_issue(
             return "episode_dialogue_blocks 必须是数组"
         return None
 
+    if stage_name == STAGE_APPEARANCE_ALIAS_GENERATION and field_name == APPEARANCE_MAPPING:
+        if not isinstance(value, dict):
+            return "必须是 object"
+        mapping = value.get("appearance_mapping") if isinstance(value.get("appearance_mapping"), dict) else value
+        characters = mapping.get("characters")
+        if not isinstance(characters, list):
+            return "appearance_mapping.characters 必须是数组"
+        if not any(isinstance(item, dict) for item in characters):
+            return "appearance_mapping.characters 不能为空"
+        return None
+
     return None
 
 
@@ -311,8 +326,8 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
         "人物小传。当前可由框架阶段先生成，也兼容用户直传。",
         "框架阶段输出/用户输入兼容",
     ),
-    SCRIPT_TITLE: FastGPTVariable(
-        SCRIPT_TITLE,
+    script_title_content: FastGPTVariable(
+        script_title_content,
         "string",
         "剧本标题。优先使用框架阶段生成标题；若缺失，再回退到本地基于用户想要的剧本生成的标题。",
         "框架阶段输出/本地回退",
@@ -551,35 +566,13 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
     },
     STAGE_FINAL: {
-        SCRIPT_TITLE: TITLE_VAR,
+        script_title_content: TITLE_VAR,
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         STORY_OUTLINE: STORY_OUTLINE_VAR,
         CHARACTERS: FINAL_CHARACTER_VAR,
         SCENES: FINAL_SCENE_VAR,
         ALL_SCRIPT: SCRIPT_FINAL_VAR,
     },
-}
-
-
-LEGACY_OUTPUT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
-    STAGE_FRAMEWORK: {
-        SCRIPT_TITLE: (FRAMEWORK_TITLE_VAR, "script_title_content"),
-        STORY_OUTLINE: (FRAMEWORK_STORY_OUTLINE_VAR, "story_outline_content"),
-        USER_CHARACTERS: (FRAMEWORK_CHARACTER_BIOS_VAR, "character_bios_content"),
-        USER_SCENES: (FRAMEWORK_CORE_SCENE_VAR, "core_scene_content"),
-        EPISODE_PLAN: (FRAMEWORK_EPISODE_PLAN_VAR, "episode_plan_content"),
-    },
-    STAGE_APPEARANCE_PRE_STRATEGY: {},
-    STAGE_EPISODE_PLAN_NORMALIZE: {},
-    STAGE_WORLDVIEW: {WORLDVIEW: (WORLDVIEW_VAR,)},
-    STAGE_CHARACTERS: {CHARACTERS: (CHARACTER_VAR,)},
-    STAGE_SCENES: {SCENES: (SCENE_VAR,)},
-    STAGE_APPEARANCE_ALIAS_GENERATION: {APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,)},
-    STAGE_HOOKS: {},
-    STAGE_DIALOGUES: {},
-    STAGE_SCRIPT: {BATCH_SCRIPT: (SCRIPT_CURRENT_VAR,)},
-    STAGE_MEMORY: {},
-    STAGE_FINAL: {},
 }
 
 
@@ -595,11 +588,18 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             CHARACTER_ALIAS_NAMING_RULES,
         ),
         output_types={
-            SCRIPT_TITLE: "string",
+            script_title_content: "string",
             STORY_OUTLINE: "string",
             USER_CHARACTERS: "string",
             USER_SCENES: "string",
             EPISODE_PLAN: "string",
+        },
+        output_aliases={
+            script_title_content: (FRAMEWORK_TITLE_VAR, "title", "script_title_content_content"),
+            STORY_OUTLINE: (FRAMEWORK_STORY_OUTLINE_VAR, "story_outline_content"),
+            USER_CHARACTERS: (FRAMEWORK_CHARACTER_BIOS_VAR, "character_bios_content"),
+            USER_SCENES: (FRAMEWORK_CORE_SCENE_VAR, "core_scene_content"),
+            EPISODE_PLAN: (FRAMEWORK_EPISODE_PLAN_VAR, "episode_plan_content"),
         },
         fastgpt_responsibility="根据用户想要的剧本、角色数量和总集数，生成剧本标题、故事大纲、人物小传、核心场景、分集计划。",
         local_responsibility="缓存并复用五项框架产物，后续阶段统一读取这些结果。",
@@ -621,6 +621,18 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             CHARACTER_ALIAS_NAMING_RULES: "string",
             OUTFIT_SWITCH_RULES: "string",
         },
+        output_aliases={
+            CHARACTER_APPEARANCE_REQUIREMENTS: (
+                APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
+                APPEARANCE_REQUIREMENTS_VAR,
+                FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR,
+            ),
+            CHARACTER_ALIAS_NAMING_RULES: (
+                APPEARANCE_ALIAS_NAMING_RULES_VAR,
+                FRAMEWORK_ALIAS_NAMING_RULES_VAR,
+            ),
+            OUTFIT_SWITCH_RULES: (OUTFIT_SWITCH_RULES_VAR,),
+        },
         fastgpt_responsibility="基于故事、人物、场景和分集计划，先生成后续阶段要统一复用的服装版本需求、命名偏好和服装切换规则。",
         local_responsibility="缓存三项服装前置策略结果，并继续沿用现有逻辑字段供后续阶段读取。",
     ),
@@ -629,6 +641,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         label="集数一致性检查",
         input_names=(TOTAL_EPISODES, EPISODE_PLAN),
         output_types={IS_CONSISTENT: "boolean"},
+        output_aliases={IS_CONSISTENT: ("passed", "approved", "consistent")},
         fastgpt_responsibility="判断分集计划与总集数是否一致。",
         local_responsibility="不做内容判断，只根据布尔结果继续或停止。",
     ),
@@ -650,6 +663,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         label="世界观生成与审核",
         input_names=(STORY_OUTLINE, USER_SCENES, USER_CHARACTERS, EPISODE_PLAN),
         output_types={WORLDVIEW: "string"},
+        output_aliases={WORLDVIEW: (WORLDVIEW_VAR,)},
         fastgpt_responsibility="完成世界观提取、生成、审核、修订，返回最终可用世界观。",
         local_responsibility="不做业务审核循环，只校验 worldview 是否按契约返回并缓存。",
     ),
@@ -658,6 +672,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         label="人物设定生成与审核",
         input_names=(USER_CHARACTERS, WORLDVIEW, STORY_OUTLINE),
         output_types={CHARACTERS: "string"},
+        output_aliases={CHARACTERS: (CHARACTER_VAR,)},
         fastgpt_responsibility="完成人设生成、审核、修订、整理。",
         local_responsibility="不做业务审核循环，只校验 characters 是否按契约返回并缓存。",
     ),
@@ -674,6 +689,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             CHARACTER_ALIAS_NAMING_RULES,
         ),
         output_types={SCENES: "string"},
+        output_aliases={SCENES: (SCENE_VAR,)},
         fastgpt_responsibility="完成核心场景提炼/复用、生成、审核、修订、整理。",
         local_responsibility="不做业务审核循环，只校验 scenes 是否按契约返回并缓存。",
     ),
@@ -690,6 +706,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             CHARACTER_ALIAS_NAMING_RULES,
         ),
         output_types={APPEARANCE_MAPPING: "object"},
+        output_aliases={APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,)},
         fastgpt_responsibility="基于人物、场景、分集计划与命名偏好，生成人物服装版本映射与 alias registry。",
         local_responsibility="缓存服装版本映射，并提炼 canonical 角色注册表、alias 注册表与逐集 alias 计划。",
     ),
@@ -766,7 +783,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         stage_name=STAGE_FINAL,
         label="最终剧本拼接",
         input_names=(
-            SCRIPT_TITLE,
+            script_title_content,
             TOTAL_EPISODES,
             STORY_OUTLINE,
             CHARACTERS,
@@ -852,9 +869,8 @@ def coerce_fastgpt_value(value: Any, type_name: str) -> Any:
 
     if type_name == "string":
         if isinstance(value, (dict, list)):
-            text = json.dumps(value, ensure_ascii=False)
-        else:
-            text = "" if value is None else str(value).strip()
+            raise ValueError("string 类型不接受 object/array")
+        text = "" if value is None else str(value).strip()
         if not text:
             raise ValueError("FastGPT 输出 string 不能为空")
         return text
@@ -868,9 +884,7 @@ def coerce_fastgpt_value(value: Any, type_name: str) -> Any:
                 if isinstance(parsed, dict):
                     return parsed
             except Exception:
-                text = value.strip()
-                if text:
-                    return {"raw": text}
+                pass
         raise ValueError(f"无法转换为 object：{value!r}")
 
     raise ValueError(f"不支持的 FastGPT 类型：{type_name}")

@@ -32,7 +32,7 @@
 
 | 变量名 | 类型 | 说明 | 来源 |
 | --- | --- | --- | --- |
-| `script_title` | string | 剧本标题 | 用户输入 |
+| `script_title_content` | string | 剧本标题 | 用户输入 |
 | `total_episodes` | number | 总集数 | 用户输入 |
 | `episode_plan` | string | 分集计划。非批处理阶段传全文，批处理阶段传当前 5 集片段 | 用户输入/本地裁剪 |
 | `story_outline` | string | 故事大纲 | 用户输入 |
@@ -63,7 +63,7 @@
 | `dialogues` 角色对话批处理 | `characters`, `episode_plan`, `total_episodes`, `last_summary`, `batch_start_episode` | `{ "batch_dialogues": object }` | 按 5 集划分，拼接 `all_dialogues` |
 | `script` 剧本正文批处理 | `worldview`, `all_hooks`, `all_dialogues`, `episode_plan`, `total_episodes`, `last_summary`, `batch_start_episode` | `{ "batch_script": string }` | 按 5 集划分，拼接 `all_script` |
 | `memory` 正文记忆整理 | `batch_script` | `{ "last_summary": string }` | 用新摘要覆盖旧摘要 |
-| `final` 最终剧本拼接 | `script_title`, `total_episodes`, `story_outline`, `characters`, `scenes`, `all_script` | `{ "final_script": string }` | 接收并保存最终文本 |
+| `final` 最终剧本拼接 | `script_title_content`, `total_episodes`, `story_outline`, `characters`, `scenes`, `all_script` | `{ "final_script": string }` | 接收并保存最终文本 |
 
 ## 批次说明
 

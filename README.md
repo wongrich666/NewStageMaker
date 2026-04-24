@@ -219,7 +219,7 @@ FASTGPT_CHARACTER_RESKIN_API_KEY=
 
 输出：
 
-- `script_title`
+- `script_title_content`
 - `story_outline`
 - `user_characters`
 - `user_scenes`
@@ -390,7 +390,7 @@ Python 侧现在要求 `framework` 阶段最终返回：
 
 ```json
 {
-  "script_title": "string",
+  "script_title_content": "string",
   "story_outline": "string",
   "user_characters": "string",
   "user_scenes": "string",

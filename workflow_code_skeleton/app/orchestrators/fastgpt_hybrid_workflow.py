@@ -115,11 +115,19 @@ LOCAL_APPEARANCE_MEMORY_BY_BATCH = "_appearance_memory_by_batch"
 LOCAL_RAW_EPISODE_PLAN = "_raw_episode_plan"
 SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT = 32000
 SCRIPT_STAGE_PREVIOUS_SCRIPT_BATCHES = 2
+FRAMEWORK_TITLE_MIN_LENGTH = 2
+FRAMEWORK_TEXT_MIN_LENGTH = 10
 
 
 class FastGPTRunner(Protocol):
     def run_stage(self, stage_name: str, variables: dict[str, Any]) -> dict[str, Any]:
         ...
+
+
+class FrameworkOutputValidationError(ValueError):
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = list(errors)
+        super().__init__(_format_framework_validation_errors(self.errors))
 
 
 def run_fastgpt_hybrid_workflow(
@@ -131,7 +139,7 @@ def run_fastgpt_hybrid_workflow(
     client: FastGPTRunner | None = None,
     resume_snapshot: dict[str, Any] | None = None,
 ) -> WorkflowState:
-    """Run the script workflow with local orchestration and FastGPT stage calls."""
+    """主控整个 FastGPT 编排流程，并在关键节点兜底恢复/回退/重试。"""
 
     del workflow_spec_path
     payload.validate()
@@ -143,88 +151,18 @@ def run_fastgpt_hybrid_workflow(
 
     variables = _initial_fastgpt_variables(payload)
     _restore_resume_state(state, variables, resume_snapshot)
-    _apply_framework_outputs_to_variables(payload, variables)
+    _ensure_framework_and_consistency(
+        state,
+        runner,
+        payload,
+        variables,
+        resume_snapshot_present=resume_snapshot is not None,
+    )
     _apply_normalized_episode_plan_to_variables(payload, variables)
     _apply_appearance_outputs_to_variables(variables)
     _sync_state_variables(state, variables)
     sync_runtime_state(state)
-
-    if _has_framework_outputs(variables):
-        set_runtime_stage(
-            state,
-            "framework",
-            "已从缓存恢复剧本框架。",
-            progress_percent=4,
-        )
-    else:
-        variables.update(
-            _run_fastgpt_stage(
-                state,
-                runner,
-                STAGE_FRAMEWORK,
-                variables,
-                stage_key="framework",
-                message="正在撰写剧本框架。",
-                progress_percent=4,
-                max_retries=0,
-            )
-        )
-        _apply_framework_outputs_to_variables(payload, variables)
     _sync_state_variables(state, variables)
-
-
-    if _has_pre_strategy_outputs(variables):
-        _refresh_user_content_baseline(payload, variables)
-        set_runtime_stage(
-            state,
-            "appearance_strategy",
-            "已从缓存恢复服装前置策略。",
-            progress_percent=6,
-        )
-    else:
-        variables.update(
-            _run_fastgpt_stage(
-                state,
-                runner,
-                STAGE_APPEARANCE_PRE_STRATEGY,
-                variables,
-                stage_key="appearance_strategy",
-                message="正在生成服装前置策略。",
-                progress_percent=6,
-                max_retries=0,
-            )
-        )
-        _refresh_user_content_baseline(payload, variables)
-    _sync_state_variables(state, variables)
-
-    if _truthy(variables.get(IS_CONSISTENT)):
-        consistency = {IS_CONSISTENT: True}
-        set_runtime_stage(
-            state,
-            "validation",
-            "已从缓存恢复集数一致性检查结果。",
-            progress_percent=3,
-        )
-    else:
-        set_runtime_stage(state, "validation", "正在核对分集计划和总集数。", progress_percent=1)
-        consistency = _run_fastgpt_stage(
-            state,
-            runner,
-            STAGE_CONSISTENCY,
-            variables,
-            stage_key="validation",
-            message="正在核对分集计划和总集数。",
-            progress_percent=2,
-            max_retries=0,
-        )
-        variables.update(consistency)
-    if not consistency[IS_CONSISTENT]:
-        state.halted_message = "分集计划与总集数不一致，请调整后重新生成。"
-        state.final_output_text = state.halted_message
-        set_runtime_stage(state, "validation", state.halted_message, progress_percent=0)
-        sync_runtime_state(state)
-        return state
-    set_runtime_stage(state, "validation", "集数一致性检查通过。", progress_percent=3)
 
     normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
     if _normalized_episode_plan_is_trusted(normalized_plan, payload.total_episodes):
@@ -678,6 +616,7 @@ def _run_hook_batches(
             variables[BATCH_START_EPISODE] = batch.end_episode + 1
             variables[LOCAL_COMPLETED_BATCHES] = actual_index + 1
             variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index + 1
+            variables[LOCAL_CURRENT_BATCH_STAGE] = ""
             continue
 
         plan_for_batch, normalized_plan_for_batch = _get_episode_batch_plan_context(
@@ -766,6 +705,7 @@ def _run_dialogue_batches(
             variables[BATCH_START_EPISODE] = batch.end_episode + 1
             variables[LOCAL_COMPLETED_BATCHES] = actual_index + 1
             variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index + 1
+            variables[LOCAL_CURRENT_BATCH_STAGE] = ""
             continue
 
         plan_for_batch, normalized_plan_for_batch = _get_episode_batch_plan_context(
@@ -892,10 +832,13 @@ def _run_script_batches(
             variables[LAST_SUMMARY] = existing_summary
             if existing_memory:
                 variables[APPEARANCE_CONTINUITY_MEMORY] = existing_memory
+            else:
+                variables.pop(APPEARANCE_CONTINUITY_MEMORY, None)
             variables[LOCAL_SCRIPT_CHECKPOINT_START] = batch.start_episode
             variables[BATCH_START_EPISODE] = batch.end_episode + 1
             variables[LOCAL_COMPLETED_BATCHES] = actual_index + 1
             variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index + 1
+            variables[LOCAL_CURRENT_BATCH_STAGE] = ""
             continue
 
         generated_before_batch = max(0, batch.start_episode - 1)
@@ -1419,6 +1362,16 @@ def _build_stage_wire_payload_preview(stage_name: str, variables: dict[str, Any]
     payload: dict[str, Any] = {}
     for canonical_name, wire_name in aliases.items():
         if canonical_name in variables:
+            if stage_name == STAGE_SCRIPT and canonical_name == CHARACTERS:
+                payload[wire_name] = _format_wire_value_for_estimate(
+                    _build_script_character_scene_bundle_for_estimate(
+                        variables.get(CHARACTERS),
+                        variables.get(SCENES),
+                    )
+                )
+                continue
+            if stage_name == STAGE_SCRIPT and canonical_name == SCENES:
+                continue
             value = variables[canonical_name]
             if canonical_name == CHARACTER_APPEARANCE_REQUIREMENTS:
                 value = _merge_optional_text(
@@ -1436,6 +1389,19 @@ def _build_stage_wire_payload_preview(stage_name: str, variables: dict[str, Any]
         elif canonical_name == MAX_RETRIES:
             payload[wire_name] = settings.max_retries_default
     return payload
+
+
+def _build_script_character_scene_bundle_for_estimate(characters: Any, scenes: Any) -> str:
+    character_text = str(characters or "").strip()
+    scene_text = str(scenes or "").strip()
+    if character_text and scene_text:
+        return (
+            "【人设结果JSON】\n"
+            f"{character_text}\n\n"
+            "【场景结果JSON】\n"
+            f"{scene_text}"
+        ).strip()
+    return character_text or scene_text
 
 
 def _format_wire_value_for_estimate(value: Any) -> Any:
@@ -1515,6 +1481,7 @@ def _run_fastgpt_stage(
     generated_episodes: int | None = None,
     max_retries: int | None = None,
 ) -> dict[str, Any]:
+    """统一封装单个 FastGPT 阶段调用，负责进度上报、契约校验和网络重试。"""
     contract = contract_for(stage_name)
     # Business audit/revise loops live inside FastGPT. Python only retries malformed
     # stage calls when explicitly configured, while HTTP/network retry is handled
@@ -1830,6 +1797,7 @@ def _restore_resume_state(
     variables: dict[str, Any],
     resume_snapshot: dict[str, Any] | None,
 ) -> None:
+    """把快照里的变量和正式产物恢复回来，再对批次指针做一次去污染校正。"""
     if not resume_snapshot:
         return
     debug_state = resume_snapshot.get("debug_state")
@@ -1928,6 +1896,7 @@ def _derive_restored_batch_progress(
     current_stage: str,
     rewrite_stage: str,
 ) -> tuple[int | None, int]:
+    """根据已落盘缓存倒推真实进度，优先相信实际产物，不盲信旧索引。"""
     if not batches:
         return None, 0
 
@@ -2049,10 +2018,439 @@ def _apply_normalized_episode_plan_to_variables(
     return normalized_plan
 
 
-def _has_framework_outputs(variables: dict[str, Any]) -> bool:
-    return all(
-        _has_value(variables.get(name))
-        for name in (STORY_OUTLINE, USER_CHARACTERS, USER_SCENES, EPISODE_PLAN)
+def _ensure_framework_and_consistency(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+    *,
+    resume_snapshot_present: bool,
+) -> None:
+    """负责跑通 framework -> appearance_strategy -> consistency 这一整条前置链路。"""
+    retry_limit = max(0, _safe_int(variables.get(MAX_RETRIES), settings.max_retries_default))
+    total_attempts = 1 + retry_limit
+    last_error: Exception | None = None
+
+    for attempt in range(1, total_attempts + 1):
+        _ensure_framework_outputs(
+            state,
+            runner,
+            payload,
+            variables,
+            resume_snapshot_present=resume_snapshot_present and attempt == 1,
+        )
+        _ensure_pre_strategy_outputs(state, runner, payload, variables)
+
+        if _truthy(variables.get(IS_CONSISTENT)):
+            set_runtime_stage(
+                state,
+                "validation",
+                "已从缓存恢复集数一致性检查结果。",
+                progress_percent=3,
+            )
+            return
+
+        if variables.get(IS_CONSISTENT) is False:
+            consistency = {IS_CONSISTENT: False}
+        else:
+            set_runtime_stage(
+                state,
+                "validation",
+                "正在核对分集计划和总集数。",
+                progress_percent=1,
+            )
+            consistency = _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_CONSISTENCY,
+                variables,
+                stage_key="validation",
+                message="正在核对分集计划和总集数。",
+                progress_percent=2,
+                max_retries=0,
+            )
+            variables.update(consistency)
+
+        if _truthy(consistency.get(IS_CONSISTENT)):
+            set_runtime_stage(state, "validation", "集数一致性检查通过。", progress_percent=3)
+            return
+
+        last_error = ValueError(
+            f"分集计划与总集数不一致，已回到剧本框架重新生成（第 {attempt}/{total_attempts} 次）。"
+        )
+        logger.warning("%s", last_error)
+        if attempt >= total_attempts:
+            break
+
+        _reset_workflow_to_initial_input_state(state, payload, variables)
+        set_runtime_stage(
+            state,
+            "framework",
+            f"集数一致性未通过，正在回到剧本框架重新生成大纲（{attempt}/{retry_limit}）。",
+            progress_percent=0,
+        )
+        sync_runtime_state(state)
+
+    _reset_workflow_to_initial_input_state(state, payload, variables)
+    final_message = _framework_consistency_terminal_error_message(last_error, total_attempts)
+    set_runtime_stage(
+        state,
+        "framework",
+        final_message,
+        progress_percent=0,
+    )
+    sync_runtime_state(state)
+    raise ValueError(final_message) from last_error
+
+
+def _ensure_pre_strategy_outputs(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+) -> None:
+    """在 world-building 之前补齐服装/别名等前置策略，避免后续阶段吃到旧设定。"""
+    if _has_pre_strategy_outputs(variables):
+        _refresh_user_content_baseline(payload, variables)
+        set_runtime_stage(
+            state,
+            "appearance_strategy",
+            "已从缓存恢复服装前置策略。",
+            progress_percent=6,
+        )
+    else:
+        variables.update(
+            _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_APPEARANCE_PRE_STRATEGY,
+                variables,
+                stage_key="appearance_strategy",
+                message="正在生成服装前置策略。",
+                progress_percent=6,
+                max_retries=0,
+            )
+        )
+        _refresh_user_content_baseline(payload, variables)
+    _sync_state_variables(state, variables)
+
+
+def _ensure_framework_outputs(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+    *,
+    resume_snapshot_present: bool,
+) -> None:
+    cached_errors = _framework_output_integrity_errors(payload, variables)
+    if cached_errors and resume_snapshot_present:
+        logger.warning(
+            "恢复到的剧本框架缓存无效，将丢弃旧缓存并回退到原始输入重跑 framework：%s",
+            "；".join(cached_errors),
+        )
+        _reset_workflow_to_initial_input_state(state, payload, variables)
+
+    if _has_framework_outputs(payload, variables):
+        _apply_framework_outputs_to_variables(payload, variables)
+        set_runtime_stage(
+            state,
+            "framework",
+            "已从缓存恢复剧本框架。",
+            progress_percent=4,
+        )
+        return
+
+    retry_limit = max(0, _safe_int(variables.get(MAX_RETRIES), settings.max_retries_default))
+    total_attempts = 1 + retry_limit
+    last_error: Exception | None = None
+
+    for attempt in range(1, total_attempts + 1):
+        _reset_workflow_to_initial_input_state(state, payload, variables)
+        try:
+            framework_output = _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_FRAMEWORK,
+                variables,
+                stage_key="framework",
+                message="正在撰写剧本框架。",
+                progress_percent=4,
+                max_retries=0,
+            )
+            framework_errors = _framework_output_integrity_errors(payload, framework_output)
+            if framework_errors:
+                raise FrameworkOutputValidationError(framework_errors)
+        except FrameworkOutputValidationError as exc:
+            last_error = exc
+            logger.warning(
+                "剧本框架第 %s/%s 次完整性校验失败：%s",
+                attempt,
+                total_attempts,
+                exc,
+            )
+            if attempt >= total_attempts:
+                break
+            set_runtime_stage(
+                state,
+                "framework",
+                f"剧本框架输出不完整，正在自动重试（{attempt}/{retry_limit}）。",
+                progress_percent=4,
+            )
+            sync_runtime_state(state)
+            continue
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "剧本框架第 %s/%s 次执行失败：%s",
+                attempt,
+                total_attempts,
+                exc,
+            )
+            if _is_non_retryable(exc) or attempt >= total_attempts:
+                break
+            set_runtime_stage(
+                state,
+                "framework",
+                f"剧本框架生成失败，正在自动重试（{attempt}/{retry_limit}）。",
+                progress_percent=4,
+            )
+            sync_runtime_state(state)
+            continue
+
+        variables.update(framework_output)
+        if not _apply_framework_outputs_to_variables(payload, variables):
+            last_error = FrameworkOutputValidationError(
+                _framework_output_integrity_errors(payload, framework_output)
+            )
+            if attempt >= total_attempts:
+                break
+            set_runtime_stage(
+                state,
+                "framework",
+                f"剧本框架输出不完整，正在自动重试（{attempt}/{retry_limit}）。",
+                progress_percent=4,
+            )
+            sync_runtime_state(state)
+            continue
+        return
+
+    _reset_workflow_to_initial_input_state(state, payload, variables)
+    final_message = _framework_terminal_error_message(last_error)
+    set_runtime_stage(
+        state,
+        "framework",
+        final_message,
+        progress_percent=0,
+    )
+    sync_runtime_state(state)
+    raise ValueError(final_message) from last_error
+
+
+def _reset_workflow_to_initial_input_state(
+    state: WorkflowState,
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+) -> None:
+    """在 framework/consistency 重试前清空本轮临时状态，回到用户原始输入起点。"""
+    variables.clear()
+    variables.update(_initial_fastgpt_variables(payload))
+    state.variables.clear()
+    state.node_outputs.clear()
+    state.final_output_text = ""
+    state.halted_message = None
+    _sync_state_variables(state, variables)
+
+
+def _has_framework_outputs(
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+) -> bool:
+    return not _framework_output_integrity_errors(payload, variables)
+
+
+def _framework_output_integrity_errors(
+    payload: WorkflowInput,
+    values: dict[str, Any],
+) -> list[str]:
+    """对 framework 成品做代码级验收，拦住空字段、过短文本和分集计划缺集。"""
+    framework_values = _framework_output_snapshot(payload, values)
+    errors: list[str] = []
+    min_lengths = {
+        SCRIPT_TITLE: FRAMEWORK_TITLE_MIN_LENGTH,
+        STORY_OUTLINE: FRAMEWORK_TEXT_MIN_LENGTH,
+        USER_CHARACTERS: FRAMEWORK_TEXT_MIN_LENGTH,
+        USER_SCENES: FRAMEWORK_TEXT_MIN_LENGTH,
+        EPISODE_PLAN: FRAMEWORK_TEXT_MIN_LENGTH,
+    }
+
+    for field_name, min_length in min_lengths.items():
+        text = str(framework_values.get(field_name) or "").strip()
+        if not text:
+            errors.append(f"{field_name} 缺失")
+            continue
+        if len(text) < min_length:
+            errors.append(
+                f"{field_name} 过短（当前 {len(text)} 字，至少 {min_length} 字）"
+            )
+
+    episode_plan_issue = _framework_episode_plan_integrity_issue(
+        framework_values.get(EPISODE_PLAN),
+        payload.total_episodes,
+    )
+    if episode_plan_issue:
+        errors.append(episode_plan_issue)
+    return errors
+
+
+def _framework_output_snapshot(
+    payload: WorkflowInput,
+    values: dict[str, Any],
+) -> dict[str, str]:
+    """只抽出 framework 这一步真正要交给后续阶段的 5 个正式字段。"""
+    return {
+        SCRIPT_TITLE: str(values.get(SCRIPT_TITLE) or "").strip(),
+        STORY_OUTLINE: str(values.get(STORY_OUTLINE) or "").strip(),
+        USER_CHARACTERS: str(values.get(USER_CHARACTERS) or "").strip(),
+        USER_SCENES: str(values.get(USER_SCENES) or "").strip(),
+        EPISODE_PLAN: _select_complete_framework_episode_plan_source(payload, values),
+    }
+
+
+def _select_complete_framework_episode_plan_source(
+    payload: WorkflowInput,
+    values: dict[str, Any],
+) -> str:
+    """从 framework 相关变量里挑出完整分集计划母本，避免误吃局部批次结果。"""
+    canonical = str(values.get(EPISODE_PLAN) or "").strip()
+    raw_source = str(values.get(LOCAL_RAW_EPISODE_PLAN) or "").strip()
+    for candidate in (raw_source, canonical):
+        if _episode_plan_covers_total_episodes(candidate, payload.total_episodes):
+            return candidate
+    return canonical or raw_source
+
+
+def _framework_episode_plan_integrity_issue(
+    value: Any,
+    total_episodes: int,
+) -> str | None:
+    """检查 framework 产出的分集计划是否真的覆盖到第 1-total_episodes 集。"""
+    text = str(value or "").strip()
+    if not text:
+        return "episode_plan 缺失"
+
+    episode_numbers = _extract_complete_episode_numbers_from_plan(text)
+    if not episode_numbers:
+        return f"episode_plan 未识别到第 1-{int(total_episodes or 0)} 集的有效覆盖"
+
+    max_episode = int(total_episodes or 0)
+    if max_episode <= 0:
+        return None
+
+    episode_set = set(episode_numbers)
+    missing = [episode for episode in range(1, max_episode + 1) if episode not in episode_set]
+    extras = [episode for episode in episode_numbers if episode > max_episode]
+    if not missing and not extras and episode_numbers[0] == 1 and episode_numbers[-1] == max_episode:
+        return None
+
+    details: list[str] = [f"当前识别到 {_format_episode_ranges(episode_numbers)}"]
+    if missing:
+        details.append(f"缺少 {_format_episode_ranges(missing)}")
+    if extras:
+        details.append(f"超出总集数的有 {_format_episode_ranges(extras)}")
+    return f"episode_plan 未完整覆盖 1-{max_episode} 集（{'；'.join(details)}）"
+
+
+def _episode_plan_covers_total_episodes(value: Any, total_episodes: int) -> bool:
+    return _framework_episode_plan_integrity_issue(value, total_episodes) is None
+
+
+def _extract_complete_episode_numbers_from_plan(value: Any) -> list[int]:
+    normalized = _normalize_episode_plan_object(value)
+    if normalized is not None:
+        episode_numbers = _extract_batch_episode_numbers_from_plan(normalized)
+        return sorted({episode for episode in episode_numbers if episode > 0})
+
+    text = str(value or "").strip()
+    if not text:
+        return []
+
+    seen: set[int] = set()
+    numbers: list[int] = []
+    for match in re.finditer(
+        r"第\s*([0-9零〇一二两三四五六七八九十百千]+)\s*[集话回章]",
+        text,
+        re.MULTILINE,
+    ):
+        raw = str(match.group(1) or "").strip()
+        episode_number = int(raw) if raw.isdigit() else _parse_chinese_number(raw)
+        if episode_number is None or episode_number in seen:
+            continue
+        seen.add(episode_number)
+        numbers.append(episode_number)
+
+    if numbers:
+        return sorted(numbers)
+
+    for line in text.splitlines():
+        episode_number = _extract_episode_number(line)
+        if episode_number is None or episode_number in seen:
+            continue
+        seen.add(episode_number)
+        numbers.append(episode_number)
+    return sorted(numbers)
+
+
+def _format_episode_ranges(numbers: list[int]) -> str:
+    normalized = sorted({int(number) for number in numbers if int(number) > 0})
+    if not normalized:
+        return "无有效集数"
+
+    ranges: list[str] = []
+    start = normalized[0]
+    end = normalized[0]
+    for episode in normalized[1:]:
+        if episode == end + 1:
+            end = episode
+            continue
+        ranges.append(_format_episode_range(start, end))
+        start = episode
+        end = episode
+    ranges.append(_format_episode_range(start, end))
+    return "第 " + "、".join(ranges) + " 集"
+
+
+def _format_episode_range(start: int, end: int) -> str:
+    if start == end:
+        return str(start)
+    return f"{start}-{end}"
+
+
+def _format_framework_validation_errors(errors: list[str]) -> str:
+    if not errors:
+        return "剧本框架输出无效。"
+    return "剧本框架输出无效：" + "；".join(errors)
+
+
+def _framework_terminal_error_message(last_error: Exception | None) -> str:
+    if isinstance(last_error, FrameworkOutputValidationError):
+        return str(last_error)
+    if last_error is None:
+        return "剧本框架输出无效。"
+    return f"剧本框架生成失败：{last_error}"
+
+
+def _framework_consistency_terminal_error_message(
+    last_error: Exception | None,
+    total_attempts: int,
+) -> str:
+    if last_error is None:
+        return "分集计划与总集数一致性校验失败，且未能回退到剧本框架完成重生。"
+    if isinstance(last_error, FrameworkOutputValidationError):
+        return str(last_error)
+    return (
+        f"分集计划与总集数一致性校验连续失败，已回到剧本框架重生 {total_attempts} 次仍未通过："
+        f"{last_error}"
     )
 
 
@@ -2071,15 +2469,16 @@ def _apply_framework_outputs_to_variables(
     payload: WorkflowInput,
     variables: dict[str, Any],
 ) -> bool:
-    if not _has_framework_outputs(variables):
+    """把 framework 成品正式回写到运行态变量，供后面的策略、校验和批处理继续使用。"""
+    if not _has_framework_outputs(payload, variables):
         return False
 
-    framework_title = str(variables.get(SCRIPT_TITLE) or "").strip()
-    story_outline = str(variables.get(STORY_OUTLINE) or "").strip()
-    user_characters = str(variables.get(USER_CHARACTERS) or "").strip()
-    user_scenes = str(variables.get(USER_SCENES) or "").strip()
-    episode_plan = str(variables.get(EPISODE_PLAN) or "").strip()
-    script_title = framework_title or str(payload.title or "").strip() or "AI原创剧本"
+    framework_values = _framework_output_snapshot(payload, variables)
+    script_title = framework_values[SCRIPT_TITLE]
+    story_outline = framework_values[STORY_OUTLINE]
+    user_characters = framework_values[USER_CHARACTERS]
+    user_scenes = framework_values[USER_SCENES]
+    episode_plan = framework_values[EPISODE_PLAN]
 
     variables[SCRIPT_TITLE] = script_title
     variables[STORY_OUTLINE] = story_outline
@@ -2899,6 +3298,7 @@ def _get_episode_batch_plan_context(
     batch_size: int,
     raw_episode_plan: str,
 ) -> tuple[str, dict[str, Any] | None]:
+    """给 hooks/dialogues/script 取当前批次专属的分集计划，禁止混入母本全文。"""
     batch_window = BatchWindow(
         start_episode=start_episode,
         end_episode=max(start_episode, start_episode + max(1, batch_size) - 1),

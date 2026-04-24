@@ -38,7 +38,7 @@ from .fastgpt_contracts import (
     OUTFIT_SWITCH_RULES,
     SCENES,
     SCENE_APPEARANCE_REQUIREMENTS,
-    SCRIPT_TITLE,
+    script_title_content,
     STORY_OUTLINE,
     USER_CHARACTERS,
     USER_CONTENT_BASELINE,
@@ -48,7 +48,7 @@ from .fastgpt_contracts import (
 from .llm_client import llm_client
 from .workflow_spec import WorkflowSpec
 from ..utils.logger import get_logger
-from ..utils.episode import iter_episode_batches
+from ..utils.episode import BatchWindow, iter_episode_batches
 from ..workflow_ids import (
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
     APPEARANCE_MAPPING_VAR,
@@ -117,7 +117,7 @@ PUBLIC_INPUT_PAYLOAD_KEYS = (
     "total_episodes",
 )
 PUBLIC_ARTIFACT_KEYS = (
-    "script_title",
+    "script_title_content",
     "story_outline",
     "character_bios",
     "core_scene_input",
@@ -136,7 +136,7 @@ COMPLETED_INPUT_PAYLOAD_KEYS = (
     "total_episodes",
 )
 COMPLETED_ARTIFACT_KEYS = (
-    "script_title",
+    "script_title_content",
     "story_outline",
     "normalized_episode_plan",
     "character_summary",
@@ -188,8 +188,16 @@ ROLLBACK_STAGE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("final", "最终剧本拼接"),
 )
 ROLLBACK_STAGE_LABELS = {key: label for key, label in ROLLBACK_STAGE_OPTIONS}
+
+
+def _rollback_stage_index(stage_key: Any) -> int:
+    stage = str(stage_key or "").strip().lower()
+    for index, (key, _) in enumerate(ROLLBACK_STAGE_OPTIONS):
+        if key == stage:
+            return index
+    return -1
 DEBUG_VARIABLE_MIRRORS: dict[str, tuple[str, ...]] = {
-    SCRIPT_TITLE: (TITLE_VAR,),
+    script_title_content: (TITLE_VAR,),
     STORY_OUTLINE: (STORY_OUTLINE_VAR,),
     USER_CHARACTERS: (CHARACTER_BIOS_VAR,),
     USER_SCENES: (CORE_SCENE_INPUT_VAR,),
@@ -226,7 +234,7 @@ DEBUG_VARIABLE_MIRRORS: dict[str, tuple[str, ...]] = {
 }
 ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
     "framework": (
-        SCRIPT_TITLE,
+        script_title_content,
         STORY_OUTLINE,
         USER_CHARACTERS,
         USER_SCENES,
@@ -540,7 +548,7 @@ for _stage_key in (
 
 ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
     "framework": (
-        "script_title",
+        "script_title_content",
         "story_outline",
         "character_bios",
         "episode_plan",
@@ -1187,7 +1195,7 @@ class WorkflowRuntime:
         )
 
     def sync_from_state(self, state: WorkflowState) -> None:
-        script_title = str(state.get_var(TITLE_VAR, "") or "").strip()
+        script_title_content = str(state.get_var(TITLE_VAR, "") or "").strip()
         final_script_text = str(
             state.final_output_text
             or state.get_var(FINAL_SCRIPT, "")
@@ -1195,7 +1203,7 @@ class WorkflowRuntime:
             or ""
         ).strip()
         artifacts = {
-            "script_title": script_title,
+            "script_title_content": script_title_content,
             "story_outline": state.get_var(STORY_OUTLINE_VAR, ""),
             "character_bios": state.get_var(CHARACTER_BIOS_VAR, ""),
             "episode_plan": state.get_var(EPISODE_PLAN_VAR, ""),
@@ -1223,7 +1231,7 @@ class WorkflowRuntime:
         }
         self.manager._update_snapshot(
             self.record,
-            title=script_title or self.record.snapshot.get("title") or "未命名剧本",
+            title=script_title_content or self.record.snapshot.get("title") or "未命名剧本",
             artifacts=artifacts,
             debug_state=state.as_debug_dict(),
             prompt_fixes=state.prompt_fixes,
@@ -1475,8 +1483,8 @@ class TaskManager:
         if cached_text and cached_hash == text_hash:
             return cached_text
 
-        source_text = self._episode_plan_display_source_text(parsed) or raw_episode_plan
-        display_text = self._generate_episode_plan_display(source_text)
+        display_source_json = self._episode_plan_display_json_text(parsed) or raw_episode_plan
+        display_text = self._generate_episode_plan_display(display_source_json)
         if not display_text:
             display_text = self._fallback_episode_plan_display(parsed)
         if not display_text:
@@ -1496,6 +1504,18 @@ class TaskManager:
         if isinstance(parsed, (dict, list)):
             return parsed
         return None
+
+    def _episode_plan_display_json_text(self, parsed: Any) -> str:
+        if isinstance(parsed, dict):
+            nested_episode_plan = parsed.get("episode_plan")
+            if isinstance(nested_episode_plan, str):
+                nested_parsed = self._parse_episode_plan_display_json(nested_episode_plan)
+                if nested_parsed is not None:
+                    return self._episode_plan_display_json_text(nested_parsed)
+        try:
+            return json.dumps(parsed, ensure_ascii=False, indent=2)
+        except Exception:
+            return ""
 
     def _episode_plan_display_source_text(self, parsed: Any) -> str:
         if isinstance(parsed, dict):
@@ -1565,7 +1585,7 @@ class TaskManager:
                     },
                     {
                         "role": "user",
-                        "content": f"请把下面的分集计划信息转成自然语言展示稿：\n\n{text}",
+                        "content": f"请把下面这份分集计划 JSON 转成自然语言展示稿：\n\n{text}",
                     },
                 ],
                 provider="deepseek",
@@ -1624,7 +1644,7 @@ class TaskManager:
         variables = debug_state.get("variables") if isinstance(debug_state.get("variables"), dict) else {}
 
         reached: set[str] = set()
-        if any(str(artifacts.get(key) or "").strip() for key in ("script_title", "story_outline", "character_bios", "core_scene_input", "episode_plan")):
+        if any(str(artifacts.get(key) or "").strip() for key in ("script_title_content", "story_outline", "character_bios", "core_scene_input", "episode_plan")):
             reached.add("framework")
         if any(str(variables.get(key) or "").strip() for key in (
             USER_CONTENT_BASELINE,
@@ -1659,6 +1679,9 @@ class TaskManager:
             reached.add(current_stage)
 
         indexes = [index for index, (key, _) in enumerate(ROLLBACK_STAGE_OPTIONS) if key in reached]
+        current_stage_index = _rollback_stage_index(current_stage)
+        if current_stage_index >= 0:
+            indexes = [index for index in indexes if index <= current_stage_index]
         return max(indexes) if indexes else -1
 
     def _snapshot_stage_to_rollback_stage(
@@ -1667,6 +1690,12 @@ class TaskManager:
         variables: dict[str, Any],
     ) -> str:
         """把运行时阶段名映射成回退阶段名，保证前后端对阶段理解一致。"""
+        batch_stage = _normalize_rollback_stage_key(variables.get(LOCAL_CURRENT_BATCH_STAGE))
+        rewrite_stage = _normalize_rollback_stage_key(variables.get(LOCAL_REWRITE_FROM_STAGE))
+        for candidate in (batch_stage, rewrite_stage):
+            if candidate in {"hooks", "dialogues", "script"}:
+                return candidate
+
         current_stage = str(snapshot.get("current_stage") or "").strip().lower()
         if current_stage == "validation":
             return "episode_plan_normalize" if variables.get(NORMALIZED_EPISODE_PLAN) else "consistency"
@@ -1688,7 +1717,13 @@ class TaskManager:
             "final": "final",
             "finished": "final",
         }
-        return mapping.get(current_stage, "")
+        mapped_stage = mapping.get(current_stage, "")
+        if rewrite_stage in ROLLBACK_STAGE_LABELS:
+            rewrite_index = _rollback_stage_index(rewrite_stage)
+            mapped_index = _rollback_stage_index(mapped_stage)
+            if rewrite_index >= 0 and (mapped_index < 0 or rewrite_index < mapped_index):
+                return rewrite_stage
+        return mapped_stage or rewrite_stage or batch_stage or ""
 
     def _current_stage_display_payload(
         self,
@@ -1767,7 +1802,7 @@ class TaskManager:
 
     def _framework_stage_output_text(self, artifacts: dict[str, Any]) -> str:
         """把框架阶段的几个正式字段拼成一份可直接阅读的阶段成品。"""
-        title = str(artifacts.get("script_title") or "").strip()
+        title = str(artifacts.get("script_title_content") or "").strip()
         story_outline = str(artifacts.get("story_outline") or "").strip()
         character_bios = str(artifacts.get("character_bios") or "").strip()
         core_scene_input = str(artifacts.get("core_scene_input") or "").strip()
@@ -1909,7 +1944,7 @@ class TaskManager:
             "project_id": snapshot.get("project_id"),
             "task_id": snapshot.get("task_id"),
             "status": snapshot.get("status"),
-            "title": snapshot.get("title") or artifacts.get("script_title") or "未命名剧本",
+            "title": snapshot.get("title") or artifacts.get("script_title_content") or "未命名剧本",
             "message": _public_status_message(snapshot),
             "created_at": snapshot.get("created_at"),
             "updated_at": snapshot.get("updated_at"),
@@ -1995,31 +2030,49 @@ class TaskManager:
         current_stage = _normalize_rollback_stage_key(snapshot.get("current_stage"))
         rewrite_stage = _normalize_rollback_stage_key(variables.get(LOCAL_REWRITE_FROM_STAGE))
         batch_stage = _normalize_rollback_stage_key(variables.get(LOCAL_CURRENT_BATCH_STAGE))
+        interrupted_start = self._interrupted_batch_start_episode(snapshot)
 
-        for candidate in (rewrite_stage, current_stage, batch_stage):
+        for candidate in (batch_stage, rewrite_stage, current_stage):
             if candidate in {"hooks", "dialogues", "script"}:
-                return candidate, self._interrupted_batch_start_episode(snapshot)
+                return candidate, interrupted_start
 
-        for candidate in (current_stage, rewrite_stage, batch_stage):
+        for candidate in (batch_stage, rewrite_stage, current_stage):
             if candidate in ROLLBACK_STAGE_LABELS:
                 return candidate, None
         return "", None
 
     def _interrupted_batch_start_episode(self, snapshot: dict[str, Any]) -> int | None:
+        """优先按真实缓存覆盖度推断中断批次，避免旧的 start_episode 把回退点带偏。"""
         debug_state = snapshot.get("debug_state") or {}
         variables = debug_state.get("variables") if isinstance(debug_state, dict) else {}
         if not isinstance(variables, dict):
             variables = {}
 
-        start_episode = _safe_int(
-            variables.get(BATCH_START_EPISODE)
-            or variables.get(HOOK_START_VAR)
-            or variables.get(DIALOGUE_START_VAR)
-            or variables.get(SCRIPT_START_VAR),
-            0,
-        )
-        if start_episode > 0:
-            return start_episode
+        total_episodes = int(snapshot.get("total_episodes") or 0)
+        batch_size = max(1, int(settings.batch_size or 5))
+        batches = list(iter_episode_batches(total_episodes, batch_size=batch_size)) if total_episodes > 0 else []
+        if batches:
+            batch_stage = _normalize_rollback_stage_key(variables.get(LOCAL_CURRENT_BATCH_STAGE))
+            rewrite_stage = _normalize_rollback_stage_key(variables.get(LOCAL_REWRITE_FROM_STAGE))
+            current_stage = self._snapshot_stage_to_rollback_stage(snapshot, variables)
+            saved_start = _safe_int(
+                variables.get(BATCH_START_EPISODE)
+                or variables.get(HOOK_START_VAR)
+                or variables.get(DIALOGUE_START_VAR)
+                or variables.get(SCRIPT_START_VAR),
+                0,
+            )
+            derived_start = self._derived_batch_start_from_cache(
+                variables,
+                batches=batches,
+                batch_stage=batch_stage,
+                rewrite_stage=rewrite_stage,
+                current_stage=current_stage,
+            )
+            if derived_start is not None:
+                return derived_start
+            if saved_start > 0:
+                return saved_start
 
         current_batch = str(snapshot.get("current_batch") or "").strip()
         if current_batch:
@@ -2029,6 +2082,86 @@ class TaskManager:
                 return parsed
         return None
 
+    def _derived_batch_start_from_cache(
+        self,
+        variables: dict[str, Any],
+        *,
+        batches: list[BatchWindow],
+        batch_stage: str,
+        rewrite_stage: str,
+        current_stage: str,
+    ) -> int | None:
+        """根据 hooks/dialogues/script 的真实缓存，反推出当前应该从哪一批继续。"""
+        if not batches:
+            return None
+
+        hooks_start = self._next_unfinished_object_batch_start(variables.get(ALL_HOOKS), batches)
+        dialogues_start = self._next_unfinished_object_batch_start(variables.get(ALL_DIALOGUES), batches)
+        script_start = self._next_unfinished_script_batch_start(variables, batches)
+
+        anchor_stage = ""
+        for candidate in (batch_stage, rewrite_stage, current_stage):
+            if candidate in {"hooks", "dialogues", "script", "final"}:
+                anchor_stage = candidate
+                break
+
+        if anchor_stage == "hooks":
+            return hooks_start
+        if anchor_stage == "dialogues":
+            return dialogues_start
+        if anchor_stage in {"script", "final"}:
+            return script_start
+        return min(hooks_start, dialogues_start, script_start)
+
+    def _next_unfinished_object_batch_start(
+        self,
+        value: Any,
+        batches: list[BatchWindow],
+    ) -> int:
+        payload = copy.deepcopy(value) if isinstance(value, dict) else {}
+        for batch in batches:
+            if not self._episode_object_covers_batch(payload, batch):
+                return batch.start_episode
+        return batches[-1].end_episode + 1
+
+    def _episode_object_covers_batch(self, value: Any, batch: BatchWindow) -> bool:
+        payload = copy.deepcopy(value) if isinstance(value, dict) else {}
+        episodes = payload.get("episodes")
+        if not isinstance(episodes, list):
+            return False
+        episode_numbers = sorted(
+            {
+                _safe_int(item.get("episode"), 0)
+                for item in episodes
+                if isinstance(item, dict)
+                and batch.start_episode <= _safe_int(item.get("episode"), 0) <= batch.end_episode
+            }
+        )
+        expected = list(range(batch.start_episode, batch.end_episode + 1))
+        return episode_numbers == expected
+
+    def _next_unfinished_script_batch_start(
+        self,
+        variables: dict[str, Any],
+        batches: list[BatchWindow],
+    ) -> int:
+        script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
+        script_episodes = _normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES))
+        summary_by_batch = _normalize_batch_text_map(variables.get(LOCAL_SUMMARY_BY_BATCH))
+        for batch in batches:
+            batch_text = str(script_batches.get(batch.start_episode) or "").strip()
+            if not batch_text:
+                expected = range(batch.start_episode, batch.end_episode + 1)
+                if all(str(script_episodes.get(episode) or "").strip() for episode in expected):
+                    batch_text = "\n".join(
+                        str(script_episodes.get(episode) or "").strip()
+                        for episode in expected
+                    ).strip()
+            batch_summary = str(summary_by_batch.get(batch.start_episode) or "").strip()
+            if not batch_text or not batch_summary:
+                return batch.start_episode
+        return batches[-1].end_episode + 1
+
     def _completed_input_payload(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         input_payload = _select_non_empty_fields(
             snapshot.get("input_payload") or {},
@@ -2036,7 +2169,7 @@ class TaskManager:
         )
         artifacts = snapshot.get("artifacts") or {}
         title = str(
-            artifacts.get("script_title")
+            artifacts.get("script_title_content")
             or snapshot.get("title")
             or input_payload.get("title")
             or ""
@@ -2589,6 +2722,7 @@ class TaskManager:
         *,
         start_episode: int | None = None,
     ) -> dict[str, Any]:
+        """构造阶段回退后的新快照，只保留当前阶段之前仍然可信的缓存。"""
         effective_start_episode = (
             int(start_episode)
             if _safe_int(start_episode, 0) > 0
@@ -2695,6 +2829,7 @@ class TaskManager:
         stage_key: str,
         start_episode: int,
     ) -> None:
+        """按批次回退 hooks/dialogues，保留前序结果，只清掉需要重做的窗口。"""
         debug_state = snapshot.get("debug_state") or {}
         original_variables = debug_state.get("variables") if isinstance(debug_state, dict) else {}
         if not isinstance(original_variables, dict):
@@ -2764,7 +2899,7 @@ class TaskManager:
         variables[LOCAL_APPEARANCE_MEMORY_BY_BATCH] = _string_keyed_batch_map(preserved_appearance_batches)
         variables[LOCAL_COMPLETED_BATCHES] = completed_batches
         variables[LOCAL_CURRENT_BATCH_INDEX] = completed_batches
-        variables[LOCAL_CURRENT_BATCH_STAGE] = ""
+        variables[LOCAL_CURRENT_BATCH_STAGE] = "hook" if stage_key == "hooks" else "dialogue"
         variables[BATCH_START_EPISODE] = int(start_episode)
         variables.pop(BATCH_HOOKS, None)
         variables.pop(BATCH_DIALOGUES, None)
@@ -2780,6 +2915,7 @@ class TaskManager:
         *,
         start_episode: int,
     ) -> None:
+        """按正文缓存切掉 start_episode 之后的内容，确保 script 从真实断点续写。"""
         debug_state = snapshot.get("debug_state") or {}
         original_variables = debug_state.get("variables") if isinstance(debug_state, dict) else {}
         if not isinstance(original_variables, dict):
@@ -2863,7 +2999,7 @@ class TaskManager:
         )
         variables[LOCAL_COMPLETED_BATCHES] = completed_batches
         variables[LOCAL_CURRENT_BATCH_INDEX] = completed_batches
-        variables[LOCAL_CURRENT_BATCH_STAGE] = ""
+        variables[LOCAL_CURRENT_BATCH_STAGE] = "script"
         variables[BATCH_START_EPISODE] = int(start_episode)
         variables.pop(BATCH_SCRIPT, None)
         variables.pop(LOCAL_HOOK_CHECKPOINT_START, None)
@@ -2910,7 +3046,7 @@ class TaskManager:
         payload = {
             "project_id": snapshot.get("project_id"),
             "task_id": snapshot.get("task_id"),
-            "title": artifacts.get("script_title") or snapshot.get("title") or input_payload.get("title") or "未命名剧本",
+            "title": artifacts.get("script_title_content") or snapshot.get("title") or input_payload.get("title") or "未命名剧本",
             "summary": summary[:360],
             "status": snapshot.get("status"),
             "visibility": snapshot.get("visibility") or "private",

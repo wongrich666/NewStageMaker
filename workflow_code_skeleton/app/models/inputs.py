@@ -13,7 +13,7 @@ def _pick(data: dict[str, Any], *keys: str, default: Any = "") -> Any:
     return default
 
 
-def derive_script_title(*candidates: Any) -> str:
+def derive_script_title_content(*candidates: Any) -> str:
     for candidate in candidates:
         text = str(candidate or "").strip()
         if not text:
@@ -55,12 +55,12 @@ class WorkflowInput:
                 _pick(
                     data,
                     "title",
-                    "script_title",
+                    "script_title_content",
                     "剧本标题",
-                    default=derive_script_title(user_expectation),
+                    default=derive_script_title_content(user_expectation),
                 )
             ).strip()
-            or derive_script_title(user_expectation),
+            or derive_script_title_content(user_expectation),
             episode_word_count=int(
                 _pick(
                     data,

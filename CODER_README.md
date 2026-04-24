@@ -131,11 +131,11 @@
   - 做的事：
     1. 读取前端 JSON
     2. 生成 `payload`
-    3. 如果没有标题，就先用 `derive_script_title()` 根据“用户期待”兜底
+    3. 如果没有标题，就先用 `derive_script_title_content()` 根据“用户期待”兜底
     4. 把服装相关三个字段先置空，等后续 `appearance_pre_strategy` 阶段回填
     5. 调 `task_manager.start_task(...)`
 
-- `derive_script_title()` `workflow_code_skeleton/app/models/inputs.py:16`
+- `derive_script_title_content()` `workflow_code_skeleton/app/models/inputs.py:16`
   - 中文意思：本地兜底标题生成器
   - 用途：framework 阶段没出标题时，至少有个可用标题
 
