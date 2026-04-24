@@ -482,7 +482,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             path,
             as_attachment=True,
             download_name=path.name,
-            mimetype="application/zip",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
     return app

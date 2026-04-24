@@ -156,11 +156,14 @@ SIMPLE_TOOLS: dict[str, SimpleTool] = {
     ),
 }
 
+VISIBLE_TOOL_KEYS: tuple[str, ...] = ("character_reskin",)
+
 
 def list_simple_tools() -> list[dict[str, Any]]:
     return [
         _serialize_tool(_resolved_tool(tool.key))
-        for tool in SIMPLE_TOOLS.values()
+        for key, tool in SIMPLE_TOOLS.items()
+        if key in VISIBLE_TOOL_KEYS
     ]
 
 

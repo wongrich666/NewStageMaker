@@ -170,10 +170,78 @@ class FastGPTStageContract:
                 raise ValueError(
                     f"FastGPT 阶段 {self.stage_name} 输出字段 {name} 校验失败：{exc}"
                 ) from exc
+            issue = describe_stage_output_shape_issue(
+                self.stage_name,
+                name,
+                normalized[name],
+            )
+            if issue:
+                raise ValueError(
+                    f"FastGPT 阶段 {self.stage_name} 输出字段 {name} 结构不符合契约：{issue}"
+                )
         if missing:
             joined = ", ".join(missing)
             raise ValueError(f"FastGPT 阶段 {self.stage_name} 缺少输出变量：{joined}")
         return normalized
+
+
+def describe_stage_output_shape_issue(
+    stage_name: str,
+    field_name: str,
+    value: Any,
+) -> str | None:
+    if stage_name == STAGE_EPISODE_PLAN_NORMALIZE and field_name == NORMALIZED_EPISODE_PLAN:
+        if not isinstance(value, dict):
+            return "必须是 object"
+        required = {"parsed_episode_count", "episodes"}
+        allowed = required | {"appearance_alias_planning"}
+        missing = sorted(required - set(value.keys()))
+        extra = sorted(set(value.keys()) - allowed)
+        if missing:
+            return f"缺少键 {', '.join(missing)}"
+        if extra:
+            return f"存在非契约键 {', '.join(extra)}"
+        if not isinstance(value.get("episodes"), list):
+            return "episodes 必须是数组"
+        return None
+
+    if stage_name == STAGE_HOOKS and field_name == BATCH_HOOKS:
+        if not isinstance(value, dict):
+            return "必须是 object"
+        required = {"batch_meta", "global_hook_engine", "episodes"}
+        extra = sorted(set(value.keys()) - required)
+        missing = sorted(required - set(value.keys()))
+        if missing:
+            return f"缺少键 {', '.join(missing)}"
+        if extra:
+            return f"存在非契约键 {', '.join(extra)}"
+        if not isinstance(value.get("batch_meta"), dict):
+            return "batch_meta 必须是 object"
+        if not isinstance(value.get("global_hook_engine"), dict):
+            return "global_hook_engine 必须是 object"
+        if not isinstance(value.get("episodes"), list):
+            return "episodes 必须是数组"
+        return None
+
+    if stage_name == STAGE_DIALOGUES and field_name == BATCH_DIALOGUES:
+        if not isinstance(value, dict):
+            return "必须是 object"
+        required = {"batch_meta", "character_voice_bibles", "episode_dialogue_blocks"}
+        extra = sorted(set(value.keys()) - required)
+        missing = sorted(required - set(value.keys()))
+        if missing:
+            return f"缺少键 {', '.join(missing)}"
+        if extra:
+            return f"存在非契约键 {', '.join(extra)}"
+        if not isinstance(value.get("batch_meta"), dict):
+            return "batch_meta 必须是 object"
+        if not isinstance(value.get("character_voice_bibles"), list):
+            return "character_voice_bibles 必须是数组"
+        if not isinstance(value.get("episode_dialogue_blocks"), list):
+            return "episode_dialogue_blocks 必须是数组"
+        return None
+
+    return None
 
 
 GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
@@ -501,29 +569,14 @@ LEGACY_OUTPUT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
         USER_SCENES: (FRAMEWORK_CORE_SCENE_VAR, "core_scene_content"),
         EPISODE_PLAN: (FRAMEWORK_EPISODE_PLAN_VAR, "episode_plan_content"),
     },
-    STAGE_APPEARANCE_PRE_STRATEGY: {
-        CHARACTER_APPEARANCE_REQUIREMENTS: (
-            APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
-            "character_appearance_requirements",
-        ),
-        CHARACTER_ALIAS_NAMING_RULES: (
-            APPEARANCE_ALIAS_NAMING_RULES_VAR,
-            "character_alias_naming_rules",
-        ),
-        OUTFIT_SWITCH_RULES: (
-            OUTFIT_SWITCH_RULES_VAR,
-            "outfit_switch_rules",
-        ),
-    },
-    STAGE_EPISODE_PLAN_NORMALIZE: {
-        NORMALIZED_EPISODE_PLAN: (EPISODE_PLAN_NORMALIZED_VAR,),
-    },
+    STAGE_APPEARANCE_PRE_STRATEGY: {},
+    STAGE_EPISODE_PLAN_NORMALIZE: {},
     STAGE_WORLDVIEW: {WORLDVIEW: (WORLDVIEW_VAR,)},
     STAGE_CHARACTERS: {CHARACTERS: (CHARACTER_VAR,)},
     STAGE_SCENES: {SCENES: (SCENE_VAR,)},
     STAGE_APPEARANCE_ALIAS_GENERATION: {APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,)},
     STAGE_HOOKS: {},
-    STAGE_DIALOGUES: {BATCH_DIALOGUES: (DIALOGUE_OUTPUT_VAR,)},
+    STAGE_DIALOGUES: {},
     STAGE_SCRIPT: {BATCH_SCRIPT: (SCRIPT_CURRENT_VAR,)},
     STAGE_MEMORY: {},
     STAGE_FINAL: {},

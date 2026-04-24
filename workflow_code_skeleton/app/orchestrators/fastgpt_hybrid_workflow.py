@@ -112,6 +112,7 @@ LOCAL_SCRIPT_BATCHES = "_script_batches"
 LOCAL_SCRIPT_EPISODES = "_script_episode_cache"
 LOCAL_SUMMARY_BY_BATCH = "_summary_by_batch"
 LOCAL_APPEARANCE_MEMORY_BY_BATCH = "_appearance_memory_by_batch"
+LOCAL_RAW_EPISODE_PLAN = "_raw_episode_plan"
 SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT = 32000
 SCRIPT_STAGE_PREVIOUS_SCRIPT_BATCHES = 2
 
@@ -226,8 +227,9 @@ def run_fastgpt_hybrid_workflow(
     set_runtime_stage(state, "validation", "集数一致性检查通过。", progress_percent=3)
 
     normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
-    if _has_normalized_episode_plan(normalized_plan):
+    if _normalized_episode_plan_is_trusted(normalized_plan, payload.total_episodes):
         variables[NORMALIZED_EPISODE_PLAN] = normalized_plan
+        _apply_normalized_episode_plan_to_variables(payload, variables)
         set_runtime_stage(
             state,
             "validation",
@@ -235,6 +237,20 @@ def run_fastgpt_hybrid_workflow(
             progress_percent=7,
         )
     else:
+        if _has_normalized_episode_plan(normalized_plan):
+            logger.warning(
+                "恢复到的规范化分集计划疑似被旧快照污染：%s，当前总集数=%s。将重新执行规范化阶段。",
+                _describe_normalized_episode_plan(normalized_plan),
+                payload.total_episodes,
+            )
+        raw_episode_plan = _raw_episode_plan_source(payload, variables)
+        if not raw_episode_plan:
+            raise ValueError(
+                "恢复的规范化分集计划疑似只剩局部批次，且当前项目未保留原始分集计划，"
+                "请从剧本框架或分集计划规范化阶段重新生成。"
+            )
+        variables.pop(NORMALIZED_EPISODE_PLAN, None)
+        variables[EPISODE_PLAN] = raw_episode_plan
         variables.update(
             _run_fastgpt_stage(
                 state,
@@ -248,9 +264,13 @@ def run_fastgpt_hybrid_workflow(
             )
         )
         normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
-        if _has_normalized_episode_plan(normalized_plan):
+        if _normalized_episode_plan_is_trusted(normalized_plan, payload.total_episodes):
             variables[NORMALIZED_EPISODE_PLAN] = normalized_plan
             _apply_normalized_episode_plan_to_variables(payload, variables)
+        else:
+            raise ValueError(
+                "分集计划规范化结果未覆盖完整剧集范围，已拒绝继续使用疑似局部批次结果。"
+            )
     _sync_state_variables(state, variables)
 
     if _has_value(variables.get(WORLDVIEW)):
@@ -387,6 +407,7 @@ def _initial_fastgpt_variables(payload: WorkflowInput) -> dict[str, Any]:
         APPEARANCE_CONTINUITY_MEMORY: {},
         SCENE_APPEARANCE_REQUIREMENTS: {},
         USER_CONTENT_BASELINE: _build_user_content_baseline(payload),
+        LOCAL_RAW_EPISODE_PLAN: str(payload.episode_plan or "").strip(),
         MAX_RETRIES: settings.max_retries_default,
         LAST_SUMMARY: "",
         ALL_HOOKS: {},
@@ -659,11 +680,11 @@ def _run_hook_batches(
             variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index + 1
             continue
 
-        plan_for_batch = get_episode_batch_payload(
+        plan_for_batch, normalized_plan_for_batch = _get_episode_batch_plan_context(
             normalized_plan,
             batch.start_episode,
             batch_size=batch.size,
-            raw_episode_plan=str(variables.get(EPISODE_PLAN) or payload.episode_plan or ""),
+            raw_episode_plan=_raw_episode_plan_source(payload, variables),
         )
         _ensure_plan_matches_batch(plan_for_batch, batch=batch, stage_label="开头冲突钩子")
         alias_plan_for_batch = slice_episode_alias_plan_for_batch(episode_alias_plan, batch)
@@ -677,7 +698,11 @@ def _run_hook_batches(
         sync_runtime_state(state)
 
         hook_base = dict(variables)
-        hook_base[EPISODE_PLAN] = plan_for_batch
+        _apply_batch_episode_plan_context(
+            hook_base,
+            plan_for_batch=plan_for_batch,
+            normalized_plan_for_batch=normalized_plan_for_batch,
+        )
         hook_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
         hook_base[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
             variables.get(APPEARANCE_CONTINUITY_MEMORY),
@@ -743,11 +768,11 @@ def _run_dialogue_batches(
             variables[LOCAL_CURRENT_BATCH_INDEX] = actual_index + 1
             continue
 
-        plan_for_batch = get_episode_batch_payload(
+        plan_for_batch, normalized_plan_for_batch = _get_episode_batch_plan_context(
             normalized_plan,
             batch.start_episode,
             batch_size=batch.size,
-            raw_episode_plan=str(variables.get(EPISODE_PLAN) or payload.episode_plan or ""),
+            raw_episode_plan=_raw_episode_plan_source(payload, variables),
         )
         _ensure_plan_matches_batch(plan_for_batch, batch=batch, stage_label="角色对话")
         alias_plan_for_batch = slice_episode_alias_plan_for_batch(episode_alias_plan, batch)
@@ -768,7 +793,11 @@ def _run_dialogue_batches(
         sync_runtime_state(state)
 
         dialogue_base = dict(variables)
-        dialogue_base[EPISODE_PLAN] = plan_for_batch
+        _apply_batch_episode_plan_context(
+            dialogue_base,
+            plan_for_batch=plan_for_batch,
+            normalized_plan_for_batch=normalized_plan_for_batch,
+        )
         dialogue_base[ALL_HOOKS] = hook_payload
         dialogue_base[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
         dialogue_base[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
@@ -827,11 +856,11 @@ def _run_script_batches(
 
     for index, batch in enumerate(batches):
         actual_index = batch_index_offset + index
-        plan_for_batch = get_episode_batch_payload(
+        plan_for_batch, normalized_plan_for_batch = _get_episode_batch_plan_context(
             normalized_plan,
             batch.start_episode,
             batch_size=batch.size,
-            raw_episode_plan=str(variables.get(EPISODE_PLAN) or payload.episode_plan or ""),
+            raw_episode_plan=_raw_episode_plan_source(payload, variables),
         )
         _ensure_plan_matches_batch(plan_for_batch, batch=batch, stage_label="剧本正文")
         alias_plan_for_batch = slice_episode_alias_plan_for_batch(episode_alias_plan, batch)
@@ -883,6 +912,7 @@ def _run_script_batches(
                 variables,
                 batch=batch,
                 plan_for_batch=plan_for_batch,
+                normalized_plan_for_batch=normalized_plan_for_batch,
                 alias_plan_for_batch=alias_plan_for_batch,
                 committed_script=committed_script,
                 script_batches=script_batches,
@@ -1135,11 +1165,16 @@ def _run_full_fastgpt_generation(
     variables: dict[str, Any],
 ) -> None:
     alias_plan = _normalize_episode_alias_plan_object(variables.get(EPISODE_ALIAS_PLAN))
-    variables[EPISODE_PLAN] = get_episode_batch_payload(
+    full_plan_for_batch, full_normalized_plan_for_batch = _get_episode_batch_plan_context(
         _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN)),
         1,
         batch_size=payload.total_episodes,
         raw_episode_plan=str(variables.get(EPISODE_PLAN) or payload.episode_plan or ""),
+    )
+    _apply_batch_episode_plan_context(
+        variables,
+        plan_for_batch=full_plan_for_batch,
+        normalized_plan_for_batch=full_normalized_plan_for_batch,
     )
     variables[BATCH_START_EPISODE] = 1
     variables[EPISODE_ALIAS_PLAN] = slice_episode_alias_plan_for_batch(
@@ -1177,6 +1212,9 @@ def _run_full_fastgpt_generation(
         variables,
         batch=BatchWindow(start_episode=1, end_episode=max(1, payload.total_episodes)),
         plan_for_batch=variables[EPISODE_PLAN],
+        normalized_plan_for_batch=_normalize_episode_plan_object(
+            variables.get(NORMALIZED_EPISODE_PLAN)
+        ),
         alias_plan_for_batch=variables.get(EPISODE_ALIAS_PLAN) or {},
         committed_script=str(variables.get(ALL_SCRIPT) or "").strip(),
         script_batches=_normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES)),
@@ -1244,6 +1282,7 @@ def _build_script_stage_context(
     *,
     batch: BatchWindow,
     plan_for_batch: str,
+    normalized_plan_for_batch: dict[str, Any] | None,
     alias_plan_for_batch: dict[str, Any] | None,
     committed_script: str,
     script_batches: dict[int, str] | None = None,
@@ -1251,7 +1290,11 @@ def _build_script_stage_context(
 ) -> dict[str, Any]:
     """承接对白阶段，把当前批正文真正需要的最小上下文收束出来再发给 FastGPT。"""
     context = dict(variables)
-    context[EPISODE_PLAN] = plan_for_batch
+    _apply_batch_episode_plan_context(
+        context,
+        plan_for_batch=plan_for_batch,
+        normalized_plan_for_batch=normalized_plan_for_batch,
+    )
     context[BATCH_START_EPISODE] = batch.start_episode
     context[EPISODE_ALIAS_PLAN] = alias_plan_for_batch or {}
     context[APPEARANCE_CONTINUITY_MEMORY] = _appearance_memory_for_batch(
@@ -1826,6 +1869,131 @@ def _restore_resume_state(
     if isinstance(restored_outputs, dict):
         state.node_outputs.update(restored_outputs)
 
+    _sanitize_restored_batch_progress(variables)
+
+
+def _sanitize_restored_batch_progress(variables: dict[str, Any]) -> None:
+    """清理恢复快照里明显失真的批次指针，避免旧尾批位置继续污染新批次切片。"""
+    total_episodes = _safe_int(variables.get(TOTAL_EPISODES), 0)
+    max_start_episode = max(1, total_episodes + 1) if total_episodes > 0 else 1
+    batch_size = max(1, int(settings.batch_size or 5))
+    batches = list(iter_episode_batches(total_episodes, batch_size=batch_size)) if total_episodes > 0 else []
+    total_batches = len(batches)
+
+    saved_start = _safe_int(variables.get(BATCH_START_EPISODE), 0)
+    if saved_start and not (1 <= saved_start <= max_start_episode):
+        variables.pop(BATCH_START_EPISODE, None)
+
+    saved_index = _safe_int(variables.get(LOCAL_CURRENT_BATCH_INDEX), 0)
+    if saved_index < 0 or (total_batches and saved_index > total_batches):
+        variables[LOCAL_CURRENT_BATCH_INDEX] = 0
+
+    current_stage = str(variables.get(LOCAL_CURRENT_BATCH_STAGE) or "").strip().lower()
+    if current_stage not in {"", "hook", "dialogue", "script"}:
+        variables[LOCAL_CURRENT_BATCH_STAGE] = ""
+
+    rewrite_stage = str(variables.get(LOCAL_REWRITE_FROM_STAGE) or "").strip().lower()
+    if rewrite_stage not in {"", "dialogue", "script", "final"}:
+        variables[LOCAL_REWRITE_FROM_STAGE] = ""
+        rewrite_stage = ""
+
+    has_batched_outputs = any(
+        _has_value(variables.get(key))
+        for key in (ALL_HOOKS, BATCH_HOOKS, ALL_DIALOGUES, BATCH_DIALOGUES, ALL_SCRIPT, BATCH_SCRIPT)
+    )
+    derived_start, derived_completed_batches = _derive_restored_batch_progress(
+        variables,
+        batches=batches,
+        current_stage=current_stage,
+        rewrite_stage=rewrite_stage,
+    )
+    if derived_start is not None:
+        variables[BATCH_START_EPISODE] = derived_start
+        variables[LOCAL_COMPLETED_BATCHES] = derived_completed_batches
+        variables[LOCAL_CURRENT_BATCH_INDEX] = derived_completed_batches
+        if derived_start > total_episodes and current_stage in {"hook", "dialogue", "script"}:
+            variables[LOCAL_CURRENT_BATCH_STAGE] = ""
+        return
+
+    if not has_batched_outputs and not current_stage and saved_start > 1:
+        variables[BATCH_START_EPISODE] = 1
+        variables[LOCAL_COMPLETED_BATCHES] = 0
+        variables[LOCAL_CURRENT_BATCH_INDEX] = 0
+
+
+def _derive_restored_batch_progress(
+    variables: dict[str, Any],
+    *,
+    batches: list[BatchWindow],
+    current_stage: str,
+    rewrite_stage: str,
+) -> tuple[int | None, int]:
+    if not batches:
+        return None, 0
+
+    hooks_start = _next_unfinished_object_batch_start(variables.get(ALL_HOOKS), batches)
+    dialogues_start = _next_unfinished_object_batch_start(variables.get(ALL_DIALOGUES), batches)
+    script_start = _next_unfinished_script_batch_start(variables, batches)
+
+    if current_stage == "hook":
+        target_start = hooks_start
+    elif current_stage == "dialogue" or rewrite_stage == "dialogue":
+        target_start = dialogues_start
+    elif current_stage == "script" or rewrite_stage in {"script", "final"}:
+        target_start = script_start
+    else:
+        target_start = min(hooks_start, dialogues_start, script_start)
+
+    completed_batches = len([batch for batch in batches if batch.end_episode < target_start])
+    return target_start, completed_batches
+
+
+def _next_unfinished_object_batch_start(value: Any, batches: list[BatchWindow]) -> int:
+    for batch in batches:
+        batch_payload = slice_object_episodes_for_batch(value, batch)
+        if not _batch_object_covers_window(batch_payload, batch):
+            return batch.start_episode
+    return batches[-1].end_episode + 1
+
+
+def _next_unfinished_script_batch_start(
+    variables: dict[str, Any],
+    batches: list[BatchWindow],
+) -> int:
+    script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
+    script_episode_cache = _normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES))
+    summary_by_batch = _normalize_batch_text_map(variables.get(LOCAL_SUMMARY_BY_BATCH))
+
+    for batch in batches:
+        batch_text = _existing_batch_script_text(
+            batch,
+            script_batches=script_batches,
+            script_episode_cache=script_episode_cache,
+        )
+        batch_summary = str(summary_by_batch.get(batch.start_episode) or "").strip()
+        if not batch_text or not batch_summary:
+            return batch.start_episode
+    return batches[-1].end_episode + 1
+
+
+def _raw_episode_plan_source(
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+) -> str:
+    """优先读取框架阶段落下来的原始分集计划，避免后续规范化写回覆盖原文。"""
+    explicit_raw = str(
+        variables.get(LOCAL_RAW_EPISODE_PLAN)
+        or payload.episode_plan
+        or ""
+    ).strip()
+    if explicit_raw:
+        return explicit_raw
+
+    episode_plan_value = str(variables.get(EPISODE_PLAN) or "").strip()
+    if episode_plan_value and _normalize_episode_plan_object(episode_plan_value) is None:
+        return episode_plan_value
+    return ""
+
 
 def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
@@ -1918,6 +2086,8 @@ def _apply_framework_outputs_to_variables(
     variables[USER_CHARACTERS] = user_characters
     variables[USER_SCENES] = user_scenes
     variables[EPISODE_PLAN] = episode_plan
+    if episode_plan:
+        variables[LOCAL_RAW_EPISODE_PLAN] = episode_plan
     _refresh_user_content_baseline(payload, variables)
     return True
 
@@ -2705,6 +2875,51 @@ def _merge_dicts(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
     return left
 
 
+def _apply_batch_episode_plan_context(
+    target: dict[str, Any],
+    *,
+    plan_for_batch: str,
+    normalized_plan_for_batch: dict[str, Any] | None,
+) -> None:
+    target[EPISODE_PLAN] = plan_for_batch
+    if normalized_plan_for_batch is None:
+        target.pop(NORMALIZED_EPISODE_PLAN, None)
+        target.pop(EPISODE_PLAN_NORMALIZED_VAR, None)
+        return
+    target[NORMALIZED_EPISODE_PLAN] = copy.deepcopy(normalized_plan_for_batch)
+    target[EPISODE_PLAN_NORMALIZED_VAR] = _serialize_normalized_episode_plan(
+        normalized_plan_for_batch
+    )
+
+
+def _get_episode_batch_plan_context(
+    normalized_plan: Any,
+    start_episode: int,
+    *,
+    batch_size: int,
+    raw_episode_plan: str,
+) -> tuple[str, dict[str, Any] | None]:
+    batch_window = BatchWindow(
+        start_episode=start_episode,
+        end_episode=max(start_episode, start_episode + max(1, batch_size) - 1),
+    )
+    batch_payload = slice_normalized_episode_plan_for_batch(normalized_plan, batch_window)
+    if batch_payload is not None:
+        return _serialize_normalized_episode_plan(batch_payload), batch_payload
+
+    fallback_payload = _fallback_normalized_episode_plan_for_batch(raw_episode_plan, batch_window)
+    if fallback_payload is not None:
+        logger.warning(
+            "当前批次 %s-%s 未能从规范化分集计划中切出内容，已改用原始分集计划重建结构化批次。",
+            batch_window.start_episode,
+            batch_window.end_episode,
+        )
+        return _serialize_normalized_episode_plan(fallback_payload), fallback_payload
+
+    raw_batch_plan = slice_episode_plan_for_batch(raw_episode_plan, batch_window)
+    return raw_batch_plan, _normalize_episode_plan_object(raw_batch_plan)
+
+
 def get_episode_batch_payload(
     normalized_plan: Any,
     start_episode: int,
@@ -2712,15 +2927,13 @@ def get_episode_batch_payload(
     batch_size: int,
     raw_episode_plan: str,
 ) -> str:
-    """优先从规范化分集计划里切本批 JSON，异常时再回退原始文本切片。"""
-    batch_window = BatchWindow(
-        start_episode=start_episode,
-        end_episode=max(start_episode, start_episode + max(1, batch_size) - 1),
-    )
-    batch_payload = slice_normalized_episode_plan_for_batch(normalized_plan, batch_window)
-    if batch_payload is not None:
-        return _serialize_normalized_episode_plan(batch_payload)
-    return slice_episode_plan_for_batch(raw_episode_plan, batch_window)
+    """优先从可信的规范化分集计划切本批 JSON；异常时也要尽量回退成当前批的结构化计划。"""
+    return _get_episode_batch_plan_context(
+        normalized_plan,
+        start_episode,
+        batch_size=batch_size,
+        raw_episode_plan=raw_episode_plan,
+    )[0]
 
 
 def slice_normalized_episode_plan_for_batch(
@@ -2746,12 +2959,101 @@ def slice_normalized_episode_plan_for_batch(
     }
 
 
+def _fallback_normalized_episode_plan_for_batch(
+    raw_episode_plan: str,
+    batch: BatchWindow,
+) -> dict[str, Any] | None:
+    """当规范化计划缓存失真时，用原始分集计划兜底重建当前批的结构化 JSON。"""
+    text = str(raw_episode_plan or "").strip()
+    if not text:
+        return None
+
+    lines = text.splitlines()
+    found_marker = False
+    current_episode: int | None = None
+    current_lines: list[str] = []
+    episodes: list[dict[str, Any]] = []
+
+    def flush_current() -> None:
+        if current_episode is None:
+            return
+        if not (batch.start_episode <= current_episode <= batch.end_episode):
+            return
+        content = "\n".join(current_lines).strip()
+        if not content:
+            return
+        episodes.append(
+            {
+                "episode": current_episode,
+                "title": "",
+                "content": content,
+                "main_character_aliases": [],
+                "appearance_events": [],
+                "long_term_stage_flags": [],
+                "scene_based_alias_hints": [],
+            }
+        )
+
+    for line in lines:
+        marker = _extract_episode_number(line)
+        if marker is not None:
+            found_marker = True
+            flush_current()
+            current_episode = marker
+            current_lines = [line]
+            continue
+        if current_episode is not None:
+            current_lines.append(line)
+
+    flush_current()
+    if not found_marker or not episodes:
+        return None
+
+    return {
+        "parsed_episode_count": len(episodes),
+        "appearance_alias_planning": {},
+        "episodes": episodes,
+    }
+
+
 def _has_normalized_episode_plan(value: Any) -> bool:
     normalized = _normalize_episode_plan_object(value)
     if not isinstance(normalized, dict):
         return False
     episodes = normalized.get("episodes")
     return isinstance(episodes, list) and bool(episodes)
+
+
+def _normalized_episode_plan_is_trusted(
+    value: Any,
+    total_episodes: int,
+) -> bool:
+    """校验规范化分集计划是否仍是“全量计划”，避免旧快照只保留尾批 51-60。"""
+    normalized = _normalize_episode_plan_object(value)
+    if not _has_normalized_episode_plan(normalized):
+        return False
+    episode_numbers = _extract_batch_episode_numbers_from_plan(normalized)
+    if not episode_numbers:
+        return False
+    if episode_numbers[0] != 1:
+        return False
+    if int(total_episodes or 0) > 0 and episode_numbers[-1] != int(total_episodes):
+        return False
+    return True
+
+
+def _describe_normalized_episode_plan(value: Any) -> str:
+    normalized = _normalize_episode_plan_object(value)
+    if not normalized:
+        return "empty"
+    episode_numbers = _extract_batch_episode_numbers_from_plan(normalized)
+    if not episode_numbers:
+        return "no-episodes"
+    return (
+        f"first={episode_numbers[0]}, "
+        f"last={episode_numbers[-1]}, "
+        f"count={len(episode_numbers)}"
+    )
 
 
 def _serialize_normalized_episode_plan(normalized_plan: dict[str, Any]) -> str:

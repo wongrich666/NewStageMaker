@@ -28,6 +28,7 @@ from .fastgpt_contracts import (
     FastGPTStageContract,
     contract_for,
     coerce_fastgpt_value,
+    describe_stage_output_shape_issue,
     to_jsonable_value,
 )
 from .json_utils import parse_json, strip_code_fence
@@ -62,19 +63,10 @@ OUTPUT_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
         "episodeplan",
         "episode_plan_content",
     ),
-    "normalized_episode_plan": (
-        "normalized_episode_plan",
-        "epPlanNormJson",
-    ),
     "appearance_mapping": (
         "appearance_mapping",
         "appearanceMapping",
         "h2KpLm91",
-    ),
-    "batch_dialogues": (
-        "batch_dialogues",
-        "dialogueContent",
-        "dialogue_content",
     ),
     "batch_script": (
         "batch_script",
@@ -597,7 +589,11 @@ def _select_best_payload(
     best: tuple[tuple[int, int, int, int, int], tuple[str, dict[str, Any], list[str]]] | None = None
     for index, (source, payload) in enumerate(candidates):
         qualities = {
-            name: _output_value_quality(payload.get(name), contract.output_types[name])
+            name: _output_quality_for_stage(
+                contract,
+                name,
+                payload.get(name),
+            )
             for name in contract.output_names
         }
         empty_fields = [
@@ -667,6 +663,20 @@ def _output_value_quality(value: Any, type_name: str) -> int:
             return 1
 
     return 2
+
+
+def _output_quality_for_stage(
+    contract: FastGPTStageContract,
+    field_name: str,
+    value: Any,
+) -> int:
+    quality = _output_value_quality(value, contract.output_types[field_name])
+    if quality <= 0:
+        return quality
+    issue = describe_stage_output_shape_issue(contract.stage_name, field_name, value)
+    if issue:
+        return 1
+    return quality
 
 
 def _warn_similar_fields(candidate: dict[str, Any], contract: FastGPTStageContract) -> None:

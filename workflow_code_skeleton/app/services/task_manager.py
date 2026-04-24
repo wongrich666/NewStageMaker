@@ -5,7 +5,6 @@ import hashlib
 import json
 import threading
 import uuid
-import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -171,6 +170,7 @@ LOCAL_SCRIPT_BATCHES = "_script_batches"
 LOCAL_SCRIPT_EPISODES = "_script_episode_cache"
 LOCAL_SUMMARY_BY_BATCH = "_summary_by_batch"
 LOCAL_APPEARANCE_MEMORY_BY_BATCH = "_appearance_memory_by_batch"
+LOCAL_RAW_EPISODE_PLAN = "_raw_episode_plan"
 ROLLBACK_STAGE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("framework", "剧本框架撰写"),
     ("appearance_strategy", "服装前置策略生成"),
@@ -261,6 +261,7 @@ ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         LOCAL_DIALOGUE_CHECKPOINT_START,
         LOCAL_SCRIPT_CHECKPOINT_START,
         LOCAL_REWRITE_FROM_STAGE,
+        LOCAL_RAW_EPISODE_PLAN,
     ),
     "appearance_strategy": (
         USER_CONTENT_BASELINE,
@@ -2315,7 +2316,7 @@ class TaskManager:
         if old_record and status in {"paused", "pausing", "terminated"}:
             self._prepare_record_for_replacement(old_record)
 
-        new_task_id = uuid.uuid4().hex[:12]
+        task_id = old_task_id or uuid.uuid4().hex[:12]
         rollback_snapshot = self._build_stage_rollback_snapshot(
             snapshot,
             rollback_stage,
@@ -2332,11 +2333,11 @@ class TaskManager:
         new_snapshot = copy.deepcopy(rollback_snapshot)
         new_snapshot.update(
             {
-                "task_id": new_task_id,
+                "task_id": task_id,
                 "status": "pending",
-                "message": f"已回退到“{stage_label}”，准备从该步骤重新生成。",
+                "message": f"已回退到“{stage_label}”，准备在当前资产上继续生成。",
                 "error": None,
-                "rollback_of_task_id": old_task_id or None,
+                "rollback_of_task_id": None,
                 "rollback_stage": rollback_stage,
                 "rollback_start_episode": rollback_start_episode,
                 "updated_at": now_iso(),
@@ -2349,26 +2350,39 @@ class TaskManager:
             }
         )
 
-        record = TaskRecord(
-            user_id=int(snapshot.get("user_id") or user_id or 0),
-            project_id=int(project_id),
-            task_id=new_task_id,
-            workflow_spec_path=str(snapshot.get("workflow_spec_path", "")),
-            input_payload=copy.deepcopy(snapshot.get("input_payload") or {}),
-            model_option=model_option,
-            snapshot=new_snapshot,
-            resume_snapshot=rollback_snapshot,
-        )
+        if old_record is not None:
+            record = old_record
+            record.user_id = int(snapshot.get("user_id") or user_id or 0)
+            record.project_id = int(project_id)
+            record.task_id = task_id
+            record.workflow_spec_path = str(snapshot.get("workflow_spec_path", ""))
+            record.input_payload = copy.deepcopy(snapshot.get("input_payload") or {})
+            record.model_option = model_option
+            record.snapshot = new_snapshot
+            record.control = TaskControl()
+            record.thread = None
+            record.resume_snapshot = rollback_snapshot
+        else:
+            record = TaskRecord(
+                user_id=int(snapshot.get("user_id") or user_id or 0),
+                project_id=int(project_id),
+                task_id=task_id,
+                workflow_spec_path=str(snapshot.get("workflow_spec_path", "")),
+                input_payload=copy.deepcopy(snapshot.get("input_payload") or {}),
+                model_option=model_option,
+                snapshot=new_snapshot,
+                resume_snapshot=rollback_snapshot,
+            )
         with self._lock:
-            if old_task_id:
+            if old_task_id and old_task_id != task_id:
                 self._tasks.pop(old_task_id, None)
-            self._tasks[new_task_id] = record
+            self._tasks[task_id] = record
             self._projects[int(project_id)] = record
             self._remember_latest_project(int(user_id), int(project_id))
         self._append_log(
             record,
             title="控制动作：阶段回退重写",
-            message=f"已保留前序阶段结果，并从“{stage_label}”开始重新生成。",
+            message=f"已保留前序阶段结果，并在当前资产上从“{stage_label}”开始重新生成。",
         )
         self._save_resume_checkpoint(record)
         self._persist_snapshot(record)
@@ -2377,7 +2391,7 @@ class TaskManager:
             target=self._run_task,
             args=(record,),
             daemon=True,
-            name=f"workflow-task-{new_task_id}",
+            name=f"workflow-task-{task_id}",
         )
         record.thread = thread
         thread.start()
@@ -3212,76 +3226,31 @@ class TaskManager:
         docx_path = self.exports_dir / f"{base_name}.docx"
         zip_path = self.exports_dir / f"{base_name}.zip"
         notice_path = self.exports_dir / f"{base_name}_导出说明.txt"
-        # json_exports: list[tuple[str, Path]] = [
-        #     ("character_registry", self.exports_dir / f"{base_name}_character_registry.json"),
-        #     ("character_alias_registry", self.exports_dir / f"{base_name}_character_alias_registry.json"),
-        #     ("episode_alias_plan", self.exports_dir / f"{base_name}_episode_alias_plan.json"),
-        #     ("appearance_mapping", self.exports_dir / f"{base_name}_appearance_mapping.json"),
-        #     ("appearance_continuity_memory", self.exports_dir / f"{base_name}_appearance_continuity_memory.json"),
-        #     ("normalized_episode_plan", self.exports_dir / f"{base_name}_normalized_episode_plan.json"),
-        # ]
+        legacy_json_paths = [
+            self.exports_dir / f"{base_name}_character_registry.json",
+            self.exports_dir / f"{base_name}_character_alias_registry.json",
+            self.exports_dir / f"{base_name}_episode_alias_plan.json",
+            self.exports_dir / f"{base_name}_appearance_mapping.json",
+            self.exports_dir / f"{base_name}_appearance_continuity_memory.json",
+            self.exports_dir / f"{base_name}_normalized_episode_plan.json",
+        ]
 
         txt_path.write_text(content, encoding="utf-8")
-        exported_json_files: dict[str, str] = {}
-        # for artifact_key, file_path in json_exports:
-        #     value = artifacts.get(artifact_key)
-        #     if value in (None, "", {}, []):
-        #         if file_path.exists():
-        #             file_path.unlink()
-        #         continue
-        #     try:
-        #         if isinstance(value, str):
-        #             text = value.strip()
-        #             if not text:
-        #                 continue
-        #             parsed = json.loads(text)
-        #             file_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
-        #         else:
-        #             file_path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-        #         exported_json_files[artifact_key] = str(file_path)
-        #     except Exception:
-        #         logger.warning("导出结构化 JSON 失败: %s %s", project_id, artifact_key, exc_info=True)
-        #
-        docx_available = False
-        export_notice = ""
         try:
             from ..utils.txt_to_docx import convert as convert_txt_to_docx
             convert_txt_to_docx(str(txt_path), str(docx_path))
-            docx_available = True
         except ModuleNotFoundError as exc:
             if exc.name == "docx":
-                export_notice = (
-                    "当前环境缺少 python-docx，已先为你导出完整 TXT 版本。\n"
-                    "如需同时导出 Word，请执行：python -m pip install python-docx\n"
-                )
+                raise ValueError("当前环境缺少 python-docx，暂时无法导出剧本正文 DOCX。") from exc
             else:
-                raise ValueError(f"导出 Word 失败：{exc}") from exc
+                raise ValueError(f"导出剧本正文 DOCX 失败：{exc}") from exc
         except Exception as exc:
             logger.exception("导出 Word 失败: %s", project_id)
-            export_notice = (
-                "本次 Word 导出失败，但完整 TXT 版本已经保留。\n"
-                f"失败原因：{exc}\n"
-            )
+            raise ValueError(f"导出剧本正文 DOCX 失败：{exc}") from exc
 
-        if export_notice:
-            notice_path.write_text(export_notice, encoding="utf-8")
-        elif notice_path.exists():
-            notice_path.unlink()
-
-        try:
-            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-                archive.write(txt_path, arcname=txt_path.name)
-                if docx_available and docx_path.exists():
-                    archive.write(docx_path, arcname=docx_path.name)
-                for file_path in exported_json_files.values():
-                    path_obj = Path(file_path)
-                    if path_obj.exists():
-                        archive.write(path_obj, arcname=path_obj.name)
-                if export_notice and notice_path.exists():
-                    archive.write(notice_path, arcname=notice_path.name)
-        except Exception as exc:
-            logger.exception("导出压缩包失败: %s", project_id)
-            raise ValueError(f"导出压缩包失败：{exc}") from exc
+        for stale_path in (zip_path, notice_path, *legacy_json_paths):
+            if stale_path.exists():
+                stale_path.unlink()
 
         self._update_snapshot(
             self._projects.get(project_id) or TaskRecord(
@@ -3295,14 +3264,14 @@ class TaskManager:
                 ),
                 snapshot=snapshot,
             ),
-            saved_file=str(zip_path),
-            saved_txt_file=str(txt_path),
-            saved_docx_file=str(docx_path) if docx_available and docx_path.exists() else "",
-            saved_zip_file=str(zip_path),
-            export_notice=export_notice,
-            saved_json_files=exported_json_files,
+            saved_file=str(docx_path),
+            saved_txt_file="",
+            saved_docx_file=str(docx_path),
+            saved_zip_file="",
+            export_notice="",
+            saved_json_files={},
         )
-        return zip_path
+        return docx_path
 
 
 task_manager = TaskManager()

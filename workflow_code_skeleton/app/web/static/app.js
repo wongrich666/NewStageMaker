@@ -111,54 +111,12 @@
     editingProjectStatus: null,
     editingAssetLocked: false,
     toolDefinitions: {},
-    activeTool: "hot_review",
+    activeTool: "character_reskin",
     elapsedTimer: null,
     workspaceCollapseTimer: null
   };
 
   const DEFAULT_TOOL_DEFINITIONS = {
-    hot_review: {
-      key: "hot_review",
-      label: "爆款文审核",
-      help: "提交剧本正文、故事大纲、分集计划或局部片段，系统会评估爆款元素、风险和修改建议。",
-      fields: [
-        { name: "text", label: "待检测文本", type: "textarea", placeholder: "粘贴需要审核的剧本正文 / 小说原著 / 大纲 / 分集计划。", required: true }
-      ],
-      configured: false,
-      source: "fallback"
-    },
-    reskin: {
-      key: "reskin",
-      label: "换皮",
-      help: "输入源剧本材料和目标风格，调用换皮工作流生成新版本结果。",
-      fields: [
-        { name: "title", label: "剧本标题", type: "input", placeholder: "新剧本标题。", required: true },
-        { name: "source_outline", label: "源剧本梗概", type: "textarea", placeholder: "源故事梗概。", required: true },
-        { name: "core_scenes", label: "源剧本核心场景", type: "textarea", placeholder: "可选，源剧本核心场景。", required: false },
-        { name: "source_characters", label: "源剧本人物小传", type: "textarea", placeholder: "源人物小传。", required: true },
-        { name: "source_script", label: "源剧本正文", type: "textarea", placeholder: "源剧本正文，可为空但效果会受影响。", required: true },
-        { name: "target_style", label: "目标风格", type: "textarea", placeholder: "希望换成的题材、风格、爽点方向。", required: true },
-        { name: "total_episodes", label: "总集数", type: "number", placeholder: "例如 60。", required: true },
-        { name: "episode_word_count", label: "每集字数", type: "number", placeholder: "例如 500。", required: true }
-      ],
-      configured: false,
-      source: "fallback"
-    },
-    punchup: {
-      key: "punchup",
-      label: "增加爽感",
-      help: "在不改情节事实的前提下，强化台词网感、黄金 7 秒和爽点表达。",
-      fields: [
-        { name: "title", label: "剧本名", type: "input", placeholder: "原剧本名。", required: true },
-        { name: "story_outline", label: "故事梗概", type: "textarea", placeholder: "故事梗概。", required: true },
-        { name: "characters", label: "人物小传", type: "textarea", placeholder: "人物设定。", required: true },
-        { name: "core_scenes", label: "核心场景", type: "textarea", placeholder: "核心场景。", required: true },
-        { name: "script", label: "剧本正文", type: "textarea", placeholder: "需要增爽的剧本正文。", required: true },
-        { name: "total_episodes", label: "总集数", type: "number", placeholder: "总集数。", required: true }
-      ],
-      configured: false,
-      source: "fallback"
-    },
     character_reskin: {
       key: "character_reskin",
       label: "只换人设",
@@ -561,6 +519,15 @@
     return markers.some((marker) => runtimeMessage.includes(marker)) ? runtimeMessage : "";
   }
 
+  function creationStatusLabel(snapshot) {
+    if (!snapshot) return "待开始";
+    if (snapshot.status === "completed") return "已完成";
+    if (snapshot.status === "paused" || snapshot.status === "pausing") return "已暂停";
+    if (snapshot.status === "failed") return "执行失败";
+    if (snapshot.status === "terminated") return "已终止";
+    return "创作中";
+  }
+
   // 把后端阶段名统一折叠成前端可识别的正式阶段键。
   function normalizeStageKey(stageKey) {
     const mapping = {
@@ -568,12 +535,12 @@
       appearance_strategy: "internal",
       consistency: "internal",
       episode_plan_normalize: "internal",
-      worldview: "worldview",
-      character: "characters",
-      characters: "characters",
-      scene: "scenes",
-      scenes: "scenes",
-      appearance: "scenes",
+      worldview: "internal",
+      character: "internal",
+      characters: "internal",
+      scene: "internal",
+      scenes: "internal",
+      appearance: "internal",
       hook: "internal",
       hooks: "internal",
       dialogue: "internal",
@@ -618,23 +585,8 @@
         output: frameworkStageOutput(snapshot)
       },
       {
-        key: "worldview",
-        title: "世界观",
-        output: String(artifacts.worldview || "").trim()
-      },
-      {
-        key: "characters",
-        title: "人物设定",
-        output: String(artifacts.character_summary || "").trim()
-      },
-      {
-        key: "scenes",
-        title: "核心场景",
-        output: String(artifacts.core_scene_summary || "").trim()
-      },
-      {
         key: "final",
-        title: "最终剧本",
+        title: "剧本正文",
         output: String(artifacts.final_output_text || artifacts.final_script || "").trim()
       }
     ].filter((item) => item.output);
@@ -654,12 +606,15 @@
       visibleMessages.find((item) => item.key === normalizeStageKey(snapshot.display_stage_key))
     );
     const isRunning = RUNNING_STATUSES.has(snapshot.status);
-    const shouldFoldToThinking = normalizedCurrentStage === "internal" || (isRunning && !hasVisibleCurrentOutput);
+    const shouldFoldToThinking = (
+      normalizedCurrentStage === "internal"
+      || (isRunning && !hasVisibleCurrentOutput)
+      || snapshot.status === "completed"
+    );
     if (!shouldFoldToThinking) return null;
     return {
-      loading: isRunning,
-      stageLabel: snapshot.current_stage_label || "处理中",
-      note: statusNoteFrom(snapshot) || ""
+      stateLabel: creationStatusLabel(snapshot),
+      note: isRunning || snapshot.status === "completed" ? "" : (statusNoteFrom(snapshot) || "")
     };
   }
 
@@ -720,25 +675,17 @@
   }
 
   function renderThinkingBubble(thinkingState) {
-    const body = thinkingState.loading
-      ? `
-        <div class="chat-thinking">
-          <span>思考分析</span>
-          <span class="chat-thinking-dots"><span></span><span></span><span></span></span>
-        </div>
-      `
-      : `<span>${escapeHtml(thinkingState.note || "当前步骤已暂停，等待你的下一步操作。")}</span>`;
     return `
       <article class="chat-message system">
         <div class="chat-bubble-row">
           <div class="chat-avatar">AI</div>
           <div class="chat-bubble">
             <div class="chat-bubble-head">
-              <span class="chat-bubble-title">思考分析</span>
-              <span class="chat-bubble-meta">${escapeHtml(thinkingState.stageLabel || "处理中")}</span>
+              <span class="chat-bubble-title">创作状态</span>
+              <span class="chat-bubble-meta">${escapeHtml(thinkingState.stateLabel || "创作中")}</span>
             </div>
-            <div class="chat-bubble-content">${body}</div>
-            ${thinkingState.loading ? "" : thinkingState.note ? `
+            <div class="chat-bubble-content"><span>${escapeHtml(thinkingState.stateLabel || "创作中")}</span></div>
+            ${thinkingState.note ? `
               <div class="chat-bubble-preview">
                 <span class="chat-bubble-preview-label">状态说明</span>
                 <p class="chat-bubble-preview-text">${escapeHtml(thinkingState.note)}</p>
@@ -762,7 +709,7 @@
       els.chatTranscript.innerHTML = `
         <section class="chat-empty-state">
           <strong>今天写什么剧本</strong>
-          <p>直接输入你的创作需求，平台会把框架、人设、场景和最终剧本按对话流展示，中间处理统一折叠为思考分析。</p>
+          <p>直接输入你的创作需求，平台会把剧本框架和剧本正文按对话流展示，中间过程统一显示创作状态。</p>
           <div class="chat-empty-tools">${suggestions}</div>
         </section>
       `;
@@ -770,13 +717,20 @@
     }
 
     const messages = [renderUserPromptBubble(snapshot)];
-    visibleStageMessages(snapshot).forEach((item) => {
-      messages.push(renderAssistantStageBubble(item));
-    });
+    const stageMessages = visibleStageMessages(snapshot);
+    const frameworkMessage = stageMessages.find((item) => item.key === "framework");
+    const finalMessage = stageMessages.find((item) => item.key === "final");
+    if (frameworkMessage) {
+      messages.push(renderAssistantStageBubble(frameworkMessage));
+    }
 
     const thinkingState = thinkingStateFrom(snapshot);
     if (thinkingState) {
       messages.push(renderThinkingBubble(thinkingState));
+    }
+
+    if (finalMessage) {
+      messages.push(renderAssistantStageBubble(finalMessage));
     }
 
     els.chatTranscript.innerHTML = messages.join("");
@@ -977,7 +931,7 @@
 
   function toolConfig(toolKey) {
     const definitions = toolDefinitions();
-    return definitions[toolKey] || definitions.hot_review || Object.values(definitions)[0];
+    return definitions[toolKey] || definitions.character_reskin || Object.values(definitions)[0];
   }
 
   function normalizeToolDefinition(tool) {
@@ -1049,7 +1003,7 @@
       state.toolDefinitions = { ...DEFAULT_TOOL_DEFINITIONS };
     }
     if (!toolConfig(state.activeTool)) {
-      state.activeTool = Object.keys(toolDefinitions())[0] || "hot_review";
+      state.activeTool = Object.keys(toolDefinitions())[0] || "character_reskin";
     }
     renderToolList();
     renderToolForm(state.activeTool);
