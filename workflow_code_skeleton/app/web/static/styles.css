@@ -1890,6 +1890,26 @@ a {
   line-height: 1.8;
 }
 
+.chat-bubble-content-collapsed {
+  max-height: calc(1.8em * 5);
+  overflow: hidden;
+}
+
+.chat-bubble-toggle {
+  margin-top: 12px;
+  padding: 0;
+  border: 0;
+  color: #f4bd2d;
+  font-size: 12px;
+  font-weight: 700;
+  background: transparent;
+  cursor: pointer;
+}
+
+.chat-bubble-toggle:hover {
+  color: #ffd977;
+}
+
 .chat-bubble-preview {
   margin-top: 14px;
   padding-top: 14px;
@@ -2332,6 +2352,16 @@ a {
   color: #ffd977;
 }
 
+.sidebar-folder-link {
+  color: #f4bd2d;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.workspace-body .tools-folder summary:hover .sidebar-folder-link {
+  color: #ffd977;
+}
+
 .sidebar-section-head-compact {
   color: #8d8d8d;
   font-size: 11px;
@@ -2448,6 +2478,7 @@ a {
 
 .workspace-sidebar.is-collapsed .sidebar-group-label,
 .workspace-sidebar.is-collapsed .sidebar-text-link,
+.workspace-sidebar.is-collapsed .sidebar-folder-link,
 .workspace-sidebar.is-collapsed .sidebar-section-head,
 .workspace-sidebar.is-collapsed .workspace-folder,
 .workspace-sidebar.is-collapsed .sidebar-footer-text,
@@ -2752,6 +2783,11 @@ a {
   gap: 8px;
 }
 
+.composer-grid-toolbar {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
 .composer-field-mini {
   min-width: 92px;
   flex: 0 0 92px;
@@ -2769,6 +2805,8 @@ a {
   border: 0;
   border-radius: 0;
   background: transparent;
+  resize: none;
+  overflow-y: hidden;
 }
 
 .composer-field input {
@@ -2803,6 +2841,51 @@ a {
 .composer-send-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.composer-inline-tools {
+  display: flex;
+  flex: 1 1 240px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+}
+
+.workspace-body .composer-action-link,
+.workspace-body .composer-action-link.btn-secondary,
+.workspace-body .composer-action-link.btn-ghost,
+.workspace-body .composer-action-link.btn-danger {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: #f4bd2d;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  background: transparent;
+  box-shadow: none;
+}
+
+.workspace-body .composer-action-link:hover:not(:disabled),
+.workspace-body .composer-action-link.btn-secondary:hover:not(:disabled),
+.workspace-body .composer-action-link.btn-ghost:hover:not(:disabled),
+.workspace-body .composer-action-link.btn-danger:hover:not(:disabled) {
+  color: #ffd977;
+  background: transparent;
+  border-color: transparent;
+}
+
+.workspace-body .composer-action-link:disabled,
+.workspace-body .composer-action-link.btn-secondary:disabled,
+.workspace-body .composer-action-link.btn-ghost:disabled,
+.workspace-body .composer-action-link.btn-danger:disabled {
+  color: rgba(244, 189, 45, 0.38);
+  background: transparent;
+  border-color: transparent;
+  cursor: not-allowed;
+  opacity: 1;
 }
 
 .workspace-body .btn {
@@ -2913,6 +2996,10 @@ a {
 
   .composer-field-mini {
     flex: 1 1 120px;
+  }
+
+  .composer-inline-tools {
+    flex-basis: 100%;
   }
 
   .chat-empty-tools {
@@ -3287,6 +3374,15 @@ a {
     background: #111111;
   }
 
+  .workspace-body .composer-action-link,
+  .workspace-body .composer-action-link.btn-secondary,
+  .workspace-body .composer-action-link.btn-ghost,
+  .workspace-body .composer-action-link.btn-danger {
+    color: #9f7400;
+    background: transparent;
+    border-color: transparent;
+  }
+
   .workspace-body .btn-danger {
     color: #8e3516;
     background: rgba(227, 100, 49, 0.14);
@@ -3305,5 +3401,153 @@ a {
   .workspace-body .btn-success {
     color: #16552b;
     background: rgba(49, 227, 115, 0.16);
+  }
+}
+
+.profile-panel {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.profile-panel .profile-backdrop {
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.profile-panel .profile-drawer {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.profile-panel.panel-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.profile-panel.panel-open .profile-backdrop,
+.profile-panel.panel-open .profile-drawer {
+  opacity: 1;
+}
+
+.profile-panel.panel-open .profile-drawer {
+  transform: translateY(0);
+}
+
+.tool-panel {
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.tool-panel.panel-open {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.skeleton-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-line {
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08));
+  background-size: 200% 100%;
+  animation: skeleton-slide 1.1s linear infinite;
+}
+
+.skeleton-line + .skeleton-line {
+  margin-top: 10px;
+}
+
+.skeleton-line-short {
+  width: 42%;
+}
+
+.list-more-row,
+.empty-card-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.error-card {
+  border-color: rgba(227, 100, 49, 0.28);
+}
+
+.workspace-body .asset-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.workspace-body .asset-tile,
+.workspace-body .empty-card,
+.workspace-body .asset-editor,
+.workspace-body .profile-drawer {
+  color: var(--mono-text);
+  border-color: var(--mono-border);
+  background: var(--mono-surface);
+  box-shadow: var(--mono-shadow);
+}
+
+.workspace-body .asset-tile {
+  display: grid;
+  gap: 14px;
+  min-height: 100%;
+}
+
+.workspace-body .asset-tile h3,
+.workspace-body .section-head h2,
+.workspace-body .card-head h3 {
+  color: var(--mono-text);
+}
+
+.workspace-body .asset-tile p,
+.workspace-body .asset-meta,
+.workspace-body .section-head p,
+.workspace-body .hint,
+.workspace-body .field span {
+  color: var(--mono-muted);
+}
+
+.workspace-body .compact-select {
+  color: var(--mono-text);
+  font-weight: 600;
+}
+
+.workspace-body .compact-select option {
+  color: #f4f4f4;
+  background: #202020;
+}
+
+@keyframes skeleton-slide {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (max-width: 960px) {
+  .workspace-body .asset-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  .skeleton-line {
+    background: linear-gradient(90deg, rgba(16, 16, 16, 0.06), rgba(16, 16, 16, 0.12), rgba(16, 16, 16, 0.06));
+  }
+
+  .workspace-body .compact-select option {
+    color: #111111;
+    background: #ffffff;
   }
 }

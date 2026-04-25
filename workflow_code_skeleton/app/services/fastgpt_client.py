@@ -20,12 +20,14 @@ from .fastgpt_contracts import (
     ALL_DIALOGUES,
     ALL_HOOKS,
     ALL_SCRIPT,
+    BATCH_DIALOGUES,
     CHARACTERS,
     CHARACTER_APPEARANCE_REQUIREMENTS,
     LAST_SUMMARY,
     LEGACY_INPUT_ALIASES,
     MAX_RETRIES,
     OUTFIT_SWITCH_RULES,
+    STAGE_DIALOGUES,
     SCENES,
     STAGE_SCRIPT,
     USER_CONTENT_BASELINE,
@@ -534,6 +536,9 @@ def _payload_from_candidate(
         candidate = _dict_from_variable_items(candidate)
     if not isinstance(candidate, dict):
         return None
+    candidate = _normalize_stage_specific_output_candidate(candidate, contract)
+    if not isinstance(candidate, dict):
+        return None
     if _is_non_output_metadata(candidate):
         return None
     return _extract_contract_payload(candidate, contract)
@@ -643,6 +648,80 @@ def _format_rejected_candidate_details(
             f"{source}: {error}（payload={_truncate_log_text(_json_for_log(payload), limit=260)}）"
         )
     return "候选输出校验失败：" + "；".join(preview)
+
+
+def _normalize_stage_specific_output_candidate(
+    candidate: dict[str, Any],
+    contract: FastGPTStageContract,
+) -> dict[str, Any]:
+    if contract.stage_name == STAGE_DIALOGUES:
+        return _normalize_dialogues_output_candidate(candidate, contract)
+    return candidate
+
+
+def _normalize_dialogues_output_candidate(
+    candidate: dict[str, Any],
+    contract: FastGPTStageContract,
+) -> dict[str, Any]:
+    if BATCH_DIALOGUES in candidate:
+        wrapped = _normalize_dialogues_body(candidate.get(BATCH_DIALOGUES))
+        if isinstance(wrapped, dict):
+            if BATCH_DIALOGUES in wrapped and len(wrapped) == 1 and isinstance(wrapped.get(BATCH_DIALOGUES), dict):
+                return {**candidate, BATCH_DIALOGUES: wrapped[BATCH_DIALOGUES]}
+            return {**candidate, BATCH_DIALOGUES: wrapped}
+        return candidate
+
+    for alias in contract.aliases_for_output(BATCH_DIALOGUES):
+        if alias not in candidate:
+            continue
+        wrapped = _normalize_dialogues_body(candidate.get(alias))
+        if isinstance(wrapped, dict):
+            if BATCH_DIALOGUES in wrapped and len(wrapped) == 1 and isinstance(wrapped.get(BATCH_DIALOGUES), dict):
+                return wrapped
+            return {BATCH_DIALOGUES: wrapped}
+
+    wrapped_candidate = _normalize_dialogues_body(candidate)
+    if isinstance(wrapped_candidate, dict) and _looks_like_dialogues_body(wrapped_candidate):
+        return {BATCH_DIALOGUES: wrapped_candidate}
+    return candidate
+
+
+def _normalize_dialogues_body(value: Any) -> dict[str, Any] | None:
+    candidate = value
+    if isinstance(candidate, str):
+        parsed = _try_parse_json(candidate)
+        candidate = parsed if parsed is not None else candidate
+
+    if isinstance(candidate, list):
+        candidate = _dict_from_variable_items(candidate)
+
+    if not isinstance(candidate, dict):
+        return None
+
+    if BATCH_DIALOGUES in candidate and isinstance(candidate.get(BATCH_DIALOGUES), dict):
+        inner = _normalize_dialogues_body(candidate.get(BATCH_DIALOGUES))
+        return {BATCH_DIALOGUES: inner} if isinstance(inner, dict) else candidate
+
+    key_aliases = {
+        "batchMeta": "batch_meta",
+        "characterVoiceBibles": "character_voice_bibles",
+        "episodeDialogueBlocks": "episode_dialogue_blocks",
+    }
+    normalized = {
+        str(key_aliases.get(str(key), str(key))): value
+        for key, value in candidate.items()
+    }
+    return normalized
+
+
+def _looks_like_dialogues_body(candidate: dict[str, Any]) -> bool:
+    keys = {str(key) for key in candidate.keys()}
+    required = {"batch_meta", "character_voice_bibles", "episode_dialogue_blocks"}
+    if required.issubset(keys):
+        return True
+    return "episode_dialogue_blocks" in keys and (
+        "batch_meta" in keys or "character_voice_bibles" in keys
+    )
 
 
 def _is_non_output_metadata(candidate: dict[str, Any]) -> bool:

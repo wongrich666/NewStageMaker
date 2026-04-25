@@ -114,12 +114,13 @@ LOCAL_SUMMARY_BY_BATCH = "_summary_by_batch"
 LOCAL_APPEARANCE_MEMORY_BY_BATCH = "_appearance_memory_by_batch"
 LOCAL_RAW_EPISODE_PLAN = "_raw_episode_plan"
 SCRIPT_STAGE_PAYLOAD_HARD_LIMIT = max(
+    240000,
     int(getattr(settings, "fastgpt_script_payload_hard_limit", 240000)),
 )
 SCRIPT_STAGE_PAYLOAD_SOFT_LIMIT = min(
     SCRIPT_STAGE_PAYLOAD_HARD_LIMIT - 20000,
     max(
-        32000,
+        200000,
         int(getattr(settings, "fastgpt_script_payload_soft_limit", 200000)),
     ),
 )
@@ -949,7 +950,6 @@ def _run_script_batches(
                 batch=batch,
                 plan_for_batch=plan_for_batch,
                 normalized_plan_for_batch=normalized_plan_for_batch,
-                alias_plan_for_batch=alias_plan_for_batch,
                 hook_payload=hook_payload,
                 dialogue_payload=dialogue_payload,
                 previous_batch_summary=previous_batch_summary,
@@ -1345,7 +1345,7 @@ def _build_script_stage_context(
     previous_batch_summary: str,
     script_memory: str,
 ) -> dict[str, Any]:
-    """承接对白阶段，把当前批正文真正需要的最小上下文收束出来再发给 FastGPT。"""
+    """script 只带当前批材料 + 上一批摘要 + 滚动记忆，避免把更早批次原文重新塞回去。"""
     context = _stage_input_context(STAGE_SCRIPT, variables)
     _apply_batch_episode_plan_context(
         context,
@@ -1731,7 +1731,10 @@ def _run_fastgpt_stage(
         try:
             contract.build_input_payload(variables)
             _log_fastgpt_stage_start(state, contract.label, batch_label, attempt)
-            raw_output = runner.run_stage(stage_name, variables)
+            raw_output = _ensure_stage_output_mapping(
+                stage_name,
+                runner.run_stage(stage_name, variables),
+            )
             validated_output = contract.validate_output_payload(raw_output)
             output = dict(raw_output)
             output.update(validated_output)
@@ -1814,6 +1817,25 @@ def _run_fastgpt_stage(
                 progress_percent=progress_percent,
                 generated_episodes=generated_episodes,
             )
+
+
+def _ensure_stage_output_mapping(stage_name: str, output: Any) -> dict[str, Any]:
+    if isinstance(output, dict):
+        return output
+    if output is None:
+        raise ValueError(f"FastGPT 阶段 {stage_name} 返回了空结果（None）。")
+
+    try:
+        preview = json.dumps(to_jsonable_value(output), ensure_ascii=False, default=str)
+    except Exception:
+        preview = str(output)
+    preview = " ".join(str(preview or "").split())
+    if len(preview) > 240:
+        preview = f"{preview[:240]}..."
+    suffix = f"：{preview}" if preview else ""
+    raise ValueError(
+        f"FastGPT 阶段 {stage_name} 返回了非对象结果（{type(output).__name__}）{suffix}"
+    )
 
 
 def _log_fastgpt_stage_start(
@@ -2026,6 +2048,12 @@ def _restore_resume_state(
 ) -> None:
     """把快照里的变量和正式产物恢复回来，再对批次指针做一次去污染校正。"""
     if not resume_snapshot:
+        return
+    if not isinstance(resume_snapshot, dict):
+        logger.warning(
+            "恢复快照格式异常，已跳过恢复；实际类型=%s。",
+            type(resume_snapshot).__name__,
+        )
         return
     debug_state = resume_snapshot.get("debug_state")
     if not isinstance(debug_state, dict):
@@ -2507,9 +2535,11 @@ def _has_framework_outputs(
 
 def _framework_output_integrity_errors(
     payload: WorkflowInput,
-    values: dict[str, Any],
+    values: Any,
 ) -> list[str]:
     """对 framework 成品做代码级验收，拦住空字段、过短文本和分集计划缺集。"""
+    if not isinstance(values, dict):
+        return [f"framework 阶段返回值不是对象：{type(values).__name__}"]
     framework_values = _framework_output_snapshot(payload, values)
     errors: list[str] = []
     min_lengths = {
@@ -2541,9 +2571,17 @@ def _framework_output_integrity_errors(
 
 def _framework_output_snapshot(
     payload: WorkflowInput,
-    values: dict[str, Any],
+    values: Any,
 ) -> dict[str, str]:
     """只抽出 framework 这一步真正要交给后续阶段的 5 个正式字段。"""
+    if not isinstance(values, dict):
+        return {
+            SCRIPT_TITLE: "",
+            STORY_OUTLINE: "",
+            USER_CHARACTERS: "",
+            USER_SCENES: "",
+            EPISODE_PLAN: "",
+        }
     return {
         SCRIPT_TITLE: str(values.get(SCRIPT_TITLE) or "").strip(),
         STORY_OUTLINE: str(values.get(STORY_OUTLINE) or "").strip(),

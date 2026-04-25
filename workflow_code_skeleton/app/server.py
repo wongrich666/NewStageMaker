@@ -36,6 +36,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     app.config["WORKFLOW_SPEC_PATH"] = workflow_spec_path or default_workflow_spec_path()
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY") or os.getenv("FLASK_SECRET_KEY") or "scriptmaker-dev-secret"
 
+    @app.after_request
+    def _disable_html_cache(response):
+        if request.method == "GET" and response.mimetype == "text/html":
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
     def _json_ok(**payload):
         return jsonify({"success": True, **payload})
 

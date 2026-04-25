@@ -156,7 +156,12 @@ SIMPLE_TOOLS: dict[str, SimpleTool] = {
     ),
 }
 
-VISIBLE_TOOL_KEYS: tuple[str, ...] = ("character_reskin",)
+VISIBLE_TOOL_KEYS: tuple[str, ...] = (
+    "hot_review",
+    "reskin",
+    "punchup",
+    "character_reskin",
+)
 
 
 def list_simple_tools() -> list[dict[str, Any]]:

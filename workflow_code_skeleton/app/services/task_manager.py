@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -146,8 +147,6 @@ COMPLETED_ARTIFACT_KEYS = (
     "character_registry",
     "character_alias_registry",
     "episode_alias_plan",
-    STORY_TEASER_ARTIFACT,
-    STORY_TEASER_SOURCE_ARTIFACT,
     "final_script",
     "final_output_text",
 )
@@ -1068,7 +1067,7 @@ class TaskRecord:
     task_id: str
     workflow_spec_path: str
     input_payload: dict[str, Any]
-    model_option: ModelOption
+    model_option: ModelOption | None
     snapshot: dict[str, Any]
     control: TaskControl = field(default_factory=TaskControl)
     thread: threading.Thread | None = None
@@ -1487,21 +1486,8 @@ class TaskManager:
         if parsed is None:
             return raw_episode_plan
 
-        text_hash = self._hash_text(raw_episode_plan)
-        cached_text = str(artifacts.get(EPISODE_PLAN_DISPLAY_ARTIFACT) or "").strip()
-        cached_hash = str(artifacts.get(EPISODE_PLAN_DISPLAY_SOURCE_HASH_ARTIFACT) or "").strip()
-        if cached_text and cached_hash == text_hash:
-            return cached_text
-
-        display_source_json = self._episode_plan_display_json_text(parsed) or raw_episode_plan
-        display_text = self._generate_episode_plan_display(display_source_json)
-        if not display_text:
-            display_text = self._fallback_episode_plan_display(parsed)
-        if not display_text:
-            display_text = raw_episode_plan
-        if display_text:
-            self._cache_episode_plan_display(snapshot, display_text, text_hash)
-        return display_text
+        display_text = self._fallback_episode_plan_display(parsed)
+        return display_text or raw_episode_plan
 
     def _parse_episode_plan_display_json(self, raw_episode_plan: str) -> Any | None:
         text = str(raw_episode_plan or "").strip()
@@ -1820,21 +1806,11 @@ class TaskManager:
         stage_title: str,
         raw_output: str,
     ) -> str:
-        """优先复用缓存的自然语言摘要，避免轮询时反复请求模型。"""
+        """阶段展示只走本地格式化，不再额外触发展示摘要调用。"""
         text = str(raw_output or "").strip()
         if not text:
             return ""
-        text_hash = self._hash_text(text)
-        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
-        cached_text = str(artifacts.get(STAGE_PREVIEW_TEXT_ARTIFACT) or "").strip()
-        cached_stage = str(artifacts.get(STAGE_PREVIEW_STAGE_ARTIFACT) or "").strip()
-        cached_hash = str(artifacts.get(STAGE_PREVIEW_SOURCE_HASH_ARTIFACT) or "").strip()
-        if cached_text and cached_stage == stage_key and cached_hash == text_hash:
-            return cached_text
-
-        preview = self._fallback_stage_preview(stage_title, text)
-        self._cache_stage_preview(snapshot, stage_key=stage_key, text_hash=text_hash, preview=preview)
-        return preview
+        return self._fallback_stage_preview(stage_title, text)
 
     def _hash_text(self, value: str) -> str:
         """用内容哈希判断阶段产物是否变化，避免重复生成摘要。"""
@@ -1899,6 +1875,7 @@ class TaskManager:
         awaiting_confirmation = _awaiting_completion_confirmation(snapshot)
         can_stage_rollback = _can_stage_rollback(snapshot)
         display_payload = self._current_stage_display_payload(snapshot, artifacts)
+        progress_metrics = self._snapshot_progress_metrics(snapshot)
         rollback_stage_default, rollback_start_episode_default = self._rollback_defaults(snapshot)
         rollback_script_start_options = (
             self._script_rollback_start_options(snapshot) if can_stage_rollback else []
@@ -1918,7 +1895,8 @@ class TaskManager:
             "visibility": snapshot.get("visibility") or "private",
             "input_payload": self._public_input_payload(snapshot),
             "artifacts": artifacts,
-            "progress_percent": int(snapshot.get("progress_percent") or 0),
+            "progress_percent": progress_metrics["progress_percent"],
+            "generated_episodes": progress_metrics["generated_episodes"],
             "total_episodes": int(snapshot.get("total_episodes") or 0),
             "current_stage": snapshot.get("current_stage"),
             "current_stage_label": snapshot.get("current_stage_label") or "待开始",
@@ -2125,6 +2103,264 @@ class TaskManager:
             if not batch_text or not batch_summary:
                 return batch.start_episode
         return batches[-1].end_episode + 1
+
+    def _episode_stage_completed_count(self, total_episodes: int, *values: Any) -> int:
+        if total_episodes <= 0:
+            return 0
+
+        covered: set[int] = set()
+        for value in values:
+            payloads: list[dict[str, Any]] = []
+            if isinstance(value, dict) and isinstance(value.get("episodes"), list):
+                payloads.append(value)
+            elif isinstance(value, dict):
+                payloads.extend(_normalize_batch_object_map(value).values())
+
+            for payload in payloads:
+                episodes = payload.get("episodes")
+                if not isinstance(episodes, list):
+                    continue
+                for item in episodes:
+                    if not isinstance(item, dict):
+                        continue
+                    episode_no = _safe_int(item.get("episode"), 0)
+                    if 1 <= episode_no <= total_episodes:
+                        covered.add(episode_no)
+        return len(covered)
+
+    def _script_completed_episode_count(
+        self,
+        snapshot: dict[str, Any],
+        variables: dict[str, Any],
+        total_episodes: int,
+    ) -> int:
+        if total_episodes <= 0:
+            return 0
+
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        if (
+            str(snapshot.get("status") or "").strip().lower() == "completed"
+            or any(str(artifacts.get(key) or "").strip() for key in ("final_output_text", "final_script"))
+        ):
+            return total_episodes
+
+        completed: set[int] = set()
+        script_episodes = _normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES))
+        for episode_no in script_episodes:
+            if 1 <= episode_no <= total_episodes:
+                completed.add(episode_no)
+
+        script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
+        if script_batches:
+            batch_size = max(1, int(settings.batch_size or 5))
+            for batch in iter_episode_batches(total_episodes, batch_size=batch_size):
+                if str(script_batches.get(batch.start_episode) or "").strip():
+                    completed.update(range(batch.start_episode, batch.end_episode + 1))
+
+        return len(completed)
+
+    def _progress_value_present(self, value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (dict, list, tuple, set)):
+            return bool(value)
+        return True
+
+    def _progress_stage_key(self, snapshot: dict[str, Any], variables: dict[str, Any]) -> str:
+        batch_stage = str(variables.get(LOCAL_CURRENT_BATCH_STAGE) or "").strip().lower()
+        if batch_stage in {"hook", "dialogue", "script"}:
+            return batch_stage
+        return str(snapshot.get("current_stage") or "").strip().lower()
+
+    def _progress_batch_start_episode(
+        self,
+        snapshot: dict[str, Any],
+        variables: dict[str, Any],
+        total_episodes: int,
+    ) -> int:
+        upper_bound = max(1, int(total_episodes or 0) + 1)
+        start_episode = _safe_int(variables.get(BATCH_START_EPISODE), 0)
+        if 1 <= start_episode <= upper_bound:
+            return start_episode
+
+        current_batch = str(snapshot.get("current_batch") or "").strip()
+        match = re.match(r"^\s*(\d+)", current_batch)
+        if match:
+            parsed = _safe_int(match.group(1), 0)
+            if 1 <= parsed <= upper_bound:
+                return parsed
+        return 0
+
+    def _max_fixed_stage_index(self, snapshot: dict[str, Any], progress_stage: str) -> int:
+        status = str(snapshot.get("status") or "").strip().lower()
+        if status == "completed" or progress_stage in {"finished", "hook", "dialogue", "script", "finalize"}:
+            return 8
+        stage_limits = {
+            "framework": 0,
+            "appearance_strategy": 1,
+            "validation": 4,
+            "worldview": 4,
+            "character": 5,
+            "scene": 6,
+            "appearance": 7,
+        }
+        return int(stage_limits.get(progress_stage, 0))
+
+    def _fixed_stage_completion_flags(
+        self,
+        snapshot: dict[str, Any],
+        variables: dict[str, Any],
+        artifacts: dict[str, Any],
+    ) -> list[bool]:
+        del snapshot
+        framework_done = all(
+            self._progress_value_present(artifacts.get(key))
+            for key in (
+                "script_title_content",
+                "story_outline",
+                "character_bios",
+                "core_scene_input",
+                "episode_plan",
+            )
+        )
+        pre_strategy_done = all(
+            self._progress_value_present(variables.get(key) or artifacts.get(artifact_key))
+            for key, artifact_key in (
+                (CHARACTER_APPEARANCE_REQUIREMENTS, "character_appearance_requirements"),
+                (CHARACTER_ALIAS_NAMING_RULES, "character_alias_naming_rules"),
+                (OUTFIT_SWITCH_RULES, "outfit_switch_rules"),
+            )
+        )
+        consistency_done = variables.get(IS_CONSISTENT) is not None
+        normalize_done = self._progress_value_present(
+            variables.get(NORMALIZED_EPISODE_PLAN) or artifacts.get("normalized_episode_plan")
+        )
+        worldview_done = self._progress_value_present(artifacts.get("worldview"))
+        character_done = self._progress_value_present(
+            artifacts.get("character_summary") or variables.get(CHARACTERS)
+        )
+        scene_done = self._progress_value_present(
+            artifacts.get("core_scene_summary")
+            or artifacts.get("scene_json")
+            or variables.get(SCENES)
+        )
+        appearance_done = self._progress_value_present(
+            variables.get(APPEARANCE_MAPPING) or artifacts.get("appearance_mapping")
+        )
+        return [
+            framework_done,
+            pre_strategy_done,
+            consistency_done,
+            normalize_done,
+            worldview_done,
+            character_done,
+            scene_done,
+            appearance_done,
+        ]
+
+    def _count_contiguous_completed_stages(
+        self,
+        flags: list[bool],
+        *,
+        allowed_count: int,
+    ) -> int:
+        completed = 0
+        for index, done in enumerate(flags, start=1):
+            if index > allowed_count or not done:
+                break
+            completed += 1
+        return completed
+
+    def _snapshot_progress_metrics(self, snapshot: dict[str, Any]) -> dict[str, int]:
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        debug_state = snapshot.get("debug_state") if isinstance(snapshot.get("debug_state"), dict) else {}
+        variables = debug_state.get("variables") if isinstance(debug_state.get("variables"), dict) else {}
+        total_episodes = max(0, _safe_int(snapshot.get("total_episodes"), 0))
+        fixed_stage_total = 8
+        progress_stage = self._progress_stage_key(snapshot, variables)
+        batch_stage = str(variables.get(LOCAL_CURRENT_BATCH_STAGE) or "").strip().lower()
+        batch_start_episode = self._progress_batch_start_episode(snapshot, variables, total_episodes)
+        completed_before_current_batch = (
+            min(total_episodes, max(0, batch_start_episode - 1))
+            if batch_start_episode > 0
+            else 0
+        )
+
+        fixed_flags = self._fixed_stage_completion_flags(snapshot, variables, artifacts)
+        fixed_completed = self._count_contiguous_completed_stages(
+            fixed_flags,
+            allowed_count=self._max_fixed_stage_index(snapshot, progress_stage),
+        )
+
+        final_completed = (
+            str(snapshot.get("status") or "").strip().lower() == "completed"
+            or progress_stage == "finished"
+        )
+
+        hooks_actual = self._episode_stage_completed_count(total_episodes, variables.get(ALL_HOOKS))
+        dialogues_actual = self._episode_stage_completed_count(total_episodes, variables.get(ALL_DIALOGUES))
+        script_actual = self._script_completed_episode_count(snapshot, variables, total_episodes)
+
+        hooks_completed = 0
+        dialogues_completed = 0
+        script_completed = 0
+
+        if final_completed:
+            fixed_completed = fixed_stage_total
+            hooks_completed = total_episodes
+            dialogues_completed = total_episodes
+            script_completed = total_episodes
+        elif progress_stage == "hook":
+            hooks_completed = (
+                completed_before_current_batch
+                if batch_stage == "hook" and batch_start_episode > 0
+                else hooks_actual
+            )
+        elif progress_stage == "dialogue":
+            hooks_completed = hooks_actual
+            dialogues_completed = (
+                completed_before_current_batch
+                if batch_stage == "dialogue" and batch_start_episode > 0
+                else dialogues_actual
+            )
+        elif progress_stage == "script":
+            hooks_completed = hooks_actual
+            dialogues_completed = dialogues_actual
+            script_completed = (
+                max(script_actual, completed_before_current_batch)
+                if batch_stage == "script" and batch_start_episode > 0
+                else script_actual
+            )
+        elif progress_stage == "finalize":
+            hooks_completed = hooks_actual
+            dialogues_completed = max(dialogues_actual, script_actual)
+            if self._progress_value_present(artifacts.get("final_output_text") or artifacts.get("final_script")):
+                script_completed = total_episodes
+            else:
+                script_completed = script_actual
+
+        hooks_completed = min(total_episodes, max(0, hooks_completed))
+        dialogues_completed = min(total_episodes, max(dialogues_completed, script_completed))
+        hooks_completed = min(total_episodes, max(hooks_completed, dialogues_completed))
+        dialogues_completed = min(dialogues_completed, hooks_completed)
+        script_completed = min(script_completed, dialogues_completed)
+
+        total_units = fixed_stage_total + (total_episodes * 3) + 1
+        completed_units = fixed_completed + hooks_completed + dialogues_completed + script_completed + (1 if final_completed else 0)
+        completed_units = max(0, min(total_units, completed_units))
+        generated_episodes = total_episodes if final_completed else script_completed
+
+        if final_completed:
+            progress_percent = 100
+        else:
+            progress_percent = int(round((completed_units / total_units) * 100)) if total_units > 0 else 0
+
+        return {
+            "progress_percent": max(0, min(100, progress_percent)),
+            "generated_episodes": max(0, generated_episodes),
+        }
 
     def _completed_input_payload(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         input_payload = _select_non_empty_fields(
@@ -2709,7 +2945,6 @@ class TaskManager:
             if stage_key in {"hooks", "dialogues", "script"} and effective_start_episode
             else None
         )
-        rollback["progress_percent"] = self._rollback_progress_percent(stage_key)
         rollback["generated_episodes"] = (
             max(0, int(effective_start_episode or 0) - 1)
             if stage_key in {"hooks", "dialogues", "script"} and effective_start_episode
@@ -2717,6 +2952,7 @@ class TaskManager:
         )
         rollback["current_stage"] = stage_key
         rollback["current_stage_label"] = ROLLBACK_STAGE_LABELS.get(stage_key, stage_key)
+        rollback["progress_percent"] = self._rollback_progress_percent(rollback)
         rollback["message"] = f"已回退到“{ROLLBACK_STAGE_LABELS.get(stage_key, stage_key)}”，等待重新生成。"
         rollback["error"] = None
         rollback["finished_at"] = None
@@ -2970,22 +3206,8 @@ class TaskManager:
         variables.pop(LOCAL_DIALOGUE_CHECKPOINT_START, None)
         variables.pop(LOCAL_SCRIPT_CHECKPOINT_START, None)
 
-    def _rollback_progress_percent(self, stage_key: str) -> int:
-        defaults = {
-            "framework": 0,
-            "appearance_strategy": 4,
-            "consistency": 1,
-            "episode_plan_normalize": 3,
-            "worldview": 7,
-            "characters": 12,
-            "scenes": 24,
-            "appearance": 30,
-            "hooks": 36,
-            "dialogues": 50,
-            "script": 68,
-            "final": 98,
-        }
-        return int(defaults.get(stage_key, 0))
+    def _rollback_progress_percent(self, snapshot: dict[str, Any]) -> int:
+        return self._snapshot_progress_metrics(snapshot)["progress_percent"]
 
     def _asset_summary(
         self,
@@ -2996,6 +3218,7 @@ class TaskManager:
     ) -> dict[str, Any]:
         input_payload = snapshot.get("input_payload") or {}
         artifacts = snapshot.get("artifacts") or {}
+        progress_metrics = self._snapshot_progress_metrics(snapshot)
         story_outline = str(
             input_payload.get("story_outline")
             or artifacts.get("story_outline")
@@ -3004,7 +3227,7 @@ class TaskManager:
         final_script = str(
             artifacts.get("final_output_text") or artifacts.get("final_script") or ""
         ).strip()
-        summary = self._story_teaser_for_snapshot(snapshot) if use_teaser else ""
+        summary = self._fallback_story_teaser(story_outline) if use_teaser else ""
         if not summary:
             summary = story_outline or "这个作品还没有填写故事梗概。"
         payload = {
@@ -3021,8 +3244,8 @@ class TaskManager:
             "current_stage": snapshot.get("current_stage"),
             "current_stage_label": snapshot.get("current_stage_label") or "待开始",
             "current_batch": snapshot.get("current_batch"),
-            "progress_percent": int(snapshot.get("progress_percent") or 0),
-            "generated_episodes": int(snapshot.get("generated_episodes") or 0),
+            "progress_percent": progress_metrics["progress_percent"],
+            "generated_episodes": progress_metrics["generated_episodes"],
             "total_episodes": int(snapshot.get("total_episodes") or 0),
             "model_label": ((snapshot.get("model_option") or {}).get("label") or ""),
             "completion_confirmed": _completion_confirmed(snapshot),
@@ -3454,16 +3677,481 @@ class TaskManager:
             self._index["latest_project_id"] = None
         self._save_index()
 
+    def _build_docx_export_source_text(self, snapshot: dict[str, Any]) -> str:
+        """把正式产物组装成 txt_to_docx.py 能识别的完整导出源文本。"""
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+        title = str(
+            artifacts.get("script_title_content")
+            or snapshot.get("title")
+            or input_payload.get("title")
+            or f"project_{snapshot.get('project_id')}"
+        ).strip()
+        story_outline = str(
+            artifacts.get("story_outline")
+            or input_payload.get("story_outline")
+            or ""
+        ).strip()
+        final_script = str(
+            artifacts.get("final_output_text")
+            or artifacts.get("final_script")
+            or ""
+        ).strip()
+        if not final_script:
+            return ""
+
+        parts: list[str] = [title or f"project_{snapshot.get('project_id')}"]
+        if story_outline:
+            parts.append(f"故事梗概\n{story_outline}")
+
+        character_block = self._build_character_setting_export_block(snapshot)
+        if character_block:
+            parts.append(
+                "人物小传\n```json\n"
+                + json.dumps(character_block, ensure_ascii=False, indent=2)
+                + "\n```"
+            )
+
+        scene_block = self._build_scene_setting_export_block(snapshot)
+        if scene_block:
+            parts.append(
+                "核心场景\n```json\n"
+                + json.dumps(scene_block, ensure_ascii=False, indent=2)
+                + "\n```"
+            )
+
+        script_section = (
+            final_script
+            if final_script.lstrip().startswith("剧本正文")
+            else f"剧本正文\n{final_script}"
+        )
+        parts.append(script_section)
+        return "\n\n".join(part.strip() for part in parts if str(part).strip()).strip() + "\n"
+
+    def _build_character_setting_export_block(self, snapshot: dict[str, Any]) -> dict[str, Any] | None:
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        source_candidates = (
+            artifacts.get("character_summary"),
+            artifacts.get("character_bios"),
+            artifacts.get("characters"),
+            artifacts.get("user_characters"),
+        )
+        for candidate in source_candidates:
+            normalized = self._coerce_existing_export_block(candidate, block_key="character_setting")
+            if normalized:
+                return normalized
+
+        source_text = next((str(item).strip() for item in source_candidates if str(item or "").strip()), "")
+        if not source_text:
+            return None
+        characters = self._parse_character_entries(source_text)
+        if not characters:
+            return None
+        return {
+            "character_setting": {
+                "character_design_principle": self._summarize_export_text(source_text, limit=140),
+                "characters": characters,
+            }
+        }
+
+    def _build_scene_setting_export_block(self, snapshot: dict[str, Any]) -> dict[str, Any] | None:
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        source_candidates = (
+            artifacts.get("core_scene_summary"),
+            artifacts.get("scene_json"),
+            artifacts.get("core_scene_input"),
+            artifacts.get("user_scenes"),
+        )
+        for candidate in source_candidates:
+            normalized = self._coerce_existing_export_block(candidate, block_key="scene_setting")
+            if normalized:
+                return normalized
+
+        source_text = next((str(item).strip() for item in source_candidates if str(item or "").strip()), "")
+        if not source_text:
+            return None
+        scenes = self._parse_scene_entries(source_text)
+        if not scenes:
+            return None
+        return {
+            "scene_setting": {
+                "scene_design_principle": self._summarize_export_text(source_text, limit=180),
+                "scenes": scenes,
+            }
+        }
+
+    def _coerce_existing_export_block(
+        self,
+        candidate: Any,
+        *,
+        block_key: str,
+    ) -> dict[str, Any] | None:
+        value = self._coerce_jsonish_value(candidate)
+        if value is None:
+            return None
+        if isinstance(value, dict) and isinstance(value.get(block_key), dict):
+            return {block_key: value[block_key]}
+        if block_key == "character_setting":
+            if isinstance(value, dict) and isinstance(value.get("characters"), list):
+                return {
+                    "character_setting": {
+                        "character_design_principle": self._summarize_export_text(candidate, limit=140),
+                        "characters": [item for item in value.get("characters") or [] if isinstance(item, dict)],
+                    }
+                }
+            if isinstance(value, list):
+                items = [item for item in value if isinstance(item, dict)]
+                if items:
+                    return {
+                        "character_setting": {
+                            "character_design_principle": self._summarize_export_text(candidate, limit=140),
+                            "characters": items,
+                        }
+                    }
+        if block_key == "scene_setting":
+            if isinstance(value, dict) and isinstance(value.get("scenes"), list):
+                return {
+                    "scene_setting": {
+                        "scene_design_principle": self._summarize_export_text(candidate, limit=180),
+                        "scenes": [item for item in value.get("scenes") or [] if isinstance(item, dict)],
+                    }
+                }
+            if isinstance(value, list):
+                items = [item for item in value if isinstance(item, dict)]
+                if items:
+                    return {
+                        "scene_setting": {
+                            "scene_design_principle": self._summarize_export_text(candidate, limit=180),
+                            "scenes": items,
+                        }
+                    }
+        return None
+
+    def _coerce_jsonish_value(self, value: Any) -> Any | None:
+        if isinstance(value, (dict, list)):
+            return value
+        text = str(value or "").strip()
+        if not text or text[0] not in "[{":
+            return None
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return None
+        if isinstance(parsed, (dict, list)):
+            return parsed
+        return None
+
+    def _parse_character_entries(self, text: str) -> list[dict[str, Any]]:
+        blocks = self._split_character_blocks(text)
+        if not blocks:
+            return []
+        entries: list[dict[str, Any]] = []
+        for block in blocks:
+            heading = str(block.get("heading") or "").strip()
+            lines = block.get("lines") if isinstance(block.get("lines"), list) else []
+            name, role_hint = self._parse_character_heading(heading)
+            fields = self._parse_inline_fields(lines)
+            story_role = self._pick_first_non_empty(
+                fields,
+                "人物定位",
+                "身份定位",
+                "故事角色",
+            ) or role_hint
+            core_motivation = self._pick_first_non_empty(
+                fields,
+                "核心欲望",
+                "核心动机",
+                "深层动机",
+                "行为习惯与核心动机",
+            )
+            dramatic_value = self._pick_first_non_empty(
+                fields,
+                "主线作用",
+                "戏剧价值",
+                "人物小传",
+                "关系特点",
+            )
+            personality_text = self._pick_first_non_empty(fields, "性格特点", "性格特质")
+            appearance_anchor = self._pick_first_non_empty(fields, "稳定外貌识别锚点", "稳定识别锚点")
+            entry = {
+                "character_name": name or "未命名角色",
+                "story_role": story_role or "角色设定",
+                "core_motivation": core_motivation or "待补充",
+                "dramatic_value": dramatic_value or story_role or "待补充",
+            }
+            personality = self._compact_dict(
+                {
+                    "traits": self._split_brief_items(personality_text),
+                    "surface_impression": self._pick_first_non_empty(fields, "外貌特征", "外貌描述"),
+                    "inner_contradiction": self._pick_first_non_empty(fields, "角色弱点", "深层动机"),
+                }
+            )
+            family = self._compact_dict(
+                {
+                    "family_background": self._pick_first_non_empty(fields, "家庭背景", "家世"),
+                    "upbringing": self._pick_first_non_empty(fields, "成长线", "成长经历"),
+                    "key_family_influence": self._pick_first_non_empty(fields, "与主角关系", "与其他主要角色关系", "关系特点"),
+                }
+            )
+            appearance = self._compact_dict(
+                {
+                    "overall_look": self._pick_first_non_empty(fields, "外貌特征", "外貌描述"),
+                    "recognizable_features": self._split_brief_items(appearance_anchor, max_items=6),
+                    "external_impression_effect": self._pick_first_non_empty(fields, "出场记忆点", "人物小传"),
+                }
+            )
+            behavior = self._compact_dict(
+                {
+                    "emotional_response_pattern": self._pick_first_non_empty(fields, "行为习惯与核心动机", "角色弱点"),
+                    "social_interaction_style": self._pick_first_non_empty(fields, "常见活动状态", "关系特点"),
+                }
+            )
+            if personality:
+                entry["personality"] = personality
+            if family:
+                entry["family"] = family
+            if appearance:
+                entry["appearance"] = appearance
+            if behavior:
+                entry["behavior"] = behavior
+            entries.append(entry)
+        return entries
+
+    def _split_character_blocks(self, text: str) -> list[dict[str, Any]]:
+        blocks: list[dict[str, Any]] = []
+        current_heading = ""
+        current_lines: list[str] = []
+        for raw_line in str(text or "").replace("\r", "").split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            if self._looks_like_character_heading(line):
+                if current_heading:
+                    blocks.append({"heading": current_heading, "lines": current_lines[:]})
+                current_heading = line
+                current_lines = []
+                continue
+            if current_heading:
+                current_lines.append(line)
+        if current_heading:
+            blocks.append({"heading": current_heading, "lines": current_lines[:]})
+        return blocks
+
+    def _looks_like_character_heading(self, line: str) -> bool:
+        text = str(line or "").strip()
+        if not text:
+            return False
+        if re.match(r"^\d+\.\s*[^\s]", text):
+            return True
+        if text.startswith("【") and "】" in text and "人物小传" not in text and "主要角色设定" not in text:
+            suffix = text.split("】", 1)[1].strip()
+            return bool(suffix)
+        return False
+
+    def _parse_character_heading(self, heading: str) -> tuple[str, str]:
+        text = str(heading or "").strip()
+        if not text:
+            return "", ""
+        if re.match(r"^\d+\.", text):
+            body = re.sub(r"^\d+\.\s*", "", text)
+            name = re.split(r"[（(]", body, maxsplit=1)[0].strip()
+            role_hint = body[len(name):].strip("（）() ")
+            return name, role_hint
+        match = re.match(r"^【(?P<label>[^】]+)】\s*(?P<name>.+)$", text)
+        if match:
+            name = re.split(r"[（(]", match.group("name"), maxsplit=1)[0].strip()
+            return name, match.group("label").strip()
+        return text, ""
+
+    def _parse_inline_fields(self, lines: list[str]) -> dict[str, str]:
+        fields: dict[str, str] = {}
+        current_key = ""
+        for line in lines:
+            text = str(line or "").strip()
+            if not text:
+                continue
+            match = re.match(r"^(?P<key>[^：:]{1,24})[:：]\s*(?P<value>.*)$", text)
+            if match:
+                current_key = match.group("key").strip()
+                value = match.group("value").strip()
+                if current_key:
+                    fields[current_key] = value
+                continue
+            if current_key and text:
+                fields[current_key] = f"{fields.get(current_key, '')}\n{text}".strip()
+        return fields
+
+    def _parse_scene_entries(self, text: str) -> list[dict[str, Any]]:
+        sections = self._parse_multiline_sections(text)
+        area_items = self._parse_numbered_items(
+            sections.get("核心场景区域")
+            or sections.get("核心场景")
+            or ""
+        )
+        conflict_items = self._parse_numbered_items(
+            sections.get("冲突土壤")
+            or sections.get("危险来源")
+            or ""
+        )
+        visual_items = self._parse_numbered_items(
+            sections.get("高频触发服装切换的场景类型")
+            or ""
+        )
+        worldview_support = "\n".join(
+            part for part in (
+                sections.get("时代背景与世界观"),
+                sections.get("时代背景"),
+                sections.get("世界状态"),
+            ) if part
+        ).strip()
+        interaction_effect = "\n".join(
+            part for part in (
+                sections.get("社会环境"),
+                sections.get("生存规则与行动规则"),
+                sections.get("社会身份要求"),
+            ) if part
+        ).strip()
+        atmosphere = sections.get("整体氛围") or ""
+        environment_suffix = "\n".join(
+            part for part in (
+                sections.get("环境条件与时间条件"),
+                sections.get("环境条件触发"),
+                sections.get("时间条件触发"),
+            ) if part
+        ).strip()
+
+        if not area_items:
+            merged_environment = self._summarize_export_text(
+                "\n".join(part for part in (sections.get("核心场景区域"), environment_suffix) if part),
+                limit=280,
+            )
+            return [self._compact_dict(
+                {
+                    "scene_name": "核心场景设定",
+                    "scene_type": "故事舞台",
+                    "story_function": self._summarize_export_text(text, limit=160),
+                    "environment_description": merged_environment or self._summarize_export_text(text, limit=240),
+                    "atmosphere_description": atmosphere or self._summarize_export_text(text, limit=120),
+                    "character_interaction_effect": interaction_effect or None,
+                    "worldview_support": worldview_support or None,
+                    "visual_elements": visual_items[:6] if visual_items else None,
+                    "conflict_potential": conflict_items[:6] if conflict_items else None,
+                }
+            )]
+
+        scenes: list[dict[str, Any]] = []
+        for item in area_items:
+            name, description = self._split_list_item_name_value(item)
+            environment_description = description
+            if environment_suffix:
+                environment_description = "\n".join(part for part in (description, environment_suffix) if part).strip()
+            scene = self._compact_dict(
+                {
+                    "scene_name": name or "核心场景",
+                    "scene_type": "故事关键区域",
+                    "story_function": description or atmosphere or "承载关键剧情推进。",
+                    "environment_description": environment_description or worldview_support or "见核心场景说明。",
+                    "atmosphere_description": atmosphere or None,
+                    "character_interaction_effect": interaction_effect or None,
+                    "worldview_support": worldview_support or None,
+                    "visual_elements": visual_items[:6] if visual_items else None,
+                    "conflict_potential": conflict_items[:6] if conflict_items else None,
+                }
+            )
+            scenes.append(scene)
+        return scenes
+
+    def _parse_multiline_sections(self, text: str) -> dict[str, str]:
+        sections: dict[str, str] = {}
+        current_key = ""
+        buffer: list[str] = []
+        for raw_line in str(text or "").replace("\r", "").split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            match = re.match(r"^(?P<key>[^：:\n]{2,28})[:：]\s*(?P<value>.*)$", line)
+            if match and not re.match(r"^\d+\.\s*", line):
+                if current_key:
+                    sections[current_key] = "\n".join(buffer).strip()
+                current_key = match.group("key").strip()
+                buffer = [match.group("value").strip()] if match.group("value").strip() else []
+                continue
+            if current_key:
+                buffer.append(line)
+        if current_key:
+            sections[current_key] = "\n".join(buffer).strip()
+        return sections
+
+    def _parse_numbered_items(self, text: str) -> list[str]:
+        items: list[str] = []
+        for raw_line in str(text or "").replace("\r", "").split("\n"):
+            line = raw_line.strip(" -\t")
+            if not line:
+                continue
+            match = re.match(r"^\d+\.\s*(.+)$", line)
+            if match:
+                items.append(match.group(1).strip())
+                continue
+            if not items:
+                items.append(line)
+            else:
+                items[-1] = f"{items[-1]} {line}".strip()
+        return items
+
+    def _split_list_item_name_value(self, item: str) -> tuple[str, str]:
+        text = str(item or "").strip()
+        if not text:
+            return "", ""
+        if "：" in text:
+            name, value = text.split("：", 1)
+            return name.strip(), value.strip()
+        if ":" in text:
+            name, value = text.split(":", 1)
+            return name.strip(), value.strip()
+        return text, ""
+
+    def _pick_first_non_empty(self, fields: dict[str, str], *keys: str) -> str:
+        for key in keys:
+            value = str(fields.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    def _split_brief_items(self, value: str, *, max_items: int = 5) -> list[str]:
+        text = str(value or "").replace("\n", " ").strip()
+        if not text:
+            return []
+        parts = [
+            part.strip("；;，,。 ")
+            for part in re.split(r"[；;、]", text)
+            if part.strip("；;，,。 ")
+        ]
+        if len(parts) <= 1:
+            parts = [
+                part.strip("；;，,。 ")
+                for part in re.split(r"[，,]", text)
+                if part.strip("；;，,。 ")
+            ]
+        return parts[:max_items] if parts else [text[:80]]
+
+    def _summarize_export_text(self, value: Any, *, limit: int) -> str:
+        condensed = " ".join(str(value or "").replace("\r", "\n").split())
+        return condensed[:limit] if condensed else ""
+
+    def _compact_dict(self, payload: dict[str, Any]) -> dict[str, Any]:
+        compacted: dict[str, Any] = {}
+        for key, value in payload.items():
+            if value in (None, "", [], {}):
+                continue
+            compacted[key] = value
+        return compacted
+
     def save_final_script(self, project_id: int, user_id: int | None = None) -> Path:
         snapshot = self.get_project_snapshot(project_id, user_id=user_id, public_view=False)
         if not snapshot:
             raise ValueError("项目不存在")
         artifacts = snapshot.get("artifacts", {})
-        content = (
-            artifacts.get("final_output_text")
-            or artifacts.get("final_script")
-            or ""
-        ).strip()
+        content = self._build_docx_export_source_text(snapshot)
         if not content:
             raise ValueError("当前项目还没有可保存的最终剧本")
         title = str(snapshot.get("title") or f"project_{project_id}").strip() or f"project_{project_id}"

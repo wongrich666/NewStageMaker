@@ -12,6 +12,7 @@
   };
 
   const POLL_INTERVAL = 1500;
+  const MAX_EXPECTATION_LINES = 5;
   const RUNNING_STATUSES = new Set(["pending", "running", "pausing"]);
   const RESUMABLE_STATUSES = new Set(["paused", "pausing", "failed", "terminated"]);
   const TERMINATABLE_STATUSES = new Set(["pending", "running", "pausing", "paused", "failed"]);
@@ -107,16 +108,67 @@
     projectStatusMap: {},
     projectsInitialized: false,
     assets: [],
+    communityAssets: [],
     editingProjectId: null,
     editingProjectStatus: null,
     editingAssetLocked: false,
     toolDefinitions: {},
     activeTool: "character_reskin",
+    loadingActions: {},
+    assetsStatus: "idle",
+    assetsError: "",
+    assetsPage: 1,
+    communityStatus: "idle",
+    communityError: "",
+    communityPage: 1,
     elapsedTimer: null,
-    workspaceCollapseTimer: null
+    workspaceCollapseTimer: null,
+    expandedUserPrompts: {}
   };
 
   const DEFAULT_TOOL_DEFINITIONS = {
+    hot_review: {
+      key: "hot_review",
+      label: "爆款文审核",
+      help: "提交一段文本，让工具返回审核意见。",
+      fields: [
+        { name: "text", label: "待检测文本", type: "textarea", placeholder: "粘贴要审核的正文、大纲或片段。", required: true }
+      ],
+      configured: false,
+      source: "fallback"
+    },
+    reskin: {
+      key: "reskin",
+      label: "换皮",
+      help: "保留原剧本骨架，按目标风格做整套换皮。",
+      fields: [
+        { name: "title", label: "剧本标题", type: "input", placeholder: "新剧本标题。", required: true },
+        { name: "source_outline", label: "源剧本梗概", type: "textarea", placeholder: "源故事梗概。", required: true },
+        { name: "core_scenes", label: "源剧本核心场景", type: "textarea", placeholder: "可选，源剧本核心场景。", required: false },
+        { name: "source_characters", label: "源剧本人设", type: "textarea", placeholder: "源人物小传。", required: true },
+        { name: "source_script", label: "源剧本正文", type: "textarea", placeholder: "源剧本正文。", required: true },
+        { name: "target_style", label: "目标风格", type: "textarea", placeholder: "希望换成的题材、风格、爽点方向。", required: true },
+        { name: "total_episodes", label: "总集数", type: "number", placeholder: "例如 60。", required: true },
+        { name: "episode_word_count", label: "每集字数", type: "number", placeholder: "例如 500。", required: true }
+      ],
+      configured: false,
+      source: "fallback"
+    },
+    punchup: {
+      key: "punchup",
+      label: "增加爽感",
+      help: "不改主干情节，重点增强爽点、节奏和表达力度。",
+      fields: [
+        { name: "title", label: "剧本名", type: "input", placeholder: "原剧本名。", required: true },
+        { name: "story_outline", label: "故事梗概", type: "textarea", placeholder: "故事梗概。", required: true },
+        { name: "characters", label: "人物小传", type: "textarea", placeholder: "人物设定。", required: true },
+        { name: "core_scenes", label: "核心场景", type: "textarea", placeholder: "核心场景。", required: true },
+        { name: "script", label: "剧本正文", type: "textarea", placeholder: "需要增爽的剧本正文。", required: true },
+        { name: "total_episodes", label: "总集数", type: "number", placeholder: "总集数。", required: true }
+      ],
+      configured: false,
+      source: "fallback"
+    },
     character_reskin: {
       key: "character_reskin",
       label: "只换人设",
@@ -306,6 +358,44 @@
     renderWaitDuration(snapshot);
   }
 
+  function promptToggleKey(snapshot) {
+    const projectId = normalizeNumber(snapshot?.project_id);
+    if (projectId) return `project:${projectId}`;
+    const taskId = String(snapshot?.task_id || "").trim();
+    return taskId ? `task:${taskId}` : "current";
+  }
+
+  function inputLineCount(text) {
+    const normalized = String(text || "").replace(/\r\n/g, "\n");
+    return normalized ? normalized.split("\n").length : 1;
+  }
+
+  function syncExpectationInputHeight() {
+    const textarea = els.expectationInput;
+    if (!textarea) return;
+    const style = window.getComputedStyle(textarea);
+    const lineHeight = Number.parseFloat(style.lineHeight) || 24;
+    const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+    const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+    const minHeight = Number.parseFloat(style.minHeight) || 54;
+    const maxHeight = Math.max(minHeight, Math.ceil((lineHeight * MAX_EXPECTATION_LINES) + paddingTop + paddingBottom));
+    textarea.style.height = "auto";
+    const nextHeight = Math.max(minHeight, Math.min(textarea.scrollHeight, maxHeight));
+    textarea.style.height = `${nextHeight}px`;
+    const collapsed = textarea.scrollHeight > (maxHeight + 1);
+    textarea.classList.toggle("is-collapsed", collapsed);
+    textarea.style.overflowY = collapsed ? "auto" : "hidden";
+  }
+
+  function isRestartingCurrentProject() {
+    return Boolean(state.projectId && ["failed", "terminated"].includes(state.status));
+  }
+
+  function fallbackExpectationForRestart() {
+    if (!isRestartingCurrentProject()) return "";
+    return String(state.latestSnapshot?.input_payload?.user_expectation || "").trim();
+  }
+
   function saveDraft() {
     const draft = {
       user_expectation: els.expectationInput.value.trim(),
@@ -324,6 +414,7 @@
       els.expectationInput.value = draft.user_expectation || "";
       els.characterCountInput.value = draft.character_count || 5;
       els.episodeCountInput.value = draft.total_episodes || 10;
+      syncExpectationInputHeight();
     } catch (_) {}
   }
 
@@ -416,9 +507,10 @@
 
   function restoreInputPayload(inputPayload, { force = false } = {}) {
     if (!inputPayload || (!force && formHasUserInput())) return;
-    els.expectationInput.value = inputPayload.user_expectation || "";
+    els.expectationInput.value = "";
     els.characterCountInput.value = inputPayload.character_count || 5;
     els.episodeCountInput.value = inputPayload.total_episodes || 10;
+    syncExpectationInputHeight();
     saveDraft();
   }
 
@@ -561,7 +653,7 @@
     const title = String(artifacts.script_title_content || "").trim();
     const storyOutline = String(artifacts.story_outline || "").trim();
     const characterBios = String(artifacts.character_bios || "").trim();
-    const coreSceneInput = String(artifacts.core_scene_input || "").trim();
+    const coreSceneInput = String(artifacts.core_scene_summary || artifacts.core_scene_input || "").trim();
     const episodePlan = String(artifacts.episode_plan_display || artifacts.episode_plan || "").trim();
 
     if (title) parts.push(`剧本标题\n${title}`);
@@ -645,6 +737,9 @@
   function renderUserPromptBubble(snapshot) {
     const prompt = userPromptSummary(snapshot);
     const expectation = prompt.expectation || "还没有填写创作需求。";
+    const lineCount = inputLineCount(expectation);
+    const toggleKey = promptToggleKey(snapshot);
+    const collapsed = lineCount > MAX_EXPECTATION_LINES && !state.expandedUserPrompts[toggleKey];
     const chips = [
       prompt.characterCount > 0 ? `角色数量 ${prompt.characterCount}` : "",
       prompt.totalEpisodes > 0 ? `总集数 ${prompt.totalEpisodes}` : ""
@@ -658,7 +753,15 @@
               <span class="chat-bubble-title">创作指令</span>
               <span class="chat-bubble-meta">输入</span>
             </div>
-            <pre class="chat-bubble-content">${escapeHtml(expectation)}</pre>
+            <pre class="chat-bubble-content${collapsed ? " chat-bubble-content-collapsed" : ""}">${escapeHtml(expectation)}</pre>
+            ${lineCount > MAX_EXPECTATION_LINES ? `
+              <button
+                class="chat-bubble-toggle"
+                type="button"
+                data-chat-action="toggle-user-prompt"
+                data-prompt-key="${escapeHtml(toggleKey)}"
+              >${collapsed ? `展开全文（${lineCount}行）` : "收起"}</button>
+            ` : ""}
             ${chips.length ? `<div class="chat-user-meta">${chips.map((item) => `<span class="chat-chip">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
           </div>
         </div>
@@ -690,10 +793,10 @@
   }
 
   function renderThinkingBubble(thinkingState) {
-    const stageLabel = String(thinkingState.stageLabel || "正在处理").trim();
+    const stageLabel = String(thinkingState.stageLabel || "处理中").trim();
     const stateLabel = String(thinkingState.stateLabel || "创作中").trim();
     const content = stateLabel === "创作中"
-      ? `正在处理：${stageLabel}`
+      ? stageLabel
       : stateLabel;
     return `
       <article class="chat-message system">
@@ -701,7 +804,7 @@
           <div class="chat-avatar">AI</div>
           <div class="chat-bubble">
             <div class="chat-bubble-head">
-              <span class="chat-bubble-title">思考分析</span>
+              <span class="chat-bubble-title">${escapeHtml(stateLabel)}</span>
               <span class="chat-bubble-meta">${escapeHtml(stageLabel)}</span>
             </div>
             <div class="chat-bubble-content"><span>${escapeHtml(content)}</span></div>
@@ -721,7 +824,7 @@
   function renderChatTranscript(snapshot) {
     if (!els.chatTranscript) return;
     if (!snapshot) {
-      const suggestions = Object.values(toolDefinitions()).slice(0, 3).map((tool) => `
+      const suggestions = Object.values(toolDefinitions()).slice(0, 4).map((tool) => `
         <button class="chat-suggestion-btn" type="button" data-suggestion-tool="${escapeHtml(tool.key)}">
           ${escapeHtml(tool.label)}
         </button>
@@ -894,26 +997,29 @@
     const hasRollbackSelection = Boolean(
       selectedRollbackStage && (!requiresScriptStart || (els.rollbackScriptStartSelect?.value || ""))
     );
+    const formValidation = validateGenerationForm();
+    const toolValidation = validateToolPayload();
+    const assetValidation = validateAssetEditor();
 
-    els.startBtn.disabled = !isAuthenticated() || !hasConfiguredModel;
-    els.pauseBtn.disabled = !(state.taskId && ["running", "pending"].includes(state.status));
-    els.resumeBtn.disabled = !(state.taskId && RESUMABLE_STATUSES.has(state.status));
-    els.terminateBtn.disabled = !(state.taskId && TERMINATABLE_STATUSES.has(state.status));
+    els.startBtn.disabled = isActionLoading("start");
+    els.pauseBtn.disabled = isActionLoading("pause") || !(state.taskId && ["running", "pending"].includes(state.status));
+    els.resumeBtn.disabled = isActionLoading("resume") || !(state.taskId && RESUMABLE_STATUSES.has(state.status));
+    els.terminateBtn.disabled = isActionLoading("terminate") || !(state.taskId && TERMINATABLE_STATUSES.has(state.status));
     els.clearBtn.disabled = !isAuthenticated();
-    els.saveBtn.disabled = !isAuthenticated() || !hasProject || !hasFinal;
+    els.saveBtn.disabled = isActionLoading("download") || !isAuthenticated() || !hasProject || !hasFinal;
     if (els.confirmCompletionBtn) {
-      els.confirmCompletionBtn.disabled = !isAuthenticated() || !canConfirmCompletion;
+      els.confirmCompletionBtn.disabled = isActionLoading("confirmCompletion") || !isAuthenticated() || !canConfirmCompletion;
     }
     if (els.rollbackStageSelect) {
-      els.rollbackStageSelect.disabled = !isAuthenticated() || !canStageRollback;
+      els.rollbackStageSelect.disabled = isActionLoading("rollback") || !isAuthenticated() || !canStageRollback;
     }
     if (els.rollbackScriptStartSelect) {
       const showScriptStart = canStageRollback && selectedRollbackStage === "script";
       els.rollbackScriptStartSelect.classList.toggle("hidden", !showScriptStart);
-      els.rollbackScriptStartSelect.disabled = !showScriptStart;
+      els.rollbackScriptStartSelect.disabled = isActionLoading("rollback") || !showScriptStart;
     }
     if (els.rollbackRewriteBtn) {
-      els.rollbackRewriteBtn.disabled = !isAuthenticated() || !canStageRollback || !hasRollbackSelection;
+      els.rollbackRewriteBtn.disabled = isActionLoading("rollback") || !isAuthenticated() || !canStageRollback || !hasRollbackSelection;
     }
     if (els.completionPanel) {
       const shouldShowCompletionPanel = Boolean(
@@ -921,10 +1027,34 @@
       );
       els.completionPanel.classList.toggle("hidden", !shouldShowCompletionPanel);
     }
+    if (els.runToolBtn) {
+      els.runToolBtn.disabled = isActionLoading("runTool") || !toolValidation.valid;
+    }
+    if (els.saveAssetEditBtn && state.editingProjectId) {
+      els.saveAssetEditBtn.disabled = isActionLoading("saveAsset") || !assetValidation.valid;
+    }
+    if (!hasProject && !state.taskId && !hasConfiguredModel && els.formHint) {
+      els.formHint.textContent = "当前没有可用模型。";
+    } else if (!formValidation.valid && !hasProject && !RUNNING_STATUSES.has(state.status) && els.formHint) {
+      els.formHint.textContent = formValidation.message || "请先完善输入。";
+    }
   }
 
   function hasConfiguredModel() {
     return state.availableModels.some((item) => item.configured !== false);
+  }
+
+  function selectedModelId() {
+    const currentValue = String(els.modelSelect?.value || "").trim();
+    if (currentValue) {
+      return currentValue;
+    }
+    const fallbackModel = state.availableModels.find((item) => item.configured !== false) || state.availableModels[0];
+    const fallbackId = String(fallbackModel?.id || "").trim();
+    if (fallbackId && els.modelSelect) {
+      els.modelSelect.value = fallbackId;
+    }
+    return fallbackId;
   }
 
   function escapeHtml(text) {
@@ -946,6 +1076,135 @@
   function toolConfig(toolKey) {
     const definitions = toolDefinitions();
     return definitions[toolKey] || definitions.character_reskin || Object.values(definitions)[0];
+  }
+
+  function isActionLoading(actionKey) {
+    return Boolean(state.loadingActions?.[actionKey]);
+  }
+
+  function setActionLoading(actionKey, button, loading, loadingText = "处理中...") {
+    if (!button) return;
+    if (loading) {
+      if (!button.dataset.originalText) {
+        button.dataset.originalText = button.textContent;
+      }
+      state.loadingActions[actionKey] = true;
+      button.textContent = loadingText;
+      button.disabled = true;
+    } else {
+      delete state.loadingActions[actionKey];
+      button.textContent = button.dataset.originalText || button.textContent;
+    }
+    syncButtons();
+  }
+
+  async function withActionLoading(actionKey, button, loadingText, runner) {
+    setActionLoading(actionKey, button, true, loadingText);
+    try {
+      return await runner();
+    } finally {
+      setActionLoading(actionKey, button, false, loadingText);
+    }
+  }
+
+  function validateGenerationForm() {
+    if (!isAuthenticated()) {
+      return { valid: false, message: "登录后即可开始创作。" };
+    }
+    if (!hasConfiguredModel()) {
+      return { valid: false, message: "当前没有可用模型，请先完成 .env 配置。" };
+    }
+    const expectation = String(els.expectationInput?.value || "").trim() || fallbackExpectationForRestart();
+    const characterCount = Number(els.characterCountInput?.value || 0);
+    const totalEpisodes = Number(els.episodeCountInput?.value || 0);
+    if (!expectation) {
+      return { valid: false, message: "请填写想要的剧本。" };
+    }
+    if (expectation.length > 4000) {
+      return { valid: false, message: "创作需求请控制在 4000 字以内。" };
+    }
+    if (!Number.isFinite(characterCount) || characterCount <= 0) {
+      return { valid: false, message: "角色数量必须大于 0。" };
+    }
+    if (!Number.isFinite(totalEpisodes) || totalEpisodes <= 0) {
+      return { valid: false, message: "总集数必须大于 0。" };
+    }
+    if (!selectedModelId()) {
+      return { valid: false, message: "请选择可用模型。" };
+    }
+    return { valid: true, message: "" };
+  }
+
+  function validateToolPayload() {
+    const tool = toolConfig(state.activeTool);
+    if (!tool?.configured) {
+      return { valid: false, message: "当前工具还未配置 API Key。" };
+    }
+    const payload = collectToolPayload();
+    for (const field of tool.fields || []) {
+      const rawValue = payload[field.name];
+      const value = field.type === "number" ? Number(rawValue || 0) : String(rawValue || "").trim();
+      if (field.required && (field.type === "number" ? !(Number.isFinite(value) && value > 0) : !value)) {
+        return { valid: false, message: `请先填写 ${field.label}。` };
+      }
+    }
+    return { valid: true, message: "" };
+  }
+
+  function validateAssetEditor() {
+    if (!state.editingProjectId) {
+      return { valid: false, message: "请选择要编辑的资产。" };
+    }
+    const visibility = String(els.editAssetPrivacy?.value || "").trim();
+    if (!["private", "public"].includes(visibility)) {
+      return { valid: false, message: "请选择有效的公开状态。" };
+    }
+    if (state.editingAssetLocked) {
+      return { valid: true, message: "" };
+    }
+    const title = String(els.editAssetTitle?.value || "").trim();
+    const summary = String(els.editAssetSummary?.value || "").trim();
+    if (!title) {
+      return { valid: false, message: "剧本标题不能为空。" };
+    }
+    if (title.length > 120) {
+      return { valid: false, message: "剧本标题请控制在 120 字以内。" };
+    }
+    if (summary.length > 20000) {
+      return { valid: false, message: "故事梗概请控制在 20000 字以内。" };
+    }
+    return { valid: true, message: "" };
+  }
+
+  function renderListSkeleton(cardClass, count = 4) {
+    return Array.from({ length: count }, (_, index) => `
+      <article class="${cardClass} skeleton-card" aria-hidden="true">
+        <div class="skeleton-line skeleton-line-short"></div>
+        <div class="skeleton-line"></div>
+        <div class="skeleton-line"></div>
+        <div class="skeleton-line skeleton-line-short"></div>
+      </article>
+    `).join("");
+  }
+
+  function errorCard(message, retryLabel = "重试") {
+    return `
+      <div class="empty-card error-card">
+        <strong>${escapeHtml(message)}</strong>
+        <div class="empty-card-actions">
+          <button class="btn btn-secondary" type="button" data-action="retry-list">${escapeHtml(retryLabel)}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function paginateItems(items, page, pageSize = 6) {
+    const safePage = Math.max(1, Number(page || 1));
+    const safeSize = Math.max(1, Number(pageSize || 6));
+    return {
+      visibleItems: items.slice(0, safePage * safeSize),
+      hasMore: items.length > safePage * safeSize
+    };
   }
 
   function normalizeToolDefinition(tool) {
@@ -991,10 +1250,17 @@
     renderToolList();
     renderToolForm(tool.key);
     els.toolPanel?.classList.remove("hidden");
+    window.requestAnimationFrame(() => {
+      els.toolPanel?.classList.add("panel-open");
+    });
   }
 
   function closeToolPanel() {
-    els.toolPanel?.classList.add("hidden");
+    if (!els.toolPanel || els.toolPanel.classList.contains("hidden")) return;
+    els.toolPanel.classList.remove("panel-open");
+    window.setTimeout(() => {
+      els.toolPanel?.classList.add("hidden");
+    }, 180);
   }
 
   async function loadTools() {
@@ -1063,6 +1329,7 @@
         ? "这里会显示辅助工具结果。"
         : "当前工具还未配置 API Key，配置后即可运行。";
     }
+    syncButtons();
   }
 
   function collectToolPayload() {
@@ -1078,15 +1345,23 @@
     if (!requireLogin()) return;
     els.profilePanel?.classList.remove("hidden");
     els.profilePanel?.setAttribute("aria-hidden", "false");
+    window.requestAnimationFrame(() => {
+      els.profilePanel?.classList.add("panel-open");
+    });
     updateUrlParams((params) => params.set("panel", "profile"));
-    loadAssets().catch((error) => {
+    loadAssets({ resetPage: true }).catch((error) => {
       showStatusError(error, "个人中心加载失败，请稍后重试。");
     });
   }
 
   function closeProfilePanel() {
-    els.profilePanel?.classList.add("hidden");
-    els.profilePanel?.setAttribute("aria-hidden", "true");
+    if (!els.profilePanel || els.profilePanel.classList.contains("hidden")) return;
+    els.profilePanel.classList.remove("panel-open");
+    window.setTimeout(() => {
+      els.profilePanel?.classList.add("hidden");
+      els.profilePanel?.setAttribute("aria-hidden", "true");
+    }, 180);
+    closeAssetEditor();
     updateUrlParams((params) => params.delete("panel"));
   }
 
@@ -1142,8 +1417,10 @@
 
   // 只把当前表单里真正需要的最小输入打包给后端启动主流程。
   function buildPayload() {
+    const expectation = String(els.expectationInput.value || "").trim() || fallbackExpectationForRestart();
+    const modelSelectionId = selectedModelId();
     const payload = {
-      user_expectation: els.expectationInput.value.trim(),
+      user_expectation: expectation,
       character_count: Number(els.characterCountInput.value || 0),
       episode_word_count: 600,
       total_episodes: Number(els.episodeCountInput.value || 0),
@@ -1152,7 +1429,7 @@
       core_scene_input: "",
       character_bios: "",
       episode_plan: "",
-      model_selection_id: els.modelSelect.value || ""
+      model_selection_id: modelSelectionId
     };
 
     if (!payload.user_expectation) throw new Error("请填写想要的剧本。");
@@ -1314,7 +1591,7 @@
     saveDraft();
     const payload = buildPayload();
     const restartingCurrentProject = Boolean(
-      state.projectId && ["failed", "terminated"].includes(state.status)
+      isRestartingCurrentProject()
     );
     els.formHint.textContent = restartingCurrentProject
       ? "正在基于当前资产重新开始生成。"
@@ -1328,10 +1605,17 @@
     });
     await loadProjects({ restoreSelection: false, restoreInputs: false });
     await loadProjectDetail(data.task.project_id, { restoreInputs: false });
+    els.expectationInput.value = "";
+    syncExpectationInputHeight();
+    saveDraft();
     startPolling();
     els.formHint.textContent = restartingCurrentProject
       ? "当前资产已在原 ID 下重新开始生成。"
       : "新任务已启动。";
+    showToast(
+      restartingCurrentProject ? "已重新开始生成" : "任务已启动",
+      restartingCurrentProject ? "当前资产正在原项目下继续生成。" : "主流程已经开始执行。"
+    );
   }
 
   async function pauseTask() {
@@ -1341,6 +1625,7 @@
     renderSnapshot(data.task);
     await loadProjects({ restoreSelection: true, restoreInputs: false });
     startPolling();
+    showToast("已发出暂停请求", "当前节点完成后会进入暂停状态。");
   }
 
   async function resumeTask() {
@@ -1353,6 +1638,7 @@
     renderSnapshot(data.task);
     await loadProjects({ restoreSelection: true, restoreInputs: false });
     startPolling();
+    showToast("已继续生成", "系统会从保留的进度继续推进。");
   }
 
   async function terminateTask() {
@@ -1364,6 +1650,7 @@
     renderSnapshot(data.task);
     await loadProjects({ restoreSelection: true, restoreInputs: false });
     startPolling();
+    showToast("已请求终止", "任务会在当前节点结束后停止。");
   }
 
   async function confirmCompletion() {
@@ -1378,6 +1665,7 @@
     await loadProjects({ restoreSelection: true, restoreInputs: false });
     await loadAssets();
     await loadCommunity();
+    showToast("已确认完成", "缓存已清理，当前成品已锁定。");
   }
 
   // 把项目回退到指定阶段或指定正文起始集，并保留前面已经确认的结果。
@@ -1407,6 +1695,7 @@
     renderSnapshot(data.task);
     await loadProjects({ restoreSelection: true, restoreInputs: false });
     startPolling();
+    showToast("已开始回退重写", `${selectedLabel}${detailSuffix || ""} 已重新进入生成流程。`);
   }
 
   function clearCurrentInput() {
@@ -1415,6 +1704,8 @@
     els.expectationInput.value = "";
     els.characterCountInput.value = 5;
     els.episodeCountInput.value = 10;
+    syncExpectationInputHeight();
+    syncButtons();
     els.formHint.textContent = "输入已清空。";
   }
 
@@ -1423,6 +1714,7 @@
     if (!state.projectId) return;
     const authToken = currentAuthToken();
     const suffix = authToken ? `?auth_token=${encodeURIComponent(authToken)}` : "";
+    showToast("正在准备下载", "将为你导出包含框架与正文的 DOCX。");
     window.location.href = `/api/projects/${state.projectId}/download${suffix}`;
   }
 
@@ -1508,31 +1800,73 @@
     state.projectStatusMap = nextMap;
   }
 
-  async function loadAssets() {
+  async function loadAssets({ resetPage = false } = {}) {
     if (!isAuthenticated()) {
+      state.assetsStatus = "empty";
+      state.assetsError = "";
+      state.assets = [];
+      state.assetsPage = 1;
       if (els.assetsList) {
         els.assetsList.innerHTML = emptyCard("登录后查看剧本资产");
       }
       return;
     }
-    const data = await requestJson(window.scriptMakerConfig.assetsUrl);
-    state.assets = data.assets || [];
+    if (resetPage) {
+      state.assetsPage = 1;
+    }
+    state.assetsStatus = "loading";
+    state.assetsError = "";
     renderAssets(state.assets);
+    try {
+      const data = await requestJson(window.scriptMakerConfig.assetsUrl);
+      state.assets = data.assets || [];
+      state.assetsStatus = state.assets.length ? "success" : "empty";
+      renderAssets(state.assets);
+    } catch (error) {
+      state.assetsStatus = "error";
+      state.assetsError = friendlyErrorText(error, "资产列表加载失败，请稍后重试。");
+      renderAssets(state.assets);
+      throw error;
+    }
   }
 
-  async function loadCommunity() {
+  async function loadCommunity({ resetPage = false } = {}) {
     if (!els.communityList) return;
-    const data = await requestJson(window.scriptMakerConfig.communityUrl);
-    renderCommunity(data.assets || []);
+    if (resetPage) {
+      state.communityPage = 1;
+    }
+    state.communityStatus = "loading";
+    state.communityError = "";
+    renderCommunity([]);
+    try {
+      const data = await requestJson(window.scriptMakerConfig.communityUrl);
+      state.communityAssets = data.assets || [];
+      state.communityStatus = state.communityAssets.length ? "success" : "empty";
+      renderCommunity(state.communityAssets);
+    } catch (error) {
+      state.communityStatus = "error";
+      state.communityError = friendlyErrorText(error, "社区作品加载失败，请稍后重试。");
+      renderCommunity(state.communityAssets);
+      throw error;
+    }
   }
 
   function renderAssets(assets) {
     if (!els.assetsList) return;
+    if (state.assetsStatus === "loading") {
+      els.assetsList.innerHTML = renderListSkeleton("asset-tile");
+      return;
+    }
+    if (state.assetsStatus === "error") {
+      els.assetsList.innerHTML = errorCard(state.assetsError || "资产列表加载失败，请稍后重试。");
+      return;
+    }
     if (!assets.length) {
       els.assetsList.innerHTML = emptyCard("还没有剧本资产");
       return;
     }
-    els.assetsList.innerHTML = assets.map((item) => `
+    const { visibleItems, hasMore } = paginateItems(assets, state.assetsPage, 6);
+    els.assetsList.innerHTML = visibleItems.map((item) => `
       <article class="asset-tile">
         <div class="asset-topline">
           <span class="status-pill ${item.status === "completed" ? "status-pill-completed" : ""}">${escapeHtml(statusLabel(item.status))}</span>
@@ -1554,16 +1888,29 @@
           <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除</button>
         </div>
       </article>
-    `).join("");
+    `).join("") + (hasMore ? `
+      <div class="list-more-row">
+        <button class="btn btn-secondary" type="button" data-action="load-more-assets">加载更多资产</button>
+      </div>
+    ` : "");
   }
 
   function renderCommunity(assets) {
     if (!els.communityList) return;
+    if (state.communityStatus === "loading") {
+      els.communityList.innerHTML = renderListSkeleton("community-tile");
+      return;
+    }
+    if (state.communityStatus === "error") {
+      els.communityList.innerHTML = errorCard(state.communityError || "社区作品加载失败，请稍后重试。");
+      return;
+    }
     if (!assets.length) {
       els.communityList.innerHTML = emptyCard("社区里暂时还没有公开作品");
       return;
     }
-    els.communityList.innerHTML = assets.map((item) => `
+    const { visibleItems, hasMore } = paginateItems(assets, state.communityPage, 6);
+    els.communityList.innerHTML = visibleItems.map((item) => `
       <article class="community-tile">
         <span class="community-tag status-pill-public">公开成品</span>
         <h3>${escapeHtml(item.title)}</h3>
@@ -1572,7 +1919,11 @@
           <a class="btn btn-secondary" href="${escapeHtml(communityDetailUrl(item.project_id))}" target="_blank" rel="noopener">查看全文</a>
         </div>
       </article>
-    `).join("");
+    `).join("") + (hasMore ? `
+      <div class="list-more-row">
+        <button class="btn btn-secondary" type="button" data-action="load-more-community">加载更多作品</button>
+      </div>
+    ` : "");
   }
 
   async function openAssetEditor(projectId) {
@@ -1627,6 +1978,7 @@
     await loadProjects({ restoreSelection: true, restoreInputs: false });
     await loadAssets();
     await loadCommunity();
+    showToast("资产已保存", "修改内容已经同步更新。");
   }
 
   function closeAssetEditor() {
@@ -1636,11 +1988,16 @@
     [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].forEach((field) => {
       if (field) field.disabled = false;
     });
+    if (els.editAssetTitle) els.editAssetTitle.value = "";
+    if (els.editAssetSummary) els.editAssetSummary.value = "";
+    if (els.editAssetPrivacy) els.editAssetPrivacy.value = "private";
+    if (els.editAssetFinal) els.editAssetFinal.value = "";
     if (els.saveAssetEditBtn) {
       els.saveAssetEditBtn.disabled = false;
       els.saveAssetEditBtn.textContent = "保存修改";
     }
     els.assetEditor.classList.add("hidden");
+    syncButtons();
   }
 
   async function toggleAssetPrivacy(projectId, currentVisibility) {
@@ -1653,6 +2010,7 @@
     await loadProjects({ restoreSelection: true, restoreInputs: false });
     await loadAssets();
     await loadCommunity();
+    showToast(nextVisibility === "public" ? "已公开成品" : "已设为不公开", "资产可见性已经更新。");
   }
 
   async function deleteAsset(projectId) {
@@ -1674,6 +2032,7 @@
     });
     await loadAssets();
     await loadCommunity();
+    showToast("资产已删除", "该剧本资产已从当前账号移除。");
   }
 
   async function runActiveTool() {
@@ -1685,6 +2044,7 @@
       body: JSON.stringify(payload)
     });
     els.toolOutputBox.textContent = data.result?.result || "工具没有返回文本结果。";
+    showToast("辅助工具运行完成", `${toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果。`);
   }
 
   async function updateUsername(event) {
@@ -1780,8 +2140,26 @@
       els.episodeCountInput,
       els.modelSelect
     ].filter(Boolean).forEach((el) => {
-      el.addEventListener("input", saveDraft);
-      el.addEventListener("change", saveDraft);
+      el.addEventListener("input", () => {
+        if (el === els.expectationInput) {
+          syncExpectationInputHeight();
+        }
+        saveDraft();
+        syncButtons();
+      });
+      el.addEventListener("change", () => {
+        if (el === els.expectationInput) {
+          syncExpectationInputHeight();
+        }
+        saveDraft();
+        syncButtons();
+      });
+    });
+    els.toolForms?.addEventListener("input", syncButtons);
+    els.toolForms?.addEventListener("change", syncButtons);
+    [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].filter(Boolean).forEach((el) => {
+      el.addEventListener("input", syncButtons);
+      el.addEventListener("change", syncButtons);
     });
   }
 
@@ -1836,16 +2214,20 @@
 
     els.refreshAssetsBtn?.addEventListener("click", async () => {
       try {
-        await loadAssets();
+        await loadAssets({ resetPage: true });
+        showToast("资产列表已刷新", "已获取最新资产状态。");
       } catch (error) {
+        showToast("资产列表刷新失败", friendlyErrorText(error, "请稍后重试。"));
         showStatusError(error, "资产列表刷新失败，请稍后重试。");
       }
     });
 
     els.refreshCommunityBtn?.addEventListener("click", async () => {
       try {
-        await loadCommunity();
+        await loadCommunity({ resetPage: true });
+        showToast("社区列表已刷新", "已获取最新公开作品。");
       } catch (error) {
+        showToast("社区作品刷新失败", friendlyErrorText(error, "请稍后重试。"));
         showStatusError(error, "社区作品刷新失败，请稍后重试。");
       }
     });
@@ -1868,7 +2250,12 @@
       if (!button) return;
       const projectId = button.dataset.projectId;
       try {
-        if (button.dataset.action === "open-project") {
+        if (button.dataset.action === "retry-list") {
+          await loadAssets({ resetPage: true });
+        } else if (button.dataset.action === "load-more-assets") {
+          state.assetsPage += 1;
+          renderAssets(state.assets);
+        } else if (button.dataset.action === "open-project") {
           closeProfilePanel();
           await loadProjectDetail(projectId, { restoreInputs: true, scroll: false });
         } else if (button.dataset.action === "open-project-page") {
@@ -1881,14 +2268,34 @@
           await deleteAsset(projectId);
         }
       } catch (error) {
+        showToast("资产操作失败", friendlyErrorText(error, "请稍后重试。"));
         showStatusError(error, "资产操作失败，请稍后重试。");
+      }
+    });
+
+    els.communityList?.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) return;
+      try {
+        if (button.dataset.action === "retry-list") {
+          await loadCommunity({ resetPage: true });
+        } else if (button.dataset.action === "load-more-community") {
+          state.communityPage += 1;
+          renderCommunity(state.communityAssets);
+        }
+      } catch (error) {
+        showToast("社区列表操作失败", friendlyErrorText(error, "请稍后重试。"));
+        showStatusError(error, "社区作品刷新失败，请稍后重试。");
       }
     });
 
     els.saveAssetEditBtn?.addEventListener("click", async () => {
       try {
-        await saveAssetEdit();
+        await withActionLoading("saveAsset", els.saveAssetEditBtn, "保存中...", async () => {
+          await saveAssetEdit();
+        });
       } catch (error) {
+        showToast("资产保存失败", friendlyErrorText(error, "请稍后重试。"));
         showStatusError(error, "资产保存失败，请稍后重试。");
       }
     });
@@ -1902,6 +2309,15 @@
     });
 
     els.chatTranscript?.addEventListener("click", (event) => {
+      const toggleButton = event.target.closest("[data-chat-action='toggle-user-prompt']");
+      if (toggleButton) {
+        const promptKey = toggleButton.dataset.promptKey || "";
+        if (promptKey) {
+          state.expandedUserPrompts[promptKey] = !state.expandedUserPrompts[promptKey];
+          renderChatTranscript(state.latestSnapshot);
+        }
+        return;
+      }
       const button = event.target.closest("[data-suggestion-tool]");
       if (!button) return;
       openToolPanel(button.dataset.suggestionTool || state.activeTool);
@@ -1911,48 +2327,66 @@
 
     els.runToolBtn?.addEventListener("click", async () => {
       try {
-        await runActiveTool();
+        await withActionLoading("runTool", els.runToolBtn, "运行中...", async () => {
+          await runActiveTool();
+        });
       } catch (error) {
+        showToast("工具执行失败", friendlyErrorText(error, "请查看后台日志。"));
         showToolError(error, "工具执行失败，请查看后台日志。");
       }
     });
 
     els.startBtn.addEventListener("click", async () => {
       try {
-        await startGeneration();
+        await withActionLoading("start", els.startBtn, "启动中...", async () => {
+          await startGeneration();
+        });
       } catch (error) {
+        showToast("启动任务失败", friendlyErrorText(error, "请稍后重试。"));
         showStatusError(error, "启动任务失败，请稍后重试。");
       }
     });
 
     els.pauseBtn.addEventListener("click", async () => {
       try {
-        await pauseTask();
+        await withActionLoading("pause", els.pauseBtn, "暂停中...", async () => {
+          await pauseTask();
+        });
       } catch (error) {
+        showToast("暂停失败", friendlyErrorText(error, "请稍后重试。"));
         showStatusError(error, "暂停失败，请稍后重试。");
       }
     });
 
     els.resumeBtn.addEventListener("click", async () => {
       try {
-        await resumeTask();
+        await withActionLoading("resume", els.resumeBtn, "继续中...", async () => {
+          await resumeTask();
+        });
       } catch (error) {
+        showToast("继续失败", friendlyErrorText(error, "请稍后重试。"));
         showStatusError(error, "继续失败，请稍后重试。");
       }
     });
 
     els.terminateBtn.addEventListener("click", async () => {
       try {
-        await terminateTask();
+        await withActionLoading("terminate", els.terminateBtn, "终止中...", async () => {
+          await terminateTask();
+        });
       } catch (error) {
+        showToast("终止失败", friendlyErrorText(error, "请稍后重试。"));
         showStatusError(error, "终止失败，请稍后重试。");
       }
     });
 
     els.confirmCompletionBtn?.addEventListener("click", async () => {
       try {
-        await confirmCompletion();
+        await withActionLoading("confirmCompletion", els.confirmCompletionBtn, "确认中...", async () => {
+          await confirmCompletion();
+        });
       } catch (error) {
+        showToast("确认完成失败", friendlyErrorText(error, "请稍后重试。"));
         showStatusError(error, "确认完成失败，请稍后重试。");
       }
     });
@@ -1974,8 +2408,11 @@
 
     els.rollbackRewriteBtn?.addEventListener("click", async () => {
       try {
-        await rollbackRewrite();
+        await withActionLoading("rollback", els.rollbackRewriteBtn, "回退中...", async () => {
+          await rollbackRewrite();
+        });
       } catch (error) {
+        showToast("阶段回退失败", friendlyErrorText(error, "请稍后重试。"));
         showStatusError(error, "阶段回退失败，请稍后重试。");
       }
     });
@@ -1990,11 +2427,16 @@
       }
     });
 
-    els.saveBtn.addEventListener("click", saveFinalScript);
+    els.saveBtn.addEventListener("click", async () => {
+      await withActionLoading("download", els.saveBtn, "准备中...", async () => {
+        saveFinalScript();
+      });
+    });
   }
 
   async function init() {
     restoreDraft();
+    syncExpectationInputHeight();
     restoreSidebarCollapsed();
     state.toolDefinitions = { ...DEFAULT_TOOL_DEFINITIONS };
     renderToolList();

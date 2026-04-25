@@ -157,7 +157,12 @@ class FastGPTStageContract:
             raise ValueError(f"FastGPT 阶段 {self.stage_name} 缺少输入变量：{joined}")
         return payload
 
-    def validate_output_payload(self, output: dict[str, Any]) -> dict[str, Any]:
+    def validate_output_payload(self, output: Any) -> dict[str, Any]:
+        if not isinstance(output, dict):
+            actual_type = type(output).__name__
+            raise ValueError(
+                f"FastGPT 阶段 {self.stage_name} 输出必须是 object，实际得到 {actual_type}"
+            )
         normalized: dict[str, Any] = {}
         missing: list[str] = []
         for name, type_name in self.output_types.items():
@@ -736,6 +741,16 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             MAX_RETRIES,
         ),
         output_types={BATCH_DIALOGUES: "object"},
+        output_aliases={
+            BATCH_DIALOGUES: (
+                DIALOGUE_OUTPUT_VAR,
+                DIALOGUE_CURRENT_VAR,
+                DIALOGUE_FINAL_VAR,
+                "batchDialogues",
+                "dialogue_content",
+                "batch_dialogues_raw",
+            )
+        },
         fastgpt_responsibility="生成当前批次 5 集的角色对话 JSON。",
         local_responsibility="划分批次、裁剪 episode_plan、拼接 all_dialogues、推进批次。",
     ),

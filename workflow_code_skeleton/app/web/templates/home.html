@@ -3,8 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>剧本生成平台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260424-8">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260424-10">
 </head>
 <body class="home-body mono-page">
   <main class="home-shell">
@@ -48,7 +51,7 @@
       </a>
       <a class="home-entry-card" href="{{ url_for('workspace_page', auth_token=current_auth_token, section='tools') if current_user else url_for('login_page') }}">
         <span>辅助工具</span>
-        <small>用来防止主创工作流</small>
+        <small>审核、换皮、增爽和只换人设</small>
       </a>
     </section>
 
