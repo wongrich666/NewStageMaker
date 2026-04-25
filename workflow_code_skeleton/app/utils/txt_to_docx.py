@@ -307,9 +307,10 @@ def render_script(doc: Document, script_text: str):
             doc.add_paragraph()
             continue
 
-        # 集标题（第N集：...）
-        if re.match(r'^第\d+集[:：]', stripped):
-            add_heading(doc, stripped, level=2)
+        # 集标题（支持 Markdown 标题前缀）
+        if re.match(r'^[#>\-\s]*第[0-9０-９一二三四五六七八九十百千万两零〇]+集[:：]', stripped):
+            clean_heading = re.sub(r'^[#>\-\s]+', '', stripped).strip()
+            add_heading(doc, clean_heading, level=2)
 
         # 场景标记（场景X-Y：...）
         elif re.match(r'^场景\d+', stripped):

@@ -135,6 +135,10 @@ SCRIPT_STAGE_MEMORY_MAX_CHARS = max(
 )
 FRAMEWORK_TITLE_MIN_LENGTH = 2
 FRAMEWORK_TEXT_MIN_LENGTH = 10
+SCRIPT_EPISODE_HEADING_PATTERN = re.compile(
+    r"(?=^[ \t>#*\-]*第\s*([0-9０-９一二三四五六七八九十百千万两零〇]+)\s*集(?:\s*[:：]|$))",
+    re.MULTILINE,
+)
 
 
 class FastGPTRunner(Protocol):
@@ -317,6 +321,9 @@ def run_fastgpt_hybrid_workflow(
     _sync_state_variables(state, variables)
 
     _run_batched_generation(state, runner, payload, variables)
+    _ensure_complete_script_before_final(payload, variables)
+    _sync_state_variables(state, variables)
+    sync_runtime_state(state)
 
     final_output = _run_fastgpt_stage(
         state,
@@ -533,8 +540,17 @@ def _run_batched_generation(
     normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
     episode_alias_plan = _normalize_episode_alias_plan_object(variables.get(EPISODE_ALIAS_PLAN))
     rewrite_from_stage = str(variables.get(LOCAL_REWRITE_FROM_STAGE) or "").strip().lower()
+    repaired_script_text, repaired_script_episodes = _repair_script_outputs(
+        variables,
+        total_episodes=total_episodes,
+        batch_size=batch_size,
+    )
 
-    if rewrite_from_stage == "final" and _has_value(variables.get(ALL_SCRIPT)):
+    if (
+        rewrite_from_stage == "final"
+        and _has_value(repaired_script_text or variables.get(ALL_SCRIPT))
+        and repaired_script_episodes == list(range(1, total_episodes + 1))
+    ):
         set_runtime_stage(
             state,
             "script",
@@ -871,6 +887,11 @@ def _run_script_batches(
     total_batches = max(1, total_batches or len(batches))
     all_hooks = _dict_or_empty(variables.get(ALL_HOOKS))
     all_dialogues = _dict_or_empty(variables.get(ALL_DIALOGUES))
+    _repair_script_outputs(
+        variables,
+        total_episodes=payload.total_episodes,
+        batch_size=max(1, int(settings.batch_size or 5)),
+    )
     committed_script = str(
         variables.get(LOCAL_COMMITTED_SCRIPT) or variables.get(ALL_SCRIPT) or ""
     ).strip()
@@ -1149,11 +1170,7 @@ def _extract_script_episode_map(
     if not text:
         return {}
 
-    pattern = re.compile(
-        r"(?=^第\s*([0-9０-９一二三四五六七八九十百千万两零〇]+)\s*集)",
-        re.MULTILINE,
-    )
-    matches = list(pattern.finditer(text))
+    matches = list(SCRIPT_EPISODE_HEADING_PATTERN.finditer(text))
     if not matches:
         return {}
 
@@ -1211,6 +1228,157 @@ def _parse_episode_token(value: str) -> int | None:
         current = 0
     total += current
     return total or None
+
+
+def _script_batch_window(
+    start_episode: int,
+    *,
+    total_episodes: int,
+    batch_size: int,
+    next_start_episode: int | None = None,
+) -> BatchWindow:
+    end_episode = start_episode + max(1, batch_size) - 1
+    if total_episodes > 0:
+        end_episode = min(end_episode, total_episodes)
+    if next_start_episode and next_start_episode > start_episode:
+        end_episode = min(end_episode, next_start_episode - 1)
+    return BatchWindow(start_episode=start_episode, end_episode=max(start_episode, end_episode))
+
+
+def _rebuild_script_episode_cache(
+    script_batches: dict[int, str],
+    script_episode_cache: dict[int, str],
+    *,
+    total_episodes: int,
+    batch_size: int,
+) -> dict[int, str]:
+    repaired = dict(script_episode_cache)
+    sorted_starts = sorted(episode for episode in script_batches if episode > 0)
+    for index, start_episode in enumerate(sorted_starts):
+        batch_text = str(script_batches.get(start_episode) or "").strip()
+        if not batch_text:
+            continue
+        next_start = sorted_starts[index + 1] if index + 1 < len(sorted_starts) else None
+        batch_window = _script_batch_window(
+            start_episode,
+            total_episodes=total_episodes,
+            batch_size=batch_size,
+            next_start_episode=next_start,
+        )
+        repaired.update(_extract_script_episode_map(batch_text, batch_window))
+    return repaired
+
+
+def _script_episode_numbers(text: Any, *, total_episodes: int) -> list[int]:
+    source = str(text or "").strip()
+    if not source or total_episodes <= 0:
+        return []
+    return sorted(
+        _extract_script_episode_map(
+            source,
+            BatchWindow(start_episode=1, end_episode=max(1, total_episodes)),
+        )
+    )
+
+
+def _best_script_text_candidate(
+    total_episodes: int,
+    *candidates: Any,
+) -> tuple[str, list[int]]:
+    best_text = ""
+    best_episodes: list[int] = []
+    best_score = (-1, -1, -1)
+    seen: set[str] = set()
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        episodes = _script_episode_numbers(text, total_episodes=total_episodes)
+        score = (
+            len(episodes),
+            episodes[-1] if episodes else 0,
+            len(text),
+        )
+        if score > best_score:
+            best_text = text
+            best_episodes = episodes
+            best_score = score
+    return best_text, best_episodes
+
+
+def _repair_script_outputs(
+    variables: dict[str, Any],
+    *,
+    total_episodes: int,
+    batch_size: int,
+) -> tuple[str, list[int]]:
+    script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
+    script_episode_cache = _normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES))
+    repaired_episode_cache = _rebuild_script_episode_cache(
+        script_batches,
+        script_episode_cache,
+        total_episodes=total_episodes,
+        batch_size=batch_size,
+    )
+    if repaired_episode_cache:
+        variables[LOCAL_SCRIPT_EPISODES] = _string_keyed_batch_map(repaired_episode_cache)
+    rebuilt_script = _join_script_episode_map(repaired_episode_cache) if repaired_episode_cache else ""
+    joined_batches = _join_script_parts(
+        *(script_batches[start_episode] for start_episode in sorted(script_batches))
+    )
+    best_text, best_episodes = _best_script_text_candidate(
+        total_episodes,
+        rebuilt_script,
+        variables.get(ALL_SCRIPT),
+        variables.get(LOCAL_COMMITTED_SCRIPT),
+        joined_batches,
+    )
+    if best_text:
+        variables[ALL_SCRIPT] = best_text
+        variables[LOCAL_COMMITTED_SCRIPT] = best_text
+    return best_text, best_episodes
+
+
+def _format_episode_ranges(episodes: list[int]) -> str:
+    if not episodes:
+        return ""
+    parts: list[str] = []
+    start = episodes[0]
+    previous = episodes[0]
+    for episode in episodes[1:]:
+        if episode == previous + 1:
+            previous = episode
+            continue
+        parts.append(f"第{start}集" if start == previous else f"第{start}-{previous}集")
+        start = previous = episode
+    parts.append(f"第{start}集" if start == previous else f"第{start}-{previous}集")
+    return "、".join(parts)
+
+
+def _ensure_complete_script_before_final(
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+) -> None:
+    total_episodes = max(0, int(payload.total_episodes or 0))
+    if total_episodes <= 0:
+        return
+    _, available_episodes = _repair_script_outputs(
+        variables,
+        total_episodes=total_episodes,
+        batch_size=max(1, int(settings.batch_size or 5)),
+    )
+    expected = list(range(1, total_episodes + 1))
+    if available_episodes == expected:
+        return
+    available_set = set(available_episodes)
+    missing = [episode for episode in expected if episode not in available_set]
+    raise ValueError(
+        "剧本正文存在缺集，已阻止进入最终剧本拼接。"
+        f"当前识别到 {len(available_episodes)}/{total_episodes} 集，"
+        f"缺少：{_format_episode_ranges(missing)}。"
+        "请从剧本正文阶段继续生成缺失批次。"
+    )
 
 
 def _run_full_fastgpt_generation(
@@ -3390,11 +3558,10 @@ def _has_matching_batch_script_checkpoint(
     text = str(value or "").strip()
     if not text:
         return False
-    if saved_start > 0:
-        return saved_start == batch.start_episode
-
     episode_map = _extract_script_episode_map(text, batch)
     expected = list(range(batch.start_episode, batch.end_episode + 1))
+    if saved_start > 0 and saved_start != batch.start_episode:
+        return False
     return bool(episode_map) and sorted(episode_map) == expected
 
 

@@ -41,6 +41,7 @@ from .fastgpt_contracts import (
     SCENE_APPEARANCE_REQUIREMENTS,
     script_title_content,
     STORY_OUTLINE,
+    TOTAL_EPISODES,
     USER_CHARACTERS,
     USER_CONTENT_BASELINE,
     USER_SCENES,
@@ -173,6 +174,10 @@ LOCAL_SCRIPT_EPISODES = "_script_episode_cache"
 LOCAL_SUMMARY_BY_BATCH = "_summary_by_batch"
 LOCAL_APPEARANCE_MEMORY_BY_BATCH = "_appearance_memory_by_batch"
 LOCAL_RAW_EPISODE_PLAN = "_raw_episode_plan"
+SCRIPT_EPISODE_HEADING_PATTERN = re.compile(
+    r"(?=^[ \t>#*\-]*第\s*([0-9０-９一二三四五六七八九十百千万两零〇]+)\s*集(?:\s*[:：]|$))",
+    re.MULTILINE,
+)
 ROLLBACK_STAGE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("framework", "剧本框架撰写"),
     ("appearance_strategy", "服装前置策略生成"),
@@ -1014,6 +1019,205 @@ def _join_script_episode_map(value: dict[int, str]) -> str:
     ).strip()
 
 
+def _extract_script_episode_map(
+    batch_script: str,
+    batch: BatchWindow,
+) -> dict[int, str]:
+    text = str(batch_script or "").strip()
+    if not text:
+        return {}
+
+    matches = list(SCRIPT_EPISODE_HEADING_PATTERN.finditer(text))
+    if not matches:
+        return {}
+
+    extracted: dict[int, str] = {}
+    for index, match in enumerate(matches):
+        start = match.start()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        episode = _parse_episode_token(match.group(1))
+        if episode is None:
+            continue
+        if batch.start_episode <= episode <= batch.end_episode:
+            chunk = text[start:end].strip()
+            if chunk:
+                extracted[episode] = chunk
+    return extracted
+
+
+def _parse_episode_token(value: str) -> int | None:
+    token = str(value or "").strip()
+    if not token:
+        return None
+
+    fullwidth_digits = str.maketrans("０１２３４５６７８９", "0123456789")
+    normalized = token.translate(fullwidth_digits)
+    if normalized.isdigit():
+        return int(normalized)
+
+    numerals = {
+        "零": 0,
+        "〇": 0,
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
+    units = {"十": 10, "百": 100, "千": 1000, "万": 10000}
+    total = 0
+    current = 0
+    for char in normalized:
+        if char in numerals:
+            current = numerals[char]
+            continue
+        unit = units.get(char)
+        if unit is None:
+            return None
+        if current == 0:
+            current = 1
+        total += current * unit
+        current = 0
+    total += current
+    return total or None
+
+
+def _script_batch_window(
+    start_episode: int,
+    *,
+    total_episodes: int,
+    batch_size: int,
+    next_start_episode: int | None = None,
+) -> BatchWindow:
+    end_episode = start_episode + max(1, batch_size) - 1
+    if total_episodes > 0:
+        end_episode = min(end_episode, total_episodes)
+    if next_start_episode and next_start_episode > start_episode:
+        end_episode = min(end_episode, next_start_episode - 1)
+    return BatchWindow(start_episode=start_episode, end_episode=max(start_episode, end_episode))
+
+
+def _rebuild_script_episode_cache(
+    script_batches: dict[int, str],
+    script_episode_cache: dict[int, str],
+    *,
+    total_episodes: int,
+    batch_size: int,
+) -> dict[int, str]:
+    repaired = dict(script_episode_cache)
+    sorted_starts = sorted(episode for episode in script_batches if episode > 0)
+    for index, start_episode in enumerate(sorted_starts):
+        batch_text = str(script_batches.get(start_episode) or "").strip()
+        if not batch_text:
+            continue
+        next_start = sorted_starts[index + 1] if index + 1 < len(sorted_starts) else None
+        batch_window = _script_batch_window(
+            start_episode,
+            total_episodes=total_episodes,
+            batch_size=batch_size,
+            next_start_episode=next_start,
+        )
+        repaired.update(_extract_script_episode_map(batch_text, batch_window))
+    return repaired
+
+
+def _script_episode_numbers(text: Any, *, total_episodes: int) -> list[int]:
+    source = str(text or "").strip()
+    if not source:
+        return []
+    end_episode = max(1, total_episodes) if total_episodes > 0 else 9999
+    return sorted(
+        _extract_script_episode_map(
+            source,
+            BatchWindow(start_episode=1, end_episode=end_episode),
+        )
+    )
+
+
+def _best_script_text_candidate(
+    total_episodes: int,
+    *candidates: Any,
+) -> tuple[str, list[int]]:
+    best_text = ""
+    best_episodes: list[int] = []
+    best_score = (-1, -1, -1)
+    seen: set[str] = set()
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        episodes = _script_episode_numbers(text, total_episodes=total_episodes)
+        score = (
+            len(episodes),
+            episodes[-1] if episodes else 0,
+            len(text),
+        )
+        if score > best_score:
+            best_text = text
+            best_episodes = episodes
+            best_score = score
+    return best_text, best_episodes
+
+
+def _format_episode_ranges(episodes: list[int]) -> str:
+    if not episodes:
+        return ""
+    parts: list[str] = []
+    start = episodes[0]
+    previous = episodes[0]
+    for episode in episodes[1:]:
+        if episode == previous + 1:
+            previous = episode
+            continue
+        parts.append(f"第{start}集" if start == previous else f"第{start}-{previous}集")
+        start = previous = episode
+    parts.append(f"第{start}集" if start == previous else f"第{start}-{previous}集")
+    return "、".join(parts)
+
+
+def _resolve_best_script_text(
+    *,
+    total_episodes: int,
+    artifacts: dict[str, Any] | None,
+    variables: dict[str, Any] | None,
+    final_output_text: Any = None,
+) -> str:
+    normalized_artifacts = artifacts if isinstance(artifacts, dict) else {}
+    normalized_variables = variables if isinstance(variables, dict) else {}
+    batch_size = max(1, int(settings.batch_size or 5))
+    script_batches = _normalize_batch_text_map(normalized_variables.get(LOCAL_SCRIPT_BATCHES))
+    script_episode_cache = _normalize_episode_script_map(normalized_variables.get(LOCAL_SCRIPT_EPISODES))
+    rebuilt_episode_cache = _rebuild_script_episode_cache(
+        script_batches,
+        script_episode_cache,
+        total_episodes=total_episodes,
+        batch_size=batch_size,
+    )
+    rebuilt_script = _join_script_episode_map(rebuilt_episode_cache) if rebuilt_episode_cache else ""
+    joined_batches = _join_script_parts(
+        *(script_batches[start_episode] for start_episode in sorted(script_batches))
+    )
+    best_text, _ = _best_script_text_candidate(
+        total_episodes,
+        rebuilt_script,
+        final_output_text,
+        normalized_variables.get(FINAL_SCRIPT),
+        normalized_variables.get(SCRIPT_FINAL_VAR),
+        normalized_variables.get(ALL_SCRIPT),
+        normalized_variables.get(LOCAL_COMMITTED_SCRIPT),
+        normalized_artifacts.get("final_output_text"),
+        normalized_artifacts.get("final_script"),
+        joined_batches,
+    )
+    return best_text
+
+
 def use_fastgpt_backend() -> bool:
     return settings.workflow_backend in {"fastgpt", "hybrid", "fastgpt_hybrid"}
 
@@ -1196,12 +1400,19 @@ class WorkflowRuntime:
 
     def sync_from_state(self, state: WorkflowState) -> None:
         script_title_content = str(state.get_var(TITLE_VAR, "") or "").strip()
-        final_script_text = str(
-            state.final_output_text
-            or state.get_var(FINAL_SCRIPT, "")
-            or state.get_var(SCRIPT_FINAL_VAR, "")
-            or ""
-        ).strip()
+        final_script_text = _resolve_best_script_text(
+            total_episodes=_safe_int(getattr(state.user_input, "total_episodes", 0), 0),
+            artifacts={},
+            variables=state.variables,
+            final_output_text=state.final_output_text,
+        )
+        if not final_script_text:
+            final_script_text = str(
+                state.final_output_text
+                or state.get_var(FINAL_SCRIPT, "")
+                or state.get_var(SCRIPT_FINAL_VAR, "")
+                or ""
+            ).strip()
         artifacts = {
             "script_title_content": script_title_content,
             "story_outline": state.get_var(STORY_OUTLINE_VAR, ""),
@@ -2628,6 +2839,24 @@ class TaskManager:
         projects.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return projects
 
+    def _best_final_script_text(self, snapshot: dict[str, Any]) -> str:
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        debug_state = snapshot.get("debug_state") if isinstance(snapshot.get("debug_state"), dict) else {}
+        variables = debug_state.get("variables") if isinstance(debug_state.get("variables"), dict) else {}
+        input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+        total_episodes = _safe_int(
+            snapshot.get("total_episodes")
+            or input_payload.get("total_episodes")
+            or variables.get(TOTAL_EPISODES),
+            0,
+        )
+        return _resolve_best_script_text(
+            total_episodes=total_episodes,
+            artifacts=artifacts,
+            variables=variables,
+            final_output_text=debug_state.get("final_output_text"),
+        )
+
     def list_public_assets(self) -> list[dict[str, Any]]:
         assets = [
             self._asset_summary(snapshot, include_private=False, use_teaser=True)
@@ -2635,10 +2864,7 @@ class TaskManager:
             if str(snapshot.get("visibility") or "private") == "public"
             and str(snapshot.get("status") or "") == "completed"
             and _completion_confirmed(snapshot)
-            and bool(
-                (snapshot.get("artifacts") or {}).get("final_output_text")
-                or (snapshot.get("artifacts") or {}).get("final_script")
-            )
+            and bool(self._best_final_script_text(snapshot))
         ]
         assets.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return assets[:24]
@@ -2654,9 +2880,7 @@ class TaskManager:
         if not _completion_confirmed(snapshot):
             return None
         artifacts = snapshot.get("artifacts") or {}
-        final_script = str(
-            artifacts.get("final_output_text") or artifacts.get("final_script") or ""
-        ).strip()
+        final_script = self._best_final_script_text(snapshot)
         if not final_script:
             return None
 
@@ -3224,9 +3448,7 @@ class TaskManager:
             or artifacts.get("story_outline")
             or ""
         ).strip()
-        final_script = str(
-            artifacts.get("final_output_text") or artifacts.get("final_script") or ""
-        ).strip()
+        final_script = self._best_final_script_text(snapshot)
         summary = self._fallback_story_teaser(story_outline) if use_teaser else ""
         if not summary:
             summary = story_outline or "这个作品还没有填写故事梗概。"
@@ -3267,9 +3489,7 @@ class TaskManager:
         if not story_outline:
             return ""
 
-        has_final = bool(
-            str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip()
-        )
+        has_final = bool(self._best_final_script_text(snapshot))
         if str(snapshot.get("status") or "") != "completed" or not has_final:
             return self._fallback_story_teaser(story_outline)
 
@@ -3692,11 +3912,7 @@ class TaskManager:
             or input_payload.get("story_outline")
             or ""
         ).strip()
-        final_script = str(
-            artifacts.get("final_output_text")
-            or artifacts.get("final_script")
-            or ""
-        ).strip()
+        final_script = self._best_final_script_text(snapshot)
         if not final_script:
             return ""
 
@@ -4151,6 +4367,26 @@ class TaskManager:
         if not snapshot:
             raise ValueError("项目不存在")
         artifacts = snapshot.get("artifacts", {})
+        final_script = self._best_final_script_text(snapshot)
+        total_episodes = _safe_int(
+            snapshot.get("total_episodes")
+            or (snapshot.get("input_payload") or {}).get("total_episodes"),
+            0,
+        )
+        if final_script and total_episodes > 0:
+            available_episodes = _script_episode_numbers(
+                final_script,
+                total_episodes=total_episodes,
+            )
+            expected = list(range(1, total_episodes + 1))
+            if available_episodes != expected:
+                available_set = set(available_episodes)
+                missing = [episode for episode in expected if episode not in available_set]
+                raise ValueError(
+                    f"当前剧本正文只覆盖 {len(available_episodes)}/{total_episodes} 集，"
+                    f"缺少：{_format_episode_ranges(missing)}。"
+                    "请先继续生成缺失批次，再下载成品。"
+                )
         content = self._build_docx_export_source_text(snapshot)
         if not content:
             raise ValueError("当前项目还没有可保存的最终剧本")
