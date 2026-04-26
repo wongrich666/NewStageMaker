@@ -1415,7 +1415,9 @@
     syncButtons();
   }
 
-  // 只把当前表单里真正需要的最小输入打包给后端启动主流程。
+  // framework 起步只依赖网页上的 3 个用户输入；
+  // story_outline / character_bios / core_scene_input / episode_plan
+  // 都是 framework 的输出，不应该再伪装成“空输入”传给后端。
   function buildPayload() {
     const expectation = String(els.expectationInput.value || "").trim() || fallbackExpectationForRestart();
     const modelSelectionId = selectedModelId();
@@ -1425,10 +1427,6 @@
       episode_word_count: 600,
       total_episodes: Number(els.episodeCountInput.value || 0),
       title: "",
-      story_outline: "",
-      core_scene_input: "",
-      character_bios: "",
-      episode_plan: "",
       model_selection_id: modelSelectionId
     };
 

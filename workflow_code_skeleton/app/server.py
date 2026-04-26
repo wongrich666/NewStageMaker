@@ -366,14 +366,19 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "total_episodes": data.get("total_episodes", 0),
             "user_expectation": expectation,
             "character_count": data.get("character_count", 0),
-            "character_appearance_requirements": "",
-            "character_alias_naming_rules": "",
-            "outfit_switch_rules": "",
-            "story_outline": data.get("story_outline", ""),
-            "core_scene_input": data.get("core_scene_input", ""),
-            "character_bios": data.get("character_bios", ""),
-            "episode_plan": data.get("episode_plan", ""),
         }
+        for optional_key in (
+            "character_appearance_requirements",
+            "character_alias_naming_rules",
+            "outfit_switch_rules",
+            "story_outline",
+            "core_scene_input",
+            "character_bios",
+            "episode_plan",
+        ):
+            value = data.get(optional_key)
+            if value not in (None, "", [], {}):
+                payload[optional_key] = value
         try:
             snapshot = task_manager.start_task(
                 user_id=_require_user_id(),
@@ -397,14 +402,19 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "total_episodes": data.get("total_episodes", 0),
             "user_expectation": expectation,
             "character_count": data.get("character_count", 0),
-            "character_appearance_requirements": "",
-            "character_alias_naming_rules": "",
-            "outfit_switch_rules": "",
-            "story_outline": data.get("story_outline", ""),
-            "core_scene_input": data.get("core_scene_input", ""),
-            "character_bios": data.get("character_bios", ""),
-            "episode_plan": data.get("episode_plan", ""),
         }
+        for optional_key in (
+            "character_appearance_requirements",
+            "character_alias_naming_rules",
+            "outfit_switch_rules",
+            "story_outline",
+            "core_scene_input",
+            "character_bios",
+            "episode_plan",
+        ):
+            value = data.get(optional_key)
+            if value not in (None, "", [], {}):
+                payload[optional_key] = value
         try:
             snapshot = task_manager.restart_project(
                 project_id,

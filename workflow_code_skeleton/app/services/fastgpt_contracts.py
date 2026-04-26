@@ -224,7 +224,13 @@ class FastGPTStageContract:
                 missing.append(name)
                 continue
             try:
-                normalized[name] = coerce_fastgpt_value(output[name], type_name)
+                if self.stage_name == STAGE_CONSISTENCY and name == IS_CONSISTENT:
+                    # 这个工作流的 system prompt 已经明确要求“只能回复 true / false”。
+                    # 因此这里故意不用宽松布尔推断，避免把“通过/一致/解释文本”
+                    # 误判成合法结果，导致编排层错把脏输出当成正式布尔值继续流转。
+                    normalized[name] = coerce_strict_fastgpt_boolean(output[name])
+                else:
+                    normalized[name] = coerce_fastgpt_value(output[name], type_name)
             except ValueError as exc:
                 value = output.get(name)
                 if type_name == "string" and _is_empty_string_output(value):
@@ -1000,6 +1006,35 @@ def contract_for(stage_name: str) -> FastGPTStageContract:
         return STAGE_CONTRACTS[stage_name]
     except KeyError as exc:
         raise ValueError(f"未知 FastGPT 阶段：{stage_name}") from exc
+
+
+def coerce_strict_fastgpt_boolean(value: Any) -> bool:
+    """只接受 true / false 语义本体，不接受“通过/一致/带解释句子”的宽松猜测。"""
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, dict):
+        for key in ("is_consistent", "passed", "approved", "consistent"):
+            if key in value:
+                return coerce_strict_fastgpt_boolean(value[key])
+
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+
+    text = str(value or "").strip()
+    try:
+        parsed = parse_json(text)
+        if parsed is not value:
+            return coerce_strict_fastgpt_boolean(parsed)
+    except Exception:
+        pass
+
+    compact = "".join(text.lower().split())
+    if compact == "true":
+        return True
+    if compact == "false":
+        return False
+    raise ValueError(f"必须精确返回 true 或 false，实际得到：{value!r}")
 
 
 def coerce_fastgpt_value(value: Any, type_name: str) -> Any:

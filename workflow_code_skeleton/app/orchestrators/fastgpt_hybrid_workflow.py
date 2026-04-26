@@ -60,6 +60,7 @@ from ..services.fastgpt_contracts import (
     USER_CONTENT_BASELINE,
     USER_SCENES,
     WORLDVIEW,
+    coerce_strict_fastgpt_boolean,
     contract_for,
     to_jsonable_value,
 )
@@ -135,6 +136,7 @@ SCRIPT_STAGE_MEMORY_MAX_CHARS = max(
 )
 FRAMEWORK_TITLE_MIN_LENGTH = 2
 FRAMEWORK_TEXT_MIN_LENGTH = 10
+CONSISTENCY_SELF_CHECK_ATTEMPTS = 2
 PRE_STRATEGY_RUNTIME_FIELDS = (
     CHARACTER_APPEARANCE_REQUIREMENTS,
     CHARACTER_ALIAS_NAMING_RULES,
@@ -155,6 +157,10 @@ class FrameworkOutputValidationError(ValueError):
     def __init__(self, errors: list[str]) -> None:
         self.errors = list(errors)
         super().__init__(_format_framework_validation_errors(self.errors))
+
+
+class ConsistencySelfCheckError(ValueError):
+    """一致性阶段没有产出严格 true/false 时，阻止误打回 framework。"""
 
 
 def run_fastgpt_hybrid_workflow(
@@ -2427,6 +2433,15 @@ def _truthy(value: Any) -> bool:
     return text in {"true", "1", "yes", "y", "是", "通过", "一致"}
 
 
+def _strict_consistency_flag(value: Any) -> bool | None:
+    if value in (None, ""):
+        return None
+    try:
+        return coerce_strict_fastgpt_boolean(value)
+    except ValueError:
+        return None
+
+
 def _has_value(value: Any) -> bool:
     if value is None:
         return False
@@ -2497,7 +2512,8 @@ def _ensure_framework_and_consistency(
         )
         _ensure_pre_strategy_outputs(state, runner, payload, variables)
 
-        if _truthy(variables.get(IS_CONSISTENT)):
+        cached_consistency = _strict_consistency_flag(variables.get(IS_CONSISTENT))
+        if cached_consistency is True:
             set_runtime_stage(
                 state,
                 "validation",
@@ -2506,30 +2522,24 @@ def _ensure_framework_and_consistency(
             )
             return
 
-        if variables.get(IS_CONSISTENT) is False:
+        if cached_consistency is False:
             consistency = {IS_CONSISTENT: False}
         else:
-            set_runtime_stage(
-                state,
-                "validation",
-                "正在核对分集计划和总集数。",
-                progress_percent=1,
-            )
-            consistency = _run_fastgpt_stage(
+            consistency = _run_consistency_stage_with_self_check(
                 state,
                 runner,
-                STAGE_CONSISTENCY,
                 variables,
-                stage_key="validation",
-                message="正在核对分集计划和总集数。",
-                progress_percent=2,
-                max_retries=0,
             )
             variables.update(consistency)
 
-        if _truthy(consistency.get(IS_CONSISTENT)):
+        consistency_flag = _strict_consistency_flag(consistency.get(IS_CONSISTENT))
+        if consistency_flag is True:
             set_runtime_stage(state, "validation", "集数一致性检查通过。", progress_percent=3)
             return
+        if consistency_flag is None:
+            raise ConsistencySelfCheckError(
+                "集数一致性检查未明确返回 true/false，已停止继续回退 framework。"
+            )
 
         last_error = ValueError(
             f"分集计划与总集数不一致，已回到剧本框架重新生成（第 {attempt}/{total_attempts} 次）。"
@@ -2720,6 +2730,66 @@ def _ensure_framework_outputs(
     )
     sync_runtime_state(state)
     raise ValueError(final_message) from last_error
+
+
+def _run_consistency_stage_with_self_check(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    variables: dict[str, Any],
+) -> dict[str, Any]:
+    """一致性工作流只允许 true/false。
+
+    如果模型夹带解释文本或输出了其它同义词，这里先在 consistency 阶段内部自检重跑，
+    而不是误判成 false 后直接打回 framework。
+    """
+    last_error: Exception | None = None
+    for check_attempt in range(1, CONSISTENCY_SELF_CHECK_ATTEMPTS + 1):
+        if check_attempt > 1:
+            reminder = (
+                "集数一致性检查未明确返回 true/false，"
+                f"正在重新自检（{check_attempt}/{CONSISTENCY_SELF_CHECK_ATTEMPTS}）。"
+            )
+            set_runtime_stage(
+                state,
+                "validation",
+                reminder,
+                progress_percent=2,
+            )
+            sync_runtime_state(state)
+            logger.warning("%s", reminder)
+
+        variables.pop(IS_CONSISTENT, None)
+        try:
+            consistency = _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_CONSISTENCY,
+                variables,
+                stage_key="validation",
+                message="正在核对分集计划和总集数。",
+                progress_percent=2,
+                max_retries=0,
+            )
+        except Exception as exc:
+            last_error = exc
+            if _is_non_retryable(exc) or check_attempt >= CONSISTENCY_SELF_CHECK_ATTEMPTS:
+                break
+            continue
+
+        consistency_flag = _strict_consistency_flag(consistency.get(IS_CONSISTENT))
+        if consistency_flag is not None:
+            consistency[IS_CONSISTENT] = consistency_flag
+            return consistency
+
+        last_error = ValueError("集数一致性检查未明确返回 true/false。")
+        if check_attempt >= CONSISTENCY_SELF_CHECK_ATTEMPTS:
+            break
+
+    details = str(last_error) if last_error is not None else "未返回任何可识别结果"
+    raise ConsistencySelfCheckError(
+        "集数一致性检查未明确返回 true/false，"
+        f"已在当前阶段重新自检 {CONSISTENCY_SELF_CHECK_ATTEMPTS} 次仍失败：{details}"
+    ) from last_error
 
 
 def _reset_workflow_to_initial_input_state(

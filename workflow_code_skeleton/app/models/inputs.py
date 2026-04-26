@@ -134,8 +134,15 @@ class WorkflowInput:
         if self.episode_word_count <= 0:
             raise ValueError("episode_word_count / 每集正文字数 必须大于 0")
         has_full_outline = bool(self.story_outline and self.character_bios and self.episode_plan)
-        has_framework_prompt = bool(self.user_expectation and self.character_count > 0)
+        # framework 新版工作流起步只依赖 3 个网页输入：
+        # user_expectation / character_count / total_episodes。
+        # story_outline 等字段仍保留为兼容导入或恢复旧项目，但不再是框架启动必填。
+        has_framework_prompt = bool(
+            self.user_expectation and self.character_count > 0 and self.total_episodes > 0
+        )
         if not has_full_outline and not has_framework_prompt:
             raise ValueError(
-                "请提供完整的故事大纲/人物小传/分集计划，或至少提供 user_expectation / 用户期待 和 character_count / 角色数量"
+                "请提供完整的故事大纲/人物小传/分集计划，或至少提供 "
+                "user_expectation / 用户期待、character_count / 角色数量、"
+                "total_episodes / 总集数"
             )
