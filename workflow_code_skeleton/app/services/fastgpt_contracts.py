@@ -61,6 +61,7 @@ from ..workflow_ids import (
     WORLDVIEW_VAR,
 )
 from .json_utils import parse_json
+from .stage_output_repair import describe_repairable_stage_output_issue
 
 script_title_content = "script_title_content"
 SCRIPT_TITLE = script_title_content
@@ -271,6 +272,10 @@ def describe_stage_output_shape_issue(
     field_name: str,
     value: Any,
 ) -> str | None:
+    repairable_issue = describe_repairable_stage_output_issue(stage_name, field_name, value)
+    if repairable_issue:
+        return repairable_issue
+
     # 这里故意做得比一般 JSON 校验更严格：
     # 本地后续逻辑会直接依赖这些固定键做切片、拼接、恢复和回退，
     # 所以宁可在阶段出口报错，也不让“近似正确”的结构混入缓存。

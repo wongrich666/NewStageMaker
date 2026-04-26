@@ -64,6 +64,18 @@ class Settings:
         self.batch_size = int(_getenv("BATCH_SIZE", default="5"))
         self.max_retries_default = int(_getenv("MAX_RETRIES_DEFAULT", default="10"))
         self.fastgpt_stage_retries = int(_getenv("FASTGPT_STAGE_RETRIES", default="0"))
+        self.fastgpt_output_repair_retries = int(
+            _getenv("FASTGPT_OUTPUT_REPAIR_RETRIES", default="1")
+        )
+        self.fastgpt_stage_local_restart_retries = int(
+            _getenv(
+                "FASTGPT_STAGE_LOCAL_RESTART_RETRIES",
+                "FASTGPT_STAGE_OUTPUT_RERUN_RETRIES",
+                default="1",
+            )
+        )
+        # 兼容旧配置名；代码内部统一按“阶段本地重跑”语义读取。
+        self.fastgpt_stage_output_rerun_retries = self.fastgpt_stage_local_restart_retries
         self.fastgpt_timeout = int(_getenv("FASTGPT_TIMEOUT", default="300"))
         self.fastgpt_http_retries = int(_getenv("FASTGPT_HTTP_RETRIES", default="2"))
         self.fastgpt_http_retry_delay = float(

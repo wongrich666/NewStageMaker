@@ -35,8 +35,10 @@ from .fastgpt_contracts import (
     STAGE_DIALOGUES,
     STAGE_EPISODE_PLAN_NORMALIZE,
     STAGE_FRAMEWORK,
+    STAGE_CHARACTERS,
     SCENES,
     STAGE_SCRIPT,
+    STAGE_WORLDVIEW,
     USER_CONTENT_BASELINE,
     FastGPTStageContract,
     contract_for,
@@ -44,6 +46,12 @@ from .fastgpt_contracts import (
     to_jsonable_value,
 )
 from .json_utils import parse_json, strip_code_fence
+from .stage_output_repair import (
+    StageRepairOutcome,
+    build_stage_output_fallback,
+    is_repairable_stage_output,
+    repair_stage_output_candidate,
+)
 
 logger = get_logger("fastgpt_client")
 
@@ -61,6 +69,10 @@ TEXT_FIRST_MULTI_FIELD_STAGES = {
 PARTIAL_MATCH_MISSING_ERROR_STAGES = {
     STAGE_FRAMEWORK,
     STAGE_APPEARANCE_PRE_STRATEGY,
+}
+STRICT_JSON_STRING_STAGES = {
+    STAGE_WORLDVIEW,
+    STAGE_CHARACTERS,
 }
 
 
@@ -81,6 +93,31 @@ class FastGPTTransientError(RuntimeError):
         self.status_code = status_code
         self.url = url
         self.response_text = response_text
+
+
+class FastGPTStageOutputRetryRequest(ValueError):
+    """Worldview/characters 未形成可消费契约输出时，要求本阶段重新调用一次。"""
+
+    def __init__(
+        self,
+        *,
+        stage_name: str,
+        expected_fields: Iterable[str],
+        details: str,
+        response_preview: str,
+    ) -> None:
+        self.stage_name = stage_name
+        self.expected_fields = tuple(str(field) for field in expected_fields)
+        self.details = str(details or "").strip()
+        self.response_preview = str(response_preview or "")
+        preview = _truncate_log_text(self.response_preview, limit=500)
+        message = (
+            f"FastGPT 阶段 {stage_name} 未识别到可消费的契约输出，"
+            f"期望字段：{', '.join(self.expected_fields)}；"
+            f"{self.details or '没有发现任何可映射到阶段契约的候选输出'}；"
+            f"实际返回内容：{preview}"
+        )
+        super().__init__(message)
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,27 +163,67 @@ class FastGPTClient:
         contract = contract_for(stage_name)
         contract.build_input_payload(variables)
         payload_variables = self._build_wire_variables(stage_name, variables, contract)
-        endpoint = self._endpoint_for(stage_name)
-        body = self._build_request_body(contract, payload_variables, endpoint.chat_id)
-        headers = {
-            "Authorization": f"Bearer {endpoint.api_key}",
-            "Content-Type": "application/json",
-        }
-        response = self._post_with_retries(endpoint, headers, body, stage_name)
-        data = response.json()
-        raw_output = self._extract_output_payload(data, contract)
-        validated_output = contract.validate_output_payload(raw_output)
-        auxiliary_output = _extract_stage_auxiliary_outputs(data, stage_name)
-        if auxiliary_output:
-            logger.info(
-                "FastGPT 阶段 %s 捕获到辅助输出：%s",
-                stage_name,
-                auxiliary_output.keys(),
+        output_reruns = 0
+        if is_repairable_stage_output(stage_name):
+            output_reruns = max(
+                0,
+                int(
+                    getattr(
+                        settings,
+                        "fastgpt_stage_local_restart_retries",
+                        getattr(settings, "fastgpt_stage_output_rerun_retries", 1),
+                    )
+                ),
             )
-        return {
-            **auxiliary_output,
-            **validated_output,
-        }
+
+        total_attempts = 1 + output_reruns
+        last_retry_request: FastGPTStageOutputRetryRequest | None = None
+        for output_attempt in range(1, total_attempts + 1):
+            # 结构化输出识别失败时重新创建 chat_id 再跑一次，
+            # 避免同一个失败回复在同一会话上下文里被模型不断延续。
+            endpoint = self._endpoint_for(stage_name)
+            body = self._build_request_body(contract, payload_variables, endpoint.chat_id)
+            headers = {
+                "Authorization": f"Bearer {endpoint.api_key}",
+                "Content-Type": "application/json",
+            }
+            response = self._post_with_retries(endpoint, headers, body, stage_name)
+            data = response.json()
+            try:
+                raw_output = self._extract_output_payload(
+                    data,
+                    contract,
+                    variables,
+                    allow_fallback=output_attempt >= total_attempts,
+                )
+            except FastGPTStageOutputRetryRequest as exc:
+                last_retry_request = exc
+                logger.warning(
+                    "FastGPT 阶段 %s 第 %s/%s 次输出未形成可消费契约结果，"
+                    "将从当前阶段开头重新请求一次：%s",
+                    stage_name,
+                    output_attempt,
+                    total_attempts,
+                    exc,
+                )
+                continue
+
+            validated_output = contract.validate_output_payload(raw_output)
+            auxiliary_output = _extract_stage_auxiliary_outputs(data, stage_name)
+            if auxiliary_output:
+                logger.info(
+                    "FastGPT 阶段 %s 捕获到辅助输出：%s",
+                    stage_name,
+                    auxiliary_output.keys(),
+                )
+            return {
+                **auxiliary_output,
+                **validated_output,
+            }
+
+        if last_retry_request is not None:
+            raise last_retry_request
+        raise RuntimeError(f"FastGPT 阶段 {stage_name} 未能产出合法输出。")
 
     def _post_with_retries(
         self,
@@ -342,6 +419,9 @@ class FastGPTClient:
         self,
         data: dict[str, Any],
         contract: FastGPTStageContract,
+        variables: dict[str, Any],
+        *,
+        allow_fallback: bool = True,
     ) -> dict[str, Any]:
         expected = contract.output_names
         validated_candidates: list[ValidatedStageOutput] = []
@@ -370,24 +450,34 @@ class FastGPTClient:
         # responseData.updateVarResult、output、pluginOutput、toolDetail 等不同位置，
         # 这里统一把它们当作“候选正式产物”来做契约校验。
         for source, candidate in _iter_named_structured_candidates(data):
-            match = _payload_from_candidate(candidate, contract)
-            if match is None:
-                continue
-            try:
-                validated_payload = contract.validate_output_payload(match.payload)
-            except ValueError as exc:
-                rejected_candidates.append((source, str(exc), match.payload))
-                continue
-            validated_candidates.append(
-                ValidatedStageOutput(
+            variants = list(
+                _iter_repaired_candidate_variants(
+                    contract=contract,
+                    variables=variables,
                     source=source,
-                    payload=match.payload,
-                    validated_payload=validated_payload,
-                    matched_keys=match.matched_keys,
-                    canonical_hits=match.canonical_hits,
-                    alias_hits=match.alias_hits,
+                    candidate=candidate,
+                    allow_textual_relaxation=allow_fallback,
                 )
-            )
+            ) or [(source, candidate)]
+            for variant_source, variant_candidate in variants:
+                match = _payload_from_candidate(variant_candidate, contract)
+                if match is None:
+                    continue
+                try:
+                    validated_payload = contract.validate_output_payload(match.payload)
+                except ValueError as exc:
+                    rejected_candidates.append((variant_source, str(exc), match.payload))
+                    continue
+                validated_candidates.append(
+                    ValidatedStageOutput(
+                        source=variant_source,
+                        payload=match.payload,
+                        validated_payload=validated_payload,
+                        matched_keys=match.matched_keys,
+                        canonical_hits=match.canonical_hits,
+                        alias_hits=match.alias_hits,
+                    )
+                )
 
         if len(expected) == 1:
             single_key = expected[0]
@@ -397,6 +487,34 @@ class FastGPTClient:
             for source, text in _iter_named_text_candidates(data):
                 if not text:
                     continue
+                text_variants = list(
+                    _iter_repaired_candidate_variants(
+                        contract=contract,
+                        variables=variables,
+                        source=source,
+                        candidate=text,
+                        allow_textual_relaxation=allow_fallback,
+                    )
+                )
+                for variant_source, variant_candidate in text_variants:
+                    match = _payload_from_candidate(variant_candidate, contract)
+                    if match is None:
+                        continue
+                    try:
+                        validated_payload = contract.validate_output_payload(match.payload)
+                    except ValueError as exc:
+                        rejected_candidates.append((variant_source, str(exc), match.payload))
+                    else:
+                        validated_candidates.append(
+                            ValidatedStageOutput(
+                                source=variant_source,
+                                payload=match.payload,
+                                validated_payload=validated_payload,
+                                matched_keys=match.matched_keys,
+                                canonical_hits=match.canonical_hits,
+                                alias_hits=match.alias_hits,
+                            )
+                        )
                 parsed_text = _try_parse_json(text)
                 if parsed_text is not None:
                     match = _payload_from_candidate(parsed_text, contract)
@@ -447,6 +565,37 @@ class FastGPTClient:
             return selected.validated_payload
 
         details = _format_rejected_candidate_details(rejected_candidates)
+        if is_repairable_stage_output(contract.stage_name) and not allow_fallback:
+            raise FastGPTStageOutputRetryRequest(
+                stage_name=contract.stage_name,
+                expected_fields=expected,
+                details=details,
+                response_preview=_json_for_log(data),
+            )
+
+        fallback = build_stage_output_fallback(
+            contract.stage_name,
+            source="local",
+            input_variables=variables,
+            failure_reason=details,
+        )
+        if fallback is not None:
+            try:
+                validated_fallback = contract.validate_output_payload(fallback.payload)
+            except ValueError:
+                logger.exception(
+                    "FastGPT 阶段 %s fallback 生成后仍未通过契约校验，payload=%s",
+                    contract.stage_name,
+                    _truncate_log_text(_json_for_log(fallback.payload), limit=800),
+                )
+            else:
+                _log_stage_output_repair(
+                    contract.stage_name,
+                    "fallback",
+                    fallback,
+                )
+                return validated_fallback
+
         message = (
             f"FastGPT 阶段 {contract.stage_name} 未返回契约字段：{', '.join(expected)}；"
             f"未找到通过校验的候选输出。{details}；实际返回内容：{_json_for_log(data)}"
@@ -697,6 +846,63 @@ def _format_rejected_candidate_details(
             f"{source}: {error}（payload={_truncate_log_text(_json_for_log(payload), limit=260)}）"
         )
     return "候选输出校验失败：" + "；".join(preview)
+
+
+def _iter_repaired_candidate_variants(
+    *,
+    contract: FastGPTStageContract,
+    variables: dict[str, Any],
+    source: str,
+    candidate: Any,
+    allow_textual_relaxation: bool,
+) -> Iterable[tuple[str, Any]]:
+    if not is_repairable_stage_output(contract.stage_name):
+        return ()
+
+    attempts = 1 + max(0, int(getattr(settings, "fastgpt_output_repair_retries", 1)))
+    repaired: list[tuple[str, Any]] = []
+    for attempt_index in range(attempts):
+        outcome = repair_stage_output_candidate(
+            contract.stage_name,
+            candidate,
+            source=source,
+            input_variables=variables,
+            attempt_index=attempt_index,
+            allow_textual_relaxation=allow_textual_relaxation,
+        )
+        if outcome is None:
+            continue
+        variant_source = f"{source}({outcome.mode}:{attempt_index + 1})"
+        _log_stage_output_repair(contract.stage_name, variant_source, outcome)
+        repaired.append((variant_source, outcome.payload))
+        break
+    return repaired
+
+
+def _log_stage_output_repair(
+    stage_name: str,
+    source: str,
+    outcome: StageRepairOutcome,
+) -> None:
+    if (
+        not outcome.warnings
+        and not outcome.alias_hits
+        and not outcome.missing_fields
+        and not outcome.used_fallback
+        and not outcome.requires_local_restart
+    ):
+        return
+    logger.warning(
+        "FastGPT 阶段 %s 输出已修复，来源=%s，used_fallback=%s，requires_local_restart=%s，missing_fields=%s，alias_hits=%s，warnings=%s，payload=%s",
+        stage_name,
+        source,
+        outcome.used_fallback,
+        outcome.requires_local_restart,
+        outcome.missing_fields[:12],
+        outcome.alias_hits,
+        outcome.warnings[:6],
+        _truncate_log_text(_json_for_log(outcome.payload), limit=500),
+    )
 
 
 def _extract_preferred_text_stage_output(
@@ -1127,6 +1333,10 @@ def _iter_text_from_content(content: Any) -> Iterable[str]:
 
 def _can_coerce_single_output(value: Any, contract: FastGPTStageContract) -> bool:
     if len(contract.output_names) != 1:
+        return False
+    if contract.stage_name in STRICT_JSON_STRING_STAGES:
+        # worldview / characters 虽然外层契约仍是 string，
+        # 但字符串内部必须是合法 schema JSON，不能再把任意自然语言直接放行。
         return False
     key = contract.output_names[0]
     type_name = contract.output_types[key]
