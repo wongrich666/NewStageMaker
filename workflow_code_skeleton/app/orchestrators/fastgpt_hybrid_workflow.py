@@ -372,6 +372,9 @@ def _initial_fastgpt_variables(payload: WorkflowInput) -> dict[str, Any]:
         EPISODE_WORD_COUNT: payload.episode_word_count,
         USER_EXPECTATION: payload.user_expectation,
         CHARACTER_COUNT: payload.character_count,
+        # 这 3 个字段只是运行态占位，供 appearance_pre_strategy 及其后续阶段复用。
+        # framework 真正发给 FastGPT 的输入仍严格受 contract.input_names 约束，
+        # 只会携带网页端现有的 3 个用户输入，不会把这里的旧兼容字段一并送进去。
         CHARACTER_APPEARANCE_REQUIREMENTS: str(payload.character_appearance_requirements or "").strip(),
         CHARACTER_ALIAS_NAMING_RULES: str(payload.character_alias_naming_rules or "").strip(),
         OUTFIT_SWITCH_RULES: str(payload.outfit_switch_rules or "").strip(),

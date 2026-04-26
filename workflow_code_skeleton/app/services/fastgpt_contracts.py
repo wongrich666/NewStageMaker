@@ -112,6 +112,12 @@ STAGE_SCRIPT = "script"
 STAGE_MEMORY = "memory"
 STAGE_FINAL = "final"
 
+FRAMEWORK_WEB_INPUT_NAMES = (
+    TOTAL_EPISODES,
+    USER_EXPECTATION,
+    CHARACTER_COUNT,
+)
+
 FRAMEWORK_STORY_OUTLINE_KEYS = (
     "opening",
     "inciting_incident",
@@ -774,11 +780,11 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
     STAGE_FRAMEWORK: FastGPTStageContract(
         stage_name=STAGE_FRAMEWORK,
         label="剧本框架撰写",
-        input_names=(
-            TOTAL_EPISODES,
-            USER_EXPECTATION,
-            CHARACTER_COUNT,
-        ),
+        # framework 必须和网页端保持一致，只吃 3 个用户输入：
+        # 想要的剧本 / 角色数量 / 总集数。
+        # 服装需求、命名偏好等字段已经前移为后置内部阶段生成，
+        # 不能再回流成 framework 的直接输入。
+        input_names=FRAMEWORK_WEB_INPUT_NAMES,
         output_types={
             script_title_content: "string",
             STORY_OUTLINE: "object",
@@ -999,6 +1005,31 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         local_responsibility="调用最终拼接工作流，并以最终回复文本作为 final_script。",
     ),
 }
+
+
+def _validate_framework_web_input_alignment() -> None:
+    """防止 framework 契约与网页端 3 输入再次漂移。"""
+    framework_contract = STAGE_CONTRACTS[STAGE_FRAMEWORK]
+    expected_inputs = set(FRAMEWORK_WEB_INPUT_NAMES)
+
+    if tuple(framework_contract.input_names) != FRAMEWORK_WEB_INPUT_NAMES:
+        raise RuntimeError(
+            "framework 输入契约已偏离网页端："
+            f"当前为 {framework_contract.input_names!r}，"
+            f"预期为 {FRAMEWORK_WEB_INPUT_NAMES!r}"
+        )
+
+    legacy_inputs = LEGACY_INPUT_ALIASES.get(STAGE_FRAMEWORK, {})
+    legacy_keys = set(legacy_inputs.keys())
+    if legacy_keys != expected_inputs:
+        raise RuntimeError(
+            "framework legacy 输入映射已偏离网页端："
+            f"当前为 {sorted(legacy_keys)!r}，"
+            f"预期为 {sorted(expected_inputs)!r}"
+        )
+
+
+_validate_framework_web_input_alignment()
 
 
 def contract_for(stage_name: str) -> FastGPTStageContract:
