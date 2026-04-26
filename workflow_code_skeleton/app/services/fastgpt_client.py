@@ -20,14 +20,21 @@ from .fastgpt_contracts import (
     ALL_DIALOGUES,
     ALL_HOOKS,
     ALL_SCRIPT,
+    APPEARANCE_MAPPING,
     BATCH_DIALOGUES,
     CHARACTERS,
+    CHARACTER_ALIAS_NAMING_RULES,
     CHARACTER_APPEARANCE_REQUIREMENTS,
     LAST_SUMMARY,
     LEGACY_INPUT_ALIASES,
     MAX_RETRIES,
+    NORMALIZED_EPISODE_PLAN,
     OUTFIT_SWITCH_RULES,
+    STAGE_APPEARANCE_ALIAS_GENERATION,
+    STAGE_APPEARANCE_PRE_STRATEGY,
     STAGE_DIALOGUES,
+    STAGE_EPISODE_PLAN_NORMALIZE,
+    STAGE_FRAMEWORK,
     SCENES,
     STAGE_SCRIPT,
     USER_CONTENT_BASELINE,
@@ -46,6 +53,14 @@ STAGE_AUXILIARY_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "characters": (CHARACTER_NATURAL_LANGUAGE_VAR,),
     "scenes": (SCENE_NATURAL_LANGUAGE_VAR,),
     "appearance_alias_generation": (APPEARANCE_NATURAL_LANGUAGE_VAR,),
+}
+TEXT_FIRST_MULTI_FIELD_STAGES = {
+    STAGE_FRAMEWORK,
+    STAGE_APPEARANCE_PRE_STRATEGY,
+}
+PARTIAL_MATCH_MISSING_ERROR_STAGES = {
+    STAGE_FRAMEWORK,
+    STAGE_APPEARANCE_PRE_STRATEGY,
 }
 
 
@@ -332,6 +347,28 @@ class FastGPTClient:
         validated_candidates: list[ValidatedStageOutput] = []
         rejected_candidates: list[tuple[str, str, dict[str, Any] | None]] = []
 
+        if contract.stage_name in TEXT_FIRST_MULTI_FIELD_STAGES:
+            preferred_text_output = _extract_preferred_text_stage_output(
+                data,
+                contract,
+                rejected_candidates,
+            )
+            if preferred_text_output is not None:
+                logger.info(
+                    "FastGPT 阶段 %s 选中最终回复 JSON，来源=%s，匹配字段=%s，payload=%s",
+                    contract.stage_name,
+                    preferred_text_output.source,
+                    preferred_text_output.matched_keys,
+                    _truncate_log_text(
+                        _json_for_log(preferred_text_output.validated_payload),
+                        limit=800,
+                    ),
+                )
+                return preferred_text_output.validated_payload
+
+        # 先扫结构化槽位。FastGPT 在不同工作流/节点组合下，正式输出可能落在
+        # responseData.updateVarResult、output、pluginOutput、toolDetail 等不同位置，
+        # 这里统一把它们当作“候选正式产物”来做契约校验。
         for source, candidate in _iter_named_structured_candidates(data):
             match = _payload_from_candidate(candidate, contract)
             if match is None:
@@ -354,6 +391,9 @@ class FastGPTClient:
 
         if len(expected) == 1:
             single_key = expected[0]
+            # 单字段阶段再额外走一遍“文本兜底”。
+            # 这样即使 FastGPT 最后只回了一段 JSON 字符串或纯文本，也仍有机会
+            # 被解析成合法阶段成品，而不是直接判定失败。
             for source, text in _iter_named_text_candidates(data):
                 if not text:
                     continue
@@ -553,6 +593,7 @@ def _extract_contract_payload(
     canonical_hits = 0
     alias_hits = 0
     lowered_candidate = {str(key).lower(): key for key in candidate.keys()}
+    missing_fields: list[str] = []
 
     for expected_name in contract.output_names:
         actual_key = _match_contract_output_key(
@@ -562,13 +603,18 @@ def _extract_contract_payload(
             contract,
         )
         if actual_key is None:
-            return None
+            missing_fields.append(expected_name)
+            continue
         payload[expected_name] = candidate[actual_key]
         matched_keys[expected_name] = actual_key
         if actual_key == expected_name:
             canonical_hits += 1
         else:
             alias_hits += 1
+
+    if missing_fields:
+        if contract.stage_name not in PARTIAL_MATCH_MISSING_ERROR_STAGES or not payload:
+            return None
 
     return StageOutputMatch(
         payload=payload,
@@ -605,6 +651,8 @@ def _select_best_validated_output(
     """在已通过契约校验的候选里，优先选择契约本名命中更多、alias 更少的来源。"""
     best: tuple[tuple[int, int, int, int], ValidatedStageOutput] | None = None
     for candidate in candidates:
+        # 同时命中多个候选时，本地更相信“字段名更接近契约原名”的结果，
+        # 因为 alias 常常来自旧工作流或中间节点，语义漂移风险更高。
         score = (
             candidate.canonical_hits,
             -candidate.alias_hits,
@@ -617,19 +665,20 @@ def _select_best_validated_output(
 
 
 def _payload_source_priority(source: str) -> int:
-    if source.startswith("responseData.contract_json"):
+    lowered = source.lower()
+    if "contract_json" in lowered:
         return 8
-    if source.startswith("responseData.updateVarResult"):
+    if "updatevarresult" in lowered:
         return 7
-    if source.startswith("responseData.newVariables"):
+    if "newvariables" in lowered:
         return 6
-    if source.startswith("responseData.output") or source.startswith("responseData.outputs"):
+    if ".output" in lowered or ".outputs" in lowered or lowered.endswith("output") or lowered.endswith("outputs"):
         return 5
-    if source.startswith("responseData.pluginOutput") or source.startswith("responseData.data"):
+    if "pluginoutput" in lowered or ".data" in lowered or lowered.endswith("data"):
         return 4
-    if source.startswith("choices"):
+    if lowered.startswith("choices"):
         return 3
-    if source.startswith("answerText") or source.startswith("responseData.answerText"):
+    if "answertext" in lowered or lowered.startswith("answertext"):
         return 2
     if source == "root":
         return 1
@@ -650,13 +699,323 @@ def _format_rejected_candidate_details(
     return "候选输出校验失败：" + "；".join(preview)
 
 
+def _extract_preferred_text_stage_output(
+    data: dict[str, Any],
+    contract: FastGPTStageContract,
+    rejected_candidates: list[tuple[str, str, dict[str, Any] | None]],
+) -> ValidatedStageOutput | None:
+    # framework / appearance_pre_strategy 这类新版纯 AI 节点，
+    # 正式产物优先看最终回复文本里的整段 JSON，而不是更容易漂移的中间变量写回。
+    for source, text in _iter_named_text_candidates(data):
+        if not text:
+            continue
+        parsed_text = _try_parse_json(text)
+        if parsed_text is None:
+            continue
+        match = _payload_from_candidate(parsed_text, contract)
+        if match is None:
+            continue
+        try:
+            validated_payload = contract.validate_output_payload(match.payload)
+        except ValueError as exc:
+            rejected_candidates.append((f"{source}(json)", str(exc), match.payload))
+            continue
+        return ValidatedStageOutput(
+            source=f"{source}(json)",
+            payload=match.payload,
+            validated_payload=validated_payload,
+            matched_keys=match.matched_keys,
+            canonical_hits=match.canonical_hits,
+            alias_hits=match.alias_hits,
+        )
+    return None
+
+
 def _normalize_stage_specific_output_candidate(
     candidate: dict[str, Any],
     contract: FastGPTStageContract,
 ) -> dict[str, Any]:
+    # 通用字段匹配只解决“键名叫什么”的问题；
+    # 某些阶段还需要先把 body 从 wrapper/list/camelCase 归一化成稳定母型，
+    # 否则后续契约校验会把本来可用的结果误判为不合格。
+    if contract.stage_name == STAGE_APPEARANCE_PRE_STRATEGY:
+        return _normalize_appearance_pre_strategy_output_candidate(candidate, contract)
+    if contract.stage_name == STAGE_APPEARANCE_ALIAS_GENERATION:
+        return _normalize_appearance_mapping_output_candidate(candidate, contract)
+    if contract.stage_name == STAGE_EPISODE_PLAN_NORMALIZE:
+        return _normalize_episode_plan_normalize_output_candidate(candidate, contract)
     if contract.stage_name == STAGE_DIALOGUES:
         return _normalize_dialogues_output_candidate(candidate, contract)
     return candidate
+
+
+def _normalize_appearance_pre_strategy_output_candidate(
+    candidate: dict[str, Any],
+    contract: FastGPTStageContract,
+) -> dict[str, Any]:
+    lowered_candidate = {str(key).lower(): key for key in candidate.keys()}
+    normalized: dict[str, Any] = {}
+    for field_name in contract.output_names:
+        actual_key = _match_contract_output_key(
+            field_name,
+            candidate,
+            lowered_candidate,
+            contract,
+        )
+        if actual_key is None:
+            continue
+        normalized[field_name] = _normalize_appearance_pre_strategy_value(
+            candidate.get(actual_key)
+        )
+    return normalized or candidate
+
+
+def _normalize_appearance_pre_strategy_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (dict, list)):
+        # 后续 legacy 阶段仍把这三个字段当字符串上下文消费，
+        # 所以这里在客户端入口就把新版结构化 JSON 压成稳定字符串。
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _normalize_appearance_mapping_output_candidate(
+    candidate: dict[str, Any],
+    contract: FastGPTStageContract,
+) -> dict[str, Any]:
+    wrapper_keys = (
+        APPEARANCE_MAPPING,
+        *contract.aliases_for_output(APPEARANCE_MAPPING),
+        "appearanceMapping",
+    )
+    for key in wrapper_keys:
+        if key not in candidate:
+            continue
+        wrapped = _normalize_appearance_mapping_body(candidate.get(key))
+        if isinstance(wrapped, dict):
+            return {APPEARANCE_MAPPING: wrapped}
+
+    wrapped_candidate = _normalize_appearance_mapping_body(candidate)
+    if isinstance(wrapped_candidate, dict):
+        return {APPEARANCE_MAPPING: wrapped_candidate}
+    return candidate
+
+
+def _normalize_appearance_mapping_body(value: Any) -> dict[str, Any] | None:
+    candidate = value
+    if isinstance(candidate, str):
+        parsed = _try_parse_json(candidate)
+        candidate = parsed if parsed is not None else candidate
+
+    if isinstance(candidate, list):
+        mapped = _dict_from_variable_items(candidate)
+        candidate = mapped if mapped is not None else candidate
+
+    if not isinstance(candidate, dict):
+        return None
+
+    for key in (APPEARANCE_MAPPING, "appearanceMapping"):
+        if key not in candidate:
+            continue
+        wrapped = _normalize_appearance_mapping_body(candidate.get(key))
+        if isinstance(wrapped, dict):
+            return wrapped
+
+    if _looks_like_appearance_mapping_body(candidate):
+        return candidate
+    return None
+
+
+def _looks_like_appearance_mapping_body(candidate: dict[str, Any]) -> bool:
+    mapping = (
+        candidate.get(APPEARANCE_MAPPING)
+        if isinstance(candidate.get(APPEARANCE_MAPPING), dict)
+        else candidate
+    )
+    return isinstance(mapping.get("characters"), list)
+
+
+def _normalize_episode_plan_normalize_output_candidate(
+    candidate: dict[str, Any],
+    contract: FastGPTStageContract,
+) -> dict[str, Any]:
+    wrapper_keys = (
+        NORMALIZED_EPISODE_PLAN,
+        *contract.aliases_for_output(NORMALIZED_EPISODE_PLAN),
+    )
+    for key in wrapper_keys:
+        if key not in candidate:
+            continue
+        wrapped = _normalize_episode_plan_normalize_body(candidate.get(key))
+        if isinstance(wrapped, dict):
+            return {NORMALIZED_EPISODE_PLAN: wrapped}
+
+    wrapped_candidate = _normalize_episode_plan_normalize_body(candidate)
+    if isinstance(wrapped_candidate, dict):
+        return {NORMALIZED_EPISODE_PLAN: wrapped_candidate}
+    return candidate
+
+
+def _normalize_episode_plan_normalize_body(value: Any) -> dict[str, Any] | None:
+    candidate = value
+    if isinstance(candidate, str):
+        parsed = _try_parse_json(candidate)
+        candidate = parsed if parsed is not None else candidate
+
+    if isinstance(candidate, list):
+        mapped = _dict_from_variable_items(candidate)
+        if mapped is not None:
+            candidate = mapped
+        elif all(isinstance(item, dict) for item in candidate):
+            candidate = {"episodes": candidate}
+        else:
+            return None
+
+    if not isinstance(candidate, dict):
+        return None
+
+    wrapper_keys = (
+        NORMALIZED_EPISODE_PLAN,
+        "episode_plan_normalized",
+        "normalizedEpisodePlan",
+        "episodePlanNormalized",
+        "normalized_plan",
+        "normalizedPlan",
+    )
+    for key in wrapper_keys:
+        if key not in candidate:
+            continue
+        wrapped = _normalize_episode_plan_normalize_body(candidate.get(key))
+        if isinstance(wrapped, dict):
+            return wrapped
+
+    normalized = _normalize_episode_plan_body_dict(candidate)
+    if not _looks_like_episode_plan_normalize_body(normalized):
+        return None
+    return normalized
+
+
+def _normalize_episode_plan_body_dict(candidate: dict[str, Any]) -> dict[str, Any]:
+    key_aliases = {
+        "parsedEpisodeCount": "parsed_episode_count",
+        "appearanceAliasPlanning": "appearance_alias_planning",
+    }
+    normalized_candidate = {
+        str(key_aliases.get(str(key), str(key))): value
+        for key, value in candidate.items()
+    }
+
+    episodes = normalized_candidate.get("episodes")
+    if isinstance(episodes, list):
+        normalized_episodes = [
+            _normalize_episode_plan_episode_item(item)
+            for item in episodes
+            if isinstance(item, dict)
+        ]
+    else:
+        normalized_episodes = episodes
+
+    payload: dict[str, Any] = {
+        "parsed_episode_count": len(normalized_episodes)
+        if isinstance(normalized_episodes, list)
+        else normalized_candidate.get("parsed_episode_count"),
+        "episodes": normalized_episodes,
+    }
+    planning = _normalize_episode_plan_alias_planning(
+        normalized_candidate.get("appearance_alias_planning")
+    )
+    if planning is not None:
+        payload["appearance_alias_planning"] = planning
+    return payload
+
+
+def _normalize_episode_plan_episode_item(item: dict[str, Any]) -> dict[str, Any]:
+    key_aliases = {
+        "episodeNumber": "episode",
+        "episodeNo": "episode",
+        "mainCharacterAliases": "main_character_aliases",
+        "appearanceEvents": "appearance_events",
+        "longTermStageFlags": "long_term_stage_flags",
+        "sceneBasedAliasHints": "scene_based_alias_hints",
+    }
+    return {
+        str(key_aliases.get(str(key), str(key))): value
+        for key, value in item.items()
+    }
+
+
+def _normalize_episode_plan_alias_planning(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    candidate = value
+    if isinstance(candidate, str):
+        parsed = _try_parse_json(candidate)
+        candidate = parsed if parsed is not None else candidate
+    if not isinstance(candidate, dict):
+        return {}
+
+    key_aliases = {
+        "planningScope": "planning_scope",
+        "globalNamingStyle": "global_naming_style",
+        "charactersWithMultipleVariants": "characters_with_multiple_variants",
+        "globalRules": "global_rules",
+        "uncertainOrMissingItems": "uncertain_or_missing_items",
+    }
+    normalized = {
+        str(key_aliases.get(str(key), str(key))): value
+        for key, value in candidate.items()
+    }
+
+    characters = normalized.get("characters_with_multiple_variants")
+    if isinstance(characters, list):
+        normalized["characters_with_multiple_variants"] = [
+            _normalize_episode_plan_alias_character_item(item)
+            for item in characters
+            if isinstance(item, dict)
+        ]
+    return normalized
+
+
+def _normalize_episode_plan_alias_character_item(item: dict[str, Any]) -> dict[str, Any]:
+    key_aliases = {
+        "characterName": "character_name",
+        "switchDimensions": "switch_dimensions",
+        "longTermStageSwitches": "long_term_stage_switches",
+        "sceneBasedSwitches": "scene_based_switches",
+    }
+    normalized = {
+        str(key_aliases.get(str(key), str(key))): value
+        for key, value in item.items()
+    }
+    for key in ("long_term_stage_switches", "scene_based_switches"):
+        switches = normalized.get(key)
+        if isinstance(switches, list):
+            normalized[key] = [
+                _normalize_episode_plan_alias_switch_item(entry)
+                for entry in switches
+                if isinstance(entry, dict)
+            ]
+    return normalized
+
+
+def _normalize_episode_plan_alias_switch_item(item: dict[str, Any]) -> dict[str, Any]:
+    key_aliases = {
+        "episodeRange": "episode_range",
+        "recommendedAliasName": "recommended_alias_name",
+        "sceneOrCondition": "scene_or_condition",
+    }
+    return {
+        str(key_aliases.get(str(key), str(key))): value
+        for key, value in item.items()
+    }
+
+
+def _looks_like_episode_plan_normalize_body(candidate: dict[str, Any]) -> bool:
+    episodes = candidate.get("episodes")
+    return isinstance(episodes, list)
 
 
 def _normalize_dialogues_output_candidate(
@@ -786,6 +1145,9 @@ def _iter_named_structured_candidates(data: Any) -> Iterable[tuple[str, Any]]:
     response_data = data.get("responseData")
     if isinstance(response_data, dict):
         yield from _yield_named_branch_candidates("responseData", response_data)
+    elif isinstance(response_data, list):
+        yield ("responseData", response_data)
+        yield from _yield_named_list_candidates("responseData", response_data)
 
     yield from _yield_named_branch_candidates("root", data)
 
@@ -796,12 +1158,15 @@ def _yield_named_branch_candidates(prefix: str, data: dict[str, Any]) -> Iterabl
         return
     priority_keys = (
         "contract_json",
+        "variableUpdate",
         "updateVarResult",
         "newVariables",
+        "toolCall",
         "output",
         "outputs",
         "pluginOutput",
         "data",
+        "toolDetail",
         "answerText",
         "answer",
         "response",
@@ -811,8 +1176,24 @@ def _yield_named_branch_candidates(prefix: str, data: dict[str, Any]) -> Iterabl
     )
     for key in priority_keys:
         if key in data:
-            yield (f"{prefix}.{key}", data[key])
+            source = f"{prefix}.{key}"
+            value = data[key]
+            yield (source, value)
+            if isinstance(value, dict):
+                yield from _yield_named_branch_candidates(source, value)
+            elif isinstance(value, list):
+                yield from _yield_named_list_candidates(source, value)
     yield (prefix, data)
+
+
+def _yield_named_list_candidates(prefix: str, values: list[Any]) -> Iterable[tuple[str, Any]]:
+    for index, item in enumerate(values):
+        source = f"{prefix}[{index}]"
+        yield (source, item)
+        if isinstance(item, dict):
+            yield from _yield_named_branch_candidates(source, item)
+        elif isinstance(item, list):
+            yield from _yield_named_list_candidates(source, item)
 
 
 def _iter_named_text_candidates(data: Any) -> Iterable[tuple[str, str]]:
@@ -826,6 +1207,8 @@ def _iter_named_text_candidates(data: Any) -> Iterable[tuple[str, str]]:
     response_data = data.get("responseData")
     if isinstance(response_data, dict):
         yield from _yield_named_text_fields("responseData", response_data)
+    elif isinstance(response_data, list):
+        yield from _yield_named_text_list_fields("responseData", response_data)
 
     yield from _yield_named_text_fields("root", data)
 
@@ -838,6 +1221,21 @@ def _yield_named_text_fields(prefix: str, data: dict[str, Any]) -> Iterable[tupl
         value = data.get(key)
         if isinstance(value, str):
             yield (f"{prefix}.{key}", strip_code_fence(value))
+    for key in ("contract_json", "variableUpdate", "updateVarResult", "newVariables", "toolCall", "output", "outputs", "pluginOutput", "data", "toolDetail"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            yield from _yield_named_text_fields(f"{prefix}.{key}", value)
+        elif isinstance(value, list):
+            yield from _yield_named_text_list_fields(f"{prefix}.{key}", value)
+
+
+def _yield_named_text_list_fields(prefix: str, values: list[Any]) -> Iterable[tuple[str, str]]:
+    for index, item in enumerate(values):
+        source = f"{prefix}[{index}]"
+        if isinstance(item, dict):
+            yield from _yield_named_text_fields(source, item)
+        elif isinstance(item, list):
+            yield from _yield_named_text_list_fields(source, item)
 
 
 def _extract_stage_auxiliary_outputs(data: dict[str, Any], stage_name: str) -> dict[str, Any]:
@@ -928,16 +1326,18 @@ def _normalize_payload_candidate(
         return candidate
 
     if "key" in candidate and "value" in candidate and isinstance(candidate.get("key"), str):
-        return {str(candidate["key"]).strip(): candidate.get("value")}
-
-    variable = candidate.get("variable")
-    if "value" in candidate:
-        if isinstance(variable, str) and variable.strip():
-            return {variable.strip(): candidate.get("value")}
-        if isinstance(variable, list) and variable:
-            variable_key = str(variable[-1] or "").strip()
-            if variable_key:
-                return {variable_key: candidate.get("value")}
+        candidate = {str(candidate["key"]).strip(): candidate.get("value")}
+    elif "name" in candidate and "value" in candidate and isinstance(candidate.get("name"), str):
+        candidate = {str(candidate["name"]).strip(): candidate.get("value")}
+    else:
+        variable = candidate.get("variable")
+        if "value" in candidate:
+            if isinstance(variable, str) and variable.strip():
+                candidate = {variable.strip(): candidate.get("value")}
+            elif isinstance(variable, list) and variable:
+                variable_key = str(variable[-1] or "").strip()
+                if variable_key:
+                    candidate = {variable_key: candidate.get("value")}
 
     nested_text_keys = (
         "contract_json",
@@ -960,19 +1360,22 @@ def _normalize_payload_candidate(
 
     nested_list_keys = (
         "updateVarResult",
+        "variableUpdate",
         "newVariables",
+        "toolCall",
         "outputs",
         "output",
         "data",
         "responseData",
         "pluginOutput",
+        "toolDetail",
     )
     for key in nested_list_keys:
         value = candidate.get(key)
         if isinstance(value, (list, dict)):
             normalized = _normalize_payload_candidate(value, contract)
             if normalized is not None:
-                return normalized
+                return _normalize_payload_candidate(normalized, contract)
 
     return candidate
 

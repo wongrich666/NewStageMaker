@@ -135,6 +135,11 @@ SCRIPT_STAGE_MEMORY_MAX_CHARS = max(
 )
 FRAMEWORK_TITLE_MIN_LENGTH = 2
 FRAMEWORK_TEXT_MIN_LENGTH = 10
+PRE_STRATEGY_RUNTIME_FIELDS = (
+    CHARACTER_APPEARANCE_REQUIREMENTS,
+    CHARACTER_ALIAS_NAMING_RULES,
+    OUTFIT_SWITCH_RULES,
+)
 SCRIPT_EPISODE_HEADING_PATTERN = re.compile(
     r"(?=^[ \t>#*\-]*第\s*([0-9０-９一二三四五六七八九十百千万两零〇]+)\s*集(?:\s*[:：]|$))",
     re.MULTILINE,
@@ -173,6 +178,9 @@ def run_fastgpt_hybrid_workflow(
 
     variables = _initial_fastgpt_variables(payload)
     _restore_resume_state(state, variables, resume_snapshot)
+    # 先把“前置静态设定”跑稳，再进入批处理阶段。
+    # 这样后面的 worldview/characters/scenes/hooks/dialogues/script 才能统一读取
+    # 同一份框架、服装策略和一致性校验结果。
     _ensure_framework_and_consistency(
         state,
         runner,
@@ -321,6 +329,8 @@ def run_fastgpt_hybrid_workflow(
     _sync_state_variables(state, variables)
 
     _run_batched_generation(state, runner, payload, variables)
+    # final 只接受完整正文。这里先在本地把跨批缓存重新拼接并补做完整性校验，
+    # 避免 FastGPT final 阶段把缺批正文“正常拼接”成一个看似成功的结果。
     _ensure_complete_script_before_final(payload, variables)
     _sync_state_variables(state, variables)
     sync_runtime_state(state)
@@ -565,6 +575,9 @@ def _run_batched_generation(
 
     total_batches = len(batches)
     for batch_index, batch in enumerate(batches):
+        # 一个批次内必须严格走 hooks -> dialogues -> script。
+        # 这样对白和正文永远只消费“同批钩子/对白/分集计划”，不会出现
+        # hooks 还停在 1-5、dialogues 已跑到 6-10 这类跨批串线。
         logger.info(
             "batch_sync 对齐结果：当前批次=%s（第 %s/%s 批），rewrite_from_stage=%s。",
             batch.label,
@@ -936,6 +949,8 @@ def _run_script_batches(
         existing_memory = copy.deepcopy(appearance_memory_by_batch.get(batch.start_episode) or {})
 
         if existing_batch_script and existing_summary:
+            # 只有“正文 + 对应记忆”同时存在，才把这一批视为可直接复用。
+            # 只缓存正文而没有 memory，会让下一批上下文断层，所以宁可重跑也不盲跳过。
             variables[BATCH_SCRIPT] = existing_batch_script
             variables[LAST_SUMMARY] = _bounded_script_memory(existing_summary)
             if existing_memory:
@@ -1044,6 +1059,8 @@ def _run_script_batches(
             max_retries=0,
         )
 
+        # memory 阶段不是历史归档，而是“覆盖式滚动记忆”。
+        # 下一批 script 只吃最新摘要，避免把越来越长的原文不断回灌给模型。
         variables[LAST_SUMMARY] = _bounded_script_memory(memory_output[LAST_SUMMARY])
         variables[APPEARANCE_CONTINUITY_MEMORY] = _update_appearance_continuity_memory(
             variables.get(APPEARANCE_CONTINUITY_MEMORY),
@@ -1315,6 +1332,9 @@ def _repair_script_outputs(
 ) -> tuple[str, list[int]]:
     script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
     script_episode_cache = _normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES))
+    # 正文恢复时不能只信任单一缓存来源：
+    # 有时保留下来的是整批文本，有时是逐集拆分结果，有时只有 ALL_SCRIPT。
+    # 这里先尽量互相修复，再选出覆盖集数最多的那份正式正文。
     repaired_episode_cache = _rebuild_script_episode_cache(
         script_batches,
         script_episode_cache,
@@ -2229,6 +2249,8 @@ def _restore_resume_state(
 
     restored_variables = debug_state.get("variables")
     if isinstance(restored_variables, dict):
+        # 恢复时优先保留“真实执行变量”，因为它们比 artifacts 更完整，
+        # 包含了批次指针、局部缓存和回退控制位。
         variables.update(restored_variables)
         if ALL_SCRIPT not in variables:
             restored_all_script = restored_variables.get(ALL_SCRIPT)
@@ -2260,6 +2282,8 @@ def _restore_resume_state(
     if isinstance(restored_outputs, dict):
         state.node_outputs.update(restored_outputs)
 
+    # 快照里的 start_episode/index 可能是旧版本残留或失败中断时的脏值，
+    # 恢复变量后必须再根据真实缓存覆盖度重新推导一次批次位置。
     _sanitize_restored_batch_progress(variables)
 
 
@@ -2542,7 +2566,9 @@ def _ensure_pre_strategy_outputs(
     variables: dict[str, Any],
 ) -> None:
     """在 world-building 之前补齐服装/别名等前置策略，避免后续阶段吃到旧设定。"""
-    if _has_pre_strategy_outputs(variables):
+    cached_errors = _pre_strategy_output_integrity_errors(variables)
+    if not cached_errors:
+        _apply_pre_strategy_outputs_to_variables(variables)
         _refresh_user_content_baseline(payload, variables)
         set_runtime_stage(
             state,
@@ -2550,20 +2576,37 @@ def _ensure_pre_strategy_outputs(
             "已从缓存恢复服装前置策略。",
             progress_percent=6,
         )
-    else:
-        variables.update(
-            _run_fastgpt_stage(
-                state,
-                runner,
-                STAGE_APPEARANCE_PRE_STRATEGY,
-                variables,
-                stage_key="appearance_strategy",
-                message="正在生成服装前置策略。",
-                progress_percent=6,
-                max_retries=0,
-            )
+        _sync_state_variables(state, variables)
+        return
+
+    if any(_has_value(variables.get(name)) for name in PRE_STRATEGY_RUNTIME_FIELDS):
+        logger.warning(
+            "恢复到的服装前置策略缓存无效，将清空旧值后重新生成：%s",
+            "；".join(cached_errors),
         )
-        _refresh_user_content_baseline(payload, variables)
+    # 这里先清空旧缓存，再重跑 appearance_pre_strategy。
+    # 否则一旦本轮只回了部分字段，旧残值可能和新结果拼出一个“假完整”的 payload。
+    for field_name in PRE_STRATEGY_RUNTIME_FIELDS:
+        variables.pop(field_name, None)
+
+    pre_strategy_output = _run_fastgpt_stage(
+        state,
+        runner,
+        STAGE_APPEARANCE_PRE_STRATEGY,
+        variables,
+        stage_key="appearance_strategy",
+        message="正在生成服装前置策略。",
+        progress_percent=6,
+        max_retries=0,
+    )
+    variables.update(pre_strategy_output)
+    if not _apply_pre_strategy_outputs_to_variables(variables):
+        errors = _pre_strategy_output_integrity_errors(variables)
+        raise ValueError(
+            "服装前置策略阶段返回内容不可用："
+            + ("；".join(errors) if errors else "未返回合法字段")
+        )
+    _refresh_user_content_baseline(payload, variables)
     _sync_state_variables(state, variables)
 
 
@@ -2737,6 +2780,19 @@ def _framework_output_integrity_errors(
     return errors
 
 
+def _serialize_framework_runtime_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2)
+        except Exception:
+            return str(value).strip()
+    return str(value).strip()
+
+
 def _framework_output_snapshot(
     payload: WorkflowInput,
     values: Any,
@@ -2751,10 +2807,14 @@ def _framework_output_snapshot(
             EPISODE_PLAN: "",
         }
     return {
-        SCRIPT_TITLE: str(values.get(SCRIPT_TITLE) or "").strip(),
-        STORY_OUTLINE: str(values.get(STORY_OUTLINE) or "").strip(),
-        USER_CHARACTERS: str(values.get(USER_CHARACTERS) or "").strip(),
-        USER_SCENES: str(values.get(USER_SCENES) or "").strip(),
+        SCRIPT_TITLE: _serialize_framework_runtime_value(
+            values.get(SCRIPT_TITLE) or values.get("script_title")
+        ),
+        # framework 现在已经改成返回 object/array；这里仍统一序列化成字符串，
+        # 是为了不惊动后面的 legacy 工作流、缓存快照和导出逻辑。
+        STORY_OUTLINE: _serialize_framework_runtime_value(values.get(STORY_OUTLINE)),
+        USER_CHARACTERS: _serialize_framework_runtime_value(values.get(USER_CHARACTERS)),
+        USER_SCENES: _serialize_framework_runtime_value(values.get(USER_SCENES)),
         EPISODE_PLAN: _select_complete_framework_episode_plan_source(payload, values),
     }
 
@@ -2764,8 +2824,8 @@ def _select_complete_framework_episode_plan_source(
     values: dict[str, Any],
 ) -> str:
     """从 framework 相关变量里挑出完整分集计划母本，避免误吃局部批次结果。"""
-    canonical = str(values.get(EPISODE_PLAN) or "").strip()
-    raw_source = str(values.get(LOCAL_RAW_EPISODE_PLAN) or "").strip()
+    canonical = _serialize_framework_runtime_value(values.get(EPISODE_PLAN))
+    raw_source = _serialize_framework_runtime_value(values.get(LOCAL_RAW_EPISODE_PLAN))
     for candidate in (raw_source, canonical):
         if _episode_plan_covers_total_episodes(candidate, payload.total_episodes):
             return candidate
@@ -2777,7 +2837,7 @@ def _framework_episode_plan_integrity_issue(
     total_episodes: int,
 ) -> str | None:
     """检查 framework 产出的分集计划是否真的覆盖到第 1-total_episodes 集。"""
-    text = str(value or "").strip()
+    text = _serialize_framework_runtime_value(value)
     if not text:
         return "episode_plan 缺失"
 
@@ -2897,14 +2957,67 @@ def _framework_consistency_terminal_error_message(
 
 
 def _has_pre_strategy_outputs(variables: dict[str, Any]) -> bool:
-    return all(
-        _has_value(variables.get(name))
-        for name in (
-            CHARACTER_APPEARANCE_REQUIREMENTS,
-            CHARACTER_ALIAS_NAMING_RULES,
-            OUTFIT_SWITCH_RULES,
-        )
-    )
+    return not _pre_strategy_output_integrity_errors(variables)
+
+
+def _serialize_pre_strategy_runtime_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2)
+        except Exception:
+            return str(value).strip()
+    return str(value).strip()
+
+
+def _pre_strategy_output_snapshot(values: Any) -> dict[str, str]:
+    """把服装前置策略统一收敛成三个稳定字符串，避免恢复时混入 dict/list 原样值。"""
+    if not isinstance(values, dict):
+        return {field_name: "" for field_name in PRE_STRATEGY_RUNTIME_FIELDS}
+    return {
+        field_name: _serialize_pre_strategy_runtime_value(values.get(field_name))
+        for field_name in PRE_STRATEGY_RUNTIME_FIELDS
+    }
+
+
+def _pre_strategy_output_integrity_errors(values: Any) -> list[str]:
+    if not isinstance(values, dict):
+        return [f"appearance_pre_strategy 阶段返回值不是对象：{type(values).__name__}"]
+
+    snapshot = _pre_strategy_output_snapshot(values)
+    errors: list[str] = []
+    for field_name, text in snapshot.items():
+        if not text:
+            errors.append(f"{field_name} 缺失")
+            continue
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            continue
+        # 纯文本规则允许直接透传；但如果已经是结构化 JSON，就不能让空 dict/list/null
+        # 混进缓存，否则后面的 baseline 和导出会把“空策略”当成有效策略复用。
+        if parsed is None:
+            errors.append(f"{field_name} 为空")
+            continue
+        if isinstance(parsed, str) and not parsed.strip():
+            errors.append(f"{field_name} 为空字符串")
+            continue
+        if isinstance(parsed, (dict, list)) and not parsed:
+            errors.append(f"{field_name} 为空结构")
+    return errors
+
+
+def _apply_pre_strategy_outputs_to_variables(variables: dict[str, Any]) -> bool:
+    """在进入后续阶段前，把服装前置策略固定成字符串，保证缓存恢复和后续拼接口径一致。"""
+    if not _has_pre_strategy_outputs(variables):
+        return False
+
+    for field_name, text in _pre_strategy_output_snapshot(variables).items():
+        variables[field_name] = text
+    return True
 
 
 def _apply_framework_outputs_to_variables(
@@ -2951,6 +3064,9 @@ def _apply_appearance_outputs_to_variables(variables: dict[str, Any]) -> bool:
         return False
 
     normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
+    # appearance_mapping 是 FastGPT 给出的“原始服装/别名母本”；
+    # 本地会继续拆成 registry / alias plan / continuity memory，目的是让后续批处理
+    # 直接消费稳定结构，而不是每个阶段都重新自己理解一遍大 JSON。
     character_registry = _build_character_registry(normalized_mapping)
     character_alias_registry = _build_character_alias_registry(normalized_mapping)
     episode_alias_plan = _build_episode_alias_plan(normalized_plan, normalized_mapping)
@@ -3809,6 +3925,12 @@ def _fallback_normalized_episode_plan_for_batch(
     if not text:
         return None
 
+    structured = slice_normalized_episode_plan_for_batch(text, batch)
+    if structured is not None:
+        # framework 新版本直接把分集计划输出成 JSON 数组；恢复缓存时优先复用这份结构，
+        # 避免再退回基于“第X集”标题的文本猜测。
+        return structured
+
     lines = text.splitlines()
     found_marker = False
     current_episode: int | None = None
@@ -3920,6 +4042,14 @@ def _normalize_episode_plan_object(value: Any) -> dict[str, Any] | None:
         candidate = candidate.get(NORMALIZED_EPISODE_PLAN)
         return _normalize_episode_plan_object(candidate)
 
+    if isinstance(candidate, dict) and "episode_plan" in candidate:
+        nested_plan = _normalize_episode_plan_object(candidate.get("episode_plan"))
+        if nested_plan is not None:
+            return nested_plan
+
+    if isinstance(candidate, list):
+        return _normalize_episode_plan_entries(candidate, appearance_alias_planning={})
+
     if not isinstance(candidate, dict):
         return None
 
@@ -3927,18 +4057,36 @@ def _normalize_episode_plan_object(value: Any) -> dict[str, Any] | None:
     if not isinstance(episodes, list):
         return None
 
+    return _normalize_episode_plan_entries(
+        episodes,
+        appearance_alias_planning=candidate.get("appearance_alias_planning"),
+    )
+
+
+def _normalize_episode_plan_entries(
+    episodes: list[Any],
+    *,
+    appearance_alias_planning: Any,
+) -> dict[str, Any] | None:
     normalized_episodes: list[dict[str, Any]] = []
     for item in episodes:
         if not isinstance(item, dict):
             continue
-        episode_number = _coerce_episode_number(item.get("episode"))
+        episode_number = _coerce_episode_number(
+            item.get("episode")
+            or item.get("episode_no")
+            or item.get("episodeNumber")
+        )
         if episode_number is None:
             continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            content = _framework_episode_plan_content(item)
         normalized_episodes.append(
             {
                 "episode": episode_number,
                 "title": str(item.get("title") or "").strip(),
-                "content": str(item.get("content") or "").strip(),
+                "content": content,
                 "main_character_aliases": _normalize_alias_usage_list(item.get("main_character_aliases")),
                 "appearance_events": _string_list(item.get("appearance_events")),
                 "long_term_stage_flags": _string_list(item.get("long_term_stage_flags")),
@@ -3946,13 +4094,33 @@ def _normalize_episode_plan_object(value: Any) -> dict[str, Any] | None:
             }
         )
 
+    if not normalized_episodes:
+        return None
+
     return {
         "parsed_episode_count": len(normalized_episodes),
         "appearance_alias_planning": _normalize_appearance_alias_planning(
-            candidate.get("appearance_alias_planning")
+            appearance_alias_planning
         ),
         "episodes": normalized_episodes,
     }
+
+
+def _framework_episode_plan_content(item: dict[str, Any]) -> str:
+    parts: list[str] = []
+    main_plot = str(item.get("main_plot") or item.get("summary") or "").strip()
+    if main_plot:
+        parts.append(f"主线剧情：{main_plot}")
+
+    conflicts = [str(conflict or "").strip() for conflict in item.get("conflicts") or []]
+    conflicts = [conflict for conflict in conflicts if conflict]
+    if conflicts:
+        parts.append("冲突：\n" + "\n".join(f"- {conflict}" for conflict in conflicts))
+
+    ending_hook = str(item.get("ending_hook") or "").strip()
+    if ending_hook:
+        parts.append(f"结尾钩子：{ending_hook}")
+    return "\n".join(parts).strip()
 
 
 def _normalize_appearance_alias_planning(value: Any) -> dict[str, Any]:
@@ -4002,6 +4170,10 @@ def _normalize_appearance_alias_planning(value: Any) -> dict[str, Any]:
 
 
 def slice_episode_plan_for_batch(episode_plan: str, batch: BatchWindow) -> str:
+    structured_slice = _slice_structured_episode_plan_for_batch_text(episode_plan, batch)
+    if structured_slice:
+        return structured_slice
+
     lines = str(episode_plan or "").splitlines()
     selected: list[str] = []
     current_episode: int | None = None
@@ -4018,6 +4190,44 @@ def slice_episode_plan_for_batch(episode_plan: str, batch: BatchWindow) -> str:
     if found_marker and selected:
         return "\n".join(selected).strip()
     return str(episode_plan or "").strip()
+
+
+def _slice_structured_episode_plan_for_batch_text(
+    episode_plan: Any,
+    batch: BatchWindow,
+) -> str:
+    candidate = episode_plan
+    if isinstance(candidate, str):
+        text = candidate.strip()
+        if not text or text[0] not in "[{":
+            return ""
+        try:
+            candidate = json.loads(text)
+        except Exception:
+            return ""
+
+    if isinstance(candidate, list):
+        selected: list[dict[str, Any]] = []
+        for item in candidate:
+            if not isinstance(item, dict):
+                continue
+            episode_number = _coerce_episode_number(
+                item.get("episode")
+                or item.get("episode_no")
+                or item.get("episodeNumber")
+            )
+            if episode_number is None:
+                continue
+            if batch.start_episode <= episode_number <= batch.end_episode:
+                selected.append(copy.deepcopy(item))
+        if selected:
+            return json.dumps(selected, ensure_ascii=False, indent=2)
+        return ""
+
+    normalized_slice = slice_normalized_episode_plan_for_batch(candidate, batch)
+    if normalized_slice is not None:
+        return _serialize_normalized_episode_plan(normalized_slice)
+    return ""
 
 
 def _coerce_episode_number(value: Any) -> int | None:

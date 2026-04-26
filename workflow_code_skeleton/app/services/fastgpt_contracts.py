@@ -27,8 +27,6 @@ from ..workflow_ids import (
     FRAMEWORK_CHARACTER_COUNT_VAR,
     FRAMEWORK_CORE_SCENE_VAR,
     FRAMEWORK_EPISODE_PLAN_VAR,
-    FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR,
-    FRAMEWORK_ALIAS_NAMING_RULES_VAR,
     FRAMEWORK_TITLE_VAR,
     FRAMEWORK_TOTAL_EPISODES_VAR,
     FRAMEWORK_STORY_OUTLINE_VAR,
@@ -114,6 +112,58 @@ STAGE_SCRIPT = "script"
 STAGE_MEMORY = "memory"
 STAGE_FINAL = "final"
 
+FRAMEWORK_STORY_OUTLINE_KEYS = (
+    "opening",
+    "inciting_incident",
+    "early_goal",
+    "middle_escalation",
+    "relationship_changes",
+    "larger_crisis_or_truth",
+    "late_direction",
+    "final_climax",
+    "ending_resolution",
+    "theme",
+)
+FRAMEWORK_CHARACTER_KEYS = (
+    "name",
+    "role_type",
+    "identity",
+    "personality",
+    "core_desire",
+    "deep_motivation",
+    "strengths",
+    "weaknesses",
+    "appearance_anchor",
+    "relationship_to_protagonist",
+    "relationships_with_others",
+    "growth_arc",
+    "plot_function",
+)
+FRAMEWORK_SCENE_KEYS = (
+    "era_background",
+    "world_state",
+    "core_locations",
+    "rules",
+    "danger_sources",
+    "resource_or_stakes",
+    "power_distribution",
+    "special_rules",
+    "overall_atmosphere",
+)
+FRAMEWORK_CORE_LOCATION_KEYS = (
+    "name",
+    "function",
+    "conflict_soil",
+    "key_characters",
+)
+FRAMEWORK_EPISODE_PLAN_KEYS = (
+    "episode",
+    "title",
+    "main_plot",
+    "conflicts",
+    "ending_hook",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class FastGPTVariable:
@@ -147,8 +197,12 @@ class FastGPTStageContract:
             if name in variables:
                 payload[name] = variables[name]
             elif name == LAST_SUMMARY:
+                # 记忆类字段允许缺省为“空记忆”，这样首批正文不需要为了凑输入
+                # 额外制造一个伪 summary。
                 payload[name] = ""
             elif name in {ALL_HOOKS, ALL_DIALOGUES}:
+                # 批处理阶段允许前序累计对象以空 object 开局；真正的跨阶段完整性
+                # 由编排层在进入当前阶段前负责校验。
                 payload[name] = {}
             else:
                 missing.append(name)
@@ -180,6 +234,9 @@ class FastGPTStageContract:
                 raise ValueError(
                     f"FastGPT 阶段 {self.stage_name} 输出字段 {name} 校验失败：{exc}"
                 ) from exc
+            # 这里只做“字段类型已对”还不够。
+            # hooks/dialogues/normalized_episode_plan 等阶段如果 shape 漂了，
+            # 后面的批次切片与缓存恢复会直接失真，所以要在契约层提前拦住。
             issue = describe_stage_output_shape_issue(
                 self.stage_name,
                 name,
@@ -191,6 +248,8 @@ class FastGPTStageContract:
                 )
         if missing:
             joined = ", ".join(missing)
+            if self.stage_name == STAGE_APPEARANCE_PRE_STRATEGY:
+                raise ValueError(f"{self.stage_name} 缺少字段：{joined}")
             raise ValueError(f"FastGPT 阶段 {self.stage_name} 缺少输出变量：{joined}")
         return normalized
 
@@ -200,6 +259,20 @@ def describe_stage_output_shape_issue(
     field_name: str,
     value: Any,
 ) -> str | None:
+    # 这里故意做得比一般 JSON 校验更严格：
+    # 本地后续逻辑会直接依赖这些固定键做切片、拼接、恢复和回退，
+    # 所以宁可在阶段出口报错，也不让“近似正确”的结构混入缓存。
+    if stage_name == STAGE_FRAMEWORK:
+        if field_name == STORY_OUTLINE:
+            return _describe_framework_story_outline_issue(value)
+        if field_name == USER_CHARACTERS:
+            return _describe_framework_user_characters_issue(value)
+        if field_name == USER_SCENES:
+            return _describe_framework_user_scenes_issue(value)
+        if field_name == EPISODE_PLAN:
+            return _describe_framework_episode_plan_issue(value)
+        return None
+
     if stage_name == STAGE_EPISODE_PLAN_NORMALIZE and field_name == NORMALIZED_EPISODE_PLAN:
         if not isinstance(value, dict):
             return "必须是 object"
@@ -265,6 +338,117 @@ def describe_stage_output_shape_issue(
     return None
 
 
+def _describe_framework_story_outline_issue(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return "必须是 object"
+    issue = _describe_exact_keys_issue(value, FRAMEWORK_STORY_OUTLINE_KEYS)
+    if issue:
+        return issue
+    for key in FRAMEWORK_STORY_OUTLINE_KEYS:
+        if not str(value.get(key) or "").strip():
+            return f"{key} 不能为空"
+    return None
+
+
+def _describe_framework_user_characters_issue(value: Any) -> str | None:
+    if not isinstance(value, list):
+        return "必须是数组"
+    if not value:
+        return "数组不能为空"
+    for index, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            return f"第 {index} 个角色必须是 object"
+        issue = _describe_exact_keys_issue(item, FRAMEWORK_CHARACTER_KEYS)
+        if issue:
+            return f"第 {index} 个角色 {issue}"
+        for key in FRAMEWORK_CHARACTER_KEYS:
+            if not str(item.get(key) or "").strip():
+                return f"第 {index} 个角色的 {key} 不能为空"
+    return None
+
+
+def _describe_framework_user_scenes_issue(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return "必须是 object"
+    issue = _describe_exact_keys_issue(value, FRAMEWORK_SCENE_KEYS)
+    if issue:
+        return issue
+    for key in FRAMEWORK_SCENE_KEYS:
+        if key == "special_rules":
+            if not isinstance(value.get(key), str):
+                return "special_rules 必须是字符串"
+            continue
+        if key == "core_locations":
+            locations = value.get(key)
+            if not isinstance(locations, list):
+                return "core_locations 必须是数组"
+            if not locations:
+                return "core_locations 不能为空"
+            for index, location in enumerate(locations, start=1):
+                if not isinstance(location, dict):
+                    return f"第 {index} 个 core_locations 条目必须是 object"
+                location_issue = _describe_exact_keys_issue(location, FRAMEWORK_CORE_LOCATION_KEYS)
+                if location_issue:
+                    return f"第 {index} 个 core_locations 条目 {location_issue}"
+                for location_key in ("name", "function", "conflict_soil"):
+                    if not str(location.get(location_key) or "").strip():
+                        return f"第 {index} 个 core_locations 条目的 {location_key} 不能为空"
+                key_characters = location.get("key_characters")
+                if not isinstance(key_characters, list):
+                    return f"第 {index} 个 core_locations 条目的 key_characters 必须是数组"
+                if any(not str(character or "").strip() for character in key_characters):
+                    return f"第 {index} 个 core_locations 条目的 key_characters 不能包含空值"
+            continue
+        if not str(value.get(key) or "").strip():
+            return f"{key} 不能为空"
+    return None
+
+
+def _describe_framework_episode_plan_issue(value: Any) -> str | None:
+    if not isinstance(value, list):
+        return "必须是数组"
+    if not value:
+        return "数组不能为空"
+    for index, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            return f"第 {index} 集必须是 object"
+        issue = _describe_exact_keys_issue(item, FRAMEWORK_EPISODE_PLAN_KEYS)
+        if issue:
+            return f"第 {index} 集 {issue}"
+        episode = item.get("episode")
+        if isinstance(episode, bool):
+            return f"第 {index} 集的 episode 必须是正整数"
+        try:
+            episode_number = int(episode)
+        except (TypeError, ValueError):
+            return f"第 {index} 集的 episode 必须是正整数"
+        if episode_number <= 0:
+            return f"第 {index} 集的 episode 必须是正整数"
+        for key in ("title", "main_plot", "ending_hook"):
+            if not str(item.get(key) or "").strip():
+                return f"第 {episode_number} 集的 {key} 不能为空"
+        conflicts = item.get("conflicts")
+        if not isinstance(conflicts, list):
+            return f"第 {episode_number} 集的 conflicts 必须是数组"
+        if not conflicts:
+            return f"第 {episode_number} 集的 conflicts 不能为空"
+        if any(not str(conflict or "").strip() for conflict in conflicts):
+            return f"第 {episode_number} 集的 conflicts 不能包含空值"
+    return None
+
+
+def _describe_exact_keys_issue(value: dict[str, Any], required_keys: tuple[str, ...]) -> str | None:
+    required = set(required_keys)
+    actual = set(value.keys())
+    missing = sorted(required - actual)
+    extra = sorted(actual - required)
+    if missing:
+        return f"缺少键 {', '.join(missing)}"
+    if extra:
+        return f"存在非契约键 {', '.join(extra)}"
+    return None
+
+
 GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
     TOTAL_EPISODES: FastGPTVariable(
         TOTAL_EPISODES,
@@ -275,7 +459,7 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
     EPISODE_PLAN: FastGPTVariable(
         EPISODE_PLAN,
         "string",
-        "用户分集计划。consistency/worldview 阶段传原始全文；hooks/dialogues/script 阶段传当前批次规范化 JSON 字符串。",
+        "用户分集计划。framework 阶段可能先返回结构化 JSON；本地会把它序列化后缓存。consistency/worldview 阶段传全量计划；hooks/dialogues/script 阶段传当前批次规范化 JSON 字符串。",
         "用户输入/本地批次裁剪",
     ),
     USER_EXPECTATION: FastGPTVariable(
@@ -317,19 +501,19 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
     STORY_OUTLINE: FastGPTVariable(
         STORY_OUTLINE,
         "string",
-        "故事大纲。当前可由框架阶段先生成，也兼容用户直传。",
+        "故事大纲。framework 阶段可先返回结构化 JSON，本地缓存时仍统一保存为字符串。",
         "框架阶段输出/用户输入兼容",
     ),
     USER_SCENES: FastGPTVariable(
         USER_SCENES,
         "string",
-        "核心场景。当前可由框架阶段先生成，也兼容用户直传。",
+        "核心场景。framework 阶段可先返回结构化 JSON，本地缓存时仍统一保存为字符串。",
         "框架阶段输出/用户输入兼容",
     ),
     USER_CHARACTERS: FastGPTVariable(
         USER_CHARACTERS,
         "string",
-        "人物小传。当前可由框架阶段先生成，也兼容用户直传。",
+        "人物小传。framework 阶段可先返回结构化 JSON，本地缓存时仍统一保存为字符串。",
         "框架阶段输出/用户输入兼容",
     ),
     script_title_content: FastGPTVariable(
@@ -478,8 +662,6 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         TOTAL_EPISODES: FRAMEWORK_TOTAL_EPISODES_VAR,
         USER_EXPECTATION: FRAMEWORK_USER_EXPECTATION_VAR,
         CHARACTER_COUNT: FRAMEWORK_CHARACTER_COUNT_VAR,
-        CHARACTER_APPEARANCE_REQUIREMENTS: FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR,
-        CHARACTER_ALIAS_NAMING_RULES: FRAMEWORK_ALIAS_NAMING_RULES_VAR,
     },
     STAGE_APPEARANCE_PRE_STRATEGY: {
         USER_EXPECTATION: FRAMEWORK_USER_EXPECTATION_VAR,
@@ -590,18 +772,16 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             TOTAL_EPISODES,
             USER_EXPECTATION,
             CHARACTER_COUNT,
-            CHARACTER_APPEARANCE_REQUIREMENTS,
-            CHARACTER_ALIAS_NAMING_RULES,
         ),
         output_types={
             script_title_content: "string",
-            STORY_OUTLINE: "string",
-            USER_CHARACTERS: "string",
-            USER_SCENES: "string",
-            EPISODE_PLAN: "string",
+            STORY_OUTLINE: "object",
+            USER_CHARACTERS: "array",
+            USER_SCENES: "object",
+            EPISODE_PLAN: "array",
         },
         output_aliases={
-            script_title_content: (FRAMEWORK_TITLE_VAR,),
+            script_title_content: (FRAMEWORK_TITLE_VAR, "script_title"),
             STORY_OUTLINE: (FRAMEWORK_STORY_OUTLINE_VAR, "story_outline_content"),
             USER_CHARACTERS: (FRAMEWORK_CHARACTER_BIOS_VAR, "character_bios_content"),
             USER_SCENES: (FRAMEWORK_CORE_SCENE_VAR, "core_scene_content"),
@@ -654,6 +834,15 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             CHARACTER_ALIAS_NAMING_RULES,
         ),
         output_types={NORMALIZED_EPISODE_PLAN: "object"},
+        output_aliases={
+            NORMALIZED_EPISODE_PLAN: (
+                EPISODE_PLAN_NORMALIZED_VAR,
+                "episode_plan_normalized",
+                "normalizedEpisodePlan",
+                "episodePlanNormalized",
+                "normalized_plan",
+            )
+        },
         fastgpt_responsibility="只把原始分集计划整理成结构化 JSON，不做改写、润色、摘要或扩写。",
         local_responsibility="缓存规范化结果，并从中提炼逐集 alias 使用计划供后续批处理阶段读取当前批次需要的集数。",
     ),
@@ -895,6 +1084,18 @@ def coerce_fastgpt_value(value: Any, type_name: str) -> Any:
             except Exception:
                 pass
         raise ValueError(f"无法转换为 object：{value!r}")
+
+    if type_name == "array":
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = parse_json(value)
+                if isinstance(parsed, list):
+                    return parsed
+            except Exception:
+                pass
+        raise ValueError(f"无法转换为 array：{value!r}")
 
     raise ValueError(f"不支持的 FastGPT 类型：{type_name}")
 

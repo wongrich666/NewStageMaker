@@ -1449,6 +1449,8 @@ class WorkflowRuntime:
             "halted_message": state.halted_message or "",
             "final_output_text": final_script_text,
         }
+        # artifacts 面向前端展示与导出，debug_state 面向恢复/回退。
+        # 两份都要同步：前者保证用户能立刻看到正式成品，后者保证失败后能从真实执行状态继续。
         self.manager._update_snapshot(
             self.record,
             title=script_title_content or self.record.snapshot.get("title") or "未命名剧本",
@@ -1555,6 +1557,8 @@ class TaskManager:
 
     def _build_resume_checkpoint(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         checkpoint = copy.deepcopy(snapshot)
+        # 恢复快照只保留“可继续执行所需的稳定状态”；
+        # 错误文案、结束时间和滚动日志属于一次性运行痕迹，不应污染下一次继续生成。
         checkpoint.pop("_resume_checkpoint", None)
         checkpoint.pop("logs", None)
         checkpoint.pop("error", None)
@@ -2131,6 +2135,8 @@ class TaskManager:
                 str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip()
             ),
         }
+        # 有意不把 debug_state / logs / 内部控制位直接暴露给前端。
+        # 前端只看正式字段，避免中间变量、节点回显和恢复指针泄漏到公开接口。
         return payload
 
     def _script_rollback_start_options(self, snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2609,6 +2615,8 @@ class TaskManager:
         compacted["current_node_id"] = None
         compacted["current_node_name"] = None
         compacted["current_batch"] = None
+        # 用户确认“满意完成”后，不再保留可回退执行缓存。
+        # 这样既减小快照体积，也避免前端误以为还能继续从中间阶段接着改。
         compacted.pop("debug_state", None)
         compacted.pop("logs", None)
         compacted.pop("error", None)
@@ -3212,6 +3220,8 @@ class TaskManager:
         if not isinstance(variables, dict):
             variables = {}
 
+        # 回退不是简单清空全部缓存，而是“只删除当前阶段之后不再可信的部分”。
+        # 这样前序稳定产物还能继续复用，减少重跑成本。
         clear_keys = set(ROLLBACK_DEBUG_CLEAR_RULES.get(stage_key, ()))
         for key in list(clear_keys):
             clear_keys.update(DEBUG_VARIABLE_MIRRORS.get(key, ()))
@@ -3604,6 +3614,8 @@ class TaskManager:
                     title="任务失败",
                     message=f"已保留失败前的阶段、进度和中间产物。错误：{exc}",
                 )
+            # 失败时先退回最近一次稳定 checkpoint，再对外标记 failed。
+            # 这样 retry/继续生成看到的是“上一个成功步骤”的缓存，而不是半写入状态。
             self._restore_from_resume_checkpoint(record)
             self._update_snapshot(
                 record,
@@ -4395,6 +4407,8 @@ class TaskManager:
         base_name = f"{safe_title}_{project_id}"
         txt_path = self.exports_dir / f"{base_name}.txt"
         docx_path = self.exports_dir / f"{base_name}.docx"
+        # TODO: README 历史上提到 zip/json 一起导出，但当前实现只稳定产出 txt/docx。
+        # 如果后续要恢复压缩包导出，需要在这里补齐真实打包和快照写回逻辑。
         zip_path = self.exports_dir / f"{base_name}.zip"
         notice_path = self.exports_dir / f"{base_name}_导出说明.txt"
         legacy_json_paths = [

@@ -189,6 +189,77 @@ FASTGPT_PUNCHUP_API_KEY=
 FASTGPT_CHARACTER_RESKIN_API_KEY=
 ```
 
+## 混合工作流架构
+
+这一套主流程不是“Python 里把所有内容一步生成完”，而是一个明确分层的混合架构：
+
+```text
+浏览器 / API
+  -> server.py
+  -> TaskManager.start_task()
+  -> 后台线程 TaskManager._run_task()
+  -> runner.run_configured_workflow()
+  -> orchestrators/fastgpt_hybrid_workflow.py
+  -> services/fastgpt_client.py
+  -> FastGPT /api/v1/chat/completions
+```
+
+### 1. 入口和任务编排层
+
+- `server.py` 只负责 Web/API 入口、鉴权和把请求交给任务管理器。
+- `task_manager.py` 负责创建项目快照、启动后台线程、保存运行中快照、暂停/继续/失败重试/阶段回退/导出。
+- `runner.py` 根据 `WORKFLOW_BACKEND` 选择走本地旧流程还是当前 `FastGPT Hybrid Workflow`。
+- `fastgpt_hybrid_workflow.py` 是主编排层，负责决定“下一步该跑哪个阶段”、何时复用缓存、何时按批次推进、何时阻止不完整结果进入 `final`。
+
+### 2. FastGPTClient 调用 API 的流程
+
+`FastGPTClient.run_stage()` 的职责是“把某个阶段安全地调用出去，再把响应安全地收回来”：
+
+1. 从 `fastgpt_contracts.py` 读取该阶段契约。
+2. 根据契约和 `FASTGPT_VARIABLE_MODE` 构造要发给 FastGPT 的变量。
+3. 解析该阶段自己的 URL / API Key / chatId。
+4. 调用 `/api/v1/chat/completions`。
+5. 从 `responseData / output / updateVarResult / answerText / choices` 等常见槽位里抽取候选输出。
+6. 先做阶段专属归一化，再按契约字段名 / 别名匹配。
+7. 用契约做类型校验和结构校验。
+8. 返回“本阶段正式成品”，交回编排层缓存。
+
+这里的关键点是：本地代码不会盲信 FastGPT 的任意返回文本，而是会尽量把响应折叠成“满足契约的那一个候选结果”。
+
+### 3. 阶段契约层
+
+`fastgpt_contracts.py` 统一定义了三件事：
+
+- 每个阶段需要哪些输入字段；
+- 每个阶段必须返回哪些输出字段；
+- 这些字段的类型、结构、别名以及“FastGPT 负责什么 / 本地负责什么”。
+
+因此，契约层既是 API 适配层，也是工作流边界说明：
+
+- FastGPT 负责阶段内容生成、审核、修订、整理成最终阶段成品；
+- Python 本地负责输入准备、输出校验、缓存复用、批次切片、失败恢复和最终导出。
+
+### 4. JSON 解析层
+
+`json_utils.py` 和 `fastgpt_client.py` 共同承担“把模型输出变成稳定 JSON”的工作：
+
+- `json_utils.py` 先去掉代码块 fence，再尝试从文本里抽出 JSON 片段；
+- `fastgpt_client.py` 再结合阶段上下文做候选遍历、字段别名匹配和阶段专属格式归一化；
+- `fastgpt_hybrid_workflow.py` 会继续把 `normalized_episode_plan`、`appearance_mapping` 这类结构整理成更稳定的本地对象，供后续批处理切片使用。
+
+### 5. 批次生成、缓存、恢复、导出
+
+- 批次生成：
+  `fastgpt_hybrid_workflow.py` 会把 `hooks -> dialogues -> script` 固定成“同一批串行推进”，避免三个阶段各自跳批。
+- 缓存保存：
+  `WorkflowRuntime.sync_from_state()` 会把正式产物写入 `artifacts`，同时把完整执行状态写入 `debug_state`，供失败恢复和阶段回退使用。
+- 失败恢复：
+  `TaskManager` 会维护 `_resume_checkpoint`；任务失败后先回滚到最近一次稳定快照，再由 `_restore_resume_state()` 和 `_sanitize_restored_batch_progress()` 重新对齐批次位置。
+- 正文修复：
+  `_repair_script_outputs()` 会用 `LOCAL_SCRIPT_BATCHES + LOCAL_SCRIPT_EPISODES + ALL_SCRIPT` 交叉修复正文缓存，避免只剩局部批次文本时误判为完整正文。
+- 导出：
+  `save_final_script()` 先确认正文集数完整，再通过 `_build_docx_export_source_text()` 把标题、大纲、人物、场景、正文整理成 `txt_to_docx.py` 可识别的导出源文本。
+
 ## 当前主流程
 
 现在的主流程顺序是：
@@ -219,11 +290,11 @@ FASTGPT_CHARACTER_RESKIN_API_KEY=
 
 输出：
 
-- `script_title_content`
-- `story_outline`
-- `user_characters`
-- `user_scenes`
-- `episode_plan`
+- `script_title` / 代码侧兼容映射到 `script_title_content`
+- `story_outline`：结构化 object
+- `user_characters`：结构化 array
+- `user_scenes`：结构化 object
+- `episode_plan`：结构化 array
 
 也就是先把完整剧本框架搭出来。
 
@@ -345,16 +416,17 @@ FastGPT 负责：
 
 - `xxx.txt`
 - `xxx.docx`
-- `xxx.zip`
 
-如果当前项目包含服装映射相关结构化数据，还会一起导出：
+当前代码里的稳定导出链路是：
 
-- `character_registry.json`
-- `character_alias_registry.json`
-- `episode_alias_plan.json`
-- `appearance_mapping.json`
-- `appearance_continuity_memory.json`
-- `normalized_episode_plan.json`
+- 先写出 `txt`
+- 再转换成 `docx`
+- 下载接口当前直接返回 `docx`
+
+说明：
+
+- 导出前会再次校验剧本正文是否覆盖全部集数，缺集时会拒绝导出
+- 代码里仍保留了 `zip/json` 相关占位路径，但当前这条主导出路径还没有真正打包输出这些文件
 
 ## 辅助工具
 
@@ -390,15 +462,67 @@ Python 侧现在要求 `framework` 阶段最终返回：
 
 ```json
 {
-  "script_title_content": "string",
-  "story_outline": "string",
-  "user_characters": "string",
-  "user_scenes": "string",
-  "episode_plan": "string"
+  "script_title": "string",
+  "story_outline": {
+    "opening": "string",
+    "inciting_incident": "string",
+    "early_goal": "string",
+    "middle_escalation": "string",
+    "relationship_changes": "string",
+    "larger_crisis_or_truth": "string",
+    "late_direction": "string",
+    "final_climax": "string",
+    "ending_resolution": "string",
+    "theme": "string"
+  },
+  "user_characters": [
+    {
+      "name": "string",
+      "role_type": "string",
+      "identity": "string",
+      "personality": "string",
+      "core_desire": "string",
+      "deep_motivation": "string",
+      "strengths": "string",
+      "weaknesses": "string",
+      "appearance_anchor": "string",
+      "relationship_to_protagonist": "string",
+      "relationships_with_others": "string",
+      "growth_arc": "string",
+      "plot_function": "string"
+    }
+  ],
+  "user_scenes": {
+    "era_background": "string",
+    "world_state": "string",
+    "core_locations": [
+      {
+        "name": "string",
+        "function": "string",
+        "conflict_soil": "string",
+        "key_characters": ["string"]
+      }
+    ],
+    "rules": "string",
+    "danger_sources": "string",
+    "resource_or_stakes": "string",
+    "power_distribution": "string",
+    "special_rules": "string",
+    "overall_atmosphere": "string"
+  },
+  "episode_plan": [
+    {
+      "episode": 1,
+      "title": "string",
+      "main_plot": "string",
+      "conflicts": ["string"],
+      "ending_hook": "string"
+    }
+  ]
 }
 ```
 
-如果 FastGPT 工作流最后返回的是这个 JSON 字符串，当前解析层可以直接识别。
+本地编排层会先按这个结构做严格校验，再把 `story_outline / user_characters / user_scenes / episode_plan` 序列化回字符串缓存，保证后面的 legacy 批处理、缓存恢复和导出逻辑不用跟着一起重写。
 
 ---
 
