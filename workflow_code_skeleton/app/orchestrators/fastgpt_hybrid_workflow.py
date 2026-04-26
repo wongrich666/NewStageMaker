@@ -2442,6 +2442,22 @@ def _strict_consistency_flag(value: Any) -> bool | None:
         return None
 
 
+def _is_consistency_self_check_retryable_error(exc: Exception) -> bool:
+    if _is_non_retryable(exc):
+        return False
+    text = str(exc or "")
+    markers = (
+        "必须精确返回 true 或 false",
+        "无法转换为 boolean",
+        "输出字段 is_consistent 校验失败",
+        "未返回契约字段",
+        "缺少输出变量",
+        "返回了非对象结果",
+        "输出必须是 object",
+    )
+    return any(marker in text for marker in markers)
+
+
 def _has_value(value: Any) -> bool:
     if value is None:
         return False
@@ -2525,6 +2541,12 @@ def _ensure_framework_and_consistency(
         if cached_consistency is False:
             consistency = {IS_CONSISTENT: False}
         else:
+            set_runtime_stage(
+                state,
+                "validation",
+                "正在核对分集计划和总集数。",
+                progress_percent=1,
+            )
             consistency = _run_consistency_stage_with_self_check(
                 state,
                 runner,
@@ -2772,7 +2794,9 @@ def _run_consistency_stage_with_self_check(
             )
         except Exception as exc:
             last_error = exc
-            if _is_non_retryable(exc) or check_attempt >= CONSISTENCY_SELF_CHECK_ATTEMPTS:
+            if not _is_consistency_self_check_retryable_error(exc):
+                raise
+            if check_attempt >= CONSISTENCY_SELF_CHECK_ATTEMPTS:
                 break
             continue
 
