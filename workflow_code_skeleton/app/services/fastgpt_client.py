@@ -37,6 +37,7 @@ from .fastgpt_contracts import (
     STAGE_FRAMEWORK,
     STAGE_CHARACTERS,
     SCENES,
+    STAGE_SCENES,
     STAGE_SCRIPT,
     STAGE_WORLDVIEW,
     USER_CONTENT_BASELINE,
@@ -50,6 +51,7 @@ from .stage_output_repair import (
     StageRepairOutcome,
     build_stage_output_fallback,
     is_repairable_stage_output,
+    normalize_appearance_mapping_candidate,
     repair_stage_output_candidate,
 )
 
@@ -73,6 +75,7 @@ PARTIAL_MATCH_MISSING_ERROR_STAGES = {
 STRICT_JSON_STRING_STAGES = {
     STAGE_WORLDVIEW,
     STAGE_CHARACTERS,
+    STAGE_SCENES,
 }
 
 
@@ -96,7 +99,7 @@ class FastGPTTransientError(RuntimeError):
 
 
 class FastGPTStageOutputRetryRequest(ValueError):
-    """Worldview/characters 未形成可消费契约输出时，要求本阶段重新调用一次。"""
+    """结构化阶段未形成可消费契约输出时，要求本阶段重新调用一次。"""
 
     def __init__(
         self,
@@ -992,21 +995,10 @@ def _normalize_appearance_mapping_output_candidate(
     candidate: dict[str, Any],
     contract: FastGPTStageContract,
 ) -> dict[str, Any]:
-    wrapper_keys = (
-        APPEARANCE_MAPPING,
-        *contract.aliases_for_output(APPEARANCE_MAPPING),
-        "appearanceMapping",
-    )
-    for key in wrapper_keys:
-        if key not in candidate:
-            continue
-        wrapped = _normalize_appearance_mapping_body(candidate.get(key))
-        if isinstance(wrapped, dict):
-            return {APPEARANCE_MAPPING: wrapped}
-
-    wrapped_candidate = _normalize_appearance_mapping_body(candidate)
-    if isinstance(wrapped_candidate, dict):
-        return {APPEARANCE_MAPPING: wrapped_candidate}
+    del contract
+    normalized = normalize_appearance_mapping_candidate(candidate)
+    if isinstance(normalized, dict):
+        return normalized
     return candidate
 
 

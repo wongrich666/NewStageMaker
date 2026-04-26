@@ -5,13 +5,17 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..workflow_ids import CHARACTER_VAR, WORLDVIEW_VAR
+from ..workflow_ids import APPEARANCE_MAPPING_VAR, CHARACTER_VAR, SCENE_VAR, WORLDVIEW_VAR
 from .json_utils import parse_json, strip_code_fence
 
 STAGE_WORLDVIEW = "worldview"
 STAGE_CHARACTERS = "characters"
+STAGE_SCENES = "scenes"
+STAGE_APPEARANCE_ALIAS_GENERATION = "appearance_alias_generation"
 WORLDVIEW_FIELD = "worldview"
 CHARACTERS_FIELD = "characters"
+SCENES_FIELD = "scenes"
+APPEARANCE_MAPPING_FIELD = "appearance_mapping"
 WORLDVIEW_REQUIRED_STRING_FIELDS = (
     "worldview_summary",
     "era_background",
@@ -32,6 +36,37 @@ CHARACTER_MIN_REQUIRED_FIELDS = (
     "relation_modes",
     "actable_evidence",
     "dramatic_value",
+)
+SCENE_MIN_REQUIRED_FIELDS = (
+    "scene_name",
+    "scene_type",
+    "story_function",
+    "visual_condition_summary",
+    "styling_condition_summary",
+    "outfit_requirements",
+    "naming_condition_summary",
+    "alias_usage_rules",
+    "conflict_potential",
+    "worldview_support",
+)
+SCENE_REQUIRED_SCALAR_FIELDS = (
+    "scene_name",
+    "scene_type",
+    "story_function",
+    "scene_time_or_period",
+    "weather_or_environment_state",
+    "environment_description",
+    "atmosphere_description",
+    "visual_condition_summary",
+    "styling_condition_summary",
+    "naming_condition_summary",
+    "character_interaction_effect",
+    "worldview_support",
+)
+SCENE_REQUIRED_LIST_FIELDS = (
+    "visual_elements",
+    "identity_or_status_requirements",
+    "conflict_potential",
 )
 WORLDVIEW_WRAPPER_KEYS = (
     WORLDVIEW_FIELD,
@@ -58,6 +93,105 @@ CHARACTER_WRAPPER_KEYS = (
     "结构化人设",
     "最终结构化人设",
 )
+SCENE_WRAPPER_KEYS = (
+    SCENES_FIELD,
+    SCENE_VAR,
+    "scene_setting",
+    "sceneSetting",
+    "scene_content",
+    "sceneContent",
+    "场景内容",
+    "场景设定",
+    "场景JSON",
+    "结构化场景",
+    "最终结构化场景",
+)
+APPEARANCE_WRAPPER_KEYS = (
+    APPEARANCE_MAPPING_FIELD,
+    APPEARANCE_MAPPING_VAR,
+    "appearanceMapping",
+    "appearance_mapping_json",
+    "appearanceMappingJson",
+    "服装版本映射",
+    "服装映射",
+    "结构化服装映射",
+    "最终结构化服装映射",
+)
+APPEARANCE_TOP_LEVEL_ALIASES: dict[str, tuple[str, ...]] = {
+    "mapping_principle": ("mapping_principle", "mappingPrinciple", "principle"),
+    "global_naming_style": ("global_naming_style", "globalNamingStyle", "naming_style"),
+    "characters": ("characters", "character_list", "characterList"),
+    "episode_level_usage_plan": (
+        "episode_level_usage_plan",
+        "episodeLevelUsagePlan",
+        "episode_usage_plan",
+    ),
+    "scene_level_usage_plan": (
+        "scene_level_usage_plan",
+        "sceneLevelUsagePlan",
+        "scene_usage_plan",
+    ),
+    "special_naming_rules": (
+        "special_naming_rules",
+        "specialNamingRules",
+        "naming_rules",
+    ),
+}
+APPEARANCE_CHARACTER_ALIASES: dict[str, tuple[str, ...]] = {
+    "character_id": ("character_id", "characterId"),
+    "canonical_name": ("canonical_name", "canonicalName", "character_name", "characterName"),
+    "story_role": ("story_role", "storyRole", "role", "role_type"),
+    "same_person_anchor": ("same_person_anchor", "samePersonAnchor"),
+    "default_name": ("default_name", "defaultName"),
+    "forbidden_generic_names": (
+        "forbidden_generic_names",
+        "forbiddenGenericNames",
+    ),
+    "outfit_variants": ("outfit_variants", "outfitVariants", "variants"),
+}
+APPEARANCE_SAME_PERSON_ANCHOR_ALIASES: dict[str, tuple[str, ...]] = {
+    "stable_appearance_traits": (
+        "stable_appearance_traits",
+        "stableAppearanceTraits",
+    ),
+    "stable_recognition_points": (
+        "stable_recognition_points",
+        "stableRecognitionPoints",
+    ),
+    "unchanged_core_impression": (
+        "unchanged_core_impression",
+        "unchangedCoreImpression",
+    ),
+}
+APPEARANCE_VARIANT_ALIASES: dict[str, tuple[str, ...]] = {
+    "variant_id": ("variant_id", "variantId"),
+    "alias_name": ("alias_name", "aliasName"),
+    "applicable_identity_state": (
+        "applicable_identity_state",
+        "applicableIdentityState",
+    ),
+    "outfit_type": ("outfit_type", "outfitType"),
+    "outfit_description": ("outfit_description", "outfitDescription"),
+    "visual_keypoints": ("visual_keypoints", "visualKeypoints"),
+    "episode_range_hint": ("episode_range_hint", "episodeRangeHint"),
+    "scene_trigger_rules": ("scene_trigger_rules", "sceneTriggerRules"),
+    "usage_rule": ("usage_rule", "usageRule"),
+    "must_use_when_triggered": (
+        "must_use_when_triggered",
+        "mustUseWhenTriggered",
+    ),
+    "fallback_allowed": ("fallback_allowed", "fallbackAllowed"),
+    "same_person_confirmation": (
+        "same_person_confirmation",
+        "samePersonConfirmation",
+    ),
+}
+APPEARANCE_SCENE_TRIGGER_RULE_ALIASES: dict[str, tuple[str, ...]] = {
+    "scene_names": ("scene_names", "sceneNames"),
+    "scene_types": ("scene_types", "sceneTypes"),
+    "environment_or_time": ("environment_or_time", "environmentOrTime"),
+    "status_conditions": ("status_conditions", "statusConditions"),
+}
 WORLDVIEW_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "worldview_summary": (
         "worldview_summary",
@@ -183,6 +317,107 @@ CHARACTER_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "search_reference_usage": ("search_reference_usage", "searchReferenceUsage", "检索参考使用"),
     "dramatic_value": ("dramatic_value", "dramaticValue", "戏剧价值", "剧情价值", "主线作用"),
 }
+SCENE_SETTING_ALIASES: dict[str, tuple[str, ...]] = {
+    "scene_design_principle": (
+        "scene_design_principle",
+        "sceneDesignPrinciple",
+        "design_principle",
+        "场景设计原则",
+    ),
+    "scene_visual_styling_naming_strategy": (
+        "scene_visual_styling_naming_strategy",
+        "sceneVisualStylingNamingStrategy",
+        "visual_styling_naming_strategy",
+        "场景视觉造型命名策略",
+        "视觉造型命名策略",
+    ),
+    "scenes": (
+        "scenes",
+        "scene_list",
+        "sceneList",
+        "场景列表",
+        "核心场景列表",
+    ),
+}
+SCENE_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "scene_name": ("scene_name", "sceneName", "name", "场景名", "场景名称"),
+    "scene_type": ("scene_type", "sceneType", "type", "场景类型"),
+    "story_function": ("story_function", "storyFunction", "function", "剧情功能", "场景功能"),
+    "scene_time_or_period": ("scene_time_or_period", "sceneTimeOrPeriod", "time", "时间", "时间段"),
+    "weather_or_environment_state": (
+        "weather_or_environment_state",
+        "weatherOrEnvironmentState",
+        "environment_state",
+        "天气或环境状态",
+        "天气环境状态",
+    ),
+    "environment_description": (
+        "environment_description",
+        "environmentDescription",
+        "environment",
+        "环境描述",
+    ),
+    "atmosphere_description": (
+        "atmosphere_description",
+        "atmosphereDescription",
+        "atmosphere",
+        "氛围描述",
+    ),
+    "visual_elements": ("visual_elements", "visualElements", "视觉元素"),
+    "visual_condition_summary": (
+        "visual_condition_summary",
+        "visualConditionSummary",
+        "visual_summary",
+        "视觉条件总结",
+    ),
+    "identity_or_status_requirements": (
+        "identity_or_status_requirements",
+        "identityOrStatusRequirements",
+        "identity_requirements",
+        "身份状态要求",
+    ),
+    "styling_condition_summary": (
+        "styling_condition_summary",
+        "stylingConditionSummary",
+        "styling_summary",
+        "造型条件总结",
+    ),
+    "outfit_requirements": (
+        "outfit_requirements",
+        "outfitRequirements",
+        "服装要求",
+        "造型要求",
+    ),
+    "naming_condition_summary": (
+        "naming_condition_summary",
+        "namingConditionSummary",
+        "naming_summary",
+        "命名条件总结",
+    ),
+    "alias_usage_rules": (
+        "alias_usage_rules",
+        "aliasUsageRules",
+        "alias_rules",
+        "别名使用规则",
+    ),
+    "conflict_potential": (
+        "conflict_potential",
+        "conflictPotential",
+        "conflicts",
+        "冲突潜力",
+    ),
+    "character_interaction_effect": (
+        "character_interaction_effect",
+        "characterInteractionEffect",
+        "interaction_effect",
+        "人物互动影响",
+    ),
+    "worldview_support": (
+        "worldview_support",
+        "worldviewSupport",
+        "世界观支撑",
+    ),
+}
 
 
 @dataclass(slots=True)
@@ -197,7 +432,12 @@ class StageRepairOutcome:
 
 
 def is_repairable_stage_output(stage_name: str) -> bool:
-    return stage_name in {STAGE_WORLDVIEW, STAGE_CHARACTERS}
+    return stage_name in {
+        STAGE_WORLDVIEW,
+        STAGE_CHARACTERS,
+        STAGE_SCENES,
+        STAGE_APPEARANCE_ALIAS_GENERATION,
+    }
 
 
 def repair_stage_output_candidate(
@@ -225,6 +465,21 @@ def repair_stage_output_candidate(
             input_variables=input_variables,
             relaxed=relaxed,
             allow_textual_relaxation=allow_textual_relaxation,
+        )
+    if stage_name == STAGE_SCENES:
+        return _repair_scenes_candidate(
+            candidate,
+            source=source,
+            input_variables=input_variables,
+            relaxed=relaxed,
+            allow_textual_relaxation=allow_textual_relaxation,
+        )
+    if stage_name == STAGE_APPEARANCE_ALIAS_GENERATION:
+        return _repair_appearance_mapping_candidate(
+            candidate,
+            source=source,
+            input_variables=input_variables,
+            relaxed=relaxed,
         )
     return None
 
@@ -267,7 +522,71 @@ def describe_repairable_stage_output_issue(
         return _describe_worldview_output_issue(value)
     if stage_name == STAGE_CHARACTERS and field_name == CHARACTERS_FIELD:
         return _describe_characters_output_issue(value)
+    if stage_name == STAGE_SCENES and field_name == SCENES_FIELD:
+        return _describe_scenes_output_issue(value)
+    if (
+        stage_name == STAGE_APPEARANCE_ALIAS_GENERATION
+        and field_name == APPEARANCE_MAPPING_FIELD
+    ):
+        return describe_appearance_mapping_output_issue(value)
     return None
+
+
+def normalize_appearance_mapping_candidate(value: Any) -> dict[str, Any] | None:
+    body = _normalize_appearance_mapping_body(value)
+    if not isinstance(body, dict):
+        return None
+    return {APPEARANCE_MAPPING_FIELD: body}
+
+
+def describe_appearance_mapping_output_issue(value: Any) -> str | None:
+    issues = _validate_appearance_mapping_contract_shape(value)
+    return issues[0] if issues else None
+
+
+def validate_appearance_mapping_output(value: Any) -> list[str]:
+    issues = _validate_appearance_mapping_contract_shape(value)
+    if issues:
+        return issues
+    return _validate_appearance_mapping_local_review(value)
+
+
+def _repair_appearance_mapping_candidate(
+    candidate: Any,
+    *,
+    source: str,
+    input_variables: dict[str, Any],
+    relaxed: bool,
+) -> StageRepairOutcome | None:
+    del input_variables
+    warnings: list[str] = []
+    alias_hits: dict[str, str] = {}
+    body = _search_stage_body(
+        candidate,
+        wrapper_keys=APPEARANCE_WRAPPER_KEYS,
+        detector=_looks_like_appearance_mapping_body,
+        audit_detector=_looks_like_appearance_mapping_review_json,
+        relaxed=relaxed,
+    )
+    if body is None:
+        return None
+
+    normalized_body = _normalize_appearance_mapping_body(
+        body,
+        warnings=warnings,
+        alias_hits=alias_hits,
+    )
+    if normalized_body is None:
+        return None
+
+    return StageRepairOutcome(
+        payload={APPEARANCE_MAPPING_FIELD: normalized_body},
+        warnings=warnings,
+        alias_hits=alias_hits,
+        used_fallback=False,
+        requires_local_restart=False,
+        mode="local_repair",
+    )
 
 
 def _repair_worldview_candidate(
@@ -361,6 +680,47 @@ def _repair_characters_candidate(
         alias_hits=alias_hits,
         missing_fields=missing_fields,
         requires_local_restart=requires_local_restart,
+    )
+
+
+def _repair_scenes_candidate(
+    candidate: Any,
+    *,
+    source: str,
+    input_variables: dict[str, Any],
+    relaxed: bool,
+    allow_textual_relaxation: bool,
+) -> StageRepairOutcome | None:
+    del allow_textual_relaxation
+    warnings: list[str] = []
+    alias_hits: dict[str, str] = {}
+    missing_fields: list[str] = []
+    body = _search_stage_body(
+        candidate,
+        wrapper_keys=SCENE_WRAPPER_KEYS,
+        detector=_looks_like_scenes_body,
+        audit_detector=_looks_like_scenes_review_json,
+        relaxed=relaxed,
+    )
+    if body is None:
+        return None
+
+    canonical = _canonicalize_scenes_body(
+        body,
+        input_variables=input_variables,
+        warnings=warnings,
+        alias_hits=alias_hits,
+        missing_fields=missing_fields,
+        relaxed=relaxed,
+    )
+    if canonical is None:
+        return None
+    return StageRepairOutcome(
+        payload={SCENES_FIELD: json.dumps(canonical, ensure_ascii=False, indent=2)},
+        warnings=warnings,
+        alias_hits=alias_hits,
+        missing_fields=missing_fields,
+        requires_local_restart=False,
     )
 
 
@@ -572,6 +932,103 @@ def _canonicalize_characters_body(
     ]
     payload = {"character_setting": canonical_setting}
     return payload if _describe_characters_body_issue(payload) is None else None
+
+
+def _canonicalize_scenes_body(
+    body: Any,
+    *,
+    input_variables: dict[str, Any],
+    warnings: list[str],
+    alias_hits: dict[str, str],
+    missing_fields: list[str],
+    relaxed: bool,
+) -> dict[str, Any] | None:
+    normalized = _deep_normalize_candidate(body)
+    setting: dict[str, Any]
+    if isinstance(normalized, dict) and isinstance(normalized.get("scene_setting"), dict):
+        setting = dict(normalized["scene_setting"])
+    elif isinstance(normalized, dict) and _looks_like_scene_setting_dict(normalized):
+        setting = dict(normalized)
+    elif isinstance(normalized, dict) and isinstance(normalized.get("scenes"), list):
+        setting = dict(normalized)
+    elif isinstance(normalized, list):
+        setting = {"scenes": normalized}
+    else:
+        return None
+
+    lowered = _lowered_key_map(setting)
+    canonical_setting: dict[str, Any] = {}
+    for field_name, aliases in SCENE_SETTING_ALIASES.items():
+        actual_key = _match_alias_key(setting, lowered, aliases)
+        if actual_key is None:
+            missing_fields.append(f"scene_setting.{field_name}")
+            continue
+        if actual_key != field_name:
+            alias_hits[f"scene_setting.{field_name}"] = actual_key
+        canonical_setting[field_name] = setting.get(actual_key)
+
+    scenes = _normalize_scene_seed_list(
+        canonical_setting.get("scenes"),
+        input_variables=input_variables,
+    )
+    if not scenes:
+        return None
+
+    normalized_scenes = [
+        _normalize_scene_item(
+            seed,
+            input_variables=input_variables,
+            index=index,
+            warnings=warnings,
+            alias_hits=alias_hits,
+            missing_fields=missing_fields,
+        )
+        for index, seed in enumerate(scenes, start=1)
+        if isinstance(_deep_normalize_candidate(seed), dict)
+    ]
+    normalized_scenes = [item for item in normalized_scenes if item]
+    if len(normalized_scenes) < 3:
+        supplemented = _supplement_scene_items_from_input(
+            normalized_scenes,
+            input_variables=input_variables,
+            warnings=warnings,
+        )
+        normalized_scenes = supplemented
+    if len(normalized_scenes) < 3 and not relaxed:
+        return None
+    if len(normalized_scenes) < 3:
+        return None
+
+    canonical_setting["scene_design_principle"] = _normalize_text_value(
+        canonical_setting.get("scene_design_principle")
+    ) or _scene_setting_placeholder("scene_design_principle", input_variables)
+    canonical_setting["scene_visual_styling_naming_strategy"] = _normalize_text_value(
+        canonical_setting.get("scene_visual_styling_naming_strategy")
+    ) or _scene_setting_placeholder("scene_visual_styling_naming_strategy", input_variables)
+    canonical_setting["scenes"] = normalized_scenes
+    payload = {"scene_setting": canonical_setting}
+    return payload if _describe_scenes_body_issue(payload) is None else None
+
+
+def _normalize_scene_seed_list(
+    value: Any,
+    *,
+    input_variables: dict[str, Any],
+) -> list[Any]:
+    normalized = _deep_normalize_candidate(value)
+    if isinstance(normalized, list):
+        return normalized
+    if isinstance(normalized, dict):
+        if isinstance(normalized.get("scenes"), list):
+            return list(normalized.get("scenes") or [])
+        if _looks_like_single_scene_dict(normalized):
+            return [normalized]
+    if normalized in (None, "", []):
+        user_scenes = _jsonish_dict(input_variables.get("user_scenes"))
+        core_locations = user_scenes.get("core_locations")
+        if isinstance(core_locations, list):
+            return [item for item in core_locations if isinstance(item, dict)]
+    return []
 
 
 def _normalize_character_seed_list(
@@ -1162,6 +1619,329 @@ def _fallback_character_name(input_variables: dict[str, Any], index: int) -> str
     return "主角" if index == 1 else f"角色{index}"
 
 
+def _normalize_scene_item(
+    seed: Any,
+    *,
+    input_variables: dict[str, Any],
+    index: int,
+    warnings: list[str],
+    alias_hits: dict[str, str],
+    missing_fields: list[str],
+) -> dict[str, Any]:
+    raw = _deep_normalize_candidate(seed)
+    if not isinstance(raw, dict):
+        return {}
+
+    lowered = _lowered_key_map(raw)
+    scene_name = _extract_scene_field(raw, lowered, "scene_name", alias_hits)
+    scene_type = _extract_scene_field(raw, lowered, "scene_type", alias_hits)
+    story_function = _extract_scene_field(raw, lowered, "story_function", alias_hits)
+    scene_missing = False
+
+    for field_name in SCENE_MIN_REQUIRED_FIELDS:
+        if _extract_scene_raw(raw, lowered, field_name) in (None, "", [], {}):
+            missing_fields.append(f"scene_setting.scenes[{index}].{field_name}")
+            scene_missing = True
+
+    location_seed = _scene_location_seed(input_variables, index)
+    scene_name = scene_name or _normalize_text_value(location_seed.get("name")) or f"待补全场景{index}"
+    scene_type = scene_type or "待补全：补充场景类型"
+    story_function = (
+        story_function
+        or _normalize_text_value(location_seed.get("function"))
+        or "待补全：补充场景功能"
+    )
+
+    canonical: dict[str, Any] = {
+        "scene_name": scene_name,
+        "scene_type": scene_type,
+        "story_function": story_function,
+        "scene_time_or_period": _extract_scene_field(raw, lowered, "scene_time_or_period", alias_hits)
+        or f"待补全：补充{scene_name}的时间或时段",
+        "weather_or_environment_state": _extract_scene_field(
+            raw,
+            lowered,
+            "weather_or_environment_state",
+            alias_hits,
+        )
+        or f"待补全：补充{scene_name}的天气或环境状态",
+        "environment_description": _extract_scene_field(raw, lowered, "environment_description", alias_hits)
+        or f"待补全：补充{scene_name}的环境描述",
+        "atmosphere_description": _extract_scene_field(raw, lowered, "atmosphere_description", alias_hits)
+        or _normalize_text_value(_jsonish_dict(input_variables.get("user_scenes")).get("overall_atmosphere"))
+        or f"待补全：补充{scene_name}的氛围描述",
+        "visual_elements": _normalize_scene_string_list(
+            _extract_scene_raw(raw, lowered, "visual_elements"),
+            fallback_label=f"{scene_name}的视觉元素",
+            minimum=2,
+        ),
+        "visual_condition_summary": _extract_scene_field(raw, lowered, "visual_condition_summary", alias_hits)
+        or f"待补全：补充{scene_name}的视觉条件总结",
+        "identity_or_status_requirements": _normalize_scene_string_list(
+            _extract_scene_raw(raw, lowered, "identity_or_status_requirements"),
+            fallback_label=f"{scene_name}的人物身份状态要求",
+            minimum=1,
+        ),
+        "styling_condition_summary": _extract_scene_field(raw, lowered, "styling_condition_summary", alias_hits)
+        or f"待补全：补充{scene_name}的造型条件总结",
+        "outfit_requirements": _normalize_scene_outfit_requirements(
+            _extract_scene_raw(raw, lowered, "outfit_requirements"),
+            input_variables=input_variables,
+            scene_name=scene_name,
+        ),
+        "naming_condition_summary": _extract_scene_field(raw, lowered, "naming_condition_summary", alias_hits)
+        or f"待补全：补充{scene_name}的命名条件总结",
+        "alias_usage_rules": _normalize_scene_alias_usage_rules(
+            _extract_scene_raw(raw, lowered, "alias_usage_rules"),
+            input_variables=input_variables,
+            scene_name=scene_name,
+        ),
+        "conflict_potential": _normalize_scene_string_list(
+            _extract_scene_raw(raw, lowered, "conflict_potential"),
+            fallback_label=_normalize_text_value(location_seed.get("conflict_soil")) or f"{scene_name}的冲突潜力",
+            minimum=1,
+        ),
+        "character_interaction_effect": _extract_scene_field(
+            raw,
+            lowered,
+            "character_interaction_effect",
+            alias_hits,
+        ) or f"待补全：补充{scene_name}对人物互动方式的影响",
+        "worldview_support": _extract_scene_field(raw, lowered, "worldview_support", alias_hits)
+        or f"待补全：说明{scene_name}如何支撑世界观",
+    }
+
+    for key, value in raw.items():
+        if key in canonical or value in (None, "", [], {}):
+            continue
+        canonical[str(key)] = value
+
+    if scene_missing:
+        warnings.append(f"scenes 第 {index} 个场景存在字段缺失，已按本地契约补齐。")
+    return canonical
+
+
+def _extract_scene_field(
+    raw: dict[str, Any],
+    lowered: dict[str, str],
+    field_name: str,
+    alias_hits: dict[str, str],
+) -> str:
+    actual_key = _match_alias_key(raw, lowered, SCENE_FIELD_ALIASES[field_name])
+    if actual_key is None:
+        return ""
+    if actual_key != field_name:
+        alias_hits[f"scenes.{field_name}"] = actual_key
+    return _normalize_text_value(raw.get(actual_key))
+
+
+def _extract_scene_raw(
+    raw: dict[str, Any],
+    lowered: dict[str, str],
+    field_name: str,
+) -> Any:
+    actual_key = _match_alias_key(raw, lowered, SCENE_FIELD_ALIASES[field_name])
+    return raw.get(actual_key) if actual_key is not None else None
+
+
+def _normalize_scene_string_list(
+    value: Any,
+    *,
+    fallback_label: str,
+    minimum: int,
+) -> list[str]:
+    items = _normalize_string_list(value)
+    while len(items) < minimum:
+        items.append(f"待补全：补充{fallback_label}")
+    return _dedupe_strings(items)[: max(minimum, len(items))]
+
+
+def _normalize_scene_outfit_requirements(
+    value: Any,
+    *,
+    input_variables: dict[str, Any],
+    scene_name: str,
+) -> list[dict[str, Any]]:
+    normalized = _deep_normalize_candidate(value)
+    items = normalized if isinstance(normalized, list) else []
+    result: list[dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, dict):
+            canonical_name = _extract_any_text(item, ("canonical_name", "character_name", "name")) or "待补全角色"
+            recommended_alias_name = _extract_any_text(
+                item,
+                ("recommended_alias_name", "alias_name"),
+            ) or f"{canonical_name}（{scene_name}）"
+            result.append(
+                {
+                    "character_id": _extract_any_text(item, ("character_id",)) or canonical_name,
+                    "canonical_name": canonical_name,
+                    "recommended_alias_name": recommended_alias_name,
+                    "identity_or_status": _extract_any_text(item, ("identity_or_status", "identity"))
+                    or "待补全：补充身份状态",
+                    "outfit_requirement": _extract_any_text(item, ("outfit_requirement", "requirement"))
+                    or "待补全：补充服装要求",
+                    "visual_focus": _extract_any_text(item, ("visual_focus", "focus"))
+                    or "待补全：补充视觉重点",
+                    "must_use_alias_when_triggered": bool(item.get("must_use_alias_when_triggered", False)),
+                    "trigger_reason": _extract_any_text(item, ("trigger_reason", "reason"))
+                    or "待补全：补充触发原因",
+                    "forbidden_fallback_names": _normalize_string_list(item.get("forbidden_fallback_names"))
+                    or ["男主", "女主", "反派", "配角"],
+                }
+            )
+            continue
+        text = _normalize_text_value(item)
+        if not text:
+            continue
+        seed = _scene_character_seed(input_variables, 1)
+        canonical_name = seed.get("character_name") or "待补全角色"
+        result.append(
+            {
+                "character_id": canonical_name,
+                "canonical_name": canonical_name,
+                "recommended_alias_name": f"{canonical_name}（{scene_name}）",
+                "identity_or_status": "待补全：补充身份状态",
+                "outfit_requirement": text,
+                "visual_focus": f"待补全：补充{canonical_name}在{scene_name}的视觉重点",
+                "must_use_alias_when_triggered": False,
+                "trigger_reason": f"待补全：补充{canonical_name}在{scene_name}的服装触发原因",
+                "forbidden_fallback_names": ["男主", "女主", "反派", "配角"],
+            }
+        )
+    if result:
+        return result
+
+    seed = _scene_character_seed(input_variables, 1)
+    canonical_name = seed.get("character_name") or "待补全角色"
+    return [
+        {
+            "character_id": canonical_name,
+            "canonical_name": canonical_name,
+            "recommended_alias_name": f"{canonical_name}（{scene_name}）",
+            "identity_or_status": "待补全：补充身份状态",
+            "outfit_requirement": f"待补全：补充{canonical_name}在{scene_name}的服装要求",
+            "visual_focus": f"待补全：补充{canonical_name}在{scene_name}的视觉重点",
+            "must_use_alias_when_triggered": False,
+            "trigger_reason": f"待补全：补充{canonical_name}在{scene_name}的触发原因",
+            "forbidden_fallback_names": ["男主", "女主", "反派", "配角"],
+        }
+    ]
+
+
+def _normalize_scene_alias_usage_rules(
+    value: Any,
+    *,
+    input_variables: dict[str, Any],
+    scene_name: str,
+) -> list[dict[str, Any]]:
+    normalized = _deep_normalize_candidate(value)
+    items = normalized if isinstance(normalized, list) else []
+    result: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        canonical_name = _extract_any_text(item, ("canonical_name", "character_name", "name")) or "待补全角色"
+        result.append(
+            {
+                "character_id": _extract_any_text(item, ("character_id",)) or canonical_name,
+                "canonical_name": canonical_name,
+                "recommended_alias_name": _extract_any_text(
+                    item,
+                    ("recommended_alias_name", "alias_name"),
+                ) or f"{canonical_name}（{scene_name}）",
+                "usage_condition": _extract_any_text(item, ("usage_condition", "condition"))
+                or f"待补全：补充{canonical_name}在{scene_name}的别名使用条件",
+                "fallback_allowed": bool(item.get("fallback_allowed", False)),
+                "reason": _extract_any_text(item, ("reason",))
+                or f"待补全：补充{canonical_name}在{scene_name}使用该 alias 的原因",
+            }
+        )
+    if result:
+        return result
+
+    seed = _scene_character_seed(input_variables, 1)
+    canonical_name = seed.get("character_name") or "待补全角色"
+    return [
+        {
+            "character_id": canonical_name,
+            "canonical_name": canonical_name,
+            "recommended_alias_name": f"{canonical_name}（{scene_name}）",
+            "usage_condition": f"待补全：补充{canonical_name}在{scene_name}的别名使用条件",
+            "fallback_allowed": False,
+            "reason": f"待补全：补充{canonical_name}在{scene_name}使用 alias 的原因",
+        }
+    ]
+
+
+def _supplement_scene_items_from_input(
+    existing: list[dict[str, Any]],
+    *,
+    input_variables: dict[str, Any],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    if len(existing) >= 3:
+        return existing
+    seeds = _scene_location_seeds(input_variables)
+    used_names = {str(item.get("scene_name") or "").strip() for item in existing}
+    next_index = len(existing) + 1
+    for seed in seeds:
+        name = _normalize_text_value(seed.get("name"))
+        if not name or name in used_names:
+            continue
+        existing.append(
+            _normalize_scene_item(
+                seed,
+                input_variables=input_variables,
+                index=next_index,
+                warnings=warnings,
+                alias_hits={},
+                missing_fields=[],
+            )
+        )
+        used_names.add(name)
+        next_index += 1
+        if len(existing) >= 3:
+            warnings.append("scenes 场景数量不足，已根据 user_scenes.core_locations 补足到至少 3 个。")
+            break
+    return existing
+
+
+def _scene_character_seed(input_variables: dict[str, Any], index: int) -> dict[str, Any]:
+    seeds = _character_seeds_from_input(input_variables.get("user_characters"))
+    if 0 < index <= len(seeds) and isinstance(seeds[index - 1], dict):
+        return seeds[index - 1]
+    return {}
+
+
+def _scene_location_seeds(input_variables: dict[str, Any]) -> list[dict[str, Any]]:
+    user_scenes = _jsonish_dict(input_variables.get("user_scenes"))
+    core_locations = user_scenes.get("core_locations")
+    if not isinstance(core_locations, list):
+        return []
+    return [item for item in core_locations if isinstance(item, dict)]
+
+
+def _scene_location_seed(input_variables: dict[str, Any], index: int) -> dict[str, Any]:
+    seeds = _scene_location_seeds(input_variables)
+    if 0 < index <= len(seeds):
+        return seeds[index - 1]
+    return {}
+
+
+def _scene_setting_placeholder(field_name: str, input_variables: dict[str, Any]) -> str:
+    user_scenes = _jsonish_dict(input_variables.get("user_scenes"))
+    atmosphere = _normalize_text_value(user_scenes.get("overall_atmosphere"))
+    rules = _normalize_text_value(user_scenes.get("rules"))
+    if field_name == "scene_design_principle":
+        return "待补全：围绕故事大纲、核心场景与分集计划统一场景功能分工"
+    if field_name == "scene_visual_styling_naming_strategy":
+        if atmosphere or rules:
+            return f"待补全：围绕{atmosphere or '整体氛围'}与{rules or '场景规则'}统一视觉/造型/命名策略"
+        return "待补全：统一视觉条件、造型条件和命名条件的场景策略"
+    return f"待补全：补充 {field_name}"
+
+
 def _extract_character_field(
     raw: dict[str, Any],
     lowered: dict[str, str],
@@ -1183,6 +1963,541 @@ def _extract_character_raw(
 ) -> Any:
     actual_key = _match_alias_key(raw, lowered, CHARACTER_FIELD_ALIASES[field_name])
     return raw.get(actual_key) if actual_key is not None else None
+
+
+def _normalize_appearance_mapping_body(
+    value: Any,
+    *,
+    warnings: list[str] | None = None,
+    alias_hits: dict[str, str] | None = None,
+) -> dict[str, Any] | None:
+    if warnings is None:
+        warnings = []
+    if alias_hits is None:
+        alias_hits = {}
+    candidate = _deep_normalize_candidate(value)
+    if isinstance(candidate, dict):
+        for wrapper_key in APPEARANCE_WRAPPER_KEYS:
+            nested = candidate.get(wrapper_key)
+            if nested is None:
+                continue
+            normalized_nested = _normalize_appearance_mapping_body(
+                nested,
+                warnings=warnings,
+                alias_hits=alias_hits,
+            )
+            if isinstance(normalized_nested, dict):
+                return normalized_nested
+
+    if not isinstance(candidate, dict):
+        return None
+    if not _looks_like_appearance_mapping_body(candidate):
+        return None
+
+    return _canonicalize_appearance_mapping_body(
+        candidate,
+        warnings=warnings,
+        alias_hits=alias_hits,
+    )
+
+
+def _canonicalize_appearance_mapping_body(
+    value: dict[str, Any],
+    *,
+    warnings: list[str],
+    alias_hits: dict[str, str],
+) -> dict[str, Any]:
+    lowered = _lowered_key_map(value)
+    normalized: dict[str, Any] = {}
+    for field_name, aliases in APPEARANCE_TOP_LEVEL_ALIASES.items():
+        actual_key = _match_alias_key(value, lowered, aliases)
+        if actual_key is None:
+            continue
+        if actual_key != field_name:
+            alias_hits[f"appearance_mapping.{field_name}"] = actual_key
+        raw = value.get(actual_key)
+        if field_name == "characters":
+            normalized[field_name] = _normalize_appearance_characters(raw, warnings, alias_hits)
+        elif field_name == "episode_level_usage_plan":
+            normalized[field_name] = _normalize_appearance_episode_usage_plan(
+                raw,
+                warnings,
+                alias_hits,
+            )
+        elif field_name == "scene_level_usage_plan":
+            normalized[field_name] = _normalize_appearance_scene_usage_plan(
+                raw,
+                warnings,
+                alias_hits,
+            )
+        elif field_name == "special_naming_rules":
+            normalized[field_name] = _normalize_string_list(raw)
+        else:
+            normalized[field_name] = _normalize_text_value(raw)
+    return normalized
+
+
+def _normalize_appearance_characters(
+    value: Any,
+    warnings: list[str],
+    alias_hits: dict[str, str],
+) -> list[dict[str, Any]]:
+    normalized = _deep_normalize_candidate(value)
+    items = normalized if isinstance(normalized, list) else []
+    result: list[dict[str, Any]] = []
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+        lowered = _lowered_key_map(item)
+        character: dict[str, Any] = {}
+        for field_name, aliases in APPEARANCE_CHARACTER_ALIASES.items():
+            actual_key = _match_alias_key(item, lowered, aliases)
+            if actual_key is None:
+                continue
+            if actual_key != field_name:
+                alias_hits[f"appearance_mapping.characters[{index}].{field_name}"] = actual_key
+            raw = item.get(actual_key)
+            if field_name == "same_person_anchor":
+                character[field_name] = _normalize_same_person_anchor_for_appearance(
+                    raw,
+                    index=index,
+                    alias_hits=alias_hits,
+                )
+            elif field_name == "forbidden_generic_names":
+                character[field_name] = _normalize_string_list(raw)
+            elif field_name == "outfit_variants":
+                character[field_name] = _normalize_appearance_outfit_variants(
+                    raw,
+                    index=index,
+                    warnings=warnings,
+                    alias_hits=alias_hits,
+                )
+            else:
+                character[field_name] = _normalize_text_value(raw)
+        result.append(character)
+    return result
+
+
+def _normalize_same_person_anchor_for_appearance(
+    value: Any,
+    *,
+    index: int,
+    alias_hits: dict[str, str],
+) -> dict[str, Any]:
+    normalized = _deep_normalize_candidate(value)
+    raw = normalized if isinstance(normalized, dict) else {}
+    lowered = _lowered_key_map(raw)
+    result: dict[str, Any] = {}
+    for field_name, aliases in APPEARANCE_SAME_PERSON_ANCHOR_ALIASES.items():
+        actual_key = _match_alias_key(raw, lowered, aliases)
+        if actual_key is None:
+            continue
+        if actual_key != field_name:
+            alias_hits[
+                f"appearance_mapping.characters[{index}].same_person_anchor.{field_name}"
+            ] = actual_key
+        value_at_key = raw.get(actual_key)
+        if field_name == "unchanged_core_impression":
+            result[field_name] = _normalize_text_value(value_at_key)
+        else:
+            result[field_name] = _normalize_string_list(value_at_key)
+    return result
+
+
+def _normalize_appearance_outfit_variants(
+    value: Any,
+    *,
+    index: int,
+    warnings: list[str],
+    alias_hits: dict[str, str],
+) -> list[dict[str, Any]]:
+    del warnings
+    normalized = _deep_normalize_candidate(value)
+    items = normalized if isinstance(normalized, list) else []
+    result: list[dict[str, Any]] = []
+    for variant_index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+        lowered = _lowered_key_map(item)
+        variant: dict[str, Any] = {}
+        for field_name, aliases in APPEARANCE_VARIANT_ALIASES.items():
+            actual_key = _match_alias_key(item, lowered, aliases)
+            if actual_key is None:
+                continue
+            if actual_key != field_name:
+                alias_hits[
+                    f"appearance_mapping.characters[{index}].outfit_variants[{variant_index}].{field_name}"
+                ] = actual_key
+            raw = item.get(actual_key)
+            if field_name == "visual_keypoints":
+                variant[field_name] = _normalize_string_list(raw)
+            elif field_name == "scene_trigger_rules":
+                variant[field_name] = _normalize_appearance_scene_trigger_rules(
+                    raw,
+                    character_index=index,
+                    variant_index=variant_index,
+                    alias_hits=alias_hits,
+                )
+            elif field_name in {"must_use_when_triggered", "fallback_allowed"}:
+                variant[field_name] = raw
+            else:
+                variant[field_name] = _normalize_text_value(raw)
+        result.append(variant)
+    return result
+
+
+def _normalize_appearance_scene_trigger_rules(
+    value: Any,
+    *,
+    character_index: int,
+    variant_index: int,
+    alias_hits: dict[str, str],
+) -> dict[str, Any]:
+    normalized = _deep_normalize_candidate(value)
+    raw = normalized if isinstance(normalized, dict) else {}
+    lowered = _lowered_key_map(raw)
+    result: dict[str, Any] = {}
+    for field_name, aliases in APPEARANCE_SCENE_TRIGGER_RULE_ALIASES.items():
+        actual_key = _match_alias_key(raw, lowered, aliases)
+        if actual_key is None:
+            continue
+        if actual_key != field_name:
+            alias_hits[
+                "appearance_mapping.characters"
+                f"[{character_index}].outfit_variants[{variant_index}].scene_trigger_rules.{field_name}"
+            ] = actual_key
+        result[field_name] = _normalize_string_list(raw.get(actual_key))
+    return result
+
+
+def _normalize_appearance_episode_usage_plan(
+    value: Any,
+    warnings: list[str],
+    alias_hits: dict[str, str],
+) -> list[dict[str, Any]]:
+    del warnings
+    normalized = _deep_normalize_candidate(value)
+    items = normalized if isinstance(normalized, list) else []
+    result: list[dict[str, Any]] = []
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+        lowered = _lowered_key_map(item)
+        episode_range_key = _match_alias_key(
+            item,
+            lowered,
+            ("episode_range", "episodeRange"),
+        )
+        aliases_key = _match_alias_key(
+            item,
+            lowered,
+            ("main_character_aliases", "mainCharacterAliases"),
+        )
+        entry = {
+            "episode_range": _normalize_text_value(item.get(episode_range_key))
+            if episode_range_key is not None
+            else "",
+            "main_character_aliases": _normalize_appearance_usage_alias_items(
+                item.get(aliases_key),
+                alias_name_field="recommended_alias_name",
+            ),
+        }
+        if episode_range_key is not None and episode_range_key != "episode_range":
+            alias_hits[f"appearance_mapping.episode_level_usage_plan[{index}].episode_range"] = episode_range_key
+        if aliases_key is not None and aliases_key != "main_character_aliases":
+            alias_hits[
+                f"appearance_mapping.episode_level_usage_plan[{index}].main_character_aliases"
+            ] = aliases_key
+        result.append(entry)
+    return result
+
+
+def _normalize_appearance_scene_usage_plan(
+    value: Any,
+    warnings: list[str],
+    alias_hits: dict[str, str],
+) -> list[dict[str, Any]]:
+    del warnings
+    normalized = _deep_normalize_candidate(value)
+    items = normalized if isinstance(normalized, list) else []
+    result: list[dict[str, Any]] = []
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+        lowered = _lowered_key_map(item)
+        scene_name_key = _match_alias_key(item, lowered, ("scene_name", "sceneName"))
+        usage_key = _match_alias_key(
+            item,
+            lowered,
+            ("expected_alias_usage", "expectedAliasUsage"),
+        )
+        entry = {
+            "scene_name": _normalize_text_value(item.get(scene_name_key))
+            if scene_name_key is not None
+            else "",
+            "expected_alias_usage": _normalize_appearance_usage_alias_items(
+                item.get(usage_key),
+                alias_name_field="alias_name",
+            ),
+        }
+        if scene_name_key is not None and scene_name_key != "scene_name":
+            alias_hits[f"appearance_mapping.scene_level_usage_plan[{index}].scene_name"] = scene_name_key
+        if usage_key is not None and usage_key != "expected_alias_usage":
+            alias_hits[
+                f"appearance_mapping.scene_level_usage_plan[{index}].expected_alias_usage"
+            ] = usage_key
+        result.append(entry)
+    return result
+
+
+def _normalize_appearance_usage_alias_items(
+    value: Any,
+    *,
+    alias_name_field: str,
+) -> list[dict[str, Any]]:
+    normalized = _deep_normalize_candidate(value)
+    items = normalized if isinstance(normalized, list) else []
+    result: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        lowered = _lowered_key_map(item)
+        character_id_key = _match_alias_key(item, lowered, ("character_id", "characterId"))
+        alias_key = _match_alias_key(
+            item,
+            lowered,
+            (alias_name_field, "recommended_alias_name", "recommendedAliasName", "alias_name", "aliasName"),
+        )
+        reason_key = _match_alias_key(item, lowered, ("reason",))
+        result.append(
+            {
+                "character_id": _normalize_text_value(item.get(character_id_key))
+                if character_id_key is not None
+                else "",
+                alias_name_field: _normalize_text_value(item.get(alias_key))
+                if alias_key is not None
+                else "",
+                "reason": _normalize_text_value(item.get(reason_key))
+                if reason_key is not None
+                else "",
+            }
+        )
+    return result
+
+
+def _looks_like_appearance_mapping_body(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if isinstance(value.get(APPEARANCE_MAPPING_FIELD), dict):
+        return True
+    lowered = {str(key).lower() for key in value.keys()}
+    alias_set = {
+        alias.lower()
+        for aliases in APPEARANCE_TOP_LEVEL_ALIASES.values()
+        for alias in aliases
+    }
+    return bool(lowered & alias_set)
+
+
+def _looks_like_appearance_mapping_review_json(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    keys = {str(key) for key in value.keys()}
+    review_keys = {
+        "passed",
+        "approved",
+        "blocking_issues",
+        "non_blocking_issues",
+        "rewrite_required",
+        "summary",
+        "suggestions",
+        "issues",
+        "patches",
+    }
+    return bool(keys & review_keys) and not _looks_like_appearance_mapping_body(value)
+
+
+def _appearance_mapping_object(value: Any) -> dict[str, Any] | None:
+    normalized_body = _normalize_appearance_mapping_body(value)
+    if isinstance(normalized_body, dict):
+        return normalized_body
+    normalized = _parse_json_object_string(value)
+    if not isinstance(normalized, dict):
+        return None
+    if isinstance(normalized.get(APPEARANCE_MAPPING_FIELD), dict):
+        return normalized.get(APPEARANCE_MAPPING_FIELD)
+    if _looks_like_appearance_mapping_body(normalized):
+        return normalized
+    return None
+
+
+def _validate_appearance_mapping_contract_shape(value: Any) -> list[str]:
+    mapping = _appearance_mapping_object(value)
+    if not isinstance(mapping, dict):
+        return ["必须是可归一化为 appearance_mapping 的 JSON object"]
+
+    issues: list[str] = []
+    for key in ("mapping_principle", "global_naming_style"):
+        if not str(mapping.get(key) or "").strip():
+            issues.append(f"appearance_mapping.{key} 不能为空")
+
+    characters = mapping.get("characters")
+    if not isinstance(characters, list) or not characters:
+        issues.append("appearance_mapping.characters 必须是非空数组")
+    episode_usage_plan = mapping.get("episode_level_usage_plan")
+    if not isinstance(episode_usage_plan, list):
+        issues.append("appearance_mapping.episode_level_usage_plan 必须是数组")
+    scene_usage_plan = mapping.get("scene_level_usage_plan")
+    if not isinstance(scene_usage_plan, list):
+        issues.append("appearance_mapping.scene_level_usage_plan 必须是数组")
+    if "special_naming_rules" not in mapping:
+        issues.append("appearance_mapping.special_naming_rules 缺失")
+    elif not isinstance(mapping.get("special_naming_rules"), list):
+        issues.append("appearance_mapping.special_naming_rules 必须是数组")
+
+    if not isinstance(characters, list):
+        return issues
+
+    for index, item in enumerate(characters, start=1):
+        prefix = f"appearance_mapping.characters[{index}]"
+        if not isinstance(item, dict):
+            issues.append(f"{prefix} 必须是 object")
+            continue
+        if not str(item.get("character_id") or "").strip():
+            issues.append(f"{prefix}.character_id 不能为空")
+        if not str(item.get("canonical_name") or "").strip():
+            issues.append(f"{prefix}.canonical_name 不能为空")
+        if not str(item.get("story_role") or "").strip():
+            issues.append(f"{prefix}.story_role 不能为空")
+        if not str(item.get("default_name") or "").strip():
+            issues.append(f"{prefix}.default_name 不能为空")
+
+        same_person_anchor = item.get("same_person_anchor")
+        if not isinstance(same_person_anchor, dict):
+            issues.append(f"{prefix}.same_person_anchor 必须是 object")
+        else:
+            if not _normalize_string_list(same_person_anchor.get("stable_appearance_traits")):
+                issues.append(f"{prefix}.same_person_anchor.stable_appearance_traits 必须是非空数组")
+            if not _normalize_string_list(same_person_anchor.get("stable_recognition_points")):
+                issues.append(f"{prefix}.same_person_anchor.stable_recognition_points 必须是非空数组")
+            if not str(same_person_anchor.get("unchanged_core_impression") or "").strip():
+                issues.append(f"{prefix}.same_person_anchor.unchanged_core_impression 不能为空")
+
+        forbidden_names = item.get("forbidden_generic_names")
+        if not isinstance(forbidden_names, list) or not _normalize_string_list(forbidden_names):
+            issues.append(f"{prefix}.forbidden_generic_names 必须是非空数组")
+
+        variants = item.get("outfit_variants")
+        if not isinstance(variants, list) or not variants:
+            issues.append(f"{prefix}.outfit_variants 必须是非空数组")
+            continue
+
+        for variant_index, variant in enumerate(variants, start=1):
+            variant_prefix = f"{prefix}.outfit_variants[{variant_index}]"
+            if not isinstance(variant, dict):
+                issues.append(f"{variant_prefix} 必须是 object")
+                continue
+            for key in (
+                "variant_id",
+                "alias_name",
+                "applicable_identity_state",
+                "outfit_type",
+                "outfit_description",
+                "episode_range_hint",
+                "usage_rule",
+                "same_person_confirmation",
+            ):
+                if not str(variant.get(key) or "").strip():
+                    issues.append(f"{variant_prefix}.{key} 不能为空")
+            alias_name = str(variant.get("alias_name") or "").strip()
+            if alias_name and ("【" not in alias_name or "】" not in alias_name):
+                issues.append(f"{variant_prefix}.alias_name 必须包含中文方括号【】")
+            if not _normalize_string_list(variant.get("visual_keypoints")):
+                issues.append(f"{variant_prefix}.visual_keypoints 必须是非空数组")
+
+            trigger_rules = variant.get("scene_trigger_rules")
+            if not isinstance(trigger_rules, dict):
+                issues.append(f"{variant_prefix}.scene_trigger_rules 必须是 object")
+            else:
+                for key in (
+                    "scene_names",
+                    "scene_types",
+                    "environment_or_time",
+                    "status_conditions",
+                ):
+                    if key not in trigger_rules:
+                        issues.append(f"{variant_prefix}.scene_trigger_rules.{key} 缺失")
+                    elif not isinstance(trigger_rules.get(key), list):
+                        issues.append(f"{variant_prefix}.scene_trigger_rules.{key} 必须是数组")
+
+            for bool_key in ("must_use_when_triggered", "fallback_allowed"):
+                if not isinstance(variant.get(bool_key), bool):
+                    issues.append(f"{variant_prefix}.{bool_key} 必须是 boolean")
+    return issues
+
+
+def _validate_appearance_mapping_local_review(value: Any) -> list[str]:
+    mapping = _appearance_mapping_object(value)
+    if not isinstance(mapping, dict):
+        return ["必须是可归一化为 appearance_mapping 的 JSON object"]
+
+    issues: list[str] = []
+    episode_usage_plan = mapping.get("episode_level_usage_plan")
+    if isinstance(episode_usage_plan, list):
+        if not episode_usage_plan:
+            issues.append("appearance_mapping.episode_level_usage_plan 不能为空")
+        for index, item in enumerate(episode_usage_plan, start=1):
+            prefix = f"appearance_mapping.episode_level_usage_plan[{index}]"
+            if not isinstance(item, dict):
+                issues.append(f"{prefix} 必须是 object")
+                continue
+            if not str(item.get("episode_range") or "").strip():
+                issues.append(f"{prefix}.episode_range 不能为空")
+            aliases = item.get("main_character_aliases")
+            if not isinstance(aliases, list) or not aliases:
+                issues.append(f"{prefix}.main_character_aliases 必须是非空数组")
+                continue
+            for alias_index, alias_item in enumerate(aliases, start=1):
+                alias_prefix = f"{prefix}.main_character_aliases[{alias_index}]"
+                if not isinstance(alias_item, dict):
+                    issues.append(f"{alias_prefix} 必须是 object")
+                    continue
+                alias_name = str(alias_item.get("recommended_alias_name") or "").strip()
+                if not alias_name:
+                    issues.append(f"{alias_prefix}.recommended_alias_name 不能为空")
+                elif "【" not in alias_name or "】" not in alias_name:
+                    issues.append(f"{alias_prefix}.recommended_alias_name 必须包含中文方括号【】")
+                if not str(alias_item.get("reason") or "").strip():
+                    issues.append(f"{alias_prefix}.reason 不能为空")
+
+    scene_usage_plan = mapping.get("scene_level_usage_plan")
+    if isinstance(scene_usage_plan, list):
+        if not scene_usage_plan:
+            issues.append("appearance_mapping.scene_level_usage_plan 不能为空")
+        for index, item in enumerate(scene_usage_plan, start=1):
+            prefix = f"appearance_mapping.scene_level_usage_plan[{index}]"
+            if not isinstance(item, dict):
+                issues.append(f"{prefix} 必须是 object")
+                continue
+            if not str(item.get("scene_name") or "").strip():
+                issues.append(f"{prefix}.scene_name 不能为空")
+            aliases = item.get("expected_alias_usage")
+            if not isinstance(aliases, list) or not aliases:
+                issues.append(f"{prefix}.expected_alias_usage 必须是非空数组")
+                continue
+            for alias_index, alias_item in enumerate(aliases, start=1):
+                alias_prefix = f"{prefix}.expected_alias_usage[{alias_index}]"
+                if not isinstance(alias_item, dict):
+                    issues.append(f"{alias_prefix} 必须是 object")
+                    continue
+                alias_name = str(alias_item.get("alias_name") or "").strip()
+                if not alias_name:
+                    issues.append(f"{alias_prefix}.alias_name 不能为空")
+                elif "【" not in alias_name or "】" not in alias_name:
+                    issues.append(f"{alias_prefix}.alias_name 必须包含中文方括号【】")
+                if not str(alias_item.get("reason") or "").strip():
+                    issues.append(f"{alias_prefix}.reason 不能为空")
+    return issues
 
 
 def _looks_like_worldview_body(value: Any) -> bool:
@@ -1209,6 +2524,18 @@ def _looks_like_character_body(value: Any) -> bool:
     return False
 
 
+def _looks_like_scenes_body(value: Any) -> bool:
+    if isinstance(value, dict) and isinstance(value.get("scene_setting"), dict):
+        return True
+    if isinstance(value, dict) and _looks_like_scene_setting_dict(value):
+        return True
+    if isinstance(value, dict) and isinstance(value.get("scenes"), list):
+        return True
+    if isinstance(value, list):
+        return any(isinstance(item, dict) for item in value)
+    return False
+
+
 def _looks_like_character_setting_dict(value: dict[str, Any]) -> bool:
     lowered = {str(key).lower() for key in value.keys()}
     alias_set = {
@@ -1224,6 +2551,21 @@ def _looks_like_single_character_dict(value: dict[str, Any]) -> bool:
     return any(alias.lower() in lowered for alias in CHARACTER_FIELD_ALIASES["character_name"])
 
 
+def _looks_like_scene_setting_dict(value: dict[str, Any]) -> bool:
+    lowered = {str(key).lower() for key in value.keys()}
+    alias_set = {
+        alias.lower()
+        for aliases in SCENE_SETTING_ALIASES.values()
+        for alias in aliases
+    }
+    return bool(lowered & alias_set)
+
+
+def _looks_like_single_scene_dict(value: dict[str, Any]) -> bool:
+    lowered = {str(key).lower() for key in value.keys()}
+    return any(alias.lower() in lowered for alias in SCENE_FIELD_ALIASES["scene_name"])
+
+
 def _looks_like_worldview_review_json(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
@@ -1237,6 +2579,23 @@ def _looks_like_characters_review_json(value: Any) -> bool:
     keys = {str(key) for key in value.keys()}
     review_keys = {"passed", "approved", "blocking_issues", "non_blocking_issues", "rewrite_required", "summary", "suggestions"}
     return bool(keys & review_keys) and not _looks_like_character_body(value)
+
+
+def _looks_like_scenes_review_json(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    keys = {str(key) for key in value.keys()}
+    review_keys = {
+        "passed",
+        "approved",
+        "blocking_issues",
+        "non_blocking_issues",
+        "rewrite_required",
+        "summary",
+        "suggestions",
+        "issues",
+    }
+    return bool(keys & review_keys) and not _looks_like_scenes_body(value)
 
 
 def _describe_worldview_output_issue(value: Any) -> str | None:
@@ -1264,6 +2623,13 @@ def _describe_characters_output_issue(value: Any) -> str | None:
     return _describe_characters_body_issue(data)
 
 
+def _describe_scenes_output_issue(value: Any) -> str | None:
+    data = _parse_json_object_string(value)
+    if data is None:
+        return "必须是可 parse 的 JSON object"
+    return _describe_scenes_body_issue(data)
+
+
 def _describe_characters_body_issue(data: dict[str, Any]) -> str | None:
     setting = data.get("character_setting")
     if not isinstance(setting, dict):
@@ -1285,6 +2651,30 @@ def _describe_characters_body_issue(data: dict[str, Any]) -> str | None:
             return f"character_setting.characters[{index}].relation_modes 必须是非空数组"
         if not isinstance(item.get("actable_evidence"), dict):
             return f"character_setting.characters[{index}].actable_evidence 必须是 object"
+    return None
+
+
+def _describe_scenes_body_issue(data: dict[str, Any]) -> str | None:
+    setting = data.get("scene_setting")
+    if not isinstance(setting, dict):
+        return "scene_setting 必须是 object"
+    scenes = setting.get("scenes")
+    if not isinstance(scenes, list) or not scenes:
+        return "scene_setting.scenes 必须是非空数组"
+    if len(scenes) < 3:
+        return "scene_setting.scenes 至少需要 3 个场景"
+    for index, item in enumerate(scenes, start=1):
+        if not isinstance(item, dict):
+            return f"scene_setting.scenes[{index}] 必须是 object"
+        missing = [key for key in SCENE_MIN_REQUIRED_FIELDS if item.get(key) in (None, "", [], {})]
+        if missing:
+            return f"scene_setting.scenes[{index}] 缺少字段 {', '.join(missing)}"
+        if not isinstance(item.get("outfit_requirements"), list) or not item.get("outfit_requirements"):
+            return f"scene_setting.scenes[{index}].outfit_requirements 必须是非空数组"
+        if not isinstance(item.get("alias_usage_rules"), list) or not item.get("alias_usage_rules"):
+            return f"scene_setting.scenes[{index}].alias_usage_rules 必须是非空数组"
+        if not isinstance(item.get("conflict_potential"), list) or not item.get("conflict_potential"):
+            return f"scene_setting.scenes[{index}].conflict_potential 必须是非空数组"
     return None
 
 
@@ -1323,14 +2713,18 @@ def _try_parse_json_value(value: Any) -> Any | None:
     cleaned = strip_code_fence(value)
     if not cleaned:
         return None
-    try:
-        return parse_json(cleaned)
-    except Exception:
-        pass
-    try:
-        return json.loads(cleaned)
-    except Exception:
-        return None
+    for parser in (parse_json, json.loads):
+        try:
+            parsed = parser(cleaned)
+        except Exception:
+            continue
+        if isinstance(parsed, (dict, list)):
+            return parsed
+        if isinstance(parsed, str):
+            nested = strip_code_fence(parsed).strip()
+            if nested.startswith("{") or nested.startswith("["):
+                return parsed
+    return None
 
 
 def _dict_from_variable_items(values: list[Any]) -> dict[str, Any] | None:

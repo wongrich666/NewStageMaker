@@ -76,6 +76,12 @@ class Settings:
         )
         # 兼容旧配置名；代码内部统一按“阶段本地重跑”语义读取。
         self.fastgpt_stage_output_rerun_retries = self.fastgpt_stage_local_restart_retries
+        self.fastgpt_appearance_local_review_retries = int(
+            _getenv(
+                "FASTGPT_APPEARANCE_LOCAL_REVIEW_RETRIES",
+                default=str(self.fastgpt_stage_local_restart_retries),
+            )
+        )
         self.fastgpt_timeout = int(_getenv("FASTGPT_TIMEOUT", default="300"))
         self.fastgpt_http_retries = int(_getenv("FASTGPT_HTTP_RETRIES", default="2"))
         self.fastgpt_http_retry_delay = float(

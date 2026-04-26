@@ -4,11 +4,23 @@ import json
 import unittest
 
 from workflow_code_skeleton.app.config import settings
+from workflow_code_skeleton.app.orchestrators.fastgpt_hybrid_workflow import (
+    _ensure_appearance_outputs,
+    _prepare_scene_stage_inputs,
+)
+from workflow_code_skeleton.app.models.inputs import WorkflowInput
+from workflow_code_skeleton.app.models.state import WorkflowState
 from workflow_code_skeleton.app.services.fastgpt_client import FastGPTClient
 from workflow_code_skeleton.app.services.fastgpt_contracts import (
+    APPEARANCE_MAPPING,
     CHARACTERS,
+    CHARACTER_ALIAS_NAMING_RULES,
+    CHARACTER_APPEARANCE_REQUIREMENTS,
     EPISODE_PLAN,
+    SCENES,
+    STAGE_APPEARANCE_ALIAS_GENERATION,
     STAGE_CHARACTERS,
+    STAGE_SCENES,
     STAGE_WORLDVIEW,
     STORY_OUTLINE,
     USER_CHARACTERS,
@@ -16,7 +28,13 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     WORLDVIEW,
     contract_for,
 )
-from workflow_code_skeleton.app.workflow_ids import CHARACTER_VAR, WORLDVIEW_VAR
+from workflow_code_skeleton.app.workflow_ids import (
+    APPEARANCE_MAPPING_VAR,
+    APPEARANCE_NATURAL_LANGUAGE_VAR,
+    CHARACTER_VAR,
+    SCENE_VAR,
+    WORLDVIEW_VAR,
+)
 
 
 class _FakeResponse:
@@ -51,6 +69,21 @@ class _QueuedFastGPTClient(FastGPTClient):
         if not self._responses:
             raise AssertionError("No fake FastGPT response left for test")
         return _FakeResponse(self._responses.pop(0))
+
+
+class _QueuedStageRunner:
+    def __init__(self, responses: list[dict[str, object]]) -> None:
+        self._responses = list(responses)
+        self.request_count = 0
+        self.stage_calls: list[str] = []
+
+    def run_stage(self, stage_name: str, variables: dict[str, object]) -> dict[str, object]:
+        del variables
+        self.request_count += 1
+        self.stage_calls.append(stage_name)
+        if not self._responses:
+            raise AssertionError("No fake stage response left for test")
+        return self._responses.pop(0)
 
 
 def _worldview_json() -> dict[str, object]:
@@ -160,6 +193,156 @@ def _character_setting_json(name: str = "林夏") -> dict[str, object]:
     }
 
 
+def _scene_setting_json() -> dict[str, object]:
+    def _scene_item(name: str, alias_suffix: str, conflict: str) -> dict[str, object]:
+        return {
+            "scene_name": name,
+            "scene_type": "核心博弈场",
+            "story_function": f"{name}负责承载主线冲突推进与人物关系变形。",
+            "scene_time_or_period": "深夜加班时段",
+            "weather_or_environment_state": "冷白灯长亮，空气闷且安静",
+            "environment_description": f"{name}空间封闭，任何情绪波动都会被放大。",
+            "atmosphere_description": "表面克制，内里高压。",
+            "visual_elements": ["玻璃反光", "凌乱文件", "屏幕冷光"],
+            "visual_condition_summary": f"{name}需要保持冷硬、压迫、可持续发生权力观察的视觉条件。",
+            "identity_or_status_requirements": ["角色必须带着明显的职场身份差异进入场景"],
+            "styling_condition_summary": f"{name}里的人物造型要体现职位、疲态与临时应战状态。",
+            "outfit_requirements": [
+                {
+                    "character_id": "林夏",
+                    "canonical_name": "林夏",
+                    "recommended_alias_name": f"林夏（{alias_suffix}）",
+                    "identity_or_status": "项目负责人强撑状态",
+                    "outfit_requirement": "通勤衬衫有轻微褶皱，保持精英感但露出疲态",
+                    "visual_focus": "袖口与肩线的强撑感",
+                    "must_use_alias_when_triggered": True,
+                    "trigger_reason": "该场景需要明确角色的当前职场身份与疲态",
+                    "forbidden_fallback_names": ["男主", "女主", "反派", "配角"],
+                }
+            ],
+            "naming_condition_summary": f"{name}中的称谓要体现权力距离与身份压力。",
+            "alias_usage_rules": [
+                {
+                    "character_id": "林夏",
+                    "canonical_name": "林夏",
+                    "recommended_alias_name": f"林夏（{alias_suffix}）",
+                    "usage_condition": "当场景强调她的工作身份与外在体面时使用",
+                    "fallback_allowed": False,
+                    "reason": "避免退化回模糊泛称，保持人物造型与身份一致",
+                }
+            ],
+            "conflict_potential": [conflict],
+            "character_interaction_effect": "角色对话会更短、更克制，防御姿态明显上升。",
+            "worldview_support": "这个场景让高压制度、资源争夺和身份表演同时可视化。",
+        }
+
+    return {
+        "scene_setting": {
+            "scene_design_principle": "每个场景都必须同时承载剧情推进、视觉条件与角色身份暴露。",
+            "scene_visual_styling_naming_strategy": "用冷硬空间、疲态造型和精确 alias 共同固定人物出场条件。",
+            "scenes": [
+                _scene_item("玻璃会议室", "会议室交锋态", "公开站队与背锅切割随时爆发"),
+                _scene_item("深夜开放办公区", "熬夜作战态", "任务失控后责任归属会迅速恶化"),
+                _scene_item("合租公寓玄关", "卸甲回家态", "体面外壳与真实崩溃会在此正面撞上"),
+            ],
+        }
+    }
+
+
+def _appearance_mapping_json() -> dict[str, object]:
+    return {
+        "appearance_mapping": {
+            "mapping_principle": "同一角色按场景与身份状态切换服饰别名，但始终保留同一人物识别锚点。",
+            "global_naming_style": "统一使用“角色中文全名【场景/状态/身份】”的命名方式。",
+            "characters": [
+                {
+                    "character_id": "linxia",
+                    "canonical_name": "林夏",
+                    "story_role": "主角",
+                    "same_person_anchor": {
+                        "stable_appearance_traits": ["清瘦利落", "通勤感强"],
+                        "stable_recognition_points": ["总把头发束紧", "说话前会先停顿"],
+                        "unchanged_core_impression": "克制冷硬但始终强撑体面。",
+                    },
+                    "default_name": "林夏",
+                    "forbidden_generic_names": ["男主", "女主", "反派", "配角"],
+                    "outfit_variants": [
+                        {
+                            "variant_id": "linxia_meeting",
+                            "alias_name": "林夏【会议室交锋态】",
+                            "applicable_identity_state": "项目负责人高压博弈状态",
+                            "outfit_type": "精英通勤装",
+                            "outfit_description": "深色西装外套配利落内搭，保持体面但略有疲态。",
+                            "visual_keypoints": ["硬挺肩线", "冷色衬衫", "细金属耳饰"],
+                            "episode_range_hint": "第1-3集",
+                            "scene_trigger_rules": {
+                                "scene_names": ["玻璃会议室"],
+                                "scene_types": ["核心博弈场"],
+                                "environment_or_time": ["深夜加班时段"],
+                                "status_conditions": ["需要公开扛责或正面交锋"],
+                            },
+                            "usage_rule": "凡是进入公开谈判和站队场景，都优先使用该 alias。",
+                            "must_use_when_triggered": True,
+                            "fallback_allowed": False,
+                            "same_person_confirmation": "仍然是林夏本人，只是进入高压谈判状态。",
+                        }
+                    ],
+                }
+            ],
+            "episode_level_usage_plan": [
+                {
+                    "episode_range": "第1-3集",
+                    "main_character_aliases": [
+                        {
+                            "character_id": "linxia",
+                            "recommended_alias_name": "林夏【会议室交锋态】",
+                            "reason": "前期主线集中发生在公开博弈与背锅切割场景。",
+                        }
+                    ],
+                }
+            ],
+            "scene_level_usage_plan": [
+                {
+                    "scene_name": "玻璃会议室",
+                    "expected_alias_usage": [
+                        {
+                            "character_id": "linxia",
+                            "alias_name": "林夏【会议室交锋态】",
+                            "reason": "该场景需要把她的职场身份与强撑状态直接写进人物名。",
+                        }
+                    ],
+                }
+            ],
+            "special_naming_rules": ["禁止回退为男主、女主、反派、配角等泛称。"],
+        }
+    }
+
+
+def _appearance_input_variables() -> dict[str, str]:
+    variables = _input_variables()
+    variables[CHARACTERS] = json.dumps(_character_setting_json(), ensure_ascii=False)
+    variables[SCENES] = json.dumps(_scene_setting_json(), ensure_ascii=False)
+    variables[CHARACTER_ALIAS_NAMING_RULES] = "统一使用角色中文全名【场景/状态/身份】。"
+    return variables
+
+
+def _workflow_input() -> WorkflowInput:
+    return WorkflowInput(
+        title="测试剧本",
+        episode_word_count=800,
+        total_episodes=12,
+        user_expectation="现代都市高压职场悬疑剧",
+        character_count=4,
+        character_appearance_requirements="",
+        character_alias_naming_rules="",
+        outfit_switch_rules="",
+        story_outline="",
+        core_scene_input="",
+        character_bios="",
+        episode_plan="",
+    )
+
+
 def _input_variables() -> dict[str, str]:
     story_outline = {
         "opening": "林夏在互联网公司濒临被裁。",
@@ -244,6 +427,8 @@ def _input_variables() -> dict[str, str]:
         USER_CHARACTERS: json.dumps(user_characters, ensure_ascii=False),
         EPISODE_PLAN: json.dumps(episode_plan, ensure_ascii=False),
         WORLDVIEW: json.dumps(_worldview_json(), ensure_ascii=False),
+        CHARACTER_APPEARANCE_REQUIREMENTS: "",
+        CHARACTER_ALIAS_NAMING_RULES: "",
     }
 
 
@@ -251,6 +436,7 @@ class StageOutputRepairTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = FastGPTClient()
         self.variables = _input_variables()
+        self.appearance_variables = _appearance_input_variables()
         self._old_stage_local_restart_retries = getattr(
             settings,
             "fastgpt_stage_local_restart_retries",
@@ -261,12 +447,19 @@ class StageOutputRepairTests(unittest.TestCase):
             "fastgpt_stage_output_rerun_retries",
             1,
         )
+        self._old_appearance_local_review_retries = getattr(
+            settings,
+            "fastgpt_appearance_local_review_retries",
+            1,
+        )
         settings.fastgpt_stage_local_restart_retries = 1
         settings.fastgpt_stage_output_rerun_retries = 1
+        settings.fastgpt_appearance_local_review_retries = 1
 
     def tearDown(self) -> None:
         settings.fastgpt_stage_local_restart_retries = self._old_stage_local_restart_retries
         settings.fastgpt_stage_output_rerun_retries = self._old_stage_output_rerun_retries
+        settings.fastgpt_appearance_local_review_retries = self._old_appearance_local_review_retries
 
     def _extract(self, stage_name: str, data: dict[str, object]) -> dict[str, str]:
         contract = contract_for(stage_name)
@@ -336,6 +529,36 @@ class StageOutputRepairTests(unittest.TestCase):
         parsed = json.loads(result[CHARACTERS])
         self.assertEqual(parsed["character_setting"]["characters"][0]["character_name"], "林夏")
 
+    def test_scenes_direct_scene_setting_json(self) -> None:
+        result = self._extract(
+            STAGE_SCENES,
+            {"answerText": json.dumps(_scene_setting_json(), ensure_ascii=False)},
+        )
+        parsed = json.loads(result[SCENES])
+        self.assertEqual(len(parsed["scene_setting"]["scenes"]), 3)
+        self.assertEqual(parsed["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
+
+    def test_scenes_wrapped_in_internal_variable(self) -> None:
+        data = {
+            "responseData": {
+                "updateVarResult": [
+                    {
+                        "variable": ["VARIABLE_NODE_ID", SCENE_VAR],
+                        "value": json.dumps(_scene_setting_json(), ensure_ascii=False),
+                    }
+                ]
+            }
+        }
+        result = self._extract(STAGE_SCENES, data)
+        parsed = json.loads(result[SCENES])
+        self.assertEqual(parsed["scene_setting"]["scenes"][1]["scene_name"], "深夜开放办公区")
+
+    def test_scenes_markdown_code_fence(self) -> None:
+        fenced = "```json\n" + json.dumps(_scene_setting_json(), ensure_ascii=False, indent=2) + "\n```"
+        result = self._extract(STAGE_SCENES, {"answerText": fenced})
+        parsed = json.loads(result[SCENES])
+        self.assertEqual(parsed["scene_setting"]["scenes"][2]["scene_name"], "合租公寓玄关")
+
     def test_characters_wrapped_in_internal_variable(self) -> None:
         data = {
             "responseData": {
@@ -359,6 +582,18 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertEqual(first_character["character_name"], "林夏")
         self.assertTrue(first_character["decision_logic"]["when_under_pressure"])
 
+    def test_scenes_natural_language_triggers_stage_local_restart_before_success(self) -> None:
+        client = _QueuedFastGPTClient(
+            [
+                {"answerText": "核心场景包括玻璃会议室、深夜办公区和合租公寓，整体偏冷硬压抑。"},
+                {"answerText": json.dumps(_scene_setting_json(), ensure_ascii=False)},
+            ]
+        )
+        result = client.run_stage(STAGE_SCENES, dict(self.variables))
+        self.assertEqual(client.request_count, 2)
+        parsed = json.loads(result[SCENES])
+        self.assertEqual(len(parsed["scene_setting"]["scenes"]), 3)
+
     def test_worldview_unknown_wrapper_triggers_stage_local_restart(self) -> None:
         client = _QueuedFastGPTClient(
             [
@@ -370,6 +605,18 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertEqual(client.request_count, 2)
         parsed = json.loads(result[WORLDVIEW])
         self.assertEqual(parsed["worldview_summary"], _worldview_json()["worldview_summary"])
+
+    def test_scenes_unknown_wrapper_triggers_stage_local_restart(self) -> None:
+        client = _QueuedFastGPTClient(
+            [
+                {"answerText": json.dumps({"foo": "bar"}, ensure_ascii=False)},
+                {"answerText": json.dumps(_scene_setting_json(), ensure_ascii=False)},
+            ]
+        )
+        result = client.run_stage(STAGE_SCENES, dict(self.variables))
+        self.assertEqual(client.request_count, 2)
+        parsed = json.loads(result[SCENES])
+        self.assertEqual(parsed["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
 
     def test_characters_natural_language_triggers_stage_local_restart_before_fallback(self) -> None:
         client = _QueuedFastGPTClient(
@@ -397,11 +644,20 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertIn("character_setting", parsed)
         self.assertNotIn("passed", parsed)
 
+    def test_review_json_is_not_treated_as_formal_scenes(self) -> None:
+        review_json = {"passed": False, "blocking_issues": ["场景数量不足"], "summary": "需要补强"}
+        with self.assertRaises(ValueError):
+            self._extract(STAGE_SCENES, {"answerText": json.dumps(review_json, ensure_ascii=False)})
+
     def test_empty_string_uses_schema_valid_fallback(self) -> None:
         result = self._extract(STAGE_WORLDVIEW, {"answerText": ""})
         parsed = json.loads(result[WORLDVIEW])
         self.assertTrue(parsed["worldview_summary"])
         self.assertEqual(len(parsed["key_settings"]), 3)
+
+    def test_scenes_empty_string_cannot_enter_formal_cache(self) -> None:
+        with self.assertRaises(ValueError):
+            self._extract(STAGE_SCENES, {"answerText": ""})
 
     def test_worldview_stage_reruns_when_only_review_json_is_returned(self) -> None:
         review_json = {"approved": False, "suggestions": ["补充时代背景", "补充视觉关键词"]}
@@ -429,6 +685,19 @@ class StageOutputRepairTests(unittest.TestCase):
         parsed = json.loads(result[CHARACTERS])
         self.assertEqual(parsed["character_setting"]["characters"][0]["character_name"], "周沉")
 
+    def test_scenes_stage_reruns_when_only_review_json_is_returned(self) -> None:
+        review_json = {"passed": False, "blocking_issues": ["缺少 alias_usage_rules"], "summary": "需要补强"}
+        client = _QueuedFastGPTClient(
+            [
+                {"answerText": json.dumps(review_json, ensure_ascii=False)},
+                {"answerText": json.dumps(_scene_setting_json(), ensure_ascii=False)},
+            ]
+        )
+        result = client.run_stage(STAGE_SCENES, dict(self.variables))
+        self.assertEqual(client.request_count, 2)
+        parsed = json.loads(result[SCENES])
+        self.assertEqual(len(parsed["scene_setting"]["scenes"]), 3)
+
     def test_worldview_final_attempt_uses_fallback_after_rerun_exhausted(self) -> None:
         review_json = {"approved": False, "suggestions": ["仍未形成正式世界观"]}
         client = _QueuedFastGPTClient(
@@ -442,6 +711,213 @@ class StageOutputRepairTests(unittest.TestCase):
         parsed = json.loads(result[WORLDVIEW])
         self.assertIn("worldview_summary", parsed)
         self.assertEqual(len(parsed["key_settings"]), 3)
+
+    def test_scenes_final_attempt_raises_after_rerun_exhausted(self) -> None:
+        review_json = {"passed": False, "blocking_issues": ["仍未形成 scene_setting"], "summary": "继续修订"}
+        client = _QueuedFastGPTClient(
+            [
+                {"answerText": json.dumps(review_json, ensure_ascii=False)},
+                {"answerText": json.dumps(review_json, ensure_ascii=False)},
+            ]
+        )
+        with self.assertRaises(ValueError):
+            client.run_stage(STAGE_SCENES, dict(self.variables))
+        self.assertEqual(client.request_count, 2)
+
+    def test_scene_input_guard_rejects_broken_worldview(self) -> None:
+        broken = dict(self.variables)
+        broken[WORLDVIEW] = ""
+        _prepared, _warnings, fatal_errors = _prepare_scene_stage_inputs(broken)
+        self.assertIn("worldview 为空或不是合法世界观 JSON", fatal_errors)
+
+    def test_appearance_mapping_standard_json_passes(self) -> None:
+        result = self._extract(
+            STAGE_APPEARANCE_ALIAS_GENERATION,
+            {"output": _appearance_mapping_json()},
+        )
+        mapping = result[APPEARANCE_MAPPING]
+        self.assertEqual(mapping["characters"][0]["canonical_name"], "林夏")
+
+    def test_appearance_mapping_answer_text_json_passes(self) -> None:
+        result = self._extract(
+            STAGE_APPEARANCE_ALIAS_GENERATION,
+            {"answerText": json.dumps(_appearance_mapping_json(), ensure_ascii=False)},
+        )
+        mapping = result[APPEARANCE_MAPPING]
+        self.assertEqual(mapping["scene_level_usage_plan"][0]["scene_name"], "玻璃会议室")
+
+    def test_appearance_mapping_wrapped_in_legacy_alias_string_passes(self) -> None:
+        wrapped = {
+            APPEARANCE_MAPPING_VAR: json.dumps(_appearance_mapping_json(), ensure_ascii=False)
+        }
+        result = self._extract(
+            STAGE_APPEARANCE_ALIAS_GENERATION,
+            {"answerText": json.dumps(wrapped, ensure_ascii=False)},
+        )
+        mapping = result[APPEARANCE_MAPPING]
+        self.assertEqual(mapping["characters"][0]["outfit_variants"][0]["alias_name"], "林夏【会议室交锋态】")
+
+    def test_appearance_mapping_wrapped_in_update_var_result_passes(self) -> None:
+        data = {
+            "responseData": {
+                "updateVarResult": [
+                    {
+                        "variable": ["VARIABLE_NODE_ID", APPEARANCE_MAPPING_VAR],
+                        "value": json.dumps(_appearance_mapping_json(), ensure_ascii=False),
+                    }
+                ]
+            }
+        }
+        result = self._extract(STAGE_APPEARANCE_ALIAS_GENERATION, data)
+        mapping = result[APPEARANCE_MAPPING]
+        self.assertEqual(mapping["mapping_principle"], _appearance_mapping_json()["appearance_mapping"]["mapping_principle"])
+
+    def test_appearance_natural_language_is_not_formal_output(self) -> None:
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {"answerText": "林夏主要分为会议室交锋态和回家卸甲态，命名保持统一即可。"},
+            )
+
+    def test_appearance_review_json_is_not_formal_output(self) -> None:
+        review_json = {"passed": False, "blocking_issues": ["alias_name 不统一"], "summary": "需要修订"}
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {"answerText": json.dumps(review_json, ensure_ascii=False)},
+            )
+
+    def test_appearance_missing_characters_fails(self) -> None:
+        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
+        broken["appearance_mapping"].pop("characters", None)
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {"answerText": json.dumps(broken, ensure_ascii=False)},
+            )
+
+    def test_appearance_missing_outfit_variants_fails(self) -> None:
+        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
+        broken["appearance_mapping"]["characters"][0].pop("outfit_variants", None)
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {"answerText": json.dumps(broken, ensure_ascii=False)},
+            )
+
+    def test_appearance_empty_outfit_variants_fails(self) -> None:
+        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
+        broken["appearance_mapping"]["characters"][0]["outfit_variants"] = []
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {"answerText": json.dumps(broken, ensure_ascii=False)},
+            )
+
+    def test_appearance_alias_name_without_brackets_fails(self) -> None:
+        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
+        broken["appearance_mapping"]["characters"][0]["outfit_variants"][0]["alias_name"] = "林夏会议室交锋态"
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {"answerText": json.dumps(broken, ensure_ascii=False)},
+            )
+
+    def test_appearance_scene_trigger_rules_must_be_object(self) -> None:
+        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
+        broken["appearance_mapping"]["characters"][0]["outfit_variants"][0]["scene_trigger_rules"] = ["玻璃会议室"]
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {"answerText": json.dumps(broken, ensure_ascii=False)},
+            )
+
+    def test_appearance_string_booleans_fail(self) -> None:
+        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
+        broken["appearance_mapping"]["characters"][0]["outfit_variants"][0]["must_use_when_triggered"] = "true"
+        broken["appearance_mapping"]["characters"][0]["outfit_variants"][0]["fallback_allowed"] = "false"
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {"answerText": json.dumps(broken, ensure_ascii=False)},
+            )
+
+    def test_appearance_local_review_failure_triggers_stage_rerun(self) -> None:
+        invalid = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
+        invalid["appearance_mapping"]["episode_level_usage_plan"] = []
+        invalid["appearance_mapping"]["scene_level_usage_plan"] = []
+        runner = _QueuedStageRunner(
+            [
+                {APPEARANCE_MAPPING: invalid},
+                {APPEARANCE_MAPPING: _appearance_mapping_json()},
+            ]
+        )
+        state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
+        variables = dict(self.appearance_variables)
+        state.variables.update(variables)
+
+        _ensure_appearance_outputs(state, runner, variables)
+
+        self.assertEqual(runner.request_count, 2)
+        self.assertEqual(
+            runner.stage_calls,
+            [STAGE_APPEARANCE_ALIAS_GENERATION, STAGE_APPEARANCE_ALIAS_GENERATION],
+        )
+        self.assertIsInstance(variables[APPEARANCE_MAPPING], dict)
+        self.assertIn("appearance_mapping", variables[APPEARANCE_MAPPING])
+        self.assertIn("character_registry", variables)
+
+    def test_appearance_local_review_exhaustion_raises_without_cache_pollution(self) -> None:
+        invalid = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
+        invalid["appearance_mapping"]["episode_level_usage_plan"] = []
+        invalid["appearance_mapping"]["scene_level_usage_plan"] = []
+        runner = _QueuedStageRunner(
+            [
+                {APPEARANCE_MAPPING: invalid},
+                {APPEARANCE_MAPPING: invalid},
+            ]
+        )
+        state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
+        variables = dict(self.appearance_variables)
+        state.variables.update(variables)
+
+        with self.assertRaises(ValueError):
+            _ensure_appearance_outputs(state, runner, variables)
+
+        self.assertEqual(runner.request_count, 2)
+        self.assertNotIn(APPEARANCE_MAPPING, variables)
+        self.assertNotIn("character_registry", variables)
+        self.assertNotIn("character_alias_registry", variables)
+        self.assertNotIn("episode_alias_plan", variables)
+        self.assertNotIn("appearance_continuity_memory", variables)
+        self.assertNotIn(APPEARANCE_NATURAL_LANGUAGE_VAR, variables)
+
+    def test_appearance_auxiliary_natural_language_does_not_override_structured_output(self) -> None:
+        client = _QueuedFastGPTClient(
+            [
+                {
+                    "answerText": json.dumps(_appearance_mapping_json(), ensure_ascii=False),
+                    "responseData": {
+                        "updateVarResult": [
+                            {
+                                "variable": ["VARIABLE_NODE_ID", APPEARANCE_NATURAL_LANGUAGE_VAR],
+                                "value": "林夏在会议室场景统一使用“林夏【会议室交锋态】”。",
+                            }
+                        ]
+                    },
+                }
+            ]
+        )
+        result = client.run_stage(STAGE_APPEARANCE_ALIAS_GENERATION, dict(self.appearance_variables))
+        self.assertIsInstance(result[APPEARANCE_MAPPING], dict)
+        self.assertEqual(
+            result[APPEARANCE_MAPPING]["characters"][0]["canonical_name"],
+            "林夏",
+        )
+        self.assertEqual(
+            result[APPEARANCE_NATURAL_LANGUAGE_VAR],
+            "林夏在会议室场景统一使用“林夏【会议室交锋态】”。",
+        )
 
 
 if __name__ == "__main__":

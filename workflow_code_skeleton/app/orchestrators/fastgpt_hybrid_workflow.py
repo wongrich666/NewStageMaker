@@ -64,13 +64,20 @@ from ..services.fastgpt_contracts import (
     contract_for,
     to_jsonable_value,
 )
+from ..services.json_utils import parse_json
+from ..services.stage_output_repair import (
+    normalize_appearance_mapping_candidate,
+    validate_appearance_mapping_output,
+)
 from ..utils.episode import BatchWindow, iter_episode_batches, iter_episode_batches_from
 from ..utils.logger import get_logger
 from ..workflow_ids import (
+    APPEARANCE_NATURAL_LANGUAGE_VAR,
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
     APPEARANCE_MAPPING_VAR,
     APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
     APPEARANCE_REQUIREMENTS_VAR,
+    APPEARANCE_REVIEW_VAR,
     CHARACTER_BIOS_VAR,
     CHARACTER_VAR,
     CORE_SCENE_INPUT_VAR,
@@ -90,6 +97,9 @@ from ..workflow_ids import (
     HOOK_FINAL_VAR,
     MEMORY_VAR,
     OUTFIT_SWITCH_RULES_VAR,
+    SCENE_MAX_RETRY_VAR,
+    SCENE_NATURAL_LANGUAGE_VAR,
+    SCENE_RETRY_VAR,
     SCENE_VAR,
     SCRIPT_CURRENT_VAR,
     SCRIPT_START_VAR,
@@ -141,6 +151,38 @@ PRE_STRATEGY_RUNTIME_FIELDS = (
     CHARACTER_APPEARANCE_REQUIREMENTS,
     CHARACTER_ALIAS_NAMING_RULES,
     OUTFIT_SWITCH_RULES,
+)
+SCENE_CORE_INPUT_FIELDS = (
+    WORLDVIEW,
+    STORY_OUTLINE,
+    USER_CHARACTERS,
+    EPISODE_PLAN,
+)
+SCENE_OPTIONAL_INPUT_FIELDS = (
+    USER_SCENES,
+    CHARACTER_APPEARANCE_REQUIREMENTS,
+    CHARACTER_ALIAS_NAMING_RULES,
+)
+SCENE_STAGE_TRANSIENT_KEYS = (
+    SCENES,
+    SCENE_VAR,
+    CORE_SCENE_FINAL_VAR,
+    FINAL_SCENE_VAR,
+    SCENE_NATURAL_LANGUAGE_VAR,
+    SCENE_RETRY_VAR,
+    SCENE_MAX_RETRY_VAR,
+    SCENE_APPEARANCE_REQUIREMENTS,
+)
+SCENE_MIN_COUNT = 3
+APPEARANCE_STAGE_TRANSIENT_KEYS = (
+    APPEARANCE_MAPPING,
+    APPEARANCE_MAPPING_VAR,
+    APPEARANCE_REVIEW_VAR,
+    APPEARANCE_NATURAL_LANGUAGE_VAR,
+    CHARACTER_REGISTRY,
+    CHARACTER_ALIAS_REGISTRY,
+    EPISODE_ALIAS_PLAN,
+    APPEARANCE_CONTINUITY_MEMORY,
 )
 SCRIPT_EPISODE_HEADING_PATTERN = re.compile(
     r"(?=^[ \t>#*\-]*第\s*([0-9０-９一二三四五六七八九十百千万两零〇]+)\s*集(?:\s*[:：]|$))",
@@ -289,49 +331,10 @@ def run_fastgpt_hybrid_workflow(
         )
     _sync_state_variables(state, variables)
 
-    if _has_value(variables.get(SCENES)):
-        set_runtime_stage(
-            state,
-            "scene",
-            "已从缓存恢复核心场景。",
-            progress_percent=34,
-        )
-    else:
-        variables.update(
-            _run_fastgpt_stage(
-                state,
-                runner,
-                STAGE_SCENES,
-                variables,
-                stage_key="scene",
-                message="正在生成并校正核心场景。",
-                progress_percent=34,
-            )
-        )
+    _ensure_scene_outputs(state, runner, variables)
     _sync_state_variables(state, variables)
 
-    if _normalize_appearance_mapping_object(variables.get(APPEARANCE_MAPPING)):
-        _apply_appearance_outputs_to_variables(variables)
-        set_runtime_stage(
-            state,
-            "appearance",
-            "已从缓存恢复人物服装版本映射。",
-            progress_percent=42,
-        )
-    else:
-        variables.update(
-            _run_fastgpt_stage(
-                state,
-                runner,
-                STAGE_APPEARANCE_ALIAS_GENERATION,
-                variables,
-                stage_key="appearance",
-                message="正在生成人物服装版本映射。",
-                progress_percent=42,
-            )
-        )
-        if not _apply_appearance_outputs_to_variables(variables):
-            raise ValueError("人物服装版本映射阶段返回内容不可解析，未得到合法 appearance_mapping。")
+    _ensure_appearance_outputs(state, runner, variables)
     _sync_state_variables(state, variables)
 
     _run_batched_generation(state, runner, payload, variables)
@@ -2016,6 +2019,550 @@ def _run_fastgpt_stage(
             )
 
 
+def _ensure_scene_outputs(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    variables: dict[str, Any],
+) -> None:
+    cached_issue = _scene_output_integrity_issue(variables.get(SCENES))
+    if cached_issue is None:
+        set_runtime_stage(
+            state,
+            "scene",
+            "已从缓存恢复核心场景。",
+            progress_percent=34,
+        )
+        return
+
+    if _scene_stage_has_transient_state(state, variables):
+        logger.warning(
+            "stage_name=scenes failure_type=stale_scene_cache source=resume_or_runtime_cache "
+            "missing_fields=%s attempted_json_repair=%s local_restart_attempt=%s "
+            "cleared_stage_cache=%s preview=%s",
+            [cached_issue] if cached_issue else [],
+            False,
+            0,
+            True,
+            _truncate_log_text(_serialize_framework_runtime_value(variables.get(SCENES)), max_chars=280),
+        )
+        _clear_scene_stage_state(state, variables)
+        sync_runtime_state(state)
+
+    scene_inputs, warnings, fatal_errors = _prepare_scene_stage_inputs(variables)
+    for warning in warnings:
+        logger.warning(
+            "stage_name=scenes failure_type=scene_input_degraded source=local_input_guard "
+            "missing_fields=[] attempted_json_repair=%s local_restart_attempt=%s "
+            "cleared_stage_cache=%s preview=%s",
+            True,
+            0,
+            False,
+            _truncate_log_text(warning, max_chars=220),
+        )
+    if fatal_errors:
+        message = (
+            "scenes 阶段检测到上游正式输入已损坏，已阻止继续进入下一阶段："
+            + "；".join(fatal_errors)
+        )
+        logger.warning(
+            "stage_name=scenes failure_type=broken_upstream_inputs source=local_input_guard "
+            "missing_fields=%s attempted_json_repair=%s local_restart_attempt=%s "
+            "cleared_stage_cache=%s preview=%s",
+            fatal_errors[:8],
+            True,
+            0,
+            True,
+            _truncate_log_text(message, max_chars=320),
+        )
+        _clear_scene_stage_state(state, variables)
+        sync_runtime_state(state)
+        raise ValueError(message)
+
+    variables.update(scene_inputs)
+    try:
+        output = _run_fastgpt_stage(
+            state,
+            runner,
+            STAGE_SCENES,
+            variables,
+            stage_key="scene",
+            message="正在生成并校正核心场景。",
+            progress_percent=34,
+            max_retries=0,
+        )
+    except Exception as exc:
+        logger.warning(
+            "stage_name=scenes failure_type=scene_stage_restart_exhausted source=fastgpt_stage "
+            "missing_fields=[] attempted_json_repair=%s local_restart_attempt=%s "
+            "cleared_stage_cache=%s preview=%s",
+            True,
+            max(0, int(getattr(settings, "fastgpt_stage_local_restart_retries", 1))),
+            True,
+            _truncate_log_text(str(exc), max_chars=320),
+        )
+        _clear_scene_stage_state(state, variables)
+        sync_runtime_state(state)
+        raise
+
+    scene_issue = _scene_output_integrity_issue(output.get(SCENES))
+    if scene_issue:
+        logger.warning(
+            "stage_name=scenes failure_type=post_stage_scene_validation_failed source=contract_output "
+            "missing_fields=%s attempted_json_repair=%s local_restart_attempt=%s "
+            "cleared_stage_cache=%s preview=%s",
+            [scene_issue],
+            True,
+            max(0, int(getattr(settings, "fastgpt_stage_local_restart_retries", 1))),
+            True,
+            _truncate_log_text(_serialize_framework_runtime_value(output.get(SCENES)), max_chars=320),
+        )
+        _clear_scene_stage_state(state, variables)
+        sync_runtime_state(state)
+        raise ValueError(f"scenes 阶段输出未通过本地结构校验：{scene_issue}")
+
+    variables.update(output)
+
+
+def _ensure_appearance_outputs(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    variables: dict[str, Any],
+) -> None:
+    cached_issues = _appearance_output_integrity_issues(variables.get(APPEARANCE_MAPPING))
+    if not cached_issues and _apply_appearance_outputs_to_variables(variables):
+        set_runtime_stage(
+            state,
+            "appearance",
+            "已从缓存恢复人物服装版本映射。",
+            progress_percent=42,
+        )
+        return
+    if not cached_issues:
+        cached_issues = ["appearance_mapping 通过契约校验后仍无法生成本地 alias registry"]
+
+    if _appearance_stage_has_transient_state(state, variables):
+        logger.warning(
+            "stage_name=appearance_alias_generation failure_type=stale_appearance_cache "
+            "source=resume_or_runtime_cache blocking_issues=%s local_review_attempt=%s "
+            "cleared_stage_cache=%s preview=%s",
+            cached_issues[:8],
+            0,
+            True,
+            _truncate_log_text(
+                _serialize_framework_runtime_value(variables.get(APPEARANCE_MAPPING)),
+                max_chars=320,
+            ),
+        )
+        _clear_appearance_stage_state(state, variables)
+        sync_runtime_state(state)
+
+    appearance_inputs, warnings, fatal_errors = _prepare_appearance_stage_inputs(variables)
+    for warning in warnings:
+        logger.warning(
+            "stage_name=appearance_alias_generation failure_type=appearance_input_degraded "
+            "source=local_input_guard blocking_issues=[] local_review_attempt=%s "
+            "cleared_stage_cache=%s preview=%s",
+            0,
+            False,
+            _truncate_log_text(warning, max_chars=220),
+        )
+    if fatal_errors:
+        message = (
+            "appearance_alias_generation 阶段检测到上游正式产物损坏，已阻止继续进入下一阶段："
+            + "；".join(fatal_errors)
+        )
+        logger.warning(
+            "stage_name=appearance_alias_generation failure_type=broken_upstream_inputs "
+            "source=local_input_guard blocking_issues=%s local_review_attempt=%s "
+            "cleared_stage_cache=%s preview=%s",
+            fatal_errors[:8],
+            0,
+            True,
+            _truncate_log_text(message, max_chars=320),
+        )
+        state.set_output(
+            STAGE_APPEARANCE_ALIAS_GENERATION,
+            "last_invalid_output",
+            {
+                "failure_type": "broken_upstream_inputs",
+                "blocking_issues": fatal_errors[:12],
+                "preview": _truncate_log_text(message, max_chars=500),
+            },
+        )
+        _clear_appearance_stage_state(state, variables)
+        sync_runtime_state(state)
+        raise ValueError(message)
+
+    variables.update(appearance_inputs)
+    total_attempts = 1 + max(
+        0,
+        int(
+            getattr(
+                settings,
+                "fastgpt_appearance_local_review_retries",
+                getattr(settings, "fastgpt_stage_local_restart_retries", 1),
+            )
+        ),
+    )
+    last_issues: list[str] = []
+    for local_review_attempt in range(1, total_attempts + 1):
+        try:
+            output = _run_fastgpt_stage(
+                state,
+                runner,
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                variables,
+                stage_key="appearance",
+                message="正在生成人物服装版本映射。",
+                progress_percent=42,
+                max_retries=0,
+            )
+        except Exception as exc:
+            logger.warning(
+                "stage_name=appearance_alias_generation failure_type=appearance_stage_restart_exhausted "
+                "source=fastgpt_stage blocking_issues=%s local_review_attempt=%s "
+                "cleared_stage_cache=%s preview=%s",
+                last_issues[:8],
+                local_review_attempt,
+                True,
+                _truncate_log_text(str(exc), max_chars=320),
+            )
+            state.set_output(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                "last_invalid_output",
+                {
+                    "failure_type": "appearance_stage_restart_exhausted",
+                    "blocking_issues": last_issues[:12],
+                    "preview": _truncate_log_text(str(exc), max_chars=500),
+                },
+            )
+            _clear_appearance_stage_state(state, variables)
+            sync_runtime_state(state)
+            raise
+
+        issues = _appearance_output_integrity_issues(output.get(APPEARANCE_MAPPING))
+        if not issues:
+            variables.update(output)
+            if _apply_appearance_outputs_to_variables(variables):
+                return
+            issues = ["appearance_mapping 通过本地审核后仍无法生成 registry / alias plan"]
+
+        last_issues = list(issues)
+        logger.warning(
+            "stage_name=appearance_alias_generation failure_type=appearance_local_review_failed "
+            "source=contract_output blocking_issues=%s local_review_attempt=%s "
+            "cleared_stage_cache=%s preview=%s",
+            issues[:10],
+            local_review_attempt,
+            True,
+            _truncate_log_text(
+                _serialize_framework_runtime_value(output.get(APPEARANCE_MAPPING)),
+                max_chars=320,
+            ),
+        )
+        state.set_output(
+            STAGE_APPEARANCE_ALIAS_GENERATION,
+            "last_invalid_output",
+            {
+                "failure_type": "appearance_local_review_failed",
+                "blocking_issues": issues[:20],
+                "preview": _truncate_log_text(
+                    _serialize_framework_runtime_value(output.get(APPEARANCE_MAPPING)),
+                    max_chars=500,
+                ),
+            },
+        )
+        _clear_appearance_stage_state(state, variables)
+        sync_runtime_state(state)
+        if local_review_attempt >= total_attempts:
+            raise ValueError("appearance_mapping 本地审核失败：" + "；".join(issues[:12]))
+
+
+def _prepare_appearance_stage_inputs(
+    variables: dict[str, Any],
+) -> tuple[dict[str, str], list[str], list[str]]:
+    prepared: dict[str, str] = {}
+    warnings: list[str] = []
+    fatal_errors: list[str] = []
+
+    worldview_text = _normalize_appearance_formal_stage_input(
+        STAGE_WORLDVIEW,
+        WORLDVIEW,
+        variables.get(WORLDVIEW),
+    )
+    if worldview_text is None:
+        fatal_errors.append("worldview 为空或不是合法世界观 JSON")
+    else:
+        prepared[WORLDVIEW] = worldview_text
+
+    story_outline_text = _normalize_scene_json_object_input(
+        variables.get(STORY_OUTLINE),
+        field_name=STORY_OUTLINE,
+    )
+    if story_outline_text is None:
+        fatal_errors.append("story_outline 为空或不是合法故事大纲 JSON")
+    else:
+        prepared[STORY_OUTLINE] = story_outline_text
+
+    episode_plan_text = _normalize_scene_episode_plan_input(variables.get(EPISODE_PLAN))
+    if episode_plan_text is None:
+        fatal_errors.append("episode_plan 为空或不是合法分集计划 JSON")
+    else:
+        prepared[EPISODE_PLAN] = episode_plan_text
+
+    user_characters_text = _normalize_appearance_story_context_input(
+        variables.get(USER_CHARACTERS),
+        field_name=USER_CHARACTERS,
+        warnings=warnings,
+    )
+    if user_characters_text is None:
+        fatal_errors.append("user_characters 为空或不是可消费的人物小传上下文")
+    else:
+        prepared[USER_CHARACTERS] = user_characters_text
+
+    characters_text = _normalize_appearance_formal_stage_input(
+        STAGE_CHARACTERS,
+        CHARACTERS,
+        variables.get(CHARACTERS),
+    )
+    if characters_text is None:
+        fatal_errors.append("characters 为空或不是合法结构化人设 JSON")
+    else:
+        prepared[CHARACTERS] = characters_text
+
+    scenes_text = _normalize_appearance_formal_stage_input(
+        STAGE_SCENES,
+        SCENES,
+        variables.get(SCENES),
+    )
+    if scenes_text is None:
+        fatal_errors.append("scenes 为空或不是合法结构化场景 JSON")
+    else:
+        prepared[SCENES] = scenes_text
+
+    prepared[CHARACTER_ALIAS_NAMING_RULES] = _normalize_scene_optional_input(
+        CHARACTER_ALIAS_NAMING_RULES,
+        variables.get(CHARACTER_ALIAS_NAMING_RULES),
+        warnings=warnings,
+    )
+    return prepared, warnings, fatal_errors
+
+
+def _prepare_scene_stage_inputs(
+    variables: dict[str, Any],
+) -> tuple[dict[str, str], list[str], list[str]]:
+    prepared: dict[str, str] = {}
+    warnings: list[str] = []
+    fatal_errors: list[str] = []
+
+    worldview_text = _normalize_scene_worldview_input(variables.get(WORLDVIEW))
+    if worldview_text is None:
+        fatal_errors.append("worldview 为空或不是合法世界观 JSON")
+    else:
+        prepared[WORLDVIEW] = worldview_text
+
+    story_outline_text = _normalize_scene_json_object_input(
+        variables.get(STORY_OUTLINE),
+        field_name=STORY_OUTLINE,
+    )
+    if story_outline_text is None:
+        fatal_errors.append("story_outline 为空或不是可解析 JSON object")
+    else:
+        prepared[STORY_OUTLINE] = story_outline_text
+
+    user_characters_text = _normalize_scene_json_collection_input(
+        variables.get(USER_CHARACTERS),
+        field_name=USER_CHARACTERS,
+    )
+    if user_characters_text is None:
+        fatal_errors.append("user_characters 为空或不是可解析 JSON")
+    else:
+        prepared[USER_CHARACTERS] = user_characters_text
+
+    episode_plan_text = _normalize_scene_episode_plan_input(variables.get(EPISODE_PLAN))
+    if episode_plan_text is None:
+        fatal_errors.append("episode_plan 为空或不是可消费分集计划 JSON")
+    else:
+        prepared[EPISODE_PLAN] = episode_plan_text
+
+    for field_name in SCENE_OPTIONAL_INPUT_FIELDS:
+        prepared[field_name] = _normalize_scene_optional_input(
+            field_name,
+            variables.get(field_name),
+            warnings=warnings,
+        )
+
+    return prepared, warnings, fatal_errors
+
+
+def _normalize_appearance_formal_stage_input(
+    stage_name: str,
+    field_name: str,
+    value: Any,
+) -> str | None:
+    if value in (None, ""):
+        return None
+    text = _serialize_framework_runtime_value(value)
+    if not text:
+        return None
+    try:
+        return contract_for(stage_name).validate_output_payload({field_name: text})[field_name]
+    except Exception:
+        return None
+
+
+def _normalize_appearance_story_context_input(
+    value: Any,
+    *,
+    field_name: str,
+    warnings: list[str],
+) -> str | None:
+    del field_name
+    if value in (None, ""):
+        return None
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2)
+        except Exception:
+            return None
+    text = str(value).strip()
+    if not text:
+        return None
+    candidate = _scene_json_candidate(text)
+    if isinstance(candidate, (dict, list)):
+        return json.dumps(candidate, ensure_ascii=False, indent=2)
+    warnings.append("user_characters 不是结构化 JSON，已按纯文本人物小传透传给 appearance 阶段。")
+    return text
+
+
+def _normalize_scene_worldview_input(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    text = _serialize_framework_runtime_value(value)
+    if not text:
+        return None
+    try:
+        return contract_for(STAGE_WORLDVIEW).validate_output_payload({WORLDVIEW: text})[WORLDVIEW]
+    except Exception:
+        return None
+
+
+def _normalize_scene_json_object_input(value: Any, *, field_name: str) -> str | None:
+    data = _scene_json_candidate(value)
+    if not isinstance(data, dict) or not data:
+        return None
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def _normalize_scene_json_collection_input(value: Any, *, field_name: str) -> str | None:
+    data = _scene_json_candidate(value)
+    if isinstance(data, list):
+        return json.dumps(data, ensure_ascii=False, indent=2) if data else None
+    if isinstance(data, dict):
+        characters = data.get("characters")
+        if isinstance(characters, list) and characters:
+            return json.dumps(data, ensure_ascii=False, indent=2)
+        if data:
+            return json.dumps(data, ensure_ascii=False, indent=2)
+    return None
+
+
+def _normalize_scene_episode_plan_input(value: Any) -> str | None:
+    if _normalize_episode_plan_object(value) is None:
+        return None
+    return _serialize_framework_runtime_value(value)
+
+
+def _normalize_scene_optional_input(
+    field_name: str,
+    value: Any,
+    *,
+    warnings: list[str],
+) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    text = str(value).strip()
+    if not text:
+        return ""
+    if field_name == USER_SCENES:
+        candidate = _scene_json_candidate(text)
+        if isinstance(candidate, (dict, list)):
+            return json.dumps(candidate, ensure_ascii=False, indent=2)
+        return text
+    return text
+
+
+def _scene_json_candidate(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return parse_json(text)
+    except Exception:
+        return None
+
+
+def _scene_output_integrity_issue(value: Any) -> str | None:
+    if not _has_value(value):
+        return "scenes 为空"
+    try:
+        contract_for(STAGE_SCENES).validate_output_payload({SCENES: value})
+    except Exception as exc:
+        return str(exc)
+    return None
+
+
+def _appearance_output_integrity_issues(value: Any) -> list[str]:
+    if not _has_value(value):
+        return ["appearance_mapping 为空"]
+    issues = validate_appearance_mapping_output(value)
+    if issues:
+        return issues
+    if _normalize_appearance_mapping_object(value) is None:
+        return ["appearance_mapping 未能规范化为内部可消费对象"]
+    return []
+
+
+def _scene_stage_has_transient_state(
+    state: WorkflowState,
+    variables: dict[str, Any],
+) -> bool:
+    for key in SCENE_STAGE_TRANSIENT_KEYS:
+        if _has_value(variables.get(key)):
+            return True
+        if _has_value(state.variables.get(key)):
+            return True
+    return False
+
+
+def _appearance_stage_has_transient_state(
+    state: WorkflowState,
+    variables: dict[str, Any],
+) -> bool:
+    for key in APPEARANCE_STAGE_TRANSIENT_KEYS:
+        if _has_value(variables.get(key)):
+            return True
+        if _has_value(state.variables.get(key)):
+            return True
+    return False
+
+
+def _clear_scene_stage_state(state: WorkflowState, variables: dict[str, Any]) -> None:
+    for key in SCENE_STAGE_TRANSIENT_KEYS:
+        variables.pop(key, None)
+        state.variables.pop(key, None)
+
+
+def _clear_appearance_stage_state(state: WorkflowState, variables: dict[str, Any]) -> None:
+    for key in APPEARANCE_STAGE_TRANSIENT_KEYS:
+        variables.pop(key, None)
+        state.variables.pop(key, None)
+
+
 def _ensure_stage_output_mapping(stage_name: str, output: Any) -> dict[str, Any]:
     if isinstance(output, dict):
         return output
@@ -2890,6 +3437,13 @@ def _serialize_framework_runtime_value(value: Any) -> str:
     return str(value).strip()
 
 
+def _truncate_log_text(text: Any, *, max_chars: int = 500) -> str:
+    normalized = " ".join(str(text or "").split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return f"{normalized[:max_chars]}..."
+
+
 def _framework_output_snapshot(
     payload: WorkflowInput,
     values: Any,
@@ -3183,7 +3737,8 @@ def _apply_appearance_outputs_to_variables(variables: dict[str, Any]) -> bool:
 
 
 def _normalize_appearance_mapping_object(value: Any) -> dict[str, Any] | None:
-    candidate = value
+    normalized_candidate = normalize_appearance_mapping_candidate(value)
+    candidate = normalized_candidate if isinstance(normalized_candidate, dict) else value
     if candidate in (None, ""):
         return None
     if isinstance(candidate, str):
@@ -3227,8 +3782,16 @@ def _normalize_appearance_mapping_object(value: Any) -> dict[str, Any] | None:
                     "episode_range_hint": str(variant.get("episode_range_hint") or "").strip(),
                     "scene_trigger_rules": _normalize_scene_trigger_rules(variant.get("scene_trigger_rules")),
                     "usage_rule": str(variant.get("usage_rule") or "").strip(),
-                    "must_use_when_triggered": bool(variant.get("must_use_when_triggered", True)),
-                    "fallback_allowed": bool(variant.get("fallback_allowed", False)),
+                    "must_use_when_triggered": (
+                        variant.get("must_use_when_triggered")
+                        if isinstance(variant.get("must_use_when_triggered"), bool)
+                        else True
+                    ),
+                    "fallback_allowed": (
+                        variant.get("fallback_allowed")
+                        if isinstance(variant.get("fallback_allowed"), bool)
+                        else False
+                    ),
                     "same_person_confirmation": str(variant.get("same_person_confirmation") or "").strip(),
                 }
             )
