@@ -1,0 +1,546 @@
+﻿{
+  "nodes": [
+    {
+      "nodeId": "userGuide",
+      "name": "系统配置",
+      "intro": "可以配置应用的系统参数",
+      "avatar": "core/workflow/template/systemConfig",
+      "flowNodeType": "userGuide",
+      "position": {
+        "x": -90,
+        "y": -1665
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "welcomeText",
+          "label": "core.app.Welcome Text",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": ""
+        },
+        {
+          "key": "variables",
+          "label": "core.app.Chat Variable",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": []
+        },
+        {
+          "key": "questionGuide",
+          "label": "core.app.Question Guide",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false
+          }
+        },
+        {
+          "key": "tts",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "type": "web"
+          }
+        },
+        {
+          "key": "whisper",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false,
+            "autoSend": false,
+            "autoTTSResponse": false
+          }
+        },
+        {
+          "key": "scheduleTrigger",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": null
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "workflowStart",
+      "name": "流程开始",
+      "intro": "",
+      "avatar": "core/workflow/template/workflowStart",
+      "flowNodeType": "workflowStart",
+      "position": {
+        "x": 555,
+        "y": -1605
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "toolDescription": "用户问题",
+          "debugLabel": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "userChatInput",
+          "key": "userChatInput",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.input.label.user question",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "dialogueWriter",
+      "name": "角色对白编剧",
+      "intro": "在 alias registry 强约束下写对白：先有人物声音，再让对白承担戏剧功能。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 975,
+        "y": -1755
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-v4-flash",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 1.1,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 64000,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "string",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "string",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "number",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "string",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "string",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "string",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“角色对白编剧”，不是信息摘要器，不是剧情说明员，不是书面句子切短器。\n\n你的任务：\n基于世界观、人设、场景、服装版本映射、开头冲突钩子、分集计划，为当前批次集数生成“能被人自然说出口”的关键对白 JSON。\n你写的是“人怎么说话”，不是“作者想让剧情怎么走”。\n这一次你还必须把“canonical 角色”与“当前该使用的 alias_name”严格分开：人物本体可以稳定，但输出命名必须跟随当前集数/场景/状态要求。\n\n【批次边界】\n从第{{$VARIABLE_NODE_ID.dialogueStartEpisode$}}集开始。\n一次只写连续五集；若不足五集，就写剩余集数。\n严禁超过{{$VARIABLE_NODE_ID.totalEpisodes$}}集。\n\n【命名优先级】\n当前批次人物命名必须按以下优先级执行：\n1. 服装版本映射JSON（最高优先级）：{{$VARIABLE_NODE_ID.h2KpLm91$}}\n2. 场景结果JSON中的命名条件 / 造型条件：{{$VARIABLE_NODE_ID.sceneContent$}}\n3. 开头冲突钩子JSON中的本集开场出场 alias：{{$VARIABLE_NODE_ID.hookContent$}}\n4. 分集计划JSON中的集级 alias 使用建议：{{$VARIABLE_NODE_ID.episodePlan$}}\n\n执行原则：\n- 先用 canonical 角色理解人物动机、关系和声音。\n- 再用 alias registry 决定当前对白里这个人应该以什么名字出现。\n- participants、dialogue_block.speaker、character_voice_bibles.alias_name、alias_binding.must_use_aliases 都必须使用当前允许的 alias_name。\n- 若当前集/当前场景要求“男主（上班）”，就禁止输出裸名“男主”。\n- 禁止发明 alias registry 里没有的别名。\n- 禁止把别名错绑到别的角色。\n\n【创作原则：这是一次机制革命，不是修辞润色】\n1. 先有人，再有功能：\n 每句台词先满足“这个人会不会这样说”，再考虑“能不能推进剧情”。\n1. 先有关系，再有信息：\n 人不是为了交代信息而说话，而是在关系压力里顺带暴露信息。\n1. 先有动作冲动，再有句子：\n 试探、压迫、敷衍、回避、示弱、转移、反咬、装镇定，先决定说话动作，再写台词。\n1. 不把话说满：\n 真实对白允许省略、打断、改口、反问、错位回应、情绪顶嘴、没接住话。\n1. 每个角色必须有独立声音：\n 不是“主角/配角/反派”三类声音，而是“每个关键角色各有词汇偏好、句长习惯、情绪爆点、攻击方式、示弱方式”。\n1. 命名要稳，声音要活：\n 角色声音来自 canonical 本体，输出标签来自 alias_name；二者不能混淆。\n\n【禁止事项】\n- 禁止把书面叙述拆成几句就当对白\n- 禁止用对白硬塞背景设定\n- 禁止所有角色都说完整、标准、逻辑过强的句子\n- 禁止每场都把潜台词解释出来\n- 禁止用“热梗”替代人物性格\n- 禁止为了显得聪明而写过度工整、过度金句化的台词\n- 禁止在同一集/同一场戏里无故切换同一角色的称呼\n- 禁止回退成“男主/女主/反派/上司/同事/医生”等泛称\n- 禁止输出未在 alias registry 中声明、也未被当前场景/钩子/分集计划支持的名字\n\n【口语检验标准】\n你写完每句时，默认做五个检查：\n- 这个角色此刻真会这么开口吗？\n- 这句话一口气能说出来吗？\n- 这句话有没有“写出来像中文、说出来不像人”的问题？\n- 这句话是不是同时体现了身份、关系和当下情绪？\n- 这句台词的 speaker 名字是不是当前必须使用的 alias？\n\n【输入】\n【世界观JSON】\n{{$VARIABLE_NODE_ID.worldviewContent$}}\n【人设JSON】\n{{$VARIABLE_NODE_ID.characterContent$}}\n【场景结果JSON】\n{{$VARIABLE_NODE_ID.sceneContent$}}\n【服装版本映射JSON】\n{{$VARIABLE_NODE_ID.h2KpLm91$}}\n【开头冲突钩子JSON】\n{{$VARIABLE_NODE_ID.hookContent$}}\n【分集计划JSON】\n{{$VARIABLE_NODE_ID.episodePlan$}}\n【表达参考JSON，可为空】\n{{$VARIABLE_NODE_ID.dialogueSearchMemory$}}\n\n【输出要求】\n- 只输出合法 JSON\n- 不要输出 JSON 之外的任何文字\n- 不要使用 markdown 代码块\n- 所有出现的人物名字必须使用当前允许的 alias_name\n- speaker 字段只能填写 alias_name，不能写 canonical 泛称\n- 若某角色当前批次只允许一个 alias，则整批不得漂移命名\n\n# 契约字段强约束\n\n最终输出必须是合法 JSON。\n最外层必须且只能有一个字段：batch_dialogues。\n\nbatch_meta、character_voice_bibles、episode_dialogue_blocks 必须放在 batch_dialogues 内部。\n\n禁止在最外层输出以下字段：\n- totalEpisodes\n- episodePlan\n- worldviewContent\n- characterContent\n- sceneContent\n- hookContent\n- dialogueContent\n- dialogueReviewContent\n- dialogueSearchMemory\n- dialogueStartEpisode\n- dialogueMaxRewriteRounds\n- batch_meta\n- character_voice_bibles\n- episode_dialogue_blocks\n- dialogues\n- result\n- data\n\n这些都是输入变量或 legacy/random key，不是输出契约字段。\n\n严格输出为如下结构：\n{\n  \"batch_dialogues\": {\n    \"batch_meta\": {\n      \"start_episode\": 1,\n      \"end_episode\": 5,\n      \"batch_goal\": \"\",\n      \"naming_principle\": \"\",\n      \"bare_name_ban\": true\n    },\n    \"character_voice_bibles\": [],\n    \"episode_dialogue_blocks\": []\n  }\n}",
+          "maxLength": 100000,
+          "description": "common:core.app.tip.systemPromptTip",
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "description": "workflow:max_dialog_rounds",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "workflowStart",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成角色对白生成任务即可。",
+          "toolDescription": "用户问题",
+          "debugLabel": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true,
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]"
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": true
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "updateDialogueContentFromWriter",
+      "name": "更新角色对白内容",
+      "intro": "将生成结果写入角色对白内容变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 1905,
+        "y": -1170
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "dialogueContent"
+              ],
+              "value": [
+                "dialogueWriter",
+                "answerText"
+              ],
+              "valueType": "string",
+              "renderType": "reference"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "dialogueWriter",
+      "target": "updateDialogueContentFromWriter",
+      "sourceHandle": "dialogueWriter-source-right",
+      "targetHandle": "updateDialogueContentFromWriter-target-left"
+    },
+    {
+      "source": "workflowStart",
+      "target": "dialogueWriter",
+      "sourceHandle": "workflowStart-source-right",
+      "targetHandle": "dialogueWriter-target-left"
+    }
+  ],
+  "chatConfig": {
+    "variables": [
+      {
+        "key": "totalEpisodes",
+        "label": "总集数",
+        "valueType": "number",
+        "required": true,
+        "defaultValue": 60,
+        "max": 100,
+        "min": 1,
+        "type": "numberInput",
+        "description": "用户要写的剧本总集数",
+        "icon": "core/workflow/inputType/numberInput"
+      },
+      {
+        "key": "episodePlan",
+        "label": "分集计划",
+        "valueType": "string",
+        "required": true,
+        "defaultValue": "",
+        "type": "input",
+        "description": "按剧集拆解的分集计划 JSON 或文本",
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "key": "worldviewContent",
+        "label": "世界观内容",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "保存世界观最新版本",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "characterContent",
+        "label": "人设内容",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "保存人设最新版本",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "sceneContent",
+        "label": "场景内容",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "保存最新场景结果",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "hookContent",
+        "label": "最终开头冲突钩子",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "保存最新开头冲突钩子",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "h2KpLm91",
+        "label": "服装版本映射内容",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "internal",
+        "description": "保存最新撰写/修订的服装版本映射结构化JSON，用作当前批次角色对白的 alias registry。",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "dialogueStartEpisode",
+        "label": "角色对白从这一集开始",
+        "valueType": "number",
+        "required": false,
+        "defaultValue": "1",
+        "type": "internal",
+        "description": "当前批次起始集数",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "dialogueContent",
+        "label": "角色对白内容",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "internal",
+        "description": "当前批次最新对白 JSON",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "dialogueSearchMemory",
+        "label": "对白表达参考记忆",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "internal",
+        "description": "百度搜索工具流归纳后的表达参考 JSON",
+        "icon": "core/workflow/inputType/internal"
+      }
+    ],
+    "scheduledTriggerConfig": {
+      "cronString": "",
+      "timezone": "Asia/Shanghai",
+      "defaultPrompt": ""
+    },
+    "_id": "69e754af7846cab59f6991b2"
+  }
+}

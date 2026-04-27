@@ -1,0 +1,577 @@
+﻿{
+  "nodes": [
+    {
+      "nodeId": "userGuide",
+      "name": "common:core.module.template.system_config",
+      "intro": "common:core.module.template.system_config_info",
+      "avatar": "core/workflow/template/systemConfig",
+      "flowNodeType": "userGuide",
+      "position": {
+        "x": -2055,
+        "y": -1530
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "welcomeText",
+          "label": "core.app.Welcome Text",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": ""
+        },
+        {
+          "key": "variables",
+          "label": "core.app.Chat Variable",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": []
+        },
+        {
+          "key": "questionGuide",
+          "label": "core.app.Question Guide",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false
+          }
+        },
+        {
+          "key": "tts",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "type": "web"
+          }
+        },
+        {
+          "key": "whisper",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false,
+            "autoSend": false,
+            "autoTTSResponse": false
+          }
+        },
+        {
+          "key": "scheduleTrigger",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": null
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "448745",
+      "name": "common:core.module.template.work_start",
+      "intro": "",
+      "avatar": "core/workflow/template/workflowStart",
+      "flowNodeType": "workflowStart",
+      "position": {
+        "x": -1425,
+        "y": -1530
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "userChatInput",
+          "key": "userChatInput",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.input.label.user question",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "zQ5rpWO0pErpeFKK",
+      "name": "开头，中间冲突，结尾钩子修订编剧",
+      "intro": "根据审核结果重写完整开头钩子JSON，修正戏剧启动效率与开场 alias 命名落地问题。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": -645,
+        "y": -1650
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-v4-flash",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": 64000
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“开头冲突钩子修订编剧”。\n你的任务不是打补丁，而是根据审核意见，重写当前批次完整的开头钩子 JSON。\n\n【输入】\n【世界观JSON】\n{{$VARIABLE_NODE_ID.yuozoGpo$}}\n【人设JSON】\n{{$VARIABLE_NODE_ID.fFM0mroW$}}\n【场景JSON】\n{{$VARIABLE_NODE_ID.iJudZHhM$}}\n【故事大纲】\n{{$VARIABLE_NODE_ID.ayxWwSpE$}}\n【分集计划】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n【服装版本映射JSON（只读）】\n{{$VARIABLE_NODE_ID.h2KpLm91$}}\n【当前开头冲突钩子JSON】\n{{$VARIABLE_NODE_ID.nIGPvKG2$}}\n【开头冲突钩子审核结果JSON】\n{{$VARIABLE_NODE_ID.uzt0m0hS$}}\n\n【批次边界】\n当前批次从第{{$VARIABLE_NODE_ID.iJkq6iGe$}}集开始\n一次只处理连续五集，且必须包含第{{$VARIABLE_NODE_ID.iJkq6iGe$}}集\n若剩余不足五集，只处理剩余集数\n严禁输出超过{{$VARIABLE_NODE_ID.blkSS7dY$}}集的内容\n\n【本阶段注意原则】\n戏剧优先，不要设定优先\n开局尽量晚进入，直接切进主角已经陷入麻烦的时刻\n观众必须通过“看到/听到”理解信息，不能依赖说明文\n每一集都必须发生局势变化，不能只有过程没有结果\n上一集结尾抛出的核心问题，下一集开头必须优先接住\n这一次你还必须把“开场人物该用哪个名字出场”落实清楚\n\n【服装版本映射使用原则】\n服装版本映射JSON是只读上游变量，你只能读取它，不能在本阶段新增、发明或改写任何服装版本信息。\n如果服装版本映射JSON非空，它就是本阶段人物出场命名的最高优先级依据。\n你要做的不是生成服装信息，而是把“这一集开头谁以哪个 alias 出场”落实到钩子JSON里。\n如果映射明确要求某角色在当前集数/场景/状态使用某个 alias，则禁止退回裸名、泛称或自造别名。\n如果映射为空，则不要硬造 alias，按现有人设、场景、分集计划使用稳定本名即可。\n\n【修订原则】\n1. 优先修 blocking_issues 中的问题\n2. 保留已经成立的强项，但只要影响戏剧启动效率、连续性、可视化表达、结果密度，就必须重写\n3. 每一集都要明确：开头接什么、主角要什么、被什么阻挡、观众怎么懂、结尾怎么逼下一集\n4. 不得把解释型文本伪装成“剧情设计”\n5. 不得为了炫技把钩子写成脱离角色逻辑的反转\n6. 输出必须是完整新 JSON，不能只给局部补丁\n7. 服装版本映射JSON是只读约束，不得在本阶段新造 alias 或 variant\n8. 若审核指出命名问题，必须通过 opening_alias_plan 修正本集开场出场名，并保证与上游映射一致\n9. 若上游映射为空，则修稳定命名，不要硬造 alias\n\n【输出要求】\n- 只输出合法 JSON\n- 不要输出 JSON 之外的任何文字\n- 不要使用 markdown 代码块\n- 使用与生成节点完全一致的 JSON 结构\n\n# 契约字段强约束\n最终输出必须是合法 JSON。\n禁止输出以下 legacy/random key：\n- hooks\n- hook_json\n- opening_hooks\n- batch_opening_hooks\n- episodes\n- batch_meta\n- global_hook_engine\n- final_hooks\n- result\n\n注意：\nbatch_meta、global_hook_engine、episodes 都必须放在 batch_hooks 内部。\n禁止把 episodes 放在最外层。\n禁止依赖代码侧 legacy 映射兜底。\n\n【严格输出格式规定】\n{\n \"batch_hooks\": {\n \"batch_meta\": {\n \"start_episode\": 1,\n \"end_episode\": 5,\n \"batch_opening_strategy\": \"\",\n \"what_to_withhold\": [],\n \"must_land_immediately\": [],\n \"naming_principle\": \"\",\n \"appearance_mapping_used\": true\n },\n \"global_hook_engine\": {\n \"first_visual_grab\": \"\",\n \"first_concrete_problem\": \"\",\n \"primary_pressure_source\": \"\",\n \"five_episode_escalation\": \"\",\n \"continuity_rule\": \"\"\n },\n \"episodes\": [\n {\n \"episode\": 1,\n \"opening_alias_plan\": [],\n \"carry_in\": \"\",\n \"opening_image\": \"\",\n \"opening_action\": \"\",\n \"current_goal\": \"\",\n \"core_obstacle\": \"\",\n \"audience_must_understand\": \"\",\n \"how_audience_understands\": \"\",\n \"mid_episode_turn\": \"\",\n \"episode_state_change\": \"\",\n \"ending_hook\": \"\",\n \"next_episode_priority_response\": \"\"\n }\n ]\n }\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按系统提示词完成剧本的开头，中间冲突，结尾钩子修订任务即可",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": true
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "jQ9mMY6xCfeYdNDU",
+      "name": "更新开头冲突钩子内容",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 135,
+        "y": -1275
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "nIGPvKG2"
+              ],
+              "value": [
+                "zQ5rpWO0pErpeFKK",
+                "answerText"
+              ],
+              "valueType": "string",
+              "renderType": "reference"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "zQ5rpWO0pErpeFKK",
+      "target": "jQ9mMY6xCfeYdNDU",
+      "sourceHandle": "zQ5rpWO0pErpeFKK-source-right",
+      "targetHandle": "jQ9mMY6xCfeYdNDU-target-left"
+    },
+    {
+      "source": "448745",
+      "target": "zQ5rpWO0pErpeFKK",
+      "sourceHandle": "448745-source-right",
+      "targetHandle": "zQ5rpWO0pErpeFKK-target-left"
+    }
+  ],
+  "chatConfig": {
+    "variables": [
+      {
+        "key": "ayxWwSpE",
+        "label": "故事大纲",
+        "valueType": "string",
+        "required": true,
+        "maxLength": 10000,
+        "type": "input",
+        "description": "是全剧核心主线与情节脉络的高度浓缩，完整梳理故事起承转合、关键转折与最终结局，帮助模型快速把握剧本主旨、核心冲突与整体叙事逻辑。",
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "key": "blkSS7dY",
+        "label": "总集数",
+        "valueType": "number",
+        "required": true,
+        "defaultValue": 60,
+        "max": 100,
+        "min": 1,
+        "type": "numberInput",
+        "description": "用户要写的剧本一共有多少集",
+        "icon": "core/workflow/inputType/numberInput"
+      },
+      {
+        "key": "pxtQY7p2",
+        "label": "分集计划",
+        "valueType": "string",
+        "required": true,
+        "defaultValue": "",
+        "type": "input",
+        "description": "按剧集拆解开场引入、冲突升级、高潮爆发、结尾留钩的结构设计，明确每集叙事节奏与核心看点，为剧本初稿搭建稳定的框架基础。",
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "key": "fFM0mroW",
+        "label": "人设内容",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "保存最新撰写/修订的人设内容",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "h2KpLm91",
+        "label": "服装版本映射内容",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "internal",
+        "description": "保存最新撰写/修订的服装版本映射结构化JSON，供开头冲突钩子读取 alias 与触发规则。",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "hUoaaRhJ",
+        "label": "最终开头冲突钩子",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "保存最终定稿的开头冲突钩子JSON，供后续角色对白与剧本正文读取。",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "iJkq6iGe",
+        "label": "开头冲突钩子从这一集开始",
+        "valueType": "number",
+        "required": false,
+        "defaultValue": 1,
+        "type": "internal",
+        "description": "开局钩子从这一集开始",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "iJudZHhM",
+        "label": "场景内容",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "保存了最新撰写/修订的场景说明文字",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "nIGPvKG2",
+        "label": "开头冲突钩子循环变量",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "保存这一轮的五集写的开头冲突钩子",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "uzt0m0hS",
+        "label": "开头冲突钩子审核内容",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "internal",
+        "description": "",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "yuozoGpo",
+        "label": "世界观内容",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "用于更新记录每一次新修订的世界观内容",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "hookSearchInput",
+        "label": "开头钩子搜索输入",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "internal",
+        "description": "保存给谷歌搜索工具的精确检索任务描述",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "key": "hookSearchMemory",
+        "label": "开头钩子搜索记忆",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "internal",
+        "description": "保存搜索整理后的开头钩子写法参考，只可提炼方法，禁止照抄",
+        "icon": "core/workflow/inputType/internal"
+      }
+    ],
+    "scheduledTriggerConfig": {
+      "cronString": "",
+      "timezone": "Asia/Shanghai",
+      "defaultPrompt": ""
+    },
+    "_id": "69dc6ac8f962df93355c2dac"
+  }
+}
