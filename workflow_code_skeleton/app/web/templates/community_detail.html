@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>{% if asset %}{{ asset.title }}{% else %}社区好剧{% endif %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260424-10">
+</head>
+<body class="home-body community-page mono-page">
+  <main class="home-shell">
+    <header class="home-topbar">
+      <div class="topbar-main">
+        <a class="page-back-link page-back-link-light" href="{{ url_for('index', auth_token=current_auth_token) }}">返回首页</a>
+        <a class="brand-mark" href="{{ url_for('index', auth_token=current_auth_token) }}">
+          <span>剧</span>
+          <strong>社区共享好剧</strong>
+        </a>
+      </div>
+      <nav class="home-nav">
+        <a href="{{ url_for('index', auth_token=current_auth_token) }}">首页</a>
+        <a href="{{ url_for('workspace_page', auth_token=current_auth_token) if current_user else url_for('login_page') }}">工作台</a>
+      </nav>
+    </header>
+
+    {% if asset %}
+      <section class="card community-detail-card">
+        <div class="community-detail-head">
+          <div>
+            <div class="detail-pill-row">
+              <span class="status-pill status-pill-completed">已完成</span>
+              <span class="status-pill status-pill-public">公开成品</span>
+            </div>
+            <h1>{{ asset.title }}</h1>
+            <p class="community-detail-summary">{{ asset.summary }}</p>
+          </div>
+          <a class="btn btn-secondary" href="{{ url_for('index', auth_token=current_auth_token) }}#community">返回社区</a>
+        </div>
+
+        {% if asset.story_outline %}
+          <section class="detail-block">
+            <h2>故事大纲</h2>
+            <pre class="output-box detail-output">{{ asset.story_outline }}</pre>
+          </section>
+        {% endif %}
+
+        <section class="detail-block">
+          <h2>完整剧本</h2>
+          <pre class="output-box detail-output large-detail-output">{{ asset.final_script }}</pre>
+        </section>
+      </section>
+    {% else %}
+      <section class="card community-detail-card">
+        <div class="empty-card">
+          <strong>这个公开作品不存在，或已经被取消公开。</strong>
+          <p>你可以返回首页，查看其他社区好剧。</p>
+        </div>
+      </section>
+    {% endif %}
+  </main>
+</body>
+</html>

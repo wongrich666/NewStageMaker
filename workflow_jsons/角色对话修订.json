@@ -1,0 +1,506 @@
+﻿{
+  "nodes": [
+    {
+      "nodeId": "userGuide",
+      "name": "common:core.module.template.system_config",
+      "intro": "common:core.module.template.system_config_info",
+      "avatar": "core/workflow/template/systemConfig",
+      "flowNodeType": "userGuide",
+      "position": {
+        "x": -5130,
+        "y": -4935
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "welcomeText",
+          "label": "core.app.Welcome Text",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": ""
+        },
+        {
+          "key": "variables",
+          "label": "core.app.Chat Variable",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": []
+        },
+        {
+          "key": "questionGuide",
+          "label": "core.app.Question Guide",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false
+          }
+        },
+        {
+          "key": "tts",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "type": "web"
+          }
+        },
+        {
+          "key": "whisper",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false,
+            "autoSend": false,
+            "autoTTSResponse": false
+          }
+        },
+        {
+          "key": "scheduleTrigger",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": null
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "448745",
+      "name": "common:core.module.template.work_start",
+      "intro": "",
+      "avatar": "core/workflow/template/workflowStart",
+      "flowNodeType": "workflowStart",
+      "position": {
+        "x": -4305,
+        "y": -4825
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "userChatInput",
+          "key": "userChatInput",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.input.label.user question",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "dialogueMemorySummarizer",
+      "name": "角色对话记忆整理器",
+      "intro": "总结当前五集角色对白，沉淀下一批对白需要延续的人物声音、关系张力、潜台词与 alias 连续性。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": -3750,
+        "y": -5085
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": "json_object"
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": "{\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"this_turn_episodes\", \"dialogue_voice_summary\", \"episode_dialogue_progress\", \"character_voice_continuity\", \"alias_usage_continuity\", \"unresolved_dialogue_threads\", \"must_carry_into_next_turn\", \"next_turn_dialogue_guidance\"], \"properties\": {\"this_turn_episodes\": {\"type\": \"string\", \"minLength\": 1}, \"dialogue_voice_summary\": {\"type\": \"string\", \"minLength\": 5}, \"episode_dialogue_progress\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"character_voice_continuity\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"character_name\", \"alias_name\", \"voice_traits_activated\", \"relationship_tone_after_this_turn\", \"unresolved_dialogue_subtext\", \"next_turn_voice_warning\"], \"properties\": {\"character_name\": {\"type\": \"string\"}, \"alias_name\": {\"type\": \"string\"}, \"voice_traits_activated\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"relationship_tone_after_this_turn\": {\"type\": \"string\"}, \"unresolved_dialogue_subtext\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"next_turn_voice_warning\": {\"type\": \"string\"}}}}, \"alias_usage_continuity\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"global_summary\", \"aliases_activated\", \"aliases_not_yet_appeared\", \"batch_level_naming_warnings\"], \"properties\": {\"global_summary\": {\"type\": \"string\"}, \"aliases_activated\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"aliases_not_yet_appeared\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"batch_level_naming_warnings\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}}, \"unresolved_dialogue_threads\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"must_carry_into_next_turn\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"next_turn_dialogue_guidance\": {\"type\": \"string\", \"minLength\": 3}}}"
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“角色对话记忆整理器”。\n\n你的任务：\n基于【当前批次角色对白JSON】、【已有角色对话记忆】与【服装版本映射内容】，整理出一个供“下一批角色对白编写智能体”直接使用的上下文记忆包。\n\n可用输入\n【当前批次起始集】\n{{$VARIABLE_NODE_ID.dialogueStartEpisode$}}\n【总集数】\n{{$VARIABLE_NODE_ID.totalEpisodes$}}\n【分集计划】\n{{$VARIABLE_NODE_ID.episodePlan$}}\n【当前批次角色对白JSON】\n{{$VARIABLE_NODE_ID.dialogueContent$}}\n【服装版本映射内容】\n{{$VARIABLE_NODE_ID.h2KpLm91$}}\n\n这个记忆包的作用不是复述对白全文，而是帮助下一批对白编写时：\n- 延续已经形成的人物声音\n- 延续角色之间的关系张力、潜台词、尚未说破的矛盾\n- 不丢失当前批次已经启用的 alias 与说话人标签规则\n- 避免下一批对白重新做人设、重新定声音、重新定义关系\n- 避免下一批把 speaker、participants、alias_binding 写乱\n\n整理要求：\n1. 只基于当前批次对白、已有对白记忆、开头钩子和服装版本映射提炼，不得杜撰对白里没有形成的人物声音或关系变化。\n2. 摘要必须聚焦“对白层面的结果”：谁的声音被定住了、谁和谁的关系发生了什么变化、哪些潜台词下一批必须延续。\n3. 必须整理每个关键角色的语气、句长、攻击方式、回避方式、情绪爆点、示弱方式。\n4. 必须明确哪些 alias 已经在 speaker/participants/voice bible 中被实际启用，哪些尚未登场。\n5. 必须记录下一批对白最容易写错的命名和声音连续性提醒。\n6. 如果某角色本批没有出场，不得编造其声音变化；但可根据服装版本映射列入尚未登场 alias。\n7. 输出要短、准、可直接喂给下一批角色对白编写智能体。\n8. 最终只能输出合法 JSON，不要输出 JSON 之外的任何解释、标题、注释或代码块。\n\n请严格输出以下 JSON 结构：\n{\n \"this_turn_episodes\": \"例如 1-5 / 6-10；必须严格等于当前批次范围，不得根据对白内容自行改写、推断或跳过集数\",\n \"dialogue_voice_summary\": \"用一段话概括这五集对白真正定下了哪些人物声音、关系语气和冲突表达方式。\",\n \"episode_dialogue_progress\": [\n \"第X集对白层面推进了什么关系/信息/冲突\",\n \"第X+1集对白层面推进了什么关系/信息/冲突\"\n ],\n \"character_voice_continuity\": [\n {\n \"character_name\": \"角色名\",\n \"alias_name\": \"本批实际使用的主要 alias；若本批未出场，则写空字符串。\",\n \"voice_traits_activated\": [\n \"本批已经形成的声音特征1\",\n \"本批已经形成的说话动作/攻击方式/回避方式2\"\n ],\n \"relationship_tone_after_this_turn\": \"本批结束后，该角色与核心关系对象之间的语气状态。\",\n \"unresolved_dialogue_subtext\": [\n \"下一批对白还不能忘记的潜台词或未说破矛盾1\"\n ],\n \"next_turn_voice_warning\": \"下一批写这个角色对白时最需要遵守的声音连续性提醒。\"\n }\n ],\n \"alias_usage_continuity\": {\n \"global_summary\": \"一句话概括本批对白结束后，speaker/participants/alias_binding 最需要注意的总原则。\",\n \"aliases_activated\": [\n \"本批已经在对白中实际启用的 alias1\"\n ],\n \"aliases_not_yet_appeared\": [\n \"映射中已定义但截至当前批次仍未真正进入对白的 alias1\"\n ],\n \"batch_level_naming_warnings\": [\n \"下一批全局最容易写错的人物 alias 或 speaker 命名提醒1\"\n ]\n },\n \"unresolved_dialogue_threads\": [\n \"下一批对白必须继续推进的关系/信息/潜台词问题1\"\n ],\n \"must_carry_into_next_turn\": [\n \"下一批对白开场必须承接的信息1\",\n \"下一批对白开场必须承接的关系语气2\"\n ],\n \"next_turn_dialogue_guidance\": \"用一句话说明下一批角色对白最应该先接住什么声音、关系或潜台词。\"\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按要求整理当前五集角色对话记忆即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题",
+          "selectedTypeIndex": 1
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "q9vUkHh6EyOpR248",
+      "name": "变量更新",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": -2964,
+        "y": -5085
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "valueType": "any",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "yBXivzVI"
+              ],
+              "value": [
+                "dialogueMemorySummarizer",
+                "answerText"
+              ],
+              "valueType": "any",
+              "renderType": "reference"
+            }
+          ]
+        }
+      ],
+      "outputs": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "448745",
+      "target": "dialogueMemorySummarizer",
+      "sourceHandle": "448745-source-right",
+      "targetHandle": "dialogueMemorySummarizer-target-left"
+    },
+    {
+      "source": "dialogueMemorySummarizer",
+      "target": "q9vUkHh6EyOpR248",
+      "sourceHandle": "dialogueMemorySummarizer-source-right",
+      "targetHandle": "q9vUkHh6EyOpR248-target-left"
+    }
+  ],
+  "chatConfig": {
+    "variables": [
+      {
+        "key": "dialogueStartEpisode",
+        "label": "当前对白批次起始集",
+        "valueType": "number",
+        "required": true,
+        "defaultValue": 1,
+        "type": "numberInput",
+        "description": "当前角色对白批次的起始集数。",
+        "icon": "core/workflow/inputType/numberInput"
+      },
+      {
+        "key": "totalEpisodes",
+        "label": "总集数",
+        "valueType": "number",
+        "required": true,
+        "defaultValue": 60,
+        "type": "numberInput",
+        "description": "剧本总集数。",
+        "icon": "core/workflow/inputType/numberInput"
+      },
+      {
+        "key": "dialogueContent",
+        "label": "当前批次角色对白JSON",
+        "valueType": "string",
+        "required": true,
+        "type": "input",
+        "description": "当前五集角色对白 JSON。",
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "key": "episodePlan",
+        "label": "分集计划",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "input",
+        "description": "当前剧本分集计划，用于校验批次范围与后续承接。",
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "key": "h2KpLm91",
+        "label": "服装版本映射内容",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "input",
+        "description": "人物服装版本映射 JSON，用于整理 alias 与 speaker 连续性。",
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "type": "internal",
+        "key": "yBXivzVI",
+        "label": "当前五集角色对话记忆",
+        "valueType": "string",
+        "description": "",
+        "required": false
+      }
+    ],
+    "scheduledTriggerConfig": {
+      "cronString": "",
+      "timezone": "Asia/Shanghai",
+      "defaultPrompt": ""
+    },
+    "_id": "69dc6a6bf962df93355c2aa3"
+  }
+}

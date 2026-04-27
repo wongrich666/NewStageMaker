@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>IDEA TO SCRIPT 剧本生成工作台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260425-11">
+</head>
+<body class="workspace-body">
+  <main class="chat-workspace-shell">
+    <aside id="workspaceCard" class="workspace-sidebar">
+      <div class="sidebar-top">
+        <div class="sidebar-brand-row">
+          <button id="sidebarToggleBtn" class="sidebar-toggle" type="button" aria-label="折叠侧边栏">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+          <a class="sidebar-brand" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">
+            <span class="sidebar-brand-mark">I</span>
+            <span class="sidebar-brand-text">
+              <strong>idea to script</strong>
+              <em>剧本平台</em>
+            </span>
+          </a>
+        </div>
+      </div>
+
+      <div class="sidebar-primary">
+        <button id="newScriptBtn" class="sidebar-create-btn" type="button">＋ 新建剧本</button>
+      </div>
+
+      <div class="sidebar-nav">
+        <section class="sidebar-group">
+          <div class="sidebar-group-label">我的剧本</div>
+          <div class="sidebar-section-head sidebar-section-head-compact">
+            <span>资产会话</span>
+            <button id="refreshProjectsBtn" class="sidebar-refresh-btn" type="button">刷新</button>
+          </div>
+          <div class="sidebar-folders">
+            <details id="activeWorkspaceFolder" class="workspace-folder" open>
+              <summary>
+                <span>生成中的剧本</span>
+              </summary>
+              <div id="activeProjectList" class="workspace-compact-list"></div>
+            </details>
+            <details id="completedWorkspaceFolder" class="workspace-folder">
+              <summary>
+                <span>已完成剧本</span>
+              </summary>
+              <div id="completedProjectList" class="workspace-compact-list"></div>
+            </details>
+          </div>
+        </section>
+
+        <section class="sidebar-group sidebar-tools-section">
+          <details id="assistantToolsFolder" class="workspace-folder tools-folder">
+            <summary>
+              <span class="sidebar-folder-link">辅助工具</span>
+            </summary>
+            <div id="toolList" class="tool-shortcut-list"></div>
+          </details>
+        </section>
+
+        <div class="sidebar-group sidebar-links">
+          <a class="sidebar-text-link" href="{{ url_for('index', auth_token=current_auth_token) }}">社区好剧</a>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        {% if current_user %}
+          <div class="sidebar-footer-links">
+            <button id="openProfileBtn" class="sidebar-profile-btn" type="button">
+              <span class="sidebar-profile-avatar">{{ current_user.username[:1] }}</span>
+              <span class="sidebar-footer-text">个人中心</span>
+            </button>
+            <a class="sidebar-logout-link" href="{{ url_for('logout', auth_token=current_auth_token) }}">退出登录</a>
+          </div>
+        {% else %}
+          <div class="sidebar-footer-links">
+            <a class="sidebar-profile-btn" href="{{ url_for('login_page') }}">
+              <span class="sidebar-profile-avatar">游</span>
+              <span class="sidebar-footer-text">登录后创作</span>
+            </a>
+            <a class="sidebar-logout-link" href="{{ url_for('register_page') }}">注册</a>
+          </div>
+        {% endif %}
+      </div>
+    </aside>
+
+    <section class="chat-main">
+      <header class="workspace-runtime runtime">
+        <div class="progress-bar progress-bar-fixed runtime-progress-top">
+          <div id="progressFill" class="progress-fill"></div>
+        </div>
+        <div class="runtime-strip">
+          <div class="runtime-brandline">
+            <span class="runtime-app-label">idea to script 剧本平台</span>
+            <strong id="projectText">当前剧本：未选中</strong>
+          </div>
+          <div class="runtime-meta-strip">
+            <div class="runtime-pill">
+              <span class="runtime-kicker">状态</span>
+              <strong id="statusText">待开始</strong>
+            </div>
+            <div class="runtime-pill">
+              <span class="runtime-kicker">阶段</span>
+              <strong id="stageText">待开始</strong>
+            </div>
+            <div class="runtime-pill">
+              <span class="runtime-kicker">等待</span>
+              <strong id="waitDurationText">00:00</strong>
+            </div>
+          </div>
+        </div>
+        <p id="messageText" class="runtime-note hidden"></p>
+        <div class="runtime-foot">
+          <span id="progressText">0%</span>
+          <span id="taskText">任务：未选中</span>
+        </div>
+      </header>
+
+      <section id="toolPanel" class="tool-panel hidden">
+        <div class="tool-panel-head">
+          <div>
+            <span class="tool-panel-kicker">辅助工具</span>
+            <h3 id="toolPanelTitle">选择工具</h3>
+          </div>
+          <button id="closeToolPanelBtn" class="btn btn-ghost" type="button">关闭</button>
+        </div>
+        <div id="toolForms" class="tool-forms"></div>
+        <div class="tool-panel-actions">
+          <button id="runToolBtn" class="btn btn-primary" type="button">运行辅助工具</button>
+        </div>
+        <pre id="toolOutputBox" class="output-box tool-panel-output">这里会显示辅助工具结果。</pre>
+      </section>
+
+      <section class="chat-view">
+        <div id="chatTranscript" class="chat-transcript"></div>
+      </section>
+
+      <section class="composer-card">
+        <div class="visually-hidden" aria-hidden="true">
+          <label>
+            <span>模型选择</span>
+            <select id="modelSelect"></select>
+          </label>
+        </div>
+
+        <div class="chat-composer-shell">
+          <div class="chat-composer-plus">＋</div>
+          <div class="chat-composer-main">
+            <label class="composer-field composer-field-wide">
+              <span class="visually-hidden">想要的剧本</span>
+              <textarea id="expectationInput" placeholder="今天写什么剧本"></textarea>
+            </label>
+            <div class="composer-grid composer-grid-inline composer-grid-toolbar">
+              <label class="composer-field composer-field-mini">
+                <span>角色</span>
+                <input id="characterCountInput" type="number" min="1" max="50" value="5">
+              </label>
+              <label class="composer-field composer-field-mini">
+                <span>集数</span>
+                <input id="episodeCountInput" type="number" min="1" max="100" value="10">
+              </label>
+              <div class="composer-inline-tools">
+                <button id="pauseBtn" class="btn btn-secondary composer-action-link" type="button" disabled>暂停生成</button>
+                <button id="resumeBtn" class="btn btn-secondary composer-action-link" type="button" disabled>继续生成</button>
+                <button id="terminateBtn" class="btn btn-danger composer-action-link" type="button" disabled>终止生成</button>
+                <button id="saveBtn" class="btn btn-secondary composer-action-link" type="button" disabled>下载成品</button>
+                <button id="clearBtn" class="btn btn-ghost composer-action-link" type="button">清空输入</button>
+              </div>
+            </div>
+          </div>
+          <button id="startBtn" class="composer-send-btn" type="button" aria-label="开始生成">开始</button>
+        </div>
+
+        <p id="formHint" class="composer-hint">只需要填写故事期待、角色数量和总集数。</p>
+
+        <div id="completionPanel" class="completion-panel compact-completion">
+          <p id="cacheNoticeText" class="muted">系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。</p>
+          <div class="completion-actions">
+            <button id="confirmCompletionBtn" class="btn btn-success" type="button" disabled>确认剧本满意完成</button>
+            <div class="rollback-group">
+              <select id="rollbackStageSelect" class="compact-select" disabled>
+                <option value="">选择回退步骤</option>
+              </select>
+              <select id="rollbackScriptStartSelect" class="compact-select hidden" disabled>
+                <option value="">选择正文开始重写的集数</option>
+              </select>
+              <button id="rollbackRewriteBtn" class="btn btn-secondary" type="button" disabled>回退重写</button>
+            </div>
+          </div>
+        </div>
+
+        <section class="hidden" aria-hidden="true">
+          <h3 id="outputTitle">当前阶段输出</h3>
+          <pre id="outputNaturalBox"></pre>
+          <pre id="finalOutputBox"></pre>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <aside id="profilePanel" class="profile-panel hidden" aria-hidden="true">
+    <div class="profile-backdrop" id="closeProfileBackdrop"></div>
+    <section class="profile-drawer">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Profile</p>
+          <h2>个人中心</h2>
+        </div>
+        <button id="closeProfileBtn" class="btn btn-ghost" type="button">关闭</button>
+      </div>
+
+      <div class="profile-grid">
+        <form id="usernameForm" class="card mini-card">
+          <div class="card-head">
+            <h3>修改用户名</h3>
+          </div>
+          <label class="field">
+            <span>新用户名</span>
+            <input id="profileUsernameInput" type="text" value="{{ current_user.username if current_user else '' }}">
+          </label>
+          <button class="btn btn-primary" type="submit">保存用户名</button>
+          <p id="profileMessage" class="hint"></p>
+        </form>
+
+        <form id="passwordForm" class="card mini-card">
+          <div class="card-head">
+            <h3>修改密码</h3>
+          </div>
+          <label class="field">
+            <span>当前密码</span>
+            <input id="currentPasswordInput" type="password">
+          </label>
+          <label class="field">
+            <span>新密码</span>
+            <input id="newPasswordInput" type="password">
+          </label>
+          <label class="field">
+            <span>确认新密码</span>
+            <input id="confirmPasswordInput" type="password">
+          </label>
+          <button class="btn btn-primary" type="submit">保存密码</button>
+        </form>
+      </div>
+
+      <div class="section-head compact-head">
+        <div>
+          <h3>我的资产</h3>
+        </div>
+        <button id="refreshAssetsBtn" class="btn btn-secondary" type="button">刷新资产</button>
+      </div>
+      <div id="assetsList" class="asset-grid"></div>
+
+      <div id="assetEditor" class="asset-editor hidden">
+        <div class="card-head">
+          <h3>修改资产</h3>
+        </div>
+        <div class="field-grid compact-grid">
+          <label class="field">
+            <span>剧本标题</span>
+            <input id="editAssetTitle" type="text">
+          </label>
+          <label class="field">
+            <span>隐私程度</span>
+            <select id="editAssetPrivacy">
+              <option value="private">不公开</option>
+              <option value="public">公开成品</option>
+            </select>
+          </label>
+        </div>
+        <label class="field">
+          <span>故事梗概</span>
+          <textarea id="editAssetSummary"></textarea>
+        </label>
+        <label class="field">
+          <span>最终剧本文本</span>
+          <textarea id="editAssetFinal" class="tall-textarea"></textarea>
+        </label>
+        <div class="control-row">
+          <button id="saveAssetEditBtn" class="btn btn-primary" type="button">保存修改</button>
+          <button id="cancelAssetEditBtn" class="btn btn-ghost" type="button">取消</button>
+        </div>
+      </div>
+    </section>
+  </aside>
+
+  <script>
+    window.scriptMakerConfig = {
+      isAuthenticated: {{ 'true' if current_user else 'false' }},
+      userId: {{ current_user.id if current_user else 'null' }},
+      username: {{ current_user.username|tojson if current_user else 'null' }},
+      homeUrl: "{{ url_for('index') }}",
+      workspaceUrl: "{{ url_for('workspace_page') }}",
+      modelsUrl: "/api/models",
+      latestProjectUrl: "/api/projects/latest",
+      projectsUrl: "/api/projects",
+      assetsUrl: "/api/assets",
+      communityUrl: "/api/community",
+      communityDetailBaseUrl: "/community",
+      toolsUrl: "/api/tools",
+      startUrl: "/api/workflows/start",
+      confirmCompletionUrlBase: "/api/projects",
+      rollbackUrlBase: "/api/projects",
+      loginUrl: "{{ url_for('login_page') }}"
+    };
+  </script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260425-11"></script>
+</body>
+</html>

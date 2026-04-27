@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+output*.txt
+debug_state*.json
+runtime_data/
+CODER_README.md
+FASTGPT_CONTRACTS.md

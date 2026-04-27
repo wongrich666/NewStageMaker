@@ -1,0 +1,7 @@
+from __future__ import annotations
+
+EXTRACT_CORE_SCENE_NODE_ID = "efDjECetS43OkGMM"
+GENERATE_NODE_ID = "t6c25dToC8jvQ2Pn"
+REVIEW_NODE_ID = "uGthtPXZfWniBG1P"
+REVISE_NODE_ID = "sybkLGNSDvuRF1b0"
+SUMMARY_NODE_ID = "vzfYbCXGypU9CFRQ"
