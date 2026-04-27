@@ -121,8 +121,8 @@
       "flowNodeType": "chatNode",
       "showStatus": true,
       "position": {
-        "x": -3195,
-        "y": -5115
+        "x": -3750,
+        "y": -5085
       },
       "version": "4.9.7",
       "inputs": [
@@ -273,7 +273,7 @@
             "textarea",
             "reference"
           ],
-          "value": "你是“剧本批次记忆整理器”。\n\n你的任务：\n基于【当前批次剧本正文】、【已有连贯记忆】和【服装版本映射内容】，提炼出一个供“下一批正文写作智能体”直接使用的上下文记忆包。\n\n这个记忆包的作用不是复述全文，而是帮助下一批剧本在开头时：\n- 准确承接上一批最后的剧情状态\n- 准确承接最后一个钩子\n- 不丢失人物关系变化、冲突状态和未解决问题\n- 不丢失人物形象连续性、alias 使用状态和命名约束\n- 避免写作智能体只看当前局部输入而忘记前文推进结果\n- 避免下一批正文把已经切换过的角色名字、造型状态写乱或写回退\n\n【当前批次剧本正文】\n{{$VARIABLE_NODE_ID.zS2LXibg$}}\n\n【已有连贯记忆】\n{{$VARIABLE_NODE_ID.dzt6kORx$}}\n\n【服装版本映射内容】\n{{$VARIABLE_NODE_ID.h2KpLm91$}}\n\n【命名偏好】\n{{$VARIABLE_NODE_ID.m3UxJ8pD$}}\n\n整理要求：\n1. 只基于当前批次正文、已有连贯记忆和服装版本映射提炼，不得杜撰正文里没有发生的内容\n2. 摘要必须聚焦“剧情推进结果”，不要写空泛感受\n3. 必须明确指出“最后一集结尾钩子”是什么\n4. 必须提炼“下一批一开场就该承接什么”\n5. 必须提炼人物关系、目标、危机、信息差的变化\n6. 还必须提炼“人物形象连续性摘要”，至少包括：\n   - 上一批每个主角最后使用的 alias\n   - 哪些 alias 已启用\n   - 哪些 alias 尚未登场\n   - 哪些切装/身份切换已经发生，下一批不得回退到旧 alias\n   - 下一批一开场人物命名最需要遵守的限制\n7. 如果当前批次正文里没有出现某角色，不得强行编造其新状态；但如果服装版本映射里定义了该角色的 alias，可在“尚未登场 alias”里保留\n8. “已启用 alias”指正文或已有连贯记忆中已经实际进入叙事使用状态的 alias，不等于映射里定义过就算启用\n9. “不得回退”只记录已经在剧情里发生且下批必须延续的切换，不要把可切回的日常换装乱写成不可回退\n10. 输出要短、准、可直接喂给下一轮写作智能体\n11. 所有内容使用中文\n12. 最终只能输出合法 JSON\n13. 不要输出 JSON 之外的任何解释、标题、注释、代码块标记或多余文本\n\n请严格输出为以下 JSON 结构，禁止输出其他废话或者符号：\n{\n  \"this_turn_episodes\": \"例如 1-5 / 6-10 / 11-15\",\n  \"abstract_of_this_turn\": \"用一段话概括这五集真正推进了什么，重点写局势变化、关系变化、关键事件和结果，不要泛泛而谈。\",\n  \"final_hook_of_this_turn\": \"明确写出本批次最后一集结尾留下的钩子，必须具体到事件、动作、发现、危机、闯入、揭露、决定、反转中的一种或多种。\",\n  \"current_story_state\": [\n    \"当前批次结束后，主角/核心人物所处状态1\",\n    \"当前批次结束后，关系或局势状态2\",\n    \"当前批次结束后，任务/危机/追踪线状态3\"\n  ],\n  \"unresolved_threads\": [\n    \"尚未解决、下一批必须继续推进的问题1\",\n    \"尚未解决、下一批必须继续推进的问题2\",\n    \"尚未解决、下一批必须继续推进的问题3\"\n  ],\n  \"must_carry_into_next_turn\": [\n    \"下一批开头必须承接的信息1\",\n    \"下一批开头必须承接的信息2\",\n    \"下一批开头必须承接的信息3\"\n  ],\n  \"next_turn_opening_guidance\": \"用一句话说明下一批正文开场最应该先接住什么，优先接 final_hook_of_this_turn，不要另起炉灶。\",\n  \"appearance_continuity_summary\": {\n    \"global_summary\": \"用一句话概括本批次结束后，人物 alias 和造型命名 continuity 最需要注意的总原则。\",\n    \"character_alias_continuity\": [\n      {\n        \"character_name\": \"角色名\",\n        \"last_used_alias\": \"该角色在当前批次结束时，最后一次实际使用的 alias；若本批未出场，则写空字符串。\",\n        \"aliases_activated\": [\n          \"已在叙事中启用的 alias1\",\n          \"已在叙事中启用的 alias2\"\n        ],\n        \"aliases_not_yet_appeared\": [\n          \"映射中已定义但截至当前批次仍未真正登场的 alias1\"\n        ],\n        \"switches_already_happened_and_cannot_revert_next_turn\": [\n          \"已经发生且下一批不能回退的切装/身份 alias 切换1\"\n        ],\n        \"next_turn_naming_warning\": \"下一批写这个角色时最需要遵守的命名连续性提醒。\"\n      }\n    ],\n    \"batch_level_naming_warnings\": [\n      \"下一批全局最容易写错的人物 alias 连续性提醒1\",\n      \"下一批全局最容易写错的人物 alias 连续性提醒2\"\n    ]\n  }\n}",
+          "value": "你是“剧本批次记忆整理器”。\n\n你的任务：\n基于【当前批次剧本正文】、【已有连贯记忆】和【服装版本映射内容】，提炼出一个供“下一批正文写作智能体”直接使用的上下文记忆包。\n\n这个记忆包的作用不是复述全文，而是帮助下一批剧本在开头时：\n- 准确承接上一批最后的剧情状态\n- 准确承接最后一个钩子\n- 不丢失人物关系变化、冲突状态和未解决问题\n- 不丢失人物形象连续性、alias 使用状态和命名约束\n- 避免写作智能体只看当前局部输入而忘记前文推进结果\n- 避免下一批正文把已经切换过的角色名字、造型状态写乱或写回退\n\n【当前批次剧本正文】\n{{$VARIABLE_NODE_ID.zS2LXibg$}}\n\n【已有连贯记忆】\n{{$VARIABLE_NODE_ID.dzt6kORx$}}\n\n【服装版本映射内容】\n{{$VARIABLE_NODE_ID.h2KpLm91$}}\n\n【命名偏好】\n{{$VARIABLE_NODE_ID.m3UxJ8pD$}}\n\n整理要求：\n1. 只基于当前批次正文、已有连贯记忆和服装版本映射提炼，不得杜撰正文里没有发生的内容\n2. 摘要必须聚焦“剧情推进结果”，不要写空泛感受\n3. 必须明确指出“最后一集结尾钩子”是什么\n4. 必须提炼“下一批一开场就该承接什么”\n5. 必须提炼人物关系、目标、危机、信息差的变化\n6. 还必须提炼“人物形象连续性摘要”，至少包括：\n  - 上一批每个主角最后使用的 alias\n  - 哪些 alias 已启用\n  - 哪些 alias 尚未登场\n  - 哪些切装/身份切换已经发生，下一批不得回退到旧 alias\n  - 下一批一开场人物命名最需要遵守的限制\n7. 如果当前批次正文里没有出现某角色，不得强行编造其新状态；但如果服装版本映射里定义了该角色的 alias，可在“尚未登场 alias”里保留\n8. “已启用 alias”指正文或已有连贯记忆中已经实际进入叙事使用状态的 alias，不等于映射里定义过就算启用\n9. “不得回退”只记录已经在剧情里发生且下批必须延续的切换，不要把可切回的日常换装乱写成不可回退\n10. 输出要短、准、可直接喂给下一轮写作智能体\n11. 所有内容使用中文\n12. 最终只能输出合法 JSON\n13. 不要输出 JSON 之外的任何解释、标题、注释、代码块标记或多余文本\n\n请严格输出为以下 JSON 结构，禁止输出其他废话或者符号：\n{\n  \"this_turn_episodes\": \"例如 1-5 / 6-10 / 11-15必须严格等于当前批次范围不得根据正文内容自行改写、推断或跳过集数\",\n  \"abstract_of_this_turn\": \"用一段话概括这五集真正推进了什么，重点写局势变化、关系变化、关键事件和结果，不要泛泛而谈。\",\n  \"final_hook_of_this_turn\": \"明确写出本批次最后一集结尾留下的钩子，必须具体到事件、动作、发现、危机、闯入、揭露、决定、反转中的一种或多种。\",\n  \"current_story_state\": [\n    \"当前批次结束后，主角/核心人物所处状态1\",\n    \"当前批次结束后，关系或局势状态2\",\n    \"当前批次结束后，任务/危机/追踪线状态3\"\n  ],\n  \"unresolved_threads\": [\n    \"尚未解决、下一批必须继续推进的问题1\",\n    \"尚未解决、下一批必须继续推进的问题2\",\n    \"尚未解决、下一批必须继续推进的问题3\"\n  ],\n  \"must_carry_into_next_turn\": [\n    \"下一批开头必须承接的信息1\",\n    \"下一批开头必须承接的信息2\",\n    \"下一批开头必须承接的信息3\"\n  ],\n  \"next_turn_opening_guidance\": \"用一句话说明下一批正文开场最应该先接住什么，优先接 final_hook_of_this_turn，不要另起炉灶。\",\n  \"appearance_continuity_summary\": {\n    \"global_summary\": \"用一句话概括本批次结束后，人物 alias 和造型命名 continuity 最需要注意的总原则。\",\n    \"character_alias_continuity\": [\n      {\n        \"character_name\": \"角色名\",\n        \"last_used_alias\": \"该角色在当前批次结束时，最后一次实际使用的 alias；若本批未出场，则写空字符串。\",\n        \"aliases_activated\": [\n          \"已在叙事中启用的 alias1\",\n          \"已在叙事中启用的 alias2\"\n        ],\n        \"aliases_not_yet_appeared\": [\n          \"映射中已定义但截至当前批次仍未真正登场的 alias1\"\n        ],\n        \"switches_already_happened_and_cannot_revert_next_turn\": [\n          \"已经发生且下一批不能回退的切装/身份 alias 切换1\"\n        ],\n        \"next_turn_naming_warning\": \"下一批写这个角色时最需要遵守的命名连续性提醒。\"\n      }\n    ],\n    \"batch_level_naming_warnings\": [\n      \"下一批全局最容易写错的人物 alias 连续性提醒1\",\n      \"下一批全局最容易写错的人物 alias 连续性提醒2\"\n    ]\n  }\n}",
           "debugLabel": "",
           "description": "common:core.app.tip.systemPromptTip",
           "toolDescription": ""
@@ -332,12 +332,10 @@
             "reference",
             "textarea"
           ],
-          "value": [
-            "448745",
-            "userChatInput"
-          ],
+          "value": "按要求对当前五集剧本正文进行整理即可",
           "debugLabel": "",
-          "toolDescription": "用户问题"
+          "toolDescription": "用户问题",
+          "selectedTypeIndex": 1
         }
       ],
       "outputs": [

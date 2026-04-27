@@ -16,10 +16,10 @@
 - `FASTGPT_WORLDVIEW_API_KEY`：世界观阶段独立 Key，可选。
 - `FASTGPT_CHARACTERS_API_KEY`：人设阶段独立 Key，可选。
 - `FASTGPT_SCENES_API_KEY`：核心场景阶段独立 Key，可选。
-- `FASTGPT_HOOKS_API_KEY`：开头冲突钩子阶段独立 Key，可选。
-- `FASTGPT_DIALOGUES_API_KEY`：角色对话阶段独立 Key，可选。
-- `FASTGPT_SCRIPT_API_KEY`：剧本正文阶段独立 Key，可选。
-- `FASTGPT_MEMORY_API_KEY`：正文记忆整理阶段独立 Key，可选。
+- `FASTGPT_HOOKS_WRITING_API_KEY`：开头冲突钩子阶段独立 Key，可选。
+- `FASTGPT_DIALOGUES_WRITING_API_KEY`：角色对话阶段独立 Key，可选。
+- `FASTGPT_SCRIPT_WRITING_API_KEY`：剧本正文阶段独立 Key，可选。
+- `FASTGPT_SCRIPT_MEMORY_API_KEY=`：正文记忆整理阶段独立 Key，可选。
 - `FASTGPT_FINAL_API_KEY`：最终剧本拼接阶段独立 Key，可选。
 
 如某个阶段未配置独立 Key，代码会回退使用 `FASTGPT_API_KEY`。缺少 Key 时，后端只提示缺少哪个变量，不会打印任何密钥内容。请求失败时日志会打印最终请求 URL、状态码、`response.text` 和脱敏后的 payload 摘要，用于判断 URL、Key、请求体或远端上游模型问题。

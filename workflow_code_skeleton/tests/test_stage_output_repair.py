@@ -866,6 +866,9 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertIsInstance(variables[APPEARANCE_MAPPING], dict)
         self.assertIn("appearance_mapping", variables[APPEARANCE_MAPPING])
         self.assertIn("character_registry", variables)
+        self.assertIsInstance(state.variables[APPEARANCE_MAPPING], dict)
+        self.assertIn("appearance_mapping", state.variables[APPEARANCE_MAPPING])
+        self.assertIn("character_registry", state.variables)
 
     def test_appearance_local_review_exhaustion_raises_without_cache_pollution(self) -> None:
         invalid = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
@@ -891,6 +894,27 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertNotIn("episode_alias_plan", variables)
         self.assertNotIn("appearance_continuity_memory", variables)
         self.assertNotIn(APPEARANCE_NATURAL_LANGUAGE_VAR, variables)
+        self.assertNotIn(APPEARANCE_MAPPING, state.variables)
+        self.assertNotIn("character_registry", state.variables)
+        self.assertNotIn("character_alias_registry", state.variables)
+        self.assertNotIn("episode_alias_plan", state.variables)
+        self.assertNotIn("appearance_continuity_memory", state.variables)
+        self.assertNotIn(APPEARANCE_NATURAL_LANGUAGE_VAR, state.variables)
+
+    def test_appearance_broken_upstream_inputs_fail_without_stage_rerun(self) -> None:
+        runner = _QueuedStageRunner([{APPEARANCE_MAPPING: _appearance_mapping_json()}])
+        state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
+        variables = dict(self.appearance_variables)
+        variables[WORLDVIEW] = ""
+        state.variables.update(variables)
+
+        with self.assertRaises(ValueError) as ctx:
+            _ensure_appearance_outputs(state, runner, variables)
+
+        self.assertIn("上游正式产物损坏", str(ctx.exception))
+        self.assertEqual(runner.request_count, 0)
+        self.assertNotIn(APPEARANCE_MAPPING, variables)
+        self.assertNotIn(APPEARANCE_MAPPING, state.variables)
 
     def test_appearance_auxiliary_natural_language_does_not_override_structured_output(self) -> None:
         client = _QueuedFastGPTClient(

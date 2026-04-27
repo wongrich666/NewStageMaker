@@ -33,12 +33,19 @@ from .fastgpt_contracts import (
     STAGE_APPEARANCE_ALIAS_GENERATION,
     STAGE_APPEARANCE_PRE_STRATEGY,
     STAGE_DIALOGUES,
+    STAGE_DIALOGUES_REVIEW,
+    STAGE_DIALOGUES_REWRITE,
+    STAGE_DIALOGUES_WRITING,
     STAGE_EPISODE_PLAN_NORMALIZE,
     STAGE_FRAMEWORK,
     STAGE_CHARACTERS,
+    STAGE_HOOKS_REVIEW,
     SCENES,
     STAGE_SCENES,
     STAGE_SCRIPT,
+    STAGE_SCRIPT_REVIEW,
+    STAGE_SCRIPT_REWRITE,
+    STAGE_SCRIPT_WRITING,
     STAGE_WORLDVIEW,
     USER_CONTENT_BASELINE,
     FastGPTStageContract,
@@ -67,10 +74,16 @@ STAGE_AUXILIARY_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
 TEXT_FIRST_MULTI_FIELD_STAGES = {
     STAGE_FRAMEWORK,
     STAGE_APPEARANCE_PRE_STRATEGY,
+    STAGE_HOOKS_REVIEW,
+    STAGE_DIALOGUES_REVIEW,
+    STAGE_SCRIPT_REVIEW,
 }
 PARTIAL_MATCH_MISSING_ERROR_STAGES = {
     STAGE_FRAMEWORK,
     STAGE_APPEARANCE_PRE_STRATEGY,
+    STAGE_HOOKS_REVIEW,
+    STAGE_DIALOGUES_REVIEW,
+    STAGE_SCRIPT_REVIEW,
 }
 STRICT_JSON_STRING_STAGES = {
     STAGE_WORLDVIEW,
@@ -324,7 +337,7 @@ class FastGPTClient:
         wire: dict[str, Any] = {}
         for canonical_name, wire_name in aliases.items():
             if canonical_name in variables:
-                if stage_name == STAGE_SCRIPT and canonical_name == CHARACTERS:
+                if _is_script_family_stage(stage_name) and canonical_name == CHARACTERS:
                     wire[wire_name] = _format_wire_value(
                         _build_script_character_scene_bundle(
                             variables.get(CHARACTERS),
@@ -332,7 +345,7 @@ class FastGPTClient:
                         )
                     )
                     continue
-                if stage_name == STAGE_SCRIPT and canonical_name == SCENES:
+                if _is_script_family_stage(stage_name) and canonical_name == SCENES:
                     continue
                 if canonical_name == CHARACTER_APPEARANCE_REQUIREMENTS:
                     wire[wire_name] = _format_wire_value(
@@ -636,11 +649,31 @@ def _build_script_character_scene_bundle(characters: Any, scenes: Any) -> str:
     return character_text or scene_text
 
 
+def _is_script_family_stage(stage_name: str) -> bool:
+    return stage_name in {
+        STAGE_SCRIPT,
+        STAGE_SCRIPT_WRITING,
+        STAGE_SCRIPT_REVIEW,
+        STAGE_SCRIPT_REWRITE,
+    }
+
+
+def _is_dialogue_payload_stage(stage_name: str) -> bool:
+    return stage_name in {
+        STAGE_DIALOGUES,
+        STAGE_DIALOGUES_WRITING,
+        STAGE_DIALOGUES_REWRITE,
+    }
+
+
 def _env_with_name(*names: str) -> tuple[str | None, str | None]:
     for name in names:
         value = os.getenv(name)
         if value is not None and str(value).strip():
-            return name, str(value).strip()
+            normalized = str(value).strip()
+            if "API_KEY" in name and normalized.startswith("="):
+                normalized = normalized.lstrip("=").strip()
+            return name, normalized
     return None, None
 
 
@@ -953,8 +986,14 @@ def _normalize_stage_specific_output_candidate(
         return _normalize_appearance_mapping_output_candidate(candidate, contract)
     if contract.stage_name == STAGE_EPISODE_PLAN_NORMALIZE:
         return _normalize_episode_plan_normalize_output_candidate(candidate, contract)
-    if contract.stage_name == STAGE_DIALOGUES:
+    if _is_dialogue_payload_stage(contract.stage_name):
         return _normalize_dialogues_output_candidate(candidate, contract)
+    if contract.stage_name in {
+        STAGE_HOOKS_REVIEW,
+        STAGE_DIALOGUES_REVIEW,
+        STAGE_SCRIPT_REVIEW,
+    }:
+        return _normalize_pass_review_output_candidate(candidate, contract)
     return candidate
 
 
@@ -1269,6 +1308,60 @@ def _normalize_dialogues_body(value: Any) -> dict[str, Any] | None:
         for key, value in candidate.items()
     }
     return normalized
+
+
+def _normalize_pass_review_output_candidate(
+    candidate: dict[str, Any],
+    contract: FastGPTStageContract,
+) -> dict[str, Any]:
+    wrapped_candidate = _normalize_pass_review_body(candidate)
+    if isinstance(wrapped_candidate, dict) and _looks_like_pass_review_body(wrapped_candidate):
+        return wrapped_candidate
+
+    wrapper_keys: list[str] = []
+    for field_name in contract.output_names:
+        for alias in contract.aliases_for_output(field_name):
+            if alias not in wrapper_keys:
+                wrapper_keys.append(alias)
+
+    for alias in wrapper_keys:
+        if alias not in candidate:
+            continue
+        wrapped = _normalize_pass_review_body(candidate.get(alias))
+        if isinstance(wrapped, dict):
+            return wrapped
+    return candidate
+
+
+def _normalize_pass_review_body(value: Any) -> dict[str, Any] | None:
+    candidate = value
+    if isinstance(candidate, str):
+        parsed = _try_parse_json(candidate)
+        candidate = parsed if parsed is not None else candidate
+
+    if isinstance(candidate, list):
+        candidate = _dict_from_variable_items(candidate)
+
+    if not isinstance(candidate, dict):
+        return None
+
+    if _looks_like_pass_review_body(candidate):
+        return candidate
+
+    if len(candidate) == 1:
+        only_value = next(iter(candidate.values()))
+        nested = _normalize_pass_review_body(only_value)
+        if isinstance(nested, dict):
+            return nested
+
+    return candidate
+
+
+def _looks_like_pass_review_body(candidate: dict[str, Any]) -> bool:
+    keys = {str(key) for key in candidate.keys()}
+    return "passed" in keys and (
+        "rewrite_required" in keys or "blocking_issues" in keys or "summary" in keys
+    )
 
 
 def _looks_like_dialogues_body(candidate: dict[str, Any]) -> bool:
