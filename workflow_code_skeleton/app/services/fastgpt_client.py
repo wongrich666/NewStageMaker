@@ -22,9 +22,12 @@ from .fastgpt_contracts import (
     ALL_SCRIPT,
     APPEARANCE_MAPPING,
     BATCH_DIALOGUES,
+    BATCH_HOOKS,
     CHARACTERS,
     CHARACTER_ALIAS_NAMING_RULES,
     CHARACTER_APPEARANCE_REQUIREMENTS,
+    DIALOGUE_MEMORY,
+    HOOK_MEMORY,
     LAST_SUMMARY,
     LEGACY_INPUT_ALIASES,
     MAX_RETRIES,
@@ -33,20 +36,31 @@ from .fastgpt_contracts import (
     STAGE_APPEARANCE_ALIAS_GENERATION,
     STAGE_APPEARANCE_PRE_STRATEGY,
     STAGE_DIALOGUES,
+    STAGE_DIALOGUE_MEMORY,
+    STAGE_DIALOGUE_REVIEW,
+    STAGE_DIALOGUE_REVISE,
+    STAGE_DIALOGUE_WRITE,
     STAGE_DIALOGUES_REVIEW,
     STAGE_DIALOGUES_REWRITE,
     STAGE_DIALOGUES_WRITING,
     STAGE_EPISODE_PLAN_NORMALIZE,
     STAGE_FRAMEWORK,
     STAGE_CHARACTERS,
+    STAGE_HOOK_MEMORY,
+    STAGE_HOOK_REVIEW,
+    STAGE_HOOK_REVISE,
+    STAGE_HOOK_WRITE,
     STAGE_HOOKS_REVIEW,
     SCENES,
     STAGE_SCENES,
     STAGE_SCRIPT,
     STAGE_SCRIPT_REVIEW,
+    STAGE_SCRIPT_REVISE,
     STAGE_SCRIPT_REWRITE,
+    STAGE_SCRIPT_WRITE,
     STAGE_SCRIPT_WRITING,
     STAGE_SCRIPT_MEMORY,
+    SCRIPT_MEMORY,
     STAGE_WORLDVIEW,
     USER_CONTENT_BASELINE,
     FastGPTStageContract,
@@ -74,22 +88,36 @@ STAGE_AUXILIARY_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
 }
 STAGE_API_KEY_ENV_ALIASES: dict[str, tuple[str, ...]] = {
     STAGE_SCRIPT_WRITING: ("FASTGPT_SCRIPT_WRITE_API_KEY", "FASTGPT_SCRIPT_API_KEY"),
+    STAGE_SCRIPT_WRITE: ("FASTGPT_SCRIPT_WRITE_API_KEY", "FASTGPT_SCRIPT_API_KEY"),
     STAGE_SCRIPT_REVIEW: ("FASTGPT_SCRIPT_REVIEW_API_KEY", "FASTGPT_SCRIPT_API_KEY"),
     STAGE_SCRIPT_REWRITE: ("FASTGPT_SCRIPT_REVISE_API_KEY", "FASTGPT_SCRIPT_API_KEY"),
+    STAGE_SCRIPT_REVISE: ("FASTGPT_SCRIPT_REVISE_API_KEY", "FASTGPT_SCRIPT_API_KEY"),
     STAGE_SCRIPT_MEMORY: ("FASTGPT_SCRIPT_MEMORY_API_KEY", "FASTGPT_MEMORY_API_KEY"),
+    STAGE_HOOK_WRITE: ("FASTGPT_HOOK_WRITE_API_KEY", "FASTGPT_HOOKS_WRITING_API_KEY", "FASTGPT_HOOKS_API_KEY"),
+    STAGE_HOOK_REVIEW: ("FASTGPT_HOOK_REVIEW_API_KEY", "FASTGPT_HOOKS_REVIEW_API_KEY", "FASTGPT_HOOKS_API_KEY"),
+    STAGE_HOOK_REVISE: ("FASTGPT_HOOK_REVISE_API_KEY", "FASTGPT_HOOKS_REWRITE_API_KEY", "FASTGPT_HOOKS_API_KEY"),
+    STAGE_HOOK_MEMORY: ("FASTGPT_HOOK_MEMORY_API_KEY", "FASTGPT_HOOKS_MEMORY_API_KEY", "FASTGPT_HOOKS_API_KEY"),
+    STAGE_DIALOGUE_WRITE: ("FASTGPT_DIALOGUE_WRITE_API_KEY", "FASTGPT_DIALOGUES_WRITING_API_KEY", "FASTGPT_DIALOGUE_API_KEY"),
+    STAGE_DIALOGUE_REVIEW: ("FASTGPT_DIALOGUE_REVIEW_API_KEY", "FASTGPT_DIALOGUES_REVIEW_API_KEY", "FASTGPT_DIALOGUE_API_KEY"),
+    STAGE_DIALOGUE_REVISE: ("FASTGPT_DIALOGUE_REVISE_API_KEY", "FASTGPT_DIALOGUES_REWRITE_API_KEY", "FASTGPT_DIALOGUE_API_KEY"),
+    STAGE_DIALOGUE_MEMORY: ("FASTGPT_DIALOGUE_MEMORY_API_KEY", "FASTGPT_DIALOGUES_MEMORY_API_KEY", "FASTGPT_MEMORY_API_KEY", "FASTGPT_DIALOGUE_API_KEY"),
 }
 TEXT_FIRST_MULTI_FIELD_STAGES = {
     STAGE_FRAMEWORK,
     STAGE_APPEARANCE_PRE_STRATEGY,
     STAGE_HOOKS_REVIEW,
+    STAGE_HOOK_REVIEW,
     STAGE_DIALOGUES_REVIEW,
+    STAGE_DIALOGUE_REVIEW,
     STAGE_SCRIPT_REVIEW,
 }
 PARTIAL_MATCH_MISSING_ERROR_STAGES = {
     STAGE_FRAMEWORK,
     STAGE_APPEARANCE_PRE_STRATEGY,
     STAGE_HOOKS_REVIEW,
+    STAGE_HOOK_REVIEW,
     STAGE_DIALOGUES_REVIEW,
+    STAGE_DIALOGUE_REVIEW,
     STAGE_SCRIPT_REVIEW,
 }
 STRICT_JSON_STRING_STAGES = {
@@ -343,35 +371,46 @@ class FastGPTClient:
 
         wire: dict[str, Any] = {}
         for canonical_name, wire_name in aliases.items():
+            wire_names = _as_wire_names(wire_name)
+            if canonical_name == ALL_HOOKS and BATCH_HOOKS in variables:
+                _set_wire_values(wire, wire_names, variables[BATCH_HOOKS])
+                continue
+            if canonical_name == ALL_DIALOGUES and BATCH_DIALOGUES in variables:
+                _set_wire_values(wire, wire_names, variables[BATCH_DIALOGUES])
+                continue
             if canonical_name in variables:
                 if _is_script_family_stage(stage_name) and canonical_name == CHARACTERS:
-                    wire[wire_name] = _format_wire_value(
+                    _set_wire_values(
+                        wire,
+                        wire_names,
                         _build_script_character_scene_bundle(
                             variables.get(CHARACTERS),
                             variables.get(SCENES),
-                        )
+                        ),
                     )
                     continue
                 if _is_script_family_stage(stage_name) and canonical_name == SCENES:
                     continue
                 if canonical_name == CHARACTER_APPEARANCE_REQUIREMENTS:
-                    wire[wire_name] = _format_wire_value(
+                    _set_wire_values(
+                        wire,
+                        wire_names,
                         _merge_optional_text(
                             variables.get(CHARACTER_APPEARANCE_REQUIREMENTS),
                             variables.get(OUTFIT_SWITCH_RULES),
-                        )
+                        ),
                     )
                     continue
-                wire[wire_name] = _format_wire_value(variables[canonical_name])
+                _set_wire_values(wire, wire_names, variables[canonical_name])
                 continue
-            if canonical_name == LAST_SUMMARY:
-                wire[wire_name] = ""
+            if canonical_name in {LAST_SUMMARY, HOOK_MEMORY, DIALOGUE_MEMORY, SCRIPT_MEMORY}:
+                _set_wire_values(wire, wire_names, "")
             elif canonical_name in {ALL_HOOKS, ALL_DIALOGUES, ALL_SCRIPT}:
-                wire[wire_name] = ""
+                _set_wire_values(wire, wire_names, "")
             elif canonical_name == USER_CONTENT_BASELINE:
-                wire[wire_name] = "{}"
+                _set_wire_values(wire, wire_names, "{}")
             elif canonical_name == MAX_RETRIES:
-                wire[wire_name] = settings.max_retries_default
+                _set_wire_values(wire, wire_names, settings.max_retries_default)
         return wire
 
     def _endpoint_for(self, stage_name: str) -> FastGPTEndpoint:
@@ -664,8 +703,10 @@ def _is_script_family_stage(stage_name: str) -> bool:
     return stage_name in {
         STAGE_SCRIPT,
         STAGE_SCRIPT_WRITING,
+        STAGE_SCRIPT_WRITE,
         STAGE_SCRIPT_REVIEW,
         STAGE_SCRIPT_REWRITE,
+        STAGE_SCRIPT_REVISE,
     }
 
 
@@ -673,7 +714,9 @@ def _is_dialogue_payload_stage(stage_name: str) -> bool:
     return stage_name in {
         STAGE_DIALOGUES,
         STAGE_DIALOGUES_WRITING,
+        STAGE_DIALOGUE_WRITE,
         STAGE_DIALOGUES_REWRITE,
+        STAGE_DIALOGUE_REVISE,
     }
 
 
@@ -1615,6 +1658,18 @@ def _format_wire_value(value: Any) -> Any:
     if isinstance(jsonable, (dict, list)):
         return json.dumps(jsonable, ensure_ascii=False)
     return jsonable
+
+
+def _as_wire_names(wire_name: Any) -> tuple[str, ...]:
+    if isinstance(wire_name, (tuple, list, set)):
+        return tuple(str(name) for name in wire_name if str(name).strip())
+    return (str(wire_name),)
+
+
+def _set_wire_values(wire: dict[str, Any], wire_names: tuple[str, ...], value: Any) -> None:
+    formatted = _format_wire_value(value)
+    for name in wire_names:
+        wire[name] = formatted
 
 
 def _normalize_payload_candidate(
