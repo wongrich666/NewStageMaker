@@ -7,8 +7,10 @@ from typing import Any
 from ..workflow_ids import (
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
     APPEARANCE_MAPPING_VAR,
+    APPEARANCE_NATURAL_LANGUAGE_VAR,
     APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
     APPEARANCE_REQUIREMENTS_VAR,
+    APPEARANCE_REVIEW_VAR,
     CHARACTER_BIOS_VAR,
     CHARACTER_MAX_RETRY_VAR,
     CHARACTER_VAR,
@@ -160,6 +162,10 @@ STAGE_WORLDVIEW_NATURALIZE = "worldview_naturalize"
 STAGE_CHARACTERS = "characters"
 STAGE_SCENES = "scenes"
 STAGE_APPEARANCE_ALIAS_GENERATION = "appearance_alias_generation"
+STAGE_APPEARANCE_ALIAS_WRITING = "appearance_alias_writing"
+STAGE_APPEARANCE_ALIAS_REVIEW = "appearance_alias_review"
+STAGE_APPEARANCE_ALIAS_REWRITE = "appearance_alias_rewrite"
+STAGE_APPEARANCE_ALIAS_UNSTRUCTURED = "appearance_alias_unstructured"
 STAGE_HOOKS = "hooks"
 STAGE_HOOKS_WRITING = "hooks_writing"
 STAGE_HOOK_WRITE = "hook_write"
@@ -227,6 +233,12 @@ SCRIPT_MEMORY_ALIASES = (
 )
 SCRIPT_HOOK_ALIASES = (SCRIPT_HOOK_BATCH_VAR, HOOK_FINAL_VAR)
 SCRIPT_DIALOGUE_ALIASES = (SCRIPT_DIALOGUE_BATCH_VAR, DIALOGUE_FINAL_VAR)
+
+APPEARANCE_MAPPING_STAGE_NAMES = {
+    STAGE_APPEARANCE_ALIAS_GENERATION,
+    STAGE_APPEARANCE_ALIAS_WRITING,
+    STAGE_APPEARANCE_ALIAS_REWRITE,
+}
 
 FRAMEWORK_WEB_INPUT_NAMES = (
     TOTAL_EPISODES,
@@ -478,7 +490,7 @@ def describe_stage_output_shape_issue(
             return "episode_dialogue_blocks 必须是数组"
         return None
 
-    if stage_name == STAGE_APPEARANCE_ALIAS_GENERATION and field_name == APPEARANCE_MAPPING:
+    if stage_name in APPEARANCE_MAPPING_STAGE_NAMES and field_name == APPEARANCE_MAPPING:
         if not isinstance(value, dict):
             return "必须是 object"
         mapping = value.get("appearance_mapping") if isinstance(value.get("appearance_mapping"), dict) else value
@@ -900,6 +912,47 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, LegacyInputAlias]] = {
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
     },
     STAGE_APPEARANCE_ALIAS_GENERATION: {
+        WORLDVIEW: WORLDVIEW_VAR,
+        STORY_OUTLINE: STORY_OUTLINE_VAR,
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
+        USER_CHARACTERS: CHARACTER_BIOS_VAR,
+        CHARACTERS: CHARACTER_VAR,
+        SCENES: SCENE_VAR,
+        CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+    },
+    STAGE_APPEARANCE_ALIAS_WRITING: {
+        WORLDVIEW: WORLDVIEW_VAR,
+        STORY_OUTLINE: STORY_OUTLINE_VAR,
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
+        USER_CHARACTERS: CHARACTER_BIOS_VAR,
+        CHARACTERS: CHARACTER_VAR,
+        SCENES: SCENE_VAR,
+        CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+    },
+    STAGE_APPEARANCE_ALIAS_REVIEW: {
+        WORLDVIEW: WORLDVIEW_VAR,
+        STORY_OUTLINE: STORY_OUTLINE_VAR,
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
+        USER_CHARACTERS: CHARACTER_BIOS_VAR,
+        CHARACTERS: CHARACTER_VAR,
+        SCENES: SCENE_VAR,
+        CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+    },
+    STAGE_APPEARANCE_ALIAS_REWRITE: {
+        WORLDVIEW: WORLDVIEW_VAR,
+        STORY_OUTLINE: STORY_OUTLINE_VAR,
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
+        USER_CHARACTERS: CHARACTER_BIOS_VAR,
+        CHARACTERS: CHARACTER_VAR,
+        SCENES: SCENE_VAR,
+        CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        PASS_REVIEW_JSON: APPEARANCE_REVIEW_VAR,
+    },
+    STAGE_APPEARANCE_ALIAS_UNSTRUCTURED: {
         WORLDVIEW: WORLDVIEW_VAR,
         STORY_OUTLINE: STORY_OUTLINE_VAR,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
@@ -1364,8 +1417,96 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         ),
         output_types={APPEARANCE_MAPPING: "object"},
         output_aliases={APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,)},
-        fastgpt_responsibility="基于人物、场景、分集计划与命名偏好，生成人物服装版本映射与 alias registry。",
-        local_responsibility="缓存服装版本映射，并提炼 canonical 角色注册表、alias 注册表与逐集 alias 计划。",
+        fastgpt_responsibility="逻辑阶段名；实际由 Python 依次调用服装映射编写、审核、修订与自然语言说明四个独立 workflow。",
+        local_responsibility="编排四阶段循环，审核通过后才提交正式 appearance_mapping，并在本地提炼 registry / alias plan。",
+    ),
+    STAGE_APPEARANCE_ALIAS_WRITING: FastGPTStageContract(
+        stage_name=STAGE_APPEARANCE_ALIAS_WRITING,
+        label="服装版本映射编写",
+        input_names=(
+            WORLDVIEW,
+            STORY_OUTLINE,
+            EPISODE_PLAN,
+            USER_CHARACTERS,
+            CHARACTERS,
+            SCENES,
+            CHARACTER_ALIAS_NAMING_RULES,
+        ),
+        output_types={APPEARANCE_MAPPING: "object"},
+        output_aliases={APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,)},
+        fastgpt_responsibility="编写完整结构化服装版本映射 JSON。",
+        local_responsibility="只做输出 repair/结构校验；正式缓存提交由 Python 审核结果决定。",
+        expected_output_kind="appearance_mapping_json",
+        workflow_json_name="服装版本映射编写.json",
+    ),
+    STAGE_APPEARANCE_ALIAS_REVIEW: FastGPTStageContract(
+        stage_name=STAGE_APPEARANCE_ALIAS_REVIEW,
+        label="服装版本映射审核",
+        input_names=(
+            WORLDVIEW,
+            STORY_OUTLINE,
+            EPISODE_PLAN,
+            USER_CHARACTERS,
+            CHARACTERS,
+            SCENES,
+            CHARACTER_ALIAS_NAMING_RULES,
+            APPEARANCE_MAPPING,
+        ),
+        output_types={
+            REVIEW_PASSED: "boolean",
+            REWRITE_REQUIRED: "boolean",
+            BLOCKING_ISSUES: "array",
+        },
+        output_aliases={
+            REVIEW_PASSED: (APPEARANCE_REVIEW_VAR, "approved"),
+            REWRITE_REQUIRED: (APPEARANCE_REVIEW_VAR,),
+            BLOCKING_ISSUES: (APPEARANCE_REVIEW_VAR,),
+        },
+        fastgpt_responsibility="审核当前结构化服装版本映射是否可提交到正式缓存。",
+        local_responsibility="严格解析 review JSON，并决定进入通过、修订或失败退出。",
+        expected_output_kind="review_json",
+        workflow_json_name="服装版本映射审核.json",
+    ),
+    STAGE_APPEARANCE_ALIAS_REWRITE: FastGPTStageContract(
+        stage_name=STAGE_APPEARANCE_ALIAS_REWRITE,
+        label="服装版本映射修订",
+        input_names=(
+            WORLDVIEW,
+            STORY_OUTLINE,
+            EPISODE_PLAN,
+            USER_CHARACTERS,
+            CHARACTERS,
+            SCENES,
+            CHARACTER_ALIAS_NAMING_RULES,
+            APPEARANCE_MAPPING,
+            PASS_REVIEW_JSON,
+        ),
+        output_types={APPEARANCE_MAPPING: "object"},
+        output_aliases={APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,)},
+        fastgpt_responsibility="基于当前服装映射与审核结果，输出新的完整 appearance_mapping。",
+        local_responsibility="只做输出 repair/结构校验；是否继续循环由 Python 决定。",
+        expected_output_kind="appearance_mapping_json",
+        workflow_json_name="服装版本映射修订.json",
+    ),
+    STAGE_APPEARANCE_ALIAS_UNSTRUCTURED: FastGPTStageContract(
+        stage_name=STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+        label="自然语言服装版本映射说明",
+        input_names=(
+            WORLDVIEW,
+            STORY_OUTLINE,
+            EPISODE_PLAN,
+            USER_CHARACTERS,
+            CHARACTERS,
+            SCENES,
+            CHARACTER_ALIAS_NAMING_RULES,
+            APPEARANCE_MAPPING,
+        ),
+        output_types={APPEARANCE_NATURAL_LANGUAGE_VAR: "string"},
+        output_aliases={APPEARANCE_NATURAL_LANGUAGE_VAR: (APPEARANCE_NATURAL_LANGUAGE_VAR,)},
+        fastgpt_responsibility="把正式结构化服装映射整理成便于人工阅读的自然语言说明。",
+        local_responsibility="只缓存 c7VnQ4eX 展示文本；不能覆盖 h2KpLm91。",
+        expected_output_kind="unstructured_natural_language_text",
+        workflow_json_name="自然语言服装版本映射.json",
     ),
     STAGE_HOOKS: FastGPTStageContract(
         stage_name=STAGE_HOOKS,

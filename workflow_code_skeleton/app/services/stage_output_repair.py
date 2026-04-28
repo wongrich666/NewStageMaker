@@ -12,6 +12,8 @@ STAGE_WORLDVIEW = "worldview"
 STAGE_CHARACTERS = "characters"
 STAGE_SCENES = "scenes"
 STAGE_APPEARANCE_ALIAS_GENERATION = "appearance_alias_generation"
+STAGE_APPEARANCE_ALIAS_WRITING = "appearance_alias_writing"
+STAGE_APPEARANCE_ALIAS_REWRITE = "appearance_alias_rewrite"
 WORLDVIEW_FIELD = "worldview"
 CHARACTERS_FIELD = "characters"
 SCENES_FIELD = "scenes"
@@ -117,6 +119,12 @@ APPEARANCE_WRAPPER_KEYS = (
     "结构化服装映射",
     "最终结构化服装映射",
 )
+APPEARANCE_MAPPING_STAGE_NAMES = {
+    STAGE_APPEARANCE_ALIAS_GENERATION,
+    STAGE_APPEARANCE_ALIAS_WRITING,
+    STAGE_APPEARANCE_ALIAS_REWRITE,
+}
+APPEARANCE_DEFAULT_FORBIDDEN_GENERIC_NAMES = ["男主", "女主", "反派", "配角"]
 APPEARANCE_TOP_LEVEL_ALIASES: dict[str, tuple[str, ...]] = {
     "mapping_principle": ("mapping_principle", "mappingPrinciple", "principle"),
     "global_naming_style": ("global_naming_style", "globalNamingStyle", "naming_style"),
@@ -436,7 +444,7 @@ def is_repairable_stage_output(stage_name: str) -> bool:
         STAGE_WORLDVIEW,
         STAGE_CHARACTERS,
         STAGE_SCENES,
-        STAGE_APPEARANCE_ALIAS_GENERATION,
+        *APPEARANCE_MAPPING_STAGE_NAMES,
     }
 
 
@@ -474,7 +482,7 @@ def repair_stage_output_candidate(
             relaxed=relaxed,
             allow_textual_relaxation=allow_textual_relaxation,
         )
-    if stage_name == STAGE_APPEARANCE_ALIAS_GENERATION:
+    if stage_name in APPEARANCE_MAPPING_STAGE_NAMES:
         return _repair_appearance_mapping_candidate(
             candidate,
             source=source,
@@ -524,10 +532,7 @@ def describe_repairable_stage_output_issue(
         return _describe_characters_output_issue(value)
     if stage_name == STAGE_SCENES and field_name == SCENES_FIELD:
         return _describe_scenes_output_issue(value)
-    if (
-        stage_name == STAGE_APPEARANCE_ALIAS_GENERATION
-        and field_name == APPEARANCE_MAPPING_FIELD
-    ):
+    if stage_name in APPEARANCE_MAPPING_STAGE_NAMES and field_name == APPEARANCE_MAPPING_FIELD:
         return describe_appearance_mapping_output_issue(value)
     return None
 
@@ -2041,6 +2046,27 @@ def _canonicalize_appearance_mapping_body(
             normalized[field_name] = _normalize_string_list(raw)
         else:
             normalized[field_name] = _normalize_text_value(raw)
+    if not str(normalized.get("mapping_principle") or "").strip():
+        normalized["mapping_principle"] = (
+            "以角色身份、场景触发与状态变化为核心，保持同人同锚点、同触发条件同别名。"
+        )
+        warnings.append("appearance_mapping.mapping_principle 缺失，已补默认映射原则")
+    if not str(normalized.get("global_naming_style") or "").strip():
+        normalized["global_naming_style"] = (
+            "统一使用“角色中文全名【场景/状态/身份】”格式；常态默认使用 default_name。"
+        )
+        warnings.append("appearance_mapping.global_naming_style 缺失，已补默认命名风格")
+    if not isinstance(normalized.get("characters"), list):
+        normalized["characters"] = []
+    if not isinstance(normalized.get("episode_level_usage_plan"), list):
+        normalized["episode_level_usage_plan"] = []
+        warnings.append("appearance_mapping.episode_level_usage_plan 缺失，已补空数组")
+    if not isinstance(normalized.get("scene_level_usage_plan"), list):
+        normalized["scene_level_usage_plan"] = []
+        warnings.append("appearance_mapping.scene_level_usage_plan 缺失，已补空数组")
+    if not isinstance(normalized.get("special_naming_rules"), list):
+        normalized["special_naming_rules"] = []
+        warnings.append("appearance_mapping.special_naming_rules 缺失，已补空数组")
     return normalized
 
 
@@ -2057,6 +2083,10 @@ def _normalize_appearance_characters(
             continue
         lowered = _lowered_key_map(item)
         character: dict[str, Any] = {}
+        raw_variant_seed = item.get(
+            _match_alias_key(item, lowered, APPEARANCE_CHARACTER_ALIASES["outfit_variants"])
+            or "outfit_variants"
+        )
         for field_name, aliases in APPEARANCE_CHARACTER_ALIASES.items():
             actual_key = _match_alias_key(item, lowered, aliases)
             if actual_key is None:
@@ -2073,21 +2103,34 @@ def _normalize_appearance_characters(
             elif field_name == "forbidden_generic_names":
                 character[field_name] = _normalize_string_list(raw)
             elif field_name == "outfit_variants":
-                character[field_name] = _normalize_appearance_outfit_variants(
-                    raw,
-                    index=index,
-                    warnings=warnings,
-                    alias_hits=alias_hits,
-                )
+                continue
             else:
                 character[field_name] = _normalize_text_value(raw)
-        canonical_name = str(character.get("canonical_name") or "").strip()
+        raw_character_name = _normalize_text_value(item.get("character_name"))
+        canonical_name = str(character.get("canonical_name") or "").strip() or raw_character_name
+        if canonical_name and canonical_name != str(character.get("canonical_name") or "").strip():
+            character["canonical_name"] = canonical_name
+            warnings.append(
+                f"appearance_mapping.characters[{index}].canonical_name 缺失，已回退为 {canonical_name}"
+            )
         character_id = str(character.get("character_id") or "").strip()
+        if not character_id:
+            character_id = _stable_character_id(canonical_name or raw_character_name, index=index)
+            if character_id:
+                character["character_id"] = character_id
+                warnings.append(
+                    f"appearance_mapping.characters[{index}].character_id 缺失，已补为 {character_id}"
+                )
         if not canonical_name and character_id:
-            character["canonical_name"] = character_id
             canonical_name = character_id
+            character["canonical_name"] = character_id
             warnings.append(
                 f"appearance_mapping.characters[{index}].canonical_name 为空，已回退为 {character_id}"
+            )
+        if not str(character.get("story_role") or "").strip():
+            character["story_role"] = "关键角色"
+            warnings.append(
+                f"appearance_mapping.characters[{index}].story_role 缺失，已补默认值“关键角色”"
             )
         if not str(character.get("default_name") or "").strip():
             fallback_name = canonical_name or character_id
@@ -2096,6 +2139,29 @@ def _normalize_appearance_characters(
                 warnings.append(
                     f"appearance_mapping.characters[{index}].default_name 为空，已回退为 {fallback_name}"
                 )
+        same_person_anchor = _complete_same_person_anchor_for_appearance(
+            anchor=character.get("same_person_anchor"),
+            variant_seed=raw_variant_seed,
+            canonical_name=canonical_name or raw_character_name or character_id,
+            default_name=str(character.get("default_name") or "").strip(),
+        )
+        character["same_person_anchor"] = same_person_anchor
+        forbidden_names = _normalize_string_list(character.get("forbidden_generic_names"))
+        if not forbidden_names:
+            forbidden_names = list(APPEARANCE_DEFAULT_FORBIDDEN_GENERIC_NAMES)
+            warnings.append(
+                f"appearance_mapping.characters[{index}].forbidden_generic_names 缺失，已补默认泛称黑名单"
+            )
+        character["forbidden_generic_names"] = forbidden_names
+        character["outfit_variants"] = _normalize_appearance_outfit_variants(
+            raw_variant_seed,
+            index=index,
+            warnings=warnings,
+            alias_hits=alias_hits,
+            character_name=canonical_name or raw_character_name or character_id,
+            default_name=str(character.get("default_name") or "").strip(),
+            same_person_anchor=same_person_anchor,
+        )
         result.append(character)
     return result
 
@@ -2132,8 +2198,10 @@ def _normalize_appearance_outfit_variants(
     index: int,
     warnings: list[str],
     alias_hits: dict[str, str],
+    character_name: str,
+    default_name: str,
+    same_person_anchor: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    del warnings
     normalized = _deep_normalize_candidate(value)
     items = normalized if isinstance(normalized, list) else []
     result: list[dict[str, Any]] = []
@@ -2159,11 +2227,54 @@ def _normalize_appearance_outfit_variants(
                     character_index=index,
                     variant_index=variant_index,
                     alias_hits=alias_hits,
+                    raw_variant=item,
                 )
             elif field_name in {"must_use_when_triggered", "fallback_allowed"}:
                 variant[field_name] = raw
             else:
                 variant[field_name] = _normalize_text_value(raw)
+        alias_name = str(variant.get("alias_name") or "").strip()
+        if not alias_name:
+            alias_name = default_name or _default_variant_alias_name(character_name, variant_index)
+            if alias_name:
+                variant["alias_name"] = alias_name
+                warnings.append(
+                    "appearance_mapping.characters"
+                    f"[{index}].outfit_variants[{variant_index}].alias_name 缺失，已补为 {alias_name}"
+                )
+        identity_state = str(variant.get("applicable_identity_state") or "").strip()
+        if not identity_state:
+            identity_state = _extract_identity_state_from_alias(alias_name) or "常态"
+            variant["applicable_identity_state"] = identity_state
+        visual_keypoints = _normalize_string_list(variant.get("visual_keypoints"))
+        outfit_description = str(variant.get("outfit_description") or "").strip()
+        if not outfit_description:
+            outfit_description = "，".join(visual_keypoints) or "待补全服装描述"
+            variant["outfit_description"] = outfit_description
+        if not visual_keypoints:
+            visual_keypoints = _fallback_visual_keypoints(outfit_description, alias_name)
+            variant["visual_keypoints"] = visual_keypoints
+        if not str(variant.get("outfit_type") or "").strip():
+            variant["outfit_type"] = _infer_outfit_type(alias_name, outfit_description)
+        if not str(variant.get("variant_id") or "").strip():
+            variant["variant_id"] = _stable_variant_id(alias_name, identity_state, variant_index)
+        if not str(variant.get("episode_range_hint") or "").strip():
+            variant["episode_range_hint"] = "按场景或状态触发"
+        variant["scene_trigger_rules"] = _complete_appearance_scene_trigger_rules(
+            variant.get("scene_trigger_rules"),
+            raw_variant=item,
+        )
+        if not str(variant.get("usage_rule") or "").strip():
+            rule_alias = alias_name or default_name or character_name
+            variant["usage_rule"] = f"触发对应场景或状态时使用{rule_alias}"
+        if not isinstance(variant.get("must_use_when_triggered"), bool):
+            variant["must_use_when_triggered"] = True
+        if not isinstance(variant.get("fallback_allowed"), bool):
+            variant["fallback_allowed"] = False
+        if not str(variant.get("same_person_confirmation") or "").strip():
+            variant["same_person_confirmation"] = str(
+                same_person_anchor.get("unchanged_core_impression") or ""
+            ).strip()
         result.append(variant)
     return result
 
@@ -2174,6 +2285,7 @@ def _normalize_appearance_scene_trigger_rules(
     character_index: int,
     variant_index: int,
     alias_hits: dict[str, str],
+    raw_variant: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized = _deep_normalize_candidate(value)
     raw = normalized if isinstance(normalized, dict) else {}
@@ -2189,7 +2301,7 @@ def _normalize_appearance_scene_trigger_rules(
                 f"[{character_index}].outfit_variants[{variant_index}].scene_trigger_rules.{field_name}"
             ] = actual_key
         result[field_name] = _normalize_string_list(raw.get(actual_key))
-    return result
+    return _complete_appearance_scene_trigger_rules(result, raw_variant=raw_variant)
 
 
 def _normalize_appearance_episode_usage_plan(
@@ -2305,6 +2417,144 @@ def _normalize_appearance_usage_alias_items(
             }
         )
     return result
+
+
+def _complete_same_person_anchor_for_appearance(
+    *,
+    anchor: Any,
+    variant_seed: Any,
+    canonical_name: str,
+    default_name: str,
+) -> dict[str, Any]:
+    existing = anchor if isinstance(anchor, dict) else {}
+    stable_traits = _normalize_string_list(existing.get("stable_appearance_traits"))
+    recognition_points = _normalize_string_list(existing.get("stable_recognition_points"))
+    unchanged_core = str(existing.get("unchanged_core_impression") or "").strip()
+
+    visual_seed_points: list[str] = []
+    confirmation_texts: list[str] = []
+    variant_items = _deep_normalize_candidate(variant_seed)
+    if isinstance(variant_items, list):
+        for item in variant_items:
+            if not isinstance(item, dict):
+                continue
+            visual_seed_points.extend(_normalize_string_list(item.get("visual_keypoints")))
+            confirmation = _normalize_text_value(item.get("same_person_confirmation"))
+            if confirmation:
+                confirmation_texts.append(confirmation)
+
+    merged_points = _dedupe_strings([*stable_traits, *recognition_points, *visual_seed_points])
+    if not stable_traits:
+        stable_traits = merged_points[:3]
+    if not recognition_points:
+        recognition_points = merged_points[:3]
+    if not unchanged_core:
+        unchanged_core = (
+            confirmation_texts[0]
+            if confirmation_texts
+            else "、".join(merged_points[:2])
+            or default_name
+            or canonical_name
+            or "同一人物的核心外观印象保持一致"
+        )
+
+    if not stable_traits:
+        stable_traits = [default_name or canonical_name or "核心人物造型稳定"]
+    if not recognition_points:
+        recognition_points = [default_name or canonical_name or "核心人物识别点稳定"]
+
+    return {
+        "stable_appearance_traits": stable_traits,
+        "stable_recognition_points": recognition_points,
+        "unchanged_core_impression": unchanged_core,
+    }
+
+
+def _complete_appearance_scene_trigger_rules(
+    value: Any,
+    *,
+    raw_variant: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    current = value if isinstance(value, dict) else {}
+    raw = raw_variant if isinstance(raw_variant, dict) else {}
+    lowered = _lowered_key_map(raw)
+    result: dict[str, Any] = {}
+    for field_name, aliases in APPEARANCE_SCENE_TRIGGER_RULE_ALIASES.items():
+        existing_values = _normalize_string_list(current.get(field_name))
+        if existing_values:
+            result[field_name] = existing_values
+            continue
+        actual_key = _match_alias_key(raw, lowered, aliases)
+        if actual_key is not None:
+            result[field_name] = _normalize_string_list(raw.get(actual_key))
+            continue
+        result[field_name] = []
+    return result
+
+
+def _stable_character_id(name: str, *, index: int) -> str:
+    text = str(name or "").strip()
+    if not text:
+        return f"character_{index}"
+    lowered = text.lower()
+    ascii_candidate = re.sub(r"[^a-z0-9]+", "_", lowered).strip("_")
+    if ascii_candidate:
+        return ascii_candidate
+    normalized = re.sub(r"[^\w\u4e00-\u9fff]+", "", text)
+    return normalized or f"character_{index}"
+
+
+def _default_variant_alias_name(character_name: str, variant_index: int) -> str:
+    base = str(character_name or "").strip() or f"角色{variant_index}"
+    return f"{base}【常态】"
+
+
+def _extract_identity_state_from_alias(alias_name: str) -> str:
+    text = str(alias_name or "").strip()
+    if not text:
+        return ""
+    for pattern in (r"【([^】]+)】", r"\[([^\]]+)\]"):
+        match = re.search(pattern, text)
+        if match:
+            return str(match.group(1) or "").strip()
+    return ""
+
+
+def _fallback_visual_keypoints(outfit_description: str, alias_name: str) -> list[str]:
+    description_points = _normalize_string_list(outfit_description)
+    if description_points:
+        return description_points[:3]
+    alias_text = str(alias_name or "").strip()
+    return [alias_text] if alias_text else ["待补全服装关键点"]
+
+
+def _infer_outfit_type(alias_name: str, outfit_description: str) -> str:
+    text = f"{alias_name} {outfit_description}".strip()
+    for keyword, outfit_type in (
+        ("日常", "日常装"),
+        ("通勤", "通勤装"),
+        ("会议", "职场装"),
+        ("制服", "制服"),
+        ("校服", "校服"),
+        ("礼服", "礼服"),
+        ("战斗", "战斗装"),
+        ("婚礼", "礼服"),
+        ("睡衣", "居家装"),
+        ("居家", "居家装"),
+    ):
+        if keyword in text:
+            return outfit_type
+    return "剧情服装"
+
+
+def _stable_variant_id(alias_name: str, identity_state: str, variant_index: int) -> str:
+    seed = identity_state or alias_name or f"variant_{variant_index}"
+    lowered = str(seed or "").strip().lower()
+    ascii_candidate = re.sub(r"[^a-z0-9]+", "_", lowered).strip("_")
+    if ascii_candidate:
+        return ascii_candidate
+    normalized = re.sub(r"[^\w\u4e00-\u9fff]+", "", str(seed or "").strip())
+    return normalized or f"variant_{variant_index}"
 
 
 def _looks_like_appearance_mapping_body(value: Any) -> bool:
@@ -2499,8 +2749,6 @@ def _validate_appearance_mapping_local_review(value: Any) -> list[str]:
     issues: list[str] = []
     episode_usage_plan = mapping.get("episode_level_usage_plan")
     if isinstance(episode_usage_plan, list):
-        if not episode_usage_plan:
-            issues.append("appearance_mapping.episode_level_usage_plan 不能为空")
         for index, item in enumerate(episode_usage_plan, start=1):
             prefix = f"appearance_mapping.episode_level_usage_plan[{index}]"
             if not isinstance(item, dict):
@@ -2527,8 +2775,6 @@ def _validate_appearance_mapping_local_review(value: Any) -> list[str]:
 
     scene_usage_plan = mapping.get("scene_level_usage_plan")
     if isinstance(scene_usage_plan, list):
-        if not scene_usage_plan:
-            issues.append("appearance_mapping.scene_level_usage_plan 不能为空")
         for index, item in enumerate(scene_usage_plan, start=1):
             prefix = f"appearance_mapping.scene_level_usage_plan[{index}]"
             if not isinstance(item, dict):

@@ -36,6 +36,10 @@ from .fastgpt_contracts import (
     NORMALIZED_EPISODE_PLAN,
     OUTFIT_SWITCH_RULES,
     STAGE_APPEARANCE_ALIAS_GENERATION,
+    STAGE_APPEARANCE_ALIAS_REVIEW,
+    STAGE_APPEARANCE_ALIAS_REWRITE,
+    STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+    STAGE_APPEARANCE_ALIAS_WRITING,
     STAGE_APPEARANCE_PRE_STRATEGY,
     STAGE_DIALOGUES,
     STAGE_DIALOGUE_MEMORY,
@@ -93,6 +97,18 @@ STAGE_AUXILIARY_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
 STAGE_API_KEY_ENV_ALIASES: dict[str, tuple[str, ...]] = {
     STAGE_FRAMEWORK_NATURALIZE: ("FASTGPT_UNSTRUCTURED_API_KEY",),
     STAGE_WORLDVIEW_NATURALIZE: ("FASTGPT_UNSTRUCTURED_API_KEY",),
+    STAGE_APPEARANCE_ALIAS_WRITING: (
+        "FASTGPT_APPEARANCE_ALIAS_WRITING_API_KEY",
+    ),
+    STAGE_APPEARANCE_ALIAS_REVIEW: (
+        "FASTGPT_APPEARANCE_ALIAS_REVIEW_API_KEY",
+    ),
+    STAGE_APPEARANCE_ALIAS_REWRITE: (
+        "FASTGPT_APPEARANCE_ALIAS_REWRITE_API_KEY",
+    ),
+    STAGE_APPEARANCE_ALIAS_UNSTRUCTURED: (
+        "FASTGPT_APPEARANCE_ALIAS_UNSTRUCTURED_API_KEY",
+    ),
     STAGE_SCRIPT_WRITING: (
         "FASTGPT_SCRIPT_WRITING_API_KEY",
         "FASTGPT_SCRIPT_WRITE_API_KEY",
@@ -127,6 +143,7 @@ STAGE_API_KEY_ENV_ALIASES: dict[str, tuple[str, ...]] = {
 TEXT_FIRST_MULTI_FIELD_STAGES = {
     STAGE_FRAMEWORK,
     STAGE_APPEARANCE_PRE_STRATEGY,
+    STAGE_APPEARANCE_ALIAS_REVIEW,
     STAGE_HOOKS_REVIEW,
     STAGE_HOOK_REVIEW,
     STAGE_DIALOGUES_REVIEW,
@@ -136,6 +153,7 @@ TEXT_FIRST_MULTI_FIELD_STAGES = {
 PARTIAL_MATCH_MISSING_ERROR_STAGES = {
     STAGE_FRAMEWORK,
     STAGE_APPEARANCE_PRE_STRATEGY,
+    STAGE_APPEARANCE_ALIAS_REVIEW,
     STAGE_HOOKS_REVIEW,
     STAGE_HOOK_REVIEW,
     STAGE_DIALOGUES_REVIEW,
@@ -146,6 +164,26 @@ STRICT_JSON_STRING_STAGES = {
     STAGE_WORLDVIEW,
     STAGE_CHARACTERS,
     STAGE_SCENES,
+}
+APPEARANCE_MAPPING_OUTPUT_STAGES = {
+    STAGE_APPEARANCE_ALIAS_GENERATION,
+    STAGE_APPEARANCE_ALIAS_WRITING,
+    STAGE_APPEARANCE_ALIAS_REWRITE,
+}
+APPEARANCE_DETAIL_STAGES = {
+    STAGE_APPEARANCE_ALIAS_GENERATION,
+    STAGE_APPEARANCE_ALIAS_WRITING,
+    STAGE_APPEARANCE_ALIAS_REVIEW,
+    STAGE_APPEARANCE_ALIAS_REWRITE,
+    STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+}
+PASS_REVIEW_OUTPUT_STAGES = {
+    STAGE_APPEARANCE_ALIAS_REVIEW,
+    STAGE_HOOKS_REVIEW,
+    STAGE_HOOK_REVIEW,
+    STAGE_DIALOGUES_REVIEW,
+    STAGE_DIALOGUE_REVIEW,
+    STAGE_SCRIPT_REVIEW,
 }
 
 
@@ -733,7 +771,7 @@ class FastGPTClient:
                 )
                 return framework_output.selected.validated_payload
 
-        if contract.stage_name == STAGE_APPEARANCE_ALIAS_GENERATION:
+        if contract.stage_name in APPEARANCE_MAPPING_OUTPUT_STAGES:
             appearance_output = _extract_appearance_stage_output(
                 data,
                 contract,
@@ -819,7 +857,7 @@ class FastGPTClient:
                 )
                 return preferred_text_output.validated_payload
 
-        if contract.stage_name != STAGE_APPEARANCE_ALIAS_GENERATION:
+        if contract.stage_name not in APPEARANCE_MAPPING_OUTPUT_STAGES:
             # 先扫结构化槽位。FastGPT 在不同工作流/节点组合下，正式输出可能落在
             # responseData.updateVarResult、output、pluginOutput、toolDetail 等不同位置，
             # 这里统一把它们当作“候选正式产物”来做契约校验。
@@ -842,6 +880,11 @@ class FastGPTClient:
                     except ValueError as exc:
                         rejected_candidates.append((variant_source, str(exc), match.payload))
                         continue
+                    validated_payload = _merge_review_auxiliary_fields(
+                        validated_payload,
+                        match.payload,
+                        contract=contract,
+                    )
                     validated_candidates.append(
                         ValidatedStageOutput(
                             source=variant_source,
@@ -853,7 +896,7 @@ class FastGPTClient:
                         )
                     )
 
-        if len(expected) == 1 and contract.stage_name != STAGE_APPEARANCE_ALIAS_GENERATION:
+        if len(expected) == 1 and contract.stage_name not in APPEARANCE_MAPPING_OUTPUT_STAGES:
             single_key = expected[0]
             # 单字段阶段再额外走一遍“文本兜底”。
             # 这样即使 FastGPT 最后只回了一段 JSON 字符串或纯文本，也仍有机会
@@ -1043,7 +1086,7 @@ def _detail_enabled_for_stage(stage_name: str) -> bool:
         return bool(getattr(settings, "fastgpt_characters_detail", False))
     if stage_name == STAGE_SCENES:
         return bool(getattr(settings, "fastgpt_scenes_detail", False))
-    if stage_name == STAGE_APPEARANCE_ALIAS_GENERATION:
+    if stage_name in APPEARANCE_DETAIL_STAGES:
         return bool(getattr(settings, "fastgpt_appearance_alias_generation_detail", False))
     return True
 
@@ -1322,6 +1365,11 @@ def _extract_contract_payload(
         if contract.stage_name not in PARTIAL_MATCH_MISSING_ERROR_STAGES or not payload:
             return None
 
+    if contract.stage_name in PASS_REVIEW_OUTPUT_STAGES:
+        for key in ("summary", "non_blocking_issues", "rewrite_start_episode", "stage"):
+            if key in candidate and key not in payload:
+                payload[key] = candidate[key]
+
     return StageOutputMatch(
         payload=payload,
         matched_keys=matched_keys,
@@ -1494,6 +1542,34 @@ def _extract_preferred_text_stage_output(
     for source, text in _iter_named_text_candidates(data):
         if not text:
             continue
+        if contract.stage_name in PASS_REVIEW_OUTPUT_STAGES:
+            json_candidates = extract_json_object_candidates(text)
+            for candidate_index, parsed_text in reversed(list(enumerate(json_candidates))):
+                match = _payload_from_candidate(parsed_text, contract)
+                if match is None:
+                    continue
+                try:
+                    validated_payload = contract.validate_output_payload(match.payload)
+                except ValueError as exc:
+                    rejected_candidates.append(
+                        (f"{source}[json_object:{candidate_index}]", str(exc), match.payload)
+                    )
+                    continue
+                validated_payload = _merge_review_auxiliary_fields(
+                    validated_payload,
+                    match.payload,
+                    contract=contract,
+                )
+                return ValidatedStageOutput(
+                    source=f"{source}[json_object:{candidate_index}]",
+                    payload=match.payload,
+                    validated_payload=validated_payload,
+                    matched_keys=match.matched_keys,
+                    canonical_hits=match.canonical_hits,
+                    alias_hits=match.alias_hits,
+                )
+            continue
+
         parsed_text = _try_parse_json(text)
         if parsed_text is None:
             continue
@@ -2247,17 +2323,13 @@ def _normalize_stage_specific_output_candidate(
     # 否则后续契约校验会把本来可用的结果误判为不合格。
     if contract.stage_name == STAGE_APPEARANCE_PRE_STRATEGY:
         return _normalize_appearance_pre_strategy_output_candidate(candidate, contract)
-    if contract.stage_name == STAGE_APPEARANCE_ALIAS_GENERATION:
+    if contract.stage_name in APPEARANCE_MAPPING_OUTPUT_STAGES:
         return _normalize_appearance_mapping_output_candidate(candidate, contract)
     if contract.stage_name == STAGE_EPISODE_PLAN_NORMALIZE:
         return _normalize_episode_plan_normalize_output_candidate(candidate, contract)
     if _is_dialogue_payload_stage(contract.stage_name):
         return _normalize_dialogues_output_candidate(candidate, contract)
-    if contract.stage_name in {
-        STAGE_HOOKS_REVIEW,
-        STAGE_DIALOGUES_REVIEW,
-        STAGE_SCRIPT_REVIEW,
-    }:
+    if contract.stage_name in PASS_REVIEW_OUTPUT_STAGES:
         return _normalize_pass_review_output_candidate(candidate, contract)
     return candidate
 
@@ -2622,6 +2694,22 @@ def _normalize_pass_review_body(value: Any) -> dict[str, Any] | None:
     return candidate
 
 
+def _merge_review_auxiliary_fields(
+    validated_payload: dict[str, Any],
+    raw_payload: dict[str, Any],
+    *,
+    contract: FastGPTStageContract,
+) -> dict[str, Any]:
+    if contract.stage_name not in PASS_REVIEW_OUTPUT_STAGES:
+        return validated_payload
+
+    merged = dict(validated_payload)
+    for key in ("summary", "non_blocking_issues", "rewrite_start_episode", "stage"):
+        if key in raw_payload:
+            merged[key] = raw_payload[key]
+    return merged
+
+
 def _looks_like_pass_review_body(candidate: dict[str, Any]) -> bool:
     keys = {str(key) for key in candidate.keys()}
     return "passed" in keys and (
@@ -2668,6 +2756,9 @@ def _iter_text_from_content(content: Any) -> Iterable[str]:
         yield content
         return
     if isinstance(content, dict):
+        content_type = str(content.get("type") or "").strip().lower()
+        if content_type in {"reasoning", "reason", "thinking", "analysis"}:
+            return
         text = content.get("text")
         if isinstance(text, str):
             yield text

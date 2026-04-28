@@ -23,8 +23,13 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     CHARACTER_ALIAS_NAMING_RULES,
     CHARACTER_APPEARANCE_REQUIREMENTS,
     EPISODE_PLAN,
+    PASS_REVIEW_JSON,
     SCENES,
     STAGE_APPEARANCE_ALIAS_GENERATION,
+    STAGE_APPEARANCE_ALIAS_REVIEW,
+    STAGE_APPEARANCE_ALIAS_REWRITE,
+    STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+    STAGE_APPEARANCE_ALIAS_WRITING,
     STAGE_CHARACTERS,
     STAGE_SCENES,
     STAGE_WORLDVIEW,
@@ -37,6 +42,7 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
 from workflow_code_skeleton.app.workflow_ids import (
     APPEARANCE_MAPPING_VAR,
     APPEARANCE_NATURAL_LANGUAGE_VAR,
+    APPEARANCE_REVIEW_VAR,
     CHARACTER_VAR,
     CORE_SCENE_FINAL_VAR,
     SCENE_VAR,
@@ -332,6 +338,45 @@ def _appearance_mapping_with_principle(principle: str) -> dict[str, object]:
     return payload
 
 
+def _appearance_review_json(
+    *,
+    passed: bool,
+    rewrite_required: bool,
+    blocking_issues: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "passed": passed,
+        "rewrite_required": rewrite_required,
+        "summary": "审核通过" if passed else "需要修订",
+        "blocking_issues": list(blocking_issues or []),
+        "non_blocking_issues": [],
+    }
+
+
+def _simplified_appearance_mapping_json() -> dict[str, object]:
+    return {
+        "appearance_mapping": {
+            "characters": [
+                {
+                    "character_name": "白雪公主",
+                    "canonical_name": "白雪公主",
+                    "default_name": "白雪公主【日常】",
+                    "outfit_variants": [
+                        {
+                            "alias_name": "白雪公主【日常】",
+                            "visual_keypoints": [],
+                            "scene_names": ["王宫走廊"],
+                            "scene_types": ["宫廷"],
+                            "status_conditions": ["常态"],
+                            "same_person_confirmation": "",
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+
+
 def _appearance_input_variables() -> dict[str, str]:
     variables = _input_variables()
     variables[CHARACTERS] = json.dumps(_character_setting_json(), ensure_ascii=False)
@@ -466,14 +511,28 @@ class StageOutputRepairTests(unittest.TestCase):
             "fastgpt_appearance_local_review_retries",
             1,
         )
+        self._old_stage_review_revise_max_loops = getattr(
+            settings,
+            "fastgpt_stage_review_revise_max_loops",
+            10,
+        )
+        self._old_stage_format_retry_limit = getattr(
+            settings,
+            "fastgpt_stage_format_retry_limit",
+            3,
+        )
         settings.fastgpt_stage_local_restart_retries = 1
         settings.fastgpt_stage_output_rerun_retries = 1
         settings.fastgpt_appearance_local_review_retries = 1
+        settings.fastgpt_stage_review_revise_max_loops = 10
+        settings.fastgpt_stage_format_retry_limit = 1
 
     def tearDown(self) -> None:
         settings.fastgpt_stage_local_restart_retries = self._old_stage_local_restart_retries
         settings.fastgpt_stage_output_rerun_retries = self._old_stage_output_rerun_retries
         settings.fastgpt_appearance_local_review_retries = self._old_appearance_local_review_retries
+        settings.fastgpt_stage_review_revise_max_loops = self._old_stage_review_revise_max_loops
+        settings.fastgpt_stage_format_retry_limit = self._old_stage_format_retry_limit
 
     def _extract(self, stage_name: str, data: dict[str, object]) -> dict[str, str]:
         contract = contract_for(stage_name)
@@ -1192,14 +1251,68 @@ class StageOutputRepairTests(unittest.TestCase):
                 {"answerText": json.dumps(broken, ensure_ascii=False)},
             )
 
-    def test_appearance_local_review_failure_triggers_stage_rerun(self) -> None:
-        invalid = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
-        invalid["appearance_mapping"]["episode_level_usage_plan"] = []
-        invalid["appearance_mapping"]["scene_level_usage_plan"] = []
+    def test_appearance_generation_runs_writing_review_unstructured_in_order(self) -> None:
         runner = _QueuedStageRunner(
             [
-                {APPEARANCE_MAPPING: invalid},
                 {APPEARANCE_MAPPING: _appearance_mapping_json()},
+                _appearance_review_json(
+                    passed=True,
+                    rewrite_required=False,
+                ),
+                {
+                    APPEARANCE_NATURAL_LANGUAGE_VAR: "林夏在会议室与回家场景之间使用不同服装别名，但同一人物锚点保持一致。"
+                },
+            ]
+        )
+        state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
+        variables = dict(self.appearance_variables)
+        original_characters = str(variables[CHARACTERS])
+        original_scenes = str(variables[SCENES])
+        state.variables.update(variables)
+
+        _ensure_appearance_outputs(state, runner, variables)
+
+        self.assertEqual(
+            runner.stage_calls,
+            [
+                STAGE_APPEARANCE_ALIAS_WRITING,
+                STAGE_APPEARANCE_ALIAS_REVIEW,
+                STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+            ],
+        )
+        self.assertEqual(str(variables[CHARACTERS]), original_characters)
+        self.assertEqual(str(variables[SCENES]), original_scenes)
+        self.assertIsInstance(variables[APPEARANCE_MAPPING], dict)
+        mapping = variables[APPEARANCE_MAPPING]["appearance_mapping"]
+        self.assertEqual(
+            mapping["characters"][0]["canonical_name"],
+            "林夏",
+        )
+        self.assertIn(APPEARANCE_NATURAL_LANGUAGE_VAR, variables)
+        stage_input = runner.variable_snapshots[0]
+        self.assertIn('"same_person_traits"', str(stage_input[CHARACTERS]))
+        self.assertNotIn("dramatic_function", str(stage_input[CHARACTERS]))
+        self.assertIn('"scene_name":"玻璃会议室"', str(stage_input[SCENES]))
+        self.assertNotIn("outfit_requirements", str(stage_input[SCENES]))
+
+    def test_appearance_review_failure_triggers_rewrite_then_review(self) -> None:
+        rewritten = _appearance_mapping_with_principle("REWRITTEN_AFTER_REVIEW")
+        runner = _QueuedStageRunner(
+            [
+                {APPEARANCE_MAPPING: _appearance_mapping_json()},
+                _appearance_review_json(
+                    passed=False,
+                    rewrite_required=True,
+                    blocking_issues=["alias_name 需要统一"],
+                ),
+                {APPEARANCE_MAPPING: rewritten},
+                _appearance_review_json(
+                    passed=True,
+                    rewrite_required=False,
+                ),
+                {
+                    APPEARANCE_NATURAL_LANGUAGE_VAR: "修订后统一使用完整角色名加方括号版本名。"
+                },
             ]
         )
         state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
@@ -1208,20 +1321,34 @@ class StageOutputRepairTests(unittest.TestCase):
 
         _ensure_appearance_outputs(state, runner, variables)
 
-        self.assertEqual(runner.request_count, 2)
         self.assertEqual(
             runner.stage_calls,
-            [STAGE_APPEARANCE_ALIAS_GENERATION, STAGE_APPEARANCE_ALIAS_GENERATION],
+            [
+                STAGE_APPEARANCE_ALIAS_WRITING,
+                STAGE_APPEARANCE_ALIAS_REVIEW,
+                STAGE_APPEARANCE_ALIAS_REWRITE,
+                STAGE_APPEARANCE_ALIAS_REVIEW,
+                STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+            ],
         )
-        self.assertIsInstance(variables[APPEARANCE_MAPPING], dict)
-        self.assertIn("appearance_mapping", variables[APPEARANCE_MAPPING])
-        self.assertIn("character_registry", variables)
-        self.assertIsInstance(state.variables[APPEARANCE_MAPPING], dict)
-        self.assertIn("appearance_mapping", state.variables[APPEARANCE_MAPPING])
-        self.assertIn("character_registry", state.variables)
+        self.assertEqual(
+            variables[APPEARANCE_MAPPING]["appearance_mapping"]["mapping_principle"],
+            "REWRITTEN_AFTER_REVIEW",
+        )
 
     def test_appearance_stage_uses_compact_characters_and_scenes_without_overwriting_formal_outputs(self) -> None:
-        runner = _QueuedStageRunner([{APPEARANCE_MAPPING: _appearance_mapping_json()}])
+        runner = _QueuedStageRunner(
+            [
+                {APPEARANCE_MAPPING: _appearance_mapping_json()},
+                _appearance_review_json(
+                    passed=True,
+                    rewrite_required=False,
+                ),
+                {
+                    APPEARANCE_NATURAL_LANGUAGE_VAR: "林夏常态与会议室场景服装版本已整理为自然语言说明。"
+                },
+            ]
+        )
         state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
         variables = dict(self.appearance_variables)
         original_characters = str(variables[CHARACTERS])
@@ -1232,23 +1359,33 @@ class StageOutputRepairTests(unittest.TestCase):
 
         self.assertEqual(str(variables[CHARACTERS]), original_characters)
         self.assertEqual(str(variables[SCENES]), original_scenes)
-        self.assertEqual(runner.request_count, 1)
+        self.assertEqual(runner.request_count, 3)
         stage_input = runner.variable_snapshots[0]
         self.assertIn('"same_person_traits"', str(stage_input[CHARACTERS]))
         self.assertNotIn("dramatic_function", str(stage_input[CHARACTERS]))
         self.assertIn('"scene_name":"玻璃会议室"', str(stage_input[SCENES]))
         self.assertNotIn("outfit_requirements", str(stage_input[SCENES]))
 
-    def test_appearance_local_review_exhaustion_raises_without_cache_pollution(self) -> None:
-        invalid = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
-        invalid["appearance_mapping"]["episode_level_usage_plan"] = []
-        invalid["appearance_mapping"]["scene_level_usage_plan"] = []
-        runner = _QueuedStageRunner(
-            [
-                {APPEARANCE_MAPPING: invalid},
-                {APPEARANCE_MAPPING: invalid},
-            ]
+    def test_appearance_rewrite_review_limit_raises_without_cache_pollution(self) -> None:
+        rewrite_payload = {APPEARANCE_MAPPING: _appearance_mapping_json()}
+        responses: list[dict[str, object]] = [{APPEARANCE_MAPPING: _appearance_mapping_json()}]
+        for _ in range(9):
+            responses.append(
+                _appearance_review_json(
+                    passed=False,
+                    rewrite_required=True,
+                    blocking_issues=["blocking issue"],
+                )
+            )
+            responses.append(rewrite_payload)
+        responses.append(
+            _appearance_review_json(
+                passed=False,
+                rewrite_required=True,
+                blocking_issues=["blocking issue"],
+            )
         )
+        runner = _QueuedStageRunner(responses)
         state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
         variables = dict(self.appearance_variables)
         state.variables.update(variables)
@@ -1256,7 +1393,7 @@ class StageOutputRepairTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _ensure_appearance_outputs(state, runner, variables)
 
-        self.assertEqual(runner.request_count, 2)
+        self.assertEqual(runner.request_count, 20)
         self.assertNotIn(APPEARANCE_MAPPING, variables)
         self.assertNotIn("character_registry", variables)
         self.assertNotIn("character_alias_registry", variables)
@@ -1284,6 +1421,70 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertEqual(runner.request_count, 0)
         self.assertNotIn(APPEARANCE_MAPPING, variables)
         self.assertNotIn(APPEARANCE_MAPPING, state.variables)
+
+    def test_appearance_unstructured_failure_does_not_break_structured_output(self) -> None:
+        runner = _QueuedStageRunner(
+            [
+                {APPEARANCE_MAPPING: _appearance_mapping_json()},
+                _appearance_review_json(
+                    passed=True,
+                    rewrite_required=False,
+                ),
+                {APPEARANCE_MAPPING_VAR: json.dumps(_appearance_mapping_json(), ensure_ascii=False)},
+            ]
+        )
+        state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
+        variables = dict(self.appearance_variables)
+        state.variables.update(variables)
+
+        _ensure_appearance_outputs(state, runner, variables)
+
+        self.assertIsInstance(variables[APPEARANCE_MAPPING], dict)
+        mapping = variables[APPEARANCE_MAPPING]["appearance_mapping"]
+        self.assertEqual(
+            mapping["characters"][0]["canonical_name"],
+            "林夏",
+        )
+        self.assertNotIn(APPEARANCE_NATURAL_LANGUAGE_VAR, variables)
+
+    def test_appearance_writing_simplified_mapping_repairs_and_passes(self) -> None:
+        runner = _QueuedStageRunner(
+            [
+                {APPEARANCE_MAPPING: _simplified_appearance_mapping_json()},
+                _appearance_review_json(
+                    passed=True,
+                    rewrite_required=False,
+                ),
+                {
+                    APPEARANCE_NATURAL_LANGUAGE_VAR: "白雪公主常态优先使用“白雪公主【日常】”。"
+                },
+            ]
+        )
+        state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
+        variables = dict(self.appearance_variables)
+        state.variables.update(variables)
+
+        _ensure_appearance_outputs(state, runner, variables)
+
+        mapping = variables[APPEARANCE_MAPPING]["appearance_mapping"]
+        character = mapping["characters"][0]
+        variant = character["outfit_variants"][0]
+        self.assertEqual(character["story_role"], "关键角色")
+        self.assertTrue(bool(character["character_id"]))
+        self.assertEqual(character["default_name"], "白雪公主【日常】")
+        self.assertEqual(variant["applicable_identity_state"], "日常")
+        self.assertEqual(variant["episode_range_hint"], "按场景或状态触发")
+        self.assertEqual(validate_appearance_mapping_output(mapping), [])
+
+    def test_appearance_variant_scene_trigger_fields_migrate_from_top_level(self) -> None:
+        normalized = normalize_appearance_mapping_candidate(_simplified_appearance_mapping_json())
+
+        self.assertIsNotNone(normalized)
+        variant = normalized["appearance_mapping"]["characters"][0]["outfit_variants"][0]
+        self.assertEqual(variant["scene_trigger_rules"]["scene_names"], ["王宫走廊"])
+        self.assertEqual(variant["scene_trigger_rules"]["scene_types"], ["宫廷"])
+        self.assertEqual(variant["scene_trigger_rules"]["status_conditions"], ["常态"])
+        self.assertEqual(variant["scene_trigger_rules"]["environment_or_time"], [])
 
     def test_appearance_auxiliary_natural_language_does_not_override_structured_output(self) -> None:
         client = _QueuedFastGPTClient(

@@ -168,10 +168,18 @@ def validate_stage_output_with_workflow_contract(
             REVIEW_PASSED: payload[REVIEW_PASSED],
             REWRITE_REQUIRED: payload[REWRITE_REQUIRED],
             BLOCKING_ISSUES: payload[BLOCKING_ISSUES],
+            "summary": str(payload.get("summary") or "").strip(),
+            "non_blocking_issues": list(payload.get("non_blocking_issues") or []),
         }
-        for key in ("summary", "non_blocking_issues", "rewrite_start_episode", "stage"):
-            if key in payload:
-                normalized[key] = payload[key]
+        if "rewrite_start_episode" in payload:
+            normalized["rewrite_start_episode"] = payload["rewrite_start_episode"]
+        if spec.stage_name == "script_review":
+            normalized["stage"] = (
+                str(payload.get("stage") or "").strip()
+                or "five_episode_continuity_review"
+            )
+        elif "stage" in payload:
+            normalized["stage"] = payload["stage"]
         if spec.stage_name == "script_review":
             review_issues, review_warnings = _script_review_contract_issues(payload)
             if review_issues:
@@ -191,6 +199,20 @@ def validate_stage_output_with_workflow_contract(
         if issues:
             raise WorkflowOutputValidationError(
                 f"{spec.stage_name} 输出未通过本地批次校验",
+                issues=issues,
+                normalized_output={canonical_name: payload},
+                matched_aliases=matched_aliases,
+            )
+        normalized = {canonical_name: payload}
+        meta["normalized_preview"] = _preview(normalized)
+        return normalized, meta
+
+    if kind == "appearance_mapping_json":
+        payload = _normalize_batch_json_candidate(candidate, canonical_name=canonical_name)
+        issues = list(batch_validator(payload) if callable(batch_validator) else [])
+        if issues:
+            raise WorkflowOutputValidationError(
+                f"{spec.stage_name} 输出未通过服装映射本地校验",
                 issues=issues,
                 normalized_output={canonical_name: payload},
                 matched_aliases=matched_aliases,
@@ -542,21 +564,13 @@ def _required_memory_keys(kind: str) -> set[str]:
 def _script_review_contract_issues(payload: dict[str, Any]) -> tuple[list[str], list[str]]:
     issues: list[str] = []
     warnings: list[str] = []
-    if "summary" not in payload:
-        issues.append("script_review output missing required key: summary")
-    if "non_blocking_issues" not in payload:
-        issues.append("script_review output missing required key: non_blocking_issues")
-    elif not isinstance(payload.get("non_blocking_issues"), list):
+    if "non_blocking_issues" in payload and not isinstance(payload.get("non_blocking_issues"), list):
         issues.append("script_review output key non_blocking_issues must be array")
-    if "rewrite_start_episode" not in payload:
-        issues.append("script_review output missing required key: rewrite_start_episode")
-    else:
+    if "rewrite_start_episode" in payload:
         rewrite_start = payload.get("rewrite_start_episode")
         if isinstance(rewrite_start, bool) or not isinstance(rewrite_start, int):
             issues.append("script_review output key rewrite_start_episode must be int")
-    if "stage" not in payload:
-        issues.append("script_review output missing required key: stage")
-    else:
+    if "stage" in payload:
         stage_value = str(payload.get("stage") or "").strip()
         if not stage_value:
             issues.append("script_review output key stage must be non-empty string")

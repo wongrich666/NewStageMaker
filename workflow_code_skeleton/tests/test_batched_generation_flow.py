@@ -1796,6 +1796,62 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertTrue(forced.rewrite_required)
         self.assertTrue(any("forcing revision" in entry for entry in logs.output))
 
+    def test_review_parser_non_blocking_does_not_block_but_blocking_still_forces_failure(self) -> None:
+        passed_with_non_blocking = flow.parse_review_result(
+            {
+                SCRIPT_REVIEW_OUTPUT_VAR: json.dumps(
+                    {
+                        "passed": True,
+                        "rewrite_required": False,
+                        "summary": "整体通过",
+                        "blocking_issues": [],
+                        "non_blocking_issues": ["台词还能更狠一点"],
+                    }
+                )
+            }
+        )
+        self.assertTrue(passed_with_non_blocking.passed)
+        self.assertFalse(passed_with_non_blocking.rewrite_required)
+        self.assertEqual(
+            passed_with_non_blocking.non_blocking_issues,
+            ["台词还能更狠一点"],
+        )
+
+        for alias in (HOOK_REVIEW_OUTPUT_VAR, DIALOGUE_REVIEW_OUTPUT_VAR):
+            with self.subTest(alias=alias):
+                decision = flow.parse_review_result(
+                    {
+                        alias: json.dumps(
+                            {
+                                "passed": True,
+                                "rewrite_required": False,
+                                "summary": "通过",
+                                "blocking_issues": [],
+                                "non_blocking_issues": ["可优化"],
+                            }
+                        )
+                    }
+                )
+                self.assertTrue(decision.passed)
+                self.assertFalse(decision.rewrite_required)
+
+        blocked = flow.parse_review_result(
+            {
+                SCRIPT_REVIEW_OUTPUT_VAR: json.dumps(
+                    {
+                        "passed": True,
+                        "rewrite_required": False,
+                        "summary": "看似通过",
+                        "blocking_issues": ["连续性断裂"],
+                        "non_blocking_issues": ["措辞可更简洁"],
+                    }
+                )
+            }
+        )
+        self.assertFalse(blocked.passed)
+        self.assertTrue(blocked.rewrite_required)
+        self.assertIn("连续性断裂", blocked.blocking_issues)
+
     def test_hook_alias_write_review_and_memory_output_mirror(self) -> None:
         state, payload, variables = self._state_and_payload(5)
         batches = list(iter_episode_batches(5, batch_size=5))
@@ -2579,7 +2635,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         rewrite_call = runner.stage_calls(STAGE_SCRIPT_REWRITE)[0]
         self.assertIn("revise", rewrite_call["script_review_alias_text"])
 
-    def test_script_review_missing_required_schema_fields_retries_review_only(self) -> None:
+    def test_script_review_missing_optional_schema_fields_uses_defaults(self) -> None:
         state, payload, variables, batches = self._script_ready_state(5)
         settings.fastgpt_stage_format_retry_limit = 3
         runner = _PhaseRecordingRunner(
@@ -2588,32 +2644,9 @@ class BatchedGenerationFlowTests(unittest.TestCase):
                     {
                         SCRIPT_REVIEW_WRITE_VAR: json.dumps(
                             {
-                                "passed": False,
-                                "rewrite_required": True,
-                                "blocking_issues": ["revise"],
-                                "summary": "missing fields",
-                            },
-                            ensure_ascii=False,
-                        )
-                    },
-                    {
-                        SCRIPT_REVIEW_WRITE_VAR: json.dumps(
-                            {
-                                "passed": False,
-                                "rewrite_required": True,
-                                "blocking_issues": ["revise"],
-                                "summary": "still missing",
-                            },
-                            ensure_ascii=False,
-                        )
-                    },
-                    {
-                        SCRIPT_REVIEW_WRITE_VAR: json.dumps(
-                            {
-                                "passed": False,
-                                "rewrite_required": True,
-                                "blocking_issues": ["revise"],
-                                "summary": "last missing",
+                                "passed": True,
+                                "rewrite_required": False,
+                                "blocking_issues": [],
                             },
                             ensure_ascii=False,
                         )
@@ -2622,24 +2655,22 @@ class BatchedGenerationFlowTests(unittest.TestCase):
             }
         )
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "script_review|审核输出未通过格式契约校验|missing required key",
-        ):
-            flow._run_all_script_batches(
-                state,
-                runner,
-                payload,
-                variables,
-                batches=batches,
-                normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
-                episode_alias_plan=None,
-                rewrite_from_stage="",
-            )
+        flow._run_all_script_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=None,
+            rewrite_from_stage="",
+        )
 
         self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_WRITING)), 1)
-        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REVIEW)), 3)
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REVIEW)), 1)
         self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REWRITE)), 0)
+        self.assertIn('"rewrite_start_episode": 1', str(variables[SCRIPT_REVIEW_OUTPUT_VAR]))
+        self.assertIn('"stage": "five_episode_continuity_review"', str(variables[SCRIPT_REVIEW_OUTPUT_VAR]))
 
     def test_script_rewrite_receives_current_batch_hook_and_dialogue_slices(self) -> None:
         state, payload, variables, batches = self._script_ready_state(10)

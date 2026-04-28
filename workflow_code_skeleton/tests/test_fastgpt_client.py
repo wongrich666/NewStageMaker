@@ -18,12 +18,20 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     APPEARANCE_MAPPING,
     CHARACTER_COUNT,
     EPISODE_PLAN,
+    PASS_REVIEW_JSON,
     SCRIPT_TITLE,
     STAGE_APPEARANCE_ALIAS_GENERATION,
+    STAGE_APPEARANCE_ALIAS_REVIEW,
+    STAGE_APPEARANCE_ALIAS_REWRITE,
+    STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+    STAGE_APPEARANCE_ALIAS_WRITING,
     STAGE_CHARACTERS,
+    STAGE_DIALOGUE_REVIEW,
     STAGE_FRAMEWORK,
     STAGE_FRAMEWORK_NATURALIZE,
+    STAGE_HOOK_REVIEW,
     STAGE_SCENES,
+    STAGE_SCRIPT_REVIEW,
     STAGE_WORLDVIEW_NATURALIZE,
     STORY_OUTLINE,
     TOTAL_EPISODES,
@@ -34,6 +42,8 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
 )
 from workflow_code_skeleton.app.workflow_ids import (
     APPEARANCE_MAPPING_VAR,
+    APPEARANCE_NATURAL_LANGUAGE_VAR,
+    APPEARANCE_REVIEW_VAR,
     CHARACTER_VAR,
     SCENE_VAR,
 )
@@ -151,6 +161,42 @@ def _framework_payload(*, title_key: str = "script_title") -> dict[str, object]:
                 "ending_hook": "主角收到匿名短信。",
             }
         ],
+    }
+
+
+def _appearance_review_json(
+    *,
+    passed: bool,
+    rewrite_required: bool,
+    blocking_issues: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "passed": passed,
+        "rewrite_required": rewrite_required,
+        "summary": "审核通过" if passed else "需要修订",
+        "blocking_issues": list(blocking_issues or []),
+        "non_blocking_issues": [],
+    }
+
+
+def _pass_review_json(
+    *,
+    passed: bool,
+    rewrite_required: bool,
+    summary: str = "",
+    blocking_issues: list[str] | None = None,
+    non_blocking_issues: list[str] | None = None,
+    rewrite_start_episode: int = 1,
+    stage: str = "five_episode_continuity_review",
+) -> dict[str, object]:
+    return {
+        "passed": passed,
+        "rewrite_required": rewrite_required,
+        "summary": summary,
+        "blocking_issues": list(blocking_issues or []),
+        "non_blocking_issues": list(non_blocking_issues or []),
+        "rewrite_start_episode": rewrite_start_episode,
+        "stage": stage,
     }
 
 
@@ -411,6 +457,68 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
 
         self.assertEqual(endpoint.api_key, "default-key")
 
+    def test_appearance_stages_prefer_dedicated_api_keys(self) -> None:
+        stage_to_env = {
+            STAGE_APPEARANCE_ALIAS_WRITING: "FASTGPT_APPEARANCE_ALIAS_WRITING_API_KEY",
+            STAGE_APPEARANCE_ALIAS_REVIEW: "FASTGPT_APPEARANCE_ALIAS_REVIEW_API_KEY",
+            STAGE_APPEARANCE_ALIAS_REWRITE: "FASTGPT_APPEARANCE_ALIAS_REWRITE_API_KEY",
+            STAGE_APPEARANCE_ALIAS_UNSTRUCTURED: "FASTGPT_APPEARANCE_ALIAS_UNSTRUCTURED_API_KEY",
+        }
+        for stage_name, env_name in stage_to_env.items():
+            with self.subTest(stage_name=stage_name):
+                with patch.dict(
+                    "os.environ",
+                    {
+                        env_name: f"{stage_name}-key",
+                        "FASTGPT_API_KEY": "default-key",
+                    },
+                    clear=False,
+                ):
+                    client = FastGPTClient()
+                    endpoint = client._endpoint_for(stage_name)
+                self.assertEqual(endpoint.api_key, f"{stage_name}-key")
+
+    def test_appearance_stages_fall_back_to_default_api_key(self) -> None:
+        for stage_name in (
+            STAGE_APPEARANCE_ALIAS_WRITING,
+            STAGE_APPEARANCE_ALIAS_REVIEW,
+            STAGE_APPEARANCE_ALIAS_REWRITE,
+            STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+        ):
+            with self.subTest(stage_name=stage_name):
+                with patch.dict(
+                    "os.environ",
+                    {
+                        "FASTGPT_API_KEY": "default-key",
+                    },
+                    clear=True,
+                ):
+                    client = FastGPTClient()
+                    endpoint = client._endpoint_for(stage_name)
+                self.assertEqual(endpoint.api_key, "default-key")
+
+    def test_appearance_stages_read_stage_specific_timeouts(self) -> None:
+        stage_to_timeout = {
+            STAGE_APPEARANCE_ALIAS_WRITING: 601,
+            STAGE_APPEARANCE_ALIAS_REVIEW: 302,
+            STAGE_APPEARANCE_ALIAS_REWRITE: 603,
+            STAGE_APPEARANCE_ALIAS_UNSTRUCTURED: 304,
+        }
+        for stage_name, timeout_value in stage_to_timeout.items():
+            env_prefix = f"FASTGPT_{stage_name.upper()}"
+            with self.subTest(stage_name=stage_name):
+                with patch.dict(
+                    "os.environ",
+                    {
+                        f"{env_prefix}_TIMEOUT": str(timeout_value),
+                        "FASTGPT_API_KEY": "default-key",
+                    },
+                    clear=False,
+                ):
+                    client = FastGPTClient()
+                    endpoint = client._endpoint_for(stage_name)
+                self.assertEqual(endpoint.timeout, timeout_value)
+
     def test_payload_warn_limit_logs_length_summary(self) -> None:
         settings.fastgpt_stage_payload_warn_chars = 50
         settings.fastgpt_stage_payload_hard_chars = 10000
@@ -537,6 +645,293 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
                 STAGE_APPEARANCE_ALIAS_GENERATION
             ).get("request_detail")
         )
+
+    def test_detail_false_appearance_writing_stage_extracts_from_choices_message_content(self) -> None:
+        settings.fastgpt_appearance_alias_generation_detail = False
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            _appearance_mapping_json(),
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(
+            STAGE_APPEARANCE_ALIAS_WRITING,
+            _appearance_input_variables(),
+        )
+
+        self.assertEqual(
+            output[APPEARANCE_MAPPING]["characters"][0]["canonical_name"],
+            "林夏",
+        )
+        self.assertFalse(
+            client.get_last_stage_debug_info(
+                STAGE_APPEARANCE_ALIAS_WRITING
+            ).get("request_detail")
+        )
+
+    def test_detail_false_appearance_rewrite_stage_extracts_from_choices_message_content(self) -> None:
+        settings.fastgpt_appearance_alias_generation_detail = False
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            _appearance_mapping_json(),
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+        client = _QueuedFastGPTClient([response])
+        variables = _appearance_input_variables()
+        variables[APPEARANCE_MAPPING] = _appearance_mapping_json()
+        variables[PASS_REVIEW_JSON] = _appearance_review_json(
+            passed=False,
+            rewrite_required=True,
+            blocking_issues=["alias_name 需要统一"],
+        )
+
+        output = client.run_stage(
+            STAGE_APPEARANCE_ALIAS_REWRITE,
+            variables,
+        )
+
+        self.assertEqual(
+            output[APPEARANCE_MAPPING]["scene_level_usage_plan"][0]["scene_name"],
+            "玻璃会议室",
+        )
+        self.assertFalse(
+            client.get_last_stage_debug_info(
+                STAGE_APPEARANCE_ALIAS_REWRITE
+            ).get("request_detail")
+        )
+
+    def test_detail_false_appearance_review_stage_extracts_review_json_from_choices(self) -> None:
+        settings.fastgpt_appearance_alias_generation_detail = False
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                APPEARANCE_REVIEW_VAR: json.dumps(
+                                    _appearance_review_json(
+                                        passed=True,
+                                        rewrite_required=False,
+                                    ),
+                                    ensure_ascii=False,
+                                )
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+        client = _QueuedFastGPTClient([response])
+        variables = _appearance_input_variables()
+        variables[APPEARANCE_MAPPING] = _appearance_mapping_json()
+
+        output = client.run_stage(
+            STAGE_APPEARANCE_ALIAS_REVIEW,
+            variables,
+        )
+
+        self.assertTrue(output["passed"])
+        self.assertEqual(output["blocking_issues"], [])
+        self.assertFalse(
+            client.get_last_stage_debug_info(
+                STAGE_APPEARANCE_ALIAS_REVIEW
+            ).get("request_detail")
+        )
+
+    def test_detail_false_appearance_unstructured_stage_extracts_text_from_choices(self) -> None:
+        settings.fastgpt_appearance_alias_generation_detail = False
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "林夏常态默认使用“林夏【会议室交锋态】”，回到公寓后切回更松弛的居家版本。"
+                    }
+                }
+            ]
+        }
+        client = _QueuedFastGPTClient([response])
+        variables = _appearance_input_variables()
+        variables[APPEARANCE_MAPPING] = _appearance_mapping_json()
+
+        output = client.run_stage(
+            STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+            variables,
+        )
+
+        self.assertIn("林夏", output[APPEARANCE_NATURAL_LANGUAGE_VAR])
+        self.assertFalse(
+            client.get_last_stage_debug_info(
+                STAGE_APPEARANCE_ALIAS_UNSTRUCTURED
+            ).get("request_detail")
+        )
+
+    def test_script_review_complete_json_from_choices_passes_contract(self) -> None:
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            _pass_review_json(
+                                passed=True,
+                                rewrite_required=False,
+                                summary="review ok",
+                                blocking_issues=[],
+                                non_blocking_issues=["措辞可更紧"],
+                                rewrite_start_episode=1,
+                                stage="five_episode_continuity_review",
+                            ),
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+        client = FastGPTClient()
+
+        output = client._extract_output_payload(
+            response,
+            contract_for(STAGE_SCRIPT_REVIEW),
+            {},
+            allow_fallback=True,
+        )
+
+        self.assertTrue(output["passed"])
+        self.assertEqual(output["summary"], "review ok")
+        self.assertEqual(output["non_blocking_issues"], ["措辞可更紧"])
+        self.assertEqual(output["rewrite_start_episode"], 1)
+        self.assertEqual(output["stage"], "five_episode_continuity_review")
+
+    def test_script_review_thinking_plus_json_extracts_last_json_object(self) -> None:
+        earlier = {"passed": False, "note": "ignore"}
+        final_review = _pass_review_json(
+            passed=True,
+            rewrite_required=False,
+            summary="final ok",
+            blocking_issues=[],
+            non_blocking_issues=[],
+            rewrite_start_episode=6,
+            stage="five_episode_continuity_review",
+        )
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            "思考过程：先比较节奏和连续性。\n"
+                            f"{json.dumps(earlier, ensure_ascii=False)}\n"
+                            "最终审核结论如下：\n"
+                            f"{json.dumps(final_review, ensure_ascii=False)}"
+                        )
+                    }
+                }
+            ]
+        }
+        client = FastGPTClient()
+
+        output = client._extract_output_payload(
+            response,
+            contract_for(STAGE_SCRIPT_REVIEW),
+            {},
+            allow_fallback=True,
+        )
+
+        self.assertTrue(output["passed"])
+        self.assertEqual(output["summary"], "final ok")
+        self.assertEqual(output["rewrite_start_episode"], 6)
+
+    def test_script_review_reasoning_content_block_is_not_treated_as_output(self) -> None:
+        final_review = _pass_review_json(
+            passed=True,
+            rewrite_required=False,
+            summary="array ok",
+            blocking_issues=[],
+            non_blocking_issues=[],
+            rewrite_start_episode=1,
+            stage="five_episode_continuity_review",
+        )
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": [
+                            {
+                                "type": "reasoning",
+                                "text": {
+                                    "content": json.dumps(
+                                        {"passed": False, "rewrite_required": True},
+                                        ensure_ascii=False,
+                                    )
+                                },
+                            },
+                            {
+                                "type": "text",
+                                "text": {
+                                    "content": json.dumps(final_review, ensure_ascii=False)
+                                },
+                            },
+                        ]
+                    }
+                }
+            ]
+        }
+        client = FastGPTClient()
+
+        output = client._extract_output_payload(
+            response,
+            contract_for(STAGE_SCRIPT_REVIEW),
+            {},
+            allow_fallback=True,
+        )
+
+        self.assertTrue(output["passed"])
+        self.assertEqual(output["summary"], "array ok")
+
+    def test_hook_and_dialogue_review_also_prefer_choices_json(self) -> None:
+        review_payload = _pass_review_json(
+            passed=True,
+            rewrite_required=False,
+            summary="ok",
+            blocking_issues=[],
+            non_blocking_issues=["可以更锐利"],
+        )
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(review_payload, ensure_ascii=False)
+                    }
+                }
+            ]
+        }
+        client = FastGPTClient()
+
+        for stage_name in (STAGE_HOOK_REVIEW, STAGE_DIALOGUE_REVIEW):
+            with self.subTest(stage_name=stage_name):
+                output = client._extract_output_payload(
+                    response,
+                    contract_for(stage_name),
+                    {},
+                    allow_fallback=True,
+                )
+                self.assertTrue(output["passed"])
+                self.assertEqual(output["summary"], "ok")
+                self.assertEqual(output["non_blocking_issues"], ["可以更锐利"])
 
 
 if __name__ == "__main__":

@@ -72,6 +72,10 @@ from ..services.fastgpt_contracts import (
     SCRIPT_MEMORY,
     SCRIPT_REVIEW_RESULT,
     STAGE_APPEARANCE_ALIAS_GENERATION,
+    STAGE_APPEARANCE_ALIAS_REVIEW,
+    STAGE_APPEARANCE_ALIAS_REWRITE,
+    STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+    STAGE_APPEARANCE_ALIAS_WRITING,
     STAGE_APPEARANCE_PRE_STRATEGY,
     STAGE_FRAMEWORK,
     STAGE_FRAMEWORK_NATURALIZE,
@@ -319,6 +323,7 @@ SCENE_MIN_COUNT = 3
 APPEARANCE_STAGE_TRANSIENT_KEYS = (
     APPEARANCE_MAPPING,
     APPEARANCE_MAPPING_VAR,
+    PASS_REVIEW_JSON,
     APPEARANCE_REVIEW_VAR,
     APPEARANCE_NATURAL_LANGUAGE_VAR,
     CHARACTER_REGISTRY,
@@ -4385,6 +4390,17 @@ def run_stage_with_contract_guard(
                 memory_normalizer=memory_normalizer,
                 memory_kwargs=memory_kwargs,
             )
+            if stage_name == STAGE_SCRIPT_REVIEW:
+                validated_output["summary"] = str(validated_output.get("summary") or "").strip()
+                validated_output["non_blocking_issues"] = list(
+                    validated_output.get("non_blocking_issues") or []
+                )
+                if not isinstance(validated_output.get("rewrite_start_episode"), int) and batch is not None:
+                    validated_output["rewrite_start_episode"] = int(batch.start_episode)
+                validated_output["stage"] = (
+                    str(validated_output.get("stage") or "").strip()
+                    or "five_episode_continuity_review"
+                )
             if sync_output_to_state:
                 _sync_state_variables(state, validated_output)
             runner_debug = _runner_stage_debug_info(runner, stage_name)
@@ -4766,6 +4782,7 @@ def _ensure_appearance_outputs(
     cached_issues = _appearance_output_integrity_issues(variables.get(APPEARANCE_MAPPING))
     if not cached_issues and _apply_appearance_outputs_to_variables(variables):
         _sync_state_variables(state, variables)
+        _try_generate_appearance_unstructured_output(state, runner, variables)
         set_runtime_stage(
             state,
             "appearance",
@@ -4830,92 +4847,186 @@ def _ensure_appearance_outputs(
         raise ValueError(message)
 
     appearance_context = {**variables, **appearance_inputs}
-    total_attempts = 1 + max(
-        0,
-        int(
-            getattr(
-                settings,
-                "fastgpt_appearance_local_review_retries",
-                getattr(settings, "fastgpt_stage_local_restart_retries", 1),
-            )
-        ),
-    )
+    review_loop_limit = _stage_review_revise_loop_limit()
+    current_mapping: dict[str, Any] | None = None
+    current_review_payload: dict[str, Any] | None = None
+    last_failure_type = "appearance_structured_stage_failed"
     last_issues: list[str] = []
-    for local_review_attempt in range(1, total_attempts + 1):
-        try:
-            output = _run_fastgpt_stage(
+    last_preview = ""
+
+    try:
+        writing_output = run_stage_with_contract_guard(
+            state,
+            runner,
+            STAGE_APPEARANCE_ALIAS_WRITING,
+            appearance_context,
+            stage_key="appearance",
+            message="正在编写人物服装版本映射。",
+            progress_percent=42,
+            output_field=APPEARANCE_MAPPING,
+            validator=validate_appearance_mapping_output,
+            sync_output_to_state=False,
+        )
+        current_mapping = _normalize_appearance_mapping_object(
+            writing_output.get(APPEARANCE_MAPPING)
+        )
+        if current_mapping is None:
+            raise ValueError("appearance_alias_writing 未返回可归一化的 h2KpLm91")
+
+        for review_round in range(1, review_loop_limit + 1):
+            review_context = {
+                **appearance_context,
+                APPEARANCE_MAPPING: copy.deepcopy(current_mapping),
+            }
+            review_output = run_stage_with_contract_guard(
                 state,
                 runner,
-                STAGE_APPEARANCE_ALIAS_GENERATION,
-                appearance_context,
+                STAGE_APPEARANCE_ALIAS_REVIEW,
+                review_context,
                 stage_key="appearance",
-                message="正在生成人物服装版本映射。",
+                message="正在审核人物服装版本映射。",
                 progress_percent=42,
-                max_retries=0,
-                # appearance_mapping 即便能被 parse，也还需要本地深层审核；
-                # 审核通过前不要把这轮结果写入 runtime/state，避免坏映射污染恢复点。
+                review_round=review_round,
+                review_parser=parse_review_result,
                 sync_output_to_state=False,
             )
-        except Exception as exc:
-            logger.warning(
-                "stage_name=appearance_alias_generation failure_type=appearance_stage_restart_exhausted "
-                "source=fastgpt_stage blocking_issues=%s local_review_attempt=%s "
-                "cleared_stage_cache=%s preview=%s",
-                last_issues[:8],
-                local_review_attempt,
-                True,
-                _truncate_log_text(str(exc), max_chars=320),
+            review_decision = parse_review_result(review_output)
+            current_review_payload = copy.deepcopy(review_decision.payload)
+            last_issues = [
+                str(item).strip()
+                for item in list(review_decision.blocking_issues or [])
+                if str(item).strip()
+            ]
+            last_preview = _truncate_log_text(
+                _serialize_framework_runtime_value(current_review_payload),
+                max_chars=500,
             )
-            state.set_output(
-                STAGE_APPEARANCE_ALIAS_GENERATION,
-                "last_invalid_output",
-                {
-                    "failure_type": "appearance_stage_restart_exhausted",
-                    "blocking_issues": last_issues[:12],
-                    "preview": _truncate_log_text(str(exc), max_chars=500),
-                },
-            )
-            _clear_appearance_stage_state(state, variables)
-            sync_runtime_state(state)
-            raise
 
-        issues = _appearance_output_integrity_issues(output.get(APPEARANCE_MAPPING))
-        if not issues:
-            variables.update(output)
-            if _apply_appearance_outputs_to_variables(variables):
+            if review_decision.passed and not review_decision.blocking_issues:
+                variables[APPEARANCE_MAPPING] = copy.deepcopy(current_mapping)
+                variables[PASS_REVIEW_JSON] = copy.deepcopy(current_review_payload)
+                variables[APPEARANCE_REVIEW_VAR] = copy.deepcopy(current_review_payload)
+                if not _apply_appearance_outputs_to_variables(variables):
+                    raise ValueError(
+                        "appearance_mapping 通过审核后仍无法生成 registry / alias plan"
+                    )
                 _sync_state_variables(state, variables)
+                state.set_var(APPEARANCE_REVIEW_VAR, copy.deepcopy(current_review_payload))
+                _try_generate_appearance_unstructured_output(state, runner, variables)
+                variables.pop(PASS_REVIEW_JSON, None)
+                state.variables.pop(PASS_REVIEW_JSON, None)
                 return
-            issues = ["appearance_mapping 通过本地审核后仍无法生成 registry / alias plan"]
 
-        last_issues = list(issues)
+            if review_round >= review_loop_limit:
+                last_failure_type = "appearance_review_rewrite_exhausted"
+                raise ValueError(
+                    "appearance_alias_generation 审核/修订循环已达到上限："
+                    + "；".join(last_issues[:12] or ["review did not pass"])
+                )
+
+            rewrite_context = {
+                **appearance_context,
+                APPEARANCE_MAPPING: copy.deepcopy(current_mapping),
+                PASS_REVIEW_JSON: copy.deepcopy(current_review_payload),
+                APPEARANCE_REVIEW_VAR: copy.deepcopy(current_review_payload),
+            }
+            rewrite_output = run_stage_with_contract_guard(
+                state,
+                runner,
+                STAGE_APPEARANCE_ALIAS_REWRITE,
+                rewrite_context,
+                stage_key="appearance",
+                message="正在根据审核结果修订服装版本映射。",
+                progress_percent=42,
+                review_round=review_round,
+                output_field=APPEARANCE_MAPPING,
+                validator=validate_appearance_mapping_output,
+                sync_output_to_state=False,
+            )
+            current_mapping = _normalize_appearance_mapping_object(
+                rewrite_output.get(APPEARANCE_MAPPING)
+            )
+            if current_mapping is None:
+                last_failure_type = "appearance_rewrite_invalid_output"
+                raise ValueError("appearance_alias_rewrite 未返回可归一化的 h2KpLm91")
+            last_preview = _truncate_log_text(
+                _serialize_framework_runtime_value(current_mapping),
+                max_chars=500,
+            )
+    except Exception as exc:
+        if not last_preview:
+            last_preview = _truncate_log_text(str(exc), max_chars=500)
         logger.warning(
-            "stage_name=appearance_alias_generation failure_type=appearance_local_review_failed "
-            "source=contract_output blocking_issues=%s local_review_attempt=%s "
-            "cleared_stage_cache=%s preview=%s",
-            issues[:10],
-            local_review_attempt,
+            "stage_name=appearance_alias_generation failure_type=%s source=python_orchestration "
+            "blocking_issues=%s review_loop_limit=%s cleared_stage_cache=%s preview=%s",
+            last_failure_type,
+            last_issues[:10],
+            review_loop_limit,
             True,
-            _truncate_log_text(
-                _serialize_framework_runtime_value(output.get(APPEARANCE_MAPPING)),
-                max_chars=320,
-            ),
+            _truncate_log_text(str(exc), max_chars=320),
         )
         state.set_output(
             STAGE_APPEARANCE_ALIAS_GENERATION,
             "last_invalid_output",
             {
-                "failure_type": "appearance_local_review_failed",
-                "blocking_issues": issues[:20],
-                "preview": _truncate_log_text(
-                    _serialize_framework_runtime_value(output.get(APPEARANCE_MAPPING)),
-                    max_chars=500,
-                ),
+                "failure_type": last_failure_type,
+                "blocking_issues": last_issues[:20],
+                "preview": last_preview,
             },
         )
         _clear_appearance_stage_state(state, variables)
         sync_runtime_state(state)
-        if local_review_attempt >= total_attempts:
-            raise ValueError("appearance_mapping 本地审核失败：" + "；".join(issues[:12]))
+        raise
+
+
+def _try_generate_appearance_unstructured_output(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    variables: dict[str, Any],
+) -> None:
+    if _has_value(variables.get(APPEARANCE_NATURAL_LANGUAGE_VAR)):
+        return
+
+    stage_variables = dict(variables)
+    stage_variables.pop(APPEARANCE_NATURAL_LANGUAGE_VAR, None)
+    try:
+        output = run_stage_with_contract_guard(
+            state,
+            runner,
+            STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+            stage_variables,
+            stage_key="appearance",
+            message="正在整理服装版本自然语言说明。",
+            progress_percent=44,
+            output_field=APPEARANCE_NATURAL_LANGUAGE_VAR,
+            sync_output_to_state=False,
+        )
+    except Exception as exc:
+        logger.warning(
+            "stage_name=appearance_alias_unstructured failure_type=appearance_unstructured_optional_failed "
+            "source=fastgpt_stage blocking_issues=[] cleared_stage_cache=%s preview=%s",
+            False,
+            _truncate_log_text(str(exc), max_chars=320),
+        )
+        state.set_output(
+            STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+            "last_invalid_output",
+            {
+                "failure_type": "appearance_unstructured_optional_failed",
+                "blocking_issues": [],
+                "preview": _truncate_log_text(str(exc), max_chars=500),
+            },
+        )
+        variables.pop(APPEARANCE_NATURAL_LANGUAGE_VAR, None)
+        state.variables.pop(APPEARANCE_NATURAL_LANGUAGE_VAR, None)
+        sync_runtime_state(state)
+        return
+
+    natural_language = str(output.get(APPEARANCE_NATURAL_LANGUAGE_VAR) or "").strip()
+    if natural_language:
+        variables[APPEARANCE_NATURAL_LANGUAGE_VAR] = natural_language
+        state.set_var(APPEARANCE_NATURAL_LANGUAGE_VAR, natural_language)
+        sync_runtime_state(state)
 
 
 def _prepare_appearance_stage_inputs(
