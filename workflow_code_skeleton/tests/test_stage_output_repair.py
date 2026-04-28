@@ -5,12 +5,18 @@ import unittest
 
 from workflow_code_skeleton.app.config import settings
 from workflow_code_skeleton.app.orchestrators.fastgpt_hybrid_workflow import (
+    _ensure_scene_outputs,
     _ensure_appearance_outputs,
+    _prepare_appearance_stage_inputs,
     _prepare_scene_stage_inputs,
 )
 from workflow_code_skeleton.app.models.inputs import WorkflowInput
 from workflow_code_skeleton.app.models.state import WorkflowState
 from workflow_code_skeleton.app.services.fastgpt_client import FastGPTClient
+from workflow_code_skeleton.app.services.stage_output_repair import (
+    normalize_appearance_mapping_candidate,
+    validate_appearance_mapping_output,
+)
 from workflow_code_skeleton.app.services.fastgpt_contracts import (
     APPEARANCE_MAPPING,
     CHARACTERS,
@@ -32,6 +38,7 @@ from workflow_code_skeleton.app.workflow_ids import (
     APPEARANCE_MAPPING_VAR,
     APPEARANCE_NATURAL_LANGUAGE_VAR,
     CHARACTER_VAR,
+    CORE_SCENE_FINAL_VAR,
     SCENE_VAR,
     WORLDVIEW_VAR,
 )
@@ -76,11 +83,12 @@ class _QueuedStageRunner:
         self._responses = list(responses)
         self.request_count = 0
         self.stage_calls: list[str] = []
+        self.variable_snapshots: list[dict[str, object]] = []
 
     def run_stage(self, stage_name: str, variables: dict[str, object]) -> dict[str, object]:
-        del variables
         self.request_count += 1
         self.stage_calls.append(stage_name)
+        self.variable_snapshots.append(dict(variables))
         if not self._responses:
             raise AssertionError("No fake stage response left for test")
         return self._responses.pop(0)
@@ -730,6 +738,58 @@ class StageOutputRepairTests(unittest.TestCase):
         _prepared, _warnings, fatal_errors = _prepare_scene_stage_inputs(broken)
         self.assertIn("worldview 为空或不是合法世界观 JSON", fatal_errors)
 
+    def test_scene_stage_uses_compact_characters_without_overwriting_formal_output(self) -> None:
+        state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
+        variables = dict(self.appearance_variables)
+        original_characters = str(variables[CHARACTERS])
+        variables.pop(SCENES, None)
+        runner = _QueuedStageRunner(
+            [
+                {
+                    SCENES: json.dumps(_scene_setting_json(), ensure_ascii=False),
+                }
+            ]
+        )
+        state.variables.update(variables)
+
+        _ensure_scene_outputs(state, runner, variables)
+
+        self.assertEqual(str(variables[CHARACTERS]), original_characters)
+        self.assertEqual(runner.stage_calls, [STAGE_SCENES])
+        stage_input = runner.variable_snapshots[0]
+        compact_user_characters = str(stage_input[USER_CHARACTERS])
+        self.assertIn('"character_name":"林夏"', compact_user_characters)
+        self.assertIn('"dramatic_value_summary"', compact_user_characters)
+        self.assertNotIn("family_background", compact_user_characters)
+        self.assertNotIn("speech_profile", compact_user_characters)
+
+    def test_prepare_appearance_stage_inputs_use_compact_characters_and_scenes(self) -> None:
+        prepared, warnings, fatal_errors = _prepare_appearance_stage_inputs(
+            dict(self.appearance_variables)
+        )
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(fatal_errors, [])
+        self.assertIn('"same_person_traits"', str(prepared[CHARACTERS]))
+        self.assertIn('"default_name_candidate":"林夏"', str(prepared[CHARACTERS]))
+        self.assertNotIn("dramatic_function", str(prepared[CHARACTERS]))
+        self.assertEqual(str(prepared[USER_CHARACTERS]), str(prepared[CHARACTERS]))
+        self.assertIn('"scene_name":"玻璃会议室"', str(prepared[SCENES]))
+        self.assertIn('"conflict_potential_summary"', str(prepared[SCENES]))
+        self.assertNotIn("outfit_requirements", str(prepared[SCENES]))
+
+    def test_prepare_appearance_stage_inputs_do_not_overwrite_formal_mapping(self) -> None:
+        variables = dict(self.appearance_variables)
+        original_mapping = json.dumps(_appearance_mapping_json(), ensure_ascii=False)
+        variables[APPEARANCE_MAPPING] = original_mapping
+
+        prepared, warnings, fatal_errors = _prepare_appearance_stage_inputs(variables)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(fatal_errors, [])
+        self.assertEqual(variables[APPEARANCE_MAPPING], original_mapping)
+        self.assertEqual(prepared[APPEARANCE_MAPPING], original_mapping)
+
     def test_appearance_mapping_standard_json_passes(self) -> None:
         result = self._extract(
             STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -771,6 +831,35 @@ class StageOutputRepairTests(unittest.TestCase):
         result = self._extract(STAGE_APPEARANCE_ALIAS_GENERATION, data)
         mapping = result[APPEARANCE_MAPPING]
         self.assertEqual(mapping["mapping_principle"], _appearance_mapping_json()["appearance_mapping"]["mapping_principle"])
+
+    def test_appearance_mapping_blank_default_name_repairs_from_canonical_name(self) -> None:
+        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
+        broken["appearance_mapping"]["characters"][0]["default_name"] = ""
+
+        result = self._extract(
+            STAGE_APPEARANCE_ALIAS_GENERATION,
+            {"answerText": json.dumps(broken, ensure_ascii=False)},
+        )
+
+        mapping = result[APPEARANCE_MAPPING]
+        self.assertEqual(mapping["characters"][0]["default_name"], "林夏")
+        self.assertEqual(validate_appearance_mapping_output(mapping), [])
+
+    def test_appearance_mapping_blank_default_name_repairs_from_character_id_when_name_missing(self) -> None:
+        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
+        broken["appearance_mapping"]["characters"][0]["canonical_name"] = ""
+        broken["appearance_mapping"]["characters"][0]["default_name"] = ""
+
+        normalized = normalize_appearance_mapping_candidate(broken)
+
+        self.assertIsNotNone(normalized)
+        repaired = normalized["appearance_mapping"]["characters"][0]
+        self.assertEqual(repaired["canonical_name"], "linxia")
+        self.assertEqual(repaired["default_name"], "linxia")
+        self.assertEqual(
+            validate_appearance_mapping_output(normalized["appearance_mapping"]),
+            [],
+        )
 
     def test_appearance_empty_h2kpLm91_uses_answer_text_json(self) -> None:
         client = _QueuedFastGPTClient(
@@ -848,6 +937,13 @@ class StageOutputRepairTests(unittest.TestCase):
                 {"answerText": json.dumps(review_json, ensure_ascii=False)},
             )
 
+    def test_appearance_plain_text_core_scene_is_still_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {"answerText": "核心场景：玻璃会议室、深夜开放办公区、合租公寓玄关"},
+            )
+
     def test_appearance_mapping_string_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             self._extract(
@@ -857,6 +953,45 @@ class StageOutputRepairTests(unittest.TestCase):
                         {APPEARANCE_MAPPING: "核心场景：玻璃会议室与合租公寓。"},
                         ensure_ascii=False,
                     )
+                },
+            )
+
+    def test_appearance_scene_setting_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {"answerText": json.dumps(_scene_setting_json(), ensure_ascii=False)},
+            )
+
+    def test_appearance_core_scene_final_var_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {
+                    "responseData": {
+                        "updateVarResult": [
+                            {
+                                "variable": ["VARIABLE_NODE_ID", CORE_SCENE_FINAL_VAR],
+                                "value": "核心场景：玻璃会议室、深夜开放办公区、合租公寓玄关",
+                            }
+                        ]
+                    }
+                },
+            )
+
+    def test_appearance_auxiliary_natural_language_var_cannot_replace_mapping(self) -> None:
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {
+                    "responseData": {
+                        "updateVarResult": [
+                            {
+                                "variable": ["VARIABLE_NODE_ID", APPEARANCE_NATURAL_LANGUAGE_VAR],
+                                "value": "林夏在会议室场景统一使用会议室交锋态，回家后切回卸甲状态。",
+                            }
+                        ]
+                    }
                 },
             )
 
@@ -942,6 +1077,25 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertIsInstance(state.variables[APPEARANCE_MAPPING], dict)
         self.assertIn("appearance_mapping", state.variables[APPEARANCE_MAPPING])
         self.assertIn("character_registry", state.variables)
+
+    def test_appearance_stage_uses_compact_characters_and_scenes_without_overwriting_formal_outputs(self) -> None:
+        runner = _QueuedStageRunner([{APPEARANCE_MAPPING: _appearance_mapping_json()}])
+        state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
+        variables = dict(self.appearance_variables)
+        original_characters = str(variables[CHARACTERS])
+        original_scenes = str(variables[SCENES])
+        state.variables.update(variables)
+
+        _ensure_appearance_outputs(state, runner, variables)
+
+        self.assertEqual(str(variables[CHARACTERS]), original_characters)
+        self.assertEqual(str(variables[SCENES]), original_scenes)
+        self.assertEqual(runner.request_count, 1)
+        stage_input = runner.variable_snapshots[0]
+        self.assertIn('"same_person_traits"', str(stage_input[CHARACTERS]))
+        self.assertNotIn("dramatic_function", str(stage_input[CHARACTERS]))
+        self.assertIn('"scene_name":"玻璃会议室"', str(stage_input[SCENES]))
+        self.assertNotIn("outfit_requirements", str(stage_input[SCENES]))
 
     def test_appearance_local_review_exhaustion_raises_without_cache_pollution(self) -> None:
         invalid = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))

@@ -18,6 +18,7 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     BATCH_HOOKS,
     BATCH_SCRIPT,
     BATCH_START_EPISODE,
+    EPISODE_ALIAS_PLAN,
     CHARACTER_APPEARANCE_REQUIREMENTS,
     CHARACTER_ALIAS_NAMING_RULES,
     CHARACTERS,
@@ -306,6 +307,117 @@ def _script_batch_text(episodes: list[int]) -> str:
     )
 
 
+def _rich_characters_text() -> str:
+    return json.dumps(
+        {
+            "character_setting": {
+                "characters": [
+                    {
+                        "character_name": "林夏",
+                        "story_role": "主角",
+                        "core_motivation": "扛住项目并保住团队。",
+                        "appearance": {
+                            "overall_look": "清瘦利落，深色通勤装。",
+                            "recognizable_features": ["总把头发束紧", "说话前会先停顿"],
+                        },
+                        "behavior": {
+                            "habitual_actions": ["说话前先停顿半秒", "焦虑时反复整理桌面"],
+                        },
+                        "speech_profile": {
+                            "baseline_register": "简短克制",
+                            "sentence_rhythm": "句子偏短",
+                            "keyword_habits": ["先这样", "我来处理"],
+                            "conflict_style": "不大喊，但会逼近核心矛盾",
+                        },
+                        "relation_modes": [
+                            {
+                                "target": "周沉",
+                                "relation_type": "危险盟友",
+                                "default_posture": "先试探再靠近",
+                                "speech_difference": "会更少废话",
+                                "conflict_trigger": "对方替她决定时会反弹",
+                            }
+                        ],
+                        "family": {
+                            "family_background": "普通工薪家庭出身",
+                            "upbringing": "从小被教育要懂事能忍",
+                        },
+                        "dramatic_function": {
+                            "scene_value": "能把压抑情绪变成持续张力",
+                        },
+                        "dramatic_value": "她的选择决定主线何时正式反击。",
+                    }
+                ]
+            }
+        },
+        ensure_ascii=False,
+    )
+
+
+def _rich_scenes_text() -> str:
+    return json.dumps(
+        {
+            "scene_setting": {
+                "scenes": [
+                    {
+                        "scene_name": "玻璃会议室",
+                        "scene_type": "核心博弈场",
+                        "story_function": "推动公开站队冲突。",
+                        "scene_time_or_period": "深夜加班时段",
+                        "weather_or_environment_state": "冷白灯长亮",
+                        "visual_condition_summary": "冷硬压迫，适合观察权力差。",
+                        "identity_or_status_requirements": ["带着明显职级差进入场景"],
+                        "styling_condition_summary": "造型要保留精英感与疲态。",
+                        "naming_condition_summary": "称谓要体现权力距离。",
+                        "conflict_potential": ["公开站队与背锅切割随时爆发"],
+                        "outfit_requirements": [{"character_id": "linxia"}],
+                    }
+                ]
+            }
+        },
+        ensure_ascii=False,
+    )
+
+
+def _episode_alias_plan(total_episodes: int) -> dict[str, object]:
+    return {
+        "planning_scope": "current_batch_only",
+        "global_naming_style": "统一使用角色中文全名【状态】",
+        "global_rules": ["禁止使用男主、女主等泛称"],
+        "episodes": [
+            {
+                "episode": episode,
+                "title": f"第{episode}集",
+                "main_character_aliases": [
+                    {
+                        "character_id": "linxia",
+                        "character_name": "林夏",
+                        "recommended_alias_name": f"林夏【第{episode}集状态】",
+                        "reason": f"第{episode}集剧情状态变化",
+                    }
+                ],
+                "appearance_events": [f"event-{episode}"],
+                "scene_based_alias_hints": [],
+            }
+            for episode in range(1, total_episodes + 1)
+        ],
+        "scene_level_usage_plan": [
+            {
+                "scene_name": "玻璃会议室",
+                "expected_alias_usage": [
+                    {
+                        "character_id": "linxia",
+                        "character_name": "林夏",
+                        "alias_name": "林夏【会议室交锋态】",
+                        "reason": "进入公开博弈场景时使用",
+                    }
+                ],
+            }
+        ],
+        "uncertain_or_missing_items": [],
+    }
+
+
 def _script_review_payload(
     *,
     passed: bool,
@@ -362,6 +474,24 @@ def _episode_numbers_from_object(value: object) -> list[int]:
     ]
 
 
+def _jsonish(value: object) -> object:
+    if isinstance(value, (dict, list)):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return json.loads(value)
+    except Exception:
+        return None
+
+
+def _appearance_plan_episodes(value: object) -> list[int]:
+    candidate = _jsonish(value)
+    if isinstance(candidate, dict):
+        return _episode_numbers_from_object(candidate)
+    return []
+
+
 class _PhaseRecordingRunner:
     def __init__(
         self,
@@ -392,6 +522,13 @@ class _PhaseRecordingRunner:
                 "hooks_episodes": hooks_episodes,
                 "dialogue_episodes": dialogue_episodes,
                 "story_outline_text": str(variables.get(STORY_OUTLINE) or ""),
+                "worldview_text": str(variables.get(WORLDVIEW) or ""),
+                "characters_text": str(variables.get(CHARACTERS) or ""),
+                "scenes_text": str(variables.get(SCENES) or ""),
+                "appearance_text": str(variables.get(APPEARANCE_MAPPING) or ""),
+                "appearance_plan_episodes": _appearance_plan_episodes(
+                    variables.get(APPEARANCE_MAPPING)
+                ),
                 "hook_write_alias_episodes": _episode_numbers_from_object(
                     variables.get(HOOK_CURRENT_WRITE_VAR)
                 ),
@@ -1970,6 +2107,78 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertEqual(rewrite_call["dialogue_hook_rewrite_alias_episodes"], [1, 2, 3, 4, 5])
         self.assertEqual(rewrite_call["dialogue_hook_prompt_alias_episodes"], [1, 2, 3, 4, 5])
 
+    def test_hook_stage_uses_compact_context_and_current_batch_alias_plan(self) -> None:
+        alias_plan = _episode_alias_plan(10)
+        state, payload, variables = self._state_and_payload(
+            10,
+            variables={
+                CHARACTERS: _rich_characters_text(),
+                SCENES: _rich_scenes_text(),
+                EPISODE_ALIAS_PLAN: alias_plan,
+            },
+        )
+        original_characters = str(variables[CHARACTERS])
+        batches = list(iter_episode_batches(10, batch_size=5))
+        runner = _PhaseRecordingRunner()
+
+        flow._run_all_hook_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=alias_plan,
+            rewrite_from_stage="",
+        )
+
+        write_call = runner.stage_calls(STAGE_HOOKS_WRITING)[0]
+        self.assertEqual(write_call["plan_episodes"], [1, 2, 3, 4, 5])
+        self.assertEqual(write_call["appearance_plan_episodes"], [1, 2, 3, 4, 5])
+        self.assertIn('"core_motivation"', write_call["characters_text"])
+        self.assertNotIn("family_background", write_call["characters_text"])
+        self.assertNotIn("dramatic_function", write_call["characters_text"])
+        self.assertIn('"scene_name":"玻璃会议室"', write_call["scenes_text"])
+        self.assertNotIn("outfit_requirements", write_call["scenes_text"])
+        self.assertEqual(str(variables[CHARACTERS]), original_characters)
+
+    def test_dialogue_stage_uses_compact_context_and_current_batch_alias_plan(self) -> None:
+        alias_plan = _episode_alias_plan(10)
+        state, payload, variables = self._state_and_payload(
+            10,
+            variables={
+                ALL_HOOKS: flow.merge_batch_object(
+                    _hook_batch([1, 2, 3, 4, 5]),
+                    _hook_batch([6, 7, 8, 9, 10]),
+                ),
+                CHARACTERS: _rich_characters_text(),
+                SCENES: _rich_scenes_text(),
+                EPISODE_ALIAS_PLAN: alias_plan,
+            },
+        )
+        batches = list(iter_episode_batches(10, batch_size=5))
+        runner = _PhaseRecordingRunner()
+
+        flow._run_all_dialogue_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=alias_plan,
+            rewrite_from_stage="",
+        )
+
+        write_call = runner.stage_calls(STAGE_DIALOGUES_WRITING)[0]
+        self.assertEqual(write_call["hooks_episodes"], [1, 2, 3, 4, 5])
+        self.assertEqual(write_call["appearance_plan_episodes"], [1, 2, 3, 4, 5])
+        self.assertIn('"speech_profile"', write_call["characters_text"])
+        self.assertNotIn("family_background", write_call["characters_text"])
+        self.assertNotIn("dramatic_function", write_call["characters_text"])
+        self.assertIn('"scene_name":"玻璃会议室"', write_call["scenes_text"])
+        self.assertNotIn("outfit_requirements", write_call["scenes_text"])
+
     def test_script_alias_write_review_revise_and_memory_aliases(self) -> None:
         state, payload, variables, batches = self._script_ready_state(5)
         memory_json = json.dumps(
@@ -2225,6 +2434,41 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertEqual(rewrite_call["script_hook_alias_episodes"], [1, 2, 3, 4, 5])
         self.assertEqual(rewrite_call["script_dialogue_alias_episodes"], [1, 2, 3, 4, 5])
         self.assertIn("failed", rewrite_call["script_review_alias_text"])
+
+    def test_script_stage_uses_compact_context_and_never_receives_full_hooks_or_dialogues(self) -> None:
+        alias_plan = _episode_alias_plan(10)
+        state, payload, variables, batches = self._script_ready_state(
+            10,
+            variables={
+                CHARACTERS: _rich_characters_text(),
+                SCENES: _rich_scenes_text(),
+                EPISODE_ALIAS_PLAN: alias_plan,
+            },
+        )
+        original_characters = str(variables[CHARACTERS])
+        runner = _PhaseRecordingRunner()
+
+        flow._run_all_script_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=alias_plan,
+            rewrite_from_stage="",
+        )
+
+        write_call = runner.stage_calls(STAGE_SCRIPT_WRITING)[0]
+        self.assertEqual(write_call["hooks_episodes"], [1, 2, 3, 4, 5])
+        self.assertEqual(write_call["dialogue_episodes"], [1, 2, 3, 4, 5])
+        self.assertEqual(write_call["appearance_plan_episodes"], [1, 2, 3, 4, 5])
+        self.assertIn('"core_motivation"', write_call["characters_text"])
+        self.assertNotIn("family_background", write_call["characters_text"])
+        self.assertNotIn("dramatic_function", write_call["characters_text"])
+        self.assertIn('"scene_name":"玻璃会议室"', write_call["scenes_text"])
+        self.assertNotIn("outfit_requirements", write_call["scenes_text"])
+        self.assertEqual(str(variables[CHARACTERS]), original_characters)
 
     def test_script_memory_answertext_is_accepted_and_invalid_memory_does_not_pollute_batch(self) -> None:
         state, payload, variables, batches = self._script_ready_state(5)

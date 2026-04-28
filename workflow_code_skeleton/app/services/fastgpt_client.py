@@ -739,13 +739,22 @@ class FastGPTClient:
                 variables,
                 rejected_candidates,
             )
+            existing_debug = self.get_last_stage_debug_info(contract.stage_name)
+            previous_empty_alias = bool(existing_debug.get("appearance_h2KpLm91_empty"))
+            previous_sources = list(existing_debug.get("appearance_candidate_sources") or [])
+            previous_summaries = list(existing_debug.get("appearance_candidate_summaries") or [])
+            combined_summaries = previous_summaries + list(appearance_output.candidate_summaries)
+            combined_sources = previous_sources + [
+                item.get("source") for item in appearance_output.candidate_summaries
+            ]
             self._remember_stage_debug_info(
                 contract.stage_name,
                 appearance_candidate_sources=[
-                    item.get("source") for item in appearance_output.candidate_summaries
+                    source for source in combined_sources if str(source or "").strip()
                 ],
-                appearance_candidate_summaries=appearance_output.candidate_summaries,
-                appearance_h2KpLm91_empty=appearance_output.empty_alias_seen,
+                appearance_candidate_summaries=combined_summaries,
+                appearance_h2KpLm91_empty=previous_empty_alias
+                or appearance_output.empty_alias_seen,
             )
             if appearance_output.selected is not None:
                 self._remember_stage_debug_info(
@@ -1773,10 +1782,15 @@ def _iter_appearance_output_candidates(
     for source, candidate in _iter_named_structured_candidates(data):
         if any(marker in source for marker in (".newVariables", ".updateVarResult", ".variableUpdate")):
             continue
-        if isinstance(candidate, dict) and output_alias in candidate:
+        if not isinstance(candidate, dict):
+            continue
+        if output_alias in candidate:
             yield from emit(f"{source}.{output_alias}", candidate.get(output_alias))
+            continue
+        if APPEARANCE_MAPPING in candidate:
+            yield from emit(f"{source}.{APPEARANCE_MAPPING}", candidate)
 
-    for source, text in _iter_named_text_candidates(data):
+    for source, text in _iter_appearance_text_candidates(data):
         cleaned = strip_code_fence(text).strip()
         if not cleaned:
             continue
@@ -1813,6 +1827,39 @@ def _extract_named_value(container: Any, key: str) -> Any:
     return None
 
 
+def _iter_appearance_text_candidates(data: Any) -> Iterable[tuple[str, str]]:
+    if not isinstance(data, dict):
+        return
+
+    yielded: set[str] = set()
+
+    def emit(source: str, value: Any) -> Iterable[tuple[str, str]]:
+        if not isinstance(value, str):
+            return ()
+        cleaned = strip_code_fence(value).strip()
+        if not cleaned or source in yielded:
+            return ()
+        yielded.add(source)
+        return ((source, cleaned),)
+
+    response_data = data.get("responseData")
+    for source, branch in _iter_response_like_branches(response_data, "responseData"):
+        if not isinstance(branch, dict):
+            continue
+        yield from emit(f"{source}.answerText", branch.get("answerText"))
+        yield from emit(f"{source}.textOutput", branch.get("textOutput"))
+        outputs = branch.get("outputs")
+        if isinstance(outputs, dict):
+            yield from emit(f"{source}.outputs.answerText", outputs.get("answerText"))
+            yield from emit(f"{source}.outputs.textOutput", outputs.get("textOutput"))
+
+    yield from emit("root.answerText", data.get("answerText"))
+    yield from emit("root.textOutput", data.get("textOutput"))
+
+    for index, content in enumerate(_iter_choice_message_contents(data)):
+        yield from emit(f"choices[{index}].message.content", content)
+
+
 def _coerce_appearance_candidate(
     candidate: Any,
 ) -> tuple[dict[str, Any] | None, str, bool]:
@@ -1825,7 +1872,7 @@ def _coerce_appearance_candidate(
     if isinstance(current, str):
         text = strip_code_fence(current).strip()
         if not text:
-            return None, "appearance_mapping 候选为空字符串", False
+            return None, "appearance_mapping 候选为空字符串", True
         if _looks_like_core_scene_text(text):
             return None, "候选是核心场景提炼文本，不是 appearance_mapping JSON", False
         parsed = _try_parse_json(text)
@@ -1835,6 +1882,9 @@ def _coerce_appearance_candidate(
 
     if not isinstance(current, dict):
         return None, "appearance_mapping 候选不是 object", alias_empty
+
+    if "scene_setting" in current:
+        return None, "候选是 scene_setting，不是 appearance_mapping", alias_empty
 
     for key in (APPEARANCE_MAPPING_VAR, APPEARANCE_MAPPING):
         if key not in current:

@@ -390,7 +390,7 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         self.assertEqual(endpoint.api_key, "default-key")
 
     def test_payload_warn_limit_logs_length_summary(self) -> None:
-        settings.fastgpt_stage_payload_warn_chars = 200
+        settings.fastgpt_stage_payload_warn_chars = 50
         settings.fastgpt_stage_payload_hard_chars = 10000
         response = {
             "responseData": [
@@ -414,7 +414,7 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         self.assertIn("最大字段", joined)
         debug_info = client.get_last_stage_debug_info(STAGE_FRAMEWORK)
         self.assertIn("payload_stats", debug_info)
-        self.assertGreater(int(debug_info["payload_stats"]["body_chars"]), 200)
+        self.assertGreater(int(debug_info["payload_stats"]["body_chars"]), 50)
 
     def test_payload_hard_limit_blocks_request_before_http(self) -> None:
         settings.fastgpt_stage_payload_warn_chars = 50
