@@ -1084,7 +1084,7 @@ def _ensure_dialogue_revise_workflow_available() -> None:
             "并写回 dialogueContent/exiXcZp1。请补充真正的角色对话修订 workflow。"
         )
 
-    if "hookContent" in text and "hookContent" not in variable_keys:
+    if "{{$VARIABLE_NODE_ID.hookContent$}}" in text and "hookContent" not in variable_keys:
         logger.warning(
             "角色对话修订 workflow prompt 引用了 hookContent，"
             "但 chatConfig.variables 未声明该变量。代码侧会继续镜像注入该 alias，"

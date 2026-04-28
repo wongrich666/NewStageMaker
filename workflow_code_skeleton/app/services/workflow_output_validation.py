@@ -396,10 +396,6 @@ def _workflow_warnings_from_json(
         warnings.append(
             "workflow prompt 通过 VARIABLE_NODE_ID 引用了 hookContent，但 chatConfig.variables 未声明该变量。"
         )
-    elif "hookContent" in raw_text and "hookContent" not in chat_variables:
-        warnings.append(
-            "workflow prompt 引用了 hookContent，但 chatConfig.variables 未声明该变量。"
-        )
     return warnings
 
 

@@ -236,6 +236,7 @@ class _PhaseRecordingRunner:
                 "plan_episodes": plan_episodes,
                 "hooks_episodes": hooks_episodes,
                 "dialogue_episodes": dialogue_episodes,
+                "story_outline_text": str(variables.get(STORY_OUTLINE) or ""),
                 "hook_write_alias_episodes": _episode_numbers_from_object(
                     variables.get(HOOK_CURRENT_WRITE_VAR)
                 ),
@@ -1279,7 +1280,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         issues = flow.validate_batch_dialogues(bad_revise, BatchWindow(start_episode=1, end_episode=5))
         self.assertIn("角色对话修订 workflow 输出契约错误", "\n".join(issues))
 
-    def test_dialogue_review_alias_variants_and_warning_for_missing_hookcontent_var(self) -> None:
+    def test_dialogue_review_alias_variants_without_spurious_hookcontent_warning(self) -> None:
         state, payload, variables = self._state_and_payload(
             5,
             variables={ALL_HOOKS: _hook_batch([1, 2, 3, 4, 5])},
@@ -1328,10 +1329,29 @@ class BatchedGenerationFlowTests(unittest.TestCase):
             )
 
         self.assertEqual(len(runner.stage_calls(STAGE_DIALOGUES_REWRITE)), 1)
-        self.assertTrue(any("hookContent" in entry for entry in logs.output))
+        self.assertFalse(any("hookContent" in entry for entry in logs.output))
         self.assertIn('"passed": true', str(variables[DIALOGUE_REVIEW_OUTPUT_VAR]).lower())
         self.assertEqual(str(variables[DIALOGUE_REVIEW_WORKFLOW_VAR]), str(variables[DIALOGUE_REVIEW_OUTPUT_VAR]))
         self.assertEqual(str(variables[DIALOGUE_REVIEW_LEGACY_VAR]), str(variables[DIALOGUE_REVIEW_OUTPUT_VAR]))
+
+    def test_hook_review_receives_story_outline_context(self) -> None:
+        state, payload, variables = self._state_and_payload(5)
+        batches = list(iter_episode_batches(5, batch_size=5))
+        runner = _PhaseRecordingRunner()
+
+        flow._run_all_hook_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=None,
+            rewrite_from_stage="",
+        )
+
+        review_call = runner.stage_calls(STAGE_HOOKS_REVIEW)[0]
+        self.assertEqual(review_call["story_outline_text"], "测试大纲")
 
     def test_dialogue_validation_accepts_json_string_and_rejects_review_memory_natural_and_empty_speaker(self) -> None:
         batch = BatchWindow(start_episode=1, end_episode=5)
@@ -1776,7 +1796,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertEqual(artifact.get("status"), "fallback_used")
         self.assertTrue(Path(str(artifact.get("debug_file_path") or "")).exists())
 
-    def test_dialogue_rewrite_contract_guard_records_hookcontent_warning(self) -> None:
+    def test_dialogue_rewrite_contract_guard_has_no_spurious_hookcontent_warning(self) -> None:
         state, payload, variables = self._state_and_payload(
             5,
             variables={ALL_HOOKS: _hook_batch([1, 2, 3, 4, 5])},
@@ -1800,8 +1820,8 @@ class BatchedGenerationFlowTests(unittest.TestCase):
 
         artifact = state.get_output(STAGE_DIALOGUES_REWRITE, "contract_guard", {})
         warnings = list(artifact.get("workflow_warnings") or [])
-        self.assertTrue(any("hookContent" in item for item in warnings))
-        self.assertTrue(any("hookContent" in line for line in logs.output))
+        self.assertFalse(any("hookContent" in item for item in warnings))
+        self.assertFalse(any("hookContent" in line for line in logs.output))
 
     def test_workflow_json_dir_env_override_is_respected(self) -> None:
         with TemporaryDirectory() as tmpdir:
