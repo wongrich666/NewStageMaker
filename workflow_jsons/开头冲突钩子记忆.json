@@ -1,1 +1,505 @@
-{ "nodes": [ { "nodeId": "userGuide", "name": "common:core.module.template.system_config", "intro": "common:core.module.template.system_config_info", "avatar": "core/workflow/template/systemConfig", "flowNodeType": "userGuide", "position": { "x": -5130, "y": -4935 }, "version": "481", "inputs": [ { "key": "welcomeText", "label": "core.app.Welcome Text", "valueType": "string", "renderTypeList": [ "hidden" ], "value": "" }, { "key": "variables", "label": "core.app.Chat Variable", "valueType": "any", "renderTypeList": [ "hidden" ], "value": [] }, { "key": "questionGuide", "label": "core.app.Question Guide", "valueType": "any", "renderTypeList": [ "hidden" ], "value": { "open": false } }, { "key": "tts", "label": "", "valueType": "any", "renderTypeList": [ "hidden" ], "value": { "type": "web" } }, { "key": "whisper", "label": "", "valueType": "any", "renderTypeList": [ "hidden" ], "value": { "open": false, "autoSend": false, "autoTTSResponse": false } }, { "key": "scheduleTrigger", "label": "", "valueType": "any", "renderTypeList": [ "hidden" ], "value": null } ], "outputs": [] }, { "nodeId": "448745", "name": "common:core.module.template.work_start", "intro": "", "avatar": "core/workflow/template/workflowStart", "flowNodeType": "workflowStart", "position": { "x": -4305, "y": -4825 }, "version": "481", "inputs": [ { "key": "userChatInput", "label": "workflow:user_question", "valueType": "string", "required": true, "renderTypeList": [ "reference", "textarea" ], "debugLabel": "", "toolDescription": "用户问题" } ], "outputs": [ { "id": "userChatInput", "key": "userChatInput", "type": "static", "valueType": "string", "label": "common:core.module.input.label.user question", "description": "" } ] }, { "nodeId": "hookMemorySummarizer", "name": "开头冲突钩子记忆整理器", "intro": "总结当前五集开头冲突钩子，沉淀下一批钩子需要承接的剧情压力、结尾钩子与 alias 连续性。", "avatar": "core/workflow/template/aiChat", "flowNodeType": "chatNode", "showStatus": true, "position": { "x": -3750, "y": -5085 }, "version": "4.9.7", "inputs": [ { "key": "model", "label": "common:core.module.input.label.aiModel", "valueType": "string", "renderTypeList": [ "settingLLMModel", "reference" ], "value": "deepseek-reasoner", "debugLabel": "", "toolDescription": "" }, { "key": "temperature", "label": "", "valueType": "number", "renderTypeList": [ "hidden" ], "debugLabel": "", "toolDescription": "" }, { "key": "maxToken", "label": "", "valueType": "number", "renderTypeList": [ "hidden" ], "debugLabel": "", "toolDescription": "" }, { "key": "isResponseAnswerText", "label": "", "valueType": "boolean", "renderTypeList": [ "hidden" ], "value": true, "debugLabel": "", "toolDescription": "" }, { "key": "aiChatQuoteRole", "label": "", "valueType": "string", "renderTypeList": [ "hidden" ], "value": "system", "debugLabel": "", "toolDescription": "" }, { "key": "quoteTemplate", "label": "", "valueType": "string", "renderTypeList": [ "hidden" ], "debugLabel": "", "toolDescription": "" }, { "key": "quotePrompt", "label": "", "valueType": "string", "renderTypeList": [ "hidden" ], "debugLabel": "", "toolDescription": "" }, { "key": "aiChatVision", "label": "", "valueType": "boolean", "renderTypeList": [ "hidden" ], "value": true, "debugLabel": "", "toolDescription": "" }, { "key": "aiChatReasoning", "label": "", "valueType": "boolean", "renderTypeList": [ "hidden" ], "value": true, "debugLabel": "", "toolDescription": "" }, { "key": "aiChatTopP", "label": "", "valueType": "number", "renderTypeList": [ "hidden" ], "debugLabel": "", "toolDescription": "" }, { "key": "aiChatStopSign", "label": "", "valueType": "string", "renderTypeList": [ "hidden" ], "debugLabel": "", "toolDescription": "" }, { "key": "aiChatResponseFormat", "label": "", "valueType": "string", "renderTypeList": [ "hidden" ], "debugLabel": "", "toolDescription": "", "value": "json_object" }, { "key": "aiChatJsonSchema", "label": "", "valueType": "string", "renderTypeList": [ "hidden" ], "debugLabel": "", "toolDescription": "", "value": "{\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"this_turn_episodes\", \"abstract_of_this_turn\", \"final_hook_of_this_turn\", \"hook_continuity_state\", \"unresolved_hook_threads\", \"must_carry_into_next_turn\", \"next_turn_opening_guidance\", \"appearance_alias_continuity_summary\"], \"properties\": {\"this_turn_episodes\": {\"type\": \"string\", \"minLength\": 1}, \"abstract_of_this_turn\": {\"type\": \"string\", \"minLength\": 5}, \"final_hook_of_this_turn\": {\"type\": \"string\", \"minLength\": 3}, \"hook_continuity_state\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"unresolved_hook_threads\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"must_carry_into_next_turn\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"next_turn_opening_guidance\": {\"type\": \"string\", \"minLength\": 3}, \"appearance_alias_continuity_summary\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"global_summary\", \"character_alias_continuity\", \"batch_level_naming_warnings\"], \"properties\": {\"global_summary\": {\"type\": \"string\"}, \"character_alias_continuity\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"character_name\", \"last_opening_alias\", \"aliases_activated_in_hooks\", \"aliases_not_yet_appeared\", \"next_hook_naming_warning\"], \"properties\": {\"character_name\": {\"type\": \"string\"}, \"last_opening_alias\": {\"type\": \"string\"}, \"aliases_activated_in_hooks\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"aliases_not_yet_appeared\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"next_hook_naming_warning\": {\"type\": \"string\"}}}}, \"batch_level_naming_warnings\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}}}}" }, { "key": "systemPrompt", "label": "common:core.ai.Prompt", "valueType": "string", "isRichText": true, "placeholder": "common:core.app.tip.chatNodeSystemPromptTip", "maxLength": 100000, "renderTypeList": [ "textarea", "reference" ], "value": "你是“开头冲突钩子记忆整理器”。\n\n你的任务：\n基于【当前批次开头冲突钩子JSON】、【已有开头钩子记忆】、【分集计划】与【服装版本映射内容】，整理出一个供“下一批开头冲突钩子编写智能体”直接使用的上下文记忆包。\n\n这个记忆包的作用不是复述钩子全文，而是帮助下一批钩子编写时：\n- 准确承接上一批最后一集留下的 ending_hook\n- 准确承接每集之间已经建立的压力递进\n- 不丢失当前批次已经启动的角色 alias / 开场出场名\n- 避免下一批重新开局、另起炉灶、忘记上一批必须接住的问题\n- 避免下一批把已经启用的 alias 写乱或退回泛称\n\n【当前批次起始集】\n{{$VARIABLE_NODE_ID.iJkq6iGe$}}\n\n【总集数】\n{{$VARIABLE_NODE_ID.blkSS7dY$}}\n\n【分集计划】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n\n【当前批次开头冲突钩子JSON】\n{{$VARIABLE_NODE_ID.nIGPvKG2$}}\n\n【已有开头钩子记忆】\n{{$VARIABLE_NODE_ID.hookSearchMemory$}}\n\n【服装版本映射内容】\n{{$VARIABLE_NODE_ID.h2KpLm91$}}\n\n【命名偏好】\n{{$VARIABLE_NODE_ID.m3UxJ8pD$}}\n\n整理要求：\n1. 只基于当前批次钩子、已有记忆、分集计划和服装版本映射提炼，不得杜撰没有出现的剧情。\n2. 必须明确指出本批最后一集的 ending_hook 是什么。\n3. 必须明确指出下一批第一集开头最应该优先承接什么。\n4. 必须提炼本批已经形成的“压力源 / 未解决问题 / 观众等待兑现的问题”。\n5. 必须提炼 opening_alias_plan 的连续性：哪些角色在开场钩子中已经使用了哪些 alias，哪些 alias 尚未真正启用。\n6. 如果当前批次钩子里没有出现某角色，不得编造其状态；但如果服装映射中定义了该角色 alias，可放入“尚未登场 alias”。\n7. “已启用 alias”指当前批次钩子中已经实际进入开场或冲突设计的 alias，不等于映射里定义过就算启用。\n8. 输出要短、准、可直接喂给下一批开头冲突钩子编写智能体。\n9. 最终只能输出合法 JSON，不要输出 JSON 之外的任何解释、标题、注释或代码块。\n\n请严格输出以下 JSON 结构：\n{\n \"this_turn_episodes\": \"例如 1-5 / 6-10；必须严格等于当前批次范围，不得根据正文内容自行改写、推断或跳过集数\",\n \"abstract_of_this_turn\": \"用一段话概括这五集钩子真正建立了什么压力、问题和局势变化。\",\n \"final_hook_of_this_turn\": \"明确写出本批次最后一集 ending_hook；必须具体到事件、动作、发现、危机、闯入、揭露、决定、反转中的一种或多种。\",\n \"hook_continuity_state\": [\n \"当前批次结束后，开头钩子层面已经建立的连续压力1\",\n \"当前批次结束后，下一批必须接住的局势状态2\"\n ],\n \"unresolved_hook_threads\": [\n \"尚未解决、下一批钩子必须继续推进的问题1\",\n \"尚未解决、下一批钩子必须继续推进的问题2\"\n ],\n \"must_carry_into_next_turn\": [\n \"下一批开头必须承接的信息1\",\n \"下一批开头必须承接的信息2\"\n ],\n \"next_turn_opening_guidance\": \"用一句话说明下一批开头冲突钩子最应该先接住什么，优先接 final_hook_of_this_turn，不要另起炉灶。\",\n \"appearance_alias_continuity_summary\": {\n \"global_summary\": \"一句话概括本批开头钩子结束后，人物 alias 与开场命名最需要注意的总原则。\",\n \"character_alias_continuity\": [\n {\n \"character_name\": \"角色名\",\n \"last_opening_alias\": \"该角色在当前批次开头钩子中最后一次实际使用的 alias；若本批未出场，则写空字符串。\",\n \"aliases_activated_in_hooks\": [\n \"已在开头钩子中启用的 alias1\"\n ],\n \"aliases_not_yet_appeared\": [\n \"映射中已定义但截至当前批次仍未真正进入开头钩子的 alias1\"\n ],\n \"next_hook_naming_warning\": \"下一批写这个角色开头钩子时最需要遵守的命名连续性提醒。\"\n }\n ],\n \"batch_level_naming_warnings\": [\n \"下一批全局最容易写错的人物 alias 连续性提醒1\"\n ]\n }\n}", "debugLabel": "", "description": "common:core.app.tip.systemPromptTip", "toolDescription": "" }, { "key": "history", "label": "common:core.module.input.label.chat history", "valueType": "chatHistory", "required": true, "max": 50, "min": 0, "renderTypeList": [ "numberInput", "reference" ], "value": 0, "debugLabel": "", "description": "workflow:max_dialog_rounds", "toolDescription": "" }, { "key": "quoteQA", "label": "", "valueType": "datasetQuote", "renderTypeList": [ "settingDatasetQuotePrompt" ], "debugLabel": "知识库引用", "description": "", "toolDescription": "" }, { "key": "fileUrlList", "label": "app:workflow.user_file_input", "valueType": "arrayString", "renderTypeList": [ "reference", "input" ], "value": [ [ "448745", "userFiles" ] ], "debugLabel": "文件链接", "description": "app:workflow.user_file_input_desc", "toolDescription": "" }, { "key": "userChatInput", "label": "workflow:user_question", "valueType": "string", "required": true, "renderTypeList": [ "reference", "textarea" ], "value": "按要求整理当前五集开头冲突钩子记忆即可。", "debugLabel": "", "toolDescription": "用户问题", "selectedTypeIndex": 1 } ], "outputs": [ { "id": "history", "key": "history", "type": "static", "valueType": "chatHistory", "valueDesc": "{\n obj: System | Human | AI;\n value: string;\n}[]", "label": "common:core.module.output.label.New context", "description": "将本次回复内容拼接上历史记录，作为新的上下文返回", "required": true }, { "id": "answerText", "key": "answerText", "type": "static", "valueType": "string", "valueDesc": "", "label": "common:core.module.output.label.Ai response content", "description": "将在 stream 回复完毕后触发", "required": true }, { "id": "reasoningText", "key": "reasoningText", "type": "static", "valueType": "string", "valueDesc": "", "label": "workflow:reasoning_content", "description": "", "required": false, "invalid": false }, { "id": "system_error_text", "key": "system_error_text", "type": "error", "valueType": "string", "valueDesc": "", "label": "workflow:error_text", "description": "" } ], "catchError": false } ], "edges": [ { "source": "448745", "target": "hookMemorySummarizer", "sourceHandle": "448745-source-right", "targetHandle": "hookMemorySummarizer-target-left" } ], "chatConfig": { "variables": [ { "key": "iJkq6iGe", "label": "当前钩子批次起始集", "valueType": "number", "required": true, "defaultValue": 1, "type": "numberInput", "description": "当前开头冲突钩子批次的起始集数。" }, { "key": "blkSS7dY", "label": "总集数", "valueType": "number", "required": true, "defaultValue": 60, "type": "numberInput", "description": "剧本总集数。" }, { "key": "pxtQY7p2", "label": "分集计划", "valueType": "string", "required": false, "defaultValue": "", "type": "input", "description": "当前剧本分集计划，用于校验批次范围与后续承接。" }, { "key": "nIGPvKG2", "label": "当前批次开头冲突钩子", "valueType": "string", "required": true, "type": "input", "description": "当前五集开头冲突钩子 JSON。" }, { "key": "hookSearchMemory", "label": "已有开头钩子记忆", "valueType": "string", "required": false, "defaultValue": "", "type": "input", "description": "上一批整理出的开头冲突钩子记忆。" }, { "key": "h2KpLm91", "label": "服装版本映射内容", "valueType": "string", "required": false, "defaultValue": "", "type": "input", "description": "人物服装版本映射 JSON，用于整理 alias 连续性。" }, { "key": "m3UxJ8pD", "label": "命名偏好", "valueType": "string", "required": false, "defaultValue": "", "type": "input", "description": "可选命名偏好，用于辅助整理 alias 连续性提醒。" } ], "scheduledTriggerConfig": { "cronString": "", "timezone": "Asia/Shanghai", "defaultPrompt": "" }, "_id": "69dc6a6bf962df93355c2aa2" } }
+{
+  "nodes": [
+    {
+      "nodeId": "userGuide",
+      "name": "common:core.module.template.system_config",
+      "intro": "common:core.module.template.system_config_info",
+      "avatar": "core/workflow/template/systemConfig",
+      "flowNodeType": "userGuide",
+      "position": {
+        "x": -5130,
+        "y": -4935
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "welcomeText",
+          "label": "core.app.Welcome Text",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": ""
+        },
+        {
+          "key": "variables",
+          "label": "core.app.Chat Variable",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": []
+        },
+        {
+          "key": "questionGuide",
+          "label": "core.app.Question Guide",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false
+          }
+        },
+        {
+          "key": "tts",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "type": "web"
+          }
+        },
+        {
+          "key": "whisper",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false,
+            "autoSend": false,
+            "autoTTSResponse": false
+          }
+        },
+        {
+          "key": "scheduleTrigger",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": null
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "448745",
+      "name": "common:core.module.template.work_start",
+      "intro": "",
+      "avatar": "core/workflow/template/workflowStart",
+      "flowNodeType": "workflowStart",
+      "position": {
+        "x": -4125,
+        "y": -4860
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "userChatInput",
+          "key": "userChatInput",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.input.label.user question",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "hookMemorySummarizer",
+      "name": "开头冲突钩子记忆整理器",
+      "intro": "总结当前五集开头冲突钩子，沉淀下一批钩子需要承接的剧情压力、结尾钩子与 alias 连续性。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": -3750,
+        "y": -5085
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": "json_object"
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": "{\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"this_turn_episodes\", \"abstract_of_this_turn\", \"final_hook_of_this_turn\", \"hook_continuity_state\", \"unresolved_hook_threads\", \"must_carry_into_next_turn\", \"next_turn_opening_guidance\", \"appearance_alias_continuity_summary\"], \"properties\": {\"this_turn_episodes\": {\"type\": \"string\", \"minLength\": 1}, \"abstract_of_this_turn\": {\"type\": \"string\", \"minLength\": 5}, \"final_hook_of_this_turn\": {\"type\": \"string\", \"minLength\": 3}, \"hook_continuity_state\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"unresolved_hook_threads\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"must_carry_into_next_turn\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"next_turn_opening_guidance\": {\"type\": \"string\", \"minLength\": 3}, \"appearance_alias_continuity_summary\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"global_summary\", \"character_alias_continuity\", \"batch_level_naming_warnings\"], \"properties\": {\"global_summary\": {\"type\": \"string\"}, \"character_alias_continuity\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"character_name\", \"last_opening_alias\", \"aliases_activated_in_hooks\", \"aliases_not_yet_appeared\", \"next_hook_naming_warning\"], \"properties\": {\"character_name\": {\"type\": \"string\"}, \"last_opening_alias\": {\"type\": \"string\"}, \"aliases_activated_in_hooks\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"aliases_not_yet_appeared\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"next_hook_naming_warning\": {\"type\": \"string\"}}}}, \"batch_level_naming_warnings\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}}}}"
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“开头冲突钩子记忆整理器”。\n\n你的任务：\n基于【当前批次开头冲突钩子JSON】、【已有开头钩子记忆】、【分集计划】与【服装版本映射内容】，整理出一个供“下一批开头冲突钩子编写智能体”直接使用的上下文记忆包。\n\n这个记忆包的作用不是复述钩子全文，而是帮助下一批钩子编写时：\n- 准确承接上一批最后一集留下的 ending_hook\n- 准确承接每集之间已经建立的压力递进\n- 不丢失当前批次已经启动的角色 alias / 开场出场名\n- 避免下一批重新开局、另起炉灶、忘记上一批必须接住的问题\n- 避免下一批把已经启用的 alias 写乱或退回泛称\n\n【当前批次起始集】\n{{$VARIABLE_NODE_ID.iJkq6iGe$}}\n【总集数】\n{{$VARIABLE_NODE_ID.blkSS7dY$}}\n【分集计划】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n【当前批次开头冲突钩子JSON】\n{{$VARIABLE_NODE_ID.nIGPvKG2$}}\n【服装版本映射内容】\n{{$VARIABLE_NODE_ID.h2KpLm91$}}\n\n整理要求：\n1. 只基于当前批次钩子、已有记忆、分集计划和服装版本映射提炼，不得杜撰没有出现的剧情。\n2. 必须明确指出本批最后一集的 ending_hook 是什么。\n3. 必须明确指出下一批第一集开头最应该优先承接什么。\n4. 必须提炼本批已经形成的“压力源 / 未解决问题 / 观众等待兑现的问题”。\n5. 必须提炼 opening_alias_plan 的连续性：哪些角色在开场钩子中已经使用了哪些 alias，哪些 alias 尚未真正启用。\n6. 如果当前批次钩子里没有出现某角色，不得编造其状态；但如果服装映射中定义了该角色 alias，可放入“尚未登场 alias”。\n7. “已启用 alias”指当前批次钩子中已经实际进入开场或冲突设计的 alias，不等于映射里定义过就算启用。\n8. 输出要短、准、可直接喂给下一批开头冲突钩子编写智能体。\n9. 最终只能输出合法 JSON，不要输出 JSON 之外的任何解释、标题、注释或代码块。\n\n请严格输出以下 JSON 结构：\n{\n \"this_turn_episodes\": \"例如 1-5 / 6-10；必须严格等于当前批次范围，不得根据正文内容自行改写、推断或跳过集数\",\n \"abstract_of_this_turn\": \"用一段话概括这五集钩子真正建立了什么压力、问题和局势变化。\",\n \"final_hook_of_this_turn\": \"明确写出本批次最后一集 ending_hook；必须具体到事件、动作、发现、危机、闯入、揭露、决定、反转中的一种或多种。\",\n \"hook_continuity_state\": [\n \"当前批次结束后，开头钩子层面已经建立的连续压力1\",\n \"当前批次结束后，下一批必须接住的局势状态2\"\n ],\n \"unresolved_hook_threads\": [\n \"尚未解决、下一批钩子必须继续推进的问题1\",\n \"尚未解决、下一批钩子必须继续推进的问题2\"\n ],\n \"must_carry_into_next_turn\": [\n \"下一批开头必须承接的信息1\",\n \"下一批开头必须承接的信息2\"\n ],\n \"next_turn_opening_guidance\": \"用一句话说明下一批开头冲突钩子最应该先接住什么，优先接 final_hook_of_this_turn，不要另起炉灶。\",\n \"appearance_alias_continuity_summary\": {\n \"global_summary\": \"一句话概括本批开头钩子结束后，人物 alias 与开场命名最需要注意的总原则。\",\n \"character_alias_continuity\": [\n {\n \"character_name\": \"角色名\",\n \"last_opening_alias\": \"该角色在当前批次开头钩子中最后一次实际使用的 alias；若本批未出场，则写空字符串。\",\n \"aliases_activated_in_hooks\": [\n \"已在开头钩子中启用的 alias1\"\n ],\n \"aliases_not_yet_appeared\": [\n \"映射中已定义但截至当前批次仍未真正进入开头钩子的 alias1\"\n ],\n \"next_hook_naming_warning\": \"下一批写这个角色开头钩子时最需要遵守的命名连续性提醒。\"\n }\n ],\n \"batch_level_naming_warnings\": [\n \"下一批全局最容易写错的人物 alias 连续性提醒1\"\n ]\n }\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按要求整理当前五集开头冲突钩子记忆即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题",
+          "selectedTypeIndex": 1
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "ju6QuCg4CZDRABco",
+      "name": "变量更新",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": -2970,
+        "y": -5085
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "valueType": "any",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "pcX1dAuk"
+              ],
+              "value": [
+                "hookMemorySummarizer",
+                "answerText"
+              ],
+              "valueType": "any",
+              "renderType": "reference"
+            }
+          ]
+        }
+      ],
+      "outputs": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "448745",
+      "target": "hookMemorySummarizer",
+      "sourceHandle": "448745-source-right",
+      "targetHandle": "hookMemorySummarizer-target-left"
+    },
+    {
+      "source": "hookMemorySummarizer",
+      "target": "ju6QuCg4CZDRABco",
+      "sourceHandle": "hookMemorySummarizer-source-right",
+      "targetHandle": "ju6QuCg4CZDRABco-target-left"
+    }
+  ],
+  "chatConfig": {
+    "variables": [
+      {
+        "key": "iJkq6iGe",
+        "label": "当前钩子批次起始集",
+        "valueType": "number",
+        "required": true,
+        "defaultValue": 1,
+        "type": "numberInput",
+        "description": "当前开头冲突钩子批次的起始集数。",
+        "icon": "core/workflow/inputType/numberInput"
+      },
+      {
+        "key": "blkSS7dY",
+        "label": "总集数",
+        "valueType": "number",
+        "required": true,
+        "defaultValue": 60,
+        "type": "numberInput",
+        "description": "剧本总集数。",
+        "icon": "core/workflow/inputType/numberInput"
+      },
+      {
+        "type": "input",
+        "key": "nIGPvKG2",
+        "label": "当前批次开头冲突钩子",
+        "valueType": "string",
+        "description": "当前五集开头冲突钩子 JSON。",
+        "required": true
+      },
+      {
+        "key": "pxtQY7p2",
+        "label": "分集计划",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "input",
+        "description": "当前剧本分集计划，用于校验批次范围与后续承接。",
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "key": "h2KpLm91",
+        "label": "服装版本映射内容",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "input",
+        "description": "人物服装版本映射 JSON，用于整理 alias 连续性。",
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "type": "internal",
+        "key": "pcX1dAuk",
+        "label": "当前开头冲突钩子记忆",
+        "valueType": "string",
+        "description": "",
+        "required": false
+      }
+    ],
+    "scheduledTriggerConfig": {
+      "cronString": "",
+      "timezone": "Asia/Shanghai",
+      "defaultPrompt": ""
+    },
+    "_id": "69dc6a6bf962df93355c2aa2"
+  }
+}

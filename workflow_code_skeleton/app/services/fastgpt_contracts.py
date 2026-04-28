@@ -15,7 +15,16 @@ from ..workflow_ids import (
     CORE_SCENE_FINAL_VAR,
     CORE_SCENE_INPUT_VAR,
     DIALOGUE_CURRENT_VAR,
+    DIALOGUE_CURRENT_WORKFLOW_VAR,
+    DIALOGUE_CURRENT_WRITE_VAR,
     DIALOGUE_FINAL_VAR,
+    DIALOGUE_HOOK_BATCH_VAR,
+    DIALOGUE_HOOK_REVIEW_VAR,
+    DIALOGUE_MEMORY_INPUT_VAR,
+    DIALOGUE_MEMORY_OUTPUT_VAR,
+    DIALOGUE_MEMORY_SEARCH_VAR,
+    DIALOGUE_REVIEW_LEGACY_VAR,
+    DIALOGUE_REVIEW_WORKFLOW_VAR,
     DIALOGUE_START_VAR,
     DIALOGUE_MAX_RETRY_VAR,
     EPISODE_PLAN_VAR,
@@ -32,7 +41,12 @@ from ..workflow_ids import (
     FRAMEWORK_STORY_OUTLINE_VAR,
     FRAMEWORK_USER_EXPECTATION_VAR,
     HOOK_CURRENT_VAR,
+    HOOK_CURRENT_WRITE_VAR,
     HOOK_FINAL_VAR,
+    HOOK_MEMORY_INPUT_VAR,
+    HOOK_MEMORY_OUTPUT_VAR,
+    HOOK_MEMORY_REVIEW_VAR,
+    HOOK_MEMORY_REVISE_VAR,
     HOOK_START_VAR,
     HOOK_MAX_RETRY_VAR,
     MEMORY_VAR,
@@ -43,7 +57,12 @@ from ..workflow_ids import (
     SCENE_VAR,
     DIALOGUE_CHARACTER_INPUT_VAR,
     SCRIPT_CURRENT_VAR,
+    SCRIPT_CURRENT_WRITE_VAR,
+    SCRIPT_DIALOGUE_BATCH_VAR,
     SCRIPT_FINAL_VAR,
+    SCRIPT_HOOK_BATCH_VAR,
+    SCRIPT_MEMORY_OUTPUT_VAR,
+    SCRIPT_MEMORY_WRITE_INPUT_VAR,
     DIALOGUE_EPISODE_PLAN_INPUT_VAR,
     DIALOGUE_HOOK_INPUT_VAR,
     DIALOGUE_MAX_RETRY_INPUT_VAR,
@@ -56,6 +75,8 @@ from ..workflow_ids import (
     HOOK_REVIEW_OUTPUT_VAR,
     SCRIPT_START_VAR,
     SCRIPT_MAX_RETRY_VAR,
+    SCRIPT_REVIEW_VAR,
+    SCRIPT_REVIEW_WRITE_VAR,
     SCRIPT_REVIEW_OUTPUT_VAR,
     STORY_OUTLINE_VAR,
     TITLE_VAR,
@@ -84,16 +105,28 @@ MAX_RETRIES = "max_retries"
 WORLDVIEW = "worldview"
 CHARACTERS = "characters"
 SCENES = "scenes"
+BATCH_START_EPISODE = "batch_start_episode"
 BATCH_HOOKS = "batch_hooks"
+HOOK_BATCH_START_EPISODE = BATCH_START_EPISODE
+HOOK_BATCH_CONTENT = BATCH_HOOKS
+HOOK_REVIEW_RESULT = "hook_review_result"
+HOOK_MEMORY = "hook_memory"
 ALL_HOOKS = "all_hooks"
 BATCH_DIALOGUES = "batch_dialogues"
+DIALOGUE_BATCH_START_EPISODE = BATCH_START_EPISODE
+DIALOGUE_BATCH_CONTENT = BATCH_DIALOGUES
+DIALOGUE_REVIEW_RESULT = "dialogue_review_result"
+DIALOGUE_MEMORY = "dialogue_memory"
 ALL_DIALOGUES = "all_dialogues"
 BATCH_SCRIPT = "batch_script"
+SCRIPT_BATCH_START_EPISODE = BATCH_START_EPISODE
+SCRIPT_BATCH_CONTENT = BATCH_SCRIPT
+SCRIPT_REVIEW_RESULT = "script_review_result"
+SCRIPT_MEMORY = "last_summary"
 ALL_SCRIPT = "all_script"
 LAST_SUMMARY = "last_summary"
 FINAL_SCRIPT = "final_script"
 IS_CONSISTENT = "is_consistent"
-BATCH_START_EPISODE = "batch_start_episode"
 NORMALIZED_EPISODE_PLAN = "normalized_episode_plan"
 APPEARANCE_MAPPING = "appearance_mapping"
 CHARACTER_REGISTRY = "character_registry"
@@ -120,19 +153,70 @@ STAGE_SCENES = "scenes"
 STAGE_APPEARANCE_ALIAS_GENERATION = "appearance_alias_generation"
 STAGE_HOOKS = "hooks"
 STAGE_HOOKS_WRITING = "hooks_writing"
+STAGE_HOOK_WRITE = "hook_write"
 STAGE_HOOKS_REVIEW = "hooks_review"
+STAGE_HOOK_REVIEW = "hook_review"
 STAGE_HOOKS_REWRITE = "hooks_rewrite"
+STAGE_HOOK_REVISE = "hook_revise"
+STAGE_HOOK_MEMORY = "hook_memory"
 STAGE_DIALOGUES = "dialogues"
 STAGE_DIALOGUES_WRITING = "dialogues_writing"
+STAGE_DIALOGUE_WRITE = "dialogue_write"
 STAGE_DIALOGUES_REVIEW = "dialogues_review"
+STAGE_DIALOGUE_REVIEW = "dialogue_review"
 STAGE_DIALOGUES_REWRITE = "dialogues_rewrite"
+STAGE_DIALOGUE_REVISE = "dialogue_revise"
+STAGE_DIALOGUE_MEMORY = "dialogue_memory"
 STAGE_SCRIPT = "script"
 STAGE_SCRIPT_WRITING = "script_writing"
+STAGE_SCRIPT_WRITE = "script_write"
 STAGE_SCRIPT_REVIEW = "script_review"
 STAGE_SCRIPT_REWRITE = "script_rewrite"
+STAGE_SCRIPT_REVISE = "script_revise"
 STAGE_MEMORY = "memory"
 STAGE_SCRIPT_MEMORY = "script_memory"
 STAGE_FINAL = "final"
+
+HOOK_CURRENT_ALIASES = (HOOK_CURRENT_VAR, HOOK_CURRENT_WRITE_VAR)
+HOOK_MEMORY_ALIASES = (
+    HOOK_MEMORY_INPUT_VAR,
+    HOOK_MEMORY_REVIEW_VAR,
+    HOOK_MEMORY_REVISE_VAR,
+    HOOK_MEMORY_OUTPUT_VAR,
+)
+DIALOGUE_CURRENT_ALIASES = (
+    DIALOGUE_CURRENT_VAR,
+    DIALOGUE_CURRENT_WORKFLOW_VAR,
+    DIALOGUE_CURRENT_WRITE_VAR,
+)
+DIALOGUE_REVIEW_ALIASES = (
+    DIALOGUE_REVIEW_OUTPUT_VAR,
+    DIALOGUE_REVIEW_WORKFLOW_VAR,
+    DIALOGUE_REVIEW_LEGACY_VAR,
+)
+DIALOGUE_MEMORY_ALIASES = (
+    DIALOGUE_MEMORY_INPUT_VAR,
+    DIALOGUE_MEMORY_SEARCH_VAR,
+    DIALOGUE_MEMORY_OUTPUT_VAR,
+)
+DIALOGUE_HOOK_ALIASES = (
+    DIALOGUE_HOOK_INPUT_VAR,
+    DIALOGUE_HOOK_BATCH_VAR,
+    DIALOGUE_HOOK_REVIEW_VAR,
+)
+SCRIPT_CURRENT_ALIASES = (SCRIPT_CURRENT_VAR, SCRIPT_CURRENT_WRITE_VAR)
+SCRIPT_REVIEW_ALIASES = (
+    SCRIPT_REVIEW_VAR,
+    SCRIPT_REVIEW_OUTPUT_VAR,
+    SCRIPT_REVIEW_WRITE_VAR,
+)
+SCRIPT_MEMORY_ALIASES = (
+    MEMORY_VAR,
+    SCRIPT_MEMORY_WRITE_INPUT_VAR,
+    SCRIPT_MEMORY_OUTPUT_VAR,
+)
+SCRIPT_HOOK_ALIASES = (HOOK_FINAL_VAR, SCRIPT_HOOK_BATCH_VAR)
+SCRIPT_DIALOGUE_ALIASES = (DIALOGUE_FINAL_VAR, SCRIPT_DIALOGUE_BATCH_VAR)
 
 FRAMEWORK_WEB_INPUT_NAMES = (
     TOTAL_EPISODES,
@@ -224,7 +308,7 @@ class FastGPTStageContract:
         for name in self.input_names:
             if name in variables:
                 payload[name] = variables[name]
-            elif name == LAST_SUMMARY:
+            elif name in {LAST_SUMMARY, HOOK_MEMORY, DIALOGUE_MEMORY, SCRIPT_MEMORY}:
                 # 记忆类字段允许缺省为“空记忆”，这样首批正文不需要为了凑输入
                 # 额外制造一个伪 summary。
                 payload[name] = ""
@@ -256,6 +340,18 @@ class FastGPTStageContract:
                     # 这个工作流的 system prompt 已经明确要求“只能回复 true / false”。
                     # 因此这里故意不用宽松布尔推断，避免把“通过/一致/解释文本”
                     # 误判成合法结果，导致编排层错把脏输出当成正式布尔值继续流转。
+                    normalized[name] = coerce_strict_fastgpt_boolean(output[name])
+                elif (
+                    self.stage_name
+                    in {
+                        STAGE_HOOKS_REVIEW,
+                        STAGE_HOOK_REVIEW,
+                        STAGE_DIALOGUES_REVIEW,
+                        STAGE_DIALOGUE_REVIEW,
+                        STAGE_SCRIPT_REVIEW,
+                    }
+                    and name in {REVIEW_PASSED, REWRITE_REQUIRED}
+                ):
                     normalized[name] = coerce_strict_fastgpt_boolean(output[name])
                 else:
                     normalized[name] = coerce_fastgpt_value(output[name], type_name)
@@ -377,19 +473,33 @@ def describe_stage_output_shape_issue(
 
 
 def _is_hook_payload_stage(stage_name: str) -> bool:
-    return stage_name in {STAGE_HOOKS, STAGE_HOOKS_WRITING, STAGE_HOOKS_REWRITE}
+    return stage_name in {
+        STAGE_HOOKS,
+        STAGE_HOOKS_WRITING,
+        STAGE_HOOK_WRITE,
+        STAGE_HOOKS_REWRITE,
+        STAGE_HOOK_REVISE,
+    }
 
 
 def _is_dialogue_payload_stage(stage_name: str) -> bool:
-    return stage_name in {STAGE_DIALOGUES, STAGE_DIALOGUES_WRITING, STAGE_DIALOGUES_REWRITE}
+    return stage_name in {
+        STAGE_DIALOGUES,
+        STAGE_DIALOGUES_WRITING,
+        STAGE_DIALOGUE_WRITE,
+        STAGE_DIALOGUES_REWRITE,
+        STAGE_DIALOGUE_REVISE,
+    }
 
 
 def _is_script_family_stage(stage_name: str) -> bool:
     return stage_name in {
         STAGE_SCRIPT,
         STAGE_SCRIPT_WRITING,
+        STAGE_SCRIPT_WRITE,
         STAGE_SCRIPT_REVIEW,
         STAGE_SCRIPT_REWRITE,
+        STAGE_SCRIPT_REVISE,
     }
 
 
@@ -712,7 +822,10 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
 }
 
 
-LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
+LegacyInputAlias = str | tuple[str, ...]
+
+
+LEGACY_INPUT_ALIASES: dict[str, dict[str, LegacyInputAlias]] = {
     STAGE_FRAMEWORK: {
         TOTAL_EPISODES: FRAMEWORK_TOTAL_EPISODES_VAR,
         USER_EXPECTATION: FRAMEWORK_USER_EXPECTATION_VAR,
@@ -776,6 +889,7 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         BATCH_START_EPISODE: HOOK_START_VAR,
+        HOOK_MEMORY: HOOK_MEMORY_ALIASES,
     },
     STAGE_HOOKS_WRITING: {
         WORLDVIEW: WORLDVIEW_VAR,
@@ -786,6 +900,7 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         BATCH_START_EPISODE: HOOK_START_VAR,
+        HOOK_MEMORY: HOOK_MEMORY_ALIASES,
     },
     STAGE_HOOKS_REVIEW: {
         WORLDVIEW: WORLDVIEW_VAR,
@@ -793,7 +908,10 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         SCENES: SCENE_VAR,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
-        BATCH_HOOKS: HOOK_CURRENT_VAR,
+        BATCH_HOOKS: HOOK_CURRENT_ALIASES,
+        HOOK_MEMORY: HOOK_MEMORY_ALIASES,
+        BATCH_START_EPISODE: HOOK_START_VAR,
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
     },
     STAGE_HOOKS_REWRITE: {
         WORLDVIEW: WORLDVIEW_VAR,
@@ -802,67 +920,161 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         STORY_OUTLINE: STORY_OUTLINE_VAR,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
-        BATCH_HOOKS: HOOK_CURRENT_VAR,
+        BATCH_HOOKS: HOOK_CURRENT_ALIASES,
         PASS_REVIEW_JSON: HOOK_REVIEW_OUTPUT_VAR,
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         BATCH_START_EPISODE: HOOK_START_VAR,
+        HOOK_MEMORY: HOOK_MEMORY_ALIASES,
+    },
+    STAGE_HOOK_WRITE: {
+        WORLDVIEW: WORLDVIEW_VAR,
+        CHARACTERS: CHARACTER_VAR,
+        SCENES: SCENE_VAR,
+        STORY_OUTLINE: STORY_OUTLINE_VAR,
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        BATCH_START_EPISODE: HOOK_START_VAR,
+        HOOK_MEMORY: HOOK_MEMORY_ALIASES,
+    },
+    STAGE_HOOK_REVIEW: {
+        WORLDVIEW: WORLDVIEW_VAR,
+        CHARACTERS: CHARACTER_VAR,
+        SCENES: SCENE_VAR,
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        BATCH_HOOKS: HOOK_CURRENT_ALIASES,
+        HOOK_MEMORY: HOOK_MEMORY_ALIASES,
+        BATCH_START_EPISODE: HOOK_START_VAR,
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+    },
+    STAGE_HOOK_REVISE: {
+        WORLDVIEW: WORLDVIEW_VAR,
+        CHARACTERS: CHARACTER_VAR,
+        SCENES: SCENE_VAR,
+        STORY_OUTLINE: STORY_OUTLINE_VAR,
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        BATCH_HOOKS: HOOK_CURRENT_ALIASES,
+        PASS_REVIEW_JSON: HOOK_REVIEW_OUTPUT_VAR,
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        BATCH_START_EPISODE: HOOK_START_VAR,
+        HOOK_MEMORY: HOOK_MEMORY_ALIASES,
+    },
+    STAGE_HOOK_MEMORY: {
+        BATCH_HOOKS: HOOK_CURRENT_ALIASES,
+        HOOK_MEMORY: HOOK_MEMORY_ALIASES,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        BATCH_START_EPISODE: HOOK_START_VAR,
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
     },
     STAGE_DIALOGUES: {
         WORLDVIEW: DIALOGUE_WORLDVIEW_INPUT_VAR,
         CHARACTERS: DIALOGUE_CHARACTER_INPUT_VAR,
         SCENES: DIALOGUE_SCENE_INPUT_VAR,
-        ALL_HOOKS: DIALOGUE_HOOK_INPUT_VAR,
+        ALL_HOOKS: DIALOGUE_HOOK_ALIASES,
         EPISODE_PLAN: DIALOGUE_EPISODE_PLAN_INPUT_VAR,
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         TOTAL_EPISODES: DIALOGUE_TOTAL_EPISODES_INPUT_VAR,
         BATCH_START_EPISODE: DIALOGUE_START_INPUT_VAR,
         MAX_RETRIES: DIALOGUE_MAX_RETRY_INPUT_VAR,
+        DIALOGUE_MEMORY: DIALOGUE_MEMORY_ALIASES,
     },
     STAGE_DIALOGUES_WRITING: {
         WORLDVIEW: DIALOGUE_WORLDVIEW_INPUT_VAR,
         CHARACTERS: DIALOGUE_CHARACTER_INPUT_VAR,
         SCENES: DIALOGUE_SCENE_INPUT_VAR,
-        ALL_HOOKS: DIALOGUE_HOOK_INPUT_VAR,
+        ALL_HOOKS: DIALOGUE_HOOK_ALIASES,
         EPISODE_PLAN: DIALOGUE_EPISODE_PLAN_INPUT_VAR,
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         TOTAL_EPISODES: DIALOGUE_TOTAL_EPISODES_INPUT_VAR,
         BATCH_START_EPISODE: DIALOGUE_START_INPUT_VAR,
         MAX_RETRIES: DIALOGUE_MAX_RETRY_INPUT_VAR,
+        DIALOGUE_MEMORY: DIALOGUE_MEMORY_ALIASES,
     },
     STAGE_DIALOGUES_REVIEW: {
         WORLDVIEW: DIALOGUE_WORLDVIEW_INPUT_VAR,
         CHARACTERS: DIALOGUE_CHARACTER_INPUT_VAR,
         SCENES: DIALOGUE_SCENE_INPUT_VAR,
-        ALL_HOOKS: DIALOGUE_HOOK_INPUT_VAR,
+        ALL_HOOKS: DIALOGUE_HOOK_ALIASES,
         EPISODE_PLAN: DIALOGUE_EPISODE_PLAN_INPUT_VAR,
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         TOTAL_EPISODES: DIALOGUE_TOTAL_EPISODES_INPUT_VAR,
         BATCH_START_EPISODE: DIALOGUE_START_INPUT_VAR,
-        BATCH_DIALOGUES: DIALOGUE_CURRENT_VAR,
+        BATCH_DIALOGUES: DIALOGUE_CURRENT_ALIASES,
     },
     STAGE_DIALOGUES_REWRITE: {
         WORLDVIEW: DIALOGUE_WORLDVIEW_INPUT_VAR,
         CHARACTERS: DIALOGUE_CHARACTER_INPUT_VAR,
         SCENES: DIALOGUE_SCENE_INPUT_VAR,
-        ALL_HOOKS: DIALOGUE_HOOK_INPUT_VAR,
+        ALL_HOOKS: DIALOGUE_HOOK_ALIASES,
         EPISODE_PLAN: DIALOGUE_EPISODE_PLAN_INPUT_VAR,
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         TOTAL_EPISODES: DIALOGUE_TOTAL_EPISODES_INPUT_VAR,
         BATCH_START_EPISODE: DIALOGUE_START_INPUT_VAR,
-        BATCH_DIALOGUES: DIALOGUE_CURRENT_VAR,
-        PASS_REVIEW_JSON: DIALOGUE_REVIEW_OUTPUT_VAR,
+        BATCH_DIALOGUES: DIALOGUE_CURRENT_ALIASES,
+        PASS_REVIEW_JSON: DIALOGUE_REVIEW_ALIASES,
+        DIALOGUE_MEMORY: DIALOGUE_MEMORY_ALIASES,
+    },
+    STAGE_DIALOGUE_WRITE: {
+        WORLDVIEW: DIALOGUE_WORLDVIEW_INPUT_VAR,
+        CHARACTERS: DIALOGUE_CHARACTER_INPUT_VAR,
+        SCENES: DIALOGUE_SCENE_INPUT_VAR,
+        ALL_HOOKS: DIALOGUE_HOOK_ALIASES,
+        EPISODE_PLAN: DIALOGUE_EPISODE_PLAN_INPUT_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        TOTAL_EPISODES: DIALOGUE_TOTAL_EPISODES_INPUT_VAR,
+        BATCH_START_EPISODE: DIALOGUE_START_INPUT_VAR,
+        MAX_RETRIES: DIALOGUE_MAX_RETRY_INPUT_VAR,
+        DIALOGUE_MEMORY: DIALOGUE_MEMORY_ALIASES,
+    },
+    STAGE_DIALOGUE_REVIEW: {
+        WORLDVIEW: DIALOGUE_WORLDVIEW_INPUT_VAR,
+        CHARACTERS: DIALOGUE_CHARACTER_INPUT_VAR,
+        SCENES: DIALOGUE_SCENE_INPUT_VAR,
+        ALL_HOOKS: DIALOGUE_HOOK_ALIASES,
+        EPISODE_PLAN: DIALOGUE_EPISODE_PLAN_INPUT_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        TOTAL_EPISODES: DIALOGUE_TOTAL_EPISODES_INPUT_VAR,
+        BATCH_START_EPISODE: DIALOGUE_START_INPUT_VAR,
+        BATCH_DIALOGUES: DIALOGUE_CURRENT_ALIASES,
+    },
+    STAGE_DIALOGUE_REVISE: {
+        WORLDVIEW: DIALOGUE_WORLDVIEW_INPUT_VAR,
+        CHARACTERS: DIALOGUE_CHARACTER_INPUT_VAR,
+        SCENES: DIALOGUE_SCENE_INPUT_VAR,
+        ALL_HOOKS: DIALOGUE_HOOK_ALIASES,
+        EPISODE_PLAN: DIALOGUE_EPISODE_PLAN_INPUT_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        TOTAL_EPISODES: DIALOGUE_TOTAL_EPISODES_INPUT_VAR,
+        BATCH_START_EPISODE: DIALOGUE_START_INPUT_VAR,
+        BATCH_DIALOGUES: DIALOGUE_CURRENT_ALIASES,
+        PASS_REVIEW_JSON: DIALOGUE_REVIEW_ALIASES,
+        DIALOGUE_MEMORY: DIALOGUE_MEMORY_ALIASES,
+    },
+    STAGE_DIALOGUE_MEMORY: {
+        BATCH_DIALOGUES: DIALOGUE_CURRENT_ALIASES,
+        DIALOGUE_MEMORY: DIALOGUE_MEMORY_ALIASES,
+        ALL_HOOKS: DIALOGUE_HOOK_ALIASES,
+        EPISODE_PLAN: DIALOGUE_EPISODE_PLAN_INPUT_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        TOTAL_EPISODES: DIALOGUE_TOTAL_EPISODES_INPUT_VAR,
+        BATCH_START_EPISODE: DIALOGUE_START_INPUT_VAR,
+        CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
     },
     STAGE_SCRIPT: {
         WORLDVIEW: WORLDVIEW_VAR,
         CHARACTERS: CHARACTER_VAR,
         SCENES: CHARACTER_VAR,
-        ALL_HOOKS: HOOK_FINAL_VAR,
-        ALL_DIALOGUES: DIALOGUE_FINAL_VAR,
+        ALL_HOOKS: SCRIPT_HOOK_ALIASES,
+        ALL_DIALOGUES: SCRIPT_DIALOGUE_ALIASES,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         EPISODE_WORD_COUNT: EPISODE_WORD_COUNT_VAR,
-        LAST_SUMMARY: MEMORY_VAR,
+        LAST_SUMMARY: SCRIPT_MEMORY_ALIASES,
+        SCRIPT_MEMORY: SCRIPT_MEMORY_ALIASES,
         BATCH_START_EPISODE: SCRIPT_START_VAR,
         ALL_SCRIPT: SCRIPT_FINAL_VAR,
     },
@@ -870,13 +1082,14 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         WORLDVIEW: WORLDVIEW_VAR,
         CHARACTERS: CHARACTER_VAR,
         SCENES: CHARACTER_VAR,
-        ALL_HOOKS: HOOK_FINAL_VAR,
-        ALL_DIALOGUES: DIALOGUE_FINAL_VAR,
+        ALL_HOOKS: SCRIPT_HOOK_ALIASES,
+        ALL_DIALOGUES: SCRIPT_DIALOGUE_ALIASES,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         EPISODE_WORD_COUNT: EPISODE_WORD_COUNT_VAR,
-        LAST_SUMMARY: MEMORY_VAR,
+        LAST_SUMMARY: SCRIPT_MEMORY_ALIASES,
+        SCRIPT_MEMORY: SCRIPT_MEMORY_ALIASES,
         BATCH_START_EPISODE: SCRIPT_START_VAR,
         ALL_SCRIPT: SCRIPT_FINAL_VAR,
     },
@@ -884,40 +1097,75 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, str]] = {
         WORLDVIEW: WORLDVIEW_VAR,
         CHARACTERS: CHARACTER_VAR,
         SCENES: CHARACTER_VAR,
-        ALL_HOOKS: HOOK_FINAL_VAR,
-        ALL_DIALOGUES: DIALOGUE_FINAL_VAR,
+        ALL_HOOKS: SCRIPT_HOOK_ALIASES,
+        ALL_DIALOGUES: SCRIPT_DIALOGUE_ALIASES,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         EPISODE_WORD_COUNT: EPISODE_WORD_COUNT_VAR,
-        LAST_SUMMARY: MEMORY_VAR,
+        LAST_SUMMARY: SCRIPT_MEMORY_ALIASES,
+        SCRIPT_MEMORY: SCRIPT_MEMORY_ALIASES,
         BATCH_START_EPISODE: SCRIPT_START_VAR,
-        BATCH_SCRIPT: SCRIPT_CURRENT_VAR,
+        BATCH_SCRIPT: SCRIPT_CURRENT_ALIASES,
     },
     STAGE_SCRIPT_REWRITE: {
         WORLDVIEW: WORLDVIEW_VAR,
         CHARACTERS: CHARACTER_VAR,
         SCENES: CHARACTER_VAR,
-        ALL_HOOKS: HOOK_FINAL_VAR,
-        ALL_DIALOGUES: DIALOGUE_FINAL_VAR,
+        ALL_HOOKS: SCRIPT_HOOK_ALIASES,
+        ALL_DIALOGUES: SCRIPT_DIALOGUE_ALIASES,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         TOTAL_EPISODES: TOTAL_EPISODES_VAR,
         EPISODE_WORD_COUNT: EPISODE_WORD_COUNT_VAR,
-        LAST_SUMMARY: MEMORY_VAR,
+        LAST_SUMMARY: SCRIPT_MEMORY_ALIASES,
+        SCRIPT_MEMORY: SCRIPT_MEMORY_ALIASES,
         BATCH_START_EPISODE: SCRIPT_START_VAR,
-        BATCH_SCRIPT: SCRIPT_CURRENT_VAR,
-        PASS_REVIEW_JSON: SCRIPT_REVIEW_OUTPUT_VAR,
+        BATCH_SCRIPT: SCRIPT_CURRENT_ALIASES,
+        PASS_REVIEW_JSON: SCRIPT_REVIEW_ALIASES,
+    },
+    STAGE_SCRIPT_WRITE: {
+        WORLDVIEW: WORLDVIEW_VAR,
+        CHARACTERS: CHARACTER_VAR,
+        SCENES: CHARACTER_VAR,
+        ALL_HOOKS: SCRIPT_HOOK_ALIASES,
+        ALL_DIALOGUES: SCRIPT_DIALOGUE_ALIASES,
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        EPISODE_WORD_COUNT: EPISODE_WORD_COUNT_VAR,
+        LAST_SUMMARY: SCRIPT_MEMORY_ALIASES,
+        SCRIPT_MEMORY: SCRIPT_MEMORY_ALIASES,
+        BATCH_START_EPISODE: SCRIPT_START_VAR,
+        ALL_SCRIPT: SCRIPT_FINAL_VAR,
+    },
+    STAGE_SCRIPT_REVISE: {
+        WORLDVIEW: WORLDVIEW_VAR,
+        CHARACTERS: CHARACTER_VAR,
+        SCENES: CHARACTER_VAR,
+        ALL_HOOKS: SCRIPT_HOOK_ALIASES,
+        ALL_DIALOGUES: SCRIPT_DIALOGUE_ALIASES,
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        EPISODE_WORD_COUNT: EPISODE_WORD_COUNT_VAR,
+        LAST_SUMMARY: SCRIPT_MEMORY_ALIASES,
+        SCRIPT_MEMORY: SCRIPT_MEMORY_ALIASES,
+        BATCH_START_EPISODE: SCRIPT_START_VAR,
+        BATCH_SCRIPT: SCRIPT_CURRENT_ALIASES,
+        PASS_REVIEW_JSON: SCRIPT_REVIEW_ALIASES,
     },
     STAGE_MEMORY: {
-        BATCH_SCRIPT: SCRIPT_CURRENT_VAR,
-        LAST_SUMMARY: MEMORY_VAR,
+        BATCH_SCRIPT: SCRIPT_CURRENT_ALIASES,
+        LAST_SUMMARY: SCRIPT_MEMORY_ALIASES,
+        SCRIPT_MEMORY: SCRIPT_MEMORY_ALIASES,
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
     },
     STAGE_SCRIPT_MEMORY: {
-        BATCH_SCRIPT: SCRIPT_CURRENT_VAR,
-        LAST_SUMMARY: MEMORY_VAR,
+        BATCH_SCRIPT: SCRIPT_CURRENT_ALIASES,
+        LAST_SUMMARY: SCRIPT_MEMORY_ALIASES,
+        SCRIPT_MEMORY: SCRIPT_MEMORY_ALIASES,
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
         CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
     },
@@ -1093,11 +1341,12 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             STORY_OUTLINE,
             EPISODE_PLAN,
             APPEARANCE_MAPPING,
+            HOOK_MEMORY,
             TOTAL_EPISODES,
             BATCH_START_EPISODE,
         ),
         output_types={BATCH_HOOKS: "object"},
-        output_aliases={BATCH_HOOKS: (HOOK_CURRENT_VAR, HOOK_FINAL_VAR, "batch_hooks")},
+        output_aliases={BATCH_HOOKS: (*HOOK_CURRENT_ALIASES, "batch_hooks")},
         fastgpt_responsibility="编写当前批次 5 集的开头冲突钩子 JSON。",
         local_responsibility="只消费当前批输入，不直接提交 all_hooks；是否落正式缓存由本地审核结果决定。",
     ),
@@ -1111,6 +1360,9 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             EPISODE_PLAN,
             APPEARANCE_MAPPING,
             BATCH_HOOKS,
+            HOOK_MEMORY,
+            BATCH_START_EPISODE,
+            TOTAL_EPISODES,
         ),
         output_types={
             REVIEW_PASSED: "boolean",
@@ -1118,9 +1370,9 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             BLOCKING_ISSUES: "array",
         },
         output_aliases={
-            REVIEW_PASSED: (HOOK_REVIEW_OUTPUT_VAR, "approved"),
-            REWRITE_REQUIRED: (HOOK_REVIEW_OUTPUT_VAR,),
-            BLOCKING_ISSUES: (HOOK_REVIEW_OUTPUT_VAR,),
+            REVIEW_PASSED: (HOOK_REVIEW_OUTPUT_VAR, HOOK_REVIEW_RESULT, "approved"),
+            REWRITE_REQUIRED: (HOOK_REVIEW_OUTPUT_VAR, HOOK_REVIEW_RESULT),
+            BLOCKING_ISSUES: (HOOK_REVIEW_OUTPUT_VAR, HOOK_REVIEW_RESULT),
         },
         fastgpt_responsibility="审核当前批次开头冲突钩子是否可提交。",
         local_responsibility="把审核结果转成 passed/rewrite_required/blocking_issues，并决定是否进入修订。",
@@ -1137,11 +1389,12 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             APPEARANCE_MAPPING,
             BATCH_HOOKS,
             PASS_REVIEW_JSON,
+            HOOK_MEMORY,
             TOTAL_EPISODES,
             BATCH_START_EPISODE,
         ),
         output_types={BATCH_HOOKS: "object"},
-        output_aliases={BATCH_HOOKS: (HOOK_CURRENT_VAR, HOOK_FINAL_VAR, "batch_hooks")},
+        output_aliases={BATCH_HOOKS: (*HOOK_CURRENT_ALIASES, "batch_hooks")},
         fastgpt_responsibility="根据审核意见重写当前批次开头冲突钩子 JSON。",
         local_responsibility="保留当前批次边界，只在 passed=true 后才允许提交到 all_hooks。",
     ),
@@ -1155,6 +1408,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             ALL_HOOKS,
             EPISODE_PLAN,
             APPEARANCE_MAPPING,
+            DIALOGUE_MEMORY,
             TOTAL_EPISODES,
             BATCH_START_EPISODE,
             MAX_RETRIES,
@@ -1164,7 +1418,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             BATCH_DIALOGUES: (
                 DIALOGUE_OUTPUT_VAR,
                 DIALOGUE_CURRENT_VAR,
-                DIALOGUE_FINAL_VAR,
+                DIALOGUE_CURRENT_WRITE_VAR,
                 "batchDialogues",
                 "dialogue_content",
                 "batch_dialogues_raw",
@@ -1183,6 +1437,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             ALL_HOOKS,
             EPISODE_PLAN,
             APPEARANCE_MAPPING,
+            DIALOGUE_MEMORY,
             TOTAL_EPISODES,
             BATCH_START_EPISODE,
             MAX_RETRIES,
@@ -1192,7 +1447,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             BATCH_DIALOGUES: (
                 DIALOGUE_OUTPUT_VAR,
                 DIALOGUE_CURRENT_VAR,
-                DIALOGUE_FINAL_VAR,
+                DIALOGUE_CURRENT_WRITE_VAR,
                 "batchDialogues",
                 "dialogue_content",
                 "batch_dialogues_raw",
@@ -1222,9 +1477,9 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             BLOCKING_ISSUES: "array",
         },
         output_aliases={
-            REVIEW_PASSED: (DIALOGUE_REVIEW_OUTPUT_VAR, "approved"),
-            REWRITE_REQUIRED: (DIALOGUE_REVIEW_OUTPUT_VAR,),
-            BLOCKING_ISSUES: (DIALOGUE_REVIEW_OUTPUT_VAR,),
+            REVIEW_PASSED: (*DIALOGUE_REVIEW_ALIASES, "approved"),
+            REWRITE_REQUIRED: (*DIALOGUE_REVIEW_ALIASES,),
+            BLOCKING_ISSUES: (*DIALOGUE_REVIEW_ALIASES,),
         },
         fastgpt_responsibility="审核当前批次角色对白是否可提交。",
         local_responsibility="把审核结果转成 passed/rewrite_required/blocking_issues，并决定是否进入修订。",
@@ -1243,13 +1498,14 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             BATCH_START_EPISODE,
             BATCH_DIALOGUES,
             PASS_REVIEW_JSON,
+            DIALOGUE_MEMORY,
         ),
         output_types={BATCH_DIALOGUES: "object"},
         output_aliases={
             BATCH_DIALOGUES: (
                 DIALOGUE_OUTPUT_VAR,
                 DIALOGUE_CURRENT_VAR,
-                DIALOGUE_FINAL_VAR,
+                DIALOGUE_CURRENT_WRITE_VAR,
                 "batchDialogues",
                 "dialogue_content",
                 "batch_dialogues_raw",
@@ -1298,7 +1554,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             ALL_SCRIPT,
         ),
         output_types={BATCH_SCRIPT: "string"},
-        output_aliases={BATCH_SCRIPT: (SCRIPT_CURRENT_VAR, SCRIPT_FINAL_VAR)},
+        output_aliases={BATCH_SCRIPT: SCRIPT_CURRENT_ALIASES},
         fastgpt_responsibility="编写当前批次 5 集剧本正文。",
         local_responsibility="只缓存当前批次临时正文，正式合并到 all_script 前仍需本地审核通过。",
     ),
@@ -1325,9 +1581,9 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             BLOCKING_ISSUES: "array",
         },
         output_aliases={
-            REVIEW_PASSED: (SCRIPT_REVIEW_OUTPUT_VAR, "approved"),
-            REWRITE_REQUIRED: (SCRIPT_REVIEW_OUTPUT_VAR,),
-            BLOCKING_ISSUES: (SCRIPT_REVIEW_OUTPUT_VAR,),
+            REVIEW_PASSED: (*SCRIPT_REVIEW_ALIASES, "approved"),
+            REWRITE_REQUIRED: SCRIPT_REVIEW_ALIASES,
+            BLOCKING_ISSUES: SCRIPT_REVIEW_ALIASES,
         },
         fastgpt_responsibility="审核当前批次剧本正文是否可提交。",
         local_responsibility="把审核结果转成 passed/rewrite_required/blocking_issues，并决定是否进入修订。",
@@ -1351,7 +1607,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             PASS_REVIEW_JSON,
         ),
         output_types={BATCH_SCRIPT: "string"},
-        output_aliases={BATCH_SCRIPT: (SCRIPT_CURRENT_VAR, SCRIPT_FINAL_VAR)},
+        output_aliases={BATCH_SCRIPT: SCRIPT_CURRENT_ALIASES},
         fastgpt_responsibility="根据审核意见修订当前批次剧本正文。",
         local_responsibility="保留当前批次边界，只在 passed=true 后才允许提交到 all_script。",
     ),
@@ -1378,7 +1634,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             CHARACTER_ALIAS_NAMING_RULES,
         ),
         output_types={LAST_SUMMARY: "string"},
-        output_aliases={LAST_SUMMARY: (MEMORY_VAR,)},
+        output_aliases={LAST_SUMMARY: SCRIPT_MEMORY_ALIASES},
         fastgpt_responsibility="把当前批次正文整理成下一批可用的摘要。",
         local_responsibility="用新 last_summary 覆盖旧 last_summary，不保存历史。",
     ),
@@ -1398,6 +1654,101 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         local_responsibility="调用最终拼接工作流，并以最终回复文本作为 final_script。",
     ),
 }
+
+
+def _clone_stage_contract(
+    source_stage_name: str,
+    target_stage_name: str,
+    label: str,
+) -> FastGPTStageContract:
+    source = STAGE_CONTRACTS[source_stage_name]
+    return FastGPTStageContract(
+        stage_name=target_stage_name,
+        label=label,
+        input_names=source.input_names,
+        output_types=source.output_types,
+        output_aliases=source.output_aliases,
+        fastgpt_responsibility=source.fastgpt_responsibility,
+        local_responsibility=source.local_responsibility,
+    )
+
+
+STAGE_CONTRACTS[STAGE_HOOK_WRITE] = _clone_stage_contract(
+    STAGE_HOOKS_WRITING,
+    STAGE_HOOK_WRITE,
+    "开头冲突钩子编写",
+)
+STAGE_CONTRACTS[STAGE_HOOK_REVIEW] = _clone_stage_contract(
+    STAGE_HOOKS_REVIEW,
+    STAGE_HOOK_REVIEW,
+    "开头冲突钩子审核",
+)
+STAGE_CONTRACTS[STAGE_HOOK_REVISE] = _clone_stage_contract(
+    STAGE_HOOKS_REWRITE,
+    STAGE_HOOK_REVISE,
+    "开头冲突钩子修订",
+)
+STAGE_CONTRACTS[STAGE_HOOK_MEMORY] = FastGPTStageContract(
+    stage_name=STAGE_HOOK_MEMORY,
+    label="开头冲突钩子记忆",
+    input_names=(
+        BATCH_HOOKS,
+        HOOK_MEMORY,
+        APPEARANCE_MAPPING,
+        TOTAL_EPISODES,
+        BATCH_START_EPISODE,
+        EPISODE_PLAN,
+    ),
+    output_types={HOOK_MEMORY: "string"},
+    output_aliases={HOOK_MEMORY: HOOK_MEMORY_ALIASES},
+    fastgpt_responsibility="基于当前批次钩子和已有钩子记忆生成下一批可承接的钩子记忆。",
+    local_responsibility="用新的 hook_memory 覆盖旧钩子记忆，不合并到 all_hooks。",
+)
+
+STAGE_CONTRACTS[STAGE_DIALOGUE_WRITE] = _clone_stage_contract(
+    STAGE_DIALOGUES_WRITING,
+    STAGE_DIALOGUE_WRITE,
+    "角色对白编写",
+)
+STAGE_CONTRACTS[STAGE_DIALOGUE_REVIEW] = _clone_stage_contract(
+    STAGE_DIALOGUES_REVIEW,
+    STAGE_DIALOGUE_REVIEW,
+    "角色对白审核",
+)
+STAGE_CONTRACTS[STAGE_DIALOGUE_REVISE] = _clone_stage_contract(
+    STAGE_DIALOGUES_REWRITE,
+    STAGE_DIALOGUE_REVISE,
+    "角色对白修订",
+)
+STAGE_CONTRACTS[STAGE_DIALOGUE_MEMORY] = FastGPTStageContract(
+    stage_name=STAGE_DIALOGUE_MEMORY,
+    label="角色对白记忆",
+    input_names=(
+        BATCH_DIALOGUES,
+        DIALOGUE_MEMORY,
+        ALL_HOOKS,
+        EPISODE_PLAN,
+        APPEARANCE_MAPPING,
+        TOTAL_EPISODES,
+        BATCH_START_EPISODE,
+        CHARACTER_ALIAS_NAMING_RULES,
+    ),
+    output_types={DIALOGUE_MEMORY: "string"},
+    output_aliases={DIALOGUE_MEMORY: DIALOGUE_MEMORY_ALIASES},
+    fastgpt_responsibility="基于当前批次对白、钩子和已有对白记忆生成下一批可承接的对白记忆。",
+    local_responsibility="用新的 dialogue_memory 覆盖旧对白记忆，不合并到 all_dialogues。",
+)
+
+STAGE_CONTRACTS[STAGE_SCRIPT_WRITE] = _clone_stage_contract(
+    STAGE_SCRIPT_WRITING,
+    STAGE_SCRIPT_WRITE,
+    "剧本正文编写",
+)
+STAGE_CONTRACTS[STAGE_SCRIPT_REVISE] = _clone_stage_contract(
+    STAGE_SCRIPT_REWRITE,
+    STAGE_SCRIPT_REVISE,
+    "剧本正文修订",
+)
 
 
 def _validate_framework_web_input_alignment() -> None:
