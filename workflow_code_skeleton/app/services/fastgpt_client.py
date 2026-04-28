@@ -15,6 +15,7 @@ from ..workflow_ids import (
     APPEARANCE_MAPPING_VAR,
     APPEARANCE_NATURAL_LANGUAGE_VAR,
     CHARACTER_NATURAL_LANGUAGE_VAR,
+    CORE_SCENE_FINAL_VAR,
     SCENE_NATURAL_LANGUAGE_VAR,
 )
 from .fastgpt_contracts import (
@@ -1765,36 +1766,98 @@ def _iter_appearance_output_candidates(
         yielded.add(source)
         return ((source, value),)
 
-    root_new_variables = data.get("newVariables")
-    yield from emit(f"root.newVariables.{output_alias}", _extract_named_value(root_new_variables, output_alias))
+    for source, candidate in _iter_appearance_named_alias_candidates(
+        data,
+        output_alias,
+        "newVariables",
+    ):
+        yield from emit(source, candidate)
 
-    root_update_result = data.get("updateVarResult")
-    yield from emit(f"root.updateVarResult.{output_alias}", _extract_named_value(root_update_result, output_alias))
+    for source, candidate in _iter_appearance_named_alias_candidates(
+        data,
+        output_alias,
+        "updateVarResult",
+    ):
+        yield from emit(source, candidate)
 
     response_data = data.get("responseData")
     for source, container in _iter_response_like_branches(response_data, "responseData"):
-        for key in ("newVariables", "updateVarResult", "variableUpdate"):
-            if not isinstance(container, dict) or key not in container:
-                continue
-            source_name = f"{source}.{key}.{output_alias}"
-            yield from emit(source_name, _extract_named_value(container.get(key), output_alias))
+        if not isinstance(container, dict) or "variableUpdate" not in container:
+            continue
+        source_name = f"{source}.variableUpdate.{output_alias}"
+        yield from emit(source_name, _extract_named_value(container.get("variableUpdate"), output_alias))
 
-    for source, candidate in _iter_named_structured_candidates(data):
-        if any(marker in source for marker in (".newVariables", ".updateVarResult", ".variableUpdate")):
+    for source, candidate in _iter_appearance_answer_node_candidates(data, output_alias):
+        yield from emit(source, candidate)
+
+    for source, candidate in _iter_appearance_choice_json_candidates(data):
+        yield from emit(source, candidate)
+
+
+def _iter_appearance_named_alias_candidates(
+    data: dict[str, Any],
+    output_alias: str,
+    container_key: str,
+) -> Iterable[tuple[str, Any]]:
+    for source, container in _iter_response_like_branches(data, "root"):
+        if not isinstance(container, dict) or container_key not in container:
+            continue
+        candidate_source = f"{source}.{container_key}.{output_alias}"
+        yield (candidate_source, _extract_named_value(container.get(container_key), output_alias))
+
+
+def _iter_appearance_answer_node_candidates(
+    data: dict[str, Any],
+    output_alias: str,
+) -> Iterable[tuple[str, Any]]:
+    emitted: set[str] = set()
+    for source, candidate in _iter_response_like_branches(data, "root"):
+        if source in emitted or not _is_appearance_answer_node_source(source):
             continue
         if not isinstance(candidate, dict):
             continue
-        if output_alias in candidate:
-            yield from emit(f"{source}.{output_alias}", candidate.get(output_alias))
-            continue
-        if APPEARANCE_MAPPING in candidate:
-            yield from emit(f"{source}.{APPEARANCE_MAPPING}", candidate)
+        if any(
+            key in candidate
+            for key in (
+                output_alias,
+                APPEARANCE_MAPPING,
+                "scene_setting",
+                APPEARANCE_NATURAL_LANGUAGE_VAR,
+                CORE_SCENE_FINAL_VAR,
+            )
+        ):
+            emitted.add(source)
+            yield (source, candidate)
 
-    for source, text in _iter_appearance_text_candidates(data):
-        cleaned = strip_code_fence(text).strip()
+
+def _iter_appearance_choice_json_candidates(
+    data: dict[str, Any],
+) -> Iterable[tuple[str, Any]]:
+    for index, content in enumerate(_iter_choice_message_contents(data)):
+        cleaned = strip_code_fence(content).strip()
         if not cleaned:
             continue
-        yield from emit(source, cleaned)
+        for candidate_index, candidate in enumerate(extract_json_object_candidates(cleaned)):
+            if not isinstance(candidate, dict):
+                continue
+            if any(
+                key in candidate
+                for key in (
+                    APPEARANCE_MAPPING,
+                    "scene_setting",
+                    APPEARANCE_NATURAL_LANGUAGE_VAR,
+                    CORE_SCENE_FINAL_VAR,
+                )
+            ):
+                yield (f"choices[{index}].message.content[json_object:{candidate_index}]", candidate)
+
+
+def _is_appearance_answer_node_source(source: str) -> bool:
+    for segment in str(source or "").lower().replace("[", ".[").split("."):
+        normalized = segment.split("[", 1)[0]
+        if normalized in {"answernode", "output", "outputs"}:
+            return True
+    return False
 
 
 def _iter_response_like_branches(
@@ -1885,6 +1948,10 @@ def _coerce_appearance_candidate(
 
     if "scene_setting" in current:
         return None, "候选是 scene_setting，不是 appearance_mapping", alias_empty
+    if APPEARANCE_NATURAL_LANGUAGE_VAR in current:
+        return None, f"候选是 {APPEARANCE_NATURAL_LANGUAGE_VAR}，不是 appearance_mapping", alias_empty
+    if CORE_SCENE_FINAL_VAR in current:
+        return None, f"候选是 {CORE_SCENE_FINAL_VAR}，不是 appearance_mapping", alias_empty
 
     for key in (APPEARANCE_MAPPING_VAR, APPEARANCE_MAPPING):
         if key not in current:

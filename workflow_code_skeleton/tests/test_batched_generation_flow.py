@@ -2118,6 +2118,11 @@ class BatchedGenerationFlowTests(unittest.TestCase):
             },
         )
         original_characters = str(variables[CHARACTERS])
+        original_scenes = str(variables[SCENES])
+        original_appearance_mapping = json.dumps(
+            variables[APPEARANCE_MAPPING],
+            ensure_ascii=False,
+        )
         batches = list(iter_episode_batches(10, batch_size=5))
         runner = _PhaseRecordingRunner()
 
@@ -2141,6 +2146,11 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertIn('"scene_name":"玻璃会议室"', write_call["scenes_text"])
         self.assertNotIn("outfit_requirements", write_call["scenes_text"])
         self.assertEqual(str(variables[CHARACTERS]), original_characters)
+        self.assertEqual(str(variables[SCENES]), original_scenes)
+        self.assertEqual(
+            json.dumps(variables[APPEARANCE_MAPPING], ensure_ascii=False),
+            original_appearance_mapping,
+        )
 
     def test_dialogue_stage_uses_compact_context_and_current_batch_alias_plan(self) -> None:
         alias_plan = _episode_alias_plan(10)
@@ -2155,6 +2165,12 @@ class BatchedGenerationFlowTests(unittest.TestCase):
                 SCENES: _rich_scenes_text(),
                 EPISODE_ALIAS_PLAN: alias_plan,
             },
+        )
+        original_characters = str(variables[CHARACTERS])
+        original_scenes = str(variables[SCENES])
+        original_appearance_mapping = json.dumps(
+            variables[APPEARANCE_MAPPING],
+            ensure_ascii=False,
         )
         batches = list(iter_episode_batches(10, batch_size=5))
         runner = _PhaseRecordingRunner()
@@ -2178,6 +2194,12 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertNotIn("dramatic_function", write_call["characters_text"])
         self.assertIn('"scene_name":"玻璃会议室"', write_call["scenes_text"])
         self.assertNotIn("outfit_requirements", write_call["scenes_text"])
+        self.assertEqual(str(variables[CHARACTERS]), original_characters)
+        self.assertEqual(str(variables[SCENES]), original_scenes)
+        self.assertEqual(
+            json.dumps(variables[APPEARANCE_MAPPING], ensure_ascii=False),
+            original_appearance_mapping,
+        )
 
     def test_script_alias_write_review_revise_and_memory_aliases(self) -> None:
         state, payload, variables, batches = self._script_ready_state(5)
@@ -2446,6 +2468,11 @@ class BatchedGenerationFlowTests(unittest.TestCase):
             },
         )
         original_characters = str(variables[CHARACTERS])
+        original_scenes = str(variables[SCENES])
+        original_appearance_mapping = json.dumps(
+            variables[APPEARANCE_MAPPING],
+            ensure_ascii=False,
+        )
         runner = _PhaseRecordingRunner()
 
         flow._run_all_script_batches(
@@ -2469,6 +2496,11 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertIn('"scene_name":"玻璃会议室"', write_call["scenes_text"])
         self.assertNotIn("outfit_requirements", write_call["scenes_text"])
         self.assertEqual(str(variables[CHARACTERS]), original_characters)
+        self.assertEqual(str(variables[SCENES]), original_scenes)
+        self.assertEqual(
+            json.dumps(variables[APPEARANCE_MAPPING], ensure_ascii=False),
+            original_appearance_mapping,
+        )
 
     def test_script_memory_answertext_is_accepted_and_invalid_memory_does_not_pollute_batch(self) -> None:
         state, payload, variables, batches = self._script_ready_state(5)

@@ -15,11 +15,15 @@ from workflow_code_skeleton.app.services.fastgpt_client import (
     logger as fastgpt_client_logger,
 )
 from workflow_code_skeleton.app.services.fastgpt_contracts import (
+    APPEARANCE_MAPPING,
     CHARACTER_COUNT,
     EPISODE_PLAN,
     SCRIPT_TITLE,
+    STAGE_APPEARANCE_ALIAS_GENERATION,
+    STAGE_CHARACTERS,
     STAGE_FRAMEWORK,
     STAGE_FRAMEWORK_NATURALIZE,
+    STAGE_SCENES,
     STAGE_WORLDVIEW_NATURALIZE,
     STORY_OUTLINE,
     TOTAL_EPISODES,
@@ -27,6 +31,18 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     USER_EXPECTATION,
     USER_SCENES,
     contract_for,
+)
+from workflow_code_skeleton.app.workflow_ids import (
+    APPEARANCE_MAPPING_VAR,
+    CHARACTER_VAR,
+    SCENE_VAR,
+)
+from workflow_code_skeleton.tests.test_stage_output_repair import (
+    _appearance_input_variables,
+    _appearance_mapping_json,
+    _character_setting_json,
+    _input_variables,
+    _scene_setting_json,
 )
 
 
@@ -144,6 +160,9 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         self._original_http_retries = settings.fastgpt_http_retries
         self._original_warn_chars = settings.fastgpt_stage_payload_warn_chars
         self._original_hard_chars = settings.fastgpt_stage_payload_hard_chars
+        self._original_characters_detail = settings.fastgpt_characters_detail
+        self._original_scenes_detail = settings.fastgpt_scenes_detail
+        self._original_appearance_detail = settings.fastgpt_appearance_alias_generation_detail
         settings.fastgpt_stage_local_restart_retries = 0
 
     def tearDown(self) -> None:
@@ -151,6 +170,9 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         settings.fastgpt_http_retries = self._original_http_retries
         settings.fastgpt_stage_payload_warn_chars = self._original_warn_chars
         settings.fastgpt_stage_payload_hard_chars = self._original_hard_chars
+        settings.fastgpt_characters_detail = self._original_characters_detail
+        settings.fastgpt_scenes_detail = self._original_scenes_detail
+        settings.fastgpt_appearance_alias_generation_detail = self._original_appearance_detail
 
     def test_framework_answertext_script_title_alias_normalizes_without_retry(self) -> None:
         response = {
@@ -392,6 +414,7 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
     def test_payload_warn_limit_logs_length_summary(self) -> None:
         settings.fastgpt_stage_payload_warn_chars = 50
         settings.fastgpt_stage_payload_hard_chars = 10000
+        huge_expectation = "Z" * 400
         response = {
             "responseData": [
                 {
@@ -405,13 +428,21 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         client = _QueuedFastGPTClient([response])
 
         with self.assertLogs(fastgpt_client_logger.name, level="WARNING") as logs:
-            output = client.run_stage(STAGE_FRAMEWORK, _framework_inputs())
+            output = client.run_stage(
+                STAGE_FRAMEWORK,
+                {
+                    TOTAL_EPISODES: 10,
+                    USER_EXPECTATION: huge_expectation,
+                    CHARACTER_COUNT: 4,
+                },
+            )
 
         self.assertEqual(output[SCRIPT_TITLE], "长夜回潮")
         self.assertEqual(client.request_count, 1)
         joined = "\n".join(logs.output)
         self.assertIn("payload 过大", joined)
         self.assertIn("最大字段", joined)
+        self.assertNotIn(huge_expectation, joined)
         debug_info = client.get_last_stage_debug_info(STAGE_FRAMEWORK)
         self.assertIn("payload_stats", debug_info)
         self.assertGreater(int(debug_info["payload_stats"]["body_chars"]), 50)
@@ -419,14 +450,93 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
     def test_payload_hard_limit_blocks_request_before_http(self) -> None:
         settings.fastgpt_stage_payload_warn_chars = 50
         settings.fastgpt_stage_payload_hard_chars = 100
+        huge_expectation = "Q" * 400
         client = _QueuedFastGPTClient([])
 
         with self.assertRaises(FastGPTPayloadTooLargeError) as ctx:
-            client.run_stage(STAGE_FRAMEWORK, _framework_inputs())
+            client.run_stage(
+                STAGE_FRAMEWORK,
+                {
+                    TOTAL_EPISODES: 10,
+                    USER_EXPECTATION: huge_expectation,
+                    CHARACTER_COUNT: 4,
+                },
+            )
 
         self.assertEqual(client.request_count, 0)
         self.assertIn("请求体过大", str(ctx.exception))
         self.assertEqual(ctx.exception.stage_name, STAGE_FRAMEWORK)
+        self.assertNotIn(huge_expectation, str(ctx.exception))
+        self.assertTrue(bool(ctx.exception.largest_variables))
+
+    def test_detail_false_characters_stage_still_extracts_formal_output(self) -> None:
+        settings.fastgpt_characters_detail = False
+        response = {
+            "responseData": {
+                "updateVarResult": [
+                    {
+                        "variable": ["VARIABLE_NODE_ID", CHARACTER_VAR],
+                        "value": json.dumps(_character_setting_json(), ensure_ascii=False),
+                    }
+                ]
+            }
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(STAGE_CHARACTERS, _input_variables())
+
+        parsed = json.loads(output["characters"])
+        self.assertEqual(parsed["character_setting"]["characters"][0]["character_name"], "林夏")
+        self.assertFalse(client.get_last_stage_debug_info(STAGE_CHARACTERS).get("request_detail"))
+
+    def test_detail_false_scenes_stage_still_extracts_formal_output(self) -> None:
+        settings.fastgpt_scenes_detail = False
+        response = {
+            "responseData": {
+                "updateVarResult": [
+                    {
+                        "variable": ["VARIABLE_NODE_ID", SCENE_VAR],
+                        "value": json.dumps(_scene_setting_json(), ensure_ascii=False),
+                    }
+                ]
+            }
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(STAGE_SCENES, _input_variables())
+
+        parsed = json.loads(output["scenes"])
+        self.assertEqual(parsed["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
+        self.assertFalse(client.get_last_stage_debug_info(STAGE_SCENES).get("request_detail"))
+
+    def test_detail_false_appearance_stage_still_extracts_formal_output(self) -> None:
+        settings.fastgpt_appearance_alias_generation_detail = False
+        response = {
+            "responseData": {
+                "variableUpdate": {
+                    APPEARANCE_MAPPING_VAR: json.dumps(
+                        _appearance_mapping_json(),
+                        ensure_ascii=False,
+                    )
+                }
+            }
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(
+            STAGE_APPEARANCE_ALIAS_GENERATION,
+            _appearance_input_variables(),
+        )
+
+        self.assertEqual(
+            output[APPEARANCE_MAPPING]["characters"][0]["canonical_name"],
+            "林夏",
+        )
+        self.assertFalse(
+            client.get_last_stage_debug_info(
+                STAGE_APPEARANCE_ALIAS_GENERATION
+            ).get("request_detail")
+        )
 
 
 if __name__ == "__main__":

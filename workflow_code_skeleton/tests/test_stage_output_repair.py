@@ -326,6 +326,12 @@ def _appearance_mapping_json() -> dict[str, object]:
     }
 
 
+def _appearance_mapping_with_principle(principle: str) -> dict[str, object]:
+    payload = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
+    payload["appearance_mapping"]["mapping_principle"] = principle
+    return payload
+
+
 def _appearance_input_variables() -> dict[str, str]:
     variables = _input_variables()
     variables[CHARACTERS] = json.dumps(_character_setting_json(), ensure_ascii=False)
@@ -798,24 +804,45 @@ class StageOutputRepairTests(unittest.TestCase):
         mapping = result[APPEARANCE_MAPPING]
         self.assertEqual(mapping["characters"][0]["canonical_name"], "林夏")
 
-    def test_appearance_mapping_answer_text_json_passes(self) -> None:
+    def test_appearance_mapping_choices_json_object_passes(self) -> None:
         result = self._extract(
             STAGE_APPEARANCE_ALIAS_GENERATION,
-            {"answerText": json.dumps(_appearance_mapping_json(), ensure_ascii=False)},
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                _appearance_mapping_json(),
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            },
         )
         mapping = result[APPEARANCE_MAPPING]
         self.assertEqual(mapping["scene_level_usage_plan"][0]["scene_name"], "玻璃会议室")
 
-    def test_appearance_mapping_wrapped_in_legacy_alias_string_passes(self) -> None:
-        wrapped = {
-            APPEARANCE_MAPPING_VAR: json.dumps(_appearance_mapping_json(), ensure_ascii=False)
+    def test_appearance_mapping_wrapped_in_answer_node_alias_string_passes(self) -> None:
+        answer_node = {
+            APPEARANCE_MAPPING_VAR: json.dumps(
+                _appearance_mapping_json(),
+                ensure_ascii=False,
+            )
         }
         result = self._extract(
             STAGE_APPEARANCE_ALIAS_GENERATION,
-            {"answerText": json.dumps(wrapped, ensure_ascii=False)},
+            {"responseData": {"answerNode": answer_node}},
         )
         mapping = result[APPEARANCE_MAPPING]
         self.assertEqual(mapping["characters"][0]["outfit_variants"][0]["alias_name"], "林夏【会议室交锋态】")
+
+    def test_appearance_answer_text_json_is_not_formal_output(self) -> None:
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {"answerText": json.dumps(_appearance_mapping_json(), ensure_ascii=False)},
+            )
 
     def test_appearance_mapping_wrapped_in_update_var_result_passes(self) -> None:
         data = {
@@ -838,7 +865,7 @@ class StageOutputRepairTests(unittest.TestCase):
 
         result = self._extract(
             STAGE_APPEARANCE_ALIAS_GENERATION,
-            {"answerText": json.dumps(broken, ensure_ascii=False)},
+            {"output": broken},
         )
 
         mapping = result[APPEARANCE_MAPPING]
@@ -861,7 +888,7 @@ class StageOutputRepairTests(unittest.TestCase):
             [],
         )
 
-    def test_appearance_empty_h2kpLm91_uses_answer_text_json(self) -> None:
+    def test_appearance_empty_h2kpLm91_uses_choices_json_object(self) -> None:
         client = _QueuedFastGPTClient(
             [
                 {
@@ -869,8 +896,17 @@ class StageOutputRepairTests(unittest.TestCase):
                         "newVariables": [
                             {"key": APPEARANCE_MAPPING_VAR, "value": ""},
                         ],
-                        "answerText": json.dumps(_appearance_mapping_json(), ensure_ascii=False),
-                    }
+                    },
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    _appearance_mapping_json(),
+                                    ensure_ascii=False,
+                                )
+                            }
+                        }
+                    ],
                 }
             ]
         )
@@ -896,11 +932,20 @@ class StageOutputRepairTests(unittest.TestCase):
                         "newVariables": [
                             {"key": APPEARANCE_MAPPING_VAR, "value": ""},
                         ],
-                        "answerText": "核心场景：玻璃会议室、深夜办公区、合租公寓。",
+                        "answerNode": {
+                            APPEARANCE_MAPPING_VAR: "核心场景：玻璃会议室、深夜办公区、合租公寓。"
+                        },
                     }
                 },
                 {
-                    "answerText": json.dumps(_appearance_mapping_json(), ensure_ascii=False),
+                    "responseData": {
+                        "answerNode": {
+                            APPEARANCE_MAPPING_VAR: json.dumps(
+                                _appearance_mapping_json(),
+                                ensure_ascii=False,
+                            )
+                        }
+                    },
                 },
             ]
         )
@@ -922,6 +967,98 @@ class StageOutputRepairTests(unittest.TestCase):
             any("核心场景" in str(item.get("reason") or "") for item in summaries)
         )
 
+    def test_appearance_root_newvariables_beats_update_var_result_and_variable_update(self) -> None:
+        preferred = _appearance_mapping_with_principle("FROM_ROOT_NEWVARIABLES")
+        update_result = _appearance_mapping_with_principle("FROM_ROOT_UPDATEVARRESULT")
+        variable_update = _appearance_mapping_with_principle("FROM_RESPONSE_VARIABLEUPDATE")
+
+        result = self._extract(
+            STAGE_APPEARANCE_ALIAS_GENERATION,
+            {
+                "newVariables": {
+                    APPEARANCE_MAPPING_VAR: json.dumps(preferred, ensure_ascii=False)
+                },
+                "updateVarResult": {
+                    APPEARANCE_MAPPING_VAR: json.dumps(update_result, ensure_ascii=False)
+                },
+                "responseData": {
+                    "variableUpdate": {
+                        APPEARANCE_MAPPING_VAR: json.dumps(
+                            variable_update,
+                            ensure_ascii=False,
+                        )
+                    }
+                },
+            },
+        )
+
+        self.assertEqual(
+            result[APPEARANCE_MAPPING]["mapping_principle"],
+            "FROM_ROOT_NEWVARIABLES",
+        )
+
+    def test_appearance_variable_update_beats_answer_node(self) -> None:
+        variable_update = _appearance_mapping_with_principle("FROM_RESPONSE_VARIABLEUPDATE")
+        answer_node = _appearance_mapping_with_principle("FROM_ANSWER_NODE")
+
+        result = self._extract(
+            STAGE_APPEARANCE_ALIAS_GENERATION,
+            {
+                "responseData": {
+                    "variableUpdate": {
+                        APPEARANCE_MAPPING_VAR: json.dumps(
+                            variable_update,
+                            ensure_ascii=False,
+                        )
+                    },
+                    "answerNode": {
+                        APPEARANCE_MAPPING_VAR: json.dumps(
+                            answer_node,
+                            ensure_ascii=False,
+                        )
+                    },
+                }
+            },
+        )
+
+        self.assertEqual(
+            result[APPEARANCE_MAPPING]["mapping_principle"],
+            "FROM_RESPONSE_VARIABLEUPDATE",
+        )
+
+    def test_appearance_answer_node_beats_choices(self) -> None:
+        answer_node = _appearance_mapping_with_principle("FROM_ANSWER_NODE")
+        choice_payload = _appearance_mapping_with_principle("FROM_CHOICES")
+
+        result = self._extract(
+            STAGE_APPEARANCE_ALIAS_GENERATION,
+            {
+                "responseData": {
+                    "answerNode": {
+                        APPEARANCE_MAPPING_VAR: json.dumps(
+                            answer_node,
+                            ensure_ascii=False,
+                        )
+                    }
+                },
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                choice_payload,
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(
+            result[APPEARANCE_MAPPING]["mapping_principle"],
+            "FROM_ANSWER_NODE",
+        )
+
     def test_appearance_natural_language_is_not_formal_output(self) -> None:
         with self.assertRaises(ValueError):
             self._extract(
@@ -941,7 +1078,13 @@ class StageOutputRepairTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._extract(
                 STAGE_APPEARANCE_ALIAS_GENERATION,
-                {"answerText": "核心场景：玻璃会议室、深夜开放办公区、合租公寓玄关"},
+                {
+                    "responseData": {
+                        "answerNode": {
+                            APPEARANCE_MAPPING_VAR: "核心场景：玻璃会议室、深夜开放办公区、合租公寓玄关"
+                        }
+                    }
+                },
             )
 
     def test_appearance_mapping_string_is_rejected(self) -> None:
@@ -949,10 +1092,9 @@ class StageOutputRepairTests(unittest.TestCase):
             self._extract(
                 STAGE_APPEARANCE_ALIAS_GENERATION,
                 {
-                    "answerText": json.dumps(
-                        {APPEARANCE_MAPPING: "核心场景：玻璃会议室与合租公寓。"},
-                        ensure_ascii=False,
-                    )
+                    "output": {
+                        APPEARANCE_MAPPING: "林夏会议室交锋态",
+                    }
                 },
             )
 
@@ -960,7 +1102,7 @@ class StageOutputRepairTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._extract(
                 STAGE_APPEARANCE_ALIAS_GENERATION,
-                {"answerText": json.dumps(_scene_setting_json(), ensure_ascii=False)},
+                {"output": _scene_setting_json()},
             )
 
     def test_appearance_core_scene_final_var_is_rejected(self) -> None:
@@ -1147,7 +1289,16 @@ class StageOutputRepairTests(unittest.TestCase):
         client = _QueuedFastGPTClient(
             [
                 {
-                    "answerText": json.dumps(_appearance_mapping_json(), ensure_ascii=False),
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    _appearance_mapping_json(),
+                                    ensure_ascii=False,
+                                )
+                            }
+                        }
+                    ],
                     "responseData": {
                         "updateVarResult": [
                             {
@@ -1175,7 +1326,7 @@ class StageOutputRepairTests(unittest.TestCase):
         broken["appearance_mapping"]["characters"][0]["default_name"] = ""
         result = self._extract(
             STAGE_APPEARANCE_ALIAS_GENERATION,
-            {"answerText": json.dumps(broken, ensure_ascii=False)},
+            {"output": broken},
         )
         self.assertEqual(
             result[APPEARANCE_MAPPING]["characters"][0]["default_name"],
