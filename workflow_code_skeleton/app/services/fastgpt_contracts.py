@@ -446,6 +446,14 @@ def describe_stage_output_shape_issue(
     if _is_dialogue_payload_stage(stage_name) and field_name == BATCH_DIALOGUES:
         if not isinstance(value, dict):
             return "必须是 object"
+        nested_value = value.get(BATCH_DIALOGUES)
+        if isinstance(nested_value, str):
+            try:
+                nested_value = parse_json(nested_value)
+            except Exception:
+                nested_value = nested_value
+        if isinstance(nested_value, dict):
+            value = nested_value
         required = {"batch_meta", "character_voice_bibles", "episode_dialogue_blocks"}
         extra = sorted(set(value.keys()) - required)
         missing = sorted(required - set(value.keys()))

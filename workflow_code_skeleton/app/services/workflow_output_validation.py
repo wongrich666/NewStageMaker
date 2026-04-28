@@ -141,6 +141,7 @@ def validate_stage_output_with_workflow_contract(
         "matched_aliases": matched_aliases,
         "raw_output_source": "stage_output",
         "fallback_used": False,
+        "workflow_warnings": [],
     }
 
     kind = spec.expected_output_kind
@@ -171,6 +172,16 @@ def validate_stage_output_with_workflow_contract(
         for key in ("summary", "non_blocking_issues", "rewrite_start_episode", "stage"):
             if key in payload:
                 normalized[key] = payload[key]
+        if spec.stage_name == "script_review":
+            review_issues, review_warnings = _script_review_contract_issues(payload)
+            if review_issues:
+                raise WorkflowOutputValidationError(
+                    f"{spec.stage_name} 审核输出未通过格式契约校验",
+                    issues=review_issues,
+                    normalized_output=normalized,
+                    matched_aliases=matched_aliases,
+                )
+            meta["workflow_warnings"] = review_warnings
         meta["normalized_preview"] = _preview(normalized)
         return normalized, meta
 
@@ -441,8 +452,22 @@ def _normalize_batch_json_candidate(value: Any, *, canonical_name: str) -> dict[
             f"{canonical_name} 输出必须是 JSON object",
             issues=[f"{canonical_name} 输出必须是 JSON object"],
         )
-    if isinstance(candidate.get(canonical_name), dict):
-        candidate = candidate[canonical_name]
+    nested_candidate = candidate.get(canonical_name)
+    if isinstance(nested_candidate, str):
+        try:
+            nested_candidate = parse_json(nested_candidate)
+        except Exception:
+            nested_candidate = nested_candidate
+    if isinstance(nested_candidate, dict):
+        candidate = nested_candidate
+        nested_inner = candidate.get(canonical_name)
+        if isinstance(nested_inner, str):
+            try:
+                nested_inner = parse_json(nested_inner)
+            except Exception:
+                nested_inner = nested_inner
+        if isinstance(nested_inner, dict):
+            candidate = nested_inner
     if not isinstance(candidate, dict):
         raise WorkflowOutputValidationError(
             f"{canonical_name} 输出必须归一化为 object",
@@ -469,6 +494,34 @@ def _required_memory_keys(kind: str) -> set[str]:
         "must_carry_into_next_turn",
         "appearance_continuity_summary",
     }
+
+
+def _script_review_contract_issues(payload: dict[str, Any]) -> tuple[list[str], list[str]]:
+    issues: list[str] = []
+    warnings: list[str] = []
+    if "summary" not in payload:
+        issues.append("script_review output missing required key: summary")
+    if "non_blocking_issues" not in payload:
+        issues.append("script_review output missing required key: non_blocking_issues")
+    elif not isinstance(payload.get("non_blocking_issues"), list):
+        issues.append("script_review output key non_blocking_issues must be array")
+    if "rewrite_start_episode" not in payload:
+        issues.append("script_review output missing required key: rewrite_start_episode")
+    else:
+        rewrite_start = payload.get("rewrite_start_episode")
+        if isinstance(rewrite_start, bool) or not isinstance(rewrite_start, int):
+            issues.append("script_review output key rewrite_start_episode must be int")
+    if "stage" not in payload:
+        issues.append("script_review output missing required key: stage")
+    else:
+        stage_value = str(payload.get("stage") or "").strip()
+        if not stage_value:
+            issues.append("script_review output key stage must be non-empty string")
+        elif stage_value != "five_episode_continuity_review":
+            warnings.append(
+                f"script_review output stage is '{stage_value}', expected 'five_episode_continuity_review'"
+            )
+    return issues, warnings
 
 
 def _strict_memory_json_is_valid(value: Any, *, required_keys: set[str]) -> bool:

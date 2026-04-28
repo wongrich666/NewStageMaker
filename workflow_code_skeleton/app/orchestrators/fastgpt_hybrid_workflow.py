@@ -1048,7 +1048,7 @@ def _review_aliases_for_stage_key(stage_key: str) -> tuple[str, tuple[str, ...]]
 def _ensure_dialogue_revise_workflow_available() -> None:
     workflow_path = _workflow_json_path("角色对话修订.json")
     try:
-        text = workflow_path.read_text(encoding="utf-8")
+        text = workflow_path.read_text(encoding="utf-8-sig")
     except FileNotFoundError as exc:
         raise ValueError(
             "角色对白审核未通过，但缺少真正的角色对话修订 workflow："
@@ -2171,13 +2171,14 @@ def _run_script_batches(
             set_with_aliases(variables, BATCH_SCRIPT, batch_script, SCRIPT_BATCH_ALIASES)
 
         memory_progress = 78 + int(((actual_index + 1) / total_batches) * 20)
+        previous_script_memory = _bounded_script_memory(variables.get(LAST_SUMMARY))
         memory_output = run_stage_with_contract_guard(
             state,
             runner,
             STAGE_SCRIPT_MEMORY,
             {
                 BATCH_SCRIPT: batch_script,
-                LAST_SUMMARY: _bounded_script_memory(variables.get(LAST_SUMMARY)),
+                LAST_SUMMARY: previous_script_memory,
                 APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING) or {},
                 CHARACTER_ALIAS_NAMING_RULES: variables.get(CHARACTER_ALIAS_NAMING_RULES) or "",
             },
@@ -2199,14 +2200,22 @@ def _run_script_batches(
 
         # memory 阶段不是历史归档，而是“覆盖式滚动记忆”。
         # 下一批 script 只吃最新摘要，避免把越来越长的原文不断回灌给模型。
-        new_script_memory = _bounded_script_memory(
-            get_with_aliases(
-                memory_output,
-                LAST_SUMMARY,
-                SCRIPT_MEMORY_ALIASES,
-                memory_output.get(LAST_SUMMARY) or memory_output.get("answerText"),
+        memory_artifact = state.get_output(STAGE_SCRIPT_MEMORY, "contract_guard", {})
+        if memory_artifact.get("fallback_used"):
+            new_script_memory = previous_script_memory
+            logger.warning(
+                "剧本正文摘要 %s 输出非法，保留上一批有效记忆。",
+                batch.label,
             )
-        )
+        else:
+            new_script_memory = _bounded_script_memory(
+                get_with_aliases(
+                    memory_output,
+                    LAST_SUMMARY,
+                    SCRIPT_MEMORY_ALIASES,
+                    memory_output.get(LAST_SUMMARY) or memory_output.get("answerText"),
+                )
+            )
         set_with_aliases(variables, SCRIPT_MEMORY, new_script_memory, SCRIPT_MEMORY_ALIASES)
         variables[LAST_SUMMARY] = new_script_memory
         variables[APPEARANCE_CONTINUITY_MEMORY] = _update_appearance_continuity_memory(
@@ -2660,10 +2669,15 @@ def _normalize_batch_dialogues_payload(value: Any) -> dict[str, Any] | None:
     if not payload:
         return None
     candidate = payload.get(BATCH_DIALOGUES)
+    if isinstance(candidate, str) and candidate.strip():
+        candidate = _dict_or_empty(candidate)
     if isinstance(candidate, dict):
         payload = copy.deepcopy(candidate)
-    if isinstance(payload.get(BATCH_DIALOGUES), dict):
-        payload = copy.deepcopy(payload[BATCH_DIALOGUES])
+    nested_candidate = payload.get(BATCH_DIALOGUES)
+    if isinstance(nested_candidate, str) and nested_candidate.strip():
+        nested_candidate = _dict_or_empty(nested_candidate)
+    if isinstance(nested_candidate, dict):
+        payload = copy.deepcopy(nested_candidate)
     if isinstance(payload.get("batch_meta"), dict) and isinstance(payload.get("episode_dialogue_blocks"), list):
         return payload
     return None
@@ -2766,18 +2780,57 @@ def validate_batch_dialogues(value: Any, batch: BatchWindow) -> list[str]:
             if not isinstance(item, dict):
                 continue
             episode = _safe_int(item.get("episode"), 0)
+            nested_blocks = item.get("dialogue_blocks")
+            if isinstance(nested_blocks, list):
+                if not nested_blocks:
+                    issues.append(f"dialogue episode {episode or '?'} dialogue_blocks is empty")
+                    continue
+                nested_valid = False
+                for block_index, block in enumerate(nested_blocks, start=1):
+                    if not isinstance(block, dict):
+                        issues.append(
+                            f"dialogue episode {episode or '?'} dialogue_block {block_index} must be object"
+                        )
+                        continue
+                    dialogues = block.get("dialogues")
+                    if not isinstance(dialogues, list) or not dialogues:
+                        issues.append(
+                            f"dialogue episode {episode or '?'} dialogue_block {block_index} dialogues is empty"
+                        )
+                        continue
+                    block_has_valid_dialogue = False
+                    for dialogue_index, dialogue in enumerate(dialogues, start=1):
+                        if not isinstance(dialogue, dict):
+                            issues.append(
+                                f"dialogue episode {episode or '?'} dialogue_block {block_index} dialogue {dialogue_index} must be object"
+                            )
+                            continue
+                        speaker = str(dialogue.get("speaker") or "").strip()
+                        line = str(dialogue.get("line") or "").strip()
+                        if not speaker or not line:
+                            issues.append(
+                                f"dialogue episode {episode or '?'} dialogue_block {block_index} dialogue {dialogue_index} speaker/line is empty"
+                            )
+                            continue
+                        block_has_valid_dialogue = True
+                    nested_valid = nested_valid or block_has_valid_dialogue
+                if not nested_valid:
+                    issues.append(
+                        f"dialogue episode {episode or '?'} has no valid nested dialogues"
+                    )
+                continue
+
             block_text = str(item.get("dialogue_block") or item.get("content") or "").strip()
-            lines = item.get("dialogue_lines")
-            if not block_text and not lines:
-                issues.append(f"dialogue episode {episode or '?'} block is empty")
             participants = item.get("participants")
             speaker = item.get("speaker")
             if "participants" in item and not _has_value(participants):
                 issues.append(f"dialogue episode {episode or '?'} participants is empty")
             if "speaker" in item and not _has_value(speaker):
                 issues.append(f"dialogue episode {episode or '?'} speaker is empty")
-            if "participants" not in item and "speaker" not in item:
-                issues.append(f"dialogue episode {episode or '?'} missing speaker or participants")
+            if not block_text and not _has_value(participants) and not _has_value(speaker):
+                issues.append(
+                    f"dialogue episode {episode or '?'} missing dialogue_blocks or flat dialogue content"
+                )
     return issues
 
 
@@ -3839,6 +3892,10 @@ def run_stage_with_contract_guard(
                 normalized_preview=validation_meta.get("normalized_preview") or validated_output,
                 fallback_used=bool(validation_meta.get("fallback_used")),
             )
+            workflow_warnings = list(workflow_contract.workflow_warnings)
+            workflow_warnings.extend(validation_meta.get("workflow_warnings", []) or [])
+            if workflow_warnings:
+                artifact["workflow_warnings"] = workflow_warnings
             debug_file_path = ""
             if artifact.get("status") != "validated":
                 debug_file_path = _write_stage_debug_artifact_file(
@@ -3851,8 +3908,8 @@ def run_stage_with_contract_guard(
                 )
                 artifact["debug_file_path"] = debug_file_path
             state.set_output(stage_name, "contract_guard", artifact)
-            if workflow_contract.workflow_warnings:
-                for warning in workflow_contract.workflow_warnings:
+            if workflow_warnings:
+                for warning in workflow_warnings:
                     logger.warning("%s", warning)
             if debug_file_path:
                 logger.warning(
