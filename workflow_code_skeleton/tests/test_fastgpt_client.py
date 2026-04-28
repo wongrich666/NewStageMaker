@@ -10,6 +10,7 @@ from workflow_code_skeleton.app.config import settings
 from workflow_code_skeleton.app.services.fastgpt_client import (
     FastGPTClient,
     FastGPTEndpoint,
+    FastGPTPayloadTooLargeError,
     FastGPTTransientError,
     logger as fastgpt_client_logger,
 )
@@ -18,6 +19,8 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     EPISODE_PLAN,
     SCRIPT_TITLE,
     STAGE_FRAMEWORK,
+    STAGE_FRAMEWORK_NATURALIZE,
+    STAGE_WORLDVIEW_NATURALIZE,
     STORY_OUTLINE,
     TOTAL_EPISODES,
     USER_CHARACTERS,
@@ -139,11 +142,15 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
     def setUp(self) -> None:
         self._original_reruns = settings.fastgpt_stage_local_restart_retries
         self._original_http_retries = settings.fastgpt_http_retries
+        self._original_warn_chars = settings.fastgpt_stage_payload_warn_chars
+        self._original_hard_chars = settings.fastgpt_stage_payload_hard_chars
         settings.fastgpt_stage_local_restart_retries = 0
 
     def tearDown(self) -> None:
         settings.fastgpt_stage_local_restart_retries = self._original_reruns
         settings.fastgpt_http_retries = self._original_http_retries
+        settings.fastgpt_stage_payload_warn_chars = self._original_warn_chars
+        settings.fastgpt_stage_payload_hard_chars = self._original_hard_chars
 
     def test_framework_answertext_script_title_alias_normalizes_without_retry(self) -> None:
         response = {
@@ -353,6 +360,73 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
                 )
 
         self.assertEqual(mock_post.call_args.kwargs.get("timeout"), 17)
+
+    def test_unstructured_stage_prefers_unstructured_api_key(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "FASTGPT_UNSTRUCTURED_API_KEY": "unstructured-key",
+                "FASTGPT_API_KEY": "default-key",
+            },
+            clear=False,
+        ):
+            client = FastGPTClient()
+            endpoint = client._endpoint_for(STAGE_FRAMEWORK_NATURALIZE)
+
+        self.assertEqual(endpoint.api_key, "unstructured-key")
+
+    def test_unstructured_stage_falls_back_to_default_api_key(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "FASTGPT_UNSTRUCTURED_API_KEY": "",
+                "FASTGPT_API_KEY": "default-key",
+            },
+            clear=False,
+        ):
+            client = FastGPTClient()
+            endpoint = client._endpoint_for(STAGE_WORLDVIEW_NATURALIZE)
+
+        self.assertEqual(endpoint.api_key, "default-key")
+
+    def test_payload_warn_limit_logs_length_summary(self) -> None:
+        settings.fastgpt_stage_payload_warn_chars = 200
+        settings.fastgpt_stage_payload_hard_chars = 10000
+        response = {
+            "responseData": [
+                {
+                    "answerText": json.dumps(
+                        _framework_payload(title_key="script_title"),
+                        ensure_ascii=False,
+                    )
+                }
+            ]
+        }
+        client = _QueuedFastGPTClient([response])
+
+        with self.assertLogs(fastgpt_client_logger.name, level="WARNING") as logs:
+            output = client.run_stage(STAGE_FRAMEWORK, _framework_inputs())
+
+        self.assertEqual(output[SCRIPT_TITLE], "长夜回潮")
+        self.assertEqual(client.request_count, 1)
+        joined = "\n".join(logs.output)
+        self.assertIn("payload 过大", joined)
+        self.assertIn("最大字段", joined)
+        debug_info = client.get_last_stage_debug_info(STAGE_FRAMEWORK)
+        self.assertIn("payload_stats", debug_info)
+        self.assertGreater(int(debug_info["payload_stats"]["body_chars"]), 200)
+
+    def test_payload_hard_limit_blocks_request_before_http(self) -> None:
+        settings.fastgpt_stage_payload_warn_chars = 50
+        settings.fastgpt_stage_payload_hard_chars = 100
+        client = _QueuedFastGPTClient([])
+
+        with self.assertRaises(FastGPTPayloadTooLargeError) as ctx:
+            client.run_stage(STAGE_FRAMEWORK, _framework_inputs())
+
+        self.assertEqual(client.request_count, 0)
+        self.assertIn("请求体过大", str(ctx.exception))
+        self.assertEqual(ctx.exception.stage_name, STAGE_FRAMEWORK)
 
 
 if __name__ == "__main__":

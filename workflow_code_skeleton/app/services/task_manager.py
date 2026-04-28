@@ -33,6 +33,7 @@ from .fastgpt_contracts import (
     EPISODE_ALIAS_PLAN,
     EPISODE_PLAN,
     FINAL_SCRIPT,
+    FRAMEWORK_NATURAL_LANGUAGE,
     IS_CONSISTENT,
     LAST_SUMMARY,
     NORMALIZED_EPISODE_PLAN,
@@ -46,6 +47,7 @@ from .fastgpt_contracts import (
     USER_CONTENT_BASELINE,
     USER_SCENES,
     WORLDVIEW,
+    WORLDVIEW_NATURAL_LANGUAGE,
 )
 from .workflow_spec import WorkflowSpec
 from ..utils.logger import get_logger
@@ -121,11 +123,13 @@ PUBLIC_INPUT_PAYLOAD_KEYS = (
 )
 PUBLIC_ARTIFACT_KEYS = (
     "script_title_content",
+    "framework_natural_language",
     "story_outline",
     "character_bios",
     "core_scene_input",
     "episode_plan",
     "worldview",
+    "worldview_natural_language",
     "character_summary",
     "core_scene_summary",
 )
@@ -140,10 +144,12 @@ COMPLETED_INPUT_PAYLOAD_KEYS = (
 )
 COMPLETED_ARTIFACT_KEYS = (
     "script_title_content",
+    "framework_natural_language",
     "story_outline",
     "normalized_episode_plan",
     "character_summary",
     "core_scene_summary",
+    "worldview_natural_language",
     "appearance_mapping",
     "character_registry",
     "character_alias_registry",
@@ -193,6 +199,12 @@ ROLLBACK_STAGE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("final", "最终剧本拼接"),
 )
 ROLLBACK_STAGE_LABELS = {key: label for key, label in ROLLBACK_STAGE_OPTIONS}
+ROLLBACK_STAGE_DEPENDENCIES: dict[str, tuple[str, ...]] = {
+    "hooks": ("hooks", "dialogues", "script"),
+    "dialogues": ("dialogues", "script"),
+    "script": ("script",),
+}
+ROLLBACK_RANGE_STAGE_KEYS = frozenset(ROLLBACK_STAGE_DEPENDENCIES)
 
 
 def _rollback_stage_index(stage_key: Any) -> int:
@@ -201,6 +213,15 @@ def _rollback_stage_index(stage_key: Any) -> int:
         if key == stage:
             return index
     return -1
+
+
+def _rollback_stage_requires_episode_range(stage_key: Any) -> bool:
+    return _normalize_rollback_stage_key(stage_key) in ROLLBACK_RANGE_STAGE_KEYS
+
+
+def _rollback_stage_dependency_keys(stage_key: Any) -> tuple[str, ...]:
+    normalized = _normalize_rollback_stage_key(stage_key)
+    return ROLLBACK_STAGE_DEPENDENCIES.get(normalized, (normalized,))
 DEBUG_VARIABLE_MIRRORS: dict[str, tuple[str, ...]] = {
     script_title_content: (TITLE_VAR,),
     STORY_OUTLINE: (STORY_OUTLINE_VAR,),
@@ -1416,11 +1437,13 @@ class WorkflowRuntime:
             ).strip()
         artifacts = {
             "script_title_content": script_title_content,
+            "framework_natural_language": state.get_var(FRAMEWORK_NATURAL_LANGUAGE, ""),
             "story_outline": state.get_var(STORY_OUTLINE_VAR, ""),
             "character_bios": state.get_var(CHARACTER_BIOS_VAR, ""),
             "episode_plan": state.get_var(EPISODE_PLAN_VAR, ""),
             "normalized_episode_plan": state.get_var(NORMALIZED_EPISODE_PLAN, ""),
             "worldview": state.get_var(WORLDVIEW_VAR, ""),
+            "worldview_natural_language": state.get_var(WORLDVIEW_NATURAL_LANGUAGE, ""),
             "character_summary": state.get_var(
                 CHARACTER_NATURAL_LANGUAGE_VAR,
                 state.get_var(FINAL_CHARACTER_VAR, state.get_var(CHARACTER_VAR, "")),
@@ -2052,7 +2075,7 @@ class TaskManager:
         condensed = " ".join(str(raw_output or "").replace("\r", "\n").split())
         if not condensed:
             return ""
-        return f"当前展示的是{stage_title}阶段的正式结果：{condensed[:180]}"
+        return f"当前展示的是{stage_title}阶段的正式结果"
 
     def _cache_stage_preview(
         self,
@@ -2093,9 +2116,10 @@ class TaskManager:
         display_payload = self._current_stage_display_payload(snapshot, artifacts)
         progress_metrics = self._snapshot_progress_metrics(snapshot)
         rollback_stage_default, rollback_start_episode_default = self._rollback_defaults(snapshot)
-        rollback_script_start_options = (
-            self._script_rollback_start_options(snapshot) if can_stage_rollback else []
+        rollback_stage_start_options = (
+            self._rollback_stage_start_options(snapshot) if can_stage_rollback else {}
         )
+        rollback_script_start_options = rollback_stage_start_options.get("script", [])
         rollback_stage_options = self._available_rollback_stage_options(snapshot) if can_stage_rollback else []
         payload: dict[str, Any] = {
             "project_id": snapshot.get("project_id"),
@@ -2126,8 +2150,13 @@ class TaskManager:
                 {"key": key, "label": label} for key, label in rollback_stage_options
             ] if can_stage_rollback else [],
             "rollback_stage_default": rollback_stage_default if can_stage_rollback else "",
+            "rollback_stage_start_options": rollback_stage_start_options if can_stage_rollback else {},
             "rollback_script_start_options": rollback_script_start_options,
             "rollback_start_episode_default": rollback_start_episode_default if can_stage_rollback else None,
+            "rollback_stage_dependencies": {
+                stage_key: list(dependencies)
+                for stage_key, dependencies in ROLLBACK_STAGE_DEPENDENCIES.items()
+            } if can_stage_rollback else {},
             "display_stage_key": display_payload["stage_key"],
             "display_stage_title": display_payload["stage_title"],
             "display_stage_output": display_payload["output"],
@@ -2139,6 +2168,91 @@ class TaskManager:
         # 有意不把 debug_state / logs / 内部控制位直接暴露给前端。
         # 前端只看正式字段，避免中间变量、节点回显和恢复指针泄漏到公开接口。
         return payload
+
+    def _rollback_stage_start_options(
+        self,
+        snapshot: dict[str, Any],
+    ) -> dict[str, list[dict[str, Any]]]:
+        return {
+            stage_key: self._batched_stage_rollback_start_options(snapshot, stage_key)
+            for stage_key in ("hooks", "dialogues", "script")
+        }
+
+    def _batched_stage_rollback_start_options(
+        self,
+        snapshot: dict[str, Any],
+        stage_key: str,
+    ) -> list[dict[str, Any]]:
+        normalized_stage = _normalize_rollback_stage_key(stage_key)
+        if normalized_stage == "script":
+            return self._script_rollback_start_options(snapshot)
+        if normalized_stage not in {"hooks", "dialogues"}:
+            return []
+
+        debug_state = snapshot.get("debug_state") or {}
+        variables = debug_state.get("variables") if isinstance(debug_state, dict) else {}
+        if not isinstance(variables, dict):
+            variables = {}
+
+        total_episodes = int(snapshot.get("total_episodes") or 0)
+        batch_size = max(1, int(settings.batch_size or 5))
+        if total_episodes <= 0:
+            return []
+
+        batches = list(iter_episode_batches(total_episodes, batch_size=batch_size))
+        interrupted_start = self._interrupted_batch_start_episode(snapshot)
+        next_unfinished = (
+            self._next_unfinished_object_batch_start(variables.get(ALL_HOOKS), batches)
+            if normalized_stage == "hooks"
+            else self._next_unfinished_object_batch_start(variables.get(ALL_DIALOGUES), batches)
+        )
+
+        candidate_starts = [batch.start_episode for batch in batches if batch.start_episode < next_unfinished]
+        if 1 <= next_unfinished <= total_episodes:
+            candidate_starts.append(next_unfinished)
+        if interrupted_start and 1 <= interrupted_start <= total_episodes:
+            candidate_starts.append(interrupted_start)
+        if not candidate_starts and batches:
+            candidate_starts = [batches[0].start_episode]
+
+        return [
+            self._build_rollback_start_option(
+                normalized_stage,
+                total_episodes=total_episodes,
+                start_episode=start_episode,
+            )
+            for start_episode in sorted(set(candidate_starts))
+        ]
+
+    def _build_rollback_start_option(
+        self,
+        stage_key: str,
+        *,
+        total_episodes: int,
+        start_episode: int,
+        allow_script_episode_labels: bool = False,
+    ) -> dict[str, Any]:
+        batch_size = max(1, int(settings.batch_size or 5))
+        end_episode = min(total_episodes, start_episode + batch_size - 1)
+        dependencies = list(_rollback_stage_dependency_keys(stage_key))
+
+        if stage_key == "hooks":
+            label = f"从第 {start_episode}-{end_episode} 集开始重写开头冲突钩子（将联动重写角色对白与剧本正文）"
+        elif stage_key == "dialogues":
+            label = f"从第 {start_episode}-{end_episode} 集开始重写角色对白（将联动重写剧本正文）"
+        elif stage_key == "script" and allow_script_episode_labels:
+            label = f"从第 {start_episode} 集开始重写正文（本轮将覆盖第 {start_episode}-{end_episode} 集及后续）"
+        else:
+            label = f"从第 {start_episode}-{end_episode} 集开始重写剧本正文"
+
+        return {
+            "value": start_episode,
+            "label": label,
+            "start_episode": start_episode,
+            "end_episode": end_episode,
+            "stage_key": stage_key,
+            "affected_stages": dependencies,
+        }
 
     def _script_rollback_start_options(self, snapshot: dict[str, Any]) -> list[dict[str, Any]]:
         debug_state = snapshot.get("debug_state") or {}
@@ -2162,22 +2276,18 @@ class TaskManager:
         else:
             candidate_starts = [interrupted_start] if interrupted_start else batch_starts[:1]
 
-        if interrupted_start and interrupted_start not in candidate_starts:
+        if interrupted_start and 1 <= interrupted_start <= total_episodes and interrupted_start not in candidate_starts:
             candidate_starts = sorted({*candidate_starts, interrupted_start})
 
         options: list[dict[str, Any]] = []
         for start_episode in candidate_starts:
-            end_episode = min(total_episodes, start_episode + batch_size - 1)
-            label = (
-                f"从第 {start_episode} 集开始重写正文（本轮将覆盖第 {start_episode}-{end_episode} 集及后续）"
-                if script_episodes
-                else f"从第 {start_episode}-{end_episode} 集开始重写正文"
-            )
             options.append(
-                {
-                    "value": start_episode,
-                    "label": label,
-                }
+                self._build_rollback_start_option(
+                    "script",
+                    total_episodes=total_episodes,
+                    start_episode=start_episode,
+                    allow_script_episode_labels=bool(script_episodes),
+                )
             )
         return options
 
@@ -2194,7 +2304,11 @@ class TaskManager:
 
         for candidate in (batch_stage, rewrite_stage, current_stage):
             if candidate in {"hooks", "dialogues", "script"}:
-                return candidate, interrupted_start
+                valid_options = self._batched_stage_rollback_start_options(snapshot, candidate)
+                valid_starts = [int(option["value"]) for option in valid_options if _safe_int(option.get("value"), 0) > 0]
+                if interrupted_start in valid_starts:
+                    return candidate, interrupted_start
+                return candidate, valid_starts[-1] if valid_starts else None
 
         for candidate in (batch_stage, rewrite_stage, current_stage):
             if candidate in ROLLBACK_STAGE_LABELS:
@@ -3008,7 +3122,7 @@ class TaskManager:
         stage_key: str,
         start_episode: int | None = None,
     ) -> dict[str, Any]:
-        rollback_stage = str(stage_key or "").strip()
+        rollback_stage = _normalize_rollback_stage_key(stage_key)
         if rollback_stage not in ROLLBACK_STAGE_LABELS:
             raise ValueError("请选择有效的回退阶段")
 
@@ -3029,16 +3143,16 @@ class TaskManager:
 
         _, default_start_episode = self._rollback_defaults(snapshot)
         rollback_start_episode: int | None = None
-        if rollback_stage == "script":
+        if _rollback_stage_requires_episode_range(rollback_stage):
             rollback_start_episode = _safe_int(start_episode, 0) or None
             if rollback_start_episode is None and default_start_episode:
                 rollback_start_episode = int(default_start_episode)
-            rollback_options = self._script_rollback_start_options(snapshot)
+            rollback_options = self._batched_stage_rollback_start_options(snapshot, rollback_stage)
             valid_start_episodes = {int(option["value"]) for option in rollback_options if _safe_int(option.get("value"), 0) > 0}
             if rollback_start_episode is None:
-                raise ValueError("请选择正文开始重写的集数")
+                raise ValueError(f"请选择{ROLLBACK_STAGE_LABELS[rollback_stage]}开始重写的集数范围")
             if rollback_start_episode not in valid_start_episodes:
-                raise ValueError("请选择有效的正文重写起始集数")
+                raise ValueError(f"请选择有效的{ROLLBACK_STAGE_LABELS[rollback_stage]}重写起始集数")
 
         old_task_id = str(snapshot.get("task_id") or "").strip()
         old_record = self._projects.get(project_id)
@@ -3055,7 +3169,7 @@ class TaskManager:
             (snapshot.get("model_option") or {}).get("id")
         )
         stage_label = ROLLBACK_STAGE_LABELS[rollback_stage]
-        if rollback_stage == "script" and rollback_start_episode:
+        if _rollback_stage_requires_episode_range(rollback_stage) and rollback_start_episode:
             batch_size = max(1, int(settings.batch_size or 5))
             end_episode = min(int(snapshot.get("total_episodes") or 0), rollback_start_episode + batch_size - 1)
             stage_label = f"{stage_label}（从第 {rollback_start_episode}-{end_episode} 集开始）"

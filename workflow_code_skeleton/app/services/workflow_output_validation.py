@@ -17,7 +17,7 @@ from .fastgpt_contracts import (
     REVIEW_PASSED,
     REWRITE_REQUIRED,
 )
-from .json_utils import parse_json
+from .json_utils import parse_json, strip_code_fence
 
 
 WORKFLOW_PROMPT_VAR_PATTERN = re.compile(r"\{\{\$VARIABLE_NODE_ID\.([A-Za-z0-9_]+)\$\}\}")
@@ -243,6 +243,49 @@ def validate_stage_output_with_workflow_contract(
                 matched_aliases=matched_aliases,
             )
         meta["fallback_used"] = False
+        meta["normalized_preview"] = _preview(normalized)
+        return normalized, meta
+
+    if kind == "unstructured_natural_language_text":
+        if not isinstance(candidate, str):
+            raise WorkflowOutputValidationError(
+                f"{spec.stage_name} 输出必须是自然语言字符串",
+                issues=[f"{spec.stage_name} 输出不是 string"],
+                matched_aliases=matched_aliases,
+            )
+        text = strip_code_fence(str(candidate or "")).strip()
+        if not text:
+            raise WorkflowOutputValidationError(
+                f"{spec.stage_name} 输出不能为空",
+                issues=[f"{spec.stage_name} 输出为空"],
+                matched_aliases=matched_aliases,
+            )
+        if "```" in str(candidate):
+            raise WorkflowOutputValidationError(
+                f"{spec.stage_name} 输出不能包含 markdown code fence",
+                issues=[f"{spec.stage_name} 输出包含 code fence"],
+                matched_aliases=matched_aliases,
+            )
+        stripped = text.lstrip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            try:
+                parsed = parse_json(stripped)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, (dict, list)):
+                raise WorkflowOutputValidationError(
+                    f"{spec.stage_name} 输出不能是 JSON",
+                    issues=[f"{spec.stage_name} 输出仍是 JSON 结构"],
+                    matched_aliases=matched_aliases,
+                )
+        trivial_prefixes = ("已完成", "以下是", "当然", "好的", "下面是")
+        if any(text.startswith(prefix) for prefix in trivial_prefixes) and len(text) <= 24:
+            raise WorkflowOutputValidationError(
+                f"{spec.stage_name} 输出过于空泛",
+                issues=[f"{spec.stage_name} 输出只有空泛提示语"],
+                matched_aliases=matched_aliases,
+            )
+        normalized = {canonical_name: text}
         meta["normalized_preview"] = _preview(normalized)
         return normalized, meta
 

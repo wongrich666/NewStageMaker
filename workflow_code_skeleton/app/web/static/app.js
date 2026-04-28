@@ -624,10 +624,12 @@
   function normalizeStageKey(stageKey) {
     const mapping = {
       framework: "framework",
+      framework_naturalize: "framework",
       appearance_strategy: "internal",
       consistency: "internal",
       episode_plan_normalize: "internal",
       worldview: "worldview",
+      worldview_naturalize: "worldview",
       character: "characters",
       characters: "characters",
       scene: "scenes",
@@ -649,6 +651,8 @@
   // 把框架阶段的多个正式产物拼成一个完整回复，方便在聊天流里整体展示。
   function frameworkStageOutput(snapshot) {
     const artifacts = snapshot?.artifacts || {};
+    const natural = String(artifacts.framework_natural_language || "").trim();
+    if (natural) return natural;
     const parts = [];
     const title = String(artifacts.script_title_content || "").trim();
     const storyOutline = String(artifacts.story_outline || "").trim();
@@ -679,7 +683,7 @@
       {
         key: "worldview",
         title: "世界观",
-        output: String(artifacts.worldview || "").trim()
+        output: String(artifacts.worldview_natural_language || artifacts.worldview || "").trim()
       },
       {
         key: "characters",
@@ -866,13 +870,51 @@
     }
   }
 
-  // 当回退到正文阶段时，让用户按集数选择从哪一批开始重写。
+  function rollbackRangeSelectPlaceholder(stageKey) {
+    if (stageKey === "hooks") return "选择开头冲突钩子开始重写的集数范围";
+    if (stageKey === "dialogues") return "选择角色对白开始重写的集数范围";
+    if (stageKey === "script") return "选择剧本正文开始重写的集数范围";
+    return "选择开始重写的集数范围";
+  }
+
+  function rollbackStageRangeOptions(snapshot, stageKey) {
+    const optionsByStage = snapshot?.rollback_stage_start_options;
+    if (optionsByStage && typeof optionsByStage === "object") {
+      return Array.isArray(optionsByStage[stageKey]) ? optionsByStage[stageKey] : [];
+    }
+    if (stageKey === "script") {
+      return Array.isArray(snapshot?.rollback_script_start_options) ? snapshot.rollback_script_start_options : [];
+    }
+    return [];
+  }
+
+  function rollbackStageDependencies(snapshot, stageKey) {
+    const dependencies = snapshot?.rollback_stage_dependencies;
+    if (dependencies && typeof dependencies === "object" && Array.isArray(dependencies[stageKey])) {
+      return dependencies[stageKey];
+    }
+    if (stageKey === "hooks") return ["hooks", "dialogues", "script"];
+    if (stageKey === "dialogues") return ["dialogues", "script"];
+    if (stageKey === "script") return ["script"];
+    return [stageKey].filter(Boolean);
+  }
+
+  function rollbackStageLabelMap(snapshot) {
+    const entries = Array.isArray(snapshot?.rollback_stage_options) ? snapshot.rollback_stage_options : [];
+    return entries.reduce((acc, item) => {
+      if (item?.key) acc[item.key] = item.label || item.key;
+      return acc;
+    }, {});
+  }
+
+  // 当回退到 hooks/dialogues/script 阶段时，让用户按集数范围选择从哪一批开始重写。
   function renderRollbackScriptStartOptions(options, selectedValue = "") {
     if (!els.rollbackScriptStartSelect) return;
     const normalized = Array.isArray(options) ? options : [];
-    const show = normalized.length > 0 && (els.rollbackStageSelect?.value || "") === "script";
+    const selectedStage = els.rollbackStageSelect?.value || "";
+    const show = normalized.length > 0 && ["hooks", "dialogues", "script"].includes(selectedStage);
     els.rollbackScriptStartSelect.innerHTML = [
-      `<option value="">选择正文开始重写的集数</option>`,
+      `<option value="">${escapeHtml(rollbackRangeSelectPlaceholder(selectedStage))}</option>`,
       ...normalized.map((item) => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`)
     ].join("");
     if (selectedValue && normalized.some((item) => String(item.value) === String(selectedValue))) {
@@ -953,7 +995,6 @@
       || String(previousTaskId || "") !== String(state.taskId || "")
     );
     const rollbackStageOptions = snapshot.rollback_stage_options || [];
-    const rollbackScriptStartOptions = snapshot.rollback_script_start_options || [];
     const defaultRollbackStage = snapshot.rollback_stage_default || "";
     const defaultRollbackStart = snapshot.rollback_start_episode_default
       ? String(snapshot.rollback_start_episode_default)
@@ -966,18 +1007,19 @@
       ? currentRollbackStage
       : defaultRollbackStage;
     renderRollbackOptions(rollbackStageOptions, desiredRollbackStage);
+    const rollbackScriptStartOptions = rollbackStageRangeOptions(snapshot, desiredRollbackStage);
     const currentRollbackStart = snapshotChanged ? "" : (els.rollbackScriptStartSelect?.value || "");
     const desiredRollbackStart = (
-      desiredRollbackStage === "script"
+      ["hooks", "dialogues", "script"].includes(desiredRollbackStage)
       && currentRollbackStart
       && rollbackScriptStartOptions.some((item) => String(item.value) === String(currentRollbackStart))
     )
       ? currentRollbackStart
-      : desiredRollbackStage === "script"
+      : ["hooks", "dialogues", "script"].includes(desiredRollbackStage)
         ? defaultRollbackStart
         : "";
     renderRollbackScriptStartOptions(rollbackScriptStartOptions, desiredRollbackStart);
-    if (desiredRollbackStage !== "script" && els.rollbackScriptStartSelect) {
+    if (!["hooks", "dialogues", "script"].includes(desiredRollbackStage) && els.rollbackScriptStartSelect) {
       els.rollbackScriptStartSelect.value = "";
     }
     persistSelectedProjectId(snapshot.project_id);
@@ -993,7 +1035,7 @@
     const canConfirmCompletion = Boolean(state.latestSnapshot?.can_confirm_completion);
     const canStageRollback = Boolean(state.latestSnapshot?.can_stage_rollback);
     const selectedRollbackStage = els.rollbackStageSelect?.value || "";
-    const requiresScriptStart = selectedRollbackStage === "script";
+    const requiresScriptStart = ["hooks", "dialogues", "script"].includes(selectedRollbackStage);
     const hasRollbackSelection = Boolean(
       selectedRollbackStage && (!requiresScriptStart || (els.rollbackScriptStartSelect?.value || ""))
     );
@@ -1014,7 +1056,7 @@
       els.rollbackStageSelect.disabled = isActionLoading("rollback") || !isAuthenticated() || !canStageRollback;
     }
     if (els.rollbackScriptStartSelect) {
-      const showScriptStart = canStageRollback && selectedRollbackStage === "script";
+      const showScriptStart = canStageRollback && ["hooks", "dialogues", "script"].includes(selectedRollbackStage);
       els.rollbackScriptStartSelect.classList.toggle("hidden", !showScriptStart);
       els.rollbackScriptStartSelect.disabled = isActionLoading("rollback") || !showScriptStart;
     }
@@ -1675,18 +1717,30 @@
       throw new Error("请选择一个回退步骤。");
     }
     const selectedLabel = els.rollbackStageSelect?.selectedOptions?.[0]?.textContent?.trim() || "所选步骤";
-    const startEpisodeValue = stageKey === "script" ? Number(els.rollbackScriptStartSelect?.value || 0) : 0;
-    if (stageKey === "script" && startEpisodeValue <= 0) {
-      throw new Error("请选择正文开始重写的集数。");
+    const rangeRequired = ["hooks", "dialogues", "script"].includes(stageKey);
+    const startEpisodeValue = rangeRequired ? Number(els.rollbackScriptStartSelect?.value || 0) : 0;
+    if (rangeRequired && startEpisodeValue <= 0) {
+      throw new Error(`${rollbackRangeSelectPlaceholder(stageKey).replace("选择", "请选择")}`);
     }
-    const detailSuffix = stageKey === "script" ? `，从第 ${startEpisodeValue} 集开始重写后续正文` : "";
-    const ok = window.confirm(`确认回退到“${selectedLabel}”${detailSuffix}吗？前面的结果会保留，后面的结果会被清空重做。`);
+    const options = rollbackStageRangeOptions(state.latestSnapshot, stageKey);
+    const selectedRange = options.find((item) => String(item.value) === String(startEpisodeValue));
+    const detailSuffix = selectedRange
+      ? `，从第 ${selectedRange.start_episode || startEpisodeValue}-${selectedRange.end_episode || startEpisodeValue} 集开始`
+      : "";
+    const stageLabelMap = rollbackStageLabelMap(state.latestSnapshot);
+    const impactedLabels = rollbackStageDependencies(state.latestSnapshot, stageKey)
+      .map((key) => stageLabelMap[key] || key)
+      .filter(Boolean);
+    const impactNotice = impactedLabels.length > 1
+      ? `这会联动重写：${impactedLabels.join("、")}。`
+      : "这会从该阶段继续重写后续内容。";
+    const ok = window.confirm(`确认回退到“${selectedLabel}”${detailSuffix}吗？${impactNotice} 前面的结果会保留，后面的结果会被清空重做。`);
     if (!ok) return;
     const data = await requestJson(`/api/projects/${state.projectId}/rollback`, {
       method: "POST",
       body: JSON.stringify({
         stage_key: stageKey,
-        start_episode: stageKey === "script" ? startEpisodeValue : null
+        start_episode: rangeRequired ? startEpisodeValue : null
       })
     });
     restoreInputPayload(data.task?.input_payload, { force: true });
@@ -2390,14 +2444,15 @@
     });
 
     els.rollbackStageSelect?.addEventListener("change", () => {
-      if ((els.rollbackStageSelect?.value || "") !== "script" && els.rollbackScriptStartSelect) {
+      const selectedStage = els.rollbackStageSelect?.value || "";
+      if (!["hooks", "dialogues", "script"].includes(selectedStage) && els.rollbackScriptStartSelect) {
         els.rollbackScriptStartSelect.value = "";
       }
-      const defaultScriptStart = (els.rollbackStageSelect?.value || "") === "script"
+      const defaultScriptStart = ["hooks", "dialogues", "script"].includes(selectedStage)
         ? String(state.latestSnapshot?.rollback_start_episode_default || "")
         : "";
       renderRollbackScriptStartOptions(
-        state.latestSnapshot?.rollback_script_start_options || [],
+        rollbackStageRangeOptions(state.latestSnapshot, selectedStage),
         els.rollbackScriptStartSelect?.value || defaultScriptStart
       );
       syncButtons();

@@ -25,6 +25,13 @@ def _split_csv(value: str | None) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _getenv_bool(*keys: str, default: bool = False) -> bool:
+    value = _getenv(*keys)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(slots=True)
 class ProviderConfig:
     name: str
@@ -94,13 +101,32 @@ class Settings:
         self.fastgpt_http_retry_delay = float(
             _getenv("FASTGPT_HTTP_RETRY_DELAY", default="1.5")
         )
+        self.fastgpt_stage_payload_warn_chars = int(
+            _getenv("FASTGPT_STAGE_PAYLOAD_WARN_CHARS", default="120000")
+        )
+        self.fastgpt_stage_payload_hard_chars = int(
+            _getenv("FASTGPT_STAGE_PAYLOAD_HARD_CHARS", default="240000")
+        )
         self.fastgpt_script_payload_soft_limit = int(
             _getenv("FASTGPT_SCRIPT_PAYLOAD_SOFT_LIMIT", default="180000")
         )
         self.fastgpt_script_payload_hard_limit = int(
             _getenv("FASTGPT_SCRIPT_PAYLOAD_HARD_LIMIT", default="240000")
         )
+        self.fastgpt_characters_detail = _getenv_bool(
+            "FASTGPT_CHARACTERS_DETAIL",
+            default=False,
+        )
+        self.fastgpt_scenes_detail = _getenv_bool(
+            "FASTGPT_SCENES_DETAIL",
+            default=False,
+        )
+        self.fastgpt_appearance_alias_generation_detail = _getenv_bool(
+            "FASTGPT_APPEARANCE_ALIAS_GENERATION_DETAIL",
+            default=False,
+        )
         self.fastgpt_api_key = _getenv("FASTGPT_API_KEY")
+        self.fastgpt_unstructured_api_key = _getenv("FASTGPT_UNSTRUCTURED_API_KEY")
         self.fastgpt_variable_mode = _getenv("FASTGPT_VARIABLE_MODE", default="legacy").lower()
         self.fastgpt_batch_mode = _getenv("FASTGPT_BATCH_MODE", default="local").lower()
 

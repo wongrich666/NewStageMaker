@@ -772,6 +772,67 @@ class StageOutputRepairTests(unittest.TestCase):
         mapping = result[APPEARANCE_MAPPING]
         self.assertEqual(mapping["mapping_principle"], _appearance_mapping_json()["appearance_mapping"]["mapping_principle"])
 
+    def test_appearance_empty_h2kpLm91_uses_answer_text_json(self) -> None:
+        client = _QueuedFastGPTClient(
+            [
+                {
+                    "responseData": {
+                        "newVariables": [
+                            {"key": APPEARANCE_MAPPING_VAR, "value": ""},
+                        ],
+                        "answerText": json.dumps(_appearance_mapping_json(), ensure_ascii=False),
+                    }
+                }
+            ]
+        )
+
+        result = client.run_stage(
+            STAGE_APPEARANCE_ALIAS_GENERATION,
+            dict(self.appearance_variables),
+        )
+
+        self.assertEqual(client.request_count, 1)
+        self.assertEqual(
+            result[APPEARANCE_MAPPING]["characters"][0]["canonical_name"],
+            "林夏",
+        )
+        debug_info = client.get_last_stage_debug_info(STAGE_APPEARANCE_ALIAS_GENERATION)
+        self.assertTrue(debug_info.get("appearance_h2KpLm91_empty"))
+
+    def test_appearance_empty_h2kpLm91_and_core_scene_text_triggers_stage_rerun(self) -> None:
+        client = _QueuedFastGPTClient(
+            [
+                {
+                    "responseData": {
+                        "newVariables": [
+                            {"key": APPEARANCE_MAPPING_VAR, "value": ""},
+                        ],
+                        "answerText": "核心场景：玻璃会议室、深夜办公区、合租公寓。",
+                    }
+                },
+                {
+                    "answerText": json.dumps(_appearance_mapping_json(), ensure_ascii=False),
+                },
+            ]
+        )
+
+        result = client.run_stage(
+            STAGE_APPEARANCE_ALIAS_GENERATION,
+            dict(self.appearance_variables),
+        )
+
+        self.assertEqual(client.request_count, 2)
+        self.assertEqual(
+            result[APPEARANCE_MAPPING]["scene_level_usage_plan"][0]["scene_name"],
+            "玻璃会议室",
+        )
+        debug_info = client.get_last_stage_debug_info(STAGE_APPEARANCE_ALIAS_GENERATION)
+        self.assertTrue(debug_info.get("appearance_h2KpLm91_empty"))
+        summaries = list(debug_info.get("appearance_candidate_summaries") or [])
+        self.assertTrue(
+            any("核心场景" in str(item.get("reason") or "") for item in summaries)
+        )
+
     def test_appearance_natural_language_is_not_formal_output(self) -> None:
         with self.assertRaises(ValueError):
             self._extract(
@@ -785,6 +846,18 @@ class StageOutputRepairTests(unittest.TestCase):
             self._extract(
                 STAGE_APPEARANCE_ALIAS_GENERATION,
                 {"answerText": json.dumps(review_json, ensure_ascii=False)},
+            )
+
+    def test_appearance_mapping_string_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                {
+                    "answerText": json.dumps(
+                        {APPEARANCE_MAPPING: "核心场景：玻璃会议室与合租公寓。"},
+                        ensure_ascii=False,
+                    )
+                },
             )
 
     def test_appearance_missing_characters_fails(self) -> None:
@@ -941,6 +1014,18 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertEqual(
             result[APPEARANCE_NATURAL_LANGUAGE_VAR],
             "林夏在会议室场景统一使用“林夏【会议室交锋态】”。",
+        )
+
+    def test_appearance_default_name_empty_repairs_from_canonical_name(self) -> None:
+        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
+        broken["appearance_mapping"]["characters"][0]["default_name"] = ""
+        result = self._extract(
+            STAGE_APPEARANCE_ALIAS_GENERATION,
+            {"answerText": json.dumps(broken, ensure_ascii=False)},
+        )
+        self.assertEqual(
+            result[APPEARANCE_MAPPING]["characters"][0]["default_name"],
+            result[APPEARANCE_MAPPING]["characters"][0]["canonical_name"],
         )
 
 

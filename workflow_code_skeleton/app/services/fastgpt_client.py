@@ -12,6 +12,7 @@ import requests
 from ..config import settings
 from ..utils.logger import get_logger
 from ..workflow_ids import (
+    APPEARANCE_MAPPING_VAR,
     APPEARANCE_NATURAL_LANGUAGE_VAR,
     CHARACTER_NATURAL_LANGUAGE_VAR,
     SCENE_NATURAL_LANGUAGE_VAR,
@@ -45,6 +46,7 @@ from .fastgpt_contracts import (
     STAGE_DIALOGUES_WRITING,
     STAGE_EPISODE_PLAN_NORMALIZE,
     STAGE_FRAMEWORK,
+    STAGE_FRAMEWORK_NATURALIZE,
     STAGE_CHARACTERS,
     STAGE_HOOK_MEMORY,
     STAGE_HOOK_REVIEW,
@@ -62,6 +64,7 @@ from .fastgpt_contracts import (
     STAGE_SCRIPT_MEMORY,
     SCRIPT_MEMORY,
     STAGE_WORLDVIEW,
+    STAGE_WORLDVIEW_NATURALIZE,
     USER_CONTENT_BASELINE,
     FastGPTStageContract,
     contract_for,
@@ -87,6 +90,8 @@ STAGE_AUXILIARY_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "appearance_alias_generation": (APPEARANCE_NATURAL_LANGUAGE_VAR,),
 }
 STAGE_API_KEY_ENV_ALIASES: dict[str, tuple[str, ...]] = {
+    STAGE_FRAMEWORK_NATURALIZE: ("FASTGPT_UNSTRUCTURED_API_KEY",),
+    STAGE_WORLDVIEW_NATURALIZE: ("FASTGPT_UNSTRUCTURED_API_KEY",),
     STAGE_SCRIPT_WRITING: (
         "FASTGPT_SCRIPT_WRITING_API_KEY",
         "FASTGPT_SCRIPT_WRITE_API_KEY",
@@ -187,6 +192,33 @@ class FastGPTStageOutputRetryRequest(ValueError):
         super().__init__(message)
 
 
+class FastGPTPayloadTooLargeError(RuntimeError):
+    """阻止把明显超大的请求体直接发给 FastGPT。"""
+
+    def __init__(
+        self,
+        *,
+        stage_name: str,
+        body_chars: int,
+        hard_limit: int,
+        largest_variables: list[dict[str, Any]],
+    ) -> None:
+        self.stage_name = stage_name
+        self.body_chars = int(body_chars)
+        self.hard_limit = int(hard_limit)
+        self.largest_variables = list(largest_variables)
+        largest_desc = "、".join(
+            f"{item.get('name')}={item.get('chars')}"
+            for item in self.largest_variables[:3]
+            if item.get("name")
+        ) or "未知"
+        super().__init__(
+            f"FastGPT 阶段 {stage_name} 请求体过大：{body_chars} chars，"
+            f"超过硬限制 {hard_limit} chars；最大变量：{largest_desc}。"
+            "当前阶段已优先使用 compact context，如仍超限，请进一步缩小输入。"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class FastGPTEndpoint:
     url: str
@@ -235,6 +267,15 @@ class FrameworkSelectionResult:
     selected_preview: str | None = None
 
 
+@dataclass
+class AppearanceSelectionResult:
+    selected: ValidatedStageOutput | None
+    candidate_summaries: list[dict[str, Any]]
+    selected_source: str | None = None
+    selected_preview: str | None = None
+    empty_alias_seen: bool = False
+
+
 class FastGPTClient:
     """OpenAI-compatible FastGPT workflow client.
 
@@ -256,7 +297,12 @@ class FastGPTClient:
         if not isinstance(cache, dict):
             cache = {}
             self._last_stage_debug_info = cache
-        cache[stage_name] = dict(info)
+        existing = cache.get(stage_name, {})
+        if not isinstance(existing, dict):
+            existing = {}
+        merged = dict(existing)
+        merged.update(dict(info))
+        cache[stage_name] = merged
 
     def run_stage(self, stage_name: str, variables: dict[str, Any]) -> dict[str, Any]:
         contract = contract_for(stage_name)
@@ -576,10 +622,11 @@ class FastGPTClient:
             key: to_jsonable_value(value)
             for key, value in variables.items()
         }
-        return {
+        detail = _detail_enabled_for_stage(contract.stage_name)
+        body = {
             "chatId": chat_id,
             "stream": False,
-            "detail": True,
+            "detail": detail,
             "variables": safe_variables,
             "messages": [
                 {
@@ -592,6 +639,42 @@ class FastGPTClient:
                 }
             ],
         }
+        payload_stats = _build_request_payload_stats(
+            contract.stage_name,
+            safe_variables,
+            body,
+        )
+        self._remember_stage_debug_info(
+            contract.stage_name,
+            payload_stats=payload_stats,
+            request_detail=detail,
+        )
+        warn_limit = max(
+            0,
+            int(getattr(settings, "fastgpt_stage_payload_warn_chars", 120000)),
+        )
+        hard_limit = max(
+            warn_limit,
+            int(getattr(settings, "fastgpt_stage_payload_hard_chars", 240000)),
+        )
+        if payload_stats["body_chars"] > warn_limit:
+            logger.warning(
+                "FastGPT 阶段 %s payload 过大：body=%s，warn=%s，detail=%s，变量=%s，最大字段=%s",
+                contract.stage_name,
+                payload_stats["body_chars"],
+                warn_limit,
+                detail,
+                payload_stats["variable_keys"],
+                _format_largest_payload_fields(payload_stats["largest_variables"]),
+            )
+        if payload_stats["body_chars"] > hard_limit:
+            raise FastGPTPayloadTooLargeError(
+                stage_name=contract.stage_name,
+                body_chars=int(payload_stats["body_chars"]),
+                hard_limit=hard_limit,
+                largest_variables=list(payload_stats["largest_variables"]),
+            )
+        return body
 
     def _extract_output_payload(
         self,
@@ -649,6 +732,55 @@ class FastGPTClient:
                 )
                 return framework_output.selected.validated_payload
 
+        if contract.stage_name == STAGE_APPEARANCE_ALIAS_GENERATION:
+            appearance_output = _extract_appearance_stage_output(
+                data,
+                contract,
+                variables,
+                rejected_candidates,
+            )
+            self._remember_stage_debug_info(
+                contract.stage_name,
+                appearance_candidate_sources=[
+                    item.get("source") for item in appearance_output.candidate_summaries
+                ],
+                appearance_candidate_summaries=appearance_output.candidate_summaries,
+                appearance_h2KpLm91_empty=appearance_output.empty_alias_seen,
+            )
+            if appearance_output.selected is not None:
+                self._remember_stage_debug_info(
+                    contract.stage_name,
+                    raw_output_source=appearance_output.selected.source,
+                    matched_aliases=sorted(
+                        set(appearance_output.selected.matched_keys.values())
+                    ),
+                    normalized_preview=_truncate_log_text(
+                        _json_for_log(appearance_output.selected.validated_payload),
+                        limit=800,
+                    ),
+                    appearance_selected_candidate_source=appearance_output.selected_source,
+                    appearance_selected_candidate_preview=appearance_output.selected_preview,
+                )
+                logger.info(
+                    "FastGPT 阶段 %s 选中 appearance 候选，来源=%s，匹配字段=%s，候选摘要=%s，payload=%s",
+                    contract.stage_name,
+                    appearance_output.selected.source,
+                    appearance_output.selected.matched_keys,
+                    [
+                        {
+                            "source": item.get("source"),
+                            "status": item.get("status"),
+                            "reason": item.get("reason"),
+                        }
+                        for item in appearance_output.candidate_summaries[:4]
+                    ],
+                    _truncate_log_text(
+                        _json_for_log(appearance_output.selected.validated_payload),
+                        limit=500,
+                    ),
+                )
+                return appearance_output.selected.validated_payload
+
         if contract.stage_name in TEXT_FIRST_MULTI_FIELD_STAGES:
             preferred_text_output = _extract_preferred_text_stage_output(
                 data,
@@ -677,40 +809,41 @@ class FastGPTClient:
                 )
                 return preferred_text_output.validated_payload
 
-        # 先扫结构化槽位。FastGPT 在不同工作流/节点组合下，正式输出可能落在
-        # responseData.updateVarResult、output、pluginOutput、toolDetail 等不同位置，
-        # 这里统一把它们当作“候选正式产物”来做契约校验。
-        for source, candidate in _iter_named_structured_candidates(data):
-            variants = list(
-                _iter_repaired_candidate_variants(
-                    contract=contract,
-                    variables=variables,
-                    source=source,
-                    candidate=candidate,
-                    allow_textual_relaxation=allow_fallback,
-                )
-            ) or [(source, candidate)]
-            for variant_source, variant_candidate in variants:
-                match = _payload_from_candidate(variant_candidate, contract)
-                if match is None:
-                    continue
-                try:
-                    validated_payload = contract.validate_output_payload(match.payload)
-                except ValueError as exc:
-                    rejected_candidates.append((variant_source, str(exc), match.payload))
-                    continue
-                validated_candidates.append(
-                    ValidatedStageOutput(
-                        source=variant_source,
-                        payload=match.payload,
-                        validated_payload=validated_payload,
-                        matched_keys=match.matched_keys,
-                        canonical_hits=match.canonical_hits,
-                        alias_hits=match.alias_hits,
+        if contract.stage_name != STAGE_APPEARANCE_ALIAS_GENERATION:
+            # 先扫结构化槽位。FastGPT 在不同工作流/节点组合下，正式输出可能落在
+            # responseData.updateVarResult、output、pluginOutput、toolDetail 等不同位置，
+            # 这里统一把它们当作“候选正式产物”来做契约校验。
+            for source, candidate in _iter_named_structured_candidates(data):
+                variants = list(
+                    _iter_repaired_candidate_variants(
+                        contract=contract,
+                        variables=variables,
+                        source=source,
+                        candidate=candidate,
+                        allow_textual_relaxation=allow_fallback,
                     )
-                )
+                ) or [(source, candidate)]
+                for variant_source, variant_candidate in variants:
+                    match = _payload_from_candidate(variant_candidate, contract)
+                    if match is None:
+                        continue
+                    try:
+                        validated_payload = contract.validate_output_payload(match.payload)
+                    except ValueError as exc:
+                        rejected_candidates.append((variant_source, str(exc), match.payload))
+                        continue
+                    validated_candidates.append(
+                        ValidatedStageOutput(
+                            source=variant_source,
+                            payload=match.payload,
+                            validated_payload=validated_payload,
+                            matched_keys=match.matched_keys,
+                            canonical_hits=match.canonical_hits,
+                            alias_hits=match.alias_hits,
+                        )
+                    )
 
-        if len(expected) == 1:
+        if len(expected) == 1 and contract.stage_name != STAGE_APPEARANCE_ALIAS_GENERATION:
             single_key = expected[0]
             # 单字段阶段再额外走一遍“文本兜底”。
             # 这样即使 FastGPT 最后只回了一段 JSON 字符串或纯文本，也仍有机会
@@ -893,6 +1026,75 @@ def _merge_optional_text(*parts: Any) -> str:
         seen.add(text)
         merged.append(text)
     return "\n".join(merged).strip()
+
+
+def _detail_enabled_for_stage(stage_name: str) -> bool:
+    if stage_name == STAGE_CHARACTERS:
+        return bool(getattr(settings, "fastgpt_characters_detail", False))
+    if stage_name == STAGE_SCENES:
+        return bool(getattr(settings, "fastgpt_scenes_detail", False))
+    if stage_name == STAGE_APPEARANCE_ALIAS_GENERATION:
+        return bool(getattr(settings, "fastgpt_appearance_alias_generation_detail", False))
+    return True
+
+
+def _build_request_payload_stats(
+    stage_name: str,
+    variables: dict[str, Any],
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    variable_lengths = {
+        str(key): _payload_chars(value)
+        for key, value in variables.items()
+    }
+    largest_variables = [
+        {
+            "name": name,
+            "chars": size,
+            "preview": _payload_preview(variables.get(name)),
+        }
+        for name, size in sorted(
+            variable_lengths.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:5]
+    ]
+    return {
+        "stage_name": stage_name,
+        "variable_keys": list(variables.keys()),
+        "variable_char_lengths": variable_lengths,
+        "largest_variables": largest_variables,
+        "body_chars": _payload_chars(body),
+    }
+
+
+def _format_largest_payload_fields(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "无"
+    return "；".join(
+        f"{item.get('name')}={item.get('chars')} preview={item.get('preview')}"
+        for item in items
+        if item.get("name")
+    )
+
+
+def _payload_chars(value: Any) -> int:
+    return len(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        )
+    )
+
+
+def _payload_preview(value: Any, *, limit: int = 120) -> str:
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        text = str(value)
+    return _truncate_log_text(text, limit=limit)
 
 
 def _build_script_character_scene_bundle(characters: Any, scenes: Any) -> str:
@@ -1354,6 +1556,95 @@ def _extract_framework_stage_output(
     )
 
 
+def _extract_appearance_stage_output(
+    data: dict[str, Any],
+    contract: FastGPTStageContract,
+    variables: dict[str, Any],
+    rejected_candidates: list[tuple[str, str, dict[str, Any] | None]],
+) -> AppearanceSelectionResult:
+    candidate_summaries: list[dict[str, Any]] = []
+    empty_alias_seen = False
+
+    for source, candidate in _iter_appearance_output_candidates(data, contract):
+        preview = _truncate_log_text(_json_for_log(candidate), limit=260)
+        normalized_candidate, rejection_reason, alias_empty = _coerce_appearance_candidate(
+            candidate
+        )
+        empty_alias_seen = empty_alias_seen or alias_empty
+        if normalized_candidate is None:
+            candidate_summaries.append(
+                {
+                    "source": source,
+                    "status": "rejected",
+                    "reason": rejection_reason,
+                    "preview": preview,
+                }
+            )
+            rejected_candidates.append((source, rejection_reason, None))
+            continue
+
+        variants = list(
+            _iter_repaired_candidate_variants(
+                contract=contract,
+                variables=variables,
+                source=source,
+                candidate=normalized_candidate,
+                allow_textual_relaxation=False,
+            )
+        ) or [(source, normalized_candidate)]
+
+        last_reason = "候选未能映射到 appearance_mapping 契约"
+        for variant_source, variant_candidate in variants:
+            match = _payload_from_candidate(variant_candidate, contract)
+            if match is None:
+                last_reason = "候选未能映射到 appearance_mapping 契约"
+                rejected_candidates.append((variant_source, last_reason, None))
+                continue
+            try:
+                validated_payload = contract.validate_output_payload(match.payload)
+            except ValueError as exc:
+                last_reason = str(exc)
+                rejected_candidates.append((variant_source, last_reason, match.payload))
+                continue
+            candidate_summaries.append(
+                {
+                    "source": variant_source,
+                    "status": "selected",
+                    "reason": "",
+                    "preview": preview,
+                }
+            )
+            return AppearanceSelectionResult(
+                selected=ValidatedStageOutput(
+                    source=f"{variant_source}(appearance)",
+                    payload=match.payload,
+                    validated_payload=validated_payload,
+                    matched_keys=match.matched_keys,
+                    canonical_hits=match.canonical_hits,
+                    alias_hits=match.alias_hits,
+                ),
+                candidate_summaries=candidate_summaries,
+                selected_source=variant_source,
+                selected_preview=preview,
+                empty_alias_seen=empty_alias_seen,
+            )
+
+        candidate_summaries.append(
+            {
+                "source": source,
+                "status": "rejected",
+                "reason": last_reason,
+                "preview": preview,
+            }
+        )
+
+    return AppearanceSelectionResult(
+        selected=None,
+        candidate_summaries=candidate_summaries,
+        empty_alias_seen=empty_alias_seen,
+    )
+
+
 def _iter_framework_scored_candidates(
     data: dict[str, Any],
     contract: FastGPTStageContract,
@@ -1450,6 +1741,139 @@ def _iter_framework_text_blocks_from_content_list(content: list[Any]) -> Iterabl
                 continue
             if isinstance(item.get("content"), str):
                 yield item["content"]
+
+
+def _iter_appearance_output_candidates(
+    data: dict[str, Any],
+    contract: FastGPTStageContract,
+) -> Iterable[tuple[str, Any]]:
+    output_alias = next(iter(contract.aliases_for_output(APPEARANCE_MAPPING)), "h2KpLm91")
+    yielded: set[str] = set()
+
+    def emit(source: str, value: Any) -> Iterable[tuple[str, Any]]:
+        if source in yielded:
+            return ()
+        yielded.add(source)
+        return ((source, value),)
+
+    root_new_variables = data.get("newVariables")
+    yield from emit(f"root.newVariables.{output_alias}", _extract_named_value(root_new_variables, output_alias))
+
+    root_update_result = data.get("updateVarResult")
+    yield from emit(f"root.updateVarResult.{output_alias}", _extract_named_value(root_update_result, output_alias))
+
+    response_data = data.get("responseData")
+    for source, container in _iter_response_like_branches(response_data, "responseData"):
+        for key in ("newVariables", "updateVarResult", "variableUpdate"):
+            if not isinstance(container, dict) or key not in container:
+                continue
+            source_name = f"{source}.{key}.{output_alias}"
+            yield from emit(source_name, _extract_named_value(container.get(key), output_alias))
+
+    for source, candidate in _iter_named_structured_candidates(data):
+        if any(marker in source for marker in (".newVariables", ".updateVarResult", ".variableUpdate")):
+            continue
+        if isinstance(candidate, dict) and output_alias in candidate:
+            yield from emit(f"{source}.{output_alias}", candidate.get(output_alias))
+
+    for source, text in _iter_named_text_candidates(data):
+        cleaned = strip_code_fence(text).strip()
+        if not cleaned:
+            continue
+        yield from emit(source, cleaned)
+
+
+def _iter_response_like_branches(
+    value: Any,
+    prefix: str,
+) -> Iterable[tuple[str, dict[str, Any]]]:
+    if isinstance(value, dict):
+        yield (prefix, value)
+        for key, nested in value.items():
+            if isinstance(nested, dict):
+                yield from _iter_response_like_branches(nested, f"{prefix}.{key}")
+            elif isinstance(nested, list):
+                for index, item in enumerate(nested):
+                    if isinstance(item, dict):
+                        yield from _iter_response_like_branches(item, f"{prefix}.{key}[{index}]")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            if isinstance(item, dict):
+                yield from _iter_response_like_branches(item, f"{prefix}[{index}]")
+
+
+def _extract_named_value(container: Any, key: str) -> Any:
+    if isinstance(container, dict):
+        return container.get(key)
+    if isinstance(container, list):
+        mapped = _dict_from_variable_items(container)
+        if isinstance(mapped, dict):
+            return mapped.get(key)
+    return None
+
+
+def _coerce_appearance_candidate(
+    candidate: Any,
+) -> tuple[dict[str, Any] | None, str, bool]:
+    alias_empty = False
+    current = candidate
+
+    if isinstance(current, list):
+        current = _dict_from_variable_items(current) or current
+
+    if isinstance(current, str):
+        text = strip_code_fence(current).strip()
+        if not text:
+            return None, "appearance_mapping 候选为空字符串", False
+        if _looks_like_core_scene_text(text):
+            return None, "候选是核心场景提炼文本，不是 appearance_mapping JSON", False
+        parsed = _try_parse_json(text)
+        if not isinstance(parsed, dict):
+            return None, "appearance_mapping 候选不是可解析的 JSON object", False
+        current = parsed
+
+    if not isinstance(current, dict):
+        return None, "appearance_mapping 候选不是 object", alias_empty
+
+    for key in (APPEARANCE_MAPPING_VAR, APPEARANCE_MAPPING):
+        if key not in current:
+            continue
+        wrapped = current.get(key)
+        if isinstance(wrapped, str):
+            text = strip_code_fence(wrapped).strip()
+            if not text:
+                alias_empty = alias_empty or key == APPEARANCE_MAPPING_VAR
+                return None, f"{key} 为空字符串", alias_empty
+            if _looks_like_core_scene_text(text):
+                return None, f"{key} 是核心场景提炼文本，不是 appearance_mapping JSON", alias_empty
+            parsed = _try_parse_json(text)
+            if parsed is None:
+                return None, f"{key} 是纯文本，不是 JSON object", alias_empty
+        elif wrapped in (None, ""):
+            alias_empty = alias_empty or key == APPEARANCE_MAPPING_VAR
+            return None, f"{key} 为空字符串", alias_empty
+
+    normalized = normalize_appearance_mapping_candidate(current)
+    if isinstance(normalized, dict):
+        return normalized, "", alias_empty
+
+    return None, "候选不是可归一化的 appearance_mapping object", alias_empty
+
+
+def _looks_like_core_scene_text(text: str) -> bool:
+    cleaned = " ".join(strip_code_fence(str(text or "")).split())
+    if not cleaned:
+        return False
+    if cleaned.startswith("核心场景：") or cleaned.startswith("核心场景:"):
+        return True
+    if "核心场景包括" in cleaned:
+        return True
+    if "场景名：场景类型 / 建筑或空间属性" in cleaned:
+        return True
+    if "核心场景" in cleaned and "场景类型" in cleaned and "建筑或空间属性" in cleaned:
+        return True
+    return False
 
 
 def extract_json_object_candidates(text: str) -> list[dict[str, Any]]:

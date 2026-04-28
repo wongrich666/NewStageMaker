@@ -545,10 +545,15 @@ def describe_appearance_mapping_output_issue(value: Any) -> str | None:
 
 
 def validate_appearance_mapping_output(value: Any) -> list[str]:
-    issues = _validate_appearance_mapping_contract_shape(value)
+    repaired_value = _appearance_mapping_object(value)
+    issues = _validate_appearance_mapping_contract_shape(
+        repaired_value if repaired_value is not None else value
+    )
     if issues:
         return issues
-    return _validate_appearance_mapping_local_review(value)
+    return _validate_appearance_mapping_local_review(
+        repaired_value if repaired_value is not None else value
+    )
 
 
 def _repair_appearance_mapping_candidate(
@@ -1981,6 +1986,8 @@ def _normalize_appearance_mapping_body(
             nested = candidate.get(wrapper_key)
             if nested is None:
                 continue
+            if isinstance(nested, str) and _looks_like_core_scene_narrative_text(nested):
+                return None
             normalized_nested = _normalize_appearance_mapping_body(
                 nested,
                 warnings=warnings,
@@ -2074,6 +2081,21 @@ def _normalize_appearance_characters(
                 )
             else:
                 character[field_name] = _normalize_text_value(raw)
+        canonical_name = str(character.get("canonical_name") or "").strip()
+        character_id = str(character.get("character_id") or "").strip()
+        if not canonical_name and character_id:
+            character["canonical_name"] = character_id
+            canonical_name = character_id
+            warnings.append(
+                f"appearance_mapping.characters[{index}].canonical_name 为空，已回退为 {character_id}"
+            )
+        if not str(character.get("default_name") or "").strip():
+            fallback_name = canonical_name or character_id
+            if fallback_name:
+                character["default_name"] = fallback_name
+                warnings.append(
+                    f"appearance_mapping.characters[{index}].default_name 为空，已回退为 {fallback_name}"
+                )
         result.append(character)
     return result
 
@@ -2288,15 +2310,48 @@ def _normalize_appearance_usage_alias_items(
 def _looks_like_appearance_mapping_body(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
-    if isinstance(value.get(APPEARANCE_MAPPING_FIELD), dict):
+    wrapped = value.get(APPEARANCE_MAPPING_FIELD)
+    if wrapped is not None:
+        if isinstance(wrapped, dict):
+            return _looks_like_appearance_mapping_body(wrapped)
+        return False
+    if any(_looks_like_appearance_mapping_review_json(value.get(key)) for key in (APPEARANCE_MAPPING_FIELD,)):
+        return False
+    if any(
+        isinstance(item, list) and item
+        for item in (
+            value.get("characters"),
+            value.get("episode_level_usage_plan"),
+            value.get("scene_level_usage_plan"),
+            value.get("special_naming_rules"),
+        )
+    ):
         return True
-    lowered = {str(key).lower() for key in value.keys()}
-    alias_set = {
-        alias.lower()
-        for aliases in APPEARANCE_TOP_LEVEL_ALIASES.values()
-        for alias in aliases
-    }
-    return bool(lowered & alias_set)
+    signal_count = 0
+    for key in ("mapping_principle", "global_naming_style"):
+        if str(value.get(key) or "").strip():
+            signal_count += 1
+    for key in ("characters", "episode_level_usage_plan", "scene_level_usage_plan", "special_naming_rules"):
+        if key in value:
+            signal_count += 1
+    return signal_count >= 2
+
+
+def _looks_like_core_scene_narrative_text(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = " ".join(strip_code_fence(value).split())
+    if not text:
+        return False
+    if text.startswith("核心场景：") or text.startswith("核心场景:"):
+        return True
+    if "核心场景包括" in text:
+        return True
+    if "场景名：场景类型 / 建筑或空间属性" in text:
+        return True
+    if "核心场景" in text and "场景类型" in text and "建筑或空间属性" in text:
+        return True
+    return False
 
 
 def _looks_like_appearance_mapping_review_json(value: Any) -> bool:

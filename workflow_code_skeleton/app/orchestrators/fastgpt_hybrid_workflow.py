@@ -14,7 +14,23 @@ from typing import Any, Protocol
 from ..config import ModelOption, settings
 from ..models.inputs import WorkflowInput
 from ..models.state import WorkflowState
-from ..services.fastgpt_client import FastGPTTransientError, fastgpt_client
+from ..services.compact_context import (
+    build_compact_appearance_context_for_batch,
+    build_compact_character_context_for_appearance,
+    build_compact_character_context_for_dialogues,
+    build_compact_character_context_for_hooks,
+    build_compact_character_context_for_scenes,
+    build_compact_character_context_for_script,
+    build_compact_scene_context_for_appearance,
+    build_compact_scene_context_for_script,
+    build_compact_story_outline_context,
+    build_compact_worldview_context,
+)
+from ..services.fastgpt_client import (
+    FastGPTPayloadTooLargeError,
+    FastGPTTransientError,
+    fastgpt_client,
+)
 from ..services.fastgpt_contracts import (
     ALL_DIALOGUES,
     ALL_HOOKS,
@@ -34,6 +50,7 @@ from ..services.fastgpt_contracts import (
     EPISODE_PLAN,
     EPISODE_ALIAS_PLAN,
     FINAL_SCRIPT,
+    FRAMEWORK_NATURAL_LANGUAGE,
     HOOK_MEMORY,
     HOOK_REVIEW_RESULT,
     IS_CONSISTENT,
@@ -57,6 +74,7 @@ from ..services.fastgpt_contracts import (
     STAGE_APPEARANCE_ALIAS_GENERATION,
     STAGE_APPEARANCE_PRE_STRATEGY,
     STAGE_FRAMEWORK,
+    STAGE_FRAMEWORK_NATURALIZE,
     STAGE_CHARACTERS,
     STAGE_CONSISTENCY,
     STAGE_DIALOGUES,
@@ -87,13 +105,17 @@ from ..services.fastgpt_contracts import (
     STAGE_SCRIPT_WRITE,
     STAGE_SCRIPT_WRITING,
     STAGE_WORLDVIEW,
+    STAGE_WORLDVIEW_NATURALIZE,
     STORY_OUTLINE,
     TOTAL_EPISODES,
+    UNSTRUCTURED_CONTENT_KIND,
+    UNSTRUCTURED_SOURCE,
     USER_EXPECTATION,
     USER_CHARACTERS,
     USER_CONTENT_BASELINE,
     USER_SCENES,
     WORLDVIEW,
+    WORLDVIEW_NATURAL_LANGUAGE,
     coerce_strict_fastgpt_boolean,
     contract_for,
     _is_script_family_stage,
@@ -181,6 +203,9 @@ from ..workflow_ids import (
     SCRIPT_FINAL_VAR,
     STORY_OUTLINE_VAR,
     TITLE_VAR,
+    UNSTRUCTURED_KIND_VAR,
+    UNSTRUCTURED_OUTPUT_VAR,
+    UNSTRUCTURED_SOURCE_VAR,
     WORLDVIEW_VAR,
 )
 from .runtime_tools import set_runtime_stage, sync_runtime_state
@@ -453,6 +478,7 @@ def run_fastgpt_hybrid_workflow(
                 progress_percent=12,
             )
         )
+    _ensure_worldview_natural_language(state, runner, variables)
     _sync_state_variables(state, variables)
 
     if _has_value(variables.get(CHARACTERS)):
@@ -1510,6 +1536,132 @@ def _log_batched_stage_input(
     )
 
 
+def _compact_stage_text(
+    value: Any,
+    *,
+    builder,
+    fallback: Any = "",
+) -> str:
+    try:
+        compact = str(builder(value) or "").strip()
+    except Exception:
+        logger.warning(
+            "compact context builder 失败，builder=%s，fallback_to_original=%s",
+            getattr(builder, "__name__", "unknown"),
+            bool(fallback),
+            exc_info=True,
+        )
+        compact = ""
+    if compact:
+        return compact
+    return str(fallback or "").strip()
+
+
+def _build_hook_stage_context(
+    variables: dict[str, Any],
+    *,
+    stage_name: str,
+    plan_for_batch: str,
+    normalized_plan_for_batch: dict[str, Any] | None,
+    alias_plan_for_batch: dict[str, Any] | None,
+    batch_start_episode: int,
+    hook_memory: Any = "",
+    batch_hooks: Any = None,
+    review_payload: Any = None,
+) -> dict[str, Any]:
+    context = _stage_input_context(stage_name, variables)
+    _apply_batch_episode_plan_context(
+        context,
+        plan_for_batch=plan_for_batch,
+        normalized_plan_for_batch=normalized_plan_for_batch,
+    )
+    context[WORLDVIEW] = _compact_stage_text(
+        variables.get(WORLDVIEW),
+        builder=build_compact_worldview_context,
+        fallback=context.get(WORLDVIEW),
+    )
+    context[STORY_OUTLINE] = _compact_stage_text(
+        variables.get(STORY_OUTLINE),
+        builder=build_compact_story_outline_context,
+        fallback=context.get(STORY_OUTLINE),
+    )
+    context[CHARACTERS] = _compact_stage_text(
+        variables.get(CHARACTERS),
+        builder=build_compact_character_context_for_hooks,
+        fallback="",
+    )
+    context[SCENES] = _compact_stage_text(
+        variables.get(SCENES),
+        builder=build_compact_scene_context_for_script,
+        fallback="",
+    )
+    context[APPEARANCE_MAPPING] = _compact_stage_text(
+        alias_plan_for_batch,
+        builder=build_compact_appearance_context_for_batch,
+        fallback="",
+    )
+    context[BATCH_START_EPISODE] = batch_start_episode
+    if _has_value(hook_memory):
+        context[HOOK_MEMORY] = hook_memory
+    if batch_hooks is not None:
+        context[BATCH_HOOKS] = copy.deepcopy(batch_hooks)
+    if review_payload is not None:
+        context[PASS_REVIEW_JSON] = copy.deepcopy(review_payload)
+    return context
+
+
+def _build_dialogue_stage_context(
+    variables: dict[str, Any],
+    *,
+    stage_name: str,
+    plan_for_batch: str,
+    normalized_plan_for_batch: dict[str, Any] | None,
+    alias_plan_for_batch: dict[str, Any] | None,
+    hook_payload: dict[str, Any],
+    batch_start_episode: int,
+    dialogue_memory: Any = "",
+    batch_dialogues: Any = None,
+    review_payload: Any = None,
+) -> dict[str, Any]:
+    context = _stage_input_context(stage_name, variables)
+    _apply_batch_episode_plan_context(
+        context,
+        plan_for_batch=plan_for_batch,
+        normalized_plan_for_batch=normalized_plan_for_batch,
+    )
+    context[WORLDVIEW] = _compact_stage_text(
+        variables.get(WORLDVIEW),
+        builder=build_compact_worldview_context,
+        fallback=context.get(WORLDVIEW),
+    )
+    context[CHARACTERS] = _compact_stage_text(
+        variables.get(CHARACTERS),
+        builder=build_compact_character_context_for_dialogues,
+        fallback="",
+    )
+    context[SCENES] = _compact_stage_text(
+        variables.get(SCENES),
+        builder=build_compact_scene_context_for_script,
+        fallback="",
+    )
+    context[APPEARANCE_MAPPING] = _compact_stage_text(
+        alias_plan_for_batch,
+        builder=build_compact_appearance_context_for_batch,
+        fallback="",
+    )
+    context[ALL_HOOKS] = copy.deepcopy(hook_payload)
+    set_with_aliases(context, BATCH_HOOKS, hook_payload, DIALOGUE_HOOK_INPUT_ALIASES)
+    context[BATCH_START_EPISODE] = batch_start_episode
+    if _has_value(dialogue_memory):
+        context[DIALOGUE_MEMORY] = dialogue_memory
+    if batch_dialogues is not None:
+        context[BATCH_DIALOGUES] = copy.deepcopy(batch_dialogues)
+    if review_payload is not None:
+        context[PASS_REVIEW_JSON] = copy.deepcopy(review_payload)
+    context[MAX_RETRIES] = _stage_review_revise_loop_limit()
+    return context
+
+
 def _run_hook_batches(
     state: WorkflowState,
     runner: FastGPTRunner,
@@ -1573,11 +1725,19 @@ def _run_hook_batches(
         hook_write_stage = _stage_name_for_runner(runner, STAGE_HOOK_WRITE, STAGE_HOOKS_WRITING)
         hook_review_stage = _stage_name_for_runner(runner, STAGE_HOOK_REVIEW, STAGE_HOOKS_REVIEW)
         hook_revise_stage = _stage_name_for_runner(runner, STAGE_HOOK_REVISE, STAGE_HOOKS_REWRITE)
-        hook_base = _stage_input_context(hook_write_stage, variables)
-        _apply_batch_episode_plan_context(
-            hook_base,
+        hook_base = _build_hook_stage_context(
+            variables,
+            stage_name=hook_write_stage,
             plan_for_batch=plan_for_batch,
             normalized_plan_for_batch=normalized_plan_for_batch,
+            alias_plan_for_batch=alias_plan_for_batch,
+            batch_start_episode=batch.start_episode,
+            hook_memory=get_with_aliases(
+                variables,
+                HOOK_MEMORY,
+                HOOK_MEMORY_ALIASES,
+                "",
+            ),
         )
         _log_batched_stage_input(
             hook_write_stage,
@@ -1613,22 +1773,37 @@ def _run_hook_batches(
             review_stage_name=hook_review_stage,
             rewrite_stage_name=hook_revise_stage,
             writing_context=hook_base,
-            review_context_builder=lambda current_output: {
-                **_stage_input_context(hook_review_stage, {**variables, BATCH_HOOKS: current_output}),
-                EPISODE_PLAN: plan_for_batch,
-            },
-            rewrite_context_builder=lambda current_output, current_review: {
-                **_stage_input_context(
-                    hook_revise_stage,
-                    {
-                        **variables,
-                        BATCH_HOOKS: current_output,
-                        PASS_REVIEW_JSON: current_review,
-                    },
+            review_context_builder=lambda current_output: _build_hook_stage_context(
+                variables,
+                stage_name=hook_review_stage,
+                plan_for_batch=plan_for_batch,
+                normalized_plan_for_batch=normalized_plan_for_batch,
+                alias_plan_for_batch=alias_plan_for_batch,
+                batch_start_episode=batch.start_episode,
+                hook_memory=get_with_aliases(
+                    variables,
+                    HOOK_MEMORY,
+                    HOOK_MEMORY_ALIASES,
+                    "",
                 ),
-                EPISODE_PLAN: plan_for_batch,
-                BATCH_START_EPISODE: batch.start_episode,
-            },
+                batch_hooks=current_output,
+            ),
+            rewrite_context_builder=lambda current_output, current_review: _build_hook_stage_context(
+                variables,
+                stage_name=hook_revise_stage,
+                plan_for_batch=plan_for_batch,
+                normalized_plan_for_batch=normalized_plan_for_batch,
+                alias_plan_for_batch=alias_plan_for_batch,
+                batch_start_episode=batch.start_episode,
+                hook_memory=get_with_aliases(
+                    variables,
+                    HOOK_MEMORY,
+                    HOOK_MEMORY_ALIASES,
+                    "",
+                ),
+                batch_hooks=current_output,
+                review_payload=current_review,
+            ),
             progress_percent=progress,
             approved_output_validator=lambda current_output: validate_batch_hooks(
                 current_output,
@@ -1646,7 +1821,11 @@ def _run_hook_batches(
             {
                 BATCH_HOOKS: batch_hooks,
                 HOOK_MEMORY: get_with_aliases(variables, HOOK_MEMORY, HOOK_MEMORY_ALIASES, ""),
-                APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING) or {},
+                APPEARANCE_MAPPING: _compact_stage_text(
+                    alias_plan_for_batch,
+                    builder=build_compact_appearance_context_for_batch,
+                    fallback="",
+                ),
                 TOTAL_EPISODES: variables.get(TOTAL_EPISODES),
                 BATCH_START_EPISODE: batch.start_episode,
                 EPISODE_PLAN: plan_for_batch,
@@ -1774,18 +1953,21 @@ def _run_dialogue_batches(
             STAGE_DIALOGUE_REVISE,
             STAGE_DIALOGUES_REWRITE,
         )
-        dialogue_base = _stage_input_context(dialogue_write_stage, variables)
-        _apply_batch_episode_plan_context(
-            dialogue_base,
+        dialogue_base = _build_dialogue_stage_context(
+            variables,
+            stage_name=dialogue_write_stage,
             plan_for_batch=plan_for_batch,
             normalized_plan_for_batch=normalized_plan_for_batch,
+            alias_plan_for_batch=alias_plan_for_batch,
+            hook_payload=hook_payload,
+            batch_start_episode=batch.start_episode,
+            dialogue_memory=get_with_aliases(
+                variables,
+                DIALOGUE_MEMORY,
+                DIALOGUE_MEMORY_ALIASES,
+                "",
+            ),
         )
-        dialogue_base[BATCH_HOOKS] = copy.deepcopy(hook_payload)
-        # 最新 dialogue workflows 实际读取的是“当前五集 hooks” aliases。
-        # 这里把 stage-local ALL_HOOKS 临时压成当前批次切片，避免把整季 hooks 误传给单批 workflow。
-        dialogue_base[ALL_HOOKS] = copy.deepcopy(hook_payload)
-        set_with_aliases(dialogue_base, BATCH_HOOKS, hook_payload, DIALOGUE_HOOK_INPUT_ALIASES)
-        dialogue_base[MAX_RETRIES] = _stage_review_revise_loop_limit()
         _log_batched_stage_input(
             dialogue_write_stage,
             stage_label="角色对话",
@@ -1820,37 +2002,33 @@ def _run_dialogue_batches(
             review_stage_name=dialogue_review_stage,
             rewrite_stage_name=dialogue_revise_stage,
             writing_context=dialogue_base,
-            review_context_builder=lambda current_output: {
-                **_stage_input_context(
-                    dialogue_review_stage,
-                    {
-                        **variables,
-                        BATCH_HOOKS: copy.deepcopy(hook_payload),
-                        ALL_HOOKS: copy.deepcopy(hook_payload),
-                        BATCH_DIALOGUES: current_output,
-                    },
+            review_context_builder=lambda current_output: _build_dialogue_stage_context(
+                variables,
+                stage_name=dialogue_review_stage,
+                plan_for_batch=plan_for_batch,
+                normalized_plan_for_batch=normalized_plan_for_batch,
+                alias_plan_for_batch=alias_plan_for_batch,
+                hook_payload=hook_payload,
+                batch_start_episode=batch.start_episode,
+                batch_dialogues=current_output,
+            ),
+            rewrite_context_builder=lambda current_output, current_review: _build_dialogue_stage_context(
+                variables,
+                stage_name=dialogue_revise_stage,
+                plan_for_batch=plan_for_batch,
+                normalized_plan_for_batch=normalized_plan_for_batch,
+                alias_plan_for_batch=alias_plan_for_batch,
+                hook_payload=hook_payload,
+                batch_start_episode=batch.start_episode,
+                dialogue_memory=get_with_aliases(
+                    variables,
+                    DIALOGUE_MEMORY,
+                    DIALOGUE_MEMORY_ALIASES,
+                    "",
                 ),
-                EPISODE_PLAN: plan_for_batch,
-                BATCH_HOOKS: copy.deepcopy(hook_payload),
-                ALL_HOOKS: copy.deepcopy(hook_payload),
-                BATCH_START_EPISODE: batch.start_episode,
-            },
-            rewrite_context_builder=lambda current_output, current_review: {
-                **_stage_input_context(
-                    dialogue_revise_stage,
-                    {
-                        **variables,
-                        BATCH_HOOKS: copy.deepcopy(hook_payload),
-                        ALL_HOOKS: copy.deepcopy(hook_payload),
-                        BATCH_DIALOGUES: current_output,
-                        PASS_REVIEW_JSON: current_review,
-                    },
-                ),
-                EPISODE_PLAN: plan_for_batch,
-                BATCH_HOOKS: copy.deepcopy(hook_payload),
-                ALL_HOOKS: copy.deepcopy(hook_payload),
-                BATCH_START_EPISODE: batch.start_episode,
-            },
+                batch_dialogues=current_output,
+                review_payload=current_review,
+            ),
             progress_percent=progress,
             before_rewrite=lambda _current_output, _current_review: _ensure_dialogue_revise_workflow_available(),
             approved_output_validator=lambda current_output: validate_batch_dialogues(
@@ -1876,7 +2054,11 @@ def _run_dialogue_batches(
                 ),
                 ALL_HOOKS: copy.deepcopy(hook_payload),
                 EPISODE_PLAN: plan_for_batch,
-                APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING) or {},
+                APPEARANCE_MAPPING: _compact_stage_text(
+                    alias_plan_for_batch,
+                    builder=build_compact_appearance_context_for_batch,
+                    fallback="",
+                ),
                 TOTAL_EPISODES: variables.get(TOTAL_EPISODES),
                 BATCH_START_EPISODE: batch.start_episode,
                 CHARACTER_ALIAS_NAMING_RULES: variables.get(CHARACTER_ALIAS_NAMING_RULES) or "",
@@ -2065,6 +2247,7 @@ def _run_script_batches(
                 script_stage_name=script_write_stage,
                 plan_for_batch=plan_for_batch,
                 normalized_plan_for_batch=normalized_plan_for_batch,
+                alias_plan_for_batch=alias_plan_for_batch,
                 hook_payload=hook_payload,
                 dialogue_payload=dialogue_payload,
                 previous_batch_summary=previous_batch_summary,
@@ -2108,31 +2291,33 @@ def _run_script_batches(
                 rewrite_stage_name=script_revise_stage,
                 writing_context=script_base,
                 review_context_builder=lambda current_output: {
-                    **_stage_input_context(
-                        STAGE_SCRIPT_REVIEW,
-                        {
-                            **variables,
-                            ALL_HOOKS: copy.deepcopy(hook_payload),
-                            ALL_DIALOGUES: copy.deepcopy(dialogue_payload),
-                            BATCH_SCRIPT: current_output,
-                        },
+                    **_build_script_stage_context(
+                        variables,
+                        batch=batch,
+                        plan_for_batch=plan_for_batch,
+                        normalized_plan_for_batch=normalized_plan_for_batch,
+                        alias_plan_for_batch=alias_plan_for_batch,
+                        hook_payload=hook_payload,
+                        dialogue_payload=dialogue_payload,
+                        script_memory=_bounded_script_memory(variables.get(LAST_SUMMARY)),
+                        script_stage_name=STAGE_SCRIPT_REVIEW,
                     ),
-                    EPISODE_PLAN: plan_for_batch,
-                    BATCH_START_EPISODE: batch.start_episode,
+                    BATCH_SCRIPT: current_output,
                 },
                 rewrite_context_builder=lambda current_output, current_review: {
-                    **_stage_input_context(
-                        script_revise_stage,
-                        {
-                            **variables,
-                            ALL_HOOKS: copy.deepcopy(hook_payload),
-                            ALL_DIALOGUES: copy.deepcopy(dialogue_payload),
-                            BATCH_SCRIPT: current_output,
-                            PASS_REVIEW_JSON: current_review,
-                        },
+                    **_build_script_stage_context(
+                        variables,
+                        batch=batch,
+                        plan_for_batch=plan_for_batch,
+                        normalized_plan_for_batch=normalized_plan_for_batch,
+                        alias_plan_for_batch=alias_plan_for_batch,
+                        hook_payload=hook_payload,
+                        dialogue_payload=dialogue_payload,
+                        script_memory=_bounded_script_memory(variables.get(LAST_SUMMARY)),
+                        script_stage_name=script_revise_stage,
                     ),
-                    EPISODE_PLAN: plan_for_batch,
-                    BATCH_START_EPISODE: batch.start_episode,
+                    BATCH_SCRIPT: current_output,
+                    PASS_REVIEW_JSON: current_review,
                 },
                 progress_percent=progress,
                 generated_episodes=generated_before_batch,
@@ -2179,7 +2364,11 @@ def _run_script_batches(
             {
                 BATCH_SCRIPT: batch_script,
                 LAST_SUMMARY: previous_script_memory,
-                APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING) or {},
+                APPEARANCE_MAPPING: _compact_stage_text(
+                    alias_plan_for_batch,
+                    builder=build_compact_appearance_context_for_batch,
+                    fallback="",
+                ),
                 CHARACTER_ALIAS_NAMING_RULES: variables.get(CHARACTER_ALIAS_NAMING_RULES) or "",
             },
             stage_key="script",
@@ -3291,18 +3480,43 @@ def _build_script_stage_context(
     batch: BatchWindow,
     plan_for_batch: str,
     normalized_plan_for_batch: dict[str, Any] | None,
+    alias_plan_for_batch: dict[str, Any] | None,
     hook_payload: dict[str, Any] | None = None,
     dialogue_payload: dict[str, Any] | None = None,
-    previous_batch_summary: str,
-    script_memory: str,
+    previous_batch_summary: str = "",
+    script_memory: str = "",
+    committed_script: str = "",
+    script_batches: dict[int, str] | None = None,
+    script_episode_cache: dict[int, str] | None = None,
     script_stage_name: str = STAGE_SCRIPT_WRITING,
 ) -> dict[str, Any]:
     """script 只带当前批 hooks/dialogues + 当前批 plan + 上一批摘要 + 滚动记忆。"""
+    del committed_script, script_batches, script_episode_cache
     context = _stage_input_context(script_stage_name, variables)
     _apply_batch_episode_plan_context(
         context,
         plan_for_batch=plan_for_batch,
         normalized_plan_for_batch=normalized_plan_for_batch,
+    )
+    context[WORLDVIEW] = _compact_stage_text(
+        variables.get(WORLDVIEW),
+        builder=build_compact_worldview_context,
+        fallback=context.get(WORLDVIEW),
+    )
+    context[CHARACTERS] = _compact_stage_text(
+        variables.get(CHARACTERS),
+        builder=build_compact_character_context_for_script,
+        fallback="",
+    )
+    context[SCENES] = _compact_stage_text(
+        variables.get(SCENES),
+        builder=build_compact_scene_context_for_script,
+        fallback="",
+    )
+    context[APPEARANCE_MAPPING] = _compact_stage_text(
+        alias_plan_for_batch,
+        builder=build_compact_appearance_context_for_batch,
+        fallback="",
     )
     context[BATCH_START_EPISODE] = batch.start_episode
     batch_hooks = copy.deepcopy(hook_payload) if isinstance(hook_payload, dict) else _current_batch_object_payload(
@@ -4199,13 +4413,13 @@ def _ensure_scene_outputs(
         sync_runtime_state(state)
         raise ValueError(message)
 
-    variables.update(scene_inputs)
+    scene_context = {**variables, **scene_inputs}
     try:
         output = _run_fastgpt_stage(
             state,
             runner,
             STAGE_SCENES,
-            variables,
+            scene_context,
             stage_key="scene",
             message="正在生成并校正核心场景。",
             progress_percent=34,
@@ -4315,7 +4529,7 @@ def _ensure_appearance_outputs(
         sync_runtime_state(state)
         raise ValueError(message)
 
-    variables.update(appearance_inputs)
+    appearance_context = {**variables, **appearance_inputs}
     total_attempts = 1 + max(
         0,
         int(
@@ -4333,7 +4547,7 @@ def _ensure_appearance_outputs(
                 state,
                 runner,
                 STAGE_APPEARANCE_ALIAS_GENERATION,
-                variables,
+                appearance_context,
                 stage_key="appearance",
                 message="正在生成人物服装版本映射。",
                 progress_percent=42,
@@ -4454,7 +4668,13 @@ def _prepare_appearance_stage_inputs(
     if characters_text is None:
         fatal_errors.append("characters 为空或不是合法结构化人设 JSON")
     else:
-        prepared[CHARACTERS] = characters_text
+        compact_characters_text = _compact_stage_text(
+            variables.get(CHARACTERS),
+            builder=build_compact_character_context_for_appearance,
+            fallback=characters_text,
+        )
+        prepared[CHARACTERS] = compact_characters_text
+        prepared[USER_CHARACTERS] = compact_characters_text
 
     scenes_text = _normalize_appearance_formal_stage_input(
         STAGE_SCENES,
@@ -4464,11 +4684,20 @@ def _prepare_appearance_stage_inputs(
     if scenes_text is None:
         fatal_errors.append("scenes 为空或不是合法结构化场景 JSON")
     else:
-        prepared[SCENES] = scenes_text
+        prepared[SCENES] = _compact_stage_text(
+            variables.get(SCENES),
+            builder=build_compact_scene_context_for_appearance,
+            fallback=scenes_text,
+        )
 
     prepared[CHARACTER_ALIAS_NAMING_RULES] = _normalize_scene_optional_input(
         CHARACTER_ALIAS_NAMING_RULES,
         variables.get(CHARACTER_ALIAS_NAMING_RULES),
+        warnings=warnings,
+    )
+    prepared[APPEARANCE_MAPPING] = _normalize_scene_optional_input(
+        APPEARANCE_MAPPING,
+        variables.get(APPEARANCE_MAPPING),
         warnings=warnings,
     )
     return prepared, warnings, fatal_errors
@@ -4496,10 +4725,15 @@ def _prepare_scene_stage_inputs(
     else:
         prepared[STORY_OUTLINE] = story_outline_text
 
-    user_characters_text = _normalize_scene_json_collection_input(
-        variables.get(USER_CHARACTERS),
-        field_name=USER_CHARACTERS,
+    user_characters_text = _compact_stage_text(
+        variables.get(CHARACTERS),
+        builder=build_compact_character_context_for_scenes,
     )
+    if not user_characters_text:
+        user_characters_text = _normalize_scene_json_collection_input(
+            variables.get(USER_CHARACTERS),
+            field_name=USER_CHARACTERS,
+        )
     if user_characters_text is None:
         fatal_errors.append("user_characters 为空或不是可解析 JSON")
     else:
@@ -4761,6 +4995,8 @@ def _summarize_stage_output(output: dict[str, Any]) -> str:
 
 
 def _is_non_retryable(exc: Exception) -> bool:
+    if isinstance(exc, FastGPTPayloadTooLargeError):
+        return True
     text = str(exc)
     return "缺少 FastGPT API Key" in text or "401" in text or "403" in text
 
@@ -5284,6 +5520,7 @@ def _ensure_framework_and_consistency(
             variables,
             resume_snapshot_present=resume_snapshot_present and attempt == 1,
         )
+        _ensure_framework_natural_language(state, runner, payload, variables)
         _ensure_pre_strategy_outputs(state, runner, payload, variables)
 
         cached_consistency = _strict_consistency_flag(variables.get(IS_CONSISTENT))
@@ -5676,6 +5913,124 @@ def _framework_output_snapshot(
         USER_SCENES: _serialize_framework_runtime_value(values.get(USER_SCENES)),
         EPISODE_PLAN: _select_complete_framework_episode_plan_source(payload, values),
     }
+
+
+def _build_framework_naturalize_source(
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+) -> str:
+    framework_snapshot = _framework_output_snapshot(payload, variables)
+    structured_payload = {
+        SCRIPT_TITLE: str(variables.get(SCRIPT_TITLE) or framework_snapshot.get(SCRIPT_TITLE) or "").strip(),
+        STORY_OUTLINE: _framework_naturalize_structured_value(variables.get(STORY_OUTLINE)),
+        USER_CHARACTERS: _framework_naturalize_structured_value(variables.get(USER_CHARACTERS)),
+        USER_SCENES: _framework_naturalize_structured_value(variables.get(USER_SCENES)),
+        EPISODE_PLAN: _framework_naturalize_structured_value(
+            variables.get(EPISODE_PLAN) or framework_snapshot.get(EPISODE_PLAN)
+        ),
+    }
+    return json.dumps(structured_payload, ensure_ascii=False, indent=2)
+
+
+def _build_worldview_naturalize_source(variables: dict[str, Any]) -> str:
+    worldview_value = variables.get(WORLDVIEW)
+    if isinstance(worldview_value, str):
+        text = worldview_value.strip()
+        if text:
+            try:
+                worldview_value = parse_json(text)
+            except Exception:
+                return text
+    if worldview_value in (None, ""):
+        return ""
+    try:
+        return json.dumps(worldview_value, ensure_ascii=False, indent=2)
+    except Exception:
+        return str(worldview_value).strip()
+
+
+def _framework_naturalize_structured_value(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return copy.deepcopy(value)
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = parse_json(text)
+    except Exception:
+        return text
+    return copy.deepcopy(parsed)
+
+
+def _ensure_framework_natural_language(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+) -> None:
+    if _has_value(variables.get(FRAMEWORK_NATURAL_LANGUAGE)):
+        set_runtime_stage(
+            state,
+            "framework",
+            "已从缓存恢复剧本框架自然语言版。",
+            progress_percent=5,
+        )
+        return
+
+    stage_variables = dict(variables)
+    stage_variables[UNSTRUCTURED_SOURCE] = _build_framework_naturalize_source(payload, variables)
+    stage_variables[UNSTRUCTURED_CONTENT_KIND] = "framework"
+    stage_variables[UNSTRUCTURED_SOURCE_VAR] = stage_variables[UNSTRUCTURED_SOURCE]
+    stage_variables[UNSTRUCTURED_KIND_VAR] = stage_variables[UNSTRUCTURED_CONTENT_KIND]
+    output = run_stage_with_contract_guard(
+        state,
+        runner,
+        STAGE_FRAMEWORK_NATURALIZE,
+        stage_variables,
+        stage_key="framework",
+        message="正在整理剧本框架自然语言说明。",
+        progress_percent=5,
+        output_field=FRAMEWORK_NATURAL_LANGUAGE,
+        sync_output_to_state=False,
+    )
+    variables.update(output)
+
+
+def _ensure_worldview_natural_language(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    variables: dict[str, Any],
+) -> None:
+    if _has_value(variables.get(WORLDVIEW_NATURAL_LANGUAGE)):
+        set_runtime_stage(
+            state,
+            "worldview",
+            "已从缓存恢复世界观自然语言版。",
+            progress_percent=18,
+        )
+        return
+
+    source = _build_worldview_naturalize_source(variables)
+    if not source:
+        return
+
+    stage_variables = dict(variables)
+    stage_variables[UNSTRUCTURED_SOURCE] = source
+    stage_variables[UNSTRUCTURED_CONTENT_KIND] = "worldview"
+    stage_variables[UNSTRUCTURED_SOURCE_VAR] = source
+    stage_variables[UNSTRUCTURED_KIND_VAR] = "worldview"
+    output = run_stage_with_contract_guard(
+        state,
+        runner,
+        STAGE_WORLDVIEW_NATURALIZE,
+        stage_variables,
+        stage_key="worldview",
+        message="正在整理世界观自然语言说明。",
+        progress_percent=18,
+        output_field=WORLDVIEW_NATURAL_LANGUAGE,
+        sync_output_to_state=False,
+    )
+    variables.update(output)
 
 
 def _select_complete_framework_episode_plan_source(

@@ -81,6 +81,9 @@ from ..workflow_ids import (
     STORY_OUTLINE_VAR,
     TITLE_VAR,
     TOTAL_EPISODES_VAR,
+    UNSTRUCTURED_KIND_VAR,
+    UNSTRUCTURED_OUTPUT_VAR,
+    UNSTRUCTURED_SOURCE_VAR,
     WORLDVIEW_MAX_RETRY_VAR,
     WORLDVIEW_VAR,
 )
@@ -101,6 +104,10 @@ STORY_OUTLINE = "story_outline"
 USER_SCENES = "user_scenes"
 USER_CHARACTERS = "user_characters"
 USER_CONTENT_BASELINE = "user_content_baseline"
+FRAMEWORK_NATURAL_LANGUAGE = "framework_natural_language"
+WORLDVIEW_NATURAL_LANGUAGE = "worldview_natural_language"
+UNSTRUCTURED_SOURCE = "unstructured_source"
+UNSTRUCTURED_CONTENT_KIND = "unstructured_content_kind"
 MAX_RETRIES = "max_retries"
 WORLDVIEW = "worldview"
 CHARACTERS = "characters"
@@ -144,10 +151,12 @@ REWRITE_START_EPISODE = "rewrite_start_episode"
 REVIEW_STAGE_NAME = "stage"
 
 STAGE_FRAMEWORK = "framework"
+STAGE_FRAMEWORK_NATURALIZE = "framework_naturalize"
 STAGE_APPEARANCE_PRE_STRATEGY = "appearance_pre_strategy"
 STAGE_CONSISTENCY = "consistency"
 STAGE_EPISODE_PLAN_NORMALIZE = "episode_plan_normalize"
 STAGE_WORLDVIEW = "worldview"
+STAGE_WORLDVIEW_NATURALIZE = "worldview_naturalize"
 STAGE_CHARACTERS = "characters"
 STAGE_SCENES = "scenes"
 STAGE_APPEARANCE_ALIAS_GENERATION = "appearance_alias_generation"
@@ -842,6 +851,10 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, LegacyInputAlias]] = {
         USER_EXPECTATION: FRAMEWORK_USER_EXPECTATION_VAR,
         CHARACTER_COUNT: FRAMEWORK_CHARACTER_COUNT_VAR,
     },
+    STAGE_FRAMEWORK_NATURALIZE: {
+        UNSTRUCTURED_SOURCE: UNSTRUCTURED_SOURCE_VAR,
+        UNSTRUCTURED_CONTENT_KIND: UNSTRUCTURED_KIND_VAR,
+    },
     STAGE_APPEARANCE_PRE_STRATEGY: {
         USER_EXPECTATION: FRAMEWORK_USER_EXPECTATION_VAR,
         TOTAL_EPISODES: FRAMEWORK_TOTAL_EPISODES_VAR,
@@ -867,6 +880,10 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, LegacyInputAlias]] = {
         USER_CHARACTERS: CHARACTER_BIOS_VAR,
         EPISODE_PLAN: EPISODE_PLAN_VAR,
     },
+    STAGE_WORLDVIEW_NATURALIZE: {
+        UNSTRUCTURED_SOURCE: UNSTRUCTURED_SOURCE_VAR,
+        UNSTRUCTURED_CONTENT_KIND: UNSTRUCTURED_KIND_VAR,
+    },
     STAGE_CHARACTERS: {
         WORLDVIEW: WORLDVIEW_VAR,
         USER_CHARACTERS: CHARACTER_BIOS_VAR,
@@ -890,6 +907,7 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, LegacyInputAlias]] = {
         CHARACTERS: CHARACTER_VAR,
         SCENES: SCENE_VAR,
         CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
     },
     STAGE_HOOKS: {
         WORLDVIEW: WORLDVIEW_VAR,
@@ -1219,6 +1237,17 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         fastgpt_responsibility="根据用户想要的剧本、角色数量和总集数，生成剧本标题、故事大纲、人物小传、核心场景、分集计划。",
         local_responsibility="缓存并复用五项框架产物，后续阶段统一读取这些结果。",
     ),
+    STAGE_FRAMEWORK_NATURALIZE: FastGPTStageContract(
+        stage_name=STAGE_FRAMEWORK_NATURALIZE,
+        label="剧本框架自然语言化",
+        input_names=(UNSTRUCTURED_SOURCE, UNSTRUCTURED_CONTENT_KIND),
+        output_types={FRAMEWORK_NATURAL_LANGUAGE: "string"},
+        output_aliases={FRAMEWORK_NATURAL_LANGUAGE: (UNSTRUCTURED_OUTPUT_VAR,)},
+        fastgpt_responsibility="把完整结构化剧本框架改写成普通人可读的自然语言说明。",
+        local_responsibility="保留结构化 framework 正式产物，并额外缓存自然语言框架说明供前端展示和辅助输入。",
+        expected_output_kind="unstructured_natural_language_text",
+        workflow_json_name="自然语言化.json",
+    ),
     STAGE_APPEARANCE_PRE_STRATEGY: FastGPTStageContract(
         stage_name=STAGE_APPEARANCE_PRE_STRATEGY,
         label="服装前置策略生成器",
@@ -1283,6 +1312,17 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_aliases={WORLDVIEW: (WORLDVIEW_VAR,)},
         fastgpt_responsibility="完成世界观提取、生成、审核、修订，返回最终可用世界观。",
         local_responsibility="不做业务审核循环，只校验 worldview 是否按契约返回并缓存。",
+    ),
+    STAGE_WORLDVIEW_NATURALIZE: FastGPTStageContract(
+        stage_name=STAGE_WORLDVIEW_NATURALIZE,
+        label="世界观自然语言化",
+        input_names=(UNSTRUCTURED_SOURCE, UNSTRUCTURED_CONTENT_KIND),
+        output_types={WORLDVIEW_NATURAL_LANGUAGE: "string"},
+        output_aliases={WORLDVIEW_NATURAL_LANGUAGE: (UNSTRUCTURED_OUTPUT_VAR,)},
+        fastgpt_responsibility="把结构化世界观改写成普通人可读的自然语言说明。",
+        local_responsibility="保留结构化 worldview 正式产物，并额外缓存自然语言世界观说明供前端展示和辅助输入。",
+        expected_output_kind="unstructured_natural_language_text",
+        workflow_json_name="自然语言化.json",
     ),
     STAGE_CHARACTERS: FastGPTStageContract(
         stage_name=STAGE_CHARACTERS,

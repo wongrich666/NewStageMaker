@@ -18,23 +18,33 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     BATCH_HOOKS,
     BATCH_SCRIPT,
     BATCH_START_EPISODE,
+    CHARACTER_APPEARANCE_REQUIREMENTS,
     CHARACTER_ALIAS_NAMING_RULES,
     CHARACTERS,
     EPISODE_PLAN,
     EPISODE_WORD_COUNT,
+    FRAMEWORK_NATURAL_LANGUAGE,
+    IS_CONSISTENT,
     LAST_SUMMARY,
     MAX_RETRIES,
     NORMALIZED_EPISODE_PLAN,
+    OUTFIT_SWITCH_RULES,
     SCENES,
+    SCRIPT_TITLE,
     STORY_OUTLINE,
     TOTAL_EPISODES,
     WORLDVIEW,
+    WORLDVIEW_NATURAL_LANGUAGE,
+    STAGE_APPEARANCE_PRE_STRATEGY,
+    STAGE_CONSISTENCY,
     STAGE_DIALOGUES,
     STAGE_DIALOGUE_MEMORY,
     STAGE_DIALOGUE_REVIEW,
     STAGE_DIALOGUES_REVIEW,
     STAGE_DIALOGUES_REWRITE,
     STAGE_DIALOGUES_WRITING,
+    STAGE_FRAMEWORK,
+    STAGE_FRAMEWORK_NATURALIZE,
     STAGE_HOOKS,
     STAGE_HOOK_MEMORY,
     STAGE_HOOK_REVIEW,
@@ -46,6 +56,10 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     STAGE_SCRIPT_REVIEW,
     STAGE_SCRIPT_REWRITE,
     STAGE_SCRIPT_WRITING,
+    STAGE_WORLDVIEW,
+    STAGE_WORLDVIEW_NATURALIZE,
+    USER_CHARACTERS,
+    USER_SCENES,
 )
 from workflow_code_skeleton.app.utils.episode import BatchWindow, iter_episode_batches
 from workflow_code_skeleton.app.workflow_ids import (
@@ -79,8 +93,16 @@ from workflow_code_skeleton.app.workflow_ids import (
     SCRIPT_MEMORY_WRITE_INPUT_VAR,
     SCRIPT_REVIEW_OUTPUT_VAR,
     SCRIPT_REVIEW_WRITE_VAR,
+    UNSTRUCTURED_KIND_VAR,
+    UNSTRUCTURED_OUTPUT_VAR,
+    UNSTRUCTURED_SOURCE_VAR,
 )
 from workflow_code_skeleton.app.services.workflow_output_validation import resolve_workflow_json_path
+from workflow_code_skeleton.app.services.workflow_output_validation import (
+    WorkflowOutputValidationError,
+    load_workflow_output_contract,
+    validate_stage_output_with_workflow_contract,
+)
 
 
 def _workflow_input(total_episodes: int) -> WorkflowInput:
@@ -117,6 +139,77 @@ def _normalized_plan(total_episodes: int) -> dict[str, object]:
             for episode in range(1, total_episodes + 1)
         ],
     }
+
+
+def _framework_story_outline() -> dict[str, str]:
+    return {
+        "opening": "主角回到旧城，准备重启停摆多年的项目。",
+        "inciting_incident": "一场公开竞标让主角被迫提前入局。",
+        "early_goal": "主角想在第一阶段先拿下关键合作与启动资金。",
+        "middle_escalation": "竞争对手开始围堵资源，团队内部也出现裂痕。",
+        "relationship_changes": "主角与搭档从互相试探逐渐建立信任。",
+        "larger_crisis_or_truth": "主角发现项目背后牵涉更大的利益交易。",
+        "late_direction": "团队决定公开真相并赌上最后一次发布机会。",
+        "final_climax": "主角在终局发布会上正面对抗幕后操盘者。",
+        "ending_resolution": "项目重启成功，团队以新的关系进入下一阶段。",
+        "theme": "在压力与诱惑中坚持选择真正重要的人与事。",
+    }
+
+
+def _framework_characters() -> list[dict[str, str]]:
+    return [
+        {
+            "name": "林夏",
+            "role_type": "主角",
+            "identity": "回到故乡的青年产品负责人",
+            "personality": "冷静克制，但在关键时刻会冒险一搏",
+            "core_desire": "证明自己能把停摆项目重新拉起来",
+            "deep_motivation": "想弥补当年离开团队留下的遗憾",
+            "strengths": "善于整合资源、判断局势",
+            "weaknesses": "不愿轻易求助，容易把压力藏起来",
+            "appearance_anchor": "总穿深色外套，讲话前会下意识揉眉心",
+            "relationship_to_protagonist": "本人",
+            "relationships_with_others": "与搭档互补，与对手长期存在旧怨",
+            "growth_arc": "从独自扛压走向真正信任团队",
+            "plot_function": "推动主线决策并承担情感转折",
+        }
+    ]
+
+
+def _framework_scenes() -> dict[str, object]:
+    return {
+        "era_background": "近未来沿海工业城市转型期",
+        "world_state": "城市表面平稳，实则资源与话语权重新洗牌",
+        "core_locations": [
+            {
+                "name": "旧港实验楼",
+                "function": "项目团队的主要办公与研发场所",
+                "conflict_soil": "人手不足、设备陈旧、各方势力都在争夺控制权",
+                "key_characters": ["林夏", "搭档", "竞争对手"],
+            }
+        ],
+        "rules": "项目审批、资本注入与舆论窗口期共同决定行动节奏",
+        "danger_sources": "资金断裂、核心资料泄露、竞争方渗透",
+        "resource_or_stakes": "项目主导权、城市更新名额与团队声誉",
+        "power_distribution": "资本方与管理层掌握资源，执行团队掌握真实进度",
+        "special_rules": "关键发布前所有对外信息都需要二次确认",
+        "overall_atmosphere": "潮湿、压抑、逼仄，但始终带着向上突围的张力",
+    }
+
+
+def _framework_episode_plan(total_episodes: int = 10) -> list[dict[str, object]]:
+    episodes: list[dict[str, object]] = []
+    for episode in range(1, total_episodes + 1):
+        episodes.append(
+            {
+                "episode": episode,
+                "title": f"第{episode}集",
+                "main_plot": f"第{episode}集主线推进与局势升级。",
+                "conflicts": [f"第{episode}集核心冲突", f"第{episode}集次级阻碍"],
+                "ending_hook": f"第{episode}集结尾留下新的悬念。",
+            }
+        )
+    return episodes
 
 
 def _hook_batch(episodes: list[int]) -> dict[str, object]:
@@ -237,7 +330,10 @@ def _script_review_payload(
 def _episode_numbers_from_plan(plan_value: object) -> list[int]:
     candidate = plan_value
     if isinstance(candidate, str):
-        candidate = json.loads(candidate)
+        try:
+            candidate = json.loads(candidate)
+        except Exception:
+            return []
     if not isinstance(candidate, dict):
         return []
     episodes = candidate.get("episodes")
@@ -332,6 +428,8 @@ class _PhaseRecordingRunner:
                 "script_dialogue_alias_episodes": _episode_numbers_from_object(
                     variables.get(SCRIPT_DIALOGUE_BATCH_VAR)
                 ),
+                "unstructured_kind": str(variables.get(UNSTRUCTURED_KIND_VAR) or ""),
+                "unstructured_source": str(variables.get(UNSTRUCTURED_SOURCE_VAR) or ""),
             }
         )
 
@@ -339,6 +437,14 @@ class _PhaseRecordingRunner:
         if custom_output is not None:
             return custom_output
 
+        if stage_name == STAGE_FRAMEWORK:
+            return {
+                SCRIPT_TITLE: "测试剧本",
+                STORY_OUTLINE: _framework_story_outline(),
+                USER_CHARACTERS: _framework_characters(),
+                USER_SCENES: _framework_scenes(),
+                EPISODE_PLAN: _framework_episode_plan(10),
+            }
         if stage_name in {STAGE_HOOKS, STAGE_HOOKS_WRITING, STAGE_HOOKS_REWRITE}:
             return {BATCH_HOOKS: _hook_batch(plan_episodes)}
         if stage_name == STAGE_HOOKS_REVIEW:
@@ -363,6 +469,14 @@ class _PhaseRecordingRunner:
                     },
                     ensure_ascii=False,
                 )
+            }
+        if stage_name == STAGE_FRAMEWORK_NATURALIZE:
+            return {
+                FRAMEWORK_NATURAL_LANGUAGE: "剧本标题：测试剧本\n故事梗概：这是完整框架说明。\n主要人物小传：主角与配角关系清晰。\n核心场景说明：关键场景已整理。\n分集计划说明：第1集到第10集推进明确。"
+            }
+        if stage_name == STAGE_WORLDVIEW_NATURALIZE:
+            return {
+                WORLDVIEW_NATURAL_LANGUAGE: "世界设定：测试世界观。\n社会规则：规则清晰。\n冲突机制：外部压力持续推动剧情。\n视觉关键词：潮湿、压抑、霓虹。"
             }
         raise AssertionError(f"Unexpected stage call: {stage_name}")
 
@@ -448,9 +562,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         settings.fastgpt_stage_review_revise_max_loops = 10
         settings.fastgpt_stage_format_retry_limit = 3
         self._debug_artifact_dir = Path("workflow_code_skeleton") / "debug" / "fastgpt_stage_failures"
-        if self._debug_artifact_dir.exists():
-            for path in self._debug_artifact_dir.glob("*.json"):
-                path.unlink()
+        self._cleanup_debug_artifacts()
 
     def tearDown(self) -> None:
         settings.fastgpt_batch_mode = self._original_batch_mode
@@ -458,9 +570,16 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         settings.fastgpt_stage_review_revise_max_loops = self._original_review_loops
         settings.fastgpt_stage_format_retry_limit = self._original_format_retry_limit
         settings.workflow_json_dir = self._original_workflow_json_dir
-        if self._debug_artifact_dir.exists():
-            for path in self._debug_artifact_dir.glob("*.json"):
+        self._cleanup_debug_artifacts()
+
+    def _cleanup_debug_artifacts(self) -> None:
+        if not self._debug_artifact_dir.exists():
+            return
+        for path in self._debug_artifact_dir.glob("*.json"):
+            try:
                 path.unlink()
+            except OSError:
+                pass
 
     def _base_variables(self, total_episodes: int) -> dict[str, object]:
         normalized_plan = _normalized_plan(total_episodes)
@@ -514,6 +633,165 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         state, payload, base_variables = self._state_and_payload(total_episodes, variables=merged)
         batches = list(iter_episode_batches(total_episodes, batch_size=5))
         return state, payload, base_variables, batches
+
+    def test_framework_naturalize_uses_complete_framework_snapshot_and_preserves_structured_fields(self) -> None:
+        story_outline = {"opening": "故事开场", "theme": "选择"}
+        user_characters = [{"name": "林夏", "role_type": "主角"}]
+        user_scenes = {"core_locations": [{"name": "旧码头"}]}
+        episode_plan = [{"episode": 1, "title": "回城"}]
+        state, payload, variables = self._state_and_payload(
+            10,
+            variables={
+                SCRIPT_TITLE: "崛起之路",
+                STORY_OUTLINE: story_outline,
+                USER_CHARACTERS: user_characters,
+                USER_SCENES: user_scenes,
+                EPISODE_PLAN: episode_plan,
+            },
+        )
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_FRAMEWORK_NATURALIZE: [
+                    {UNSTRUCTURED_OUTPUT_VAR: "剧本标题：崛起之路\n故事梗概：故事完整展开。\n主要人物小传：人物关系清晰。\n核心场景说明：旧码头是关键舞台。\n分集计划说明：第1集推进主线。"}
+                ]
+            }
+        )
+
+        flow._ensure_framework_natural_language(state, runner, payload, variables)
+
+        call = runner.stage_calls(STAGE_FRAMEWORK_NATURALIZE)[0]
+        self.assertEqual(call["unstructured_kind"], "framework")
+        self.assertIn('"script_title_content": "崛起之路"', str(call["unstructured_source"]))
+        self.assertIn('"story_outline"', str(call["unstructured_source"]))
+        self.assertIn('"user_characters"', str(call["unstructured_source"]))
+        self.assertIn('"user_scenes"', str(call["unstructured_source"]))
+        self.assertIn('"episode_plan"', str(call["unstructured_source"]))
+        self.assertIn(FRAMEWORK_NATURAL_LANGUAGE, variables)
+        self.assertEqual(variables[SCRIPT_TITLE], "崛起之路")
+        self.assertEqual(variables[STORY_OUTLINE], story_outline)
+        self.assertEqual(variables[USER_CHARACTERS], user_characters)
+        self.assertEqual(variables[USER_SCENES], user_scenes)
+        self.assertEqual(variables[EPISODE_PLAN], episode_plan)
+
+    def test_framework_and_consistency_runs_framework_naturalize_before_pre_strategy(self) -> None:
+        state, payload, variables = self._state_and_payload(10)
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_FRAMEWORK: [
+                    {
+                        SCRIPT_TITLE: "测试剧本",
+                        STORY_OUTLINE: _framework_story_outline(),
+                        USER_CHARACTERS: _framework_characters(),
+                        USER_SCENES: _framework_scenes(),
+                        EPISODE_PLAN: _framework_episode_plan(10),
+                    }
+                ],
+                STAGE_FRAMEWORK_NATURALIZE: [
+                    {UNSTRUCTURED_OUTPUT_VAR: "剧本标题：测试剧本\n故事梗概：完整自然语言框架。\n主要人物小传：主角成长。\n核心场景说明：实验室与城市。\n分集计划说明：第1集到第10集。"}
+                ],
+                STAGE_APPEARANCE_PRE_STRATEGY: [
+                    {
+                        CHARACTER_APPEARANCE_REQUIREMENTS: "人物外观要求",
+                        CHARACTER_ALIAS_NAMING_RULES: "命名规则",
+                        OUTFIT_SWITCH_RULES: "服装切换规则",
+                    }
+                ],
+                STAGE_CONSISTENCY: [{IS_CONSISTENT: True}],
+            }
+        )
+
+        flow._ensure_framework_and_consistency(
+            state,
+            runner,
+            payload,
+            variables,
+            resume_snapshot_present=False,
+        )
+
+        stages = [str(call["stage"]) for call in runner.calls]
+        self.assertEqual(
+            stages,
+            [
+                STAGE_FRAMEWORK,
+                STAGE_FRAMEWORK_NATURALIZE,
+                STAGE_APPEARANCE_PRE_STRATEGY,
+                STAGE_CONSISTENCY,
+            ],
+        )
+
+    def test_worldview_naturalize_uses_worldview_output_and_keeps_structured_worldview(self) -> None:
+        worldview_payload = {
+            "era_background": "近未来沿海都市",
+            "rules": "信息流高度受控",
+            "conflict": "个人意志与系统对撞",
+        }
+        state, _, variables = self._state_and_payload(
+            10,
+            variables={WORLDVIEW: worldview_payload},
+        )
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_WORLDVIEW_NATURALIZE: [
+                    {UNSTRUCTURED_OUTPUT_VAR: "世界设定：近未来沿海都市。\n社会规则：信息流高度受控。\n冲突机制：个人意志与系统对撞。"}
+                ]
+            }
+        )
+
+        flow._ensure_worldview_natural_language(state, runner, variables)
+
+        call = runner.stage_calls(STAGE_WORLDVIEW_NATURALIZE)[0]
+        self.assertEqual(call["unstructured_kind"], "worldview")
+        self.assertIn("近未来沿海都市", str(call["unstructured_source"]))
+        self.assertIn(WORLDVIEW_NATURAL_LANGUAGE, variables)
+        self.assertEqual(variables[WORLDVIEW], worldview_payload)
+
+    def test_framework_and_worldview_natural_language_do_not_overwrite_each_other(self) -> None:
+        state, payload, variables = self._state_and_payload(
+            10,
+            variables={
+                SCRIPT_TITLE: "崛起之路",
+                STORY_OUTLINE: {"opening": "开场"},
+                USER_CHARACTERS: [{"name": "林夏"}],
+                USER_SCENES: {"core_locations": [{"name": "旧码头"}]},
+                EPISODE_PLAN: [{"episode": 1, "title": "回城"}],
+                WORLDVIEW: {"rules": "规则体系"},
+            },
+        )
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_FRAMEWORK_NATURALIZE: [{UNSTRUCTURED_OUTPUT_VAR: "框架自然语言版"}],
+                STAGE_WORLDVIEW_NATURALIZE: [{UNSTRUCTURED_OUTPUT_VAR: "世界观自然语言版"}],
+            }
+        )
+
+        flow._ensure_framework_natural_language(state, runner, payload, variables)
+        flow._ensure_worldview_natural_language(state, runner, variables)
+
+        self.assertEqual(variables[FRAMEWORK_NATURAL_LANGUAGE], "框架自然语言版")
+        self.assertEqual(variables[WORLDVIEW_NATURAL_LANGUAGE], "世界观自然语言版")
+
+    def test_unstructured_natural_language_validator_rejects_json_and_empty(self) -> None:
+        spec = load_workflow_output_contract(
+            stage_name=STAGE_FRAMEWORK_NATURALIZE,
+            expected_output_kind="unstructured_natural_language_text",
+            workflow_json_name="自然语言化.json",
+        )
+
+        with self.assertRaises(WorkflowOutputValidationError):
+            validate_stage_output_with_workflow_contract(
+                {UNSTRUCTURED_OUTPUT_VAR: '{"title":"bad"}'},
+                spec=spec,
+                canonical_name=FRAMEWORK_NATURAL_LANGUAGE,
+                aliases=(UNSTRUCTURED_OUTPUT_VAR,),
+            )
+
+        with self.assertRaises(WorkflowOutputValidationError):
+            validate_stage_output_with_workflow_contract(
+                {UNSTRUCTURED_OUTPUT_VAR: "   "},
+                spec=spec,
+                canonical_name=FRAMEWORK_NATURAL_LANGUAGE,
+                aliases=(UNSTRUCTURED_OUTPUT_VAR,),
+            )
 
     def test_three_phase_order_runs_all_hooks_before_dialogues_and_script(self) -> None:
         state, payload, variables = self._state_and_payload(10)
