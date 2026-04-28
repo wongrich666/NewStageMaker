@@ -87,11 +87,27 @@ STAGE_AUXILIARY_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "appearance_alias_generation": (APPEARANCE_NATURAL_LANGUAGE_VAR,),
 }
 STAGE_API_KEY_ENV_ALIASES: dict[str, tuple[str, ...]] = {
-    STAGE_SCRIPT_WRITING: ("FASTGPT_SCRIPT_WRITE_API_KEY", "FASTGPT_SCRIPT_API_KEY"),
-    STAGE_SCRIPT_WRITE: ("FASTGPT_SCRIPT_WRITE_API_KEY", "FASTGPT_SCRIPT_API_KEY"),
+    STAGE_SCRIPT_WRITING: (
+        "FASTGPT_SCRIPT_WRITING_API_KEY",
+        "FASTGPT_SCRIPT_WRITE_API_KEY",
+        "FASTGPT_SCRIPT_API_KEY",
+    ),
+    STAGE_SCRIPT_WRITE: (
+        "FASTGPT_SCRIPT_WRITING_API_KEY",
+        "FASTGPT_SCRIPT_WRITE_API_KEY",
+        "FASTGPT_SCRIPT_API_KEY",
+    ),
     STAGE_SCRIPT_REVIEW: ("FASTGPT_SCRIPT_REVIEW_API_KEY", "FASTGPT_SCRIPT_API_KEY"),
-    STAGE_SCRIPT_REWRITE: ("FASTGPT_SCRIPT_REVISE_API_KEY", "FASTGPT_SCRIPT_API_KEY"),
-    STAGE_SCRIPT_REVISE: ("FASTGPT_SCRIPT_REVISE_API_KEY", "FASTGPT_SCRIPT_API_KEY"),
+    STAGE_SCRIPT_REWRITE: (
+        "FASTGPT_SCRIPT_REWRITE_API_KEY",
+        "FASTGPT_SCRIPT_REVISE_API_KEY",
+        "FASTGPT_SCRIPT_API_KEY",
+    ),
+    STAGE_SCRIPT_REVISE: (
+        "FASTGPT_SCRIPT_REWRITE_API_KEY",
+        "FASTGPT_SCRIPT_REVISE_API_KEY",
+        "FASTGPT_SCRIPT_API_KEY",
+    ),
     STAGE_SCRIPT_MEMORY: ("FASTGPT_SCRIPT_MEMORY_API_KEY", "FASTGPT_MEMORY_API_KEY"),
     STAGE_HOOK_WRITE: ("FASTGPT_HOOK_WRITE_API_KEY", "FASTGPT_HOOKS_WRITING_API_KEY", "FASTGPT_HOOKS_API_KEY"),
     STAGE_HOOK_REVIEW: ("FASTGPT_HOOK_REVIEW_API_KEY", "FASTGPT_HOOKS_REVIEW_API_KEY", "FASTGPT_HOOKS_API_KEY"),
@@ -210,10 +226,27 @@ class FastGPTClient:
     Each stage can use its own API key, or all stages can share FASTGPT_API_KEY.
     """
 
+    def __init__(self) -> None:
+        self._last_stage_debug_info: dict[str, dict[str, Any]] = {}
+
+    def get_last_stage_debug_info(self, stage_name: str) -> dict[str, Any]:
+        cache = getattr(self, "_last_stage_debug_info", None)
+        if not isinstance(cache, dict):
+            return {}
+        return dict(cache.get(stage_name, {}))
+
+    def _remember_stage_debug_info(self, stage_name: str, **info: Any) -> None:
+        cache = getattr(self, "_last_stage_debug_info", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            self._last_stage_debug_info = cache
+        cache[stage_name] = dict(info)
+
     def run_stage(self, stage_name: str, variables: dict[str, Any]) -> dict[str, Any]:
         contract = contract_for(stage_name)
         contract.build_input_payload(variables)
         payload_variables = self._build_wire_variables(stage_name, variables, contract)
+        self._remember_stage_debug_info(stage_name, status="started", matched_aliases=[], raw_output_source="")
         output_reruns = 0
         if is_repairable_stage_output(stage_name):
             output_reruns = max(
@@ -267,6 +300,19 @@ class FastGPTClient:
                     stage_name,
                     auxiliary_output.keys(),
                 )
+            debug_info = self.get_last_stage_debug_info(stage_name)
+            debug_info.update(
+                {
+                    "status": "validated",
+                    "answer_text_preview": _truncate_log_text(
+                        _first_text_candidate(data),
+                        limit=300,
+                    ),
+                    "response_preview": _truncate_log_text(_json_for_log(data), limit=800),
+                    "output_keys": sorted(raw_output.keys()),
+                }
+            )
+            self._remember_stage_debug_info(stage_name, **debug_info)
             return {
                 **auxiliary_output,
                 **validated_output,
@@ -500,6 +546,15 @@ class FastGPTClient:
                 rejected_candidates,
             )
             if preferred_text_output is not None:
+                self._remember_stage_debug_info(
+                    contract.stage_name,
+                    raw_output_source=preferred_text_output.source,
+                    matched_aliases=sorted(set(preferred_text_output.matched_keys.values())),
+                    normalized_preview=_truncate_log_text(
+                        _json_for_log(preferred_text_output.validated_payload),
+                        limit=800,
+                    ),
+                )
                 logger.info(
                     "FastGPT 阶段 %s 选中最终回复 JSON，来源=%s，匹配字段=%s，payload=%s",
                     contract.stage_name,
@@ -620,6 +675,15 @@ class FastGPTClient:
 
         selected = _select_best_validated_output(validated_candidates)
         if selected is not None:
+            self._remember_stage_debug_info(
+                contract.stage_name,
+                raw_output_source=selected.source,
+                matched_aliases=sorted(set(selected.matched_keys.values())),
+                normalized_preview=_truncate_log_text(
+                    _json_for_log(selected.validated_payload),
+                    limit=800,
+                ),
+            )
             logger.info(
                 "FastGPT 阶段 %s 选中输出来源=%s，匹配字段=%s，alias_hits=%s，payload=%s",
                 contract.stage_name,
@@ -660,11 +724,28 @@ class FastGPTClient:
                     "fallback",
                     fallback,
                 )
+                self._remember_stage_debug_info(
+                    contract.stage_name,
+                    raw_output_source="local_fallback",
+                    matched_aliases=[],
+                    normalized_preview=_truncate_log_text(
+                        _json_for_log(validated_fallback),
+                        limit=800,
+                    ),
+                )
                 return validated_fallback
 
         message = (
             f"FastGPT 阶段 {contract.stage_name} 未返回契约字段：{', '.join(expected)}；"
             f"未找到通过校验的候选输出。{details}；实际返回内容：{_json_for_log(data)}"
+        )
+        self._remember_stage_debug_info(
+            contract.stage_name,
+            status="no_valid_candidate",
+            raw_output_source="none",
+            matched_aliases=[],
+            response_preview=_truncate_log_text(_json_for_log(data), limit=800),
+            normalized_preview="",
         )
         logger.error(message)
         raise ValueError(message)
@@ -806,6 +887,14 @@ def _iter_choice_message_contents(data: Any) -> Iterable[str]:
             yield from _iter_text_from_content(message.get("content"))
 
 
+def _first_text_candidate(data: Any) -> str:
+    for text in _iter_named_text_candidates(data):
+        candidate = text[1] if isinstance(text, tuple) and len(text) == 2 else ""
+        if candidate:
+            return str(candidate)
+    return ""
+
+
 def _payload_from_candidate(
     candidate: Any,
     contract: FastGPTStageContract,
@@ -835,16 +924,16 @@ def _extract_contract_payload(
     missing_fields: list[str] = []
 
     for expected_name in contract.output_names:
-        actual_key = _match_contract_output_key(
-            expected_name,
+        actual_key, value = extract_stage_output_with_aliases(
             candidate,
-            lowered_candidate,
-            contract,
+            expected_name,
+            contract.aliases_for_output(expected_name),
+            lowered_candidate=lowered_candidate,
         )
         if actual_key is None:
             missing_fields.append(expected_name)
             continue
-        payload[expected_name] = candidate[actual_key]
+        payload[expected_name] = value
         matched_keys[expected_name] = actual_key
         if actual_key == expected_name:
             canonical_hits += 1
@@ -863,11 +952,32 @@ def _extract_contract_payload(
     )
 
 
+def extract_stage_output_with_aliases(
+    candidate: dict[str, Any],
+    canonical_name: str,
+    aliases: tuple[str, ...] | list[str],
+    *,
+    lowered_candidate: dict[str, str] | None = None,
+) -> tuple[str | None, Any]:
+    lowered = lowered_candidate or {str(key).lower(): key for key in candidate.keys()}
+    actual_key = _match_contract_output_key(
+        canonical_name,
+        candidate,
+        lowered,
+        contract=None,
+        aliases=tuple(str(alias) for alias in aliases if str(alias).strip()),
+    )
+    if actual_key is None:
+        return None, None
+    return actual_key, candidate[actual_key]
+
+
 def _match_contract_output_key(
     expected_name: str,
     candidate: dict[str, Any],
     lowered_candidate: dict[str, Any],
-    contract: FastGPTStageContract,
+    contract: FastGPTStageContract | None = None,
+    aliases: tuple[str, ...] | list[str] = (),
 ) -> str | None:
     """按“契约字段本名 -> 同名大小写变体 -> 阶段专属别名”的顺序寻找真实输出键。"""
     if expected_name in candidate:
@@ -877,7 +987,8 @@ def _match_contract_output_key(
     if exact_name is not None:
         return str(exact_name)
 
-    for alias in contract.aliases_for_output(expected_name):
+    alias_names = tuple(aliases) if aliases else contract.aliases_for_output(expected_name) if contract else ()
+    for alias in alias_names:
         alias_key = lowered_candidate.get(str(alias).lower())
         if alias_key is not None:
             return str(alias_key)

@@ -85,6 +85,9 @@ class Settings:
         self.fastgpt_stage_review_revise_max_loops = int(
             _getenv("FASTGPT_STAGE_REVIEW_REVISE_MAX_LOOPS", default="10")
         )
+        self.fastgpt_stage_format_retry_limit = int(
+            _getenv("FASTGPT_STAGE_FORMAT_RETRY_LIMIT", default="3")
+        )
         self.fastgpt_timeout = int(_getenv("FASTGPT_TIMEOUT", default="300"))
         self.fastgpt_http_retries = int(_getenv("FASTGPT_HTTP_RETRIES", default="2"))
         self.fastgpt_http_retry_delay = float(

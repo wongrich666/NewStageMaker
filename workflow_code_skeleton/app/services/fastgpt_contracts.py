@@ -19,8 +19,10 @@ from ..workflow_ids import (
     DIALOGUE_CURRENT_WRITE_VAR,
     DIALOGUE_FINAL_VAR,
     DIALOGUE_HOOK_BATCH_VAR,
+    DIALOGUE_HOOK_REWRITE_VAR,
     DIALOGUE_HOOK_REVIEW_VAR,
     DIALOGUE_MEMORY_INPUT_VAR,
+    DIALOGUE_MEMORY_LEGACY_OUTPUT_VAR,
     DIALOGUE_MEMORY_OUTPUT_VAR,
     DIALOGUE_MEMORY_SEARCH_VAR,
     DIALOGUE_REVIEW_LEGACY_VAR,
@@ -66,7 +68,6 @@ from ..workflow_ids import (
     DIALOGUE_EPISODE_PLAN_INPUT_VAR,
     DIALOGUE_HOOK_INPUT_VAR,
     DIALOGUE_MAX_RETRY_INPUT_VAR,
-    DIALOGUE_OUTPUT_VAR,
     DIALOGUE_REVIEW_OUTPUT_VAR,
     DIALOGUE_SCENE_INPUT_VAR,
     DIALOGUE_START_INPUT_VAR,
@@ -75,7 +76,6 @@ from ..workflow_ids import (
     HOOK_REVIEW_OUTPUT_VAR,
     SCRIPT_START_VAR,
     SCRIPT_MAX_RETRY_VAR,
-    SCRIPT_REVIEW_VAR,
     SCRIPT_REVIEW_WRITE_VAR,
     SCRIPT_REVIEW_OUTPUT_VAR,
     STORY_OUTLINE_VAR,
@@ -185,9 +185,9 @@ HOOK_MEMORY_ALIASES = (
     HOOK_MEMORY_OUTPUT_VAR,
 )
 DIALOGUE_CURRENT_ALIASES = (
-    DIALOGUE_CURRENT_VAR,
     DIALOGUE_CURRENT_WORKFLOW_VAR,
     DIALOGUE_CURRENT_WRITE_VAR,
+    DIALOGUE_CURRENT_VAR,
 )
 DIALOGUE_REVIEW_ALIASES = (
     DIALOGUE_REVIEW_OUTPUT_VAR,
@@ -196,17 +196,18 @@ DIALOGUE_REVIEW_ALIASES = (
 )
 DIALOGUE_MEMORY_ALIASES = (
     DIALOGUE_MEMORY_INPUT_VAR,
-    DIALOGUE_MEMORY_SEARCH_VAR,
     DIALOGUE_MEMORY_OUTPUT_VAR,
+    DIALOGUE_MEMORY_SEARCH_VAR,
+    DIALOGUE_MEMORY_LEGACY_OUTPUT_VAR,
 )
 DIALOGUE_HOOK_ALIASES = (
-    DIALOGUE_HOOK_INPUT_VAR,
     DIALOGUE_HOOK_BATCH_VAR,
     DIALOGUE_HOOK_REVIEW_VAR,
+    DIALOGUE_HOOK_REWRITE_VAR,
+    DIALOGUE_HOOK_INPUT_VAR,
 )
 SCRIPT_CURRENT_ALIASES = (SCRIPT_CURRENT_VAR, SCRIPT_CURRENT_WRITE_VAR)
 SCRIPT_REVIEW_ALIASES = (
-    SCRIPT_REVIEW_VAR,
     SCRIPT_REVIEW_OUTPUT_VAR,
     SCRIPT_REVIEW_WRITE_VAR,
 )
@@ -215,8 +216,8 @@ SCRIPT_MEMORY_ALIASES = (
     SCRIPT_MEMORY_WRITE_INPUT_VAR,
     SCRIPT_MEMORY_OUTPUT_VAR,
 )
-SCRIPT_HOOK_ALIASES = (HOOK_FINAL_VAR, SCRIPT_HOOK_BATCH_VAR)
-SCRIPT_DIALOGUE_ALIASES = (DIALOGUE_FINAL_VAR, SCRIPT_DIALOGUE_BATCH_VAR)
+SCRIPT_HOOK_ALIASES = (SCRIPT_HOOK_BATCH_VAR, HOOK_FINAL_VAR)
+SCRIPT_DIALOGUE_ALIASES = (SCRIPT_DIALOGUE_BATCH_VAR, DIALOGUE_FINAL_VAR)
 
 FRAMEWORK_WEB_INPUT_NAMES = (
     TOTAL_EPISODES,
@@ -294,6 +295,8 @@ class FastGPTStageContract:
     fastgpt_responsibility: str
     local_responsibility: str
     output_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    expected_output_kind: str | None = None
+    workflow_json_name: str | None = None
 
     @property
     def output_names(self) -> tuple[str, ...]:
@@ -1349,6 +1352,8 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_aliases={BATCH_HOOKS: (*HOOK_CURRENT_ALIASES, "batch_hooks")},
         fastgpt_responsibility="编写当前批次 5 集的开头冲突钩子 JSON。",
         local_responsibility="只消费当前批输入，不直接提交 all_hooks；是否落正式缓存由本地审核结果决定。",
+        expected_output_kind="hooks_batch_json",
+        workflow_json_name="开头冲突钩子编写.json",
     ),
     STAGE_HOOKS_REVIEW: FastGPTStageContract(
         stage_name=STAGE_HOOKS_REVIEW,
@@ -1376,6 +1381,8 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         },
         fastgpt_responsibility="审核当前批次开头冲突钩子是否可提交。",
         local_responsibility="把审核结果转成 passed/rewrite_required/blocking_issues，并决定是否进入修订。",
+        expected_output_kind="review_json",
+        workflow_json_name="开头冲突钩子审核.json",
     ),
     STAGE_HOOKS_REWRITE: FastGPTStageContract(
         stage_name=STAGE_HOOKS_REWRITE,
@@ -1397,6 +1404,8 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_aliases={BATCH_HOOKS: (*HOOK_CURRENT_ALIASES, "batch_hooks")},
         fastgpt_responsibility="根据审核意见重写当前批次开头冲突钩子 JSON。",
         local_responsibility="保留当前批次边界，只在 passed=true 后才允许提交到 all_hooks。",
+        expected_output_kind="hooks_batch_json",
+        workflow_json_name="开头冲突钩子修订.json",
     ),
     STAGE_DIALOGUES: FastGPTStageContract(
         stage_name=STAGE_DIALOGUES,
@@ -1416,9 +1425,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_types={BATCH_DIALOGUES: "object"},
         output_aliases={
             BATCH_DIALOGUES: (
-                DIALOGUE_OUTPUT_VAR,
-                DIALOGUE_CURRENT_VAR,
-                DIALOGUE_CURRENT_WRITE_VAR,
+                *DIALOGUE_CURRENT_ALIASES,
                 "batchDialogues",
                 "dialogue_content",
                 "batch_dialogues_raw",
@@ -1445,9 +1452,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_types={BATCH_DIALOGUES: "object"},
         output_aliases={
             BATCH_DIALOGUES: (
-                DIALOGUE_OUTPUT_VAR,
-                DIALOGUE_CURRENT_VAR,
-                DIALOGUE_CURRENT_WRITE_VAR,
+                *DIALOGUE_CURRENT_ALIASES,
                 "batchDialogues",
                 "dialogue_content",
                 "batch_dialogues_raw",
@@ -1456,6 +1461,8 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         },
         fastgpt_responsibility="编写当前批次 5 集的角色对白 JSON。",
         local_responsibility="只缓存当前批次临时对白，正式合并到 all_dialogues 前仍需本地审核通过。",
+        expected_output_kind="dialogues_batch_json",
+        workflow_json_name="角色对话编写.json",
     ),
     STAGE_DIALOGUES_REVIEW: FastGPTStageContract(
         stage_name=STAGE_DIALOGUES_REVIEW,
@@ -1483,6 +1490,8 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         },
         fastgpt_responsibility="审核当前批次角色对白是否可提交。",
         local_responsibility="把审核结果转成 passed/rewrite_required/blocking_issues，并决定是否进入修订。",
+        expected_output_kind="review_json",
+        workflow_json_name="角色对话审核.json",
     ),
     STAGE_DIALOGUES_REWRITE: FastGPTStageContract(
         stage_name=STAGE_DIALOGUES_REWRITE,
@@ -1503,9 +1512,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_types={BATCH_DIALOGUES: "object"},
         output_aliases={
             BATCH_DIALOGUES: (
-                DIALOGUE_OUTPUT_VAR,
-                DIALOGUE_CURRENT_VAR,
-                DIALOGUE_CURRENT_WRITE_VAR,
+                *DIALOGUE_CURRENT_ALIASES,
                 "batchDialogues",
                 "dialogue_content",
                 "batch_dialogues_raw",
@@ -1514,6 +1521,8 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         },
         fastgpt_responsibility="根据审核意见修订当前批次角色对白 JSON。",
         local_responsibility="保留当前批次边界，只在 passed=true 后才允许提交到 all_dialogues。",
+        expected_output_kind="dialogues_batch_json",
+        workflow_json_name="角色对话修订.json",
     ),
     STAGE_SCRIPT: FastGPTStageContract(
         stage_name=STAGE_SCRIPT,
@@ -1557,6 +1566,8 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_aliases={BATCH_SCRIPT: SCRIPT_CURRENT_ALIASES},
         fastgpt_responsibility="编写当前批次 5 集剧本正文。",
         local_responsibility="只缓存当前批次临时正文，正式合并到 all_script 前仍需本地审核通过。",
+        expected_output_kind="script_text",
+        workflow_json_name="剧本正文编写.json",
     ),
     STAGE_SCRIPT_REVIEW: FastGPTStageContract(
         stage_name=STAGE_SCRIPT_REVIEW,
@@ -1587,6 +1598,8 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         },
         fastgpt_responsibility="审核当前批次剧本正文是否可提交。",
         local_responsibility="把审核结果转成 passed/rewrite_required/blocking_issues，并决定是否进入修订。",
+        expected_output_kind="review_json",
+        workflow_json_name="剧本正文审核.json",
     ),
     STAGE_SCRIPT_REWRITE: FastGPTStageContract(
         stage_name=STAGE_SCRIPT_REWRITE,
@@ -1610,6 +1623,8 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_aliases={BATCH_SCRIPT: SCRIPT_CURRENT_ALIASES},
         fastgpt_responsibility="根据审核意见修订当前批次剧本正文。",
         local_responsibility="保留当前批次边界，只在 passed=true 后才允许提交到 all_script。",
+        expected_output_kind="script_text",
+        workflow_json_name="剧本正文修订.json",
     ),
     STAGE_MEMORY: FastGPTStageContract(
         stage_name=STAGE_MEMORY,
@@ -1637,6 +1652,8 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_aliases={LAST_SUMMARY: SCRIPT_MEMORY_ALIASES},
         fastgpt_responsibility="把当前批次正文整理成下一批可用的摘要。",
         local_responsibility="用新 last_summary 覆盖旧 last_summary，不保存历史。",
+        expected_output_kind="script_memory_json",
+        workflow_json_name="当前五集剧本正文摘要.json",
     ),
     STAGE_FINAL: FastGPTStageContract(
         stage_name=STAGE_FINAL,
@@ -1670,6 +1687,8 @@ def _clone_stage_contract(
         output_aliases=source.output_aliases,
         fastgpt_responsibility=source.fastgpt_responsibility,
         local_responsibility=source.local_responsibility,
+        expected_output_kind=source.expected_output_kind,
+        workflow_json_name=source.workflow_json_name,
     )
 
 
@@ -1703,6 +1722,8 @@ STAGE_CONTRACTS[STAGE_HOOK_MEMORY] = FastGPTStageContract(
     output_aliases={HOOK_MEMORY: HOOK_MEMORY_ALIASES},
     fastgpt_responsibility="基于当前批次钩子和已有钩子记忆生成下一批可承接的钩子记忆。",
     local_responsibility="用新的 hook_memory 覆盖旧钩子记忆，不合并到 all_hooks。",
+    expected_output_kind="hook_memory_json",
+    workflow_json_name="开头冲突钩子记忆存储.json",
 )
 
 STAGE_CONTRACTS[STAGE_DIALOGUE_WRITE] = _clone_stage_contract(
@@ -1737,6 +1758,8 @@ STAGE_CONTRACTS[STAGE_DIALOGUE_MEMORY] = FastGPTStageContract(
     output_aliases={DIALOGUE_MEMORY: DIALOGUE_MEMORY_ALIASES},
     fastgpt_responsibility="基于当前批次对白、钩子和已有对白记忆生成下一批可承接的对白记忆。",
     local_responsibility="用新的 dialogue_memory 覆盖旧对白记忆，不合并到 all_dialogues。",
+    expected_output_kind="dialogue_memory_json",
+    workflow_json_name="角色对话记忆存储.json",
 )
 
 STAGE_CONTRACTS[STAGE_SCRIPT_WRITE] = _clone_stage_contract(

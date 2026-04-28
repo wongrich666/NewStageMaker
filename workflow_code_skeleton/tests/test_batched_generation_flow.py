@@ -47,19 +47,34 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
 )
 from workflow_code_skeleton.app.utils.episode import BatchWindow, iter_episode_batches
 from workflow_code_skeleton.app.workflow_ids import (
+    DIALOGUE_CURRENT_VAR,
     DIALOGUE_CURRENT_WORKFLOW_VAR,
     DIALOGUE_CURRENT_WRITE_VAR,
+    DIALOGUE_HOOK_BATCH_VAR,
+    DIALOGUE_HOOK_INPUT_VAR,
+    DIALOGUE_HOOK_REVIEW_VAR,
+    DIALOGUE_HOOK_REWRITE_VAR,
+    DIALOGUE_MEMORY_INPUT_VAR,
+    DIALOGUE_MEMORY_LEGACY_OUTPUT_VAR,
     DIALOGUE_MEMORY_OUTPUT_VAR,
+    DIALOGUE_MEMORY_SEARCH_VAR,
     DIALOGUE_REVIEW_LEGACY_VAR,
+    DIALOGUE_REVIEW_OUTPUT_VAR,
     DIALOGUE_REVIEW_WORKFLOW_VAR,
     HOOK_CURRENT_VAR,
     HOOK_CURRENT_WRITE_VAR,
+    HOOK_MEMORY_INPUT_VAR,
     HOOK_MEMORY_OUTPUT_VAR,
+    HOOK_MEMORY_REVIEW_VAR,
+    HOOK_MEMORY_REVISE_VAR,
     HOOK_REVIEW_OUTPUT_VAR,
     MEMORY_VAR,
+    SCRIPT_DIALOGUE_BATCH_VAR,
     SCRIPT_CURRENT_VAR,
     SCRIPT_CURRENT_WRITE_VAR,
+    SCRIPT_HOOK_BATCH_VAR,
     SCRIPT_MEMORY_OUTPUT_VAR,
+    SCRIPT_MEMORY_WRITE_INPUT_VAR,
     SCRIPT_REVIEW_OUTPUT_VAR,
     SCRIPT_REVIEW_WRITE_VAR,
 )
@@ -278,9 +293,30 @@ class _PhaseRecordingRunner:
                 "dialogue_workflow_alias_episodes": _episode_numbers_from_object(
                     variables.get(DIALOGUE_CURRENT_WORKFLOW_VAR)
                 ),
+                "dialogue_legacy_alias_episodes": _episode_numbers_from_object(
+                    variables.get(DIALOGUE_CURRENT_VAR)
+                ),
+                "dialogue_hook_batch_alias_episodes": _episode_numbers_from_object(
+                    variables.get(DIALOGUE_HOOK_BATCH_VAR)
+                ),
+                "dialogue_hook_review_alias_episodes": _episode_numbers_from_object(
+                    variables.get(DIALOGUE_HOOK_REVIEW_VAR)
+                ),
+                "dialogue_hook_rewrite_alias_episodes": _episode_numbers_from_object(
+                    variables.get(DIALOGUE_HOOK_REWRITE_VAR)
+                ),
+                "dialogue_hook_prompt_alias_episodes": _episode_numbers_from_object(
+                    variables.get(DIALOGUE_HOOK_INPUT_VAR)
+                ),
                 "script_write_alias_text": str(variables.get(SCRIPT_CURRENT_WRITE_VAR) or ""),
                 "script_current_alias_text": str(variables.get(SCRIPT_CURRENT_VAR) or ""),
                 "script_review_alias_text": str(variables.get(SCRIPT_REVIEW_WRITE_VAR) or ""),
+                "script_hook_alias_episodes": _episode_numbers_from_object(
+                    variables.get(SCRIPT_HOOK_BATCH_VAR)
+                ),
+                "script_dialogue_alias_episodes": _episode_numbers_from_object(
+                    variables.get(SCRIPT_DIALOGUE_BATCH_VAR)
+                ),
             }
         )
 
@@ -339,6 +375,8 @@ class _PhaseRecordingRunner:
         if not sequence:
             return None
         item = sequence.pop(0)
+        if isinstance(item, Exception):
+            raise item
         if isinstance(item, dict):
             return dict(item)
         raise AssertionError(f"Custom stage output for {stage_name} must be dict")
@@ -349,14 +387,17 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self._original_batch_mode = settings.fastgpt_batch_mode
         self._original_batch_size = settings.batch_size
         self._original_review_loops = settings.fastgpt_stage_review_revise_max_loops
+        self._original_format_retry_limit = settings.fastgpt_stage_format_retry_limit
         settings.fastgpt_batch_mode = "local"
         settings.batch_size = 5
         settings.fastgpt_stage_review_revise_max_loops = 10
+        settings.fastgpt_stage_format_retry_limit = 3
 
     def tearDown(self) -> None:
         settings.fastgpt_batch_mode = self._original_batch_mode
         settings.batch_size = self._original_batch_size
         settings.fastgpt_stage_review_revise_max_loops = self._original_review_loops
+        settings.fastgpt_stage_format_retry_limit = self._original_format_retry_limit
 
     def _base_variables(self, total_episodes: int) -> dict[str, object]:
         normalized_plan = _normalized_plan(total_episodes)
@@ -445,23 +486,29 @@ class BatchedGenerationFlowTests(unittest.TestCase):
             [int(call["batch_start"]) for call in runner.stage_calls(STAGE_DIALOGUES_WRITING)],
             [1, 6],
         )
-        self.assertTrue(
-            all(
-                call["hooks_episodes"] == list(range(1, 11))
-                for call in runner.stage_calls(STAGE_DIALOGUES_WRITING)
-            )
+        self.assertEqual(
+            [call["hooks_episodes"] for call in runner.stage_calls(STAGE_DIALOGUES_WRITING)],
+            [list(range(1, 6)), list(range(6, 11))],
         )
-        self.assertTrue(
-            all(
-                call["hooks_episodes"] == list(range(1, 11))
-                for call in runner.stage_calls(STAGE_SCRIPT_WRITING)
-            )
+        self.assertEqual(
+            [call["dialogue_hook_batch_alias_episodes"] for call in runner.stage_calls(STAGE_DIALOGUES_WRITING)],
+            [list(range(1, 6)), list(range(6, 11))],
         )
-        self.assertTrue(
-            all(
-                call["dialogue_episodes"] == list(range(1, 11))
-                for call in runner.stage_calls(STAGE_SCRIPT_WRITING)
-            )
+        self.assertEqual(
+            [call["hooks_episodes"] for call in runner.stage_calls(STAGE_SCRIPT_WRITING)],
+            [list(range(1, 6)), list(range(6, 11))],
+        )
+        self.assertEqual(
+            [call["dialogue_episodes"] for call in runner.stage_calls(STAGE_SCRIPT_WRITING)],
+            [list(range(1, 6)), list(range(6, 11))],
+        )
+        self.assertEqual(
+            [call["script_hook_alias_episodes"] for call in runner.stage_calls(STAGE_SCRIPT_WRITING)],
+            [list(range(1, 6)), list(range(6, 11))],
+        )
+        self.assertEqual(
+            [call["script_dialogue_alias_episodes"] for call in runner.stage_calls(STAGE_SCRIPT_WRITING)],
+            [list(range(1, 6)), list(range(6, 11))],
         )
         self.assertEqual(len(runner.memory_calls()), 2)
 
@@ -573,6 +620,36 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "剧本正文存在缺集"):
             flow._ensure_complete_batched_outputs_before_final(payload, variables)
 
+    def test_final_guard_rejects_when_hooks_missing(self) -> None:
+        variables = self._base_variables(10)
+        variables[ALL_HOOKS] = _hook_batch([1, 2, 3, 4, 5])
+        variables[ALL_DIALOGUES] = flow.merge_batch_object(
+            _dialogue_batch([1, 2, 3, 4, 5]),
+            _dialogue_batch([6, 7, 8, 9, 10]),
+        )
+        variables[ALL_SCRIPT] = _script_batch_text([1, 2, 3, 4, 5]) + "\n\n" + _script_batch_text(
+            [6, 7, 8, 9, 10]
+        )
+        payload = _workflow_input(10)
+
+        with self.assertRaisesRegex(ValueError, "开头冲突钩子存在缺集"):
+            flow._ensure_complete_batched_outputs_before_final(payload, variables)
+
+    def test_final_guard_rejects_when_dialogues_missing(self) -> None:
+        variables = self._base_variables(10)
+        variables[ALL_HOOKS] = flow.merge_batch_object(
+            _hook_batch([1, 2, 3, 4, 5]),
+            _hook_batch([6, 7, 8, 9, 10]),
+        )
+        variables[ALL_DIALOGUES] = _dialogue_batch([1, 2, 3, 4, 5])
+        variables[ALL_SCRIPT] = _script_batch_text([1, 2, 3, 4, 5]) + "\n\n" + _script_batch_text(
+            [6, 7, 8, 9, 10]
+        )
+        payload = _workflow_input(10)
+
+        with self.assertRaisesRegex(ValueError, "角色对白存在缺集"):
+            flow._ensure_complete_batched_outputs_before_final(payload, variables)
+
     def test_review_failure_triggers_rewrite_but_pass_stops_extra_rewrites(self) -> None:
         state, payload, variables = self._state_and_payload(5)
         runner = _PhaseRecordingRunner(
@@ -635,7 +712,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
 
     def test_script_batch_local_validation_blocks_duplicate_episode_headings(self) -> None:
         state, payload, variables = self._state_and_payload(5)
-        settings.fastgpt_stage_review_revise_max_loops = 1
+        settings.fastgpt_stage_format_retry_limit = 3
         runner = _PhaseRecordingRunner(
             stage_outputs={
                 STAGE_SCRIPT_WRITING: [
@@ -649,16 +726,42 @@ class BatchedGenerationFlowTests(unittest.TestCase):
                                 "第4集：\n场景一：第4集正文",
                             ]
                         )
-                    }
+                    },
+                    {
+                        BATCH_SCRIPT: "\n\n".join(
+                            [
+                                "第1集：\n场景一：第1集正文",
+                                "第1集：\n场景一：重复的第1集正文",
+                                "第2集：\n场景一：第2集正文",
+                                "第3集：\n场景一：第3集正文",
+                                "第4集：\n场景一：第4集正文",
+                            ]
+                        )
+                    },
+                    {
+                        BATCH_SCRIPT: "\n\n".join(
+                            [
+                                "第1集：\n场景一：第1集正文",
+                                "第1集：\n场景一：重复的第1集正文",
+                                "第2集：\n场景一：第2集正文",
+                                "第3集：\n场景一：第3集正文",
+                                "第4集：\n场景一：第4集正文",
+                            ]
+                        )
+                    },
                 ]
             }
         )
 
-        with self.assertRaisesRegex(ValueError, "剧本正文 1-5 集审核未通过"):
+        with self.assertRaisesRegex(
+            ValueError,
+            "script_writing|输出未通过正文批次校验|script batch 1-5",
+        ):
             flow._run_batched_generation(state, runner, payload, variables)
 
         self.assertEqual(len(runner.memory_calls()), 0)
         self.assertEqual(str(variables.get(ALL_SCRIPT, "") or "").strip(), "")
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_WRITING)), 3)
 
     def test_final_guard_rejects_duplicate_hook_episodes(self) -> None:
         variables = self._base_variables(10)
@@ -733,12 +836,21 @@ class BatchedGenerationFlowTests(unittest.TestCase):
 
     def test_script_review_unparseable_counts_as_failure(self) -> None:
         state, payload, variables, batches = self._script_ready_state(5)
-        settings.fastgpt_stage_review_revise_max_loops = 1
+        settings.fastgpt_stage_format_retry_limit = 3
         runner = _PhaseRecordingRunner(
-            review_sequences={STAGE_SCRIPT_REVIEW: [ValueError("not json")]}
+            review_sequences={
+                STAGE_SCRIPT_REVIEW: [
+                    ValueError("not json"),
+                    ValueError("still not json"),
+                    ValueError("again not json"),
+                ]
+            }
         )
 
-        with self.assertRaisesRegex(ValueError, "1-5"):
+        with self.assertRaisesRegex(
+            ValueError,
+            "script_review|审核输出未通过格式契约校验|not json|1-5",
+        ):
             flow._run_all_script_batches(
                 state,
                 runner,
@@ -750,7 +862,8 @@ class BatchedGenerationFlowTests(unittest.TestCase):
                 rewrite_from_stage="",
             )
 
-        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REVIEW)), 1)
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REVIEW)), 3)
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REWRITE)), 0)
         self.assertEqual(str(variables.get(ALL_SCRIPT, "") or "").strip(), "")
 
     def test_script_review_passed_with_blocking_issues_revises(self) -> None:
@@ -785,6 +898,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
     def test_script_revise_output_that_is_not_script_is_rejected(self) -> None:
         state, payload, variables, batches = self._script_ready_state(5)
         settings.fastgpt_stage_review_revise_max_loops = 2
+        settings.fastgpt_stage_format_retry_limit = 3
         runner = _PhaseRecordingRunner(
             review_sequences={STAGE_SCRIPT_REVIEW: [False, True]},
             stage_outputs={
@@ -794,12 +908,27 @@ class BatchedGenerationFlowTests(unittest.TestCase):
                             {"passed": True, "blocking_issues": []},
                             ensure_ascii=False,
                         )
-                    }
+                    },
+                    {
+                        BATCH_SCRIPT: json.dumps(
+                            {"passed": True, "blocking_issues": []},
+                            ensure_ascii=False,
+                        )
+                    },
+                    {
+                        BATCH_SCRIPT: json.dumps(
+                            {"passed": True, "blocking_issues": []},
+                            ensure_ascii=False,
+                        )
+                    },
                 ]
             },
         )
 
-        with self.assertRaisesRegex(ValueError, "1-5"):
+        with self.assertRaisesRegex(
+            ValueError,
+            "script_rewrite|输出未通过正文批次校验|script batch 1-5",
+        ):
             flow._run_all_script_batches(
                 state,
                 runner,
@@ -812,6 +941,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
             )
 
         self.assertEqual(str(variables.get(ALL_SCRIPT, "") or "").strip(), "")
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REWRITE)), 3)
 
     def test_script_out_of_range_and_missing_episode_are_rejected(self) -> None:
         issues = flow._validate_script_batch_output(
@@ -895,6 +1025,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         for alias in (
             HOOK_REVIEW_OUTPUT_VAR,
             DIALOGUE_REVIEW_WORKFLOW_VAR,
+            DIALOGUE_REVIEW_OUTPUT_VAR,
             DIALOGUE_REVIEW_LEGACY_VAR,
             SCRIPT_REVIEW_WRITE_VAR,
             SCRIPT_REVIEW_OUTPUT_VAR,
@@ -922,7 +1053,41 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertFalse(natural.passed)
         self.assertTrue(natural.rewrite_required)
 
-    def test_hook_alias_write_review_and_memory_answer_text(self) -> None:
+    def test_review_parser_forces_rewrite_false_schema_and_type_errors(self) -> None:
+        decision = flow.parse_review_result(
+            {
+                DIALOGUE_REVIEW_OUTPUT_VAR: json.dumps(
+                    {
+                        "passed": "true",
+                        "rewrite_required": False,
+                        "blocking_issues": [],
+                        "non_blocking_issues": [],
+                    }
+                )
+            }
+        )
+        self.assertFalse(decision.passed)
+        self.assertTrue(decision.rewrite_required)
+        self.assertIn("must be boolean", "\n".join(decision.blocking_issues))
+
+        with self.assertLogs(flow.logger.name, level="WARNING") as logs:
+            forced = flow.parse_review_result(
+                {
+                    SCRIPT_REVIEW_OUTPUT_VAR: json.dumps(
+                        {
+                            "passed": False,
+                            "rewrite_required": False,
+                            "blocking_issues": ["still broken"],
+                            "non_blocking_issues": [],
+                        }
+                    )
+                }
+            )
+        self.assertFalse(forced.passed)
+        self.assertTrue(forced.rewrite_required)
+        self.assertTrue(any("forcing revision" in entry for entry in logs.output))
+
+    def test_hook_alias_write_review_and_memory_output_mirror(self) -> None:
         state, payload, variables = self._state_and_payload(5)
         batches = list(iter_episode_batches(5, batch_size=5))
         memory_json = json.dumps(
@@ -936,7 +1101,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         runner = _PhaseRecordingRunner(
             stage_outputs={
                 STAGE_HOOKS_WRITING: [{HOOK_CURRENT_WRITE_VAR: _hook_batch([1, 2, 3, 4, 5])}],
-                STAGE_HOOK_MEMORY: [{"answerText": memory_json}],
+                STAGE_HOOK_MEMORY: [{HOOK_MEMORY_OUTPUT_VAR: memory_json}],
             }
         )
 
@@ -952,10 +1117,93 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         )
 
         self.assertEqual(_episode_numbers_from_object(variables[BATCH_HOOKS]), [1, 2, 3, 4, 5])
+        self.assertEqual(_episode_numbers_from_object(variables[HOOK_CURRENT_WRITE_VAR]), [1, 2, 3, 4, 5])
+        self.assertEqual(_episode_numbers_from_object(variables[HOOK_CURRENT_VAR]), [1, 2, 3, 4, 5])
         review_call = runner.stage_calls(STAGE_HOOKS_REVIEW)[0]
         self.assertEqual(review_call["hook_write_alias_episodes"], [1, 2, 3, 4, 5])
         self.assertEqual(review_call["hook_review_alias_episodes"], [1, 2, 3, 4, 5])
-        self.assertIn("final_hook_of_this_turn", str(variables[flow.HOOK_MEMORY]))
+        expected_memory = json.loads(memory_json)
+        self.assertEqual(json.loads(str(variables[flow.HOOK_MEMORY])), expected_memory)
+        self.assertEqual(json.loads(str(variables[HOOK_MEMORY_INPUT_VAR])), expected_memory)
+        self.assertEqual(json.loads(str(variables[HOOK_MEMORY_REVIEW_VAR])), expected_memory)
+        self.assertEqual(json.loads(str(variables[HOOK_MEMORY_REVISE_VAR])), expected_memory)
+        self.assertEqual(json.loads(str(variables[HOOK_MEMORY_OUTPUT_VAR])), expected_memory)
+
+    def test_hook_review_and_rewrite_alias_paths_are_respected(self) -> None:
+        state, payload, variables = self._state_and_payload(5)
+        batches = list(iter_episode_batches(5, batch_size=5))
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_HOOKS_WRITING: [{HOOK_CURRENT_WRITE_VAR: _hook_batch([1, 2, 3, 4, 5])}],
+                STAGE_HOOKS_REVIEW: [
+                    {
+                        HOOK_REVIEW_OUTPUT_VAR: json.dumps(
+                            {
+                                "passed": False,
+                                "rewrite_required": True,
+                                "blocking_issues": ["revise"],
+                                "non_blocking_issues": [],
+                            },
+                            ensure_ascii=False,
+                        )
+                    },
+                    {
+                        HOOK_REVIEW_OUTPUT_VAR: json.dumps(
+                            {
+                                "passed": True,
+                                "rewrite_required": False,
+                                "blocking_issues": [],
+                                "non_blocking_issues": [],
+                            },
+                            ensure_ascii=False,
+                        )
+                    },
+                ],
+                STAGE_HOOKS_REWRITE: [{HOOK_CURRENT_VAR: _hook_batch([1, 2, 3, 4, 5])}],
+            }
+        )
+
+        flow._run_all_hook_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=None,
+            rewrite_from_stage="",
+        )
+
+        self.assertEqual(len(runner.stage_calls(STAGE_HOOKS_REWRITE)), 1)
+        self.assertEqual(_episode_numbers_from_object(variables[HOOK_CURRENT_WRITE_VAR]), [1, 2, 3, 4, 5])
+        self.assertEqual(_episode_numbers_from_object(variables[HOOK_CURRENT_VAR]), [1, 2, 3, 4, 5])
+        self.assertIn('"passed": true', str(variables[HOOK_REVIEW_OUTPUT_VAR]).lower())
+
+    def test_hook_validation_accepts_json_string_and_rejects_review_memory_and_bad_meta(self) -> None:
+        batch = BatchWindow(start_episode=1, end_episode=5)
+        good = json.dumps({BATCH_HOOKS: _hook_batch([1, 2, 3, 4, 5])}, ensure_ascii=False)
+        self.assertEqual(flow.validate_batch_hooks(good, batch), [])
+
+        bad_meta = _hook_batch([1, 2, 3, 4, 5])
+        bad_meta["batch_meta"]["start_episode"] = 2
+        issues = flow.validate_batch_hooks(json.dumps({BATCH_HOOKS: bad_meta}, ensure_ascii=False), batch)
+        self.assertIn("batch_meta.start_episode", "\n".join(issues))
+
+        review_json = json.dumps(
+            {"passed": True, "rewrite_required": False, "blocking_issues": [], "non_blocking_issues": []},
+            ensure_ascii=False,
+        )
+        memory_json = json.dumps(
+            {
+                "final_hook_of_this_turn": "end",
+                "must_carry_into_next_turn": [],
+                "appearance_alias_continuity_summary": "",
+            },
+            ensure_ascii=False,
+        )
+        self.assertTrue(flow.validate_batch_hooks(review_json, batch))
+        self.assertTrue(flow.validate_batch_hooks(memory_json, batch))
+        self.assertTrue(flow.validate_batch_hooks("普通自然语言说明", batch))
 
     def test_hook_local_validation_rejects_missing_out_of_range_and_duplicate(self) -> None:
         batch = BatchWindow(start_episode=1, end_episode=5)
@@ -966,7 +1214,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertTrue(flow.validate_batch_hooks(bad_out, batch))
         self.assertTrue(flow.validate_batch_hooks(bad_dup, batch))
 
-    def test_dialogue_alias_write_review_memory_and_bad_revise_contract(self) -> None:
+    def test_dialogue_alias_write_review_rewrite_and_memory_mirror(self) -> None:
         state, payload, variables = self._state_and_payload(
             5,
             variables={ALL_HOOKS: _hook_batch([1, 2, 3, 4, 5])},
@@ -981,11 +1229,40 @@ class BatchedGenerationFlowTests(unittest.TestCase):
             ensure_ascii=False,
         )
         runner = _PhaseRecordingRunner(
+            review_sequences={
+                STAGE_DIALOGUES_REVIEW: [
+                    {
+                        DIALOGUE_REVIEW_WORKFLOW_VAR: json.dumps(
+                            {
+                                "passed": False,
+                                "rewrite_required": True,
+                                "blocking_issues": ["revise"],
+                                "non_blocking_issues": [],
+                            },
+                            ensure_ascii=False,
+                        )
+                    },
+                    {
+                        DIALOGUE_REVIEW_WORKFLOW_VAR: json.dumps(
+                            {
+                                "passed": True,
+                                "rewrite_required": False,
+                                "blocking_issues": [],
+                                "non_blocking_issues": [],
+                            },
+                            ensure_ascii=False,
+                        )
+                    },
+                ]
+            },
             stage_outputs={
                 STAGE_DIALOGUES_WRITING: [
                     {DIALOGUE_CURRENT_WRITE_VAR: _dialogue_batch([1, 2, 3, 4, 5])}
                 ],
-                STAGE_DIALOGUE_MEMORY: [{"answerText": memory_json}],
+                STAGE_DIALOGUES_REWRITE: [
+                    {DIALOGUE_CURRENT_WORKFLOW_VAR: _dialogue_batch([1, 2, 3, 4, 5])}
+                ],
+                STAGE_DIALOGUE_MEMORY: [{DIALOGUE_MEMORY_OUTPUT_VAR: memory_json}],
             }
         )
 
@@ -1001,10 +1278,23 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         )
 
         self.assertEqual(_episode_numbers_from_object(variables[BATCH_DIALOGUES]), [1, 2, 3, 4, 5])
+        self.assertEqual(_episode_numbers_from_object(variables[DIALOGUE_CURRENT_WRITE_VAR]), [1, 2, 3, 4, 5])
+        self.assertEqual(_episode_numbers_from_object(variables[DIALOGUE_CURRENT_WORKFLOW_VAR]), [1, 2, 3, 4, 5])
+        self.assertEqual(_episode_numbers_from_object(variables[DIALOGUE_CURRENT_VAR]), [1, 2, 3, 4, 5])
         review_call = runner.stage_calls(STAGE_DIALOGUES_REVIEW)[0]
         self.assertEqual(review_call["dialogue_write_alias_episodes"], [1, 2, 3, 4, 5])
         self.assertEqual(review_call["dialogue_workflow_alias_episodes"], [1, 2, 3, 4, 5])
-        self.assertIn("dialogue_voice_summary", str(variables[flow.DIALOGUE_MEMORY]))
+        self.assertEqual(review_call["dialogue_legacy_alias_episodes"], [1, 2, 3, 4, 5])
+        self.assertEqual(len(runner.stage_calls(STAGE_DIALOGUES_REWRITE)), 1)
+        self.assertIn('"passed": true', str(variables[DIALOGUE_REVIEW_OUTPUT_VAR]).lower())
+        self.assertEqual(str(variables[DIALOGUE_REVIEW_WORKFLOW_VAR]), str(variables[DIALOGUE_REVIEW_OUTPUT_VAR]))
+        self.assertEqual(str(variables[DIALOGUE_REVIEW_LEGACY_VAR]), str(variables[DIALOGUE_REVIEW_OUTPUT_VAR]))
+        expected_memory = json.loads(memory_json)
+        self.assertEqual(json.loads(str(variables[flow.DIALOGUE_MEMORY])), expected_memory)
+        self.assertEqual(json.loads(str(variables[DIALOGUE_MEMORY_INPUT_VAR])), expected_memory)
+        self.assertEqual(json.loads(str(variables[DIALOGUE_MEMORY_OUTPUT_VAR])), expected_memory)
+        self.assertEqual(json.loads(str(variables[DIALOGUE_MEMORY_SEARCH_VAR])), expected_memory)
+        self.assertEqual(json.loads(str(variables[DIALOGUE_MEMORY_LEGACY_OUTPUT_VAR])), expected_memory)
 
         bad_revise = {
             "dialogue_voice_summary": "memory",
@@ -1013,6 +1303,86 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         }
         issues = flow.validate_batch_dialogues(bad_revise, BatchWindow(start_episode=1, end_episode=5))
         self.assertIn("角色对话修订 workflow 输出契约错误", "\n".join(issues))
+
+    def test_dialogue_review_alias_variants_and_warning_for_missing_hookcontent_var(self) -> None:
+        state, payload, variables = self._state_and_payload(
+            5,
+            variables={ALL_HOOKS: _hook_batch([1, 2, 3, 4, 5])},
+        )
+        batches = list(iter_episode_batches(5, batch_size=5))
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_DIALOGUES_WRITING: [{DIALOGUE_CURRENT_WRITE_VAR: _dialogue_batch([1, 2, 3, 4, 5])}],
+                STAGE_DIALOGUES_REVIEW: [
+                    {
+                        DIALOGUE_REVIEW_OUTPUT_VAR: json.dumps(
+                            {
+                                "passed": False,
+                                "rewrite_required": True,
+                                "blocking_issues": ["revise"],
+                                "non_blocking_issues": [],
+                            },
+                            ensure_ascii=False,
+                        )
+                    },
+                    {
+                        DIALOGUE_REVIEW_LEGACY_VAR: json.dumps(
+                            {
+                                "passed": True,
+                                "rewrite_required": False,
+                                "blocking_issues": [],
+                                "non_blocking_issues": [],
+                            },
+                            ensure_ascii=False,
+                        )
+                    },
+                ],
+            }
+        )
+
+        with self.assertLogs(flow.logger.name, level="WARNING") as logs:
+            flow._run_all_dialogue_batches(
+                state,
+                runner,
+                payload,
+                variables,
+                batches=batches,
+                normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+                episode_alias_plan=None,
+                rewrite_from_stage="",
+            )
+
+        self.assertEqual(len(runner.stage_calls(STAGE_DIALOGUES_REWRITE)), 1)
+        self.assertTrue(any("hookContent" in entry for entry in logs.output))
+        self.assertIn('"passed": true', str(variables[DIALOGUE_REVIEW_OUTPUT_VAR]).lower())
+        self.assertEqual(str(variables[DIALOGUE_REVIEW_WORKFLOW_VAR]), str(variables[DIALOGUE_REVIEW_OUTPUT_VAR]))
+        self.assertEqual(str(variables[DIALOGUE_REVIEW_LEGACY_VAR]), str(variables[DIALOGUE_REVIEW_OUTPUT_VAR]))
+
+    def test_dialogue_validation_accepts_json_string_and_rejects_review_memory_natural_and_empty_speaker(self) -> None:
+        batch = BatchWindow(start_episode=1, end_episode=5)
+        good = json.dumps({BATCH_DIALOGUES: _dialogue_batch([1, 2, 3, 4, 5])}, ensure_ascii=False)
+        self.assertEqual(flow.validate_batch_dialogues(good, batch), [])
+
+        review_json = json.dumps(
+            {"passed": True, "rewrite_required": False, "blocking_issues": [], "non_blocking_issues": []},
+            ensure_ascii=False,
+        )
+        memory_json = json.dumps(
+            {
+                "dialogue_voice_summary": "voice",
+                "must_carry_into_next_turn": [],
+                "alias_usage_continuity": "",
+            },
+            ensure_ascii=False,
+        )
+        self.assertTrue(flow.validate_batch_dialogues(review_json, batch))
+        self.assertTrue(flow.validate_batch_dialogues(memory_json, batch))
+        self.assertTrue(flow.validate_batch_dialogues("普通自然语言说明", batch))
+
+        bad_meta = _dialogue_batch([1, 2, 3, 4, 5])
+        bad_meta["batch_meta"]["end_episode"] = 6
+        issues = flow.validate_batch_dialogues(json.dumps({BATCH_DIALOGUES: bad_meta}, ensure_ascii=False), batch)
+        self.assertIn("batch_meta.end_episode", "\n".join(issues))
 
     def test_dialogue_bad_batch_is_rejected(self) -> None:
         batch = BatchWindow(start_episode=1, end_episode=5)
@@ -1025,6 +1395,39 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertTrue(flow.validate_batch_dialogues(bad_out, batch))
         self.assertTrue(flow.validate_batch_dialogues(bad_dup, batch))
         self.assertTrue(flow.validate_batch_dialogues(bad_empty, batch))
+
+    def test_dialogue_rewrite_receives_current_batch_hook_slice_not_full_all_hooks(self) -> None:
+        state, payload, variables = self._state_and_payload(
+            10,
+            variables={
+                ALL_HOOKS: flow.merge_batch_object(
+                    _hook_batch([1, 2, 3, 4, 5]),
+                    _hook_batch([6, 7, 8, 9, 10]),
+                )
+            },
+        )
+        batches = list(iter_episode_batches(10, batch_size=5))
+        runner = _PhaseRecordingRunner(
+            review_sequences={
+                STAGE_DIALOGUES_REVIEW: [False, True],
+            }
+        )
+
+        flow._run_all_dialogue_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=None,
+            rewrite_from_stage="",
+        )
+
+        rewrite_call = runner.stage_calls(STAGE_DIALOGUES_REWRITE)[0]
+        self.assertEqual(rewrite_call["hooks_episodes"], [1, 2, 3, 4, 5])
+        self.assertEqual(rewrite_call["dialogue_hook_rewrite_alias_episodes"], [1, 2, 3, 4, 5])
+        self.assertEqual(rewrite_call["dialogue_hook_prompt_alias_episodes"], [1, 2, 3, 4, 5])
 
     def test_script_alias_write_review_revise_and_memory_aliases(self) -> None:
         state, payload, variables, batches = self._script_ready_state(5)
@@ -1072,11 +1475,298 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         )
 
         self.assertIn("第1集", str(variables[BATCH_SCRIPT]))
+        self.assertEqual(str(variables[SCRIPT_CURRENT_WRITE_VAR]), str(variables[BATCH_SCRIPT]))
+        self.assertEqual(str(variables[SCRIPT_CURRENT_VAR]), str(variables[BATCH_SCRIPT]))
         review_call = runner.stage_calls(STAGE_SCRIPT_REVIEW)[0]
         rewrite_call = runner.stage_calls(STAGE_SCRIPT_REWRITE)[0]
         self.assertIn("第1集", review_call["script_write_alias_text"])
+        self.assertIn("第1集", review_call["script_current_alias_text"])
         self.assertIn("revise", rewrite_call["script_review_alias_text"])
-        self.assertIn("appearance_continuity_summary", str(variables[flow.SCRIPT_MEMORY]))
+        self.assertEqual(str(variables[SCRIPT_REVIEW_WRITE_VAR]), str(variables[SCRIPT_REVIEW_OUTPUT_VAR]))
+        self.assertIn('"passed": true', str(variables[SCRIPT_REVIEW_OUTPUT_VAR]).lower())
+        expected_memory = json.loads(memory_json)
+        self.assertEqual(json.loads(str(variables[flow.SCRIPT_MEMORY])), expected_memory)
+        self.assertEqual(json.loads(str(variables[SCRIPT_MEMORY_WRITE_INPUT_VAR])), expected_memory)
+        self.assertEqual(json.loads(str(variables[MEMORY_VAR])), expected_memory)
+        self.assertEqual(json.loads(str(variables[SCRIPT_MEMORY_OUTPUT_VAR])), expected_memory)
+
+    def test_script_review_output_alias_path_mirrors_to_workflow_alias(self) -> None:
+        state, payload, variables, batches = self._script_ready_state(5)
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_SCRIPT_REVIEW: [
+                    {
+                        SCRIPT_REVIEW_OUTPUT_VAR: json.dumps(
+                            {
+                                "passed": False,
+                                "rewrite_required": True,
+                                "blocking_issues": ["revise"],
+                                "non_blocking_issues": [],
+                            },
+                            ensure_ascii=False,
+                        )
+                    },
+                    {
+                        SCRIPT_REVIEW_OUTPUT_VAR: json.dumps(
+                            {
+                                "passed": True,
+                                "rewrite_required": False,
+                                "blocking_issues": [],
+                                "non_blocking_issues": [],
+                            },
+                            ensure_ascii=False,
+                        )
+                    },
+                ]
+            }
+        )
+
+        flow._run_all_script_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=None,
+            rewrite_from_stage="",
+        )
+
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REWRITE)), 1)
+        self.assertEqual(str(variables[SCRIPT_REVIEW_WRITE_VAR]), str(variables[SCRIPT_REVIEW_OUTPUT_VAR]))
+        rewrite_call = runner.stage_calls(STAGE_SCRIPT_REWRITE)[0]
+        self.assertIn("revise", rewrite_call["script_review_alias_text"])
+
+    def test_script_rewrite_receives_current_batch_hook_and_dialogue_slices(self) -> None:
+        state, payload, variables, batches = self._script_ready_state(10)
+        runner = _PhaseRecordingRunner(
+            review_sequences={
+                STAGE_SCRIPT_REVIEW: [False, True],
+            }
+        )
+
+        flow._run_all_script_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=None,
+            rewrite_from_stage="",
+        )
+
+        rewrite_call = runner.stage_calls(STAGE_SCRIPT_REWRITE)[0]
+        self.assertEqual(rewrite_call["hooks_episodes"], [1, 2, 3, 4, 5])
+        self.assertEqual(rewrite_call["dialogue_episodes"], [1, 2, 3, 4, 5])
+        self.assertEqual(rewrite_call["script_hook_alias_episodes"], [1, 2, 3, 4, 5])
+        self.assertEqual(rewrite_call["script_dialogue_alias_episodes"], [1, 2, 3, 4, 5])
+        self.assertIn("failed", rewrite_call["script_review_alias_text"])
+
+    def test_script_memory_answertext_is_accepted_and_invalid_memory_does_not_pollute_batch(self) -> None:
+        state, payload, variables, batches = self._script_ready_state(5)
+        memory_json = json.dumps(
+            {
+                "final_hook_of_this_turn": "hook",
+                "must_carry_into_next_turn": [],
+                "appearance_continuity_summary": "ok",
+            },
+            ensure_ascii=False,
+        )
+        runner = _PhaseRecordingRunner(
+            stage_outputs={STAGE_SCRIPT_MEMORY: [{"answerText": memory_json}]}
+        )
+
+        flow._run_all_script_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=None,
+            rewrite_from_stage="",
+        )
+
+        expected_memory = json.loads(memory_json)
+        self.assertEqual(json.loads(str(variables[LAST_SUMMARY])), expected_memory)
+        self.assertIn("第1集", str(variables[BATCH_SCRIPT]))
+        self.assertIn("第1集", str(variables[ALL_SCRIPT]))
+
+    def test_hook_write_format_failure_retries_current_stage_and_records_debug_artifact(self) -> None:
+        state, payload, variables = self._state_and_payload(5)
+        batches = list(iter_episode_batches(5, batch_size=5))
+        settings.fastgpt_stage_format_retry_limit = 3
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_HOOKS_WRITING: [
+                    {HOOK_CURRENT_WRITE_VAR: "普通自然语言说明"},
+                    {HOOK_CURRENT_WRITE_VAR: "仍然不是 batch_hooks"},
+                    {HOOK_CURRENT_WRITE_VAR: "最后一次还是坏格式"},
+                ]
+            }
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "hooks_writing|输出字段 batch_hooks|hook batch 1-5",
+        ):
+            flow._run_all_hook_batches(
+                state,
+                runner,
+                payload,
+                variables,
+                batches=batches,
+                normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+                episode_alias_plan=None,
+                rewrite_from_stage="",
+            )
+
+        self.assertEqual(len(runner.stage_calls(STAGE_HOOKS_WRITING)), 3)
+        self.assertNotIn(ALL_HOOKS, variables)
+        artifact = state.get_output(STAGE_HOOKS_WRITING, "contract_guard", {})
+        self.assertEqual(artifact.get("status"), "retry_exhausted")
+        self.assertEqual(int(artifact.get("format_attempt") or 0), 3)
+        self.assertIn("validator_issues", artifact)
+
+    def test_script_review_format_failure_retries_current_stage_without_entering_rewrite_loop(self) -> None:
+        state, payload, variables, batches = self._script_ready_state(5)
+        settings.fastgpt_stage_format_retry_limit = 3
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_SCRIPT_REVIEW: [
+                    {SCRIPT_REVIEW_OUTPUT_VAR: "不是合法 JSON"},
+                    {SCRIPT_REVIEW_OUTPUT_VAR: "还是不对"},
+                    {SCRIPT_REVIEW_OUTPUT_VAR: "最后一次也不是 review json"},
+                ]
+            }
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "script_review|审核输出未通过格式契约校验|review output",
+        ):
+            flow._run_all_script_batches(
+                state,
+                runner,
+                payload,
+                variables,
+                batches=batches,
+                normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+                episode_alias_plan=None,
+                rewrite_from_stage="",
+            )
+
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REVIEW)), 3)
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REWRITE)), 0)
+        self.assertEqual(str(variables.get(ALL_SCRIPT, "") or "").strip(), "")
+        artifact = state.get_output(STAGE_SCRIPT_REVIEW, "contract_guard", {})
+        self.assertEqual(artifact.get("status"), "retry_exhausted")
+        self.assertEqual(int(artifact.get("format_attempt") or 0), 3)
+
+    def test_hook_memory_invalid_json_uses_fallback_and_records_debug_artifact(self) -> None:
+        state, payload, variables = self._state_and_payload(5)
+        batches = list(iter_episode_batches(5, batch_size=5))
+        runner = _PhaseRecordingRunner(
+            stage_outputs={STAGE_HOOK_MEMORY: [{HOOK_MEMORY_OUTPUT_VAR: "bad memory"}]}
+        )
+
+        flow._run_all_hook_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=None,
+            rewrite_from_stage="",
+        )
+
+        memory = json.loads(str(variables[flow.HOOK_MEMORY]))
+        self.assertTrue(memory.get("local_fallback"))
+        self.assertIn("final_hook_of_this_turn", memory)
+        artifact = state.get_output(STAGE_HOOK_MEMORY, "contract_guard", {})
+        self.assertTrue(bool(artifact.get("fallback_used")))
+        self.assertEqual(artifact.get("status"), "fallback_used")
+
+    def test_dialogue_memory_invalid_json_uses_fallback_and_records_debug_artifact(self) -> None:
+        state, payload, variables = self._state_and_payload(
+            5,
+            variables={ALL_HOOKS: _hook_batch([1, 2, 3, 4, 5])},
+        )
+        batches = list(iter_episode_batches(5, batch_size=5))
+        runner = _PhaseRecordingRunner(
+            stage_outputs={STAGE_DIALOGUE_MEMORY: [{DIALOGUE_MEMORY_OUTPUT_VAR: "bad memory"}]}
+        )
+
+        flow._run_all_dialogue_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=None,
+            rewrite_from_stage="",
+        )
+
+        memory = json.loads(str(variables[flow.DIALOGUE_MEMORY]))
+        self.assertTrue(memory.get("local_fallback"))
+        self.assertIn("dialogue_voice_summary", memory)
+        artifact = state.get_output(STAGE_DIALOGUE_MEMORY, "contract_guard", {})
+        self.assertTrue(bool(artifact.get("fallback_used")))
+        self.assertEqual(artifact.get("status"), "fallback_used")
+
+    def test_script_memory_invalid_json_records_fallback_debug_artifact(self) -> None:
+        state, payload, variables, batches = self._script_ready_state(5)
+        runner = _PhaseRecordingRunner(
+            stage_outputs={STAGE_SCRIPT_MEMORY: [{SCRIPT_MEMORY_OUTPUT_VAR: "not json"}]}
+        )
+
+        flow._run_all_script_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=None,
+            rewrite_from_stage="",
+        )
+
+        memory = json.loads(str(variables[LAST_SUMMARY]))
+        self.assertIn("appearance_continuity_summary", memory)
+        self.assertIn("第1集", str(variables[ALL_SCRIPT]))
+        artifact = state.get_output(STAGE_SCRIPT_MEMORY, "contract_guard", {})
+        self.assertTrue(bool(artifact.get("fallback_used")))
+        self.assertEqual(artifact.get("status"), "fallback_used")
+
+    def test_dialogue_rewrite_contract_guard_records_hookcontent_warning(self) -> None:
+        state, payload, variables = self._state_and_payload(
+            5,
+            variables={ALL_HOOKS: _hook_batch([1, 2, 3, 4, 5])},
+        )
+        batches = list(iter_episode_batches(5, batch_size=5))
+        runner = _PhaseRecordingRunner(
+            review_sequences={STAGE_DIALOGUES_REVIEW: [False, True]}
+        )
+
+        with self.assertLogs(flow.logger.name, level="WARNING") as logs:
+            flow._run_all_dialogue_batches(
+                state,
+                runner,
+                payload,
+                variables,
+                batches=batches,
+                normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+                episode_alias_plan=None,
+                rewrite_from_stage="",
+            )
+
+        artifact = state.get_output(STAGE_DIALOGUES_REWRITE, "contract_guard", {})
+        warnings = list(artifact.get("workflow_warnings") or [])
+        self.assertTrue(any("hookContent" in item for item in warnings))
+        self.assertTrue(any("hookContent" in line for line in logs.output))
 
     def test_script_local_validation_rejects_json_report_missing_out_of_range_duplicate(self) -> None:
         batch = BatchWindow(start_episode=1, end_episode=5)
