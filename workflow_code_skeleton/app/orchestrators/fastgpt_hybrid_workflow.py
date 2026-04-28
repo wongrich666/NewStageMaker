@@ -743,13 +743,19 @@ def _run_batched_generation(
         batch_size=batch_size,
     )
 
+    final_script_candidate = (
+        repaired_script_text
+        or get_with_aliases(variables, ALL_SCRIPT, SCRIPT_FINAL_ALIASES, "")
+    )
     if (
         rewrite_from_stage == "final"
-        and _has_value(
-            repaired_script_text
-            or get_with_aliases(variables, ALL_SCRIPT, SCRIPT_FINAL_ALIASES, "")
-        )
+        and _has_value(final_script_candidate)
         and repaired_script_episodes == list(range(1, total_episodes + 1))
+        and _script_text_is_reusable_for_final(
+            final_script_candidate,
+            total_episodes=total_episodes,
+            batches=batches,
+        )
     ):
         set_runtime_stage(
             state,
@@ -825,7 +831,10 @@ def _run_all_hook_batches(
 ) -> None:
     """先补齐全部 hooks，再允许后续阶段启动。"""
     cached_all_hooks = get_with_aliases(variables, ALL_HOOKS, HOOK_FINAL_ALIASES, {})
-    if _phase_object_complete(cached_all_hooks, batches):
+    if _phase_object_complete(cached_all_hooks, batches) and _pending_hook_memory_batch_start(
+        variables,
+        batches=batches,
+    ) is None:
         set_with_aliases(
             variables,
             ALL_HOOKS,
@@ -872,7 +881,13 @@ def _run_all_dialogue_batches(
         raise ValueError("角色对白阶段启动失败：ALL_HOOKS 尚未完整覆盖全部集数。")
 
     cached_all_dialogues = get_with_aliases(variables, ALL_DIALOGUES, DIALOGUE_FINAL_ALIASES, {})
-    if _phase_object_complete(cached_all_dialogues, batches):
+    if _phase_object_complete(
+        cached_all_dialogues,
+        batches,
+    ) and _pending_dialogue_memory_batch_start(
+        variables,
+        batches=batches,
+    ) is None:
         set_with_aliases(
             variables,
             ALL_DIALOGUES,
@@ -1678,7 +1693,11 @@ def _run_hook_batches(
     """承接前置设定阶段，为所有批次补齐开头冲突钩子。"""
     total_batches = max(1, total_batches or len(batches))
     all_hooks = _dict_or_empty(get_with_aliases(variables, ALL_HOOKS, HOOK_FINAL_ALIASES, {}))
-    if rewrite_from_stage in {"dialogue", "script", "final"} and _phase_object_complete(all_hooks, batches):
+    if (
+        rewrite_from_stage in {"dialogue", "script", "final"}
+        and _phase_object_complete(all_hooks, batches)
+        and _pending_hook_memory_batch_start(variables, batches=batches) is None
+    ):
         set_runtime_stage(
             state,
             "hook",
@@ -1689,8 +1708,17 @@ def _run_hook_batches(
 
     for index, batch in enumerate(batches):
         actual_index = batch_index_offset + index
-        existing_batch_hooks = slice_object_episodes_for_batch(all_hooks, batch)
-        if _batch_object_covers_window(existing_batch_hooks, batch):
+        existing_batch_hooks = _current_batch_object_payload(
+            variables.get(BATCH_HOOKS),
+            all_hooks,
+            batch=batch,
+        )
+        pending_hook_memory_only = _is_pending_hook_memory_recovery(
+            variables,
+            batch=batch,
+            batch_payload=existing_batch_hooks,
+        )
+        if _batch_object_is_reusable(existing_batch_hooks, batch) and not pending_hook_memory_only:
             set_with_aliases(variables, BATCH_HOOKS, existing_batch_hooks, HOOK_BATCH_ALIASES)
             variables[LOCAL_HOOK_CHECKPOINT_START] = batch.start_episode
             variables[BATCH_START_EPISODE] = batch.end_episode + 1
@@ -1722,60 +1750,19 @@ def _run_hook_batches(
         _sync_state_variables(state, variables)
         sync_runtime_state(state)
 
+        progress = 42 + int(((actual_index + 1) / total_batches) * 14)
         hook_write_stage = _stage_name_for_runner(runner, STAGE_HOOK_WRITE, STAGE_HOOKS_WRITING)
         hook_review_stage = _stage_name_for_runner(runner, STAGE_HOOK_REVIEW, STAGE_HOOKS_REVIEW)
         hook_revise_stage = _stage_name_for_runner(runner, STAGE_HOOK_REVISE, STAGE_HOOKS_REWRITE)
-        hook_base = _build_hook_stage_context(
-            variables,
-            stage_name=hook_write_stage,
-            plan_for_batch=plan_for_batch,
-            normalized_plan_for_batch=normalized_plan_for_batch,
-            alias_plan_for_batch=alias_plan_for_batch,
-            batch_start_episode=batch.start_episode,
-            hook_memory=get_with_aliases(
+        if pending_hook_memory_only:
+            batch_hooks = copy.deepcopy(existing_batch_hooks)
+            set_with_aliases(variables, BATCH_HOOKS, batch_hooks, HOOK_BATCH_ALIASES)
+            _sync_state_variables(state, variables)
+            sync_runtime_state(state)
+        else:
+            hook_base = _build_hook_stage_context(
                 variables,
-                HOOK_MEMORY,
-                HOOK_MEMORY_ALIASES,
-                "",
-            ),
-        )
-        _log_batched_stage_input(
-            hook_write_stage,
-            stage_label="开头冲突钩子",
-            batch_label=batch.label,
-            fields={
-                "batch_plan": hook_base.get(EPISODE_PLAN),
-                "worldview": hook_base.get(WORLDVIEW),
-                "characters": hook_base.get(CHARACTERS),
-                "scenes": hook_base.get(SCENES),
-                "story_outline": hook_base.get(STORY_OUTLINE),
-                "appearance_mapping": hook_base.get(APPEARANCE_MAPPING),
-                "hook_memory": hook_base.get(HOOK_MEMORY),
-            },
-            wire_context=hook_base,
-            memory_fields=("hook_memory",),
-        )
-
-        progress = 42 + int(((actual_index + 1) / total_batches) * 14)
-        batch_hooks, review_payload = _run_batch_write_review_revise_loop(
-            state,
-            runner,
-            variables=variables,
-            batch=batch,
-            stage_key="hook",
-            stage_label="开头冲突钩子",
-            output_field=BATCH_HOOKS,
-            current_output_var=HOOK_CURRENT_VAR,
-            review_output_var=HOOK_REVIEW_OUTPUT_VAR,
-            retry_var=HOOK_RETRY_VAR,
-            max_retry_var=HOOK_MAX_RETRY_VAR,
-            writing_stage_name=hook_write_stage,
-            review_stage_name=hook_review_stage,
-            rewrite_stage_name=hook_revise_stage,
-            writing_context=hook_base,
-            review_context_builder=lambda current_output: _build_hook_stage_context(
-                variables,
-                stage_name=hook_review_stage,
+                stage_name=hook_write_stage,
                 plan_for_batch=plan_for_batch,
                 normalized_plan_for_batch=normalized_plan_for_batch,
                 alias_plan_for_batch=alias_plan_for_batch,
@@ -1786,34 +1773,83 @@ def _run_hook_batches(
                     HOOK_MEMORY_ALIASES,
                     "",
                 ),
-                batch_hooks=current_output,
-            ),
-            rewrite_context_builder=lambda current_output, current_review: _build_hook_stage_context(
-                variables,
-                stage_name=hook_revise_stage,
-                plan_for_batch=plan_for_batch,
-                normalized_plan_for_batch=normalized_plan_for_batch,
-                alias_plan_for_batch=alias_plan_for_batch,
-                batch_start_episode=batch.start_episode,
-                hook_memory=get_with_aliases(
+            )
+            _log_batched_stage_input(
+                hook_write_stage,
+                stage_label="开头冲突钩子",
+                batch_label=batch.label,
+                fields={
+                    "batch_plan": hook_base.get(EPISODE_PLAN),
+                    "worldview": hook_base.get(WORLDVIEW),
+                    "characters": hook_base.get(CHARACTERS),
+                    "scenes": hook_base.get(SCENES),
+                    "story_outline": hook_base.get(STORY_OUTLINE),
+                    "appearance_mapping": hook_base.get(APPEARANCE_MAPPING),
+                    "hook_memory": hook_base.get(HOOK_MEMORY),
+                },
+                wire_context=hook_base,
+                memory_fields=("hook_memory",),
+            )
+            batch_hooks, review_payload = _run_batch_write_review_revise_loop(
+                state,
+                runner,
+                variables=variables,
+                batch=batch,
+                stage_key="hook",
+                stage_label="开头冲突钩子",
+                output_field=BATCH_HOOKS,
+                current_output_var=HOOK_CURRENT_VAR,
+                review_output_var=HOOK_REVIEW_OUTPUT_VAR,
+                retry_var=HOOK_RETRY_VAR,
+                max_retry_var=HOOK_MAX_RETRY_VAR,
+                writing_stage_name=hook_write_stage,
+                review_stage_name=hook_review_stage,
+                rewrite_stage_name=hook_revise_stage,
+                writing_context=hook_base,
+                review_context_builder=lambda current_output: _build_hook_stage_context(
                     variables,
-                    HOOK_MEMORY,
-                    HOOK_MEMORY_ALIASES,
-                    "",
+                    stage_name=hook_review_stage,
+                    plan_for_batch=plan_for_batch,
+                    normalized_plan_for_batch=normalized_plan_for_batch,
+                    alias_plan_for_batch=alias_plan_for_batch,
+                    batch_start_episode=batch.start_episode,
+                    hook_memory=get_with_aliases(
+                        variables,
+                        HOOK_MEMORY,
+                        HOOK_MEMORY_ALIASES,
+                        "",
+                    ),
+                    batch_hooks=current_output,
                 ),
-                batch_hooks=current_output,
-                review_payload=current_review,
-            ),
-            progress_percent=progress,
-            approved_output_validator=lambda current_output: validate_batch_hooks(
-                current_output,
-                batch,
-            ),
-        )
-        state.set_output(hook_review_stage, "last_committed_review", copy.deepcopy(review_payload))
-        all_hooks = merge_batch_hooks(all_hooks, batch_hooks, batch)
-        set_with_aliases(variables, BATCH_HOOKS, batch_hooks, HOOK_BATCH_ALIASES)
-        set_with_aliases(variables, ALL_HOOKS, all_hooks, HOOK_FINAL_ALIASES)
+                rewrite_context_builder=lambda current_output, current_review: _build_hook_stage_context(
+                    variables,
+                    stage_name=hook_revise_stage,
+                    plan_for_batch=plan_for_batch,
+                    normalized_plan_for_batch=normalized_plan_for_batch,
+                    alias_plan_for_batch=alias_plan_for_batch,
+                    batch_start_episode=batch.start_episode,
+                    hook_memory=get_with_aliases(
+                        variables,
+                        HOOK_MEMORY,
+                        HOOK_MEMORY_ALIASES,
+                        "",
+                    ),
+                    batch_hooks=current_output,
+                    review_payload=current_review,
+                ),
+                progress_percent=progress,
+                approved_output_validator=lambda current_output: validate_batch_hooks(
+                    current_output,
+                    batch,
+                ),
+            )
+            state.set_output(hook_review_stage, "last_committed_review", copy.deepcopy(review_payload))
+            all_hooks = merge_batch_hooks(all_hooks, batch_hooks, batch)
+            set_with_aliases(variables, BATCH_HOOKS, batch_hooks, HOOK_BATCH_ALIASES)
+            set_with_aliases(variables, ALL_HOOKS, all_hooks, HOOK_FINAL_ALIASES)
+            _sync_state_variables(state, variables)
+            sync_runtime_state(state)
+        state.set_output(STAGE_HOOK_MEMORY, "contract_guard", {})
         hook_memory_output = _run_optional_memory_stage(
             state,
             runner,
@@ -1845,6 +1881,20 @@ def _run_hook_batches(
                 "previous_memory": get_with_aliases(variables, HOOK_MEMORY, HOOK_MEMORY_ALIASES, ""),
             },
         )
+        hook_memory_artifact = state.get_output(STAGE_HOOK_MEMORY, "contract_guard", {})
+        if hook_memory_artifact.get("fallback_used"):
+            set_runtime_stage(
+                state,
+                "hook",
+                f"开头冲突钩子 {batch.label} 集正文已保留，记忆补跑失败，请继续生成重试。",
+                progress_percent=progress,
+                generated_episodes=batch.end_episode,
+            )
+            _sync_state_variables(state, variables)
+            sync_runtime_state(state)
+            raise ValueError(
+                f"开头冲突钩子 {batch.label} 集记忆生成失败，已保留当前批内容，请继续生成以补跑记忆。"
+            )
         set_with_aliases(
             variables,
             HOOK_MEMORY,
@@ -1881,7 +1931,11 @@ def _run_dialogue_batches(
     )
     if not _phase_object_complete(all_hooks, batches):
         raise ValueError("角色对白阶段启动失败：ALL_HOOKS 尚未完整覆盖全部集数。")
-    if rewrite_from_stage in {"script", "final"} and _phase_object_complete(all_dialogues, batches):
+    if (
+        rewrite_from_stage in {"script", "final"}
+        and _phase_object_complete(all_dialogues, batches)
+        and _pending_dialogue_memory_batch_start(variables, batches=batches) is None
+    ):
         set_runtime_stage(
             state,
             "dialogue",
@@ -1892,8 +1946,17 @@ def _run_dialogue_batches(
 
     for index, batch in enumerate(batches):
         actual_index = batch_index_offset + index
-        existing_batch_dialogues = slice_object_episodes_for_batch(all_dialogues, batch)
-        if _batch_object_covers_window(existing_batch_dialogues, batch):
+        existing_batch_dialogues = _current_batch_object_payload(
+            variables.get(BATCH_DIALOGUES),
+            all_dialogues,
+            batch=batch,
+        )
+        pending_dialogue_memory_only = _is_pending_dialogue_memory_recovery(
+            variables,
+            batch=batch,
+            batch_payload=existing_batch_dialogues,
+        )
+        if _batch_object_is_reusable(existing_batch_dialogues, batch) and not pending_dialogue_memory_only:
             set_with_aliases(
                 variables,
                 BATCH_DIALOGUES,
@@ -1938,6 +2001,7 @@ def _run_dialogue_batches(
         _sync_state_variables(state, variables)
         sync_runtime_state(state)
 
+        progress = 58 + int(((actual_index + 1) / total_batches) * 14)
         dialogue_write_stage = _stage_name_for_runner(
             runner,
             STAGE_DIALOGUE_WRITE,
@@ -1953,68 +2017,15 @@ def _run_dialogue_batches(
             STAGE_DIALOGUE_REVISE,
             STAGE_DIALOGUES_REWRITE,
         )
-        dialogue_base = _build_dialogue_stage_context(
-            variables,
-            stage_name=dialogue_write_stage,
-            plan_for_batch=plan_for_batch,
-            normalized_plan_for_batch=normalized_plan_for_batch,
-            alias_plan_for_batch=alias_plan_for_batch,
-            hook_payload=hook_payload,
-            batch_start_episode=batch.start_episode,
-            dialogue_memory=get_with_aliases(
+        if pending_dialogue_memory_only:
+            batch_dialogues = copy.deepcopy(existing_batch_dialogues)
+            set_with_aliases(variables, BATCH_DIALOGUES, batch_dialogues, DIALOGUE_BATCH_ALIASES)
+            _sync_state_variables(state, variables)
+            sync_runtime_state(state)
+        else:
+            dialogue_base = _build_dialogue_stage_context(
                 variables,
-                DIALOGUE_MEMORY,
-                DIALOGUE_MEMORY_ALIASES,
-                "",
-            ),
-        )
-        _log_batched_stage_input(
-            dialogue_write_stage,
-            stage_label="角色对话",
-            batch_label=batch.label,
-            fields={
-                "batch_plan": dialogue_base.get(EPISODE_PLAN),
-                "batch_hooks": dialogue_base.get(BATCH_HOOKS),
-                "worldview": dialogue_base.get(WORLDVIEW),
-                "characters": dialogue_base.get(CHARACTERS),
-                "scenes": dialogue_base.get(SCENES),
-                "appearance_mapping": dialogue_base.get(APPEARANCE_MAPPING),
-                "dialogue_memory": dialogue_base.get(DIALOGUE_MEMORY),
-            },
-            wire_context=dialogue_base,
-            memory_fields=("dialogue_memory",),
-        )
-
-        progress = 58 + int(((actual_index + 1) / total_batches) * 14)
-        batch_dialogues, review_payload = _run_batch_write_review_revise_loop(
-            state,
-            runner,
-            variables=variables,
-            batch=batch,
-            stage_key="dialogue",
-            stage_label="角色对白",
-            output_field=BATCH_DIALOGUES,
-            current_output_var=DIALOGUE_CURRENT_WORKFLOW_VAR,
-            review_output_var=DIALOGUE_REVIEW_OUTPUT_VAR,
-            retry_var=DIALOGUE_RETRY_VAR,
-            max_retry_var=DIALOGUE_MAX_RETRY_VAR,
-            writing_stage_name=dialogue_write_stage,
-            review_stage_name=dialogue_review_stage,
-            rewrite_stage_name=dialogue_revise_stage,
-            writing_context=dialogue_base,
-            review_context_builder=lambda current_output: _build_dialogue_stage_context(
-                variables,
-                stage_name=dialogue_review_stage,
-                plan_for_batch=plan_for_batch,
-                normalized_plan_for_batch=normalized_plan_for_batch,
-                alias_plan_for_batch=alias_plan_for_batch,
-                hook_payload=hook_payload,
-                batch_start_episode=batch.start_episode,
-                batch_dialogues=current_output,
-            ),
-            rewrite_context_builder=lambda current_output, current_review: _build_dialogue_stage_context(
-                variables,
-                stage_name=dialogue_revise_stage,
+                stage_name=dialogue_write_stage,
                 plan_for_batch=plan_for_batch,
                 normalized_plan_for_batch=normalized_plan_for_batch,
                 alias_plan_for_batch=alias_plan_for_batch,
@@ -2026,20 +2037,80 @@ def _run_dialogue_batches(
                     DIALOGUE_MEMORY_ALIASES,
                     "",
                 ),
-                batch_dialogues=current_output,
-                review_payload=current_review,
-            ),
-            progress_percent=progress,
-            before_rewrite=lambda _current_output, _current_review: _ensure_dialogue_revise_workflow_available(),
-            approved_output_validator=lambda current_output: validate_batch_dialogues(
-                current_output,
-                batch,
-            ),
-        )
-        state.set_output(dialogue_review_stage, "last_committed_review", copy.deepcopy(review_payload))
-        all_dialogues = merge_batch_dialogues(all_dialogues, batch_dialogues, batch)
-        set_with_aliases(variables, BATCH_DIALOGUES, batch_dialogues, DIALOGUE_BATCH_ALIASES)
-        set_with_aliases(variables, ALL_DIALOGUES, all_dialogues, DIALOGUE_FINAL_ALIASES)
+            )
+            _log_batched_stage_input(
+                dialogue_write_stage,
+                stage_label="角色对话",
+                batch_label=batch.label,
+                fields={
+                    "batch_plan": dialogue_base.get(EPISODE_PLAN),
+                    "batch_hooks": dialogue_base.get(BATCH_HOOKS),
+                    "worldview": dialogue_base.get(WORLDVIEW),
+                    "characters": dialogue_base.get(CHARACTERS),
+                    "scenes": dialogue_base.get(SCENES),
+                    "appearance_mapping": dialogue_base.get(APPEARANCE_MAPPING),
+                    "dialogue_memory": dialogue_base.get(DIALOGUE_MEMORY),
+                },
+                wire_context=dialogue_base,
+                memory_fields=("dialogue_memory",),
+            )
+            batch_dialogues, review_payload = _run_batch_write_review_revise_loop(
+                state,
+                runner,
+                variables=variables,
+                batch=batch,
+                stage_key="dialogue",
+                stage_label="角色对白",
+                output_field=BATCH_DIALOGUES,
+                current_output_var=DIALOGUE_CURRENT_WORKFLOW_VAR,
+                review_output_var=DIALOGUE_REVIEW_OUTPUT_VAR,
+                retry_var=DIALOGUE_RETRY_VAR,
+                max_retry_var=DIALOGUE_MAX_RETRY_VAR,
+                writing_stage_name=dialogue_write_stage,
+                review_stage_name=dialogue_review_stage,
+                rewrite_stage_name=dialogue_revise_stage,
+                writing_context=dialogue_base,
+                review_context_builder=lambda current_output: _build_dialogue_stage_context(
+                    variables,
+                    stage_name=dialogue_review_stage,
+                    plan_for_batch=plan_for_batch,
+                    normalized_plan_for_batch=normalized_plan_for_batch,
+                    alias_plan_for_batch=alias_plan_for_batch,
+                    hook_payload=hook_payload,
+                    batch_start_episode=batch.start_episode,
+                    batch_dialogues=current_output,
+                ),
+                rewrite_context_builder=lambda current_output, current_review: _build_dialogue_stage_context(
+                    variables,
+                    stage_name=dialogue_revise_stage,
+                    plan_for_batch=plan_for_batch,
+                    normalized_plan_for_batch=normalized_plan_for_batch,
+                    alias_plan_for_batch=alias_plan_for_batch,
+                    hook_payload=hook_payload,
+                    batch_start_episode=batch.start_episode,
+                    dialogue_memory=get_with_aliases(
+                        variables,
+                        DIALOGUE_MEMORY,
+                        DIALOGUE_MEMORY_ALIASES,
+                        "",
+                    ),
+                    batch_dialogues=current_output,
+                    review_payload=current_review,
+                ),
+                progress_percent=progress,
+                before_rewrite=lambda _current_output, _current_review: _ensure_dialogue_revise_workflow_available(),
+                approved_output_validator=lambda current_output: validate_batch_dialogues(
+                    current_output,
+                    batch,
+                ),
+            )
+            state.set_output(dialogue_review_stage, "last_committed_review", copy.deepcopy(review_payload))
+            all_dialogues = merge_batch_dialogues(all_dialogues, batch_dialogues, batch)
+            set_with_aliases(variables, BATCH_DIALOGUES, batch_dialogues, DIALOGUE_BATCH_ALIASES)
+            set_with_aliases(variables, ALL_DIALOGUES, all_dialogues, DIALOGUE_FINAL_ALIASES)
+            _sync_state_variables(state, variables)
+            sync_runtime_state(state)
+        state.set_output(STAGE_DIALOGUE_MEMORY, "contract_guard", {})
         dialogue_memory_output = _run_optional_memory_stage(
             state,
             runner,
@@ -2090,6 +2161,20 @@ def _run_dialogue_batches(
                 ),
             },
         )
+        dialogue_memory_artifact = state.get_output(STAGE_DIALOGUE_MEMORY, "contract_guard", {})
+        if dialogue_memory_artifact.get("fallback_used"):
+            set_runtime_stage(
+                state,
+                "dialogue",
+                f"角色对白 {batch.label} 集正文已保留，记忆补跑失败，请继续生成重试。",
+                progress_percent=progress,
+                generated_episodes=batch.end_episode,
+            )
+            _sync_state_variables(state, variables)
+            sync_runtime_state(state)
+            raise ValueError(
+                f"角色对白 {batch.label} 集记忆生成失败，已保留当前批内容，请继续生成以补跑记忆。"
+            )
         set_with_aliases(
             variables,
             DIALOGUE_MEMORY,
@@ -2179,9 +2264,14 @@ def _run_script_batches(
         existing_memory = copy.deepcopy(appearance_memory_by_batch.get(batch.start_episode) or {})
         batch_script = existing_batch_script
 
-        if existing_batch_script and existing_summary and not _validate_script_batch_output(
+        if (
+            existing_batch_script
+            and existing_summary
+            and _script_batch_memory_entry_exists(appearance_memory_by_batch, batch)
+            and not _validate_script_batch_output(
             existing_batch_script,
             batch=batch,
+            )
         ):
             # 只有“正文 + 对应记忆”同时存在，才把这一批视为可直接复用。
             # 只缓存正文而没有 memory，会让下一批上下文断层，所以宁可重跑也不盲跳过。
@@ -2350,13 +2440,20 @@ def _run_script_batches(
             committed_script = str(
                 get_with_aliases(variables, ALL_SCRIPT, SCRIPT_FINAL_ALIASES, "") or ""
             ).strip()
+            variables[LOCAL_COMMITTED_SCRIPT] = (
+                get_with_aliases(variables, ALL_SCRIPT, SCRIPT_FINAL_ALIASES, "") or committed_script
+            )
             _sync_state_variables(state, variables)
             sync_runtime_state(state)
         else:
             set_with_aliases(variables, BATCH_SCRIPT, batch_script, SCRIPT_BATCH_ALIASES)
 
+        _sync_state_variables(state, variables)
+        sync_runtime_state(state)
+
         memory_progress = 78 + int(((actual_index + 1) / total_batches) * 20)
         previous_script_memory = _bounded_script_memory(variables.get(LAST_SUMMARY))
+        state.set_output(STAGE_SCRIPT_MEMORY, "contract_guard", {})
         memory_output = run_stage_with_contract_guard(
             state,
             runner,
@@ -2391,20 +2488,26 @@ def _run_script_batches(
         # 下一批 script 只吃最新摘要，避免把越来越长的原文不断回灌给模型。
         memory_artifact = state.get_output(STAGE_SCRIPT_MEMORY, "contract_guard", {})
         if memory_artifact.get("fallback_used"):
-            new_script_memory = previous_script_memory
-            logger.warning(
-                "剧本正文摘要 %s 输出非法，保留上一批有效记忆。",
-                batch.label,
+            set_runtime_stage(
+                state,
+                "script",
+                f"剧本正文 {batch.label} 集正文已保留，记忆补跑失败，请继续生成重试。",
+                progress_percent=memory_progress,
+                generated_episodes=batch.end_episode,
             )
-        else:
-            new_script_memory = _bounded_script_memory(
-                get_with_aliases(
-                    memory_output,
-                    LAST_SUMMARY,
-                    SCRIPT_MEMORY_ALIASES,
-                    memory_output.get(LAST_SUMMARY) or memory_output.get("answerText"),
-                )
+            _sync_state_variables(state, variables)
+            sync_runtime_state(state)
+            raise ValueError(
+                f"剧本正文 {batch.label} 集记忆生成失败，已保留当前批内容，请继续生成以补跑记忆。"
             )
+        new_script_memory = _bounded_script_memory(
+            get_with_aliases(
+                memory_output,
+                LAST_SUMMARY,
+                SCRIPT_MEMORY_ALIASES,
+                memory_output.get(LAST_SUMMARY) or memory_output.get("answerText"),
+            )
+        )
         set_with_aliases(variables, SCRIPT_MEMORY, new_script_memory, SCRIPT_MEMORY_ALIASES)
         variables[LAST_SUMMARY] = new_script_memory
         variables[APPEARANCE_CONTINUITY_MEMORY] = _update_appearance_continuity_memory(
@@ -2561,12 +2664,196 @@ def _normalize_dialogue_memory_output(
     )
 
 
+def _validate_batch_dialogues_for_reuse(value: Any, batch: BatchWindow) -> list[str]:
+    issues = list(validate_batch_dialogues(value, batch) or [])
+    if issues:
+        return issues
+    payload = _normalize_batch_dialogues_payload(value) or {}
+    blocks = payload.get("episode_dialogue_blocks")
+    if not isinstance(blocks, list):
+        return [f"dialogue batch {batch.label} missing episode_dialogue_blocks"]
+    for item in blocks:
+        if not isinstance(item, dict):
+            continue
+        episode = _safe_int(item.get("episode"), 0)
+        if not isinstance(item.get("dialogue_blocks"), list):
+            issues.append(
+                f"dialogue episode {episode or '?'} cache must use nested dialogue_blocks structure"
+            )
+    return issues
+
+
+def _batch_object_reuse_issues(value: Any, batch: BatchWindow) -> list[str]:
+    payload = _dict_or_empty(value)
+    if not payload:
+        return [f"batch {batch.label} payload is empty"]
+    if not _batch_object_covers_window(payload, batch):
+        return [f"batch {batch.label} does not cover expected episode window"]
+
+    list_key = _batch_object_episode_list_key(payload)
+    if list_key == "episodes":
+        return list(validate_batch_hooks(payload, batch) or [])
+    if list_key == "episode_dialogue_blocks":
+        return _validate_batch_dialogues_for_reuse(payload, batch)
+    return [f"batch {batch.label} is not a recognized hooks/dialogues payload"]
+
+
+def _batch_object_is_reusable(value: Any, batch: BatchWindow) -> bool:
+    return not _batch_object_reuse_issues(value, batch)
+
+
+def _find_batch_by_start(
+    batches: list[BatchWindow],
+    start_episode: Any,
+) -> BatchWindow | None:
+    start = _safe_int(start_episode, 0)
+    if start <= 0:
+        return None
+    for batch in batches:
+        if batch.start_episode == start:
+            return batch
+    return None
+
+
+def _current_batch_object_recovery_start(
+    variables: dict[str, Any],
+    *,
+    batches: list[BatchWindow],
+    stage_name: str,
+    checkpoint_key: str,
+    current_value_key: str,
+    aggregate_value_key: str,
+) -> int | None:
+    if str(variables.get(LOCAL_CURRENT_BATCH_STAGE) or "").strip().lower() != stage_name:
+        return None
+    batch = _find_batch_by_start(batches, variables.get(BATCH_START_EPISODE))
+    if batch is None:
+        return None
+    batch_payload = slice_object_episodes_for_batch(variables.get(aggregate_value_key), batch)
+    if not _batch_object_is_reusable(batch_payload, batch):
+        return None
+    if _safe_int(variables.get(checkpoint_key), 0) == batch.start_episode:
+        return None
+    return batch.start_episode
+
+
+def _pending_hook_memory_batch_start(
+    variables: dict[str, Any],
+    *,
+    batches: list[BatchWindow],
+) -> int | None:
+    return _current_batch_object_recovery_start(
+        variables,
+        batches=batches,
+        stage_name="hook",
+        checkpoint_key=LOCAL_HOOK_CHECKPOINT_START,
+        current_value_key=BATCH_HOOKS,
+        aggregate_value_key=ALL_HOOKS,
+    )
+
+
+def _pending_dialogue_memory_batch_start(
+    variables: dict[str, Any],
+    *,
+    batches: list[BatchWindow],
+) -> int | None:
+    return _current_batch_object_recovery_start(
+        variables,
+        batches=batches,
+        stage_name="dialogue",
+        checkpoint_key=LOCAL_DIALOGUE_CHECKPOINT_START,
+        current_value_key=BATCH_DIALOGUES,
+        aggregate_value_key=ALL_DIALOGUES,
+    )
+
+
+def _is_pending_hook_memory_recovery(
+    variables: dict[str, Any],
+    *,
+    batch: BatchWindow,
+    batch_payload: Any,
+) -> bool:
+    return (
+        str(variables.get(LOCAL_CURRENT_BATCH_STAGE) or "").strip().lower() == "hook"
+        and _safe_int(variables.get(BATCH_START_EPISODE), 0) == batch.start_episode
+        and _batch_object_is_reusable(
+            slice_object_episodes_for_batch(variables.get(ALL_HOOKS), batch),
+            batch,
+        )
+        and _safe_int(variables.get(LOCAL_HOOK_CHECKPOINT_START), 0) != batch.start_episode
+    )
+
+
+def _is_pending_dialogue_memory_recovery(
+    variables: dict[str, Any],
+    *,
+    batch: BatchWindow,
+    batch_payload: Any,
+) -> bool:
+    return (
+        str(variables.get(LOCAL_CURRENT_BATCH_STAGE) or "").strip().lower() == "dialogue"
+        and _safe_int(variables.get(BATCH_START_EPISODE), 0) == batch.start_episode
+        and _batch_object_is_reusable(
+            slice_object_episodes_for_batch(variables.get(ALL_DIALOGUES), batch),
+            batch,
+        )
+        and _safe_int(variables.get(LOCAL_DIALOGUE_CHECKPOINT_START), 0) != batch.start_episode
+    )
+
+
 def _phase_object_complete(value: Any, batches: list[BatchWindow]) -> bool:
     """判断某个阶段的累计对象是否已经覆盖了全部批次。"""
     payload = _dict_or_empty(value)
     if not payload:
         return False
-    return all(_batch_object_covers_window(slice_object_episodes_for_batch(payload, batch), batch) for batch in batches)
+    return all(_batch_object_is_reusable(slice_object_episodes_for_batch(payload, batch), batch) for batch in batches)
+
+
+def _script_batch_memory_entry_exists(
+    appearance_memory_by_batch: dict[int, dict[str, Any]],
+    batch: BatchWindow,
+) -> bool:
+    return batch.start_episode in appearance_memory_by_batch
+
+
+def _script_text_reuse_issues_for_final(
+    value: Any,
+    *,
+    total_episodes: int,
+    batches: list[BatchWindow],
+) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return ["ALL_SCRIPT is empty"]
+    try:
+        assert_complete_script(text, total_episodes)
+    except ValueError as exc:
+        return [str(exc)]
+
+    episode_map = _extract_script_episode_map(
+        text,
+        BatchWindow(start_episode=1, end_episode=max(1, int(total_episodes))),
+    )
+    issues: list[str] = []
+    for batch in batches:
+        batch_text = _join_script_parts(
+            *(episode_map.get(episode, "") for episode in range(batch.start_episode, batch.end_episode + 1))
+        )
+        issues.extend(_validate_script_batch_output(batch_text, batch=batch))
+    return issues
+
+
+def _script_text_is_reusable_for_final(
+    value: Any,
+    *,
+    total_episodes: int,
+    batches: list[BatchWindow],
+) -> bool:
+    return not _script_text_reuse_issues_for_final(
+        value,
+        total_episodes=total_episodes,
+        batches=batches,
+    )
 
 
 def _existing_batch_script_text(
@@ -3201,14 +3488,9 @@ def _phase_missing_episodes(value: Any, batches: list[BatchWindow]) -> list[int]
     missing: list[int] = []
     for batch in batches:
         batch_payload = slice_object_episodes_for_batch(value, batch)
-        if _batch_object_covers_window(batch_payload, batch):
+        if _batch_object_is_reusable(batch_payload, batch):
             continue
-        batch_episodes = set(_extract_batch_episode_numbers_from_object(batch_payload))
-        missing.extend(
-            episode
-            for episode in range(batch.start_episode, batch.end_episode + 1)
-            if episode not in batch_episodes
-        )
+        missing.extend(range(batch.start_episode, batch.end_episode + 1))
     return missing
 
 
@@ -3239,6 +3521,10 @@ def _ensure_object_phase_sequence_before_final(
         raise ValueError(
             f"{stage_label}存在越界集次，已阻止进入最终剧本拼接。异常：{_format_episode_ranges(out_of_range)}。"
         )
+
+    missing = [episode for episode in expected if episode not in set(sequence)]
+    if missing:
+        return
 
     if sequence != expected:
         raise ValueError(
@@ -3294,6 +3580,11 @@ def _ensure_complete_batched_outputs_before_final(
     batches = list(iter_episode_batches(total_episodes, batch_size=batch_size))
     all_hooks = get_with_aliases(variables, ALL_HOOKS, HOOK_FINAL_ALIASES, {})
     all_dialogues = get_with_aliases(variables, ALL_DIALOGUES, DIALOGUE_FINAL_ALIASES, {})
+    _ensure_object_phase_sequence_before_final(
+        stage_label="开头冲突钩子",
+        value=all_hooks,
+        total_episodes=total_episodes,
+    )
     hooks_missing = _phase_missing_episodes(all_hooks, batches)
     if hooks_missing:
         raise ValueError(
@@ -3301,12 +3592,12 @@ def _ensure_complete_batched_outputs_before_final(
             f"缺少：{_format_episode_ranges(hooks_missing)}。"
             "请先从 hooks 阶段继续生成缺失批次。"
         )
+
     _ensure_object_phase_sequence_before_final(
-        stage_label="开头冲突钩子",
-        value=all_hooks,
+        stage_label="角色对白",
+        value=all_dialogues,
         total_episodes=total_episodes,
     )
-
     dialogues_missing = _phase_missing_episodes(all_dialogues, batches)
     if dialogues_missing:
         raise ValueError(
@@ -3314,11 +3605,6 @@ def _ensure_complete_batched_outputs_before_final(
             f"缺少：{_format_episode_ranges(dialogues_missing)}。"
             "请先从 dialogues 阶段继续生成缺失批次。"
         )
-    _ensure_object_phase_sequence_before_final(
-        stage_label="角色对白",
-        value=all_dialogues,
-        total_episodes=total_episodes,
-    )
 
     _ensure_complete_script_before_final(payload, variables)
 
@@ -3335,13 +3621,27 @@ def _ensure_complete_script_before_final(
         total_episodes=total_episodes,
         batch_size=max(1, int(settings.batch_size or 5)),
     )
+    batches = list(iter_episode_batches(total_episodes, batch_size=max(1, int(settings.batch_size or 5))))
     expected = list(range(1, total_episodes + 1))
     if available_episodes == expected:
-        _ensure_script_sequence_before_final(
+        script_text = (
             repaired_script_text
-            or get_with_aliases(variables, ALL_SCRIPT, SCRIPT_FINAL_ALIASES, ""),
+            or get_with_aliases(variables, ALL_SCRIPT, SCRIPT_FINAL_ALIASES, "")
+        )
+        _ensure_script_sequence_before_final(
+            script_text,
             total_episodes=total_episodes,
         )
+        issues = _script_text_reuse_issues_for_final(
+            script_text,
+            total_episodes=total_episodes,
+            batches=batches,
+        )
+        if issues:
+            raise ValueError(
+                "剧本正文结构异常，已阻止进入最终剧本拼接。"
+                f"问题：{'; '.join(issues[:3])}"
+            )
         return
     available_set = set(available_episodes)
     missing = [episode for episode in expected if episode not in available_set]
@@ -5337,9 +5637,15 @@ def _derive_restored_batch_progress(
     if not batches:
         return None, 0
 
+    pending_hook_memory_start = _pending_hook_memory_batch_start(variables, batches=batches)
+    pending_dialogue_memory_start = _pending_dialogue_memory_batch_start(variables, batches=batches)
     hooks_start = _next_unfinished_object_batch_start(variables.get(ALL_HOOKS), batches)
     dialogues_start = _next_unfinished_object_batch_start(variables.get(ALL_DIALOGUES), batches)
     script_start = _next_unfinished_script_batch_start(variables, batches)
+    if pending_hook_memory_start is not None:
+        hooks_start = pending_hook_memory_start
+    if pending_dialogue_memory_start is not None:
+        dialogues_start = pending_dialogue_memory_start
     last_episode = batches[-1].end_episode
     hooks_complete = hooks_start > last_episode
     dialogues_complete = dialogues_start > last_episode
@@ -5372,7 +5678,7 @@ def _derive_restored_batch_progress(
 def _next_unfinished_object_batch_start(value: Any, batches: list[BatchWindow]) -> int:
     for batch in batches:
         batch_payload = slice_object_episodes_for_batch(value, batch)
-        if not _batch_object_covers_window(batch_payload, batch):
+        if not _batch_object_is_reusable(batch_payload, batch):
             return batch.start_episode
     return batches[-1].end_episode + 1
 
@@ -5384,6 +5690,9 @@ def _next_unfinished_script_batch_start(
     script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
     script_episode_cache = _normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES))
     summary_by_batch = _normalize_batch_text_map(variables.get(LOCAL_SUMMARY_BY_BATCH))
+    appearance_memory_by_batch = _normalize_batch_object_map(
+        variables.get(LOCAL_APPEARANCE_MEMORY_BY_BATCH)
+    )
 
     for batch in batches:
         batch_text = _existing_batch_script_text(
@@ -5395,6 +5704,7 @@ def _next_unfinished_script_batch_start(
         if (
             not batch_text
             or not batch_summary
+            or not _script_batch_memory_entry_exists(appearance_memory_by_batch, batch)
             or _validate_script_batch_output(batch_text, batch=batch)
         ):
             return batch.start_episode
@@ -6872,11 +7182,33 @@ def merge_batch_object(current: dict[str, Any], batch: dict[str, Any]) -> dict[s
     return _merge_dicts(merged, incoming)
 
 
+def _remove_batch_window_from_object(value: Any, batch: BatchWindow) -> dict[str, Any]:
+    payload = _dict_or_empty(value)
+    if not payload:
+        return {}
+    trimmed = copy.deepcopy(payload)
+    list_key = _batch_object_episode_list_key(trimmed)
+    if not list_key:
+        return trimmed
+    items = trimmed.get(list_key)
+    if not isinstance(items, list):
+        return trimmed
+    trimmed[list_key] = [
+        copy.deepcopy(item)
+        for item in items
+        if not (
+            isinstance(item, dict)
+            and batch.start_episode <= _safe_int(item.get("episode"), 0) <= batch.end_episode
+        )
+    ]
+    return trimmed
+
+
 def merge_batch_hooks(all_hooks: Any, batch_hooks: Any, batch: BatchWindow) -> dict[str, Any]:
     issues = validate_batch_hooks(batch_hooks, batch)
     if issues:
         raise ValueError("hook batch validation failed: " + "; ".join(issues))
-    current = _dict_or_empty(all_hooks)
+    current = _remove_batch_window_from_object(all_hooks, batch)
     payload = _normalize_batch_hooks_payload(batch_hooks) or {}
     merged = merge_batch_object(current, payload)
     _assert_no_duplicate_object_episodes(merged, "ALL_HOOKS")
@@ -6887,7 +7219,7 @@ def merge_batch_dialogues(all_dialogues: Any, batch_dialogues: Any, batch: Batch
     issues = validate_batch_dialogues(batch_dialogues, batch)
     if issues:
         raise ValueError("dialogue batch validation failed: " + "; ".join(issues))
-    current = _dict_or_empty(all_dialogues)
+    current = _remove_batch_window_from_object(all_dialogues, batch)
     payload = _normalize_batch_dialogues_payload(batch_dialogues) or {}
     merged = merge_batch_object(current, payload)
     _assert_no_duplicate_object_episodes(merged, "ALL_DIALOGUES")
@@ -6991,7 +7323,7 @@ def _has_matching_batch_object_checkpoint(
     payload = _dict_or_empty(value)
     if not payload:
         return False
-    return _batch_object_covers_window(payload, batch)
+    return _batch_object_is_reusable(payload, batch)
 
 
 def _has_matching_batch_script_checkpoint(
@@ -7021,10 +7353,8 @@ def _current_batch_object_payload(
     *,
     batch: BatchWindow,
 ) -> dict[str, Any]:
-    """优先拿当前批缓存，拿不到时再从全量对象里切出本批所需集数。"""
-    current_payload = _dict_or_empty(current_value)
-    if _batch_object_covers_window(current_payload, batch):
-        return current_payload
+    """恢复已完成批次时只信任正式全量缓存，不信任瞬时 current batch 临时值。"""
+    del current_value
     return slice_object_episodes_for_batch(aggregate_value, batch)
 
 
@@ -7066,7 +7396,8 @@ def _ensure_batch_object_matches(
     stage_label: str,
     field_label: str,
 ) -> None:
-    if _batch_object_covers_window(value, batch):
+    issues = _batch_object_reuse_issues(value, batch)
+    if not issues:
         logger.info(
             "%s %s 集输入校验通过：%s覆盖当前批次。",
             stage_label,
@@ -7076,6 +7407,7 @@ def _ensure_batch_object_matches(
         return
     raise ValueError(
         f"{stage_label} {batch.label} 集输入异常：{field_label}未正确覆盖当前批次。"
+        f" {'; '.join(issues[:2])}"
     )
 
 

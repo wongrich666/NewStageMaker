@@ -57,9 +57,21 @@ def _script_text(start_episode: int, end_episode: int) -> str:
     )
 
 
-def _base_snapshot() -> dict[str, object]:
-    script_1_5 = _script_text(1, 5)
-    script_6_10 = _script_text(6, 10)
+def _base_snapshot(total_episodes: int = 10) -> dict[str, object]:
+    batch_starts = list(range(1, total_episodes + 1, 5))
+    script_batches = {
+        str(start_episode): _script_text(start_episode, min(total_episodes, start_episode + 4))
+        for start_episode in batch_starts
+    }
+    summary_by_batch = {
+        str(start_episode): f"summary-{start_episode}"
+        for start_episode in batch_starts
+    }
+    appearance_by_batch = {
+        str(start_episode): {"memory": f"appearance-{start_episode}"}
+        for start_episode in batch_starts
+    }
+    last_batch_start = batch_starts[-1]
     return {
         "user_id": 1,
         "project_id": 1,
@@ -74,18 +86,18 @@ def _base_snapshot() -> dict[str, object]:
         "input_payload": {
             "title": "测试项目",
             "story_outline": "测试大纲",
-            "total_episodes": 10,
+            "total_episodes": total_episodes,
         },
         "model_option": {},
         "artifacts": {
             "script_title_content": "测试项目",
             "story_outline": "测试大纲",
-            "final_script": _script_text(1, 10),
-            "final_output_text": _script_text(1, 10),
+            "final_script": _script_text(1, total_episodes),
+            "final_output_text": _script_text(1, total_episodes),
         },
-        "total_episodes": 10,
+        "total_episodes": total_episodes,
         "progress_percent": 100,
-        "generated_episodes": 10,
+        "generated_episodes": total_episodes,
         "current_stage": "script",
         "current_stage_label": "剧本正文",
         "cache_retained": True,
@@ -93,28 +105,19 @@ def _base_snapshot() -> dict[str, object]:
         "completion_confirmed": False,
         "debug_state": {
             "variables": {
-                ALL_HOOKS: _episode_object(1, 10, "hook"),
-                ALL_DIALOGUES: _episode_object(1, 10, "dialogue"),
-                ALL_SCRIPT: _script_text(1, 10),
-                LAST_SUMMARY: "summary-6",
-                APPEARANCE_CONTINUITY_MEMORY: {"memory": "appearance-6"},
-                task_manager_module.LOCAL_SCRIPT_BATCHES: {
-                    "1": script_1_5,
-                    "6": script_6_10,
-                },
+                ALL_HOOKS: _episode_object(1, total_episodes, "hook"),
+                ALL_DIALOGUES: _episode_object(1, total_episodes, "dialogue"),
+                ALL_SCRIPT: _script_text(1, total_episodes),
+                LAST_SUMMARY: f"summary-{last_batch_start}",
+                APPEARANCE_CONTINUITY_MEMORY: {"memory": f"appearance-{last_batch_start}"},
+                task_manager_module.LOCAL_SCRIPT_BATCHES: script_batches,
                 task_manager_module.LOCAL_SCRIPT_EPISODES: {},
-                task_manager_module.LOCAL_SUMMARY_BY_BATCH: {
-                    "1": "summary-1",
-                    "6": "summary-6",
-                },
-                task_manager_module.LOCAL_APPEARANCE_MEMORY_BY_BATCH: {
-                    "1": {"memory": "appearance-1"},
-                    "6": {"memory": "appearance-6"},
-                },
-                task_manager_module.LOCAL_COMPLETED_BATCHES: 2,
-                task_manager_module.LOCAL_CURRENT_BATCH_INDEX: 1,
+                task_manager_module.LOCAL_SUMMARY_BY_BATCH: summary_by_batch,
+                task_manager_module.LOCAL_APPEARANCE_MEMORY_BY_BATCH: appearance_by_batch,
+                task_manager_module.LOCAL_COMPLETED_BATCHES: len(batch_starts),
+                task_manager_module.LOCAL_CURRENT_BATCH_INDEX: max(0, len(batch_starts) - 1),
                 task_manager_module.LOCAL_CURRENT_BATCH_STAGE: "script",
-                BATCH_START_EPISODE: 6,
+                BATCH_START_EPISODE: last_batch_start,
             },
             "node_outputs": {},
         },
@@ -266,6 +269,92 @@ class TaskManagerRollbackTests(unittest.TestCase):
         self.assertEqual(variables[APPEARANCE_CONTINUITY_MEMORY], {"memory": "appearance-1"})
         self.assertEqual(variables[task_manager_module.LOCAL_CURRENT_BATCH_STAGE], "script")
         self.assertEqual(variables[BATCH_START_EPISODE], 6)
+
+    def test_hooks_rollback_on_15_episodes_clears_downstream_caches_after_episode_6(self) -> None:
+        snapshot = _base_snapshot(15)
+        self._persist_snapshot(snapshot)
+
+        with patch.object(task_manager_module.threading, "Thread", _FakeThread):
+            self.manager.rollback_project_to_stage(
+                1,
+                user_id=1,
+                stage_key="hooks",
+                start_episode=6,
+            )
+
+        raw = self._raw_project_snapshot()
+        variables = raw["debug_state"]["variables"]
+        self.assertEqual(
+            [item["episode"] for item in variables[ALL_HOOKS]["episodes"]],
+            [1, 2, 3, 4, 5],
+        )
+        self.assertNotIn(ALL_DIALOGUES, variables)
+        self.assertNotIn(ALL_SCRIPT, variables)
+        self.assertEqual(variables[task_manager_module.LOCAL_SUMMARY_BY_BATCH], {"1": "summary-1"})
+        self.assertEqual(
+            variables[task_manager_module.LOCAL_APPEARANCE_MEMORY_BY_BATCH],
+            {"1": {"memory": "appearance-1"}},
+        )
+
+    def test_dialogues_rollback_on_15_episodes_preserves_all_hooks_and_trims_downstream(self) -> None:
+        snapshot = _base_snapshot(15)
+        self._persist_snapshot(snapshot)
+
+        with patch.object(task_manager_module.threading, "Thread", _FakeThread):
+            self.manager.rollback_project_to_stage(
+                1,
+                user_id=1,
+                stage_key="dialogues",
+                start_episode=6,
+            )
+
+        raw = self._raw_project_snapshot()
+        variables = raw["debug_state"]["variables"]
+        self.assertEqual(
+            [item["episode"] for item in variables[ALL_HOOKS]["episodes"]],
+            list(range(1, 16)),
+        )
+        self.assertEqual(
+            [item["episode"] for item in variables[ALL_DIALOGUES]["episodes"]],
+            [1, 2, 3, 4, 5],
+        )
+        self.assertNotIn(ALL_SCRIPT, variables)
+        self.assertEqual(variables[task_manager_module.LOCAL_SUMMARY_BY_BATCH], {"1": "summary-1"})
+        self.assertEqual(
+            variables[task_manager_module.LOCAL_APPEARANCE_MEMORY_BY_BATCH],
+            {"1": {"memory": "appearance-1"}},
+        )
+
+    def test_script_rollback_on_15_episodes_only_trims_script_and_memory(self) -> None:
+        snapshot = _base_snapshot(15)
+        self._persist_snapshot(snapshot)
+
+        with patch.object(task_manager_module.threading, "Thread", _FakeThread):
+            self.manager.rollback_project_to_stage(
+                1,
+                user_id=1,
+                stage_key="script",
+                start_episode=6,
+            )
+
+        raw = self._raw_project_snapshot()
+        variables = raw["debug_state"]["variables"]
+        self.assertEqual(
+            [item["episode"] for item in variables[ALL_HOOKS]["episodes"]],
+            list(range(1, 16)),
+        )
+        self.assertEqual(
+            [item["episode"] for item in variables[ALL_DIALOGUES]["episodes"]],
+            list(range(1, 16)),
+        )
+        self.assertEqual(variables[ALL_SCRIPT], _script_text(1, 5))
+        self.assertEqual(variables[LAST_SUMMARY], "summary-1")
+        self.assertEqual(variables[APPEARANCE_CONTINUITY_MEMORY], {"memory": "appearance-1"})
+        self.assertEqual(variables[task_manager_module.LOCAL_SUMMARY_BY_BATCH], {"1": "summary-1"})
+        self.assertEqual(
+            variables[task_manager_module.LOCAL_APPEARANCE_MEMORY_BY_BATCH],
+            {"1": {"memory": "appearance-1"}},
+        )
 
 
 if __name__ == "__main__":

@@ -3405,7 +3405,7 @@ class TaskManager:
             else:
                 variables.pop(ALL_HOOKS, None)
         elif stage_key == "dialogues":
-            preserved_hooks = _slice_episode_object_through(original_hooks, batch_end_episode)
+            preserved_hooks = copy.deepcopy(original_hooks)
             if preserved_hooks:
                 variables[ALL_HOOKS] = preserved_hooks
             else:
