@@ -88,6 +88,7 @@ class Settings:
         self.fastgpt_stage_format_retry_limit = int(
             _getenv("FASTGPT_STAGE_FORMAT_RETRY_LIMIT", default="3")
         )
+        self.workflow_json_dir = _getenv("WORKFLOW_JSON_DIR")
         self.fastgpt_timeout = int(_getenv("FASTGPT_TIMEOUT", default="300"))
         self.fastgpt_http_retries = int(_getenv("FASTGPT_HTTP_RETRIES", default="2"))
         self.fastgpt_http_retry_delay = float(

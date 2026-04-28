@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from ..config import settings
 from .fastgpt_contracts import (
     BATCH_DIALOGUES,
     BATCH_HOOKS,
@@ -222,7 +223,15 @@ def validate_stage_output_with_workflow_contract(
             )
         normalized_text = memory_normalizer(raw_value, **(memory_kwargs or {}))
         normalized = {canonical_name: normalized_text}
-        meta["fallback_used"] = not strict_ok
+        if not strict_ok:
+            raise WorkflowOutputValidationError(
+                f"{spec.stage_name} memory 输出未通过格式契约校验",
+                issues=[f"{spec.stage_name} memory output is not valid required json"],
+                normalized_output=normalized,
+                fallback_used=True,
+                matched_aliases=matched_aliases,
+            )
+        meta["fallback_used"] = False
         meta["normalized_preview"] = _preview(normalized)
         return normalized, meta
 
@@ -274,16 +283,62 @@ def build_debug_artifact(
     }
 
 
+def resolve_workflow_json_path(filename: str) -> Path:
+    repo_root = Path(__file__).resolve().parents[3]
+    cwd = Path.cwd()
+
+    configured_dir = str(getattr(settings, "workflow_json_dir", "") or "").strip()
+    search_roots: list[Path] = []
+    if configured_dir:
+        configured_path = Path(configured_dir)
+        if not configured_path.is_absolute():
+            search_roots.extend(
+                [
+                    (cwd / configured_path).resolve(),
+                    (repo_root / configured_path).resolve(),
+                ]
+            )
+        else:
+            search_roots.append(configured_path)
+
+    search_roots.extend(
+        [
+            repo_root / "workflow_jsons",
+            cwd / "workflow_jsons",
+        ]
+    )
+
+    visited: set[Path] = set()
+    for root in list(search_roots):
+        try:
+            resolved = root.resolve()
+        except Exception:
+            resolved = root
+        if resolved in visited:
+            continue
+        visited.add(resolved)
+        candidate = resolved / filename
+        if candidate.exists():
+            return candidate
+
+    for parent in (repo_root, cwd):
+        try:
+            children = list(parent.iterdir())
+        except Exception:
+            continue
+        for candidate_dir in children:
+            if not candidate_dir.is_dir() or not candidate_dir.name.endswith("workflow_jsons"):
+                continue
+            candidate = candidate_dir / filename
+            if candidate.exists():
+                return candidate
+
+    fallback_root = search_roots[0] if search_roots else (repo_root / "workflow_jsons")
+    return fallback_root / filename
+
+
 def _workflow_json_path(filename: str) -> Path:
-    direct = Path("workflow_jsons") / filename
-    if direct.exists():
-        return direct
-    for candidate in Path(".").iterdir():
-        if candidate.is_dir() and candidate.name.endswith("workflow_jsons"):
-            path = candidate / filename
-            if path.exists():
-                return path
-    return direct
+    return resolve_workflow_json_path(filename)
 
 
 def _extract_chatnode_output_contract(workflow_json: dict[str, Any]) -> tuple[str | None, str | None]:

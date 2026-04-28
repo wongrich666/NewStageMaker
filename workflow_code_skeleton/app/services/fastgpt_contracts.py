@@ -1200,7 +1200,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             EPISODE_PLAN: "array",
         },
         output_aliases={
-            script_title_content: (FRAMEWORK_TITLE_VAR, "script_title"),
+            script_title_content: (FRAMEWORK_TITLE_VAR, "script_title", "title"),
             STORY_OUTLINE: (FRAMEWORK_STORY_OUTLINE_VAR, "story_outline_content"),
             USER_CHARACTERS: (FRAMEWORK_CHARACTER_BIOS_VAR, "character_bios_content"),
             USER_SCENES: (FRAMEWORK_CORE_SCENE_VAR, "core_scene_content"),

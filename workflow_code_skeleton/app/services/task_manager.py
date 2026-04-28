@@ -2052,7 +2052,7 @@ class TaskManager:
         condensed = " ".join(str(raw_output or "").replace("\r", "\n").split())
         if not condensed:
             return ""
-        return f"{stage_title}已经产出内容，当前展示的是该阶段的正式结果：{condensed[:180]}"
+        return f"当前展示的是{stage_title}阶段的正式结果：{condensed[:180]}"
 
     def _cache_stage_preview(
         self,

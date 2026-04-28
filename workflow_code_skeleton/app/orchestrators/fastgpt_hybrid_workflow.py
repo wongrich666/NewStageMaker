@@ -4,8 +4,10 @@ import copy
 import json
 import re
 import time
+import traceback
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -106,6 +108,7 @@ from ..services.workflow_output_validation import (
     WorkflowOutputValidationError,
     build_debug_artifact,
     load_workflow_output_contract,
+    resolve_workflow_json_path,
     validate_stage_output_with_workflow_contract,
 )
 from ..utils.episode import BatchWindow, iter_episode_batches, iter_episode_batches_from
@@ -1090,15 +1093,7 @@ def _ensure_dialogue_revise_workflow_available() -> None:
 
 
 def _workflow_json_path(filename: str) -> Path:
-    direct = Path("workflow_jsons") / filename
-    if direct.exists():
-        return direct
-    for candidate in Path(".").iterdir():
-        if candidate.is_dir() and candidate.name.endswith("workflow_jsons"):
-            path = candidate / filename
-            if path.exists():
-                return path
-    return direct
+    return resolve_workflow_json_path(filename)
 
 
 def _stage_name_for_runner(runner: FastGPTRunner, preferred: str, legacy: str) -> str:
@@ -3639,6 +3634,75 @@ def _runner_stage_debug_info(runner: FastGPTRunner, stage_name: str) -> dict[str
     return {}
 
 
+def _debug_artifact_dir() -> Path:
+    return Path(__file__).resolve().parents[2] / "debug" / "fastgpt_stage_failures"
+
+
+def _safe_debug_filename_part(value: str) -> str:
+    text = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or "").strip())
+    return text.strip("_") or "unknown"
+
+
+def _write_stage_debug_artifact_file(
+    *,
+    artifact: dict[str, Any],
+    stage_variables: dict[str, Any],
+    runner_debug: dict[str, Any],
+    raw_output: dict[str, Any] | None,
+    batch: BatchWindow | None,
+    exception: Exception | None,
+) -> str:
+    debug_dir = _debug_artifact_dir()
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    batch_start = batch.start_episode if batch else ""
+    batch_end = batch.end_episode if batch else ""
+    filename = (
+        f"{_safe_debug_filename_part(str(artifact.get('stage_name') or 'stage'))}"
+        f"__{batch_start or 'na'}_{batch_end or 'na'}"
+        f"__attempt{int(artifact.get('format_attempt') or 0)}"
+        f"__{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.json"
+    )
+    output_keys = sorted(raw_output.keys()) if isinstance(raw_output, dict) else []
+    input_keys = sorted(str(key) for key in stage_variables.keys())
+    payload = {
+        **artifact,
+        "batch": {
+            "start_episode": batch.start_episode if batch else None,
+            "end_episode": batch.end_episode if batch else None,
+            "label": batch.label if batch else "",
+        },
+        "input_keys": input_keys,
+        "input_preview": _compact_nested_strings(stage_variables, max_chars=600),
+        "output_keys": output_keys,
+        "raw_output_preview": _compact_nested_strings(raw_output or {}, max_chars=600),
+        "raw_answer_text_preview": str(runner_debug.get("answer_text_preview") or ""),
+        "fastgpt_client_answer_text_preview": str(
+            runner_debug.get("answer_text_preview") or ""
+        ),
+        "fastgpt_client_response_preview": str(
+            runner_debug.get("response_preview") or ""
+        ),
+        "fastgpt_client_output_keys": list(runner_debug.get("output_keys") or []),
+        "fastgpt_client_raw_response": runner_debug.get("raw_response"),
+        "fastgpt_client_last_stage_debug_info": _compact_nested_strings(
+            runner_debug,
+            max_chars=600,
+        ),
+        "conversation_log_available": False,
+        "traceback": "".join(
+            traceback.format_exception(type(exception), exception, exception.__traceback__)
+        )
+        if exception is not None
+        else "",
+    }
+    target = debug_dir / filename
+    target.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+    return str(target.resolve())
+
+
 def _run_fastgpt_stage_once(
     state: WorkflowState,
     runner: FastGPTRunner,
@@ -3775,10 +3839,28 @@ def run_stage_with_contract_guard(
                 normalized_preview=validation_meta.get("normalized_preview") or validated_output,
                 fallback_used=bool(validation_meta.get("fallback_used")),
             )
+            debug_file_path = ""
+            if artifact.get("status") != "validated":
+                debug_file_path = _write_stage_debug_artifact_file(
+                    artifact=artifact,
+                    stage_variables=variables,
+                    runner_debug=runner_debug,
+                    raw_output=raw_output,
+                    batch=batch,
+                    exception=None,
+                )
+                artifact["debug_file_path"] = debug_file_path
             state.set_output(stage_name, "contract_guard", artifact)
             if workflow_contract.workflow_warnings:
                 for warning in workflow_contract.workflow_warnings:
                     logger.warning("%s", warning)
+            if debug_file_path:
+                logger.warning(
+                    "%s%s 使用 fallback 输出，调试文件：%s",
+                    contract.label,
+                    _format_batch_suffix(batch_label),
+                    debug_file_path,
+                )
             return validated_output
         except Exception as exc:
             last_error = exc
@@ -3790,15 +3872,24 @@ def run_stage_with_contract_guard(
                 or runner_debug.get("raw_output_source")
                 or "stage_output"
             )
+            fallback_output = getattr(exc, "normalized_output", None)
+            can_use_fallback = bool(getattr(exc, "fallback_used", False)) and isinstance(
+                fallback_output,
+                dict,
+            ) and bool(fallback_output)
             artifact = build_debug_artifact(
                 spec=workflow_contract,
                 batch_label=batch_label,
                 review_round=review_round,
                 format_attempt=format_attempt,
                 max_format_retries=retries,
-                status="retry_exhausted"
-                if format_attempt >= retries or _is_non_retryable(exc)
-                else "failed_retryable",
+                status=(
+                    "fallback_used"
+                    if can_use_fallback and format_attempt >= retries
+                    else "retry_exhausted"
+                    if format_attempt >= retries or _is_non_retryable(exc)
+                    else "failed_retryable"
+                ),
                 validator_issues=issues,
                 exception=exc,
                 raw_output_source=raw_output_source,
@@ -3811,17 +3902,35 @@ def run_stage_with_contract_guard(
                 normalized_preview=normalized_preview or validation_meta.get("normalized_preview") or "",
                 fallback_used=bool(getattr(exc, "fallback_used", False)),
             )
+            debug_file_path = _write_stage_debug_artifact_file(
+                artifact=artifact,
+                stage_variables=variables,
+                runner_debug=runner_debug,
+                raw_output=raw_output,
+                batch=batch,
+                exception=exc,
+            )
+            artifact["debug_file_path"] = debug_file_path
             state.set_output(stage_name, "contract_guard", artifact)
-            if workflow_contract.workflow_warnings:
-                artifact["workflow_warnings"] = list(workflow_contract.workflow_warnings)
             logger.warning(
-                "%s%s第 %s/%s 次格式校验失败：%s",
+                "%s%s第 %s/%s 次格式校验失败：%s；调试文件：%s",
                 contract.label,
                 _format_batch_suffix(batch_label),
                 format_attempt,
                 retries,
                 _truncate_log_text(str(exc), max_chars=320),
+                debug_file_path,
             )
+            if can_use_fallback and format_attempt >= retries:
+                state.set_output(stage_name, "contract_guard", artifact)
+                if sync_output_to_state:
+                    _sync_state_variables(state, fallback_output)
+                logger.warning(
+                    "%s%s 输出格式重试已耗尽，已使用本地 fallback 结果继续。",
+                    contract.label,
+                    _format_batch_suffix(batch_label),
+                )
+                return dict(fallback_output)
             if _is_non_retryable(exc) or format_attempt >= retries:
                 set_runtime_stage(
                     state,
