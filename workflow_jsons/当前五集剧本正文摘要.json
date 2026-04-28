@@ -134,7 +134,7 @@
             "settingLLMModel",
             "reference"
           ],
-          "value": "deepseek-reasoner",
+          "value": "deepseek-v4-flash",
           "debugLabel": "",
           "toolDescription": ""
         },
@@ -414,7 +414,9 @@
               "valueType": "string",
               "renderType": "reference"
             }
-          ]
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
         }
       ],
       "outputs": []

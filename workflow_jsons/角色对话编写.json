@@ -7,8 +7,8 @@
       "avatar": "core/workflow/template/systemConfig",
       "flowNodeType": "userGuide",
       "position": {
-        "x": -90,
-        "y": -1665
+        "x": -30,
+        "y": -1755
       },
       "version": "481",
       "inputs": [
@@ -84,8 +84,8 @@
       "avatar": "core/workflow/template/workflowStart",
       "flowNodeType": "workflowStart",
       "position": {
-        "x": 555,
-        "y": -1605
+        "x": 570,
+        "y": -1755
       },
       "version": "481",
       "inputs": [
@@ -389,8 +389,8 @@
       "flowNodeType": "variableUpdate",
       "showStatus": false,
       "position": {
-        "x": 1905,
-        "y": -1170
+        "x": 1860,
+        "y": -1755
       },
       "inputs": [
         {
@@ -460,70 +460,63 @@
         "icon": "core/workflow/inputType/input"
       },
       {
+        "type": "input",
         "key": "worldviewContent",
         "label": "世界观内容",
         "valueType": "string",
-        "required": false,
-        "type": "internal",
         "description": "保存世界观最新版本",
-        "icon": "core/workflow/inputType/internal"
+        "required": false
       },
       {
+        "type": "input",
         "key": "characterContent",
         "label": "人设内容",
         "valueType": "string",
-        "required": false,
-        "type": "internal",
         "description": "保存人设最新版本",
-        "icon": "core/workflow/inputType/internal"
+        "required": false
       },
       {
+        "type": "input",
         "key": "sceneContent",
         "label": "场景内容",
         "valueType": "string",
-        "required": false,
-        "type": "internal",
         "description": "保存最新场景结果",
-        "icon": "core/workflow/inputType/internal"
+        "required": false
       },
       {
-        "type": "internal",
+        "type": "input",
         "key": "u5vVHFr4",
         "label": "对应五集的开头冲突钩子记忆",
         "valueType": "string",
         "description": "",
-        "required": false,
-        "icon": "core/workflow/inputType/internal"
+        "required": false
       },
       {
+        "type": "input",
         "key": "h2KpLm91",
         "label": "服装版本映射内容",
         "valueType": "string",
-        "required": false,
-        "defaultValue": "",
-        "type": "internal",
         "description": "保存最新撰写/修订的服装版本映射结构化JSON，用作当前批次角色对白的 alias registry。",
-        "icon": "core/workflow/inputType/internal"
+        "required": false,
+        "defaultValue": ""
       },
       {
+        "type": "numberInput",
         "key": "dialogueStartEpisode",
         "label": "角色对白从这一集开始",
         "valueType": "number",
-        "required": false,
-        "defaultValue": "1",
-        "type": "internal",
         "description": "当前批次起始集数",
-        "icon": "core/workflow/inputType/internal"
+        "required": false,
+        "defaultValue": "1"
       },
       {
-        "type": "internal",
+        "type": "input",
         "key": "bGzG0Eaw",
         "label": "角色对话上五集记忆",
         "valueType": "string",
         "description": "",
         "required": false,
-        "defaultValue": "",
-        "icon": "core/workflow/inputType/internal"
+        "defaultValue": ""
       },
       {
         "type": "internal",

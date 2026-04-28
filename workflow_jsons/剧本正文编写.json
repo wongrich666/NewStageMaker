@@ -7,7 +7,7 @@
       "avatar": "core/workflow/template/systemConfig",
       "flowNodeType": "userGuide",
       "position": {
-        "x": 13260,
+        "x": 13395,
         "y": -1275
       },
       "version": "481",
@@ -121,7 +121,7 @@
       "flowNodeType": "chatNode",
       "showStatus": true,
       "position": {
-        "x": 14505,
+        "x": 14490,
         "y": -1275
       },
       "version": "4.9.7",
@@ -391,8 +391,8 @@
       "flowNodeType": "variableUpdate",
       "showStatus": false,
       "position": {
-        "x": 15270,
-        "y": -1260
+        "x": 15315,
+        "y": -1275
       },
       "inputs": [
         {
@@ -503,14 +503,41 @@
         "icon": "core/workflow/inputType/input"
       },
       {
+        "type": "numberInput",
         "key": "d4sfifeZ",
         "label": "剧本从这一集开始",
         "valueType": "number",
-        "required": false,
-        "defaultValue": "1",
-        "type": "internal",
         "description": "引导模型从这一集开始写剧本",
-        "icon": "core/workflow/inputType/internal"
+        "required": false,
+        "defaultValue": "1"
+      },
+      {
+        "type": "input",
+        "key": "fFM0mroW",
+        "label": "人设内容",
+        "valueType": "string",
+        "description": "保存最新撰写/修订的人设内容",
+        "required": false,
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "type": "input",
+        "key": "h2KpLm91",
+        "label": "服装版本映射内容",
+        "valueType": "string",
+        "description": "保存最新撰写/修订的服装版本映射结构化JSON，供开头冲突钩子、角色对话、剧本正文统一读取别名与触发规则。",
+        "required": false,
+        "defaultValue": "",
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "type": "input",
+        "key": "yuozoGpo",
+        "label": "世界观内容",
+        "valueType": "string",
+        "description": "用于更新记录每一次新修订的世界观内容",
+        "required": false,
+        "icon": "core/workflow/inputType/input"
       },
       {
         "type": "internal",
@@ -519,34 +546,6 @@
         "valueType": "string",
         "description": "",
         "required": false,
-        "icon": "core/workflow/inputType/internal"
-      },
-      {
-        "key": "fFM0mroW",
-        "label": "人设内容",
-        "valueType": "string",
-        "required": false,
-        "type": "internal",
-        "description": "保存最新撰写/修订的人设内容",
-        "icon": "core/workflow/inputType/internal"
-      },
-      {
-        "key": "h2KpLm91",
-        "label": "服装版本映射内容",
-        "valueType": "string",
-        "required": false,
-        "defaultValue": "",
-        "type": "internal",
-        "description": "保存最新撰写/修订的服装版本映射结构化JSON，供开头冲突钩子、角色对话、剧本正文统一读取别名与触发规则。",
-        "icon": "core/workflow/inputType/internal"
-      },
-      {
-        "key": "yuozoGpo",
-        "label": "世界观内容",
-        "valueType": "string",
-        "required": false,
-        "type": "internal",
-        "description": "用于更新记录每一次新修订的世界观内容",
         "icon": "core/workflow/inputType/internal"
       }
     ],

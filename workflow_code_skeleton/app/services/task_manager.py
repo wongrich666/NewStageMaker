@@ -1218,6 +1218,7 @@ def _resolve_best_script_text(
     return best_text
 
 
+
 def use_fastgpt_backend() -> bool:
     return settings.workflow_backend in {"fastgpt", "hybrid", "fastgpt_hybrid"}
 

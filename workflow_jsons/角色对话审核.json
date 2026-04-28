@@ -84,8 +84,8 @@
       "avatar": "core/workflow/template/workflowStart",
       "flowNodeType": "workflowStart",
       "position": {
-        "x": 555,
-        "y": -1605
+        "x": 465,
+        "y": -1665
       },
       "version": "481",
       "inputs": [
@@ -121,8 +121,8 @@
       "flowNodeType": "chatNode",
       "showStatus": true,
       "position": {
-        "x": 1245,
-        "y": -1665
+        "x": 915,
+        "y": -1650
       },
       "version": "4.9.7",
       "inputs": [
@@ -389,8 +389,8 @@
       "flowNodeType": "variableUpdate",
       "showStatus": false,
       "position": {
-        "x": 2085,
-        "y": -1245
+        "x": 1725,
+        "y": -1650
       },
       "inputs": [
         {
@@ -460,61 +460,70 @@
         "icon": "core/workflow/inputType/input"
       },
       {
+        "type": "input",
         "key": "worldviewContent",
         "label": "世界观内容",
         "valueType": "string",
-        "required": false,
-        "type": "internal",
         "description": "保存世界观最新版本",
-        "icon": "core/workflow/inputType/internal"
+        "required": false,
+        "icon": "core/workflow/inputType/input"
       },
       {
+        "type": "input",
         "key": "characterContent",
         "label": "人设内容",
         "valueType": "string",
-        "required": false,
-        "type": "internal",
         "description": "保存人设最新版本",
-        "icon": "core/workflow/inputType/internal"
+        "required": false,
+        "icon": "core/workflow/inputType/input"
       },
       {
+        "type": "input",
         "key": "sceneContent",
         "label": "场景内容",
         "valueType": "string",
-        "required": false,
-        "type": "internal",
         "description": "保存最新场景结果",
-        "icon": "core/workflow/inputType/internal"
+        "required": false,
+        "icon": "core/workflow/inputType/input"
       },
       {
+        "type": "input",
         "key": "h2KpLm91",
         "label": "服装版本映射内容",
         "valueType": "string",
+        "description": "保存最新撰写/修订的服装版本映射结构化JSON，用作当前批次角色对白的 alias registry。",
         "required": false,
         "defaultValue": "",
-        "type": "internal",
-        "description": "保存最新撰写/修订的服装版本映射结构化JSON，用作当前批次角色对白的 alias registry。",
-        "icon": "core/workflow/inputType/internal"
+        "icon": "core/workflow/inputType/input"
       },
       {
+        "type": "numberInput",
         "key": "dialogueStartEpisode",
         "label": "角色对白从这一集开始",
         "valueType": "number",
+        "description": "当前批次起始集数",
         "required": false,
         "defaultValue": "1",
-        "type": "internal",
-        "description": "当前批次起始集数",
-        "icon": "core/workflow/inputType/internal"
+        "icon": "core/workflow/inputType/numberInput"
       },
       {
+        "type": "input",
         "key": "dialogueContent",
         "label": "角色对白内容",
         "valueType": "string",
+        "description": "当前批次最新对白 JSON",
         "required": false,
         "defaultValue": "",
-        "type": "internal",
-        "description": "当前批次最新对白 JSON",
-        "icon": "core/workflow/inputType/internal"
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "type": "input",
+        "key": "gHwTQTHn",
+        "label": "开头冲突钩子当前五集记忆",
+        "valueType": "string",
+        "description": "",
+        "required": false,
+        "icon": "core/workflow/inputType/input"
       },
       {
         "type": "internal",
@@ -522,15 +531,8 @@
         "label": "角色对话审核内容",
         "valueType": "string",
         "description": "",
-        "required": false
-      },
-      {
-        "type": "internal",
-        "key": "gHwTQTHn",
-        "label": "开头冲突钩子当前五集记忆",
-        "valueType": "string",
-        "description": "",
-        "required": false
+        "required": false,
+        "icon": "core/workflow/inputType/internal"
       },
       {
         "type": "internal",
@@ -538,7 +540,8 @@
         "label": "角色对话当前五集审核内容",
         "valueType": "string",
         "description": "",
-        "required": false
+        "required": false,
+        "icon": "core/workflow/inputType/internal"
       }
     ],
     "scheduledTriggerConfig": {

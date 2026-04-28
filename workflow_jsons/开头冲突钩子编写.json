@@ -468,54 +468,49 @@
         "icon": "core/workflow/inputType/input"
       },
       {
+        "type": "input",
         "key": "fFM0mroW",
         "label": "人设内容",
         "valueType": "string",
-        "required": false,
-        "type": "internal",
         "description": "保存最新撰写/修订的人设内容",
-        "icon": "core/workflow/inputType/internal"
+        "required": false
       },
       {
+        "type": "input",
         "key": "h2KpLm91",
         "label": "服装版本映射内容",
         "valueType": "string",
-        "required": false,
-        "defaultValue": "",
-        "type": "internal",
         "description": "保存最新撰写/修订的服装版本映射结构化JSON，供开头冲突钩子读取 alias 与触发规则。",
-        "icon": "core/workflow/inputType/internal"
+        "required": false,
+        "defaultValue": ""
       },
       {
+        "type": "numberInput",
         "key": "iJkq6iGe",
         "label": "开头冲突钩子从这一集开始",
         "valueType": "number",
-        "required": false,
-        "defaultValue": 1,
-        "type": "internal",
         "description": "开局钩子从这一集开始",
-        "icon": "core/workflow/inputType/internal"
+        "required": false,
+        "defaultValue": 1
       },
       {
+        "type": "input",
         "key": "iJudZHhM",
         "label": "场景内容",
         "valueType": "string",
-        "required": false,
-        "type": "internal",
         "description": "保存了最新撰写/修订的场景说明文字",
-        "icon": "core/workflow/inputType/internal"
+        "required": false
       },
       {
+        "type": "input",
         "key": "yuozoGpo",
         "label": "世界观内容",
         "valueType": "string",
-        "required": false,
-        "type": "internal",
         "description": "用于更新记录每一次新修订的世界观内容",
-        "icon": "core/workflow/inputType/internal"
+        "required": false
       },
       {
-        "type": "internal",
+        "type": "input",
         "key": "hookSearchMemory",
         "label": "开头冲突钩子上五集记忆",
         "valueType": "string",
