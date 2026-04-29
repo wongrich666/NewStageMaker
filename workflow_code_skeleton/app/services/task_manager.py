@@ -51,7 +51,13 @@ from .fastgpt_contracts import (
 )
 from .workflow_spec import WorkflowSpec
 from ..utils.logger import get_logger
-from ..utils.episode import BatchWindow, iter_episode_batches
+from ..utils.episode import (
+    BatchWindow,
+    build_episode_batches,
+    iter_episode_batches,
+    rewrite_start_validation_message,
+    validate_rewrite_start_episode,
+)
 from ..workflow_ids import (
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
     APPEARANCE_MAPPING_VAR,
@@ -284,7 +290,7 @@ ROLLBACK_STAGE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("scenes", "核心场景生成"),
     ("appearance", "服装版本映射"),
     ("hooks", "开头冲突钩子"),
-    ("dialogues", "角色对白"),
+    ("dialogues", "角色对话"),
     ("script", "剧本正文"),
     ("final", "最终剧本拼接"),
 )
@@ -2666,6 +2672,7 @@ class TaskManager:
             return []
 
         batches = list(iter_episode_batches(total_episodes, batch_size=batch_size))
+        valid_batch_starts = {batch.start_episode for batch in batches}
         interrupted_start = self._interrupted_batch_start_episode(snapshot)
         next_unfinished = (
             self._next_unfinished_object_batch_start(variables.get(ALL_HOOKS), batches)
@@ -2674,9 +2681,9 @@ class TaskManager:
         )
 
         candidate_starts = [batch.start_episode for batch in batches if batch.start_episode < next_unfinished]
-        if 1 <= next_unfinished <= total_episodes:
+        if next_unfinished in valid_batch_starts:
             candidate_starts.append(next_unfinished)
-        if interrupted_start and 1 <= interrupted_start <= total_episodes:
+        if interrupted_start in valid_batch_starts:
             candidate_starts.append(interrupted_start)
         if not candidate_starts and batches:
             candidate_starts = [batches[0].start_episode]
@@ -2701,15 +2708,20 @@ class TaskManager:
         batch_size = max(1, int(settings.batch_size or 5))
         end_episode = min(total_episodes, start_episode + batch_size - 1)
         dependencies = list(_rollback_stage_dependency_keys(stage_key))
+        del allow_script_episode_labels
 
-        if stage_key == "hooks":
-            label = f"从第 {start_episode}-{end_episode} 集开始重写开头冲突钩子（将联动重写角色对白与剧本正文）"
-        elif stage_key == "dialogues":
-            label = f"从第 {start_episode}-{end_episode} 集开始重写角色对白（将联动重写剧本正文）"
-        elif stage_key == "script" and allow_script_episode_labels:
-            label = f"从第 {start_episode} 集开始重写正文（本轮将覆盖第 {start_episode}-{end_episode} 集及后续）"
+        stage_label = {
+            "hooks": "开头冲突钩子",
+            "dialogues": "角色对话",
+            "script": "剧本正文",
+        }.get(stage_key, ROLLBACK_STAGE_LABELS.get(stage_key, stage_key))
+        if end_episode < total_episodes:
+            label = (
+                f"从第 {start_episode} 集开始重写{stage_label}"
+                f"（将按批次重写第 {start_episode}-{end_episode} 集，并继续重写后续批次）"
+            )
         else:
-            label = f"从第 {start_episode}-{end_episode} 集开始重写剧本正文"
+            label = f"从第 {start_episode} 集开始重写{stage_label}（将重写第 {start_episode}-{end_episode} 集）"
 
         return {
             "value": start_episode,
@@ -2731,18 +2743,21 @@ class TaskManager:
         if total_episodes <= 0:
             return []
 
-        batch_starts = [batch.start_episode for batch in iter_episode_batches(total_episodes, batch_size=batch_size)]
+        batch_starts = [
+            int(batch["start"])
+            for batch in build_episode_batches(total_episodes, batch_size=batch_size)
+        ]
         script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
         script_episodes = _normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES))
         interrupted_start = self._interrupted_batch_start_episode(snapshot)
         if script_episodes:
-            candidate_starts = list(range(1, total_episodes + 1))
+            candidate_starts = batch_starts
         elif script_batches:
             candidate_starts = batch_starts
         else:
-            candidate_starts = [interrupted_start] if interrupted_start else batch_starts[:1]
+            candidate_starts = [interrupted_start] if interrupted_start in batch_starts else batch_starts[:1]
 
-        if interrupted_start and 1 <= interrupted_start <= total_episodes and interrupted_start not in candidate_starts:
+        if interrupted_start in batch_starts and interrupted_start not in candidate_starts:
             candidate_starts = sorted({*candidate_starts, interrupted_start})
 
         options: list[dict[str, Any]] = []
@@ -3622,8 +3637,17 @@ class TaskManager:
             valid_start_episodes = {int(option["value"]) for option in rollback_options if _safe_int(option.get("value"), 0) > 0}
             if rollback_start_episode is None:
                 raise ValueError(f"请选择{ROLLBACK_STAGE_LABELS[rollback_stage]}开始重写的集数范围")
+            batch_size = max(1, int(settings.batch_size or 5))
+            try:
+                rollback_start_episode = validate_rewrite_start_episode(
+                    rollback_start_episode,
+                    int(snapshot.get("total_episodes") or 0),
+                    batch_size=batch_size,
+                )
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
             if rollback_start_episode not in valid_start_episodes:
-                raise ValueError(f"请选择有效的{ROLLBACK_STAGE_LABELS[rollback_stage]}重写起始集数")
+                raise ValueError(rewrite_start_validation_message(batch_size))
 
         old_task_id = str(snapshot.get("task_id") or "").strip()
         old_record = self._projects.get(project_id)
@@ -3643,7 +3667,13 @@ class TaskManager:
         if _rollback_stage_requires_episode_range(rollback_stage) and rollback_start_episode:
             batch_size = max(1, int(settings.batch_size or 5))
             end_episode = min(int(snapshot.get("total_episodes") or 0), rollback_start_episode + batch_size - 1)
-            stage_label = f"{stage_label}（从第 {rollback_start_episode}-{end_episode} 集开始）"
+            if end_episode < int(snapshot.get("total_episodes") or 0):
+                stage_label = (
+                    f"{stage_label}（从第 {rollback_start_episode} 集开始，"
+                    f"将按批次重写第 {rollback_start_episode}-{end_episode} 集，并继续重写后续批次）"
+                )
+            else:
+                stage_label = f"{stage_label}（从第 {rollback_start_episode} 集开始，将重写第 {rollback_start_episode}-{end_episode} 集）"
         new_snapshot = copy.deepcopy(rollback_snapshot)
         new_snapshot.update(
             {

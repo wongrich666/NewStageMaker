@@ -1021,7 +1021,7 @@
 
   function rollbackRangeSelectPlaceholder(stageKey) {
     if (stageKey === "hooks") return "选择开头冲突钩子开始重写的集数范围";
-    if (stageKey === "dialogues") return "选择角色对白开始重写的集数范围";
+    if (stageKey === "dialogues") return "选择角色对话开始重写的集数范围";
     if (stageKey === "script") return "选择剧本正文开始重写的集数范围";
     return "选择开始重写的集数范围";
   }
@@ -1886,11 +1886,13 @@
     if (rangeRequired && startEpisodeValue <= 0) {
       throw new Error(`${rollbackRangeSelectPlaceholder(stageKey).replace("选择", "请选择")}`);
     }
-    const options = rollbackStageRangeOptions(state.latestSnapshot, stageKey);
-    const selectedRange = options.find((item) => String(item.value) === String(startEpisodeValue));
-    const detailSuffix = selectedRange
-      ? `，从第 ${selectedRange.start_episode || startEpisodeValue}-${selectedRange.end_episode || startEpisodeValue} 集开始`
-      : "";
+      const options = rollbackStageRangeOptions(state.latestSnapshot, stageKey);
+      const selectedRange = options.find((item) => String(item.value) === String(startEpisodeValue));
+      const detailSuffix = selectedRange
+        ? Number(selectedRange.end_episode || startEpisodeValue) < Number(state.latestSnapshot?.total_episodes || 0)
+          ? `，从第 ${selectedRange.start_episode || startEpisodeValue} 集开始（将按批次重写第 ${selectedRange.start_episode || startEpisodeValue}-${selectedRange.end_episode || startEpisodeValue} 集，并继续重写后续批次）`
+          : `，从第 ${selectedRange.start_episode || startEpisodeValue} 集开始（将重写第 ${selectedRange.start_episode || startEpisodeValue}-${selectedRange.end_episode || startEpisodeValue} 集）`
+        : "";
     const stageLabelMap = rollbackStageLabelMap(state.latestSnapshot);
     const impactedLabels = rollbackStageDependencies(state.latestSnapshot, stageKey)
       .map((key) => stageLabelMap[key] || key)

@@ -194,12 +194,47 @@ class TaskManagerRollbackTests(unittest.TestCase):
             [1, 6],
         )
 
+    def test_public_snapshot_uses_fixed_five_episode_batches_for_rewrite_start_options(self) -> None:
+        snapshot = _base_snapshot(15)
+        snapshot["debug_state"]["variables"][task_manager_module.LOCAL_SCRIPT_EPISODES] = {
+            str(episode): f"正文 {episode}"
+            for episode in range(1, 16)
+        }
+        public = self.manager._public_snapshot(snapshot)
+
+        self.assertEqual(
+            [item["value"] for item in public["rollback_stage_start_options"]["hooks"]],
+            [1, 6, 11],
+        )
+        self.assertEqual(
+            [item["value"] for item in public["rollback_stage_start_options"]["dialogues"]],
+            [1, 6, 11],
+        )
+        self.assertEqual(
+            [item["value"] for item in public["rollback_stage_start_options"]["script"]],
+            [1, 6, 11],
+        )
+        self.assertTrue(
+            all("第 2-" not in item["label"] and "第 3-" not in item["label"] for item in public["rollback_stage_start_options"]["script"])
+        )
+
+    def test_public_snapshot_uses_actual_tail_batch_for_partial_final_window(self) -> None:
+        snapshot = _base_snapshot(12)
+        public = self.manager._public_snapshot(snapshot)
+        script_options = public["rollback_stage_start_options"]["script"]
+
+        self.assertEqual([item["value"] for item in script_options], [1, 6, 11])
+        self.assertEqual(script_options[-1]["start_episode"], 11)
+        self.assertEqual(script_options[-1]["end_episode"], 12)
+        self.assertIn("第 11-12 集", script_options[-1]["label"])
+        self.assertNotIn("11-15", script_options[-1]["label"])
+
     def test_hooks_rollback_requires_valid_start_episode(self) -> None:
         snapshot = _base_snapshot()
         self._persist_snapshot(snapshot)
 
         with patch.object(task_manager_module.threading, "Thread", _FakeThread):
-            with self.assertRaisesRegex(ValueError, "请选择有效的开头冲突钩子重写起始集数"):
+            with self.assertRaisesRegex(ValueError, "回退重写只能从每个五集批次的起点开始"):
                 self.manager.rollback_project_to_stage(1, user_id=1, stage_key="hooks", start_episode=99)
 
     def test_dialogues_rollback_requires_valid_start_episode(self) -> None:
@@ -207,8 +242,24 @@ class TaskManagerRollbackTests(unittest.TestCase):
         self._persist_snapshot(snapshot)
 
         with patch.object(task_manager_module.threading, "Thread", _FakeThread):
-            with self.assertRaisesRegex(ValueError, "请选择有效的角色对白重写起始集数"):
+            with self.assertRaisesRegex(ValueError, "回退重写只能从每个五集批次的起点开始"):
                 self.manager.rollback_project_to_stage(1, user_id=1, stage_key="dialogues", start_episode=99)
+
+    def test_batched_rollback_rejects_sliding_window_start_episodes(self) -> None:
+        snapshot = _base_snapshot(15)
+        self._persist_snapshot(snapshot)
+
+        with patch.object(task_manager_module.threading, "Thread", _FakeThread):
+            for stage_key in ("hooks", "dialogues", "script"):
+                for invalid_start in (2, 3, 4, 5, 7, 8, 9, 10):
+                    with self.subTest(stage_key=stage_key, start_episode=invalid_start):
+                        with self.assertRaisesRegex(ValueError, "回退重写只能从每个五集批次的起点开始"):
+                            self.manager.rollback_project_to_stage(
+                                1,
+                                user_id=1,
+                                stage_key=stage_key,
+                                start_episode=invalid_start,
+                            )
 
     def test_hooks_rollback_clears_dialogues_and_script_from_selected_batch(self) -> None:
         snapshot = _base_snapshot()
@@ -374,6 +425,32 @@ class TaskManagerRollbackTests(unittest.TestCase):
         self.assertEqual(
             variables[task_manager_module.LOCAL_APPEARANCE_MEMORY_BY_BATCH],
             {"1": {"memory": "appearance-1"}},
+        )
+
+    def test_script_rollback_on_partial_tail_batch_only_trims_from_last_valid_batch(self) -> None:
+        snapshot = _base_snapshot(12)
+        self._persist_snapshot(snapshot)
+
+        with patch.object(task_manager_module.threading, "Thread", _FakeThread):
+            public = self.manager.rollback_project_to_stage(
+                1,
+                user_id=1,
+                stage_key="script",
+                start_episode=11,
+            )
+
+        self.assertEqual(public["current_stage"], "script")
+        raw = self._raw_project_snapshot()
+        variables = raw["debug_state"]["variables"]
+        self.assertEqual(variables[BATCH_START_EPISODE], 11)
+        self.assertEqual(raw["current_batch"], "11-12")
+        self.assertEqual(
+            raw["artifacts"][task_manager_module.SCRIPT_BATCH_RANGE_ARTIFACT],
+            "6-10",
+        )
+        self.assertEqual(
+            [item["start_episode"] for item in raw["artifacts"][task_manager_module.SCRIPT_BATCHES_DISPLAY_ARTIFACT]],
+            [1, 6],
         )
 
 
