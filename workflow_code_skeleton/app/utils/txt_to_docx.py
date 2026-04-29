@@ -26,6 +26,16 @@ from docx.oxml import OxmlElement
 
 logger = logging.getLogger(__name__)
 
+PLAIN_SECTION_HEADINGS = (
+    "故事梗概",
+    "世界观设定",
+    "人物小传",
+    "人物服饰说明",
+    "核心场景",
+    "分集计划",
+    "剧本正文",
+)
+
 
 # ─────────────────────────── 样式辅助 ───────────────────────────
 
@@ -174,6 +184,63 @@ def normalize_text(value: Any, *, _depth: int = 0) -> str:
     return str(value).strip()
 
 
+def split_plain_sections(text: str) -> tuple[str, dict[str, str]]:
+    """按导出用的一级中文标题切分纯文本章节，兼容新导出格式。"""
+    source = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = source.split("\n")
+    title = ""
+    index = 0
+    while index < len(lines):
+        line = str(lines[index] or "").strip()
+        if line:
+            title = line
+            index += 1
+            break
+        index += 1
+
+    sections: dict[str, list[str]] = {}
+    current_heading = ""
+    buffer: list[str] = []
+    known = set(PLAIN_SECTION_HEADINGS)
+    for raw_line in lines[index:]:
+        line = str(raw_line or "")
+        stripped = line.strip()
+        if stripped in known:
+            if current_heading:
+                sections[current_heading] = buffer[:]
+            current_heading = stripped
+            buffer = []
+            continue
+        if current_heading:
+            buffer.append(line)
+    if current_heading:
+        sections[current_heading] = buffer[:]
+
+    return title, {
+        key: "\n".join(value).strip()
+        for key, value in sections.items()
+        if "\n".join(value).strip()
+    }
+
+
+def _section_is_code_fence(text: str) -> bool:
+    content = str(text or "").strip()
+    return content.startswith("```json") or content.startswith("```")
+
+
+def render_plain_section(doc: Document, title: str, text: Any):
+    content = normalize_text(text)
+    if not content:
+        return
+    add_heading(doc, title, level=1)
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", content) if part.strip()]
+    if not paragraphs:
+        paragraphs = [line.strip() for line in str(content).splitlines() if line.strip()]
+    for paragraph in paragraphs:
+        add_para(doc, paragraph)
+    add_divider(doc)
+
+
 def render_field(doc: Document, label: str, value: Any):
     """按字段类型安全渲染键值、列表或复杂对象。"""
     items = normalize_list(value)
@@ -272,6 +339,7 @@ def parse_txt(filepath: str) -> dict:
     }
     """
     text = Path(filepath).read_text(encoding='utf-8')
+    title, plain_sections = split_plain_sections(text)
 
     # 提取所有 ```json ... ``` 块（含位置信息）
     json_pattern = re.compile(r'```json\s*(.*?)```', re.DOTALL)
@@ -281,10 +349,11 @@ def parse_txt(filepath: str) -> dict:
     plain_text = json_pattern.sub('<<<JSON_BLOCK>>>', text)
     plain_parts = plain_text.split('<<<JSON_BLOCK>>>')
 
-    # 第一个纯文本块包含标题和故事梗概
+    # 兼容旧格式：第一个纯文本块包含标题和故事梗概
     header_block = plain_parts[0].strip() if plain_parts else ""
     lines = header_block.splitlines()
-    title = lines[0].strip() if lines else ""
+    legacy_title = lines[0].strip() if lines else ""
+    title = title or legacy_title
     synopsis_lines = []
     in_synopsis = False
     for line in lines[1:]:
@@ -298,13 +367,12 @@ def parse_txt(filepath: str) -> dict:
             break
         if in_synopsis:
             synopsis_lines.append(line)
-    synopsis = "\n".join(synopsis_lines).strip()
+    synopsis = plain_sections.get("故事梗概") or "\n".join(synopsis_lines).strip()
 
     # 找剧本正文（最后一个 JSON 块之后的文本）
-    script_text = ""
-    if len(plain_parts) > len(json_matches):
+    script_text = plain_sections.get("剧本正文", "")
+    if not script_text and len(plain_parts) > len(json_matches):
         last_part = plain_parts[-1]
-        # 找"剧本正文"标记
         script_match = re.search(r'剧本正文(.*)', last_part, re.DOTALL)
         if script_match:
             script_text = script_match.group(0).strip()
@@ -335,6 +403,7 @@ def parse_txt(filepath: str) -> dict:
     return {
         "title": title,
         "synopsis": synopsis,
+        "sections": plain_sections,
         "json_blocks": json_blocks,
         "script": script_text,
     }
@@ -581,13 +650,28 @@ def convert(input_path: str, output_path: str):
     title_run.font.size = Pt(20)
     set_run_color(title_run, "1F4E79")
 
-    # ── 故事梗概 ──
-    if parsed["synopsis"]:
-        add_heading(doc, "故事梗概", level=1)
-        for line in parsed["synopsis"].splitlines():
-            if line.strip():
-                add_para(doc, line.strip())
-        add_divider(doc)
+    sections = parsed.get("sections") if isinstance(parsed.get("sections"), dict) else {}
+
+    # ── 新版纯文本章节优先 ──
+    rendered_character_section = False
+    rendered_scene_section = False
+    for heading in ("故事梗概", "世界观设定", "人物小传", "人物服饰说明", "核心场景", "分集计划"):
+        section_text = sections.get(heading)
+        if not section_text:
+            continue
+        if heading == "人物小传" and _section_is_code_fence(section_text):
+            continue
+        if heading == "核心场景" and _section_is_code_fence(section_text):
+            continue
+        render_plain_section(doc, heading, section_text)
+        if heading == "人物小传":
+            rendered_character_section = True
+        if heading == "核心场景":
+            rendered_scene_section = True
+
+    # ── 兼容旧版故事梗概 ──
+    if not sections.get("故事梗概") and parsed["synopsis"]:
+        render_plain_section(doc, "故事梗概", parsed["synopsis"])
 
     # ── JSON 块渲染 ──
     for block in parsed["json_blocks"]:
@@ -600,7 +684,7 @@ def convert(input_path: str, output_path: str):
             continue
 
         # 人物小传
-        if isinstance(data, dict) and "character_setting" in data:
+        if isinstance(data, dict) and "character_setting" in data and not rendered_character_section:
             add_heading(doc, "人物小传", level=1)
             cs = data["character_setting"]
             render_field(doc, "角色设计原则", safe_get(cs, "character_design_principle") if isinstance(cs, dict) else None)
@@ -623,7 +707,7 @@ def convert(input_path: str, output_path: str):
                     render_field(doc, "人物信息", normalize_text(characters) or "未提供")
 
         # 场景设定
-        elif isinstance(data, dict) and "scene_setting" in data:
+        elif isinstance(data, dict) and "scene_setting" in data and not rendered_scene_section:
             add_heading(doc, "核心场景", level=1)
             ss = data["scene_setting"]
             render_field(doc, "场景设计原则", safe_get(ss, "scene_design_principle") if isinstance(ss, dict) else None)

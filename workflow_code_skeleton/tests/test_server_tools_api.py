@@ -98,6 +98,36 @@ class ServerToolsApiTests(unittest.TestCase):
             self.assertIn("chat-workspace-shell", text)
             self.assertIn("workspace-sidebar", text)
 
+    def test_workspace_page_contains_community_section_and_refresh_controls(self) -> None:
+        response = self.client.get("/workspace", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        text = response.get_data(as_text=True)
+        self.assertIn('id="community"', text)
+        self.assertIn('id="communityList"', text)
+        self.assertIn('id="refreshCommunityBtn"', text)
+        self.assertIn("section=community", text)
+
+    def test_home_page_renders_public_community_entries(self) -> None:
+        fake_assets = [
+            {
+                "project_id": 7,
+                "title": "公开短剧",
+                "summary": "这是一部已经公开的社区短剧。",
+            }
+        ]
+        with patch("workflow_code_skeleton.app.server.task_manager.list_public_assets", return_value=fake_assets):
+            app = create_app()
+            app.config["TESTING"] = True
+            client = app.test_client()
+            response = client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        text = response.get_data(as_text=True)
+        self.assertIn('id="community"', text)
+        self.assertIn("公开短剧", text)
+        self.assertIn("/community/7", text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,6 +30,7 @@ from workflow_code_skeleton.app.services.task_manager import (
 from workflow_code_skeleton.app.models.inputs import WorkflowInput
 from workflow_code_skeleton.app.models.state import WorkflowState
 from workflow_code_skeleton.app.workflow_ids import (
+    APPEARANCE_NATURAL_LANGUAGE_VAR,
     CHARACTER_NATURAL_LANGUAGE_VAR,
     CHARACTER_VAR,
     SCENE_NATURAL_LANGUAGE_VAR,
@@ -285,6 +286,7 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
         state.set_var(CHARACTERS, json.dumps({"character_setting": {"characters": [{"character_name": "林夏"}]}}, ensure_ascii=False))
         state.set_var(CHARACTER_VAR, state.get_var(CHARACTERS))
         state.set_var(CHARACTER_NATURAL_LANGUAGE_VAR, "人物小传自然语言版")
+        state.set_var(APPEARANCE_NATURAL_LANGUAGE_VAR, "林夏在会议室场景使用交锋态服装。")
         state.set_var(SCENES, json.dumps({"scene_setting": {"scenes": [{"scene_name": "旧码头"}]}}, ensure_ascii=False))
         state.set_var(SCENE_VAR, state.get_var(SCENES))
         state.set_var(SCENE_NATURAL_LANGUAGE_VAR, "核心场景自然语言版")
@@ -294,11 +296,13 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
         public = self.manager._public_snapshot(snapshot)
 
         self.assertEqual(snapshot["artifacts"]["character_natural_language"], "人物小传自然语言版")
+        self.assertEqual(snapshot["artifacts"]["appearance_natural_language"], "林夏在会议室场景使用交锋态服装。")
         self.assertEqual(snapshot["artifacts"]["scene_natural_language"], "核心场景自然语言版")
         self.assertEqual(snapshot["artifacts"]["characters"], state.get_var(CHARACTERS))
         self.assertEqual(snapshot["artifacts"]["scene_json"], state.get_var(SCENES))
         self.assertEqual(public["display_stage_output"], "")
         self.assertNotIn("character_natural_language", public["artifacts"])
+        self.assertNotIn("appearance_natural_language", public["artifacts"])
         self.assertNotIn("scene_natural_language", public["artifacts"])
         self.assertNotIn("characters", public["artifacts"])
         self.assertNotIn("scene_json", public["artifacts"])

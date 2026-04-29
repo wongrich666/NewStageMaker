@@ -51,10 +51,17 @@ from .fastgpt_contracts import (
 )
 from .workflow_spec import WorkflowSpec
 from ..utils.logger import get_logger
-from ..utils.episode import BatchWindow, iter_episode_batches
+from ..utils.episode import (
+    BatchWindow,
+    build_episode_batches,
+    iter_episode_batches,
+    rewrite_start_validation_message,
+    validate_rewrite_start_episode,
+)
 from ..workflow_ids import (
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
     APPEARANCE_MAPPING_VAR,
+    APPEARANCE_NATURAL_LANGUAGE_VAR,
     APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
     APPEARANCE_REQUIREMENTS_VAR,
     CHARACTER_BIOS_VAR,
@@ -199,6 +206,7 @@ STAGE_PREVIEW_STAGE_ARTIFACT = "stage_preview_stage"
 STAGE_PREVIEW_SOURCE_HASH_ARTIFACT = "stage_preview_source_hash"
 EPISODE_PLAN_DISPLAY_ARTIFACT = "episode_plan_display"
 EPISODE_PLAN_DISPLAY_SOURCE_HASH_ARTIFACT = "episode_plan_display_source_hash"
+APPEARANCE_NATURAL_LANGUAGE_ARTIFACT = "appearance_natural_language"
 SCRIPT_BATCH_PREVIEW_ARTIFACT = "script_batch_preview"
 SCRIPT_BATCH_RANGE_ARTIFACT = "script_batch_range"
 PARTIAL_SCRIPT_ARTIFACT = "partial_script"
@@ -240,6 +248,7 @@ COMPLETED_ARTIFACT_KEYS = (
     "scene_natural_language",
     "core_scene_summary",
     "worldview_natural_language",
+    APPEARANCE_NATURAL_LANGUAGE_ARTIFACT,
     "appearance_mapping",
     "character_registry",
     "character_alias_registry",
@@ -284,7 +293,7 @@ ROLLBACK_STAGE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("scenes", "核心场景生成"),
     ("appearance", "服装版本映射"),
     ("hooks", "开头冲突钩子"),
-    ("dialogues", "角色对白"),
+    ("dialogues", "角色对话"),
     ("script", "剧本正文"),
     ("final", "最终剧本拼接"),
 )
@@ -939,6 +948,83 @@ def _meaningful_stage_output_text(value: Any) -> str:
     return text
 
 
+EXPORT_TECHNICAL_KEY_PATTERN = re.compile(r'^\s*"?[A-Za-z_][A-Za-z0-9_]*"?\s*:\s*(.*)$')
+EXPORT_JSON_FENCE_PATTERN = re.compile(r"```(?:json|text|markdown)?\s*([\s\S]*?)```", re.IGNORECASE)
+
+
+def _strip_export_code_fences(text: str) -> str:
+    content = str(text or "").strip()
+    match = EXPORT_JSON_FENCE_PATTERN.fullmatch(content)
+    if match:
+        return str(match.group(1) or "").strip()
+    return EXPORT_JSON_FENCE_PATTERN.sub(lambda item: str(item.group(1) or "").strip(), content).strip()
+
+
+def _clean_export_key_line(line: str) -> str:
+    text = str(line or "").strip()
+    if not text:
+        return ""
+    if text in {"{", "}", "[", "]", ",", "```", "```json", "```text", "```markdown"}:
+        return ""
+    match = EXPORT_TECHNICAL_KEY_PATTERN.match(text)
+    if match:
+        value = str(match.group(1) or "").strip().strip(",")
+        if value in {"{", "[", "", "}", "]"}:
+            return ""
+        return value.strip(' "')
+    return text.strip(' "')
+
+
+def clean_export_readable_text(value: Any) -> str:
+    """把可能来自 JSON、markdown 或字段化文本的内容清洗成适合导出的自然语言。"""
+    if value in (None, "", {}, []):
+        return ""
+    if isinstance(value, (dict, list)):
+        parts: list[str] = []
+        items = value.items() if isinstance(value, dict) else enumerate(value, start=1)
+        for key, item in items:
+            cleaned = clean_export_readable_text(item)
+            if not cleaned:
+                continue
+            if isinstance(value, dict) and isinstance(key, str) and re.search(r"[\u4e00-\u9fff]", key):
+                parts.append(f"{key}：{cleaned}")
+            else:
+                parts.append(cleaned)
+        return "\n".join(part for part in parts if part).strip()
+
+    text = _strip_export_code_fences(str(value or ""))
+    parsed = _jsonish_value(text)
+    if parsed is not None:
+        return clean_export_readable_text(parsed)
+
+    cleaned_lines: list[str] = []
+    for raw_line in text.replace("\r", "").split("\n"):
+        line = _clean_export_key_line(raw_line)
+        if not line:
+            if cleaned_lines and cleaned_lines[-1] != "":
+                cleaned_lines.append("")
+            continue
+        cleaned_lines.append(line)
+
+    while cleaned_lines and cleaned_lines[0] == "":
+        cleaned_lines.pop(0)
+    while cleaned_lines and cleaned_lines[-1] == "":
+        cleaned_lines.pop()
+
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for line in cleaned_lines:
+        if line == "":
+            if current:
+                paragraphs.append(" ".join(current).strip())
+                current = []
+            continue
+        current.append(line)
+    if current:
+        paragraphs.append(" ".join(current).strip())
+    return "\n\n".join(paragraph for paragraph in paragraphs if paragraph).strip()
+
+
 def _summarize_fastgpt_output(output: dict[str, Any]) -> str:
     parts: list[str] = []
     for key, value in (output or {}).items():
@@ -1532,6 +1618,37 @@ def _character_items_from_value(value: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _scene_items_from_value(value: Any) -> list[dict[str, Any]]:
+    candidate = _jsonish_value(value)
+    if isinstance(candidate, dict):
+        nested_wrapper = candidate.get("scenes")
+        if isinstance(nested_wrapper, dict):
+            nested_scene_setting = nested_wrapper.get("scene_setting")
+            if isinstance(nested_scene_setting, dict) and isinstance(nested_scene_setting.get("scenes"), list):
+                return [item for item in nested_scene_setting.get("scenes") or [] if isinstance(item, dict)]
+        nested = candidate.get("scene_setting")
+        if isinstance(nested, dict) and isinstance(nested.get("scenes"), list):
+            return [item for item in nested.get("scenes") or [] if isinstance(item, dict)]
+        if isinstance(candidate.get("scenes"), list):
+            return [item for item in candidate.get("scenes") or [] if isinstance(item, dict)]
+    if isinstance(candidate, list):
+        return [item for item in candidate if isinstance(item, dict)]
+    return []
+
+
+def _appearance_character_items_from_value(value: Any) -> list[dict[str, Any]]:
+    candidate = _jsonish_value(value)
+    if isinstance(candidate, dict):
+        nested = candidate.get("appearance_mapping")
+        if isinstance(nested, dict) and isinstance(nested.get("characters"), list):
+            return [item for item in nested.get("characters") or [] if isinstance(item, dict)]
+        if isinstance(candidate.get("characters"), list):
+            return [item for item in candidate.get("characters") or [] if isinstance(item, dict)]
+    if isinstance(candidate, list):
+        return [item for item in candidate if isinstance(item, dict)]
+    return []
+
+
 def _character_name_from_item(item: dict[str, Any]) -> str:
     for key in ("character_name", "canonical_name", "name", "character_id"):
         value = str(item.get(key) or "").strip()
@@ -1800,6 +1917,9 @@ class WorkflowRuntime:
             raw_character_natural_language,
             state.get_var(CHARACTER_VAR, ""),
         )
+        appearance_natural_language = str(
+            state.get_var(APPEARANCE_NATURAL_LANGUAGE_VAR, "") or ""
+        ).strip()
         scene_natural_language = str(
             state.get_var(SCENE_NATURAL_LANGUAGE_VAR, "") or ""
         ).strip()
@@ -1832,6 +1952,7 @@ class WorkflowRuntime:
             "character_alias_naming_rules": state.get_var(CHARACTER_ALIAS_NAMING_RULES, ""),
             "outfit_switch_rules": state.get_var(OUTFIT_SWITCH_RULES, ""),
             "appearance_mapping": state.get_var(APPEARANCE_MAPPING, ""),
+            APPEARANCE_NATURAL_LANGUAGE_ARTIFACT: appearance_natural_language,
             "character_registry": state.get_var(CHARACTER_REGISTRY, ""),
             "character_alias_registry": state.get_var(CHARACTER_ALIAS_REGISTRY, ""),
             "episode_alias_plan": state.get_var(EPISODE_ALIAS_PLAN, ""),
@@ -2666,6 +2787,7 @@ class TaskManager:
             return []
 
         batches = list(iter_episode_batches(total_episodes, batch_size=batch_size))
+        valid_batch_starts = {batch.start_episode for batch in batches}
         interrupted_start = self._interrupted_batch_start_episode(snapshot)
         next_unfinished = (
             self._next_unfinished_object_batch_start(variables.get(ALL_HOOKS), batches)
@@ -2674,9 +2796,9 @@ class TaskManager:
         )
 
         candidate_starts = [batch.start_episode for batch in batches if batch.start_episode < next_unfinished]
-        if 1 <= next_unfinished <= total_episodes:
+        if next_unfinished in valid_batch_starts:
             candidate_starts.append(next_unfinished)
-        if interrupted_start and 1 <= interrupted_start <= total_episodes:
+        if interrupted_start in valid_batch_starts:
             candidate_starts.append(interrupted_start)
         if not candidate_starts and batches:
             candidate_starts = [batches[0].start_episode]
@@ -2701,15 +2823,20 @@ class TaskManager:
         batch_size = max(1, int(settings.batch_size or 5))
         end_episode = min(total_episodes, start_episode + batch_size - 1)
         dependencies = list(_rollback_stage_dependency_keys(stage_key))
+        del allow_script_episode_labels
 
-        if stage_key == "hooks":
-            label = f"从第 {start_episode}-{end_episode} 集开始重写开头冲突钩子（将联动重写角色对白与剧本正文）"
-        elif stage_key == "dialogues":
-            label = f"从第 {start_episode}-{end_episode} 集开始重写角色对白（将联动重写剧本正文）"
-        elif stage_key == "script" and allow_script_episode_labels:
-            label = f"从第 {start_episode} 集开始重写正文（本轮将覆盖第 {start_episode}-{end_episode} 集及后续）"
+        stage_label = {
+            "hooks": "开头冲突钩子",
+            "dialogues": "角色对话",
+            "script": "剧本正文",
+        }.get(stage_key, ROLLBACK_STAGE_LABELS.get(stage_key, stage_key))
+        if end_episode < total_episodes:
+            label = (
+                f"从第 {start_episode} 集开始重写{stage_label}"
+                f"（将按批次重写第 {start_episode}-{end_episode} 集，并继续重写后续批次）"
+            )
         else:
-            label = f"从第 {start_episode}-{end_episode} 集开始重写剧本正文"
+            label = f"从第 {start_episode} 集开始重写{stage_label}（将重写第 {start_episode}-{end_episode} 集）"
 
         return {
             "value": start_episode,
@@ -2731,18 +2858,21 @@ class TaskManager:
         if total_episodes <= 0:
             return []
 
-        batch_starts = [batch.start_episode for batch in iter_episode_batches(total_episodes, batch_size=batch_size)]
+        batch_starts = [
+            int(batch["start"])
+            for batch in build_episode_batches(total_episodes, batch_size=batch_size)
+        ]
         script_batches = _normalize_batch_text_map(variables.get(LOCAL_SCRIPT_BATCHES))
         script_episodes = _normalize_episode_script_map(variables.get(LOCAL_SCRIPT_EPISODES))
         interrupted_start = self._interrupted_batch_start_episode(snapshot)
         if script_episodes:
-            candidate_starts = list(range(1, total_episodes + 1))
+            candidate_starts = batch_starts
         elif script_batches:
             candidate_starts = batch_starts
         else:
-            candidate_starts = [interrupted_start] if interrupted_start else batch_starts[:1]
+            candidate_starts = [interrupted_start] if interrupted_start in batch_starts else batch_starts[:1]
 
-        if interrupted_start and 1 <= interrupted_start <= total_episodes and interrupted_start not in candidate_starts:
+        if interrupted_start in batch_starts and interrupted_start not in candidate_starts:
             candidate_starts = sorted({*candidate_starts, interrupted_start})
 
         options: list[dict[str, Any]] = []
@@ -3622,8 +3752,17 @@ class TaskManager:
             valid_start_episodes = {int(option["value"]) for option in rollback_options if _safe_int(option.get("value"), 0) > 0}
             if rollback_start_episode is None:
                 raise ValueError(f"请选择{ROLLBACK_STAGE_LABELS[rollback_stage]}开始重写的集数范围")
+            batch_size = max(1, int(settings.batch_size or 5))
+            try:
+                rollback_start_episode = validate_rewrite_start_episode(
+                    rollback_start_episode,
+                    int(snapshot.get("total_episodes") or 0),
+                    batch_size=batch_size,
+                )
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
             if rollback_start_episode not in valid_start_episodes:
-                raise ValueError(f"请选择有效的{ROLLBACK_STAGE_LABELS[rollback_stage]}重写起始集数")
+                raise ValueError(rewrite_start_validation_message(batch_size))
 
         old_task_id = str(snapshot.get("task_id") or "").strip()
         old_record = self._projects.get(project_id)
@@ -3643,7 +3782,13 @@ class TaskManager:
         if _rollback_stage_requires_episode_range(rollback_stage) and rollback_start_episode:
             batch_size = max(1, int(settings.batch_size or 5))
             end_episode = min(int(snapshot.get("total_episodes") or 0), rollback_start_episode + batch_size - 1)
-            stage_label = f"{stage_label}（从第 {rollback_start_episode}-{end_episode} 集开始）"
+            if end_episode < int(snapshot.get("total_episodes") or 0):
+                stage_label = (
+                    f"{stage_label}（从第 {rollback_start_episode} 集开始，"
+                    f"将按批次重写第 {rollback_start_episode}-{end_episode} 集，并继续重写后续批次）"
+                )
+            else:
+                stage_label = f"{stage_label}（从第 {rollback_start_episode} 集开始，将重写第 {rollback_start_episode}-{end_episode} 集）"
         new_snapshot = copy.deepcopy(rollback_snapshot)
         new_snapshot.update(
             {
@@ -4501,44 +4646,401 @@ class TaskManager:
             self._index["latest_project_id"] = None
         self._save_index()
 
+    def _snapshot_artifacts_dict(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        artifacts = snapshot.get("artifacts")
+        return artifacts if isinstance(artifacts, dict) else {}
+
+    def _snapshot_debug_variables(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        debug_state = snapshot.get("debug_state")
+        if not isinstance(debug_state, dict):
+            return {}
+        variables = debug_state.get("variables")
+        return variables if isinstance(variables, dict) else {}
+
+    def _snapshot_input_payload(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        input_payload = snapshot.get("input_payload")
+        return input_payload if isinstance(input_payload, dict) else {}
+
+    def _snapshot_export_value(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        artifact_keys: tuple[str, ...] = (),
+        variable_keys: tuple[str, ...] = (),
+        input_keys: tuple[str, ...] = (),
+    ) -> Any:
+        artifacts = self._snapshot_artifacts_dict(snapshot)
+        for key in artifact_keys:
+            value = artifacts.get(key)
+            if value not in (None, "", {}, []):
+                return value
+        variables = self._snapshot_debug_variables(snapshot)
+        for key in variable_keys:
+            value = variables.get(key)
+            if value not in (None, "", {}, []):
+                return value
+        input_payload = self._snapshot_input_payload(snapshot)
+        for key in input_keys:
+            value = input_payload.get(key)
+            if value not in (None, "", {}, []):
+                return value
+        return None
+
+    def _sanitize_export_section_text(
+        self,
+        value: Any,
+        *,
+        banned_prefixes: tuple[str, ...] = (),
+    ) -> str:
+        cleaned = clean_export_readable_text(value)
+        if not cleaned:
+            return ""
+        if not banned_prefixes:
+            return cleaned
+        lines = [
+            line
+            for line in cleaned.splitlines()
+            if str(line).strip()
+            and not any(str(line).strip().startswith(prefix) for prefix in banned_prefixes)
+        ]
+        return "\n".join(lines).strip()
+
+    def _sentence_fragment(self, value: Any) -> str:
+        return clean_export_readable_text(value).strip().strip("，。；： ")
+
+    def _extract_labeled_export_segment(
+        self,
+        value: Any,
+        *,
+        start_labels: tuple[str, ...],
+        stop_labels: tuple[str, ...] = (),
+    ) -> str:
+        raw_text = _strip_export_code_fences(str(value or "")).replace("\r", "")
+        parsed = _jsonish_value(raw_text)
+        text = clean_export_readable_text(parsed) if parsed is not None else raw_text.strip()
+        if not text:
+            return ""
+        lines = [str(line or "").strip() for line in text.replace("\r", "").split("\n")]
+        capturing = False
+        captured: list[str] = []
+        for line in lines:
+            if not line:
+                if capturing and captured and captured[-1] != "":
+                    captured.append("")
+                continue
+            matched_start = next((label for label in start_labels if line.startswith(label)), "")
+            if matched_start:
+                capturing = True
+                remainder = line[len(matched_start):].lstrip("：: ")
+                if remainder:
+                    captured.append(remainder)
+                continue
+            if capturing and any(line.startswith(label) for label in stop_labels):
+                break
+            if capturing:
+                captured.append(line)
+        if not captured:
+            return text
+        while captured and captured[0] == "":
+            captured.pop(0)
+        while captured and captured[-1] == "":
+            captured.pop()
+        return "\n".join(captured).strip()
+
+    def _story_outline_fallback_text(self, value: Any) -> str:
+        parsed = _jsonish_value(value)
+        if isinstance(parsed, dict):
+            segments: list[str] = []
+            opening = self._sentence_fragment(parsed.get("opening"))
+            inciting = self._sentence_fragment(parsed.get("inciting_incident"))
+            early_goal = self._sentence_fragment(parsed.get("early_goal"))
+            middle = self._sentence_fragment(parsed.get("middle_escalation"))
+            relationship = self._sentence_fragment(parsed.get("relationship_changes"))
+            crisis = self._sentence_fragment(parsed.get("larger_crisis_or_truth"))
+            climax = self._sentence_fragment(parsed.get("final_climax"))
+            ending = self._sentence_fragment(parsed.get("ending_resolution"))
+            theme = self._sentence_fragment(parsed.get("theme"))
+            if opening:
+                segments.append(f"故事从{opening}展开。")
+            if inciting:
+                segments.append(f"主角因为{inciting}卷入冲突。")
+            if early_goal:
+                segments.append(f"前期的明确目标是{early_goal}。")
+            if middle:
+                segments.append(f"随着剧情推进，{middle}。")
+            if relationship:
+                segments.append(f"人物关系也在这个过程中逐渐变化，{relationship}。")
+            if crisis:
+                segments.append(f"更大的危机与真相随后浮出水面：{crisis}。")
+            if climax:
+                segments.append(f"最终故事在{climax}中迎来高潮。")
+            if ending:
+                segments.append(f"结局落在{ending}。")
+            if theme:
+                segments.append(f"整部作品最终指向的主题是{theme}。")
+            if segments:
+                return "\n".join(segments).strip()
+        return self._sanitize_export_section_text(value)
+
+    def _story_outline_export_text(self, snapshot: dict[str, Any]) -> str:
+        natural = self._snapshot_export_value(
+            snapshot,
+            artifact_keys=("framework_natural_language",),
+            variable_keys=(FRAMEWORK_NATURAL_LANGUAGE,),
+        )
+        natural_excerpt = self._extract_labeled_export_segment(
+            natural,
+            start_labels=("故事梗概", "故事简介"),
+            stop_labels=("主要人物小传", "人物小传", "核心场景说明", "核心场景", "分集计划说明", "分集计划"),
+        )
+        text = _meaningful_stage_output_text(self._sanitize_export_section_text(natural_excerpt))
+        if text:
+            return text
+        source = self._snapshot_export_value(
+            snapshot,
+            artifact_keys=("story_outline",),
+            variable_keys=(STORY_OUTLINE,),
+            input_keys=("story_outline",),
+        )
+        return self._story_outline_fallback_text(source)
+
+    def _worldview_fallback_text(self, value: Any) -> str:
+        parsed = _jsonish_value(value)
+        if isinstance(parsed, dict):
+            parts: list[str] = []
+            summary = self._sentence_fragment(
+                parsed.get("worldview_summary")
+                or parsed.get("world_building_core")
+                or parsed.get("worldview")
+            )
+            rules = clean_export_readable_text(parsed.get("social_rules") or parsed.get("rules"))
+            atmosphere = self._sentence_fragment(parsed.get("atmosphere") or parsed.get("tone"))
+            if summary:
+                parts.append(summary if summary.endswith("。") else f"{summary}。")
+            if rules:
+                parts.append(f"这个世界的运行规则主要体现在：{rules}。")
+            if atmosphere:
+                parts.append(f"整体气质则偏向{atmosphere}。")
+            if parts:
+                return "\n".join(parts).strip()
+        return self._sanitize_export_section_text(value)
+
+    def _worldview_export_text(self, snapshot: dict[str, Any]) -> str:
+        natural = self._snapshot_export_value(
+            snapshot,
+            artifact_keys=("worldview_natural_language",),
+            variable_keys=(WORLDVIEW_NATURAL_LANGUAGE,),
+        )
+        text = _meaningful_stage_output_text(self._sanitize_export_section_text(natural))
+        if text:
+            return text
+        source = self._snapshot_export_value(
+            snapshot,
+            artifact_keys=("worldview",),
+            variable_keys=(WORLDVIEW,),
+        )
+        return self._worldview_fallback_text(source)
+
+    def _character_export_text(self, snapshot: dict[str, Any]) -> str:
+        banned = (
+            "角色设计原则",
+            "角色视觉风格命名策略",
+            "角色角色设计原则",
+            "character_design_principle",
+            "character_visual_styling_naming_strategy",
+            "character_role_design_principle",
+            "character_registry",
+            "character_alias_registry",
+        )
+        for candidate in (
+            self._snapshot_export_value(snapshot, artifact_keys=("character_natural_language",)),
+            self._snapshot_export_value(snapshot, variable_keys=(CHARACTER_NATURAL_LANGUAGE_VAR,)),
+            self._snapshot_export_value(snapshot, artifact_keys=("character_summary",)),
+        ):
+            text = _meaningful_stage_output_text(
+                self._sanitize_export_section_text(candidate, banned_prefixes=banned)
+            )
+            if text:
+                return text
+
+        structured = self._snapshot_export_value(
+            snapshot,
+            artifact_keys=("characters", "character_bios"),
+            variable_keys=(CHARACTERS, CHARACTER_VAR),
+            input_keys=("character_bios",),
+        )
+        characters = _character_items_from_value(structured)
+        if not characters:
+            return ""
+        sections: list[str] = []
+        for item in characters:
+            name = _character_name_from_item(item)
+            role = self._sentence_fragment(item.get("story_role") or item.get("role_type") or item.get("identity"))
+            personality = self._sentence_fragment(item.get("personality") or item.get("speech_profile"))
+            desire = self._sentence_fragment(item.get("core_desire") or item.get("core_motivation") or item.get("deep_motivation"))
+            relationship = self._sentence_fragment(
+                item.get("relationship_to_protagonist")
+                or item.get("relationships_with_others")
+                or item.get("relationships")
+            )
+            growth = self._sentence_fragment(item.get("growth_arc") or item.get("plot_function"))
+            appearance = self._sentence_fragment(
+                item.get("appearance_anchor")
+                or item.get("appearance")
+                or item.get("appearance_description")
+            )
+            fragments: list[str] = []
+            if role:
+                fragments.append(f"是故事中的{role}")
+            if personality:
+                fragments.append(f"性格上{personality}")
+            if desire:
+                fragments.append(f"内在驱动力集中在{desire}")
+            if relationship:
+                fragments.append(f"与其他角色的关系重点在于{relationship}")
+            if growth:
+                fragments.append(f"人物成长会落在{growth}")
+            if appearance:
+                fragments.append(f"视觉辨识点则是{appearance}")
+            if not fragments:
+                fragments.append("人物设定暂未补充完整。")
+            sections.append(f"{name}：" + "，".join(fragments).strip("，") + "。")
+        return "\n".join(section for section in sections if section).strip()
+
+    def _appearance_export_text(self, snapshot: dict[str, Any]) -> str:
+        for candidate in (
+            self._snapshot_export_value(snapshot, artifact_keys=(APPEARANCE_NATURAL_LANGUAGE_ARTIFACT,)),
+            self._snapshot_export_value(snapshot, variable_keys=(APPEARANCE_NATURAL_LANGUAGE_VAR, "c7VnQ4eX")),
+            self._snapshot_export_value(snapshot, artifact_keys=(APPEARANCE_NATURAL_LANGUAGE_ARTIFACT,)),
+        ):
+            text = _meaningful_stage_output_text(self._sanitize_export_section_text(candidate))
+            if text:
+                return text
+
+        structured = self._snapshot_export_value(
+            snapshot,
+            artifact_keys=("appearance_mapping",),
+            variable_keys=(APPEARANCE_MAPPING, APPEARANCE_MAPPING_VAR),
+        )
+        characters = _appearance_character_items_from_value(structured)
+        if not characters:
+            return ""
+        blocks: list[str] = []
+        for item in characters:
+            role_name = self._sentence_fragment(
+                item.get("default_name")
+                or item.get("canonical_name")
+                or item.get("character_name")
+                or item.get("character_id")
+            ) or "未命名角色"
+            default_name = self._sentence_fragment(item.get("default_name") or item.get("canonical_name"))
+            same_person_anchor = self._sentence_fragment(item.get("same_person_anchor"))
+            forbidden = clean_export_readable_text(item.get("forbidden_generic_names"))
+            variants = item.get("outfit_variants") if isinstance(item.get("outfit_variants"), list) else []
+            variant_lines: list[str] = []
+            for variant in variants:
+                if not isinstance(variant, dict):
+                    continue
+                alias_name = self._sentence_fragment(variant.get("alias_name") or variant.get("default_name"))
+                usage_rule = self._sentence_fragment(variant.get("usage_rule"))
+                episode_hint = self._sentence_fragment(variant.get("episode_range_hint"))
+                trigger_rule = self._sentence_fragment(
+                    variant.get("scene_trigger_rules")
+                    or variant.get("scene_names")
+                    or variant.get("scene_types")
+                    or variant.get("status_conditions")
+                )
+                detail_bits = [bit for bit in (usage_rule, episode_hint, trigger_rule) if bit]
+                if alias_name:
+                    if detail_bits:
+                        variant_lines.append(f"{alias_name}：{'；'.join(detail_bits)}")
+                    else:
+                        variant_lines.append(alias_name)
+            block_parts = [f"【角色】{role_name}"]
+            if default_name:
+                block_parts.append(f"默认称呼：{default_name}")
+            if same_person_anchor:
+                block_parts.append(f"固定识别锚点：{same_person_anchor}")
+            if variant_lines:
+                block_parts.append("服装版本与使用条件：" + "；".join(variant_lines))
+            if forbidden:
+                block_parts.append(f"禁止退回泛称：{forbidden}")
+            blocks.append("\n".join(block_parts).strip())
+        return "\n\n".join(block for block in blocks if block).strip()
+
+    def _scene_export_text(self, snapshot: dict[str, Any]) -> str:
+        for candidate in (
+            self._snapshot_export_value(snapshot, artifact_keys=("scene_natural_language", "core_scene_summary")),
+            self._snapshot_export_value(snapshot, variable_keys=(SCENE_NATURAL_LANGUAGE_VAR,)),
+        ):
+            text = _meaningful_stage_output_text(self._sanitize_export_section_text(candidate))
+            if text:
+                return text
+
+        structured = self._snapshot_export_value(
+            snapshot,
+            artifact_keys=("scene_json", "core_scene_input"),
+            variable_keys=(SCENES, SCENE_VAR),
+            input_keys=("core_scene_input",),
+        )
+        scenes = _scene_items_from_value(structured)
+        if not scenes:
+            return ""
+        blocks: list[str] = []
+        for item in scenes:
+            if not isinstance(item, dict):
+                continue
+            name = self._sentence_fragment(item.get("scene_name") or item.get("name")) or "核心场景"
+            scene_type = self._sentence_fragment(item.get("scene_type"))
+            story_function = self._sentence_fragment(item.get("story_function"))
+            environment = self._sentence_fragment(item.get("environment_description"))
+            atmosphere = self._sentence_fragment(item.get("atmosphere_description"))
+            interaction = self._sentence_fragment(item.get("character_interaction_effect"))
+            fragments = [bit for bit in (scene_type, story_function, environment, atmosphere, interaction) if bit]
+            if not fragments:
+                fragments.append("承载关键剧情推进。")
+            blocks.append(f"{name}：{'，'.join(fragments).strip('，')}。")
+        return "\n".join(block for block in blocks if block).strip()
+
+    def _episode_plan_export_text(self, snapshot: dict[str, Any]) -> str:
+        artifacts = self._snapshot_artifacts_dict(snapshot)
+        display_text = self._snapshot_export_value(
+            snapshot,
+            artifact_keys=(EPISODE_PLAN_DISPLAY_ARTIFACT,),
+        )
+        if display_text:
+            text = self._sanitize_export_section_text(display_text)
+            if text:
+                return text
+        text = self._episode_plan_display_text(snapshot, artifacts)
+        return self._sanitize_export_section_text(text)
+
     def _build_docx_export_source_text(self, snapshot: dict[str, Any]) -> str:
-        """把正式产物组装成 txt_to_docx.py 能识别的完整导出源文本。"""
-        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
-        input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+        """把正式产物组装成自然语言前置信息 + 正文，供 DOCX 导出使用。"""
+        artifacts = self._snapshot_artifacts_dict(snapshot)
+        input_payload = self._snapshot_input_payload(snapshot)
         title = str(
             artifacts.get("script_title_content")
             or snapshot.get("title")
             or input_payload.get("title")
             or f"project_{snapshot.get('project_id')}"
         ).strip()
-        story_outline = str(
-            artifacts.get("story_outline")
-            or input_payload.get("story_outline")
-            or ""
-        ).strip()
         final_script = self._best_final_script_text(snapshot)
         if not final_script:
             return ""
 
         parts: list[str] = [title or f"project_{snapshot.get('project_id')}"]
-        if story_outline:
-            parts.append(f"故事梗概\n{story_outline}")
-
-        character_block = self._build_character_setting_export_block(snapshot)
-        if character_block:
-            parts.append(
-                "人物小传\n```json\n"
-                + json.dumps(character_block, ensure_ascii=False, indent=2)
-                + "\n```"
-            )
-
-        scene_block = self._build_scene_setting_export_block(snapshot)
-        if scene_block:
-            parts.append(
-                "核心场景\n```json\n"
-                + json.dumps(scene_block, ensure_ascii=False, indent=2)
-                + "\n```"
-            )
+        for heading, section_text in (
+            ("故事梗概", self._story_outline_export_text(snapshot)),
+            ("世界观设定", self._worldview_export_text(snapshot)),
+            ("人物小传", self._character_export_text(snapshot)),
+            ("人物服饰说明", self._appearance_export_text(snapshot)),
+            ("核心场景", self._scene_export_text(snapshot)),
+            ("分集计划", self._episode_plan_export_text(snapshot)),
+        ):
+            cleaned = self._sanitize_export_section_text(section_text)
+            if cleaned:
+                parts.append(f"{heading}\n{cleaned}")
 
         script_section = (
             final_script

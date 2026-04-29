@@ -105,6 +105,50 @@ class TxtToDocxCompatibilityTests(unittest.TestCase):
             self.assertIn("林夏", text)
             self.assertIn("第1集：风起", text)
 
+    def test_convert_supports_readable_preface_sections_without_json_blocks(self) -> None:
+        source = """长夜回潮
+
+故事梗概
+故事从主角重返故乡展开，旧案迫使她再次入局。
+
+世界观设定
+故事发生在资源高度紧张的近未来港城，效率优先与身份等级并行。
+
+人物小传
+林夏：作为项目负责人，性格冷静克制，核心目标是保住团队。
+
+人物服饰说明
+【角色】林夏
+默认称呼：林夏【日常】
+固定识别锚点：深色风衣与冷静眼神
+
+核心场景
+旧码头负责承载悬念与秘密交易，会议室集中呈现角色对峙。
+
+分集计划
+第1集《风起》
+林夏回城后被迫接手旧案调查。
+
+剧本正文
+第1集：风起
+场景1：旧码头
+林夏：先查人，再查船。
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            txt_path = Path(tmpdir) / "readable_export.txt"
+            docx_path = Path(tmpdir) / "readable_export.docx"
+            txt_path.write_text(source, encoding="utf-8")
+
+            result_path = convert(str(txt_path), str(docx_path))
+
+            self.assertEqual(result_path, str(docx_path))
+            doc = Document(str(docx_path))
+            text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+            self.assertIn("长夜回潮", text)
+            self.assertIn("人物服饰说明", text)
+            self.assertIn("默认称呼：林夏【日常】", text)
+            self.assertIn("第1集：风起", text)
+
 
 if __name__ == "__main__":
     unittest.main()
