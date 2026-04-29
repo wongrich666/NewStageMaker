@@ -130,6 +130,7 @@ from ..services.json_utils import normalize_pass_review, parse_json
 from ..services.stage_output_repair import (
     normalize_appearance_mapping_candidate,
     validate_appearance_mapping_output,
+    validate_scenes_output,
 )
 from ..services.workflow_output_validation import (
     WorkflowOutputValidationError,
@@ -337,6 +338,7 @@ SCRIPT_EPISODE_HEADING_PATTERN = re.compile(
     r"(?=^[ \t>#*\-]*第\s*([0-9０-９一二三四五六七八九十百千万两零〇]+)\s*集(?:\s*[:：]|$))",
     re.MULTILINE,
 )
+REVIEW_ROUND_MESSAGE_PATTERN = re.compile(r"(第\s*\d+\s*/\s*\d+\s*轮)")
 
 
 class FastGPTRunner(Protocol):
@@ -4408,7 +4410,8 @@ def _run_fastgpt_stage_once(
     sync_runtime_state(state)
     _sync_stage_input_aliases(stage_name, variables)
     contract.build_input_payload(variables)
-    _log_fastgpt_stage_start(state, contract.label, batch_label, 1)
+    log_label = _stage_label_with_review_round(contract.label, message)
+    _log_fastgpt_stage_start(state, log_label, batch_label, 1)
     raw_output = _ensure_stage_output_mapping(
         stage_name,
         runner.run_stage(stage_name, variables),
@@ -4417,7 +4420,7 @@ def _run_fastgpt_stage_once(
     validated_output = contract.validate_output_payload(raw_output)
     output = dict(raw_output)
     output.update(validated_output)
-    _log_fastgpt_stage_done(state, contract.label, batch_label, output)
+    _log_fastgpt_stage_done(state, log_label, batch_label, output)
     if sync_output_to_state:
         _sync_state_variables(state, output)
     _checkpoint(state)
@@ -5106,7 +5109,7 @@ def _ensure_appearance_outputs(
                 STAGE_APPEARANCE_ALIAS_REVIEW,
                 review_context,
                 stage_key="appearance",
-                message="正在审核人物服装版本映射。",
+                message=f"正在审核人物服装版本映射：第 {review_round}/{review_loop_limit} 轮",
                 progress_percent=42,
                 review_round=review_round,
                 review_parser=parse_review_result,
@@ -5158,7 +5161,7 @@ def _ensure_appearance_outputs(
                 STAGE_APPEARANCE_ALIAS_REWRITE,
                 rewrite_context,
                 stage_key="appearance",
-                message="正在根据审核结果修订服装版本映射。",
+                message=f"正在修订人物服装版本映射：第 {review_round}/{review_loop_limit} 轮",
                 progress_percent=42,
                 review_round=review_round,
                 output_field=APPEARANCE_MAPPING,
@@ -5506,6 +5509,9 @@ def _scene_output_integrity_issue(value: Any) -> str | None:
         contract_for(STAGE_SCENES).validate_output_payload({SCENES: value})
     except Exception as exc:
         return str(exc)
+    issues = validate_scenes_output(value)
+    if issues:
+        return issues[0]
     return None
 
 
@@ -5585,6 +5591,14 @@ def _log_fastgpt_stage_start(
     runtime = state.runtime
     if runtime and hasattr(runtime, "fastgpt_stage_started"):
         runtime.fastgpt_stage_started(stage_label, batch_label=batch_label, attempt=attempt)
+
+
+def _stage_label_with_review_round(stage_label: str, message: str) -> str:
+    match = REVIEW_ROUND_MESSAGE_PATTERN.search(str(message or ""))
+    if match is None:
+        return stage_label
+    round_text = re.sub(r"\s+", "", match.group(1))
+    return f"{stage_label}（{round_text}）"
 
 
 def _log_fastgpt_stage_done(

@@ -70,6 +70,23 @@ SCENE_REQUIRED_LIST_FIELDS = (
     "identity_or_status_requirements",
     "conflict_potential",
 )
+SCENE_FORBIDDEN_SCENE_KEYS = {
+    "message",
+    "role",
+    "content",
+    "finish_reason",
+    "index",
+    "name",
+    "function",
+    "conflict_soil",
+    "key_characters",
+}
+SCENE_FORBIDDEN_TEXT_MARKERS = (
+    "我开始执行",
+    "审核通过",
+    "自然语言场景说明",
+)
+SCENE_PLACEHOLDER_REJECTION_THRESHOLD = 6
 WORLDVIEW_WRAPPER_KEYS = (
     WORLDVIEW_FIELD,
     WORLDVIEW_VAR,
@@ -348,9 +365,9 @@ SCENE_SETTING_ALIASES: dict[str, tuple[str, ...]] = {
     ),
 }
 SCENE_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
-    "scene_name": ("scene_name", "sceneName", "name", "场景名", "场景名称"),
+    "scene_name": ("scene_name", "sceneName", "场景名", "场景名称"),
     "scene_type": ("scene_type", "sceneType", "type", "场景类型"),
-    "story_function": ("story_function", "storyFunction", "function", "剧情功能", "场景功能"),
+    "story_function": ("story_function", "storyFunction", "剧情功能", "场景功能"),
     "scene_time_or_period": ("scene_time_or_period", "sceneTimeOrPeriod", "time", "时间", "时间段"),
     "weather_or_environment_state": (
         "weather_or_environment_state",
@@ -711,6 +728,7 @@ def _repair_scenes_candidate(
         detector=_looks_like_scenes_body,
         audit_detector=_looks_like_scenes_review_json,
         relaxed=relaxed,
+        blocked_nested_keys={"message", "content"},
     )
     if body is None:
         return None
@@ -741,6 +759,7 @@ def _search_stage_body(
     detector,
     audit_detector,
     relaxed: bool,
+    blocked_nested_keys: set[str] | None = None,
     depth: int = 0,
 ) -> Any | None:
     if depth > 6:
@@ -757,36 +776,45 @@ def _search_stage_body(
         for key in wrapper_keys:
             if key not in current:
                 continue
+            if blocked_nested_keys and str(key).lower() in blocked_nested_keys:
+                continue
             found = _search_stage_body(
                 current.get(key),
                 wrapper_keys=wrapper_keys,
                 detector=detector,
                 audit_detector=audit_detector,
                 relaxed=relaxed,
+                blocked_nested_keys=blocked_nested_keys,
                 depth=depth + 1,
             )
             if found is not None:
                 return found
         if len(current) == 1:
-            only_value = next(iter(current.values()))
+            only_key, only_value = next(iter(current.items()))
+            if blocked_nested_keys and str(only_key).lower() in blocked_nested_keys:
+                return None
             found = _search_stage_body(
                 only_value,
                 wrapper_keys=wrapper_keys,
                 detector=detector,
                 audit_detector=audit_detector,
                 relaxed=relaxed,
+                blocked_nested_keys=blocked_nested_keys,
                 depth=depth + 1,
             )
             if found is not None:
                 return found
         if relaxed:
-            for nested in current.values():
+            for nested_key, nested in current.items():
+                if blocked_nested_keys and str(nested_key).lower() in blocked_nested_keys:
+                    continue
                 found = _search_stage_body(
                     nested,
                     wrapper_keys=wrapper_keys,
                     detector=detector,
                     audit_detector=audit_detector,
                     relaxed=False,
+                    blocked_nested_keys=blocked_nested_keys,
                     depth=depth + 1,
                 )
                 if found is not None:
@@ -800,6 +828,7 @@ def _search_stage_body(
                 detector=detector,
                 audit_detector=audit_detector,
                 relaxed=relaxed,
+                blocked_nested_keys=blocked_nested_keys,
                 depth=depth + 1,
             )
             if found is not None:
@@ -965,6 +994,9 @@ def _canonicalize_scenes_body(
         setting = {"scenes": normalized}
     else:
         return None
+    initial_issue = _scene_payload_pollution_issue(setting)
+    if initial_issue is not None:
+        return None
 
     lowered = _lowered_key_map(setting)
     canonical_setting: dict[str, Any] = {}
@@ -979,10 +1011,13 @@ def _canonicalize_scenes_body(
 
     scenes = _normalize_scene_seed_list(
         canonical_setting.get("scenes"),
-        input_variables=input_variables,
     )
     if not scenes:
         return None
+    for seed in scenes:
+        issue = _scene_payload_pollution_issue(seed)
+        if issue is not None:
+            return None
 
     normalized_scenes = [
         _normalize_scene_item(
@@ -992,18 +1027,12 @@ def _canonicalize_scenes_body(
             warnings=warnings,
             alias_hits=alias_hits,
             missing_fields=missing_fields,
+            relaxed=relaxed,
         )
         for index, seed in enumerate(scenes, start=1)
         if isinstance(_deep_normalize_candidate(seed), dict)
     ]
     normalized_scenes = [item for item in normalized_scenes if item]
-    if len(normalized_scenes) < 3:
-        supplemented = _supplement_scene_items_from_input(
-            normalized_scenes,
-            input_variables=input_variables,
-            warnings=warnings,
-        )
-        normalized_scenes = supplemented
     if len(normalized_scenes) < 3 and not relaxed:
         return None
     if len(normalized_scenes) < 3:
@@ -1022,8 +1051,6 @@ def _canonicalize_scenes_body(
 
 def _normalize_scene_seed_list(
     value: Any,
-    *,
-    input_variables: dict[str, Any],
 ) -> list[Any]:
     normalized = _deep_normalize_candidate(value)
     if isinstance(normalized, list):
@@ -1033,11 +1060,6 @@ def _normalize_scene_seed_list(
             return list(normalized.get("scenes") or [])
         if _looks_like_single_scene_dict(normalized):
             return [normalized]
-    if normalized in (None, "", []):
-        user_scenes = _jsonish_dict(input_variables.get("user_scenes"))
-        core_locations = user_scenes.get("core_locations")
-        if isinstance(core_locations, list):
-            return [item for item in core_locations if isinstance(item, dict)]
     return []
 
 
@@ -1637,6 +1659,7 @@ def _normalize_scene_item(
     warnings: list[str],
     alias_hits: dict[str, str],
     missing_fields: list[str],
+    relaxed: bool,
 ) -> dict[str, Any]:
     raw = _deep_normalize_candidate(seed)
     if not isinstance(raw, dict):
@@ -1652,13 +1675,17 @@ def _normalize_scene_item(
         if _extract_scene_raw(raw, lowered, field_name) in (None, "", [], {}):
             missing_fields.append(f"scene_setting.scenes[{index}].{field_name}")
             scene_missing = True
+    if scene_missing and not relaxed:
+        return {}
 
     location_seed = _scene_location_seed(input_variables, index)
-    scene_name = scene_name or _normalize_text_value(location_seed.get("name")) or f"待补全场景{index}"
+    scene_name = scene_name or (
+        _normalize_text_value(location_seed.get("name")) if relaxed else ""
+    ) or f"待补全场景{index}"
     scene_type = scene_type or "待补全：补充场景类型"
     story_function = (
         story_function
-        or _normalize_text_value(location_seed.get("function"))
+        or (_normalize_text_value(location_seed.get("function")) if relaxed else "")
         or "待补全：补充场景功能"
     )
 
@@ -2931,6 +2958,11 @@ def _describe_scenes_output_issue(value: Any) -> str | None:
     return _describe_scenes_body_issue(data)
 
 
+def validate_scenes_output(value: Any) -> list[str]:
+    issue = _describe_scenes_output_issue(value)
+    return [issue] if issue else []
+
+
 def _describe_characters_body_issue(data: dict[str, Any]) -> str | None:
     setting = data.get("character_setting")
     if not isinstance(setting, dict):
@@ -2967,6 +2999,9 @@ def _describe_scenes_body_issue(data: dict[str, Any]) -> str | None:
     for index, item in enumerate(scenes, start=1):
         if not isinstance(item, dict):
             return f"scene_setting.scenes[{index}] 必须是 object"
+        issue = _scene_payload_pollution_issue(item)
+        if issue is not None:
+            return f"scene_setting.scenes[{index}] {issue}"
         missing = [key for key in SCENE_MIN_REQUIRED_FIELDS if item.get(key) in (None, "", [], {})]
         if missing:
             return f"scene_setting.scenes[{index}] 缺少字段 {', '.join(missing)}"
@@ -2977,6 +3012,55 @@ def _describe_scenes_body_issue(data: dict[str, Any]) -> str | None:
         if not isinstance(item.get("conflict_potential"), list) or not item.get("conflict_potential"):
             return f"scene_setting.scenes[{index}].conflict_potential 必须是非空数组"
     return None
+
+
+def _scene_payload_pollution_issue(value: Any) -> str | None:
+    normalized = _deep_normalize_candidate(value)
+    if isinstance(normalized, dict):
+        lowered_keys = {str(key).strip().lower() for key in normalized.keys()}
+        forbidden_keys = sorted(
+            key for key in lowered_keys if key in SCENE_FORBIDDEN_SCENE_KEYS
+        )
+        if forbidden_keys:
+            return f"包含污染字段 {', '.join(forbidden_keys)}"
+        placeholder_count = _scene_placeholder_count(normalized)
+        if placeholder_count >= SCENE_PLACEHOLDER_REJECTION_THRESHOLD:
+            return "含大量“待补全”占位，疑似未完成正式结构化输出"
+        for nested_value in normalized.values():
+            issue = _scene_payload_pollution_issue(nested_value)
+            if issue is not None:
+                return issue
+        return None
+    if isinstance(normalized, list):
+        placeholder_count = _scene_placeholder_count(normalized)
+        if placeholder_count >= SCENE_PLACEHOLDER_REJECTION_THRESHOLD:
+            return "含大量“待补全”占位，疑似未完成正式结构化输出"
+        for item in normalized:
+            issue = _scene_payload_pollution_issue(item)
+            if issue is not None:
+                return issue
+        return None
+    if isinstance(normalized, str):
+        raw_text = str(value or "")
+        compact = " ".join(strip_code_fence(normalized).split())
+        if "```" in raw_text:
+            return "包含 markdown code fence"
+        if any(marker in compact for marker in SCENE_FORBIDDEN_TEXT_MARKERS):
+            return "包含审核说明或执行说明文本"
+        if _looks_like_core_scene_narrative_text(compact):
+            return "包含自然语言场景说明，不是正式 scene_setting JSON"
+        return None
+    return None
+
+
+def _scene_placeholder_count(value: Any) -> int:
+    if isinstance(value, str):
+        return str(value).count("待补全")
+    if isinstance(value, dict):
+        return sum(_scene_placeholder_count(item) for item in value.values())
+    if isinstance(value, list):
+        return sum(_scene_placeholder_count(item) for item in value)
+    return 0
 
 
 def _deep_normalize_candidate(value: Any, *, depth: int = 0) -> Any:

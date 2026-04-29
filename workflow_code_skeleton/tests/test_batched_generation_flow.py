@@ -736,6 +736,26 @@ class _PhaseRecordingRunner:
         raise AssertionError(f"Custom stage output for {stage_name} must be dict")
 
 
+class _RuntimeSpy:
+    def __init__(self) -> None:
+        self.stage_messages: list[dict[str, object]] = []
+
+    def set_stage(self, stage_key, message, **kwargs) -> None:
+        self.stage_messages.append(
+            {
+                "stage_key": str(stage_key or ""),
+                "message": str(message or ""),
+                **dict(kwargs),
+            }
+        )
+
+    def sync_from_state(self, state) -> None:
+        del state
+
+    def checkpoint(self) -> None:
+        return None
+
+
 class BatchedGenerationFlowTests(unittest.TestCase):
     def setUp(self) -> None:
         self._original_batch_mode = settings.fastgpt_batch_mode
@@ -1478,6 +1498,38 @@ class BatchedGenerationFlowTests(unittest.TestCase):
 
         self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REWRITE)), 1)
         self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REVIEW)), 2)
+
+    def test_script_review_runtime_messages_increment_review_rounds(self) -> None:
+        state, payload, variables, batches = self._script_ready_state(5)
+        state.runtime = _RuntimeSpy()
+        runner = _PhaseRecordingRunner(
+            review_sequences={STAGE_SCRIPT_REVIEW: [False, True]}
+        )
+
+        flow._run_all_script_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=None,
+            rewrite_from_stage="",
+        )
+
+        review_messages = [
+            item["message"]
+            for item in state.runtime.stage_messages
+            if item["stage_key"] == STAGE_SCRIPT_REVIEW
+        ]
+        rewrite_messages = [
+            item["message"]
+            for item in state.runtime.stage_messages
+            if item["stage_key"] == STAGE_SCRIPT_REWRITE
+        ]
+        self.assertIn("正在审核剧本正文：第 1-5 集，第 1/10 轮", review_messages)
+        self.assertIn("正在审核剧本正文：第 1-5 集，第 2/10 轮", review_messages)
+        self.assertIn("正在修订剧本正文：第 1-5 集，第 1/10 轮", rewrite_messages)
 
     def test_script_review_unparseable_counts_as_failure(self) -> None:
         state, payload, variables, batches = self._script_ready_state(5)

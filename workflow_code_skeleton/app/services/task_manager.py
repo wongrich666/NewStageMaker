@@ -2196,35 +2196,18 @@ class TaskManager:
         natural = _display_text(artifacts.get("framework_natural_language"))
         if natural:
             return natural
-        title = _display_text(artifacts.get("script_title_content"))
-        story_outline = _display_text(artifacts.get("story_outline"))
-        character_bios = _display_text(artifacts.get("character_bios"))
-        core_scene_input = _display_text(
-            artifacts.get("core_scene_summary")
-            or artifacts.get("core_scene_input")
-            or ""
-        )
         episode_plan = _display_text(artifacts.get(EPISODE_PLAN_DISPLAY_ARTIFACT))
         if not episode_plan:
             episode_plan = self._episode_plan_display_text({}, artifacts)
-        parts: list[str] = []
-        if title:
-            parts.append(f"剧本标题\n{title}")
-        if story_outline:
-            parts.append(f"故事大纲\n{story_outline}")
-        if character_bios:
-            parts.append(f"人物小传\n{character_bios}")
-        if core_scene_input:
-            parts.append(f"核心场景\n{core_scene_input}")
         if episode_plan:
-            parts.append(f"分集计划\n{episode_plan}")
-        return "\n\n".join(parts).strip()
+            return episode_plan
+        return "剧本框架自然语言说明暂未生成。"
 
     def _worldview_stage_output_text(self, artifacts: dict[str, Any]) -> str:
         natural = _display_text(artifacts.get("worldview_natural_language"))
         if natural:
             return natural
-        return _display_text(artifacts.get("worldview"))
+        return "世界观自然语言说明暂未生成。"
 
     def _character_stage_output_text(
         self,

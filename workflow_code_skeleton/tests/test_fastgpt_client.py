@@ -803,14 +803,44 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         self.assertIn("scenes", output)
         self.assertEqual(output[SCENE_NATURAL_LANGUAGE_VAR], "核心场景自然语言版")
 
+    def test_scenes_natural_language_auxiliary_output_does_not_override_structured_output(self) -> None:
+        response = {
+            "responseData": {
+                "updateVarResult": [
+                    {
+                        "variable": ["VARIABLE_NODE_ID", SCENE_VAR],
+                        "value": json.dumps(_scene_setting_json(), ensure_ascii=False),
+                    },
+                    {
+                        "variable": ["VARIABLE_NODE_ID", SCENE_NATURAL_LANGUAGE_VAR],
+                        "value": "核心场景自然语言版",
+                    },
+                ]
+            }
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(STAGE_SCENES, _input_variables())
+
+        parsed = json.loads(output["scenes"])
+        self.assertEqual(parsed["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
+        self.assertEqual(output[SCENE_NATURAL_LANGUAGE_VAR], "核心场景自然语言版")
+
     def test_scenes_stage_reads_natural_language_alias_from_choices_content(self) -> None:
         response = {
+            "responseData": {
+                "updateVarResult": [
+                    {
+                        "variable": ["VARIABLE_NODE_ID", SCENE_VAR],
+                        "value": json.dumps(_scene_setting_json(), ensure_ascii=False),
+                    }
+                ]
+            },
             "choices": [
                 {
                     "message": {
                         "content": json.dumps(
                             {
-                                "scenes": json.dumps(_scene_setting_json(), ensure_ascii=False),
                                 "core_scene_summary": "核心场景说明",
                             },
                             ensure_ascii=False,
@@ -824,6 +854,34 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         output = client.run_stage(STAGE_SCENES, _input_variables())
 
         self.assertEqual(output[SCENE_NATURAL_LANGUAGE_VAR], "核心场景说明")
+
+    def test_scenes_choices_message_content_json_is_not_used_as_formal_output(self) -> None:
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(_scene_setting_json(), ensure_ascii=False)
+                    }
+                }
+            ]
+        }
+        client = _QueuedFastGPTClient([response])
+
+        with self.assertRaises(ValueError):
+            client.run_stage(STAGE_SCENES, _input_variables())
+
+    def test_scenes_toolcall_answertext_json_is_not_used_as_formal_output(self) -> None:
+        response = {
+            "responseData": {
+                "toolCall": {
+                    "answerText": json.dumps(_scene_setting_json(), ensure_ascii=False)
+                }
+            }
+        }
+        client = _QueuedFastGPTClient([response])
+
+        with self.assertRaises(ValueError):
+            client.run_stage(STAGE_SCENES, _input_variables())
 
     def test_detail_false_appearance_stage_still_extracts_formal_output(self) -> None:
         settings.fastgpt_appearance_alias_generation_detail = False

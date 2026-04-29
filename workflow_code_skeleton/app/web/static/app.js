@@ -763,26 +763,16 @@
     const artifacts = snapshot?.artifacts || {};
     const natural = formatDisplayValue(artifacts.framework_natural_language);
     if (natural) return natural;
-    const parts = [];
-    const title = formatDisplayValue(artifacts.script_title_content);
-    const storyOutline = formatDisplayValue(artifacts.story_outline);
-    const characterBios = formatDisplayValue(artifacts.character_bios);
-    const coreSceneInput = formatDisplayValue(artifacts.core_scene_summary || artifacts.core_scene_input);
     const episodePlan = formatDisplayValue(artifacts.episode_plan_display || artifacts.episode_plan);
-
-    if (title) parts.push(`剧本标题\n${title}`);
-    if (storyOutline) parts.push(`故事大纲\n${storyOutline}`);
-    if (characterBios) parts.push(`人物小传\n${characterBios}`);
-    if (coreSceneInput) parts.push(`核心场景\n${coreSceneInput}`);
-    if (episodePlan) parts.push(`分集计划\n${episodePlan}`);
-    return parts.join("\n\n").trim();
+    if (episodePlan) return episodePlan;
+    return "剧本框架自然语言说明暂未生成。";
   }
 
   function worldviewStageOutput(snapshot) {
     const artifacts = snapshot?.artifacts || {};
     const natural = formatDisplayValue(artifacts.worldview_natural_language);
     if (natural) return natural;
-    return formatDisplayValue(artifacts.worldview);
+    return "世界观自然语言说明暂未生成。";
   }
 
   // 只把平台真正对外公开的正式阶段产物整理成聊天消息。
@@ -824,7 +814,7 @@
       },
       {
         key: "final",
-        title: "最终剧本",
+        title: "剧本正文",
         output: formatDisplayValue(artifacts.final_output_text || artifacts.final_script)
       }
     ].filter((item) => item.output);

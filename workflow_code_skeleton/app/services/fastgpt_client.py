@@ -17,6 +17,7 @@ from ..workflow_ids import (
     CHARACTER_NATURAL_LANGUAGE_VAR,
     CORE_SCENE_FINAL_VAR,
     SCENE_NATURAL_LANGUAGE_VAR,
+    SCENE_VAR,
 )
 from .fastgpt_contracts import (
     ALL_DIALOGUES,
@@ -82,6 +83,7 @@ from .stage_output_repair import (
     is_repairable_stage_output,
     normalize_appearance_mapping_candidate,
     repair_stage_output_candidate,
+    validate_scenes_output,
 )
 
 logger = get_logger("fastgpt_client")
@@ -903,6 +905,15 @@ class FastGPTClient:
                     if match is None:
                         continue
                     partial_matches.append((variant_source, match))
+                    stage_issue = _stage_specific_candidate_issue(
+                        contract=contract,
+                        source=variant_source,
+                        payload=match.payload,
+                        candidate=variant_candidate,
+                    )
+                    if stage_issue is not None:
+                        rejected_candidates.append((variant_source, stage_issue, match.payload))
+                        continue
                     try:
                         validated_payload = contract.validate_output_payload(match.payload)
                     except ValueError as exc:
@@ -946,6 +957,15 @@ class FastGPTClient:
                     if match is None:
                         continue
                     partial_matches.append((variant_source, match))
+                    stage_issue = _stage_specific_candidate_issue(
+                        contract=contract,
+                        source=variant_source,
+                        payload=match.payload,
+                        candidate=variant_candidate,
+                    )
+                    if stage_issue is not None:
+                        rejected_candidates.append((variant_source, stage_issue, match.payload))
+                        continue
                     try:
                         validated_payload = contract.validate_output_payload(match.payload)
                     except ValueError as exc:
@@ -966,6 +986,15 @@ class FastGPTClient:
                     match = _payload_from_candidate(parsed_text, contract)
                     if match is not None:
                         partial_matches.append((f"{source}(json)", match))
+                        stage_issue = _stage_specific_candidate_issue(
+                            contract=contract,
+                            source=f"{source}(json)",
+                            payload=match.payload,
+                            candidate=parsed_text,
+                        )
+                        if stage_issue is not None:
+                            rejected_candidates.append((f"{source}(json)", stage_issue, match.payload))
+                            continue
                         try:
                             validated_payload = contract.validate_output_payload(match.payload)
                         except ValueError as exc:
@@ -983,6 +1012,15 @@ class FastGPTClient:
                             )
                 if _can_coerce_single_output(text, contract):
                     raw_payload = {single_key: text}
+                    stage_issue = _stage_specific_candidate_issue(
+                        contract=contract,
+                        source=f"{source}(text)",
+                        payload=raw_payload,
+                        candidate=text,
+                    )
+                    if stage_issue is not None:
+                        rejected_candidates.append((f"{source}(text)", stage_issue, raw_payload))
+                        continue
                     try:
                         validated_payload = contract.validate_output_payload(raw_payload)
                     except ValueError as exc:
@@ -1401,6 +1439,66 @@ def _payload_from_candidate(
     if _is_non_output_metadata(candidate):
         return None
     return _extract_contract_payload(candidate, contract)
+
+
+def _scene_formal_source_blocked(source: str) -> bool:
+    lowered = str(source or "").strip().lower()
+    if not lowered:
+        return False
+    if lowered.startswith("choices["):
+        return True
+    if "toolcall" in lowered:
+        return True
+    return ".content" in lowered
+
+
+def _scene_candidate_uses_blocked_text_wrapper(candidate: Any, *, depth: int = 0) -> bool:
+    if depth > 5:
+        return False
+    if isinstance(candidate, dict):
+        lowered_keys = {str(key).strip().lower() for key in candidate.keys()}
+        if "toolcall" in lowered_keys or "message" in lowered_keys:
+            return True
+        return any(
+            _scene_candidate_uses_blocked_text_wrapper(value, depth=depth + 1)
+            for value in candidate.values()
+        )
+    if isinstance(candidate, list):
+        return any(
+            _scene_candidate_uses_blocked_text_wrapper(item, depth=depth + 1)
+            for item in candidate
+        )
+    return False
+
+
+def _stage_specific_candidate_issue(
+    *,
+    contract: FastGPTStageContract,
+    source: str,
+    payload: dict[str, Any],
+    candidate: Any | None = None,
+) -> str | None:
+    if contract.stage_name != STAGE_SCENES:
+        return None
+    if _scene_formal_source_blocked(source):
+        return "scenes 正式输出不能来自 message.content 或 toolCall 文本"
+    lowered_source = str(source or "").strip().lower()
+    if "(local_repair:" in lowered_source:
+        allowed_repair_sources = (
+            "newvariables",
+            "updatevarresult",
+            "variableupdate",
+            "answertext",
+            ".output",
+            "scene_setting",
+            SCENE_VAR.lower(),
+        )
+        if not any(marker in lowered_source for marker in allowed_repair_sources):
+            return "scenes 正式输出来源不是正式结构化场景槽位"
+    if candidate is not None and _scene_candidate_uses_blocked_text_wrapper(candidate):
+        return "scenes 正式输出不能来自 message/content 或 toolCall 包装"
+    issues = validate_scenes_output(payload.get(SCENES))
+    return issues[0] if issues else None
 
 def _extract_contract_payload(
     candidate: dict[str, Any],

@@ -103,6 +103,26 @@ class _QueuedStageRunner:
         return self._responses.pop(0)
 
 
+class _RuntimeSpy:
+    def __init__(self) -> None:
+        self.stage_messages: list[dict[str, object]] = []
+
+    def set_stage(self, stage_key, message, **kwargs) -> None:
+        self.stage_messages.append(
+            {
+                "stage_key": str(stage_key or ""),
+                "message": str(message or ""),
+                **dict(kwargs),
+            }
+        )
+
+    def sync_from_state(self, state) -> None:
+        del state
+
+    def checkpoint(self) -> None:
+        return None
+
+
 def _worldview_json() -> dict[str, object]:
     return {
         "worldview_summary": "现代都市职场与家庭双线挤压下，角色必须在规则与情感之间求生。",
@@ -634,6 +654,54 @@ class StageOutputRepairTests(unittest.TestCase):
         result = self._extract(STAGE_SCENES, {"answerText": fenced})
         parsed = json.loads(result[SCENES])
         self.assertEqual(parsed["scene_setting"]["scenes"][2]["scene_name"], "合租公寓玄关")
+
+    def test_scenes_output_with_message_content_role_fields_is_rejected(self) -> None:
+        polluted = _scene_setting_json()
+        first_scene = polluted["scene_setting"]["scenes"][0]
+        first_scene["message"] = "tool payload"
+        first_scene["role"] = "assistant"
+        first_scene["content"] = "审核通过"
+
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_SCENES,
+                {"answerText": json.dumps(polluted, ensure_ascii=False)},
+            )
+
+    def test_scenes_legacy_fields_are_rejected(self) -> None:
+        legacy_payload = {
+            "scene_setting": {
+                "scene_design_principle": "旧结构",
+                "scene_visual_styling_naming_strategy": "旧结构",
+                "scenes": [
+                    {
+                        "name": "旧码头",
+                        "function": "承载对峙",
+                        "conflict_soil": "适合围堵",
+                        "key_characters": ["林夏"],
+                    }
+                    for _ in range(3)
+                ],
+            }
+        }
+
+        with self.assertRaises(ValueError):
+            self._extract(
+                STAGE_SCENES,
+                {"answerText": json.dumps(legacy_payload, ensure_ascii=False)},
+            )
+
+    def test_scenes_repair_does_not_recurse_into_message_content(self) -> None:
+        wrapped = {
+            "output": {
+                "message": {
+                    "content": json.dumps(_scene_setting_json(), ensure_ascii=False)
+                }
+            }
+        }
+
+        with self.assertRaises(FastGPTStageFormatError):
+            self._extract(STAGE_SCENES, wrapped)
 
     def test_characters_wrapped_in_internal_variable(self) -> None:
         data = {
@@ -1359,6 +1427,47 @@ class StageOutputRepairTests(unittest.TestCase):
             variables[APPEARANCE_MAPPING]["appearance_mapping"]["mapping_principle"],
             "REWRITTEN_AFTER_REVIEW",
         )
+
+    def test_appearance_runtime_messages_increment_review_rounds(self) -> None:
+        rewritten = _appearance_mapping_with_principle("REWRITTEN_AFTER_REVIEW")
+        runner = _QueuedStageRunner(
+            [
+                {APPEARANCE_MAPPING: _appearance_mapping_json()},
+                _appearance_review_json(
+                    passed=False,
+                    rewrite_required=True,
+                    blocking_issues=["alias_name 需要统一"],
+                ),
+                {APPEARANCE_MAPPING: rewritten},
+                _appearance_review_json(
+                    passed=True,
+                    rewrite_required=False,
+                ),
+                {
+                    APPEARANCE_NATURAL_LANGUAGE_VAR: "修订后统一使用完整角色名加方括号版本名。"
+                },
+            ]
+        )
+        state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
+        state.runtime = _RuntimeSpy()
+        variables = dict(self.appearance_variables)
+        state.variables.update(variables)
+
+        _ensure_appearance_outputs(state, runner, variables)
+
+        review_messages = [
+            item["message"]
+            for item in state.runtime.stage_messages
+            if item["stage_key"] == STAGE_APPEARANCE_ALIAS_REVIEW
+        ]
+        rewrite_messages = [
+            item["message"]
+            for item in state.runtime.stage_messages
+            if item["stage_key"] == STAGE_APPEARANCE_ALIAS_REWRITE
+        ]
+        self.assertIn("正在审核人物服装版本映射：第 1/10 轮", review_messages)
+        self.assertIn("正在审核人物服装版本映射：第 2/10 轮", review_messages)
+        self.assertIn("正在修订人物服装版本映射：第 1/10 轮", rewrite_messages)
 
     def test_appearance_stage_uses_compact_characters_and_scenes_without_overwriting_formal_outputs(self) -> None:
         runner = _QueuedStageRunner(
