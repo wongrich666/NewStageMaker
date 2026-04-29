@@ -1,94 +1,333 @@
 # FastGPT 混合工作流契约
 
-本项目当前采用“本地逻辑 + FastGPT 工作流 API”的混合架构：
+这份文档只描述当前代码中的真实 FastGPT 契约与编排规则，来源以：
 
-- 本地负责：暂停/继续/终止、批次划分、分集计划裁剪、批次 +5、JSON 拼接、正文拼接、`last_summary` 覆盖、用户缓存与保存。
-- FastGPT 负责：当前阶段/当前批次内部的内容生成、内容审核、修订整理，并只把成品输出给 Python。
-- 代码内部统一使用本文列出的英文变量名；当 `FASTGPT_VARIABLE_MODE=legacy` 时，会在请求前映射为你最新 FastGPT JSON 中的变量 ID。
+- `workflow_code_skeleton/app/services/fastgpt_contracts.py`
+- `workflow_code_skeleton/app/services/fastgpt_client.py`
+- `workflow_code_skeleton/app/services/workflow_output_validation.py`
+- `workflow_code_skeleton/app/orchestrators/fastgpt_hybrid_workflow.py`
 
-## 配置位置
+为准。
 
-真实 Key 不要写进代码。复制 `workflow_code_skeleton/.env.example` 为 `workflow_code_skeleton/.env` 后填写：
+## 1. 架构边界
 
-- `FASTGPT_CHAT_COMPLETIONS_URL`：完整 FastGPT 接口地址，例如 `http://47.93.31.133:18080/api/v1/chat/completions`。代码不会再自动拼接 `/api/v1/chat/completions`。
-- `FASTGPT_API_KEY`：所有阶段共用的 FastGPT 应用 Key。
-- `FASTGPT_CONSISTENCY_API_KEY`：集数一致性检查阶段独立 Key，可选。
-- `FASTGPT_WORLDVIEW_API_KEY`：世界观阶段独立 Key，可选。
-- `FASTGPT_CHARACTERS_API_KEY`：人设阶段独立 Key，可选。
-- `FASTGPT_SCENES_API_KEY`：核心场景阶段独立 Key，可选。
-- `FASTGPT_HOOKS_WRITING_API_KEY`：开头冲突钩子阶段独立 Key，可选。
-- `FASTGPT_DIALOGUES_WRITING_API_KEY`：角色对话阶段独立 Key，可选。
-- `FASTGPT_SCRIPT_WRITING_API_KEY`：剧本正文阶段独立 Key，可选。
-- `FASTGPT_SCRIPT_MEMORY_API_KEY=`：正文记忆整理阶段独立 Key，可选。
-- `FASTGPT_FINAL_API_KEY`：最终剧本拼接阶段独立 Key，可选。
+当前架构是“Python 本地编排 + FastGPT 阶段 workflow”：
 
-如某个阶段未配置独立 Key，代码会回退使用 `FASTGPT_API_KEY`。缺少 Key 时，后端只提示缺少哪个变量，不会打印任何密钥内容。请求失败时日志会打印最终请求 URL、状态码、`response.text` 和脱敏后的 payload 摘要，用于判断 URL、Key、请求体或远端上游模型问题。
+- **Python 本地负责**
+  - 输入准备
+  - stage 顺序控制
+  - hooks/dialogues/script 三段式批处理
+  - review/rewrite 循环控制
+  - 输出契约校验
+  - 格式重试
+  - 失败恢复 / 回退重写 / 快照同步
+  - partial script 展示
+  - 最终导出
 
-当前你保留的 9 个 JSON 使用的是 FastGPT 变量 ID，例如 `blkSS7dY`、`pxtQY7p2`、`yuozoGpo`。代码内部仍统一使用英文变量名，并通过 `FASTGPT_VARIABLE_MODE=legacy` 自动映射到这些 ID。如果你后续把 FastGPT 工作流变量也改成英文名，可以设置 `FASTGPT_VARIABLE_MODE=canonical`。
+- **FastGPT 负责**
+  - 当前阶段或当前批次的内容生成
+  - 审核
+  - 修订
+  - 自然语言整理
+  - answerNode / 变量更新输出
 
-当前推荐配置为 `FASTGPT_BATCH_MODE=local`。`05/06/07` 应保持为“只处理当前 `episode_plan` 片段的一批智能体”：FastGPT 内部可以继续保留生成-审核-修订闭环，但不要再做总集数循环、开始集数 +5 或全量拼接。
+## 2. 当前主阶段与 workflow 映射
 
-## 全局变量
+### 直接对应 FastGPT workflow 的阶段
 
-| 变量名 | 类型 | 说明 | 来源 |
-| --- | --- | --- | --- |
-| `script_title_content` | string | 剧本标题 | 用户输入 |
-| `total_episodes` | number | 总集数 | 用户输入 |
-| `episode_plan` | string | 分集计划。非批处理阶段传全文，批处理阶段传当前 5 集片段 | 用户输入/本地裁剪 |
-| `story_outline` | string | 故事大纲 | 用户输入 |
-| `user_scenes` | string | 核心场景 | 用户输入 |
-| `user_characters` | string | 人物小传 | 用户输入 |
-| `worldview` | string | 世界观内容 | FastGPT 输出 |
-| `characters` | string | 人设内容 | FastGPT 输出 |
-| `scenes` | string | 核心场景内容 | FastGPT 输出 |
-| `batch_hooks` | object | 当前批次 5 集开头冲突钩子 JSON | FastGPT 输出 |
-| `all_hooks` | object | 完整开头冲突钩子 JSON | 本地拼接 |
-| `batch_dialogues` | object | 当前批次 5 集角色对话 JSON | FastGPT 输出 |
-| `all_dialogues` | object | 完整角色对话 JSON | 本地拼接 |
-| `batch_script` | string | 当前批次 5 集剧本正文 | FastGPT 输出 |
-| `all_script` | string | 完整剧本正文 | 本地拼接 |
-| `last_summary` | string | 最近一次剧本摘要，只保留最新 | FastGPT 输出/本地覆盖 |
-| `final_script` | string | 最终完整剧本 | FastGPT 输出 |
-| `batch_start_episode` | number | 当前批次起始集数，仅 legacy 变量映射时传给批处理智能体 | 本地批次控制 |
+| stage | workflow JSON | 正式输出 |
+| --- | --- | --- |
+| `framework` | `剧本框架撰写.json` | `script_title_content`, `story_outline`, `user_characters`, `user_scenes`, `episode_plan` |
+| `framework_naturalize` | `自然语言化.json` | `framework_natural_language` |
+| `appearance_pre_strategy` | `服装前置策略生成器.json` | `character_appearance_requirements`, `character_alias_naming_rules`, `outfit_switch_rules` |
+| `consistency` | `集数一致性检查.json` | `is_consistent` |
+| `episode_plan_normalize` | `分集计划规范化.json` | `normalized_episode_plan` |
+| `worldview` | `世界观生成.json` | `worldview` |
+| `worldview_naturalize` | `自然语言化.json` | `worldview_natural_language` |
+| `characters` | `人设生成.json` | `characters` |
+| `scenes` | `场景生成.json` | `scenes` |
+| `appearance_alias_writing` | `服装版本映射编写.json` | `appearance_mapping` |
+| `appearance_alias_review` | `服装版本映射审核.json` | `passed`, `rewrite_required`, `blocking_issues` |
+| `appearance_alias_rewrite` | `服装版本映射修订.json` | `appearance_mapping` |
+| `appearance_alias_unstructured` | `自然语言服装版本映射.json` | `c7VnQ4eX` |
+| `hooks_writing` / `hook_write` | `开头冲突钩子编写.json` | `batch_hooks` |
+| `hooks_review` / `hook_review` | `开头冲突钩子审核.json` | `passed`, `rewrite_required`, `blocking_issues` |
+| `hooks_rewrite` / `hook_revise` | `开头冲突钩子修订.json` | `batch_hooks` |
+| `hook_memory` | `开头冲突钩子记忆存储.json` | `hook_memory` |
+| `dialogues_writing` / `dialogue_write` | `角色对话编写.json` | `batch_dialogues` |
+| `dialogues_review` / `dialogue_review` | `角色对话审核.json` | `passed`, `rewrite_required`, `blocking_issues` |
+| `dialogues_rewrite` / `dialogue_revise` | `角色对话修订.json` | `batch_dialogues` |
+| `dialogue_memory` | `角色对话记忆存储.json` | `dialogue_memory` |
+| `script_writing` / `script_write` | `剧本正文编写.json` | `batch_script` |
+| `script_review` | `剧本正文审核.json` | `passed`, `rewrite_required`, `blocking_issues` |
+| `script_rewrite` / `script_revise` | `剧本正文修订.json` | `batch_script` |
+| `script_memory` | `当前五集剧本正文摘要.json` | `last_summary` |
+| `memory` | `当前五集剧本正文摘要.json` | `last_summary` |
+| `final` | `完整剧本拼接.json` | `final_script` |
 
-## 阶段契约
+### Python 逻辑阶段
 
-| 阶段 | FastGPT 输入 | FastGPT 输出 | 本地职责 |
-| --- | --- | --- | --- |
-| `consistency` 集数一致性检查 | `total_episodes`, `episode_plan` | `{ "is_consistent": boolean }` | 根据结果继续或停止 |
-| `worldview` 世界观循环 | `story_outline`, `user_scenes`, `user_characters`, `episode_plan` | `{ "worldview": string }` | 控制重试，校验输出字段 |
-| `characters` 人设循环 | `user_characters`, `worldview` | `{ "characters": string }` | 控制重试，校验输出字段 |
-| `scenes` 核心场景循环 | `user_scenes`, `worldview` | `{ "scenes": string }` | 控制重试，校验输出字段 |
-| `hooks` 开头冲突钩子批处理 | `worldview`, `characters`, `episode_plan`, `total_episodes`, `last_summary`, `batch_start_episode` | `{ "batch_hooks": object }` | 按 5 集划分，拼接 `all_hooks` |
-| `dialogues` 角色对话批处理 | `characters`, `episode_plan`, `total_episodes`, `last_summary`, `batch_start_episode` | `{ "batch_dialogues": object }` | 按 5 集划分，拼接 `all_dialogues` |
-| `script` 剧本正文批处理 | `worldview`, `all_hooks`, `all_dialogues`, `episode_plan`, `total_episodes`, `last_summary`, `batch_start_episode` | `{ "batch_script": string }` | 按 5 集划分，拼接 `all_script` |
-| `memory` 正文记忆整理 | `batch_script` | `{ "last_summary": string }` | 用新摘要覆盖旧摘要 |
-| `final` 最终剧本拼接 | `script_title_content`, `total_episodes`, `story_outline`, `characters`, `scenes`, `all_script` | `{ "final_script": string }` | 接收并保存最终文本 |
+这些 stage 主要是本地编排概念，不是单个 workflow：
 
-## 批次说明
+| stage | 说明 |
+| --- | --- |
+| `appearance_alias_generation` | 逻辑阶段名，由 Python 串联 `writing -> review -> rewrite -> unstructured` |
+| `hooks` | 当前批 hooks 逻辑阶段名，实际落到 `hooks_writing/review/rewrite` |
+| `dialogues` | 当前批 dialogues 逻辑阶段名，实际落到 `dialogues_writing/review/rewrite` |
+| `script` | 当前批 script 逻辑阶段名，实际落到 `script_writing/review/rewrite/script_memory` |
 
-FastGPT 不接收 `batch_index`、`end_episode` 等本地计数器。为了让 FastGPT 知道当前要处理哪 5 集，本地会把用户的 `episode_plan` 按“第 N 集 / Episode N / 1.”等标记裁剪成当前批次片段，再以同名变量 `episode_plan` 发送。
+## 3. 当前关键变量语义
 
-你这版 legacy 智能体仍在提示词里引用了当前批次起始集数，因此代码会额外发送 `batch_start_episode`，并映射为 `iJkq6iGe`、`sKq9Iyza`、`d4sfifeZ`。代码不会发送批次索引或结束集数，结束边界仍由当前 `episode_plan` 片段和 `total_episodes` 约束。
+### 正式结构化变量
 
-第 5-8 步在本地按批次串联执行：当前批次钩子 -> 当前批次对白 -> 当前批次正文 -> 当前批次记忆。记忆工作流只根据刚生成的 5 集输出新记忆；代码用新 `last_summary` 覆盖旧值。这样下一批次正文智能体只能看到最新一次 `last_summary`，不会看到历史摘要列表。
+| canonical 名 | 说明 |
+| --- | --- |
+| `story_outline` | 结构化故事大纲 object |
+| `user_characters` | framework 产出的结构化原始人物设定 array |
+| `user_scenes` | framework 产出的结构化原始核心场景 object |
+| `episode_plan` | framework 产出的原始分集计划 array |
+| `normalized_episode_plan` | 规范化后的分集计划 object |
+| `worldview` | 世界观 JSON string |
+| `characters` | 人设 JSON string |
+| `scenes` | 场景业务 JSON string |
+| `appearance_mapping` | 正式结构化服装映射 object |
+| `batch_hooks` / `all_hooks` | 当前批 / 全量 hooks |
+| `batch_dialogues` / `all_dialogues` | 当前批 / 全量 dialogues |
+| `batch_script` / `all_script` | 当前批 / 全量 script |
+| `last_summary` | 当前滚动 script memory |
+| `final_script` | 最终完整剧本 |
 
-最终拼接阶段在 legacy 模式下会把 `characters` 发送到 `iDnZYjwW`，把 `scenes` 发送到 `ibpp7JZ8`，把完整正文 `all_script` 发送到 `vI8t3a31`，对应你当前最终拼接模板：
+### 辅助自然语言变量
 
-```text
-《{{$VARIABLE_NODE_ID.n5ZHYrj8$}}》{{$VARIABLE_NODE_ID.blkSS7dY$}}完整剧本
+| 变量 | 说明 |
+| --- | --- |
+| `framework_natural_language` | 框架自然语言版 |
+| `worldview_natural_language` | 世界观自然语言版 |
+| `dT7mQ2Nz` | 人物小传自然语言版 |
+| `n8PqLs4V` | 场景自然语言版 |
+| `c7VnQ4eX` | 服装映射自然语言说明 |
 
-故事梗概
-{{$VARIABLE_NODE_ID.ayxWwSpE$}}
+规则：
 
-人物小传
-{{$VARIABLE_NODE_ID.iDnZYjwW$}}
+- 辅助自然语言变量只能用于展示或辅助输入。
+- 不能覆盖正式结构化变量。
+- 普通用户前端当前只公开 `framework_natural_language`、`worldview_natural_language` 和 script/final。
 
-核心场景
-{{$VARIABLE_NODE_ID.ibpp7JZ8$}}
+## 4. FastGPT 输出抽取顺序
 
-剧本正文
-{{$VARIABLE_NODE_ID.vI8t3a31$}}
-```
+当前 `FastGPTClient` 对所有 stage 的正式输出抽取顺序是：
 
-默认 `FASTGPT_STAGE_RETRIES=0`，表示 Python 不做业务层反复调用；如果 FastGPT 返回格式错误或网络失败，HTTP 层仍会按 `FASTGPT_HTTP_RETRIES` 做短暂技术重试。旧的全量内部循环工作流只应作为临时兼容方案显式设置 `FASTGPT_BATCH_MODE=fastgpt_full` 使用。
+1. `newVariables`
+2. `updateVarResult`
+3. `responseData.variableUpdate`
+4. `textOutput`
+5. `answerText`
+6. `choices[0].message.content`
+7. answerNode 最终回复包装
+
+补充规则：
+
+- 支持 markdown code fence、JSON string、二次嵌套 JSON string
+- `choices.message.content` 为数组时，只提取 `type=text`
+- 如果内容是“思考过程 + JSON”，会优先取最后一个合法 JSON object
+- `reasoningText / reasoning / 思考过程` 不算正式输出
+
+## 5. 当前校验与重试规则
+
+### HTTP / timeout 重试
+
+- 配置项：`FASTGPT_HTTP_RETRIES`
+- 只处理网络异常、timeout、`429/500/502/503/504`
+
+### 输出格式重试
+
+- 配置项：`FASTGPT_STAGE_FORMAT_RETRY_LIMIT`
+- 默认：`3`
+
+语义：
+
+- HTTP 成功，但输出仍不可消费时，当前 stage 最多重新调用 3 次
+- 不会把坏输出写入正式 `variables/artifacts`
+- 坏输出只会写入 debug artifact
+
+### review / rewrite 循环上限
+
+- 配置项：`FASTGPT_STAGE_REVIEW_REVISE_MAX_LOOPS`
+- 默认：`10`
+
+适用：
+
+- appearance review/rewrite
+- hooks review/rewrite
+- dialogues review/rewrite
+- script review/rewrite
+
+规则：
+
+- 审核 JSON 无法解析，也计入一次失败轮次
+- 审核通过后停止修订
+- 达到上限后抛可恢复失败，不能死循环
+
+## 6. payload 限制
+
+当前 payload 限制只做统计和阻断，不会改正式变量：
+
+- `FASTGPT_STAGE_PAYLOAD_WARN_CHARS`
+- `FASTGPT_STAGE_PAYLOAD_HARD_CHARS`
+- `FASTGPT_SCRIPT_PAYLOAD_SOFT_LIMIT`
+- `FASTGPT_SCRIPT_PAYLOAD_HARD_LIMIT`
+
+规则：
+
+- warn：只打日志
+- hard：抛可恢复失败
+- 日志只记录长度统计和字段摘要，不打印完整大变量正文
+
+## 7. scenes / characters / appearance 兼容规则
+
+### characters
+
+- 正式输出必须进入 `characters`
+- 自然语言人物小传会额外同步：
+  - `dT7mQ2Nz`
+  - `character_natural_language`
+  - `character_summary`
+- 自然语言结果不能覆盖正式结构化 `fFM0mroW / characters`
+
+### scenes
+
+Python 最终仍保持：
+
+- `variables["scenes"]` 类型是 string
+
+当前兼容输入：
+
+- `{"scenes":{"scene_setting":{...}}}`
+- `{"scene_setting":{...}}`
+- `{"scenes":"<json string>"}`
+- `{"iJudZHhM":"<json string>"}`
+
+最低业务校验：
+
+- 解析后必须能得到 `scene_setting`
+- `scene_setting["scenes"]` 必须是 list
+
+污染防护：
+
+- 不能把 `id/model/usage/choices/message/content/role` 响应壳字段当成业务输出
+- 不能把审核说明、自然语言说明、toolCall 文本直接当成正式 `scenes`
+
+### appearance
+
+appearance 正式结构化来源白名单顺序：
+
+1. `newVariables.h2KpLm91`
+2. `updateVarResult.h2KpLm91`
+3. `responseData.variableUpdate.h2KpLm91`
+4. answerNode 输出里的 `h2KpLm91` 或顶层 `appearance_mapping`
+5. `choices.message.content` 中可解析且顶层带 `appearance_mapping` 的 JSON object
+
+仍然拒绝：
+
+- 空 `h2KpLm91`
+- 空 `appearance_mapping`
+- `c7VnQ4eX`
+- `fuKbtNtY`
+- `scene_setting`
+- `核心场景：...`
+- `appearance_mapping` 为 string
+- 把纯文本包装成 `{"appearance_mapping":"..."}` 的伪修复
+
+## 8. 当前 detail 与自然语言 stage 规则
+
+自然语言阶段：
+
+- `framework_naturalize`
+- `worldview_naturalize`
+- `appearance_alias_unstructured`
+
+它们当前主要走：
+
+- `FASTGPT_UNSTRUCTURED_API_KEY`
+- `FASTGPT_<STAGE>_TIMEOUT` 或全局 `FASTGPT_TIMEOUT`
+
+同时代码不能依赖 `detail=true` 才拿到正式输出；即使 `detail=false`，也应优先从 `choices.message.content / answerNode` 取正式结果。
+
+## 9. 当前 public/private 展示边界
+
+### public
+
+普通用户公开字段当前只包括：
+
+- `framework_natural_language`
+- `worldview_natural_language`
+- `partial_script`
+- `script_batches_display`
+- `script_batch_preview`
+- `script_batch_range`
+- `partial_script_episodes`
+- `final_script`
+- `final_output_text`
+
+### private / debug
+
+仍保留：
+
+- `character_natural_language`
+- `scene_natural_language`
+- `appearance_mapping`
+- `character_registry`
+- `character_alias_registry`
+- `episode_alias_plan`
+- rollback / batch checkpoint / committed script / summary caches
+
+## 10. 当前 stage 级环境变量规则
+
+所有 stage 都支持：
+
+- `FASTGPT_<STAGE>_API_KEY`
+- `FASTGPT_<STAGE>_CHAT_COMPLETIONS_URL`
+- `FASTGPT_<STAGE>_TIMEOUT`
+
+解析优先级：
+
+1. 当前 stage 的显式变量
+2. `fastgpt_client.py` 中定义的 alias 变量
+3. 全局 `FASTGPT_API_KEY / FASTGPT_CHAT_COMPLETIONS_URL / FASTGPT_TIMEOUT`
+
+常用专用 key：
+
+- `FASTGPT_UNSTRUCTURED_API_KEY`
+- `FASTGPT_APPEARANCE_ALIAS_WRITING_API_KEY`
+- `FASTGPT_APPEARANCE_ALIAS_REVIEW_API_KEY`
+- `FASTGPT_APPEARANCE_ALIAS_REWRITE_API_KEY`
+- `FASTGPT_APPEARANCE_ALIAS_UNSTRUCTURED_API_KEY`
+- `FASTGPT_HOOKS_WRITING_API_KEY`
+- `FASTGPT_HOOKS_REVIEW_API_KEY`
+- `FASTGPT_HOOKS_REWRITE_API_KEY`
+- `FASTGPT_HOOKS_MEMORY_API_KEY`
+- `FASTGPT_DIALOGUES_WRITING_API_KEY`
+- `FASTGPT_DIALOGUES_REVIEW_API_KEY`
+- `FASTGPT_DIALOGUES_REWRITE_API_KEY`
+- `FASTGPT_DIALOGUES_MEMORY_API_KEY`
+- `FASTGPT_SCRIPT_WRITING_API_KEY`
+- `FASTGPT_SCRIPT_REVIEW_API_KEY`
+- `FASTGPT_SCRIPT_REWRITE_API_KEY`
+- `FASTGPT_SCRIPT_MEMORY_API_KEY`
+- `FASTGPT_FINAL_API_KEY`
+
+辅助工具另用：
+
+- `FASTGPT_HOT_REVIEW_API_KEY`
+- `FASTGPT_RESKIN_API_KEY`
+- `FASTGPT_PUNCHUP_API_KEY`
+- `FASTGPT_CHARACTER_RESKIN_API_KEY`
+
+## 11. 当前最重要的实现约束
+
+- 不修改 workflow JSON 契约时，代码侧必须兼容 answerNode / choices 输出。
+- `compact context` 只能用于发给下游 FastGPT 的请求，不能覆盖正式变量。
+- hooks/dialogues/script 只使用当前批切片，不允许把全量变量误传成当前五集输入。
+- partial script 展示必须发生在 script 当前批审核通过且本地校验通过之后、`script_memory` 之前。
+- rollback 时必须同步清理 `partial_script / script_batches_display / script_batch_preview` 等展示缓存。
+- DOCX 导出必须兼容旧项目结构，不要求重新生成。
