@@ -215,10 +215,6 @@ PUBLIC_ARTIFACT_KEYS = (
     "script_title_content",
     "framework_natural_language",
     "worldview_natural_language",
-    "character_natural_language",
-    "character_summary",
-    "scene_natural_language",
-    "core_scene_summary",
     PARTIAL_SCRIPT_ARTIFACT,
     SCRIPT_BATCHES_DISPLAY_ARTIFACT,
     SCRIPT_BATCH_PREVIEW_ARTIFACT,
@@ -2098,25 +2094,9 @@ class TaskManager:
             or raw_artifacts.get(CHARACTER_VAR)
             or ""
         )
-        preferred_character_text = _preferred_character_display_text(
-            artifacts.get("character_natural_language")
-            or artifacts.get("character_summary")
-            or raw_artifacts.get("character_natural_language")
-            or raw_artifacts.get("character_summary")
-            or raw_artifacts.get(CHARACTER_NATURAL_LANGUAGE_VAR)
-            or "",
-            structured_characters,
-        )
-        if preferred_character_text:
-            artifacts["character_natural_language"] = preferred_character_text
-            artifacts["character_summary"] = preferred_character_text
         for key in (
             "framework_natural_language",
             "worldview_natural_language",
-            "character_natural_language",
-            "character_summary",
-            "scene_natural_language",
-            "core_scene_summary",
         ):
             text = _meaningful_stage_output_text(artifacts.get(key))
             if text:
@@ -2419,12 +2399,10 @@ class TaskManager:
             or raw_artifacts.get("final_script")
             or partial_script_output
         )
-        stage_order = ("framework", "worldview", "characters", "scenes", "final")
+        stage_order = ("framework", "worldview", "final")
         stage_title_map = {
             "framework": "剧本框架",
             "worldview": "世界观",
-            "characters": "人物设定",
-            "scenes": "核心场景",
             "final": (
                 "已生成正文"
                 if str(snapshot.get("status") or "") != "completed" and partial_script_output
@@ -2434,8 +2412,6 @@ class TaskManager:
         stage_outputs = {
             "framework": self._framework_stage_output_text(raw_artifacts),
             "worldview": self._worldview_stage_output_text(raw_artifacts),
-            "characters": self._character_stage_output_text(snapshot, artifacts),
-            "scenes": self._scene_stage_output_text(snapshot, artifacts),
             "final": final_stage_output,
         }
 
@@ -2449,11 +2425,11 @@ class TaskManager:
             "consistency": "framework",
             "episode_plan_normalize": "framework",
             "worldview": "worldview",
-            "characters": "characters",
-            "scenes": "scenes",
-            "appearance": "scenes",
-            "hooks": "scenes",
-            "dialogues": "scenes",
+            "characters": "worldview",
+            "scenes": "worldview",
+            "appearance": "worldview",
+            "hooks": "worldview",
+            "dialogues": "worldview",
             "script": "final",
             "final": "final",
         }
@@ -2564,7 +2540,7 @@ class TaskManager:
         condensed = " ".join(str(raw_output or "").replace("\r", "\n").split())
         if not condensed:
             return ""
-        return f"当前展示的是{stage_title}阶段的正式结果"
+        return f"当前展示的是{stage_title}阶段"
 
     def _cache_stage_preview(
         self,
