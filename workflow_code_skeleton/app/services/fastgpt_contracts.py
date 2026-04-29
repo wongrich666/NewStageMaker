@@ -1289,6 +1289,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         },
         fastgpt_responsibility="根据用户想要的剧本、角色数量和总集数，生成剧本标题、故事大纲、人物小传、核心场景、分集计划。",
         local_responsibility="缓存并复用五项框架产物，后续阶段统一读取这些结果。",
+        workflow_json_name="剧本框架撰写.json",
     ),
     STAGE_FRAMEWORK_NATURALIZE: FastGPTStageContract(
         stage_name=STAGE_FRAMEWORK_NATURALIZE,
@@ -1325,6 +1326,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         },
         fastgpt_responsibility="基于故事、人物、场景和分集计划，先生成后续阶段要统一复用的服装版本需求、命名偏好和服装切换规则。",
         local_responsibility="缓存三项服装前置策略结果，并继续沿用现有逻辑字段供后续阶段读取。",
+        workflow_json_name="服装前置策略生成器.json",
     ),
     STAGE_CONSISTENCY: FastGPTStageContract(
         stage_name=STAGE_CONSISTENCY,
@@ -1334,6 +1336,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_aliases={IS_CONSISTENT: ("passed", "approved", "consistent")},
         fastgpt_responsibility="判断分集计划与总集数是否一致。",
         local_responsibility="不做内容判断，只根据布尔结果继续或停止。",
+        workflow_json_name="集数一致性检查.json",
     ),
     STAGE_EPISODE_PLAN_NORMALIZE: FastGPTStageContract(
         stage_name=STAGE_EPISODE_PLAN_NORMALIZE,
@@ -1356,6 +1359,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         },
         fastgpt_responsibility="只把原始分集计划整理成结构化 JSON，不做改写、润色、摘要或扩写。",
         local_responsibility="缓存规范化结果，并从中提炼逐集 alias 使用计划供后续批处理阶段读取当前批次需要的集数。",
+        workflow_json_name="分集计划规范化.json",
     ),
     STAGE_WORLDVIEW: FastGPTStageContract(
         stage_name=STAGE_WORLDVIEW,
@@ -1365,6 +1369,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_aliases={WORLDVIEW: (WORLDVIEW_VAR,)},
         fastgpt_responsibility="完成世界观提取、生成、审核、修订，返回最终可用世界观。",
         local_responsibility="不做业务审核循环，只校验 worldview 是否按契约返回并缓存。",
+        workflow_json_name="世界观生成.json",
     ),
     STAGE_WORLDVIEW_NATURALIZE: FastGPTStageContract(
         stage_name=STAGE_WORLDVIEW_NATURALIZE,
@@ -1385,6 +1390,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_aliases={CHARACTERS: (CHARACTER_VAR,)},
         fastgpt_responsibility="完成人设生成、审核、修订、整理。",
         local_responsibility="不做业务审核循环，只校验 characters 是否按契约返回并缓存。",
+        workflow_json_name="人设生成.json",
     ),
     STAGE_SCENES: FastGPTStageContract(
         stage_name=STAGE_SCENES,
@@ -1402,6 +1408,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_aliases={SCENES: (SCENE_VAR,)},
         fastgpt_responsibility="完成核心场景提炼/复用、生成、审核、修订、整理。",
         local_responsibility="不做业务审核循环，只校验 scenes 是否按契约返回并缓存。",
+        workflow_json_name="场景生成.json",
     ),
     STAGE_APPEARANCE_ALIAS_GENERATION: FastGPTStageContract(
         stage_name=STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -1830,6 +1837,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_types={LAST_SUMMARY: "string"},
         fastgpt_responsibility="把当前批次正文整理成下一批可用的摘要。",
         local_responsibility="用新 last_summary 覆盖旧 last_summary，不保存历史。",
+        workflow_json_name="当前五集剧本正文摘要.json",
     ),
     STAGE_SCRIPT_MEMORY: FastGPTStageContract(
         stage_name=STAGE_SCRIPT_MEMORY,
@@ -1861,6 +1869,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_types={FINAL_SCRIPT: "string"},
         fastgpt_responsibility="输出最终完整剧本。",
         local_responsibility="调用最终拼接工作流，并以最终回复文本作为 final_script。",
+        workflow_json_name="完整剧本拼接.json",
     ),
 }
 
