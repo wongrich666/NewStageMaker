@@ -12,6 +12,7 @@ from ..workflow_ids import (
     APPEARANCE_REQUIREMENTS_VAR,
     APPEARANCE_REVIEW_VAR,
     CHARACTER_BIOS_VAR,
+    CHARACTER_SEARCH_INTENT_VAR,
     CHARACTER_MAX_RETRY_VAR,
     CHARACTER_VAR,
     CORE_SCENE_FINAL_VAR,
@@ -105,6 +106,7 @@ EPISODE_PLAN = "episode_plan"
 STORY_OUTLINE = "story_outline"
 USER_SCENES = "user_scenes"
 USER_CHARACTERS = "user_characters"
+CHARACTER_SEARCH_INTENT = "character_search_intent"
 USER_CONTENT_BASELINE = "user_content_baseline"
 FRAMEWORK_NATURAL_LANGUAGE = "framework_natural_language"
 WORLDVIEW_NATURAL_LANGUAGE = "worldview_natural_language"
@@ -233,6 +235,7 @@ SCRIPT_MEMORY_ALIASES = (
 )
 SCRIPT_HOOK_ALIASES = (SCRIPT_HOOK_BATCH_VAR, HOOK_FINAL_VAR)
 SCRIPT_DIALOGUE_ALIASES = (SCRIPT_DIALOGUE_BATCH_VAR, DIALOGUE_FINAL_VAR)
+OPTIONAL_EMPTY_INPUTS = {CHARACTER_SEARCH_INTENT}
 
 APPEARANCE_MAPPING_STAGE_NAMES = {
     STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -332,6 +335,8 @@ class FastGPTStageContract:
         for name in self.input_names:
             if name in variables:
                 payload[name] = variables[name]
+            elif name in OPTIONAL_EMPTY_INPUTS:
+                payload[name] = ""
             elif name in {LAST_SUMMARY, HOOK_MEMORY, DIALOGUE_MEMORY, SCRIPT_MEMORY}:
                 # 记忆类字段允许缺省为“空记忆”，这样首批正文不需要为了凑输入
                 # 额外制造一个伪 summary。
@@ -713,6 +718,12 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
         "人物小传。framework 阶段可先返回结构化 JSON，本地缓存时仍统一保存为字符串。",
         "框架阶段输出/用户输入兼容",
     ),
+    CHARACTER_SEARCH_INTENT: FastGPTVariable(
+        CHARACTER_SEARCH_INTENT,
+        "string",
+        "人设检索意图。当前人设工作流的新公开输入变量；未提供时代码侧兼容为空字符串，避免旧项目和旧前端缺字段时直接失败。",
+        "用户输入/兼容缺省",
+    ),
     script_title_content: FastGPTVariable(
         script_title_content,
         "string",
@@ -900,6 +911,7 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, LegacyInputAlias]] = {
         WORLDVIEW: WORLDVIEW_VAR,
         USER_CHARACTERS: CHARACTER_BIOS_VAR,
         STORY_OUTLINE: STORY_OUTLINE_VAR,
+        CHARACTER_SEARCH_INTENT: CHARACTER_SEARCH_INTENT_VAR,
     },
     STAGE_SCENES: {
         WORLDVIEW: WORLDVIEW_VAR,
@@ -1385,7 +1397,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
     STAGE_CHARACTERS: FastGPTStageContract(
         stage_name=STAGE_CHARACTERS,
         label="人物设定生成与审核",
-        input_names=(USER_CHARACTERS, WORLDVIEW, STORY_OUTLINE),
+        input_names=(USER_CHARACTERS, WORLDVIEW, STORY_OUTLINE, CHARACTER_SEARCH_INTENT),
         output_types={CHARACTERS: "string"},
         output_aliases={CHARACTERS: (CHARACTER_VAR,)},
         fastgpt_responsibility="完成人设生成、审核、修订、整理。",

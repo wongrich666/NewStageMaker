@@ -106,6 +106,9 @@ class ServerToolsApiTests(unittest.TestCase):
         self.assertIn('id="community"', text)
         self.assertIn('id="communityList"', text)
         self.assertIn('id="refreshCommunityBtn"', text)
+        self.assertIn('id="closeCommunityPanelBtn"', text)
+        self.assertIn('id="openCommunityPanelLink"', text)
+        self.assertIn('class="tool-panel community-panel hidden"', text)
         self.assertIn("section=community", text)
 
     def test_home_page_renders_public_community_entries(self) -> None:

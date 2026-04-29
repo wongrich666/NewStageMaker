@@ -1552,6 +1552,12 @@ a {
   gap: 12px;
 }
 
+.tool-panel-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .tool-panel-head h3 {
   margin: 4px 0 0;
 }
@@ -3311,11 +3317,12 @@ a {
   }
 
   .workspace-body .runtime-progress-top {
-    background: rgba(16, 16, 16, 0.08);
+    background: rgba(16, 16, 16, 0.12);
   }
 
   .workspace-body .progress-fill {
-    background: #111111;
+    background: linear-gradient(90deg, #d8a500, #f3c94b);
+    box-shadow: 0 0 0 1px rgba(17, 17, 17, 0.04), 0 0 18px rgba(216, 165, 0, 0.22);
   }
 
   .workspace-body .sidebar-brand-text strong,
@@ -3467,6 +3474,11 @@ a {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
+}
+
+.community-panel {
+  max-height: min(68vh, 760px);
+  overflow: auto;
 }
 
 .skeleton-card {
@@ -3825,6 +3837,175 @@ a {
 
 .prelogin-status-note {
   text-align: center;
+}
+
+/* Final workspace polish: keep only the transcript scrollable, tone down yellow,
+   and avoid hard white patches across light/dark scheme variants. */
+.workspace-body,
+.mono-page {
+  --mono-accent: #c5a24f;
+  --mono-accent-strong: #d1b06a;
+}
+
+.workspace-body {
+  height: 100vh;
+  overflow: hidden;
+  background: var(--mono-bg);
+}
+
+.chat-workspace-shell {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.workspace-sidebar {
+  height: 100vh;
+  overflow: auto;
+}
+
+.chat-main {
+  min-height: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.workspace-runtime,
+.tool-panel,
+.community-panel,
+.composer-card {
+  flex: 0 0 auto;
+}
+
+.workspace-runtime,
+.composer-card {
+  position: relative;
+  top: auto;
+  bottom: auto;
+}
+
+.chat-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-transcript {
+  height: 100%;
+  max-height: none;
+  padding: 10px 8px 4px;
+  overflow: auto;
+}
+
+.workspace-body .workspace-runtime,
+.workspace-body .tool-panel,
+.workspace-body .community-panel,
+.workspace-body .chat-composer-shell,
+.workspace-body .composer-card,
+.workspace-body .workspace-folder,
+.workspace-body .workspace-pick,
+.workspace-body .workspace-empty,
+.workspace-body .tool-shortcut,
+.workspace-body .sidebar-create-btn,
+.workspace-body .sidebar-profile-btn,
+.workspace-body .sidebar-toggle {
+  background: var(--mono-surface);
+  border-color: var(--mono-border);
+  box-shadow: var(--mono-shadow);
+}
+
+.workspace-body .workspace-sidebar {
+  background: color-mix(in srgb, var(--mono-bg) 92%, #000000 8%);
+}
+
+.workspace-body .runtime-progress-top {
+  background: color-mix(in srgb, var(--mono-surface-soft) 88%, transparent);
+}
+
+.workspace-body .progress-fill {
+  background: linear-gradient(90deg, var(--mono-accent), var(--mono-accent-strong));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--mono-accent) 28%, transparent);
+}
+
+.workspace-body .chat-message.user .chat-bubble {
+  background: color-mix(in srgb, var(--mono-surface-soft) 92%, var(--mono-accent) 8%);
+}
+
+.workspace-body .chat-message.system .chat-bubble {
+  background: color-mix(in srgb, var(--mono-surface) 88%, transparent);
+}
+
+.chat-bubble-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-copy-btn {
+  padding: 0;
+  border: 0;
+  color: var(--mono-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: transparent;
+  cursor: pointer;
+}
+
+.chat-copy-btn:hover {
+  color: var(--mono-text);
+}
+
+.toast-card.toast-card-compact {
+  min-width: 0;
+  padding: 10px 14px;
+}
+
+.toast-card.toast-card-compact strong {
+  margin-bottom: 0;
+}
+
+.toast-card.toast-card-compact p {
+  display: none;
+}
+
+.workspace-body .toast-card {
+  color: var(--mono-text);
+  border-color: var(--mono-border);
+  background: var(--mono-surface);
+  box-shadow: var(--mono-shadow);
+}
+
+@media (prefers-color-scheme: light) {
+  .mono-page,
+  .workspace-body {
+    --mono-bg: #ece9e1;
+    --mono-surface: #f6f2e8;
+    --mono-surface-soft: #efe9dd;
+    --mono-border: rgba(24, 24, 24, 0.08);
+    --mono-text: #171717;
+    --mono-muted: #666055;
+    --mono-hover: rgba(24, 24, 24, 0.045);
+    --mono-shadow: 0 16px 36px rgba(18, 18, 18, 0.06);
+    --mono-accent: #b9964a;
+    --mono-accent-strong: #c8a861;
+  }
+}
+
+@media (max-width: 900px) {
+  .workspace-body {
+    height: auto;
+    overflow: auto;
+  }
+
+  .chat-workspace-shell,
+  .chat-main,
+  .workspace-sidebar {
+    height: auto;
+    overflow: visible;
+  }
 }
 
 @media (max-width: 960px) {

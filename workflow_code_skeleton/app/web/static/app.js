@@ -28,6 +28,9 @@
     toolPanel: $("toolPanel"),
     toolPanelTitle: $("toolPanelTitle"),
     closeToolPanelBtn: $("closeToolPanelBtn"),
+    openCommunityPanelLink: $("openCommunityPanelLink"),
+    communityPanel: $("community"),
+    closeCommunityPanelBtn: $("closeCommunityPanelBtn"),
     modelSelect: $("modelSelect"),
     expectationInput: $("expectationInput"),
     characterCountInput: $("characterCountInput"),
@@ -121,6 +124,7 @@
     communityStatus: "idle",
     communityError: "",
     communityPage: 1,
+    lastTranscriptSignature: "",
     elapsedTimer: null,
     workspaceCollapseTimer: null,
     expandedUserPrompts: {}
@@ -268,6 +272,7 @@
     state.taskId = null;
     state.status = "idle";
     state.latestSnapshot = null;
+    closeCommunityPanel();
     persistSelectedProjectId(null);
     pageStorage.removeItem(STORAGE.selectedProjectId);
     const freshUrl = buildWorkspaceUrl({ fresh: true });
@@ -570,6 +575,31 @@
     els.toolOutputBox.textContent = friendlyErrorText(error, fallback);
   }
 
+  function compactMessageText(value) {
+    return String(value || "").trim();
+  }
+
+  async function copyTextToClipboard(text) {
+    const content = compactMessageText(text);
+    if (!content) return false;
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(content);
+      return true;
+    }
+    const helper = document.createElement("textarea");
+    helper.value = content;
+    helper.setAttribute("readonly", "readonly");
+    helper.style.position = "fixed";
+    helper.style.opacity = "0";
+    helper.style.pointerEvents = "none";
+    document.body.appendChild(helper);
+    helper.focus();
+    helper.select();
+    const copied = document.execCommand("copy");
+    helper.remove();
+    return copied;
+  }
+
   // 只在确认有最终成品时，给下载和保存按钮提供最终剧本文本。
   function finalOutputFrom(snapshot) {
     if (!snapshot) return "";
@@ -861,20 +891,14 @@
   function thinkingStateFrom(snapshot) {
     if (!snapshot) return null;
     const normalizedCurrentStage = normalizeStageKey(snapshot.current_stage);
-    const visibleMessages = visibleStageMessages(snapshot);
-    const hasVisibleCurrentOutput = Boolean(
-      visibleMessages.find((item) => item.key === normalizeStageKey(snapshot.display_stage_key))
-    );
-    const isRunning = RUNNING_STATUSES.has(snapshot.status);
-    const shouldFoldToThinking = (
-      normalizedCurrentStage === "internal"
-      || (isRunning && !hasVisibleCurrentOutput)
-    );
-    if (!shouldFoldToThinking) return null;
+    const isRunning = RUNNING_STATUSES.has(snapshot.status) || snapshot.status === "pausing";
+    if (!isRunning && normalizedCurrentStage !== "internal") return null;
+    const runtimeMessage = String(statusNoteFrom(snapshot) || "").trim();
     return {
       stageLabel: snapshot.current_stage_label || snapshot.display_stage_title || "正在处理",
       stateLabel: creationStatusLabel(snapshot),
-      note: isRunning || snapshot.status === "completed" ? "" : (statusNoteFrom(snapshot) || "")
+      content: runtimeMessage,
+      note: "",
     };
   }
 
@@ -885,6 +909,28 @@
       characterCount: Number(inputPayload.character_count || 0),
       totalEpisodes: Number(inputPayload.total_episodes || 0)
     };
+  }
+
+  function userPromptCopyText(snapshot) {
+    return userPromptSummary(snapshot).expectation || "";
+  }
+
+  function stageMessageCopyText(snapshot, stageKey) {
+    const message = visibleStageMessages(snapshot).find((item) => item.key === stageKey);
+    if (!message) return "";
+    const parts = [compactMessageText(message.output)];
+    const natural = compactMessageText(message.natural);
+    if (natural && natural !== parts[0]) {
+      parts.push(natural);
+    }
+    return parts.filter(Boolean).join("\n\n");
+  }
+
+  function renderCopyButton(kind, key) {
+    const attributes = [`data-chat-action="copy-message"`];
+    if (kind) attributes.push(`data-copy-kind="${escapeHtml(kind)}"`);
+    if (key) attributes.push(`data-copy-key="${escapeHtml(key)}"`);
+    return `<button class="chat-copy-btn" type="button" ${attributes.join(" ")}>copy</button>`;
   }
 
   function renderUserPromptBubble(snapshot) {
@@ -904,7 +950,10 @@
           <div class="chat-bubble">
             <div class="chat-bubble-head">
               <span class="chat-bubble-title">创作指令</span>
-              <span class="chat-bubble-meta">输入</span>
+              <span class="chat-bubble-head-actions">
+                <span class="chat-bubble-meta">输入</span>
+                ${renderCopyButton("user_prompt", "current")}
+              </span>
             </div>
             <pre class="chat-bubble-content${collapsed ? " chat-bubble-content-collapsed" : ""}">${escapeHtml(expectation)}</pre>
             ${lineCount > MAX_EXPECTATION_LINES ? `
@@ -930,7 +979,10 @@
           <div class="chat-bubble">
             <div class="chat-bubble-head">
               <span class="chat-bubble-title">${escapeHtml(message.title)}</span>
-              <span class="chat-bubble-meta">阶段产出</span>
+              <span class="chat-bubble-head-actions">
+                <span class="chat-bubble-meta">阶段产出</span>
+                ${renderCopyButton("stage_output", message.key)}
+              </span>
             </div>
             <pre class="chat-bubble-content">${escapeHtml(message.output)}</pre>
             ${message.natural ? `
@@ -948,9 +1000,11 @@
   function renderThinkingBubble(thinkingState) {
     const stageLabel = String(thinkingState.stageLabel || "处理中").trim();
     const stateLabel = String(thinkingState.stateLabel || "创作中").trim();
-    const content = stateLabel === "创作中"
-      ? stageLabel
-      : stateLabel;
+    const content = compactMessageText(thinkingState.content) || (
+      stateLabel === "创作中"
+        ? stageLabel
+        : stateLabel
+    );
     return `
       <article class="chat-message system">
         <div class="chat-bubble-row">
@@ -973,9 +1027,44 @@
     `;
   }
 
+  function transcriptSignature(snapshot) {
+    if (!snapshot) return "__empty__";
+    return JSON.stringify({
+      projectId: snapshot.project_id || null,
+      taskId: snapshot.task_id || null,
+      status: snapshot.status || "",
+      currentStage: snapshot.current_stage || "",
+      currentBatch: snapshot.current_batch || "",
+      currentStageLabel: snapshot.current_stage_label || "",
+      runtimeMessage: String(snapshot.message || "").trim(),
+      displayStageKey: snapshot.display_stage_key || "",
+      displayStageOutputNatural: String(snapshot.display_stage_output_natural || "").trim(),
+      displayStageTitle: snapshot.display_stage_title || "",
+      finalOutputText: formatDisplayValue(snapshot?.artifacts?.final_output_text || snapshot?.artifacts?.final_script),
+      partialScript: formatDisplayValue(snapshot?.artifacts?.partial_script),
+      scriptBatchesDisplay: snapshot?.artifacts?.script_batches_display || [],
+      visibleMessages: visibleStageMessages(snapshot),
+      thinkingState: thinkingStateFrom(snapshot),
+      prompt: userPromptSummary(snapshot),
+    });
+  }
+
+  function scrollTranscriptToLatest() {
+    if (!els.chatTranscript) return;
+    const target = els.chatTranscript.querySelector(".chat-message:last-of-type")
+      || els.chatTranscript.querySelector(".chat-empty-state:last-of-type");
+    if (target && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ block: "end" });
+      return;
+    }
+    els.chatTranscript.scrollTop = els.chatTranscript.scrollHeight;
+  }
+
   // 把当前项目压成对话流，只展示用户需要看的正式回复与一个统一的思考状态。
   function renderChatTranscript(snapshot) {
     if (!els.chatTranscript) return;
+    const previousScrollTop = els.chatTranscript.scrollTop;
+    const nextSignature = transcriptSignature(snapshot);
     if (!snapshot) {
       const suggestions = Object.values(toolDefinitions()).slice(0, 4).map((tool) => `
         <button class="chat-suggestion-btn" type="button" data-suggestion-tool="${escapeHtml(tool.key)}">
@@ -989,6 +1078,8 @@
           <div class="chat-empty-tools">${suggestions}</div>
         </section>
       `;
+      state.lastTranscriptSignature = nextSignature;
+      els.chatTranscript.scrollTop = 0;
       return;
     }
 
@@ -1004,6 +1095,8 @@
     }
 
     els.chatTranscript.innerHTML = messages.join("");
+    state.lastTranscriptSignature = nextSignature;
+    els.chatTranscript.scrollTop = previousScrollTop;
   }
 
   // 只渲染后端允许回退到的阶段，不展示还没执行过的未来步骤。
@@ -1440,9 +1533,36 @@
     `).join("");
   }
 
+  function openCommunityPanel() {
+    if (!els.communityPanel) return;
+    closeToolPanel();
+    els.communityPanel.classList.remove("hidden");
+    els.communityPanel.setAttribute("aria-hidden", "false");
+    window.requestAnimationFrame(() => {
+      els.communityPanel?.classList.add("panel-open");
+    });
+    updateUrlParams((params) => params.delete("section"));
+    if (state.communityStatus === "idle" || (state.communityStatus === "error" && !state.communityAssets.length)) {
+      loadCommunity({ resetPage: true }).catch((error) => {
+        showToast("社区作品加载失败", friendlyErrorText(error, "请稍后重试。"));
+        showStatusError(error, "社区作品加载失败，请稍后重试。");
+      });
+    }
+  }
+
+  function closeCommunityPanel() {
+    if (!els.communityPanel || els.communityPanel.classList.contains("hidden")) return;
+    els.communityPanel.classList.remove("panel-open");
+    window.setTimeout(() => {
+      els.communityPanel?.classList.add("hidden");
+      els.communityPanel?.setAttribute("aria-hidden", "true");
+    }, 180);
+  }
+
   function openToolPanel(toolKey) {
     const tool = toolConfig(toolKey);
     state.activeTool = tool.key;
+    closeCommunityPanel();
     if (els.assistantToolsFolder) {
       els.assistantToolsFolder.open = true;
     }
@@ -1451,7 +1571,6 @@
     els.toolPanel?.classList.remove("hidden");
     window.requestAnimationFrame(() => {
       els.toolPanel?.classList.add("panel-open");
-      els.toolPanel?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
     updateUrlParams((params) => params.set("section", "tools"));
   }
@@ -1733,6 +1852,7 @@
   }
 
   async function loadProjectDetail(projectId, { restoreInputs = false, scroll = false } = {}) {
+    closeCommunityPanel();
     const data = await requestJson(`/api/projects/${projectId}`);
     const project = data.project || null;
     if (!project) {
@@ -1792,6 +1912,7 @@
   // 新建任务或在原资产 ID 上重新启动失败任务。
   async function startGeneration() {
     if (!requireLogin()) return;
+    closeCommunityPanel();
     saveDraft();
     const payload = buildPayload();
     const restartingCurrentProject = Boolean(
@@ -1975,6 +2096,20 @@
         stack.remove();
       }
     }, 5000);
+  }
+
+  function showCopyToast() {
+    const stack = ensureToastStack();
+    const card = document.createElement("div");
+    card.className = "toast-card toast-card-compact";
+    card.innerHTML = `<strong>复制成功</strong>`;
+    stack.appendChild(card);
+    window.setTimeout(() => {
+      card.remove();
+      if (!stack.children.length) {
+        stack.remove();
+      }
+    }, 1000);
   }
 
   function projectTooltip(item) {
@@ -2358,6 +2493,12 @@
       }, 80);
       return;
     }
+    if (section === "community") {
+      window.setTimeout(() => {
+        openCommunityPanel();
+      }, 80);
+      return;
+    }
     if (section) {
       window.setTimeout(() => {
         document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2409,6 +2550,11 @@
     els.newScriptBtn?.addEventListener("click", () => {
       if (!requireLogin()) return;
       openWorkspaceInNewPage({ fresh: true });
+    });
+
+    els.openCommunityPanelLink?.addEventListener("click", (event) => {
+      event.preventDefault();
+      openCommunityPanel();
     });
 
     els.viewAssetsBtn?.addEventListener("click", () => {
@@ -2550,12 +2696,34 @@
         }
         return;
       }
+      const copyButton = event.target.closest("[data-chat-action='copy-message']");
+      if (copyButton) {
+        const kind = copyButton.dataset.copyKind || "";
+        const key = copyButton.dataset.copyKey || "";
+        let text = "";
+        if (kind === "user_prompt") {
+          text = userPromptCopyText(state.latestSnapshot);
+        } else if (kind === "stage_output") {
+          text = stageMessageCopyText(state.latestSnapshot, key);
+        }
+        copyTextToClipboard(text)
+          .then((copied) => {
+            if (copied) {
+              showCopyToast();
+            }
+          })
+          .catch((error) => {
+            showToast("复制失败", friendlyErrorText(error, "请稍后重试。"));
+          });
+        return;
+      }
       const button = event.target.closest("[data-suggestion-tool]");
       if (!button) return;
       openToolPanel(button.dataset.suggestionTool || state.activeTool);
     });
 
     els.closeToolPanelBtn?.addEventListener("click", closeToolPanel);
+    els.closeCommunityPanelBtn?.addEventListener("click", closeCommunityPanel);
 
     els.runToolBtn?.addEventListener("click", async () => {
       try {
