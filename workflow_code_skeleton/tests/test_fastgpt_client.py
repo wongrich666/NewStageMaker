@@ -781,6 +781,43 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         self.assertEqual(parsed["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
         self.assertFalse(client.get_last_stage_debug_info(STAGE_SCENES).get("request_detail"))
 
+    def test_scenes_stage_accepts_top_level_scenes_wrapper(self) -> None:
+        response = {
+            "responseData": {
+                "updateVarResult": [
+                    {
+                        "key": "scenes",
+                        "value": {
+                            "scene_setting": _scene_setting_json()["scene_setting"],
+                        },
+                    }
+                ]
+            }
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(STAGE_SCENES, _input_variables())
+
+        parsed = json.loads(output["scenes"])
+        self.assertEqual(parsed["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
+
+    def test_scenes_stage_accepts_legacy_scene_setting_object_wrapper(self) -> None:
+        response = {
+            "responseData": {
+                "scene_setting": _scene_setting_json()["scene_setting"],
+            }
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(STAGE_SCENES, _input_variables())
+
+        parsed = json.loads(output["scenes"])
+        self.assertGreaterEqual(len(parsed["scene_setting"]["scenes"]), 3)
+        self.assertIn(
+            "玻璃会议室",
+            [item["scene_name"] for item in parsed["scene_setting"]["scenes"]],
+        )
+
     def test_scenes_stage_captures_natural_language_auxiliary_output(self) -> None:
         response = {
             "responseData": {

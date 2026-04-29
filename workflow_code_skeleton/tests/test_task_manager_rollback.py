@@ -92,6 +92,21 @@ def _base_snapshot(total_episodes: int = 10) -> dict[str, object]:
         "artifacts": {
             "script_title_content": "测试项目",
             "story_outline": "测试大纲",
+            task_manager_module.PARTIAL_SCRIPT_ARTIFACT: _script_text(1, total_episodes),
+            task_manager_module.SCRIPT_BATCH_PREVIEW_ARTIFACT: _script_text(
+                last_batch_start,
+                min(total_episodes, last_batch_start + 4),
+            ),
+            task_manager_module.SCRIPT_BATCH_RANGE_ARTIFACT: f"{last_batch_start}-{min(total_episodes, last_batch_start + 4)}",
+            task_manager_module.SCRIPT_BATCHES_DISPLAY_ARTIFACT: [
+                {
+                    "start_episode": start_episode,
+                    "end_episode": min(total_episodes, start_episode + 4),
+                    "content": _script_text(start_episode, min(total_episodes, start_episode + 4)),
+                }
+                for start_episode in batch_starts
+            ],
+            task_manager_module.PARTIAL_SCRIPT_EPISODES_ARTIFACT: list(range(1, total_episodes + 1)),
             "final_script": _script_text(1, total_episodes),
             "final_output_text": _script_text(1, total_episodes),
         },
@@ -269,6 +284,9 @@ class TaskManagerRollbackTests(unittest.TestCase):
         self.assertEqual(variables[APPEARANCE_CONTINUITY_MEMORY], {"memory": "appearance-1"})
         self.assertEqual(variables[task_manager_module.LOCAL_CURRENT_BATCH_STAGE], "script")
         self.assertEqual(variables[BATCH_START_EPISODE], 6)
+        self.assertEqual(raw["artifacts"][task_manager_module.PARTIAL_SCRIPT_ARTIFACT], _script_text(1, 5))
+        self.assertEqual(raw["artifacts"][task_manager_module.SCRIPT_BATCH_RANGE_ARTIFACT], "1-5")
+        self.assertEqual(len(raw["artifacts"][task_manager_module.SCRIPT_BATCHES_DISPLAY_ARTIFACT]), 1)
 
     def test_hooks_rollback_on_15_episodes_clears_downstream_caches_after_episode_6(self) -> None:
         snapshot = _base_snapshot(15)
@@ -295,6 +313,8 @@ class TaskManagerRollbackTests(unittest.TestCase):
             variables[task_manager_module.LOCAL_APPEARANCE_MEMORY_BY_BATCH],
             {"1": {"memory": "appearance-1"}},
         )
+        self.assertNotIn(task_manager_module.PARTIAL_SCRIPT_ARTIFACT, raw["artifacts"])
+        self.assertNotIn(task_manager_module.SCRIPT_BATCHES_DISPLAY_ARTIFACT, raw["artifacts"])
 
     def test_dialogues_rollback_on_15_episodes_preserves_all_hooks_and_trims_downstream(self) -> None:
         snapshot = _base_snapshot(15)

@@ -12,7 +12,12 @@ from ..services.json_utils import ensure_dict, normalize_pass_review
 from ..services.node_executor import execute_chat_node
 from ..services.workflow_spec import WorkflowSpec
 from ..utils.logger import get_logger
-from ..workflow_ids import CHARACTER_MAX_RETRY_VAR, CHARACTER_RETRY_VAR, CHARACTER_VAR
+from ..workflow_ids import (
+    CHARACTER_MAX_RETRY_VAR,
+    CHARACTER_NATURAL_LANGUAGE_VAR,
+    CHARACTER_RETRY_VAR,
+    CHARACTER_VAR,
+)
 
 logger = get_logger("character_stage")
 
@@ -56,7 +61,7 @@ def run_character_stage(state, spec: WorkflowSpec):
         SUMMARY_NODE_ID,
         expect_json=False,
     ).strip()
-    state.set_var(CHARACTER_VAR, character_summary)
+    state.set_var(CHARACTER_NATURAL_LANGUAGE_VAR, character_summary)
     sync_runtime_state(state)
 
     set_runtime_stage(state, "character", "人物设定阶段完成。", progress_percent=22)

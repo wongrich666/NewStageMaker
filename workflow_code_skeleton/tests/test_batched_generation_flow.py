@@ -1695,6 +1695,8 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertEqual(state.get_var(MEMORY_VAR), previous_memory)
         self.assertEqual(variables[BATCH_START_EPISODE], 1)
         self.assertEqual(variables[flow.LOCAL_CURRENT_BATCH_STAGE], "script")
+        self.assertIn("第1集", str(variables[ALL_SCRIPT]))
+        self.assertEqual(str(variables[flow.LOCAL_COMMITTED_SCRIPT]), str(variables[ALL_SCRIPT]))
         self.assertIn("1", variables[flow.LOCAL_SCRIPT_BATCHES])
         self.assertNotIn("1", variables.get(flow.LOCAL_SUMMARY_BY_BATCH, {}))
         self.assertNotIn("1", variables.get(flow.LOCAL_APPEARANCE_MEMORY_BY_BATCH, {}))

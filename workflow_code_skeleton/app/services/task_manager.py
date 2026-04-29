@@ -199,6 +199,11 @@ STAGE_PREVIEW_STAGE_ARTIFACT = "stage_preview_stage"
 STAGE_PREVIEW_SOURCE_HASH_ARTIFACT = "stage_preview_source_hash"
 EPISODE_PLAN_DISPLAY_ARTIFACT = "episode_plan_display"
 EPISODE_PLAN_DISPLAY_SOURCE_HASH_ARTIFACT = "episode_plan_display_source_hash"
+SCRIPT_BATCH_PREVIEW_ARTIFACT = "script_batch_preview"
+SCRIPT_BATCH_RANGE_ARTIFACT = "script_batch_range"
+PARTIAL_SCRIPT_ARTIFACT = "partial_script"
+PARTIAL_SCRIPT_EPISODES_ARTIFACT = "partial_script_episodes"
+SCRIPT_BATCHES_DISPLAY_ARTIFACT = "script_batches_display"
 PUBLIC_INPUT_PAYLOAD_KEYS = (
     "title",
     "story_outline",
@@ -214,6 +219,11 @@ PUBLIC_ARTIFACT_KEYS = (
     "character_summary",
     "scene_natural_language",
     "core_scene_summary",
+    PARTIAL_SCRIPT_ARTIFACT,
+    SCRIPT_BATCHES_DISPLAY_ARTIFACT,
+    SCRIPT_BATCH_PREVIEW_ARTIFACT,
+    SCRIPT_BATCH_RANGE_ARTIFACT,
+    PARTIAL_SCRIPT_EPISODES_ARTIFACT,
 )
 PUBLIC_COMPLETED_ARTIFACT_KEYS = (
     "final_script",
@@ -858,6 +868,31 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
     ),
 }
 
+PARTIAL_SCRIPT_ARTIFACT_KEYS: tuple[str, ...] = (
+    PARTIAL_SCRIPT_ARTIFACT,
+    SCRIPT_BATCHES_DISPLAY_ARTIFACT,
+    SCRIPT_BATCH_PREVIEW_ARTIFACT,
+    SCRIPT_BATCH_RANGE_ARTIFACT,
+    PARTIAL_SCRIPT_EPISODES_ARTIFACT,
+)
+
+for _stage_key in (
+    "framework",
+    "appearance_strategy",
+    "consistency",
+    "episode_plan_normalize",
+    "worldview",
+    "characters",
+    "scenes",
+    "appearance",
+    "hooks",
+    "dialogues",
+    "script",
+):
+    ROLLBACK_ARTIFACT_CLEAR_RULES[_stage_key] = (
+        ROLLBACK_ARTIFACT_CLEAR_RULES[_stage_key] + PARTIAL_SCRIPT_ARTIFACT_KEYS
+    )
+
 
 def _select_non_empty_fields(
     source: dict[str, Any] | None,
@@ -887,6 +922,25 @@ def _display_text(value: Any) -> str:
         except Exception:
             return str(value).strip()
     return str(value).strip()
+
+
+PLACEHOLDER_STAGE_OUTPUTS = {
+    "剧本框架自然语言说明暂未生成。",
+    "世界观自然语言说明暂未生成。",
+    "人物设定自然语言说明暂未生成。",
+    "核心场景自然语言说明暂未生成。",
+}
+
+
+def _meaningful_stage_output_text(value: Any) -> str:
+    text = _display_text(value)
+    if not text:
+        return ""
+    if text in PLACEHOLDER_STAGE_OUTPUTS:
+        return ""
+    if text in {"{}", "[]", "[object Object]"}:
+        return ""
+    return text
 
 
 def _summarize_fastgpt_output(output: dict[str, Any]) -> str:
@@ -1369,6 +1423,185 @@ def _resolve_best_script_text(
     return best_text
 
 
+def _partial_script_entries_from_variables(
+    *,
+    total_episodes: int,
+    variables: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    normalized_variables = variables if isinstance(variables, dict) else {}
+    batch_size = max(1, int(settings.batch_size or 5))
+    script_batches = _normalize_batch_text_map(normalized_variables.get(LOCAL_SCRIPT_BATCHES))
+    script_episode_cache = _normalize_episode_script_map(normalized_variables.get(LOCAL_SCRIPT_EPISODES))
+    entries: list[dict[str, Any]] = []
+    seen_starts: set[int] = set()
+
+    if total_episodes > 0:
+        for batch in iter_episode_batches(total_episodes, batch_size=batch_size):
+            batch_text = str(script_batches.get(batch.start_episode) or "").strip()
+            if not batch_text and script_episode_cache:
+                episode_slice = {
+                    episode: script_episode_cache.get(episode)
+                    for episode in range(batch.start_episode, batch.end_episode + 1)
+                    if str(script_episode_cache.get(episode) or "").strip()
+                }
+                if len(episode_slice) == batch.size:
+                    batch_text = _join_script_episode_map(episode_slice).strip()
+            if not batch_text:
+                continue
+            entries.append(
+                {
+                    "start_episode": batch.start_episode,
+                    "end_episode": batch.end_episode,
+                    "range": f"{batch.start_episode}-{batch.end_episode}",
+                    "content": batch_text,
+                }
+            )
+            seen_starts.add(batch.start_episode)
+
+    for start_episode in sorted(script_batches):
+        if start_episode in seen_starts:
+            continue
+        batch_text = str(script_batches.get(start_episode) or "").strip()
+        if not batch_text:
+            continue
+        end_episode = max(start_episode, start_episode + batch_size - 1)
+        entries.append(
+            {
+                "start_episode": start_episode,
+                "end_episode": end_episode,
+                "range": f"{start_episode}-{end_episode}",
+                "content": batch_text,
+            }
+        )
+    return entries
+
+
+def _partial_script_artifacts_from_variables(
+    *,
+    total_episodes: int,
+    variables: dict[str, Any] | None,
+) -> dict[str, Any]:
+    entries = _partial_script_entries_from_variables(
+        total_episodes=total_episodes,
+        variables=variables,
+    )
+    if not entries:
+        return {}
+    partial_script = _join_script_parts(*(entry["content"] for entry in entries))
+    completed_episodes: list[int] = []
+    for entry in entries:
+        completed_episodes.extend(
+            list(range(int(entry["start_episode"]), int(entry["end_episode"]) + 1))
+        )
+    latest = entries[-1]
+    return {
+        PARTIAL_SCRIPT_ARTIFACT: partial_script,
+        SCRIPT_BATCHES_DISPLAY_ARTIFACT: [
+            {
+                "start_episode": int(entry["start_episode"]),
+                "end_episode": int(entry["end_episode"]),
+                "content": entry["content"],
+            }
+            for entry in entries
+        ],
+        SCRIPT_BATCH_PREVIEW_ARTIFACT: latest["content"],
+        SCRIPT_BATCH_RANGE_ARTIFACT: latest["range"],
+        PARTIAL_SCRIPT_EPISODES_ARTIFACT: completed_episodes,
+    }
+
+
+def _jsonish_value(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return copy.deepcopy(value)
+    text = str(value or "").strip()
+    if not text or text[0] not in "[{":
+        return None
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return None
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
+def _character_items_from_value(value: Any) -> list[dict[str, Any]]:
+    candidate = _jsonish_value(value)
+    if isinstance(candidate, dict):
+        nested = candidate.get("character_setting")
+        if isinstance(nested, dict) and isinstance(nested.get("characters"), list):
+            return [item for item in nested.get("characters") or [] if isinstance(item, dict)]
+        if isinstance(candidate.get("characters"), list):
+            return [item for item in candidate.get("characters") or [] if isinstance(item, dict)]
+    if isinstance(candidate, list):
+        return [item for item in candidate if isinstance(item, dict)]
+    return []
+
+
+def _character_name_from_item(item: dict[str, Any]) -> str:
+    for key in ("character_name", "canonical_name", "name", "character_id"):
+        value = str(item.get(key) or "").strip()
+        if value:
+            return value
+    return "未命名角色"
+
+
+def _character_display_summary(item: dict[str, Any]) -> str:
+    snippets: list[str] = []
+    role = str(item.get("story_role") or item.get("role_type") or item.get("identity") or "").strip()
+    if role:
+        snippets.append(f"人物定位：{role}")
+    motivation = str(item.get("core_motivation") or item.get("core_desire") or "").strip()
+    plot_function = str(item.get("plot_function") or item.get("dramatic_value") or "").strip()
+    appearance = item.get("appearance") if isinstance(item.get("appearance"), dict) else {}
+    behavior = item.get("behavior") if isinstance(item.get("behavior"), dict) else {}
+    appearance_text = str(appearance.get("overall_look") or item.get("appearance_anchor") or "").strip()
+    behavior_text = str(behavior.get("social_interaction_style") or item.get("personality") or "").strip()
+    short_bits = [bit for bit in (appearance_text, behavior_text, motivation, plot_function) if bit]
+    if short_bits:
+        snippets.append("人物小传：" + "；".join(short_bits[:4]))
+    memory_point = str(
+        item.get("entry_memory_point")
+        or item.get("appearance_anchor")
+        or item.get("recognizable_scene_signal")
+        or ""
+    ).strip()
+    if memory_point:
+        snippets.append(f"出场记忆点：{memory_point}")
+    return "\n".join(snippets).strip()
+
+
+def _structured_character_display_text(value: Any) -> str:
+    characters = _character_items_from_value(value)
+    if not characters:
+        return ""
+    parts: list[str] = []
+    for item in characters:
+        role = str(item.get("story_role") or item.get("role_type") or "角色").strip() or "角色"
+        parts.append(f"【{role}】{_character_name_from_item(item)}")
+        summary = _character_display_summary(item)
+        if summary:
+            parts.append(summary)
+        parts.append("")
+    return "\n".join(parts).strip()
+
+
+def _natural_text_covers_all_characters(natural_text: str, structured_value: Any) -> bool:
+    characters = _character_items_from_value(structured_value)
+    if len(characters) <= 1:
+        return True
+    normalized_text = str(natural_text or "").strip()
+    if not normalized_text:
+        return False
+    names = [_character_name_from_item(item) for item in characters]
+    return all(name and name in normalized_text for name in names)
+
+
+def _preferred_character_display_text(natural_text: Any, structured_value: Any) -> str:
+    natural = str(natural_text or "").strip()
+    if natural and _natural_text_covers_all_characters(natural, structured_value):
+        return natural
+    fallback = _structured_character_display_text(structured_value)
+    return fallback or natural
+
 
 def use_fastgpt_backend() -> bool:
     return settings.workflow_backend in {"fastgpt", "hybrid", "fastgpt_hybrid"}
@@ -1564,14 +1797,22 @@ class WorkflowRuntime:
                 or state.get_var(SCRIPT_FINAL_VAR, "")
                 or ""
             ).strip()
-        character_natural_language = str(
+        raw_character_natural_language = str(
             state.get_var(CHARACTER_NATURAL_LANGUAGE_VAR, "") or ""
         ).strip()
+        character_natural_language = _preferred_character_display_text(
+            raw_character_natural_language,
+            state.get_var(CHARACTER_VAR, ""),
+        )
         scene_natural_language = str(
             state.get_var(SCENE_NATURAL_LANGUAGE_VAR, "") or ""
         ).strip()
         structured_characters = state.get_var(CHARACTER_VAR, "")
         structured_scenes = state.get_var(SCENE_VAR, "")
+        partial_script_artifacts = _partial_script_artifacts_from_variables(
+            total_episodes=_safe_int(getattr(state.user_input, "total_episodes", 0), 0),
+            variables=state.variables,
+        )
         artifacts = {
             "script_title_content": script_title_content,
             "framework_natural_language": state.get_var(FRAMEWORK_NATURAL_LANGUAGE, ""),
@@ -1583,16 +1824,14 @@ class WorkflowRuntime:
             "worldview_natural_language": state.get_var(WORLDVIEW_NATURAL_LANGUAGE, ""),
             "characters": structured_characters,
             "character_natural_language": character_natural_language,
-            "character_summary": character_natural_language
-            or ("人物设定自然语言说明暂未生成。" if _display_text(structured_characters) else ""),
+            "character_summary": character_natural_language,
             "scene_json": structured_scenes,
             "scene_natural_language": scene_natural_language,
             "core_scene_input": state.get_var(
                 SCENE_NATURAL_LANGUAGE_VAR,
                 state.get_var(CORE_SCENE_INPUT_VAR, ""),
             ),
-            "core_scene_summary": scene_natural_language
-            or ("核心场景自然语言说明暂未生成。" if _display_text(structured_scenes) else ""),
+            "core_scene_summary": scene_natural_language,
             "character_appearance_requirements": state.get_var(CHARACTER_APPEARANCE_REQUIREMENTS, ""),
             "character_alias_naming_rules": state.get_var(CHARACTER_ALIAS_NAMING_RULES, ""),
             "outfit_switch_rules": state.get_var(OUTFIT_SWITCH_RULES, ""),
@@ -1609,6 +1848,7 @@ class WorkflowRuntime:
             "halted_message": state.halted_message or "",
             "final_output_text": final_script_text,
         }
+        artifacts.update(partial_script_artifacts)
         # artifacts 面向前端展示与导出，debug_state 面向恢复/回退。
         # 两份都要同步：前者保证用户能立刻看到正式成品，后者保证失败后能从真实执行状态继续。
         self.manager._update_snapshot(
@@ -1840,13 +2080,59 @@ class TaskManager:
         allowed_keys = list(PUBLIC_ARTIFACT_KEYS)
         if str(snapshot.get("status") or "") == "completed":
             allowed_keys.extend(PUBLIC_COMPLETED_ARTIFACT_KEYS)
+        raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
         artifacts = _select_non_empty_fields(
-            snapshot.get("artifacts") or {},
+            raw_artifacts,
             tuple(allowed_keys),
         )
+        debug_variables = (
+            (snapshot.get("debug_state") or {}).get("variables")
+            if isinstance(snapshot.get("debug_state"), dict)
+            else {}
+        )
+        if not isinstance(debug_variables, dict):
+            debug_variables = {}
+        structured_characters = (
+            debug_variables.get(CHARACTERS)
+            or raw_artifacts.get("characters")
+            or raw_artifacts.get(CHARACTER_VAR)
+            or ""
+        )
+        preferred_character_text = _preferred_character_display_text(
+            artifacts.get("character_natural_language")
+            or artifacts.get("character_summary")
+            or raw_artifacts.get("character_natural_language")
+            or raw_artifacts.get("character_summary")
+            or raw_artifacts.get(CHARACTER_NATURAL_LANGUAGE_VAR)
+            or "",
+            structured_characters,
+        )
+        if preferred_character_text:
+            artifacts["character_natural_language"] = preferred_character_text
+            artifacts["character_summary"] = preferred_character_text
+        for key in (
+            "framework_natural_language",
+            "worldview_natural_language",
+            "character_natural_language",
+            "character_summary",
+            "scene_natural_language",
+            "core_scene_summary",
+        ):
+            text = _meaningful_stage_output_text(artifacts.get(key))
+            if text:
+                artifacts[key] = text
+            else:
+                artifacts.pop(key, None)
         episode_plan_display = self._episode_plan_display_text(snapshot, snapshot.get("artifacts") or {})
         if episode_plan_display:
             artifacts[EPISODE_PLAN_DISPLAY_ARTIFACT] = episode_plan_display
+        if str(snapshot.get("status") or "") != "completed":
+            artifacts.update(
+                _partial_script_artifacts_from_variables(
+                    total_episodes=_safe_int(snapshot.get("total_episodes"), 0),
+                    variables=debug_variables,
+                )
+            )
         return artifacts
 
     def _episode_plan_display_text(
@@ -2122,20 +2408,35 @@ class TaskManager:
     ) -> dict[str, str]:
         """只挑用户需要看的正式阶段内容，并补一段自然语言版摘要减轻等待焦虑。"""
         raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        partial_script_output = _display_text(
+            artifacts.get(PARTIAL_SCRIPT_ARTIFACT)
+            or raw_artifacts.get(PARTIAL_SCRIPT_ARTIFACT)
+        )
+        final_stage_output = _display_text(
+            artifacts.get("final_output_text")
+            or artifacts.get("final_script")
+            or raw_artifacts.get("final_output_text")
+            or raw_artifacts.get("final_script")
+            or partial_script_output
+        )
         stage_order = ("framework", "worldview", "characters", "scenes", "final")
         stage_title_map = {
             "framework": "剧本框架",
             "worldview": "世界观",
             "characters": "人物设定",
             "scenes": "核心场景",
-            "final": "最终剧本",
+            "final": (
+                "已生成正文"
+                if str(snapshot.get("status") or "") != "completed" and partial_script_output
+                else "最终剧本"
+            ),
         }
         stage_outputs = {
             "framework": self._framework_stage_output_text(raw_artifacts),
             "worldview": self._worldview_stage_output_text(raw_artifacts),
             "characters": self._character_stage_output_text(snapshot, artifacts),
             "scenes": self._scene_stage_output_text(snapshot, artifacts),
-            "final": _display_text(artifacts.get("final_output_text") or artifacts.get("final_script") or raw_artifacts.get("final_output_text") or raw_artifacts.get("final_script")),
+            "final": final_stage_output,
         }
 
         current_stage = self._snapshot_stage_to_rollback_stage(
@@ -2153,7 +2454,7 @@ class TaskManager:
             "appearance": "scenes",
             "hooks": "scenes",
             "dialogues": "scenes",
-            "script": "scenes",
+            "script": "final",
             "final": "final",
         }
         ceiling_stage = stage_ceiling_map.get(current_stage, "framework")
@@ -2164,7 +2465,7 @@ class TaskManager:
             if stage_outputs.get(stage_key):
                 chosen_stage = stage_key
                 break
-        if not chosen_stage:
+        if not chosen_stage and not current_stage:
             for stage_key in stage_order:
                 if stage_outputs.get(stage_key):
                     chosen_stage = stage_key
@@ -2192,22 +2493,10 @@ class TaskManager:
         }
 
     def _framework_stage_output_text(self, artifacts: dict[str, Any]) -> str:
-        """把框架阶段的几个正式字段拼成一份可直接阅读的阶段成品。"""
-        natural = _display_text(artifacts.get("framework_natural_language"))
-        if natural:
-            return natural
-        episode_plan = _display_text(artifacts.get(EPISODE_PLAN_DISPLAY_ARTIFACT))
-        if not episode_plan:
-            episode_plan = self._episode_plan_display_text({}, artifacts)
-        if episode_plan:
-            return episode_plan
-        return "剧本框架自然语言说明暂未生成。"
+        return _meaningful_stage_output_text(artifacts.get("framework_natural_language"))
 
     def _worldview_stage_output_text(self, artifacts: dict[str, Any]) -> str:
-        natural = _display_text(artifacts.get("worldview_natural_language"))
-        if natural:
-            return natural
-        return "世界观自然语言说明暂未生成。"
+        return _meaningful_stage_output_text(artifacts.get("worldview_natural_language"))
 
     def _character_stage_output_text(
         self,
@@ -2221,18 +2510,7 @@ class TaskManager:
             or raw_artifacts.get("character_natural_language")
             or raw_artifacts.get("character_summary")
         )
-        if natural:
-            return natural
-        if _display_text(raw_artifacts.get("characters")):
-            return "人物设定自然语言说明暂未生成。"
-        debug_variables = (
-            (snapshot.get("debug_state") or {}).get("variables")
-            if isinstance(snapshot.get("debug_state"), dict)
-            else {}
-        )
-        if isinstance(debug_variables, dict) and _display_text(debug_variables.get(CHARACTERS)):
-            return "人物设定自然语言说明暂未生成。"
-        return ""
+        return _meaningful_stage_output_text(natural)
 
     def _scene_stage_output_text(
         self,
@@ -2246,18 +2524,7 @@ class TaskManager:
             or raw_artifacts.get("scene_natural_language")
             or raw_artifacts.get("core_scene_summary")
         )
-        if natural:
-            return natural
-        if _display_text(raw_artifacts.get("scene_json")):
-            return "核心场景自然语言说明暂未生成。"
-        debug_variables = (
-            (snapshot.get("debug_state") or {}).get("variables")
-            if isinstance(snapshot.get("debug_state"), dict)
-            else {}
-        )
-        if isinstance(debug_variables, dict) and _display_text(debug_variables.get(SCENES)):
-            return "核心场景自然语言说明暂未生成。"
-        return ""
+        return _meaningful_stage_output_text(natural)
 
     def _stage_preview_text(
         self,
@@ -3511,6 +3778,12 @@ class TaskManager:
             snapshot,
             stage_key,
             start_episode=effective_start_episode,
+        )
+        rollback["artifacts"].update(
+            _partial_script_artifacts_from_variables(
+                total_episodes=_safe_int(rollback.get("total_episodes"), 0),
+                variables=(rollback.get("debug_state") or {}).get("variables"),
+            )
         )
         rollback["prompt_fixes"] = []
         rollback["current_node_id"] = None

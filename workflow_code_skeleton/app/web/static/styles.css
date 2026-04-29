@@ -1573,6 +1573,13 @@ a {
   line-height: 1.7;
 }
 
+.tool-form-meta {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--mono-muted);
+  font-size: 12px;
+}
+
 .workspace-body .tool-field-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -3524,6 +3531,86 @@ a {
 .workspace-body .compact-select option {
   color: #f4f4f4;
   background: #202020;
+}
+
+.mono-page,
+.workspace-body {
+  --mono-accent: #e3b131;
+  --mono-accent-strong: #f0c956;
+}
+
+.mono-page .btn-primary,
+.workspace-body .btn-primary,
+.workspace-body .sidebar-create-btn {
+  color: #111111;
+  background: var(--mono-accent);
+  border-color: rgba(227, 177, 49, 0.34);
+}
+
+.mono-page .btn-secondary,
+.mono-page .btn-ghost,
+.workspace-body .btn-secondary,
+.workspace-body .btn-ghost,
+.workspace-body .tool-shortcut,
+.workspace-body .sidebar-profile-btn,
+.workspace-body .workspace-pick,
+.workspace-body .tool-panel,
+.workspace-body .profile-drawer,
+.workspace-body .asset-editor,
+.workspace-body .asset-tile {
+  color: var(--mono-text);
+  background: var(--mono-surface);
+  border-color: var(--mono-border);
+}
+
+.mono-page .btn-danger,
+.workspace-body .btn-danger {
+  color: #ffd9cf;
+  background: rgba(198, 86, 40, 0.18);
+  border-color: rgba(198, 86, 40, 0.28);
+}
+
+.mono-page .field input,
+.mono-page .field textarea,
+.mono-page .field select,
+.workspace-body .field input,
+.workspace-body .field textarea,
+.workspace-body .field select,
+.workspace-body .tool-field input,
+.workspace-body .tool-field textarea {
+  color: var(--mono-text);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--mono-border);
+}
+
+.mono-page .field input:focus,
+.mono-page .field textarea:focus,
+.mono-page .field select:focus,
+.workspace-body .field input:focus,
+.workspace-body .field textarea:focus,
+.workspace-body .field select:focus,
+.workspace-body .tool-field input:focus,
+.workspace-body .tool-field textarea:focus {
+  border-color: rgba(227, 177, 49, 0.46);
+  box-shadow: 0 0 0 3px rgba(227, 177, 49, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mono-page .eyebrow,
+.mono-page .brand-mark span,
+.workspace-body .runtime-kicker,
+.workspace-body .tool-panel-kicker,
+.workspace-body .sidebar-brand-mark,
+.workspace-body .sidebar-profile-avatar {
+  color: #111111;
+  background: var(--mono-accent);
+}
+
+.mono-page .status-pill,
+.mono-page .community-tag,
+.workspace-body .runtime-pill,
+.workspace-body .status-pill {
+  border-color: rgba(227, 177, 49, 0.2);
 }
 
 @keyframes skeleton-slide {

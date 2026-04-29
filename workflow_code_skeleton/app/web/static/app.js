@@ -758,21 +758,73 @@
     return String(value).trim();
   }
 
+  function isMeaningfulStageOutput(value) {
+    const text = formatDisplayValue(value);
+    if (!text) return false;
+    if (text === "{}" || text === "[]" || text === "[object Object]") return false;
+    if (
+      text === "剧本框架自然语言说明暂未生成。"
+      || text === "世界观自然语言说明暂未生成。"
+      || text === "人物设定自然语言说明暂未生成。"
+      || text === "核心场景自然语言说明暂未生成。"
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  function formatToolOutput(value) {
+    if (value === null || value === undefined || value === "") {
+      return "工具没有返回可展示结果。";
+    }
+    if (typeof value === "string") {
+      const text = value.trim();
+      if (!text) return "工具没有返回可展示结果。";
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === "object") {
+          return JSON.stringify(parsed, null, 2);
+        }
+      } catch (_) {}
+      return text;
+    }
+    return formatDisplayValue(value) || "工具没有返回可展示结果。";
+  }
+
+  function partialScriptOutput(snapshot) {
+    const artifacts = snapshot?.artifacts || {};
+    const finalOutput = formatDisplayValue(artifacts.final_output_text || artifacts.final_script);
+    if (finalOutput) return finalOutput;
+    const partialScript = formatDisplayValue(artifacts.partial_script);
+    if (partialScript) return partialScript;
+    const batches = Array.isArray(artifacts.script_batches_display) ? artifacts.script_batches_display : [];
+    if (!batches.length) return "";
+    return batches.map((batch) => {
+      const range = String(
+        batch?.range
+        || (
+          batch?.start_episode && batch?.end_episode
+            ? `${batch.start_episode}-${batch.end_episode}`
+            : ""
+        )
+      ).trim();
+      const content = formatDisplayValue(batch?.content);
+      if (!content) return "";
+      return range ? `第 ${range} 集\n${content}` : content;
+    }).filter(Boolean).join("\n\n");
+  }
+
   // 把框架阶段的多个正式产物拼成一个完整回复，方便在聊天流里整体展示。
   function frameworkStageOutput(snapshot) {
     const artifacts = snapshot?.artifacts || {};
     const natural = formatDisplayValue(artifacts.framework_natural_language);
-    if (natural) return natural;
-    const episodePlan = formatDisplayValue(artifacts.episode_plan_display || artifacts.episode_plan);
-    if (episodePlan) return episodePlan;
-    return "剧本框架自然语言说明暂未生成。";
+    return isMeaningfulStageOutput(natural) ? natural : "";
   }
 
   function worldviewStageOutput(snapshot) {
     const artifacts = snapshot?.artifacts || {};
     const natural = formatDisplayValue(artifacts.worldview_natural_language);
-    if (natural) return natural;
-    return "世界观自然语言说明暂未生成。";
+    return isMeaningfulStageOutput(natural) ? natural : "";
   }
 
   // 只把平台真正对外公开的正式阶段产物整理成聊天消息。
@@ -784,12 +836,10 @@
     const characterOutput = formatDisplayValue(
       artifacts.character_natural_language
       || artifacts.character_summary
-      || ((snapshot.current_stage === "characters" || snapshot.current_stage === "character") ? "人物设定自然语言说明暂未生成。" : "")
     );
     const sceneOutput = formatDisplayValue(
       artifacts.scene_natural_language
       || artifacts.core_scene_summary
-      || ((snapshot.current_stage === "scenes" || snapshot.current_stage === "scene") ? "核心场景自然语言说明暂未生成。" : "")
     );
     const messages = [
       {
@@ -814,10 +864,10 @@
       },
       {
         key: "final",
-        title: "剧本正文",
-        output: formatDisplayValue(artifacts.final_output_text || artifacts.final_script)
+        title: formatDisplayValue(artifacts.final_output_text || artifacts.final_script) ? "剧本正文" : "已生成正文",
+        output: partialScriptOutput(snapshot)
       }
-    ].filter((item) => item.output);
+    ].filter((item) => isMeaningfulStageOutput(item.output));
 
     return messages.map((item) => ({
       ...item,
@@ -1082,7 +1132,7 @@
 
     const progress = Number(snapshot.progress_percent || 0);
     const displayPayload = stageDisplayPayload(snapshot);
-    const finalOutput = displayPayload.output || "暂无内容";
+    const finalOutput = displayPayload.output || (RUNNING_STATUSES.has(snapshot.status) ? "" : "暂无内容");
     const projectTitle = runtimeProjectDisplayTitle(snapshot);
     const statusMessage = statusNoteFrom(snapshot);
 
@@ -1099,7 +1149,7 @@
       els.outputTitle.textContent = displayPayload.title || "当前阶段输出";
     }
     if (els.outputNaturalBox) {
-      els.outputNaturalBox.textContent = displayPayload.natural || "当前阶段产出生成后，会在这里显示更容易阅读的自然语言速览。";
+      els.outputNaturalBox.textContent = displayPayload.natural || "";
     }
     els.finalOutputBox.textContent = finalOutput;
     renderChatTranscript(snapshot);
@@ -1367,15 +1417,16 @@
   }
 
   function normalizeToolDefinition(tool) {
-    if (!tool?.key) return null;
-    const fallback = DEFAULT_TOOL_DEFINITIONS[tool.key] || {};
+    const key = tool?.key || tool?.tool_id || "";
+    if (!key) return null;
+    const fallback = DEFAULT_TOOL_DEFINITIONS[key] || {};
     return {
-      key: tool.key,
-      label: tool.label || fallback.label || tool.key,
+      key,
+      label: tool.label || tool.title || fallback.label || key,
       help: tool.help || fallback.help || "",
       configured: tool.configured !== false,
       source: tool.source || fallback.source || "fallback",
-      jsonFile: tool.json_file || null,
+      jsonFile: tool.json_file || tool.workflow_json_file || null,
       fields: Array.isArray(tool.fields) && tool.fields.length
         ? tool.fields.map((field) => ({
           name: field.name,
@@ -1406,12 +1457,17 @@
   function openToolPanel(toolKey) {
     const tool = toolConfig(toolKey);
     state.activeTool = tool.key;
+    if (els.assistantToolsFolder) {
+      els.assistantToolsFolder.open = true;
+    }
     renderToolList();
     renderToolForm(tool.key);
     els.toolPanel?.classList.remove("hidden");
     window.requestAnimationFrame(() => {
       els.toolPanel?.classList.add("panel-open");
+      els.toolPanel?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
+    updateUrlParams((params) => params.set("section", "tools"));
   }
 
   function closeToolPanel() {
@@ -1459,6 +1515,7 @@
       <div class="tool-form-head">
         <h3>${escapeHtml(tool.label)}</h3>
         <p>${escapeHtml(tool.help)}</p>
+        ${tool.jsonFile ? `<small class="tool-form-meta">工作流：${escapeHtml(tool.jsonFile)}</small>` : ""}
       </div>
       <div class="tool-field-grid">
         ${tool.fields.map((field) => {
@@ -2212,8 +2269,13 @@
       method: "POST",
       body: JSON.stringify(payload)
     });
-    els.toolOutputBox.textContent = data.result?.result || "工具没有返回文本结果。";
-    showToast("辅助工具运行完成", `${toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果。`);
+    const result = data.result || data;
+    const output = result.output ?? data.output ?? result.result ?? "";
+    els.toolOutputBox.textContent = formatToolOutput(output);
+    showToast(
+      "辅助工具运行完成",
+      `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果。`,
+    );
   }
 
   async function updateUsername(event) {
@@ -2294,6 +2356,15 @@
     const section = params.get("section");
     if (panel === "profile" && isAuthenticated()) {
       openProfilePanel();
+    }
+    if (section === "tools") {
+      window.setTimeout(() => {
+        if (els.assistantToolsFolder) {
+          els.assistantToolsFolder.open = true;
+        }
+        openToolPanel(state.activeTool);
+      }, 80);
+      return;
     }
     if (section) {
       window.setTimeout(() => {

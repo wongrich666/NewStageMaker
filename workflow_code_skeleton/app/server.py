@@ -17,7 +17,8 @@ from flask import (
 
 from .models.inputs import derive_script_title_content
 from .services.auth_store import auth_store
-from .services.simple_fastgpt_tools import list_simple_tools, run_simple_tool
+from .services.fastgpt_client import FastGPTTransientError
+from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
 from .services.task_manager import task_manager
 
 
@@ -263,7 +264,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @app.get("/api/tools")
     @_login_required
     def list_tools():
-        return _json_ok(tools=list_simple_tools())
+        try:
+            tools = list_simple_tools()
+        except Exception as exc:
+            return _json_error(str(exc), status=500, fallback="辅助工具列表加载失败，请稍后重试。")
+        return _json_ok(ok=True, tools=tools)
 
     @app.post("/api/tools/<tool_key>/run")
     @_login_required
@@ -271,9 +276,35 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         data = request.get_json(silent=True) or {}
         try:
             result = run_simple_tool(tool_key, data)
+        except ToolExecutionError as exc:
+            return jsonify(
+                {
+                    "success": False,
+                    "ok": False,
+                    "tool_id": exc.tool_id or tool_key,
+                    "message": str(exc),
+                    "debug": exc.debug,
+                }
+            ), int(exc.status_code or 400)
+        except FastGPTTransientError as exc:
+            return jsonify(
+                {
+                    "success": False,
+                    "ok": False,
+                    "tool_id": tool_key,
+                    "message": "工具上游暂时不可用，请稍后重试。",
+                    "debug": {
+                        "stage_name": exc.stage_name,
+                        "status_code": exc.status_code,
+                        "url": exc.url,
+                    },
+                }
+            ), 503
         except Exception as exc:
-            return _json_error(str(exc), status=400, fallback="工具执行失败，请稍后重试。")
-        return _json_ok(result=result)
+            return _json_error(str(exc), status=500, fallback="工具执行失败，请稍后重试。")
+        flattened = dict(result)
+        ok = bool(flattened.pop("ok", True))
+        return _json_ok(ok=ok, result=result, **flattened)
 
     @app.get("/api/projects/latest")
     @_login_required

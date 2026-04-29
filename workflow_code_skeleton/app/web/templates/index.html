@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>IDEA TO SCRIPT 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260425-11">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260429-01">
 </head>
 <body class="workspace-body">
   <main class="chat-workspace-shell">
@@ -56,7 +56,7 @@
           </div>
         </section>
 
-        <section class="sidebar-group sidebar-tools-section">
+        <section id="tools" class="sidebar-group sidebar-tools-section">
           <details id="assistantToolsFolder" class="workspace-folder tools-folder">
             <summary>
               <span class="sidebar-folder-link">辅助工具</span>
@@ -310,6 +310,6 @@
       loginUrl: "{{ url_for('login_page') }}"
     };
   </script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260425-11"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260429-01"></script>
 </body>
 </html>

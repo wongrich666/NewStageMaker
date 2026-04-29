@@ -1488,6 +1488,8 @@ def _stage_specific_candidate_issue(
             "newvariables",
             "updatevarresult",
             "variableupdate",
+            "responsedata",
+            "root",
             "answertext",
             ".output",
             "scene_setting",
@@ -1657,6 +1659,12 @@ def _iter_repaired_candidate_variants(
     allow_textual_relaxation: bool,
 ) -> Iterable[tuple[str, Any]]:
     if not is_repairable_stage_output(contract.stage_name):
+        return ()
+    if (
+        contract.stage_name == STAGE_SCENES
+        and str(source or "").strip() in {"root", "responseData"}
+        and _scene_candidate_uses_blocked_text_wrapper(candidate)
+    ):
         return ()
 
     attempts = 1 + max(0, int(getattr(settings, "fastgpt_output_repair_retries", 1)))
@@ -2500,6 +2508,8 @@ def _normalize_stage_specific_output_candidate(
         return _normalize_appearance_mapping_output_candidate(candidate, contract)
     if contract.stage_name == STAGE_EPISODE_PLAN_NORMALIZE:
         return _normalize_episode_plan_normalize_output_candidate(candidate, contract)
+    if contract.stage_name == STAGE_SCENES:
+        return _normalize_scenes_output_candidate(candidate, contract)
     if _is_dialogue_payload_stage(contract.stage_name):
         return _normalize_dialogues_output_candidate(candidate, contract)
     if contract.stage_name in PASS_REVIEW_OUTPUT_STAGES:
@@ -2538,6 +2548,61 @@ def _normalize_appearance_pre_strategy_value(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _normalize_scenes_output_candidate(
+    candidate: dict[str, Any],
+    contract: FastGPTStageContract,
+) -> dict[str, Any]:
+    del contract
+    current: Any = candidate
+    if isinstance(current, list):
+        current = _dict_from_variable_items(current) or current
+    if not isinstance(current, dict):
+        return candidate
+
+    if SCENES in current:
+        normalized_value = _normalize_scenes_contract_value(current.get(SCENES))
+        if normalized_value is not None:
+            normalized = dict(current)
+            normalized[SCENES] = normalized_value
+            return normalized
+        return current
+
+    normalized_value = _normalize_scenes_contract_value(current)
+    if normalized_value is None:
+        return candidate
+    return {SCENES: normalized_value}
+
+
+def _normalize_scenes_contract_value(value: Any) -> str | None:
+    candidate = value
+    if isinstance(candidate, str):
+        parsed = _try_parse_json(candidate)
+        if parsed is not None:
+            candidate = parsed
+        else:
+            return str(candidate).strip() or None
+
+    if isinstance(candidate, list):
+        candidate = {"scene_setting": {"scenes": candidate}}
+
+    if not isinstance(candidate, dict):
+        return None
+
+    if isinstance(candidate.get("scene_setting"), dict):
+        body = {"scene_setting": candidate["scene_setting"]}
+    elif isinstance(candidate.get("scenes"), dict) and isinstance(
+        candidate["scenes"].get("scene_setting"),
+        dict,
+    ):
+        body = {"scene_setting": candidate["scenes"]["scene_setting"]}
+    elif isinstance(candidate.get("scenes"), list):
+        body = {"scene_setting": {"scenes": candidate["scenes"]}}
+    else:
+        return None
+
+    return json.dumps(body, ensure_ascii=False)
 
 
 def _normalize_appearance_mapping_output_candidate(
