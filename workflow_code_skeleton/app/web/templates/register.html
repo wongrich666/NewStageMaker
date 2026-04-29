@@ -7,36 +7,67 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>注册 - 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260429-01">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260429-02">
 </head>
-<body class="auth-page mono-page">
-  <div class="bg-orb orb-a"></div>
-  <div class="bg-orb orb-b"></div>
-  <main class="auth-shell">
-    <a class="page-back-link auth-back-link" href="{{ url_for('index') }}">返回首页</a>
-    <section class="auth-card">
-      <p class="eyebrow">Create Account</p>
-      <h1>注册账号</h1>
-      <p class="muted">用户名不能重复，密码会加密保存。</p>
-      {% if error %}
-        <div class="auth-error">{{ error }}</div>
-      {% endif %}
-      <form method="post" class="auth-form">
-        <label class="field">
-          <span>用户名</span>
-          <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" required>
-        </label>
-        <label class="field">
-          <span>密码</span>
-          <input name="password" type="password" autocomplete="new-password" minlength="6" required>
-        </label>
-        <label class="field">
-          <span>确认密码</span>
-          <input name="confirm_password" type="password" autocomplete="new-password" minlength="6" required>
-        </label>
-        <button class="btn btn-primary" type="submit">注册并进入</button>
-      </form>
-      <p class="auth-switch">已有账号？<a href="{{ url_for('login_page') }}">去登录</a></p>
+<body class="workspace-body mono-page">
+  <main class="chat-workspace-shell prelogin-shell auth-workspace-shell">
+    <aside class="workspace-sidebar prelogin-sidebar">
+      <div class="sidebar-top">
+        <div class="sidebar-brand-row">
+          <a class="sidebar-brand" href="{{ url_for('index') }}">
+            <span class="sidebar-brand-mark">I</span>
+            <span class="sidebar-brand-text">
+              <strong>idea to script</strong>
+              <em>剧本平台</em>
+            </span>
+          </a>
+        </div>
+      </div>
+      <div class="sidebar-nav">
+        <section class="sidebar-group">
+          <div class="sidebar-group-label">创建账户后可用</div>
+          <div class="prelogin-note-list">
+            <p>同一账号可以并行开启多个剧本项目。</p>
+            <p>正文会按 5 集一批写作和审核，失败后支持继续生成与阶段回退。</p>
+          </div>
+        </section>
+      </div>
+      <div class="sidebar-footer">
+        <div class="sidebar-footer-links">
+          <a class="sidebar-profile-btn" href="{{ url_for('login_page') }}">
+            <span class="sidebar-profile-avatar">登</span>
+            <span class="sidebar-footer-text">已有账号？去登录</span>
+          </a>
+          <a class="sidebar-logout-link" href="{{ url_for('index') }}">返回首页</a>
+        </div>
+      </div>
+    </aside>
+
+    <section class="chat-main prelogin-main prelogin-auth-wrap">
+      <section class="card prelogin-auth-card auth-card">
+        <p class="eyebrow">Create Account</p>
+        <h1>注册账号</h1>
+        <p class="muted">用户名不能重复，密码会加密保存。</p>
+        {% if error %}
+          <div class="auth-error">{{ error }}</div>
+        {% endif %}
+        <form method="post" class="auth-form">
+          <label class="field">
+            <span>用户名</span>
+            <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" required>
+          </label>
+          <label class="field">
+            <span>密码</span>
+            <input name="password" type="password" autocomplete="new-password" minlength="6" required>
+          </label>
+          <label class="field">
+            <span>确认密码</span>
+            <input name="confirm_password" type="password" autocomplete="new-password" minlength="6" required>
+          </label>
+          <button class="btn btn-primary" type="submit">注册并进入</button>
+        </form>
+        <p class="auth-switch">已有账号？<a href="{{ url_for('login_page') }}">去登录</a></p>
+      </section>
     </section>
   </main>
 </body>

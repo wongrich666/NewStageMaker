@@ -833,14 +833,6 @@
     const artifacts = snapshot?.artifacts || {};
     const currentDisplayKey = normalizeStageKey(snapshot.display_stage_key);
     const currentNatural = String(snapshot.display_stage_output_natural || "").trim();
-    const characterOutput = formatDisplayValue(
-      artifacts.character_natural_language
-      || artifacts.character_summary
-    );
-    const sceneOutput = formatDisplayValue(
-      artifacts.scene_natural_language
-      || artifacts.core_scene_summary
-    );
     const messages = [
       {
         key: "framework",
@@ -851,16 +843,6 @@
         key: "worldview",
         title: "世界观",
         output: worldviewStageOutput(snapshot)
-      },
-      {
-        key: "characters",
-        title: "人物设定",
-        output: characterOutput
-      },
-      {
-        key: "scenes",
-        title: "核心场景",
-        output: sceneOutput
       },
       {
         key: "final",
@@ -1002,7 +984,7 @@
       `).join("");
       els.chatTranscript.innerHTML = `
         <section class="chat-empty-state">
-          <strong>今天写什么剧本</strong>
+          <strong>剧本创作需求请写在这里~</strong>
           <p>直接输入你的创作需求，平台会把剧本框架和剧本正文按对话流展示，中间过程统一显示创作状态。</p>
           <div class="chat-empty-tools">${suggestions}</div>
         </section>
@@ -1449,7 +1431,11 @@
         data-tool-key="${escapeHtml(tool.key)}"
       >
         <span>${escapeHtml(tool.label)}</span>
-        <small>${escapeHtml(tool.configured ? "可直接运行" : "待配置 API Key")}</small>
+        <small>${escapeHtml(
+          !isAuthenticated()
+            ? "登录后可运行"
+            : (tool.configured ? "可直接运行" : "待配置 API Key")
+        )}</small>
       </button>
     `).join("");
   }
@@ -1537,13 +1523,17 @@
       </div>
     `;
     if (els.runToolBtn) {
-      els.runToolBtn.disabled = !tool.configured;
-      els.runToolBtn.textContent = tool.configured ? `运行${tool.label}` : `${tool.label} 待配置`;
+      els.runToolBtn.disabled = !isAuthenticated() || !tool.configured;
+      els.runToolBtn.textContent = !isAuthenticated()
+        ? "登录后可运行"
+        : (tool.configured ? `运行${tool.label}` : `${tool.label} 待配置`);
     }
     if (els.toolOutputBox) {
-      els.toolOutputBox.textContent = tool.configured
-        ? "这里会显示辅助工具结果。"
-        : "当前工具还未配置 API Key，配置后即可运行。";
+      els.toolOutputBox.textContent = !isAuthenticated()
+        ? "登录后可使用辅助工具。"
+        : (tool.configured
+          ? "这里会显示辅助工具结果。"
+          : "当前工具还未配置 API Key，配置后即可运行。");
     }
     syncButtons();
   }

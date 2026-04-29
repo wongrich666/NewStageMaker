@@ -271,7 +271,12 @@ def _extract_scene_items(value: Any) -> list[dict[str, Any]]:
     candidate = _jsonish(value)
     if not isinstance(candidate, dict):
         return []
-    if isinstance(candidate.get("scene_setting"), dict):
+    if isinstance(candidate.get("scenes"), dict) and isinstance(
+        candidate["scenes"].get("scene_setting"),
+        dict,
+    ):
+        candidate = candidate["scenes"]["scene_setting"]
+    elif isinstance(candidate.get("scene_setting"), dict):
         candidate = candidate["scene_setting"]
     items = candidate.get("scenes")
     if isinstance(items, list):

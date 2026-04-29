@@ -3638,3 +3638,115 @@ a {
     background: #ffffff;
   }
 }
+
+/* Pre-login pages reuse the workspace shell so the product stays visually consistent
+   before and after authentication. */
+.prelogin-shell {
+  min-height: 100vh;
+}
+
+.prelogin-sidebar {
+  justify-content: space-between;
+}
+
+.prelogin-main {
+  padding: 24px;
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+
+.prelogin-runtime {
+  padding: 18px 22px;
+}
+
+.prelogin-hero-card {
+  padding: clamp(28px, 5vw, 52px);
+}
+
+.prelogin-hero-copy {
+  display: grid;
+  gap: 16px;
+  max-width: 860px;
+}
+
+.prelogin-hero-copy h1 {
+  margin: 0;
+  font-size: clamp(40px, 7vw, 72px);
+  line-height: 0.96;
+  letter-spacing: -0.06em;
+  color: var(--mono-text);
+}
+
+.prelogin-hero-copy p:last-of-type {
+  margin: 0;
+  color: var(--mono-muted);
+  line-height: 1.75;
+}
+
+.prelogin-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.prelogin-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.prelogin-shortcuts,
+.prelogin-note-list {
+  display: grid;
+  gap: 8px;
+}
+
+.prelogin-note-list p {
+  margin: 0;
+  color: var(--mono-muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.prelogin-auth-wrap {
+  min-height: 100vh;
+  place-items: center;
+  align-content: center;
+}
+
+.prelogin-auth-card {
+  width: min(460px, 100%);
+  padding: 28px;
+}
+
+.prelogin-auth-card .field input {
+  color: var(--mono-text);
+  border-color: var(--mono-border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.prelogin-auth-card .field input:focus {
+  border-color: rgba(227, 177, 49, 0.46);
+  box-shadow: 0 0 0 3px rgba(227, 177, 49, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+@media (max-width: 960px) {
+  .prelogin-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .prelogin-main {
+    padding: 16px;
+  }
+
+  .prelogin-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .prelogin-auth-wrap {
+    min-height: auto;
+    align-content: start;
+  }
+}

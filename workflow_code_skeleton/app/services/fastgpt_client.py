@@ -2585,24 +2585,34 @@ def _normalize_scenes_contract_value(value: Any) -> str | None:
             return str(candidate).strip() or None
 
     if isinstance(candidate, list):
-        candidate = {"scene_setting": {"scenes": candidate}}
+        candidate = {"scenes": {"scene_setting": {"scenes": candidate}}}
 
     if not isinstance(candidate, dict):
         return None
 
-    if isinstance(candidate.get("scene_setting"), dict):
-        body = {"scene_setting": candidate["scene_setting"]}
-    elif isinstance(candidate.get("scenes"), dict) and isinstance(
+    business_payload: dict[str, Any] | None = None
+    if isinstance(candidate.get("scenes"), dict) and isinstance(
         candidate["scenes"].get("scene_setting"),
         dict,
     ):
-        body = {"scene_setting": candidate["scenes"]["scene_setting"]}
+        business_payload = candidate
+    elif isinstance(candidate.get("scene_setting"), dict):
+        business_payload = {"scenes": {"scene_setting": candidate["scene_setting"]}}
     elif isinstance(candidate.get("scenes"), list):
-        body = {"scene_setting": {"scenes": candidate["scenes"]}}
-    else:
+        business_payload = {"scenes": {"scene_setting": {"scenes": candidate["scenes"]}}}
+
+    if not isinstance(business_payload, dict):
+        return None
+    scenes_block = business_payload.get("scenes")
+    if not isinstance(scenes_block, dict):
+        return None
+    scene_setting = scenes_block.get("scene_setting")
+    if not isinstance(scene_setting, dict):
+        return None
+    if not isinstance(scene_setting.get("scenes"), list):
         return None
 
-    return json.dumps(body, ensure_ascii=False)
+    return json.dumps(business_payload, ensure_ascii=False)
 
 
 def _normalize_appearance_mapping_output_candidate(

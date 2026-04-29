@@ -286,6 +286,17 @@ def _scene_setting_json() -> dict[str, object]:
     }
 
 
+def _scene_setting_from_output_text(output_text: str) -> dict[str, object]:
+    parsed = json.loads(output_text)
+    if isinstance(parsed, dict) and isinstance(parsed.get("scenes"), dict):
+        wrapped = parsed.get("scenes")
+        if isinstance(wrapped, dict) and isinstance(wrapped.get("scene_setting"), dict):
+            return wrapped["scene_setting"]
+    if isinstance(parsed, dict) and isinstance(parsed.get("scene_setting"), dict):
+        return parsed["scene_setting"]
+    raise AssertionError("scenes 输出未包含可识别的 scene_setting")
+
+
 def _appearance_mapping_json() -> dict[str, object]:
     return {
         "appearance_mapping": {
@@ -630,9 +641,9 @@ class StageOutputRepairTests(unittest.TestCase):
             STAGE_SCENES,
             {"answerText": json.dumps(_scene_setting_json(), ensure_ascii=False)},
         )
-        parsed = json.loads(result[SCENES])
-        self.assertEqual(len(parsed["scene_setting"]["scenes"]), 3)
-        self.assertEqual(parsed["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
+        scene_setting = _scene_setting_from_output_text(result[SCENES])
+        self.assertEqual(len(scene_setting["scenes"]), 3)
+        self.assertEqual(scene_setting["scenes"][0]["scene_name"], "玻璃会议室")
 
     def test_scenes_wrapped_in_internal_variable(self) -> None:
         data = {
@@ -646,14 +657,14 @@ class StageOutputRepairTests(unittest.TestCase):
             }
         }
         result = self._extract(STAGE_SCENES, data)
-        parsed = json.loads(result[SCENES])
-        self.assertEqual(parsed["scene_setting"]["scenes"][1]["scene_name"], "深夜开放办公区")
+        scene_setting = _scene_setting_from_output_text(result[SCENES])
+        self.assertEqual(scene_setting["scenes"][1]["scene_name"], "深夜开放办公区")
 
     def test_scenes_markdown_code_fence(self) -> None:
         fenced = "```json\n" + json.dumps(_scene_setting_json(), ensure_ascii=False, indent=2) + "\n```"
         result = self._extract(STAGE_SCENES, {"answerText": fenced})
-        parsed = json.loads(result[SCENES])
-        self.assertEqual(parsed["scene_setting"]["scenes"][2]["scene_name"], "合租公寓玄关")
+        scene_setting = _scene_setting_from_output_text(result[SCENES])
+        self.assertEqual(scene_setting["scenes"][2]["scene_name"], "合租公寓玄关")
 
     def test_scenes_output_with_message_content_role_fields_is_rejected(self) -> None:
         polluted = _scene_setting_json()

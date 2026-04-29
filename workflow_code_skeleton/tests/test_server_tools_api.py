@@ -82,6 +82,22 @@ class ServerToolsApiTests(unittest.TestCase):
         self.assertIn("缺少必填项", payload["message"])
         self.assertEqual(payload["debug"]["missing_fields"], ["text"])
 
+    def test_tools_api_requires_login_with_specific_message(self) -> None:
+        response = self.client.get("/api/tools")
+
+        self.assertEqual(response.status_code, 401)
+        payload = response.get_json()
+        self.assertFalse(payload["success"])
+        self.assertIn("请先登录", payload["message"])
+
+    def test_home_login_and_register_pages_render_workspace_shell(self) -> None:
+        for path in ("/", "/login", "/register"):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200)
+            text = response.get_data(as_text=True)
+            self.assertIn("chat-workspace-shell", text)
+            self.assertIn("workspace-sidebar", text)
+
 
 if __name__ == "__main__":
     unittest.main()

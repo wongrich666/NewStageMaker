@@ -116,7 +116,7 @@ test("visible stage messages use natural language fields for framework and world
   assert.equal(worldview?.natural, "世界观速览");
 });
 
-test("visible stage messages prefer character and scene natural language fields", () => {
+test("visible stage messages only expose framework worldview and script to ordinary users", () => {
   const messages = visibleStageMessages({
     current_stage: "scenes",
     artifacts: {
@@ -131,10 +131,11 @@ test("visible stage messages prefer character and scene natural language fields"
 
   const characters = messages.find((item) => item.key === "characters");
   const scenes = messages.find((item) => item.key === "scenes");
+  const worldview = messages.find((item) => item.key === "worldview");
 
-  assert.equal(characters?.output, "人物小传自然语言版");
-  assert.equal(scenes?.output, "核心场景自然语言版");
-  assert.equal(scenes?.natural, "当前场景速览");
+  assert.equal(characters, undefined);
+  assert.equal(scenes, undefined);
+  assert.equal(worldview, undefined);
 });
 
 test("visible stage messages do not render future-stage placeholders while running", () => {

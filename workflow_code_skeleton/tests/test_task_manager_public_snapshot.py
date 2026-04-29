@@ -255,7 +255,7 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
         self.assertEqual(public["current_batch"], "1-5")
         self.assertEqual(public["message"], "正在审核开头冲突钩子：第 1-5 集")
 
-    def test_runtime_sync_prefers_character_and_scene_natural_language(self) -> None:
+    def test_runtime_sync_keeps_character_and_scene_natural_language_private(self) -> None:
         record = TaskRecord(
             user_id=1,
             project_id=1,
@@ -297,11 +297,13 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["artifacts"]["scene_natural_language"], "核心场景自然语言版")
         self.assertEqual(snapshot["artifacts"]["characters"], state.get_var(CHARACTERS))
         self.assertEqual(snapshot["artifacts"]["scene_json"], state.get_var(SCENES))
-        self.assertEqual(public["display_stage_output"], "人物小传自然语言版")
+        self.assertEqual(public["display_stage_output"], "")
+        self.assertNotIn("character_natural_language", public["artifacts"])
+        self.assertNotIn("scene_natural_language", public["artifacts"])
         self.assertNotIn("characters", public["artifacts"])
         self.assertNotIn("scene_json", public["artifacts"])
 
-    def test_character_public_snapshot_falls_back_to_all_structured_roles_when_natural_text_is_incomplete(self) -> None:
+    def test_character_public_snapshot_does_not_promote_character_stage_for_public_view(self) -> None:
         snapshot = _snapshot(current_stage="characters")
         snapshot["artifacts"]["character_natural_language"] = "【主角】林夏\n人物定位：项目负责人。"
         snapshot["artifacts"]["character_summary"] = snapshot["artifacts"]["character_natural_language"]
@@ -309,12 +311,10 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
 
         public = self.manager._public_snapshot(snapshot)
 
-        repaired = public["artifacts"]["character_natural_language"]
-        self.assertIn("林夏", repaired)
-        self.assertIn("周衡", repaired)
-        self.assertIn("顾遥", repaired)
-        self.assertEqual(public["display_stage_output"], repaired)
-        self.assertNotIn("[object Object]", repaired)
+        self.assertEqual(public["display_stage_key"], "worldview")
+        self.assertEqual(public["display_stage_output"], "世界观自然语言版")
+        self.assertNotIn("character_natural_language", public["artifacts"])
+        self.assertNotIn("character_summary", public["artifacts"])
 
     def test_running_public_snapshot_exposes_approved_partial_script_batches_before_final(self) -> None:
         snapshot = _snapshot(current_stage="script")

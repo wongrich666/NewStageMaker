@@ -229,6 +229,8 @@ def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, An
                 "workflow_json_file": resolved.json_path.name if resolved.json_path else None,
                 "answer_node_names": list(resolved.answer_node_names),
                 "updated_variables": list(resolved.updated_variables),
+                "visible_output_fields": list(resolved.visible_output_fields),
+                "api_key_envs": list(resolved.api_key_envs),
                 "response_preview": _truncate_text(_json_text(data), limit=1200),
             },
             status_code=400,
@@ -260,12 +262,17 @@ def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, An
 
 def _serialize_tool(resolved: ResolvedSimpleTool) -> dict[str, Any]:
     definition = resolved.definition
+    api_key_name, _ = _env_with_name(*resolved.api_key_envs)
+    url_name, url_value = _env_with_name(*resolved.url_envs)
     return {
         "tool_id": definition.key,
         "key": definition.key,
         "title": definition.label,
         "label": definition.label,
         "configured": bool(_env(*resolved.api_key_envs)),
+        "configured_api_key_env": api_key_name,
+        "configured_url_env": url_name,
+        "configured_url": (url_value or DEFAULT_FASTGPT_URL).strip().rstrip("/"),
         "help": resolved.help_text,
         "source": resolved.source,
         "json_file": resolved.json_path.name if resolved.json_path else None,
@@ -547,20 +554,15 @@ def _extract_structured_output(
 def _iter_tool_text_candidates(data: Any) -> list[tuple[str, Any]]:
     candidates: list[tuple[str, Any]] = []
     if isinstance(data, dict):
-        choices = data.get("choices")
-        if isinstance(choices, list):
-            for index, choice in enumerate(choices):
-                if not isinstance(choice, dict):
-                    continue
-                message = choice.get("message")
-                if isinstance(message, dict):
-                    content = _message_content_to_text(message.get("content"))
-                    if content:
-                        candidates.append((f"choices[{index}].message.content", content))
-        for key in TOOL_RESPONSE_TEXT_KEYS:
-            value = data.get(key)
-            if value not in (None, "", [], {}):
-                candidates.append((key, value))
+        candidates.extend(_iter_choice_text_candidates(data))
+        candidates.extend(_iter_named_text_candidates("root", data))
+        response_data = data.get("responseData")
+        if isinstance(response_data, dict):
+            candidates.extend(_iter_named_text_candidates("responseData", response_data))
+        elif isinstance(response_data, list):
+            for index, item in enumerate(response_data):
+                if isinstance(item, dict):
+                    candidates.extend(_iter_named_text_candidates(f"responseData[{index}]", item))
     elif data not in (None, "", [], {}):
         candidates.append(("response", data))
     return candidates
@@ -570,17 +572,110 @@ def _iter_structured_candidate_sources(data: Any) -> list[tuple[str, dict[str, A
     candidates: list[tuple[str, dict[str, Any]]] = []
     if not isinstance(data, dict):
         return candidates
-    for key in ("newVariables", "updateVarResult"):
-        value = data.get(key)
-        if isinstance(value, dict):
-            candidates.append((key, value))
+    for key in ("newVariables", "updateVarResult", "variableUpdate"):
+        normalized = _coerce_variable_bucket(data.get(key))
+        if normalized:
+            candidates.append((key, normalized))
     response_data = data.get("responseData")
     if isinstance(response_data, dict):
         for key in ("variableUpdate", "newVariables", "updateVarResult"):
+            normalized = _coerce_variable_bucket(response_data.get(key))
+            if normalized:
+                candidates.append((f"responseData.{key}", normalized))
+        for key in ("output", "outputs"):
             value = response_data.get(key)
             if isinstance(value, dict):
                 candidates.append((f"responseData.{key}", value))
+    elif isinstance(response_data, list):
+        for index, item in enumerate(response_data):
+            if not isinstance(item, dict):
+                continue
+            for key in ("variableUpdate", "newVariables", "updateVarResult"):
+                normalized = _coerce_variable_bucket(item.get(key))
+                if normalized:
+                    candidates.append((f"responseData[{index}].{key}", normalized))
+            if isinstance(item.get("output"), dict):
+                candidates.append((f"responseData[{index}].output", item["output"]))
+            if isinstance(item.get("outputs"), dict):
+                candidates.append((f"responseData[{index}].outputs", item["outputs"]))
     return candidates
+
+
+def _iter_choice_text_candidates(data: dict[str, Any]) -> list[tuple[str, Any]]:
+    candidates: list[tuple[str, Any]] = []
+    choices = data.get("choices")
+    if not isinstance(choices, list):
+        return candidates
+    for index, choice in enumerate(choices):
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message")
+        if isinstance(message, dict):
+            content = _message_content_to_text(message.get("content"))
+            if content:
+                candidates.append((f"choices[{index}].message.content", content))
+    return candidates
+
+
+def _iter_named_text_candidates(
+    prefix: str,
+    data: dict[str, Any],
+    *,
+    _depth: int = 0,
+) -> list[tuple[str, Any]]:
+    candidates: list[tuple[str, Any]] = []
+    for key in ("answerText", "textOutput", *TOOL_RESPONSE_TEXT_KEYS):
+        value = data.get(key)
+        if value not in (None, "", [], {}):
+            candidates.append((f"{prefix}.{key}", value))
+    for key in ("output", "outputs"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            candidates.extend(_iter_named_text_candidates(f"{prefix}.{key}", value, _depth=_depth + 1))
+    if _depth >= 2:
+        return candidates
+    for key, value in data.items():
+        if key in {
+            "choices",
+            "message",
+            "content",
+            "usage",
+            "model",
+            "id",
+            "responseData",
+            "newVariables",
+            "updateVarResult",
+            "variableUpdate",
+            "toolCall",
+            "pluginOutput",
+        }:
+            continue
+        if isinstance(value, dict):
+            candidates.extend(_iter_named_text_candidates(f"{prefix}.{key}", value, _depth=_depth + 1))
+    return candidates
+
+
+def _coerce_variable_bucket(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, list):
+        return None
+    normalized: dict[str, Any] = {}
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        key = item.get("key")
+        if not isinstance(key, str) or not key.strip():
+            variable = item.get("variable")
+            if isinstance(variable, list) and len(variable) >= 2 and str(variable[1] or "").strip():
+                key = str(variable[1]).strip()
+            elif isinstance(variable, str) and variable.strip():
+                key = variable.strip()
+        if not isinstance(key, str) or not key.strip():
+            continue
+        if "value" in item:
+            normalized[key.strip()] = item.get("value")
+    return normalized or None
 
 
 def _message_content_to_text(content: Any) -> str:

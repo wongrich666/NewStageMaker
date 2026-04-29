@@ -4629,6 +4629,11 @@ class TaskManager:
                         }
                     }
         if block_key == "scene_setting":
+            if isinstance(value, dict) and isinstance(value.get("scenes"), dict) and isinstance(
+                value["scenes"].get("scene_setting"),
+                dict,
+            ):
+                return {"scene_setting": value["scenes"]["scene_setting"]}
             if isinstance(value, dict) and isinstance(value.get("scenes"), list):
                 return {
                     "scene_setting": {

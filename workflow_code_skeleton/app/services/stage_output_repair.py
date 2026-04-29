@@ -984,7 +984,12 @@ def _canonicalize_scenes_body(
 ) -> dict[str, Any] | None:
     normalized = _deep_normalize_candidate(body)
     setting: dict[str, Any]
-    if isinstance(normalized, dict) and isinstance(normalized.get("scene_setting"), dict):
+    if isinstance(normalized, dict) and isinstance(normalized.get("scenes"), dict) and isinstance(
+        normalized["scenes"].get("scene_setting"),
+        dict,
+    ):
+        setting = dict(normalized["scenes"]["scene_setting"])
+    elif isinstance(normalized, dict) and isinstance(normalized.get("scene_setting"), dict):
         setting = dict(normalized["scene_setting"])
     elif isinstance(normalized, dict) and _looks_like_scene_setting_dict(normalized):
         setting = dict(normalized)
@@ -2853,6 +2858,11 @@ def _looks_like_character_body(value: Any) -> bool:
 
 
 def _looks_like_scenes_body(value: Any) -> bool:
+    if isinstance(value, dict) and isinstance(value.get("scenes"), dict) and isinstance(
+        value["scenes"].get("scene_setting"),
+        dict,
+    ):
+        return True
     if isinstance(value, dict) and isinstance(value.get("scene_setting"), dict):
         return True
     if isinstance(value, dict) and _looks_like_scene_setting_dict(value):
@@ -2988,7 +2998,10 @@ def _describe_characters_body_issue(data: dict[str, Any]) -> str | None:
 
 
 def _describe_scenes_body_issue(data: dict[str, Any]) -> str | None:
-    setting = data.get("scene_setting")
+    if isinstance(data.get("scenes"), dict) and isinstance(data["scenes"].get("scene_setting"), dict):
+        setting = data["scenes"]["scene_setting"]
+    else:
+        setting = data.get("scene_setting")
     if not isinstance(setting, dict):
         return "scene_setting 必须是 object"
     scenes = setting.get("scenes")

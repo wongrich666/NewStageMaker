@@ -7,32 +7,63 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>登录 - 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260429-01">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260429-02">
 </head>
-<body class="auth-page mono-page">
-  <div class="bg-orb orb-a"></div>
-  <div class="bg-orb orb-b"></div>
-  <main class="auth-shell">
-    <a class="page-back-link auth-back-link" href="{{ url_for('index') }}">返回首页</a>
-    <section class="auth-card">
-      <p class="eyebrow">Welcome Back</p>
-      <h1>登录工作台</h1>
-      <p class="muted">登录后会恢复你账户下的草稿和生成结果。</p>
-      {% if error %}
-        <div class="auth-error">{{ error }}</div>
-      {% endif %}
-      <form method="post" class="auth-form">
-        <label class="field">
-          <span>用户名</span>
-          <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" required>
-        </label>
-        <label class="field">
-          <span>密码</span>
-          <input name="password" type="password" autocomplete="current-password" required>
-        </label>
-        <button class="btn btn-primary" type="submit">登录</button>
-      </form>
-      <p class="auth-switch">还没有账号？<a href="{{ url_for('register_page') }}">注册一个</a></p>
+<body class="workspace-body mono-page">
+  <main class="chat-workspace-shell prelogin-shell auth-workspace-shell">
+    <aside class="workspace-sidebar prelogin-sidebar">
+      <div class="sidebar-top">
+        <div class="sidebar-brand-row">
+          <a class="sidebar-brand" href="{{ url_for('index') }}">
+            <span class="sidebar-brand-mark">I</span>
+            <span class="sidebar-brand-text">
+              <strong>idea to script</strong>
+              <em>剧本平台</em>
+            </span>
+          </a>
+        </div>
+      </div>
+      <div class="sidebar-nav">
+        <section class="sidebar-group">
+          <div class="sidebar-group-label">登录后可用</div>
+          <div class="prelogin-note-list">
+            <p>新建剧本、继续生成、辅助工具和个人中心都需要先登录。</p>
+            <p>登录后会自动恢复你账户下的草稿、生成进度和公开资产设置。</p>
+          </div>
+        </section>
+      </div>
+      <div class="sidebar-footer">
+        <div class="sidebar-footer-links">
+          <a class="sidebar-profile-btn" href="{{ url_for('register_page') }}">
+            <span class="sidebar-profile-avatar">注</span>
+            <span class="sidebar-footer-text">没有账号？去注册</span>
+          </a>
+          <a class="sidebar-logout-link" href="{{ url_for('index') }}">返回首页</a>
+        </div>
+      </div>
+    </aside>
+
+    <section class="chat-main prelogin-main prelogin-auth-wrap">
+      <section class="card prelogin-auth-card auth-card">
+        <p class="eyebrow">Welcome Back</p>
+        <h1>登录工作台</h1>
+        <p class="muted">登录后会恢复你账户下的草稿和生成结果。</p>
+        {% if error %}
+          <div class="auth-error">{{ error }}</div>
+        {% endif %}
+        <form method="post" class="auth-form">
+          <label class="field">
+            <span>用户名</span>
+            <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" required>
+          </label>
+          <label class="field">
+            <span>密码</span>
+            <input name="password" type="password" autocomplete="current-password" required>
+          </label>
+          <button class="btn btn-primary" type="submit">登录</button>
+        </form>
+        <p class="auth-switch">还没有账号？<a href="{{ url_for('register_page') }}">注册一个</a></p>
+      </section>
     </section>
   </main>
 </body>

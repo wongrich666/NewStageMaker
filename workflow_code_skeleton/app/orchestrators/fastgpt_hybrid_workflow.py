@@ -7316,7 +7316,13 @@ def _extract_scene_appearance_requirements(value: Any) -> dict[str, Any]:
             return {}
     if not isinstance(candidate, dict):
         return {}
-    setting = candidate.get("scene_setting") if isinstance(candidate.get("scene_setting"), dict) else candidate
+    if isinstance(candidate.get("scenes"), dict) and isinstance(
+        candidate["scenes"].get("scene_setting"),
+        dict,
+    ):
+        setting = candidate["scenes"]["scene_setting"]
+    else:
+        setting = candidate.get("scene_setting") if isinstance(candidate.get("scene_setting"), dict) else candidate
     scenes = setting.get("scenes")
     if not isinstance(scenes, list):
         return {}

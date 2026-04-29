@@ -40,6 +40,19 @@ class SimpleFastGPTToolsTests(unittest.TestCase):
         self.assertIn("a1LYQ4vP", tool_map["punchup"]["input_variables"])
         self.assertIn("n5ZHYrj8", tool_map["character_reskin"]["input_variables"])
 
+    def test_list_simple_tools_marks_dedicated_api_key_as_configured(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "FASTGPT_PUNCHUP_API_KEY": "dedicated-key",
+            },
+            clear=False,
+        ):
+            tool_map = {item["tool_id"]: item for item in tools.list_simple_tools()}
+
+        self.assertTrue(tool_map["punchup"]["configured"])
+        self.assertEqual(tool_map["punchup"]["configured_api_key_env"], "FASTGPT_PUNCHUP_API_KEY")
+
     def test_run_simple_tool_returns_answernode_content_for_user(self) -> None:
         captured: dict[str, object] = {}
 
@@ -79,6 +92,44 @@ class SimpleFastGPTToolsTests(unittest.TestCase):
         self.assertEqual(captured["headers"]["Authorization"], "Bearer tool-key")
         self.assertEqual(captured["body"]["messages"][0]["content"], "测试正文")
         self.assertEqual(result["debug"]["chosen_output_source"], "choices[0].message.content")
+
+    def test_run_simple_tool_extracts_structured_output_from_list_form_variable_updates(self) -> None:
+        resolved = tools._resolved_tool("character_reskin")
+        payload = {field_name: f"{field_name} 输入" for field_name in resolved.required_fields}
+        payload["n5ZHYrj8"] = "原始角色设定"
+        output_variable = resolved.updated_variables[0]
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json, timeout
+            return _FakeResponse(
+                payload={
+                    "responseData": {
+                        "updateVarResult": [
+                            {
+                                "variable": ["VARIABLE_NODE_ID", output_variable],
+                                "value": "改写后的人设完整结果",
+                            }
+                        ]
+                    }
+                }
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                "FASTGPT_CHARACTER_RESKIN_API_KEY": "tool-key",
+            },
+            clear=False,
+        ):
+            with patch.object(tools.requests, "post", side_effect=_fake_post):
+                result = tools.run_simple_tool("character_reskin", payload)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["output"], "改写后的人设完整结果")
+        self.assertEqual(
+            result["debug"]["chosen_output_source"],
+            f"responseData.updateVarResult.{output_variable}",
+        )
 
     def test_run_simple_tool_reports_missing_required_fields(self) -> None:
         with self.assertRaisesRegex(tools.ToolExecutionError, "缺少必填项"):

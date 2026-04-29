@@ -198,6 +198,15 @@ def _framework_payload(*, title_key: str = "script_title") -> dict[str, object]:
     }
 
 
+def _scene_setting_from_output(output_text: str) -> dict[str, object]:
+    parsed = json.loads(output_text)
+    if isinstance(parsed, dict) and isinstance(parsed.get("scenes"), dict):
+        wrapped = parsed["scenes"]
+        if isinstance(wrapped.get("scene_setting"), dict):
+            return wrapped["scene_setting"]
+    return parsed["scene_setting"]
+
+
 def _appearance_review_json(
     *,
     passed: bool,
@@ -777,29 +786,28 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
 
         output = client.run_stage(STAGE_SCENES, _input_variables())
 
-        parsed = json.loads(output["scenes"])
-        self.assertEqual(parsed["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
+        setting = _scene_setting_from_output(output["scenes"])
+        self.assertEqual(setting["scenes"][0]["scene_name"], "玻璃会议室")
         self.assertFalse(client.get_last_stage_debug_info(STAGE_SCENES).get("request_detail"))
 
     def test_scenes_stage_accepts_top_level_scenes_wrapper(self) -> None:
         response = {
-            "responseData": {
-                "updateVarResult": [
-                    {
-                        "key": "scenes",
-                        "value": {
-                            "scene_setting": _scene_setting_json()["scene_setting"],
-                        },
+            "answerText": json.dumps(
+                {
+                    "scenes": {
+                        "scene_setting": _scene_setting_json()["scene_setting"],
                     }
-                ]
-            }
+                },
+                ensure_ascii=False,
+            )
         }
         client = _QueuedFastGPTClient([response])
 
         output = client.run_stage(STAGE_SCENES, _input_variables())
 
         parsed = json.loads(output["scenes"])
-        self.assertEqual(parsed["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
+        self.assertIn("scenes", parsed)
+        self.assertEqual(parsed["scenes"]["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
 
     def test_scenes_stage_accepts_legacy_scene_setting_object_wrapper(self) -> None:
         response = {
@@ -811,11 +819,11 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
 
         output = client.run_stage(STAGE_SCENES, _input_variables())
 
-        parsed = json.loads(output["scenes"])
-        self.assertGreaterEqual(len(parsed["scene_setting"]["scenes"]), 3)
+        setting = _scene_setting_from_output(output["scenes"])
+        self.assertGreaterEqual(len(setting["scenes"]), 3)
         self.assertIn(
             "玻璃会议室",
-            [item["scene_name"] for item in parsed["scene_setting"]["scenes"]],
+            [item["scene_name"] for item in setting["scenes"]],
         )
 
     def test_scenes_stage_captures_natural_language_auxiliary_output(self) -> None:
@@ -859,8 +867,8 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
 
         output = client.run_stage(STAGE_SCENES, _input_variables())
 
-        parsed = json.loads(output["scenes"])
-        self.assertEqual(parsed["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
+        setting = _scene_setting_from_output(output["scenes"])
+        self.assertEqual(setting["scenes"][0]["scene_name"], "玻璃会议室")
         self.assertEqual(output[SCENE_NATURAL_LANGUAGE_VAR], "核心场景自然语言版")
 
     def test_scenes_stage_reads_natural_language_alias_from_choices_content(self) -> None:
