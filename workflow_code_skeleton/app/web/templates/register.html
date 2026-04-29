@@ -7,66 +7,202 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>注册 - 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260429-02">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260429-03">
 </head>
-<body class="workspace-body mono-page">
-  <main class="chat-workspace-shell prelogin-shell auth-workspace-shell">
-    <aside class="workspace-sidebar prelogin-sidebar">
+<body class="workspace-body mono-page auth-page">
+  <main class="chat-workspace-shell prelogin-shell">
+    <aside id="workspaceCard" class="workspace-sidebar prelogin-sidebar">
       <div class="sidebar-top">
         <div class="sidebar-brand-row">
+          <button class="sidebar-toggle" type="button" aria-label="折叠侧边栏">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
           <a class="sidebar-brand" href="{{ url_for('index') }}">
             <span class="sidebar-brand-mark">I</span>
             <span class="sidebar-brand-text">
-              <strong>idea to script</strong>
+              <strong>IDEA TO SCRIPT</strong>
               <em>剧本平台</em>
             </span>
           </a>
         </div>
       </div>
+
+      <div class="sidebar-primary">
+        <a class="sidebar-create-btn" href="{{ url_for('register_page') }}">＋ 新建剧本</a>
+      </div>
+
       <div class="sidebar-nav">
         <section class="sidebar-group">
-          <div class="sidebar-group-label">创建账户后可用</div>
-          <div class="prelogin-note-list">
-            <p>同一账号可以并行开启多个剧本项目。</p>
-            <p>正文会按 5 集一批写作和审核，失败后支持继续生成与阶段回退。</p>
+          <div class="sidebar-group-label">我的剧本</div>
+          <div class="sidebar-section-head sidebar-section-head-compact">
+            <span>资产会话</span>
+            <a class="sidebar-refresh-btn prelogin-inline-link" href="{{ url_for('register_page') }}">刷新</a>
+          </div>
+          <div class="sidebar-folders">
+            <details class="workspace-folder" open>
+              <summary>
+                <span>生成中的剧本</span>
+              </summary>
+              <div class="workspace-compact-list">
+                <div class="workspace-empty">注册后查看正在生成的剧本。</div>
+              </div>
+            </details>
+            <details class="workspace-folder">
+              <summary>
+                <span>已完成剧本</span>
+              </summary>
+              <div class="workspace-compact-list">
+                <div class="workspace-empty">注册后查看已完成成品。</div>
+              </div>
+            </details>
           </div>
         </section>
+
+        <section class="sidebar-group sidebar-tools-section">
+          <details class="workspace-folder tools-folder" open>
+            <summary>
+              <span class="sidebar-folder-link">辅助工具</span>
+            </summary>
+            <div class="tool-shortcut-list">
+              <a class="tool-shortcut" href="{{ url_for('register_page') }}">
+                <span>爆款文审核</span>
+                <small>注册后可运行</small>
+              </a>
+              <a class="tool-shortcut" href="{{ url_for('register_page') }}">
+                <span>换皮</span>
+                <small>注册后可运行</small>
+              </a>
+              <a class="tool-shortcut" href="{{ url_for('register_page') }}">
+                <span>增加爽感</span>
+                <small>注册后可运行</small>
+              </a>
+              <a class="tool-shortcut" href="{{ url_for('register_page') }}">
+                <span>只换人设</span>
+                <small>注册后可运行</small>
+              </a>
+            </div>
+          </details>
+        </section>
+
+        <div class="sidebar-group sidebar-links">
+          <a class="sidebar-text-link" href="{{ url_for('index') }}#community">社区好剧</a>
+        </div>
       </div>
+
       <div class="sidebar-footer">
         <div class="sidebar-footer-links">
-          <a class="sidebar-profile-btn" href="{{ url_for('login_page') }}">
-            <span class="sidebar-profile-avatar">登</span>
-            <span class="sidebar-footer-text">已有账号？去登录</span>
+          <a class="sidebar-profile-btn" href="{{ url_for('register_page') }}">
+            <span class="sidebar-profile-avatar">注</span>
+            <span class="sidebar-footer-text">注册账号</span>
           </a>
-          <a class="sidebar-logout-link" href="{{ url_for('index') }}">返回首页</a>
+          <a class="sidebar-logout-link" href="{{ url_for('login_page') }}">已有账号？登录</a>
         </div>
       </div>
     </aside>
 
-    <section class="chat-main prelogin-main prelogin-auth-wrap">
-      <section class="card prelogin-auth-card auth-card">
-        <p class="eyebrow">Create Account</p>
-        <h1>注册账号</h1>
-        <p class="muted">用户名不能重复，密码会加密保存。</p>
-        {% if error %}
-          <div class="auth-error">{{ error }}</div>
-        {% endif %}
-        <form method="post" class="auth-form">
-          <label class="field">
-            <span>用户名</span>
-            <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" required>
-          </label>
-          <label class="field">
-            <span>密码</span>
-            <input name="password" type="password" autocomplete="new-password" minlength="6" required>
-          </label>
-          <label class="field">
-            <span>确认密码</span>
-            <input name="confirm_password" type="password" autocomplete="new-password" minlength="6" required>
-          </label>
-          <button class="btn btn-primary" type="submit">注册并进入</button>
-        </form>
-        <p class="auth-switch">已有账号？<a href="{{ url_for('login_page') }}">去登录</a></p>
+    <section class="chat-main prelogin-main-shell">
+      <header class="workspace-runtime runtime">
+        <div class="progress-bar progress-bar-fixed runtime-progress-top">
+          <div class="progress-fill" style="width: 0%;"></div>
+        </div>
+        <div class="runtime-strip">
+          <div class="runtime-brandline">
+            <span class="runtime-app-label">IDEA TO SCRIPT 剧本平台</span>
+            <strong>当前剧本：未选中</strong>
+          </div>
+          <div class="runtime-meta-strip">
+            <div class="runtime-pill">
+              <span class="runtime-kicker">状态</span>
+              <strong>待注册</strong>
+            </div>
+            <div class="runtime-pill">
+              <span class="runtime-kicker">阶段</span>
+              <strong>待开始</strong>
+            </div>
+            <div class="runtime-pill">
+              <span class="runtime-kicker">等待</span>
+              <strong>00:00</strong>
+            </div>
+          </div>
+        </div>
+        <div class="runtime-foot">
+          <span>0%</span>
+          <span>任务：注册后开始</span>
+        </div>
+      </header>
+
+      <section class="chat-view prelogin-chat-view">
+        <div class="chat-transcript prelogin-transcript">
+          <section class="chat-empty-state prelogin-chat-empty">
+            <strong>剧本创作需求请写在这里~</strong>
+            <p>直接输入你的创作需求，平台会把剧本框架和剧本正文按对话流展示，中间过程统一显示创作状态。</p>
+            <div class="chat-empty-tools">
+              <a class="chat-suggestion-btn" href="{{ url_for('register_page') }}">爆款文审核</a>
+              <a class="chat-suggestion-btn" href="{{ url_for('register_page') }}">换皮</a>
+              <a class="chat-suggestion-btn" href="{{ url_for('register_page') }}">增加爽感</a>
+              <a class="chat-suggestion-btn" href="{{ url_for('register_page') }}">只换人设</a>
+            </div>
+          </section>
+        </div>
+
+        <div class="prelogin-auth-overlay">
+          <section class="card auth-card prelogin-inline-auth">
+            <p class="eyebrow">Create Account</p>
+            <h2>注册账号</h2>
+            {% if error %}
+              <div class="auth-error">{{ error }}</div>
+            {% endif %}
+            <form method="post" class="auth-form">
+              <label class="field">
+                <span>用户名</span>
+                <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" required>
+              </label>
+              <label class="field">
+                <span>密码</span>
+                <input name="password" type="password" autocomplete="new-password" minlength="6" required>
+              </label>
+              <label class="field">
+                <span>确认密码</span>
+                <input name="confirm_password" type="password" autocomplete="new-password" minlength="6" required>
+              </label>
+              <button class="btn btn-primary" type="submit">注册并进入</button>
+            </form>
+            <p class="auth-switch">已有账号？<a href="{{ url_for('login_page') }}">去登录</a></p>
+          </section>
+        </div>
+      </section>
+
+      <section class="composer-card prelogin-composer-card">
+        <div class="chat-composer-shell">
+          <div class="chat-composer-plus">＋</div>
+          <div class="chat-composer-main">
+            <label class="composer-field composer-field-wide">
+              <span class="visually-hidden">想要的剧本</span>
+              <textarea placeholder="剧本创作需求请写在这里~" readonly></textarea>
+            </label>
+            <div class="composer-grid composer-grid-inline composer-grid-toolbar">
+              <label class="composer-field composer-field-mini">
+                <span>角色</span>
+                <input type="number" min="1" max="50" value="15" readonly>
+              </label>
+              <label class="composer-field composer-field-mini">
+                <span>集数</span>
+                <input type="number" min="1" max="100" value="15" readonly>
+              </label>
+              <div class="composer-inline-tools">
+                <a class="btn btn-secondary composer-action-link" href="{{ url_for('register_page') }}">暂停生成</a>
+                <a class="btn btn-secondary composer-action-link" href="{{ url_for('register_page') }}">继续生成</a>
+                <a class="btn btn-danger composer-action-link" href="{{ url_for('register_page') }}">终止生成</a>
+                <a class="btn btn-secondary composer-action-link" href="{{ url_for('register_page') }}">下载成品</a>
+                <a class="btn btn-ghost composer-action-link" href="{{ url_for('register_page') }}">清空输入</a>
+              </div>
+            </div>
+          </div>
+          <a class="composer-send-btn prelogin-send-link" href="{{ url_for('register_page') }}">开始</a>
+        </div>
+        <p class="composer-hint prelogin-status-note">注册后即可开始生成、查看进度、运行辅助工具。</p>
       </section>
     </section>
   </main>

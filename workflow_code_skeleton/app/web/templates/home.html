@@ -7,13 +7,18 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>剧本生成平台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260429-02">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260429-03">
 </head>
 <body class="workspace-body mono-page">
   <main class="chat-workspace-shell prelogin-shell">
-    <aside class="workspace-sidebar prelogin-sidebar">
+    <aside id="workspaceCard" class="workspace-sidebar prelogin-sidebar">
       <div class="sidebar-top">
         <div class="sidebar-brand-row">
+          <button class="sidebar-toggle" type="button" aria-label="折叠侧边栏">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
           <a class="sidebar-brand" href="{{ url_for('index', auth_token=current_auth_token) }}">
             <span class="sidebar-brand-mark">I</span>
             <span class="sidebar-brand-text">
@@ -24,33 +29,66 @@
         </div>
       </div>
 
+      <div class="sidebar-primary">
+        <a class="sidebar-create-btn" href="{{ url_for('workspace_page', auth_token=current_auth_token, mode='new') if current_user else url_for('login_page') }}">＋ 新建剧本</a>
+      </div>
+
       <div class="sidebar-nav">
         <section class="sidebar-group">
-          <div class="sidebar-group-label">开始创作</div>
-          <div class="prelogin-shortcuts">
-            <a class="tool-shortcut" href="{{ url_for('workspace_page', auth_token=current_auth_token, mode='new') if current_user else url_for('login_page') }}">
-              <span>新建剧本</span>
-              <small>登录后开启工作流</small>
-            </a>
-            <a class="tool-shortcut" href="{{ url_for('workspace_page', auth_token=current_auth_token, section='tools') if current_user else url_for('login_page') }}">
-              <span>辅助工具</span>
-              <small>审核、换皮、增爽、只换人设</small>
-            </a>
-            <a class="tool-shortcut" href="#community">
-              <span>社区好剧</span>
-              <small>查看公开成品</small>
-            </a>
+          <div class="sidebar-group-label">我的剧本</div>
+          <div class="sidebar-section-head sidebar-section-head-compact">
+            <span>资产会话</span>
+            <a class="sidebar-refresh-btn prelogin-inline-link" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token) }}">刷新</a>
+          </div>
+          <div class="sidebar-folders">
+            <details class="workspace-folder" open>
+              <summary>
+                <span>生成中的剧本</span>
+              </summary>
+              <div class="workspace-compact-list">
+                <div class="workspace-empty">登录后查看正在生成的剧本。</div>
+              </div>
+            </details>
+            <details class="workspace-folder">
+              <summary>
+                <span>已完成剧本</span>
+              </summary>
+              <div class="workspace-compact-list">
+                <div class="workspace-empty">登录后查看已完成成品。</div>
+              </div>
+            </details>
           </div>
         </section>
 
-        <section class="sidebar-group">
-          <div class="sidebar-group-label">功能说明</div>
-          <div class="prelogin-note-list">
-            <p>框架、世界观和正文会分阶段生成。</p>
-            <p>登录后支持多任务并行、暂停继续、阶段回退和结果下载。</p>
-            <p>辅助工具会按对应 workflow JSON 自动生成表单与输出展示。</p>
-          </div>
+        <section class="sidebar-group sidebar-tools-section">
+          <details class="workspace-folder tools-folder" open>
+            <summary>
+              <span class="sidebar-folder-link">辅助工具</span>
+            </summary>
+            <div class="tool-shortcut-list">
+              <a class="tool-shortcut" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">
+                <span>爆款文审核</span>
+                <small>登录后可运行</small>
+              </a>
+              <a class="tool-shortcut" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">
+                <span>换皮</span>
+                <small>登录后可运行</small>
+              </a>
+              <a class="tool-shortcut" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">
+                <span>增加爽感</span>
+                <small>登录后可运行</small>
+              </a>
+              <a class="tool-shortcut" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">
+                <span>只换人设</span>
+                <small>登录后可运行</small>
+              </a>
+            </div>
+          </details>
         </section>
+
+        <div class="sidebar-group sidebar-links">
+          <a class="sidebar-text-link" href="{{ url_for('index', auth_token=current_auth_token) }}#community">社区好剧</a>
+        </div>
       </div>
 
       <div class="sidebar-footer">
@@ -64,7 +102,7 @@
           {% else %}
             <a class="sidebar-profile-btn" href="{{ url_for('login_page') }}">
               <span class="sidebar-profile-avatar">登</span>
-              <span class="sidebar-footer-text">登录后创作</span>
+              <span class="sidebar-footer-text">登录创作</span>
             </a>
             <a class="sidebar-logout-link" href="{{ url_for('register_page') }}">注册账号</a>
           {% endif %}
@@ -72,77 +110,81 @@
       </div>
     </aside>
 
-    <section class="chat-main prelogin-main">
-      <header class="workspace-runtime runtime prelogin-runtime">
-        <div class="runtime-copy">
+    <section class="chat-main prelogin-main-shell">
+      <header class="workspace-runtime runtime">
+        <div class="progress-bar progress-bar-fixed runtime-progress-top">
+          <div class="progress-fill" style="width: 0%;"></div>
+        </div>
+        <div class="runtime-strip">
           <div class="runtime-brandline">
-            <span class="runtime-kicker">Studio</span>
-            <strong>登录后即可开始完整剧本生成</strong>
+            <span class="runtime-app-label">IDEA TO SCRIPT 剧本平台</span>
+            <strong>当前剧本：未选中</strong>
           </div>
-          <p class="runtime-note">未登录状态下可以浏览说明和社区作品，真正的新建、继续生成、辅助工具与个人中心操作都会跳转登录。</p>
+          <div class="runtime-meta-strip">
+            <div class="runtime-pill">
+              <span class="runtime-kicker">状态</span>
+              <strong>待开始</strong>
+            </div>
+            <div class="runtime-pill">
+              <span class="runtime-kicker">阶段</span>
+              <strong>待开始</strong>
+            </div>
+            <div class="runtime-pill">
+              <span class="runtime-kicker">等待</span>
+              <strong>00:00</strong>
+            </div>
+          </div>
+        </div>
+        <div class="runtime-foot">
+          <span>0%</span>
+          <span>任务：未选中</span>
         </div>
       </header>
 
-      <section class="card prelogin-hero-card">
-        <div class="prelogin-hero-copy">
-          <p class="eyebrow">AI Script Studio</p>
-          <h1>从一句想法，到完整短剧</h1>
-          <p>
-            NewStageMaker 会先生成自然语言版剧本框架，再生成自然语言版世界观，随后按 5 集一批持续产出并审核剧本正文。
-            登录后你可以随时离开页面，回来继续查看进度、重试失败节点和下载成品。
-          </p>
-          <div class="prelogin-hero-actions">
-            <a class="btn btn-primary" href="{{ url_for('workspace_page', auth_token=current_auth_token, mode='new') if current_user else url_for('login_page') }}">开始生成</a>
-            <a class="btn btn-secondary" href="{{ url_for('workspace_page', auth_token=current_auth_token, section='tools') if current_user else url_for('login_page') }}">打开辅助工具</a>
-          </div>
-        </div>
-      </section>
-
-      <section class="prelogin-card-grid">
-        <article class="card guide-card compact-guide">
-          <span>1</span>
-          <h3>一句话创作剧本</h3>
-          <p>只需要填写想法、角色数量和总集数，系统会自动完成前置规划与正文批处理。</p>
-        </article>
-        <article class="card guide-card compact-guide">
-          <span>2</span>
-          <h3>多任务并行</h3>
-          <p>同一账号可以同时开启多个项目，工作流在后台继续运行。</p>
-        </article>
-        <article class="card guide-card compact-guide">
-          <span>3</span>
-          <h3>批次可见正文</h3>
-          <p>正文每 5 集通过审核后就会立即展示，最终阶段再统一拼接成完整成品。</p>
-        </article>
-      </section>
-
-      <section id="community" class="card community-card home-community-card">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Community Picks</p>
-            <h2>社区共享好剧</h2>
-            <p>这里只展示完整作者公开的作品。</p>
-          </div>
-        </div>
-        <div class="community-grid">
-          {% if community_assets %}
-            {% for item in community_assets %}
-              <article class="community-tile">
-                <span class="community-tag status-pill-public">公开成品</span>
-                <h3>{{ item.title }}</h3>
-                <p>{{ item.summary }}</p>
-                <div class="community-actions">
-                  <a class="btn btn-secondary" href="{{ url_for('community_detail_page', project_id=item.project_id, auth_token=current_auth_token) }}">查看全文</a>
-                </div>
-              </article>
-            {% endfor %}
-          {% else %}
-            <div class="empty-card">
-              <strong>社区里暂时还没有公开作品</strong>
-              <p>当用户把成品设置为公开后，会展示在这里。</p>
+      <section class="chat-view prelogin-chat-view">
+        <div class="chat-transcript prelogin-transcript">
+          <section class="chat-empty-state prelogin-chat-empty">
+            <strong>剧本创作需求请写在这里~</strong>
+            <p>直接输入你的创作需求，平台会把剧本框架和剧本正文按对话流展示，中间过程统一显示创作状态。</p>
+            <div class="chat-empty-tools">
+              <a class="chat-suggestion-btn" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">爆款文审核</a>
+              <a class="chat-suggestion-btn" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">换皮</a>
+              <a class="chat-suggestion-btn" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">增加爽感</a>
+              <a class="chat-suggestion-btn" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">只换人设</a>
             </div>
-          {% endif %}
+          </section>
         </div>
+      </section>
+
+      <section class="composer-card prelogin-composer-card">
+        <div class="chat-composer-shell">
+          <div class="chat-composer-plus">＋</div>
+          <div class="chat-composer-main">
+            <label class="composer-field composer-field-wide">
+              <span class="visually-hidden">想要的剧本</span>
+              <textarea placeholder="剧本创作需求请写在这里~" readonly></textarea>
+            </label>
+            <div class="composer-grid composer-grid-inline composer-grid-toolbar">
+              <label class="composer-field composer-field-mini">
+                <span>角色</span>
+                <input type="number" min="1" max="50" value="15" readonly>
+              </label>
+              <label class="composer-field composer-field-mini">
+                <span>集数</span>
+                <input type="number" min="1" max="100" value="15" readonly>
+              </label>
+              <div class="composer-inline-tools">
+                <a class="btn btn-secondary composer-action-link" href="{{ url_for('login_page') }}">暂停生成</a>
+                <a class="btn btn-secondary composer-action-link" href="{{ url_for('login_page') }}">继续生成</a>
+                <a class="btn btn-danger composer-action-link" href="{{ url_for('login_page') }}">终止生成</a>
+                <a class="btn btn-secondary composer-action-link" href="{{ url_for('login_page') }}">下载成品</a>
+                <a class="btn btn-ghost composer-action-link" href="{{ url_for('login_page') }}">清空输入</a>
+              </div>
+            </div>
+          </div>
+          <a class="composer-send-btn prelogin-send-link" href="{{ url_for('workspace_page', auth_token=current_auth_token, mode='new') if current_user else url_for('login_page') }}">开始</a>
+        </div>
+        <p class="composer-hint prelogin-status-note">{% if current_user %}已登录，可直接进入工作台开始生成。{% else %}登录后即可开始生成、查看进度、运行辅助工具。{% endif %}</p>
       </section>
     </section>
   </main>

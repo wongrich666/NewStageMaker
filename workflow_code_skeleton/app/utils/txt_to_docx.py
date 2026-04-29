@@ -14,13 +14,17 @@ txt_to_docx.py
 
 import re
 import json
+import logging
 import sys
 from pathlib import Path
+from typing import Any
 from docx import Document
 from docx.shared import Pt, RGBColor, Inches, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────── 样式辅助 ───────────────────────────
@@ -85,6 +89,140 @@ def add_kv(doc: Document, key: str, value: str):
     clean_val = re.sub(r'\*\*(.+?)\*\*', r'\1', str(value))
     run_v = p.add_run(clean_val)
     run_v.font.size = Pt(10)
+
+
+def safe_get(obj: Any, key: str, default=None):
+    """仅在 dict 上安全读取字段。"""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return default
+
+
+def _json_fallback(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    except Exception:
+        return str(value)
+
+
+def normalize_list(value: Any, *, _depth: int = 0) -> list[str]:
+    """把任意值尽量转换成可读字符串列表。"""
+    if _depth > 5:
+        text = _json_fallback(value).strip()
+        return [text] if text else []
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, (int, float, bool)):
+        return [str(value)]
+    if isinstance(value, dict):
+        preferred_items: list[str] = []
+        for key in ("name", "value", "description", "text", "label", "title"):
+            text = normalize_text(safe_get(value, key), _depth=_depth + 1)
+            if text:
+                preferred_items.append(text)
+        if preferred_items:
+            return preferred_items
+        items: list[str] = []
+        for key, item in value.items():
+            if item in (None, "", [], {}):
+                continue
+            child_items = normalize_list(item, _depth=_depth + 1)
+            if not child_items:
+                child_text = normalize_text(item, _depth=_depth + 1)
+                if child_text:
+                    items.append(f"{key}：{child_text}")
+                continue
+            if len(child_items) == 1:
+                items.append(f"{key}：{child_items[0]}")
+            else:
+                items.append(f"{key}：")
+                items.extend(f"- {entry}" for entry in child_items)
+        return items or [item for item in [_json_fallback(value).strip()] if item]
+    if isinstance(value, (list, tuple, set)):
+        items: list[str] = []
+        for item in value:
+            child_items = normalize_list(item, _depth=_depth + 1)
+            if child_items:
+                items.extend(child_items)
+                continue
+            child_text = normalize_text(item, _depth=_depth + 1)
+            if child_text:
+                items.append(child_text)
+        return items
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def normalize_text(value: Any, *, _depth: int = 0) -> str:
+    """把任意值尽量转换成单段可读文本。"""
+    if _depth > 5:
+        return _json_fallback(value).strip()
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, (list, tuple, set, dict)):
+        items = normalize_list(value, _depth=_depth + 1)
+        if items:
+            return "\n".join(item for item in items if item)
+        return _json_fallback(value).strip()
+    return str(value).strip()
+
+
+def render_field(doc: Document, label: str, value: Any):
+    """按字段类型安全渲染键值、列表或复杂对象。"""
+    items = normalize_list(value)
+    text = normalize_text(value)
+    if not items and not text:
+        return
+    if len(items) <= 1:
+        add_kv(doc, label, items[0] if items else text)
+        return
+    add_para(doc, label, bold=True, size=10, indent=0.5)
+    for item in items:
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(1)
+        p.paragraph_format.space_after = Pt(1)
+        p.paragraph_format.left_indent = Cm(1.0)
+        run = p.add_run(f"• {item}")
+        run.font.size = Pt(10)
+
+
+def _extract_script_text(value: Any, *, _depth: int = 0) -> str:
+    """从任意正文载体中递归提取可读文本。"""
+    if _depth > 6:
+        return normalize_text(value)
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for key in (
+            "final_script",
+            "script",
+            "content",
+            "text",
+            "body",
+            "dialogue",
+            "dialogues",
+        ):
+            text = _extract_script_text(safe_get(value, key), _depth=_depth + 1)
+            if text:
+                return text
+        parts = [
+            _extract_script_text(item, _depth=_depth + 1)
+            for item in value.values()
+        ]
+        return "\n".join(part for part in parts if part).strip()
+    if isinstance(value, (list, tuple, set)):
+        parts = [_extract_script_text(item, _depth=_depth + 1) for item in value]
+        return "\n".join(part for part in parts if part).strip()
+    return normalize_text(value)
 
 
 # ─────────────────────────── 解析 txt ───────────────────────────
@@ -204,69 +342,124 @@ def parse_txt(filepath: str) -> dict:
 
 # ─────────────────────── 渲染人物小传 ───────────────────────────
 
-def render_character(doc: Document, char: dict):
+def render_character(doc: Document, char: Any):
     """渲染单个人物信息"""
-    name = char.get("character_name", "未知角色")
+    char_dict = char if isinstance(char, dict) else {}
+    name = normalize_text(
+        safe_get(char_dict, "character_name")
+        or safe_get(char_dict, "name")
+    )
+    if not name:
+        name = "角色信息" if not isinstance(char, dict) else "未知角色"
     add_heading(doc, f"👤 {name}", level=2)
+
+    if not isinstance(char, dict):
+        fallback_text = normalize_text(char)
+        render_field(doc, "人物信息", fallback_text or "未提供")
+        return
 
     simple_fields = {
         "故事角色": "story_role",
         "核心动机": "core_motivation",
+        "外在目标": "external_goal",
+        "内在需求": "inner_need",
+        "深层恐惧": "deep_fear",
+        "自我欺骗": "self_deception",
         "戏剧价值": "dramatic_value",
+        "背景": "background",
+        "动机": "motivation",
     }
     for label, key in simple_fields.items():
-        if key in char:
-            add_kv(doc, label, char[key])
+        render_field(doc, label, safe_get(char_dict, key))
 
     # 性格
-    personality = char.get("personality", {})
-    if personality:
-        add_para(doc, "性格特征", bold=True, size=10, indent=0.5)
-        traits = personality.get("traits", [])
-        if traits:
-            add_kv(doc, "特质", "、".join(traits) if isinstance(traits, list) else traits)
-        for k, label in [("surface_impression", "外在印象"), ("inner_contradiction", "内在矛盾")]:
-            if k in personality:
-                add_kv(doc, label, personality[k])
+    personality = safe_get(char_dict, "personality")
+    if personality not in (None, "", [], {}):
+        if isinstance(personality, dict):
+            add_para(doc, "性格特征", bold=True, size=10, indent=0.5)
+            render_field(doc, "特质", safe_get(personality, "traits"))
+            render_field(doc, "外在印象", safe_get(personality, "surface_impression"))
+            render_field(doc, "内在矛盾", safe_get(personality, "inner_contradiction"))
+            for key, value in personality.items():
+                if key in {"traits", "surface_impression", "inner_contradiction"}:
+                    continue
+                render_field(doc, key, value)
+        else:
+            render_field(doc, "性格特征", personality)
 
     # 家庭背景
-    family = char.get("family", {})
-    if family:
-        add_para(doc, "家庭背景", bold=True, size=10, indent=0.5)
-        for k, label in [("family_background", "家世"), ("upbringing", "成长经历"),
-                          ("key_family_influence", "关键影响")]:
-            if k in family:
-                add_kv(doc, label, family[k])
+    family = safe_get(char_dict, "family")
+    if family not in (None, "", [], {}):
+        if isinstance(family, dict):
+            add_para(doc, "家庭背景", bold=True, size=10, indent=0.5)
+            render_field(doc, "家世", safe_get(family, "family_background"))
+            render_field(doc, "成长经历", safe_get(family, "upbringing"))
+            render_field(doc, "关键影响", safe_get(family, "key_family_influence"))
+            for key, value in family.items():
+                if key in {"family_background", "upbringing", "key_family_influence"}:
+                    continue
+                render_field(doc, key, value)
+        else:
+            render_field(doc, "家庭背景", family)
 
     # 外貌
-    appearance = char.get("appearance", {})
-    if appearance:
-        add_para(doc, "外貌描述", bold=True, size=10, indent=0.5)
-        for k, label in [("overall_look", "整体形象"), ("external_impression_effect", "外貌效果")]:
-            if k in appearance:
-                add_kv(doc, label, appearance[k])
-        features = appearance.get("recognizable_features", [])
-        if features:
-            add_kv(doc, "标志性特征", "；".join(features) if isinstance(features, list) else features)
+    appearance = safe_get(char_dict, "appearance")
+    if appearance not in (None, "", [], {}):
+        if isinstance(appearance, dict):
+            add_para(doc, "外貌描述", bold=True, size=10, indent=0.5)
+            render_field(doc, "整体形象", safe_get(appearance, "overall_look"))
+            render_field(doc, "外貌效果", safe_get(appearance, "external_impression_effect"))
+            render_field(doc, "标志性特征", safe_get(appearance, "recognizable_features"))
+            for key, value in appearance.items():
+                if key in {"overall_look", "external_impression_effect", "recognizable_features"}:
+                    continue
+                render_field(doc, key, value)
+        else:
+            render_field(doc, "外貌描述", appearance)
 
     # 行为模式
-    behavior = char.get("behavior", {})
-    if behavior:
-        add_para(doc, "行为模式", bold=True, size=10, indent=0.5)
-        for k, label in [("emotional_response_pattern", "情感反应"), ("social_interaction_style", "社交风格")]:
-            if k in behavior:
-                add_kv(doc, label, behavior[k])
+    behavior = safe_get(char_dict, "behavior")
+    if behavior not in (None, "", [], {}):
+        if isinstance(behavior, dict):
+            add_para(doc, "行为模式", bold=True, size=10, indent=0.5)
+            render_field(doc, "情感反应", safe_get(behavior, "emotional_response_pattern"))
+            render_field(doc, "社交风格", safe_get(behavior, "social_interaction_style"))
+            for key, value in behavior.items():
+                if key in {"emotional_response_pattern", "social_interaction_style"}:
+                    continue
+                render_field(doc, key, value)
+        else:
+            render_field(doc, "行为模式", behavior)
+
+    for label, key in (
+        ("人物关系", "relationships"),
+        ("说话风格", "speech_profile"),
+        ("决策逻辑", "decision_logic"),
+        ("关系模式", "relation_modes"),
+        ("可演证据", "actable_evidence"),
+        ("成长弧线", "growth_arc"),
+        ("剧情功能", "plot_function"),
+    ):
+        render_field(doc, label, safe_get(char_dict, key))
 
 
 # ─────────────────────── 渲染核心场景 ───────────────────────────
 
-def render_scene(doc: Document, scene: dict):
+def render_scene(doc: Document, scene: Any):
     """渲染单个场景信息"""
-    name = scene.get("scene_name", "未知场景")
-    s_type = scene.get("scene_type", "")
+    scene_dict = scene if isinstance(scene, dict) else {}
+    name = normalize_text(
+        safe_get(scene_dict, "scene_name")
+        or safe_get(scene_dict, "name")
+    ) or ("场景说明" if not isinstance(scene, dict) else "未知场景")
+    s_type = normalize_text(safe_get(scene_dict, "scene_type"))
     add_heading(doc, f"🎬 {name}", level=2)
     if s_type:
         add_para(doc, s_type, italic=True, size=10, color="888888")
+
+    if not isinstance(scene, dict):
+        render_field(doc, "场景说明", scene)
+        return
 
     field_map = [
         ("story_function", "场景功能"),
@@ -276,31 +469,21 @@ def render_scene(doc: Document, scene: dict):
         ("worldview_support", "世界观支撑"),
     ]
     for key, label in field_map:
-        if key in scene:
-            add_kv(doc, label, scene[key])
+        render_field(doc, label, safe_get(scene_dict, key))
 
-    elements = scene.get("visual_elements", [])
-    if elements:
-        add_kv(doc, "视觉元素", "、".join(elements) if isinstance(elements, list) else elements)
-
-    conflicts = scene.get("conflict_potential", [])
-    if conflicts:
-        add_para(doc, "冲突潜力", bold=True, size=10, indent=0.5)
-        for c in (conflicts if isinstance(conflicts, list) else [conflicts]):
-            p = doc.add_paragraph(style='List Bullet')
-            p.paragraph_format.left_indent = Cm(1)
-            run = p.add_run(re.sub(r'\*\*(.+?)\*\*', r'\1', str(c)))
-            run.font.size = Pt(10)
+    render_field(doc, "视觉元素", safe_get(scene_dict, "visual_elements"))
+    render_field(doc, "冲突潜力", safe_get(scene_dict, "conflict_potential"))
 
 
 # ─────────────────────── 渲染剧本正文 ───────────────────────────
 
-def render_script(doc: Document, script_text: str):
+def render_script(doc: Document, script_text: Any):
     """渲染剧本正文"""
-    if not script_text.strip():
+    script_body = _extract_script_text(script_text)
+    if not script_body.strip():
         return
 
-    lines = script_text.splitlines()
+    lines = script_body.splitlines()
     for line in lines:
         stripped = line.strip()
         if not stripped:
@@ -411,39 +594,60 @@ def convert(input_path: str, output_path: str):
         label = block["label"]
         data = block["data"]
 
-        if "_parse_error" in data:
+        if isinstance(data, dict) and "_parse_error" in data:
             add_heading(doc, label or "数据块", level=1)
             add_para(doc, f"⚠️ JSON 解析失败：{data['_parse_error']}", color="CC0000")
             continue
 
         # 人物小传
-        if "character_setting" in data:
+        if isinstance(data, dict) and "character_setting" in data:
             add_heading(doc, "人物小传", level=1)
             cs = data["character_setting"]
-            if "character_design_principle" in cs:
-                add_kv(doc, "角色设计原则", cs["character_design_principle"])
-            if "core_relation_logic" in cs:
-                add_kv(doc, "核心关系逻辑", cs["core_relation_logic"])
+            render_field(doc, "角色设计原则", safe_get(cs, "character_design_principle") if isinstance(cs, dict) else None)
+            render_field(doc, "核心关系逻辑", safe_get(cs, "core_relation_logic") if isinstance(cs, dict) else None)
             doc.add_paragraph()
-            for char in cs.get("characters", []):
-                render_character(doc, char)
-                add_divider(doc)
+            characters = safe_get(cs, "characters", []) if isinstance(cs, dict) else cs
+            if isinstance(characters, list):
+                for char in characters:
+                    try:
+                        render_character(doc, char)
+                    except Exception as exc:
+                        logger.warning("render_character failed, fallback to plain text: %s", exc)
+                        render_character(doc, normalize_text(char) or "未提供")
+                    add_divider(doc)
+            else:
+                try:
+                    render_character(doc, characters)
+                except Exception as exc:
+                    logger.warning("render_character fallback block failed: %s", exc)
+                    render_field(doc, "人物信息", normalize_text(characters) or "未提供")
 
         # 场景设定
-        elif "scene_setting" in data:
+        elif isinstance(data, dict) and "scene_setting" in data:
             add_heading(doc, "核心场景", level=1)
             ss = data["scene_setting"]
-            if "scene_design_principle" in ss:
-                add_kv(doc, "场景设计原则", ss["scene_design_principle"])
+            render_field(doc, "场景设计原则", safe_get(ss, "scene_design_principle") if isinstance(ss, dict) else None)
             doc.add_paragraph()
-            for scene in ss.get("scenes", []):
-                render_scene(doc, scene)
-                add_divider(doc)
+            scenes = safe_get(ss, "scenes", []) if isinstance(ss, dict) else ss
+            if isinstance(scenes, list):
+                for scene in scenes:
+                    try:
+                        render_scene(doc, scene)
+                    except Exception as exc:
+                        logger.warning("render_scene failed, fallback to plain text: %s", exc)
+                        render_scene(doc, normalize_text(scene) or "未提供")
+                    add_divider(doc)
+            else:
+                try:
+                    render_scene(doc, scenes)
+                except Exception as exc:
+                    logger.warning("render_scene fallback block failed: %s", exc)
+                    render_field(doc, "场景说明", normalize_text(scenes) or "未提供")
 
         # 通用 JSON（未知结构）
         else:
             add_heading(doc, label or "附加数据", level=1)
-            add_para(doc, json.dumps(data, ensure_ascii=False, indent=2), size=9)
+            add_para(doc, normalize_text(data) or _json_fallback(data), size=9)
 
     # ── 剧本正文 ──
     if parsed["script"]:
@@ -452,7 +656,7 @@ def convert(input_path: str, output_path: str):
 
     # 3. 保存
     doc.save(output_path)
-    print(f"✅ 已生成：{output_path}")
+    print(f"已生成：{output_path}")
     return output_path
 
 

@@ -1445,11 +1445,7 @@ def _scene_formal_source_blocked(source: str) -> bool:
     lowered = str(source or "").strip().lower()
     if not lowered:
         return False
-    if lowered.startswith("choices["):
-        return True
-    if "toolcall" in lowered:
-        return True
-    return ".content" in lowered
+    return "toolcall" in lowered
 
 
 def _scene_candidate_uses_blocked_text_wrapper(candidate: Any, *, depth: int = 0) -> bool:
@@ -1481,7 +1477,7 @@ def _stage_specific_candidate_issue(
     if contract.stage_name != STAGE_SCENES:
         return None
     if _scene_formal_source_blocked(source):
-        return "scenes 正式输出不能来自 message.content 或 toolCall 文本"
+        return "scenes 正式输出不能来自 toolCall 文本"
     lowered_source = str(source or "").strip().lower()
     if "(local_repair:" in lowered_source:
         allowed_repair_sources = (

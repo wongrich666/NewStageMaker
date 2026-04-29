@@ -900,7 +900,32 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
 
         self.assertEqual(output[SCENE_NATURAL_LANGUAGE_VAR], "核心场景说明")
 
-    def test_scenes_choices_message_content_json_is_not_used_as_formal_output(self) -> None:
+    def test_scenes_choices_message_content_json_is_accepted_as_formal_output(self) -> None:
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "scenes": {
+                                    "scene_setting": _scene_setting_json()["scene_setting"],
+                                }
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(STAGE_SCENES, _input_variables())
+
+        parsed = json.loads(output["scenes"])
+        self.assertIn("scenes", parsed)
+        self.assertEqual(parsed["scenes"]["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
+
+    def test_scenes_choices_message_content_local_repair_is_accepted_as_formal_output(self) -> None:
         response = {
             "choices": [
                 {
@@ -912,8 +937,10 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         }
         client = _QueuedFastGPTClient([response])
 
-        with self.assertRaises(ValueError):
-            client.run_stage(STAGE_SCENES, _input_variables())
+        output = client.run_stage(STAGE_SCENES, _input_variables())
+
+        setting = _scene_setting_from_output(output["scenes"])
+        self.assertEqual(setting["scenes"][0]["scene_name"], "玻璃会议室")
 
     def test_scenes_toolcall_answertext_json_is_not_used_as_formal_output(self) -> None:
         response = {
