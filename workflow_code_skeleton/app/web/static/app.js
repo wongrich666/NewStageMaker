@@ -334,6 +334,11 @@
     if (state.elapsedTimer) return;
     state.elapsedTimer = window.setInterval(() => {
       renderWaitDuration(state.latestSnapshot);
+      const statusMessage = statusNoteFrom(state.latestSnapshot);
+      if (els.messageText) {
+        els.messageText.textContent = statusMessage;
+        els.messageText.classList.toggle("hidden", !statusMessage);
+      }
     }, 1000);
   }
 
@@ -588,17 +593,83 @@
     };
   }
 
+  function runtimeLoadingSuffix(snapshot, nowMs = Date.now()) {
+    if (!snapshot || !RUNNING_STATUSES.has(snapshot.status)) return "";
+    const frame = Math.floor(nowMs / 500) % 3;
+    return ".".repeat(frame + 1);
+  }
+
+  function defaultRuntimeMessage(snapshot) {
+    if (!snapshot) return "";
+    const stageKey = String(snapshot.current_stage || "").trim().toLowerCase();
+    const stageLabel = String(snapshot.current_stage_label || "").trim();
+    const batch = String(snapshot.current_batch || "").trim();
+    const mapping = {
+      framework: "正在生成剧本框架",
+      framework_naturalize: "正在整理剧本框架自然语言说明",
+      appearance_strategy: "正在生成服装前置策略",
+      appearance_pre_strategy: "正在生成服装前置策略",
+      validation: "正在执行集数检查",
+      consistency: "正在执行集数一致性检查",
+      episode_plan_normalize: "正在规范化分集计划",
+      worldview: "正在生成世界观",
+      worldview_naturalize: "正在整理世界观自然语言说明",
+      character: "正在生成人物设定",
+      characters: "正在生成人物设定",
+      scene: "正在生成核心场景",
+      scenes: "正在生成核心场景",
+      appearance: "正在生成服装版本映射",
+      appearance_alias_generation: "正在生成服装版本映射",
+      appearance_alias_writing: "正在编写服装版本映射",
+      appearance_alias_review: "正在审核服装版本映射",
+      appearance_alias_rewrite: "正在修订服装版本映射",
+      appearance_alias_unstructured: "正在整理服装版本映射自然语言说明",
+      hooks: "正在生成开头冲突钩子",
+      hooks_writing: "正在生成开头冲突钩子",
+      hook: "正在生成开头冲突钩子",
+      hook_write: "正在生成开头冲突钩子",
+      hooks_review: "正在审核开头冲突钩子",
+      hook_review: "正在审核开头冲突钩子",
+      hooks_rewrite: "正在修订开头冲突钩子",
+      hook_revise: "正在修订开头冲突钩子",
+      hook_memory: "正在写入开头冲突钩子记忆",
+      dialogues: "正在生成角色对白",
+      dialogues_writing: "正在生成角色对白",
+      dialogue: "正在生成角色对白",
+      dialogue_write: "正在生成角色对白",
+      dialogues_review: "正在审核角色对白",
+      dialogue_review: "正在审核角色对白",
+      dialogues_rewrite: "正在修订角色对白",
+      dialogue_revise: "正在修订角色对白",
+      dialogue_memory: "正在写入角色对白记忆",
+      script: "正在生成剧本正文",
+      script_writing: "正在生成剧本正文",
+      script_write: "正在生成剧本正文",
+      script_review: "正在审核剧本正文",
+      script_rewrite: "正在修订剧本正文",
+      script_revise: "正在修订剧本正文",
+      script_memory: "正在写入剧本正文记忆",
+      final: "正在整理最终剧本",
+      finalize: "正在整理最终剧本"
+    };
+    const base = mapping[stageKey] || (stageLabel ? `正在处理${stageLabel}` : "正在处理中");
+    return batch ? `${base}：第 ${batch} 集` : base;
+  }
+
   // 当前状态下只保留必要提示，避免和“当前阶段”重复。
-  function statusNoteFrom(snapshot) {
+  function statusNoteFrom(snapshot, nowMs = Date.now()) {
     if (!snapshot) return "";
     if (snapshot.status === "failed") {
-      return "当前步骤执行失败，任务已停在上一个成功步骤。";
+      return "当前步骤执行失败，可继续或重试。";
     }
     if (snapshot.status === "terminated") {
-      return "任务已终止，已保留当前进度。";
+      return "已终止。";
     }
-    if (snapshot.status === "paused" || snapshot.status === "pausing") {
-      return snapshot.message || "已暂停，等待继续。";
+    if (snapshot.status === "paused") {
+      return snapshot.message || "已暂停。";
+    }
+    if (snapshot.status === "pausing") {
+      return `${snapshot.message || "正在暂停"}${runtimeLoadingSuffix(snapshot, nowMs)}`;
     }
     if (snapshot.status === "completed") {
       return snapshot.awaiting_user_confirmation
@@ -606,9 +677,9 @@
         : "剧本已完成。";
     }
     const runtimeMessage = String(snapshot.message || "").trim();
-    if (!runtimeMessage) return "";
-    const markers = ["自动重试", "已继续执行", "网络波动", "模型连接波动"];
-    return markers.some((marker) => runtimeMessage.includes(marker)) ? runtimeMessage : "";
+    const base = runtimeMessage || defaultRuntimeMessage(snapshot);
+    if (!base) return "";
+    return `${base}${runtimeLoadingSuffix(snapshot, nowMs)}`;
   }
 
   function creationStatusLabel(snapshot) {
@@ -626,6 +697,7 @@
       framework: "framework",
       framework_naturalize: "framework",
       appearance_strategy: "internal",
+      appearance_pre_strategy: "internal",
       consistency: "internal",
       episode_plan_normalize: "internal",
       worldview: "worldview",
@@ -635,11 +707,36 @@
       scene: "scenes",
       scenes: "scenes",
       appearance: "internal",
+      appearance_alias_generation: "internal",
+      appearance_alias_writing: "internal",
+      appearance_alias_review: "internal",
+      appearance_alias_rewrite: "internal",
+      appearance_alias_unstructured: "internal",
       hook: "internal",
       hooks: "internal",
+      hooks_writing: "internal",
+      hook_write: "internal",
+      hooks_review: "internal",
+      hook_review: "internal",
+      hooks_rewrite: "internal",
+      hook_revise: "internal",
+      hook_memory: "internal",
       dialogue: "internal",
       dialogues: "internal",
+      dialogues_writing: "internal",
+      dialogue_write: "internal",
+      dialogues_review: "internal",
+      dialogue_review: "internal",
+      dialogues_rewrite: "internal",
+      dialogue_revise: "internal",
+      dialogue_memory: "internal",
       script: "internal",
+      script_writing: "internal",
+      script_write: "internal",
+      script_review: "internal",
+      script_rewrite: "internal",
+      script_revise: "internal",
+      script_memory: "internal",
       memory: "internal",
       final: "final",
       finalize: "final",
@@ -648,17 +745,30 @@
     return mapping[String(stageKey || "").trim().toLowerCase()] || "";
   }
 
+  function formatDisplayValue(value) {
+    if (value === null || value === undefined || value === "") return "";
+    if (typeof value === "string") return value.trim();
+    if (Array.isArray(value) || typeof value === "object") {
+      try {
+        return JSON.stringify(value, null, 2).trim();
+      } catch (_) {
+        return String(value).trim();
+      }
+    }
+    return String(value).trim();
+  }
+
   // 把框架阶段的多个正式产物拼成一个完整回复，方便在聊天流里整体展示。
   function frameworkStageOutput(snapshot) {
     const artifacts = snapshot?.artifacts || {};
-    const natural = String(artifacts.framework_natural_language || "").trim();
+    const natural = formatDisplayValue(artifacts.framework_natural_language);
     if (natural) return natural;
     const parts = [];
-    const title = String(artifacts.script_title_content || "").trim();
-    const storyOutline = String(artifacts.story_outline || "").trim();
-    const characterBios = String(artifacts.character_bios || "").trim();
-    const coreSceneInput = String(artifacts.core_scene_summary || artifacts.core_scene_input || "").trim();
-    const episodePlan = String(artifacts.episode_plan_display || artifacts.episode_plan || "").trim();
+    const title = formatDisplayValue(artifacts.script_title_content);
+    const storyOutline = formatDisplayValue(artifacts.story_outline);
+    const characterBios = formatDisplayValue(artifacts.character_bios);
+    const coreSceneInput = formatDisplayValue(artifacts.core_scene_summary || artifacts.core_scene_input);
+    const episodePlan = formatDisplayValue(artifacts.episode_plan_display || artifacts.episode_plan);
 
     if (title) parts.push(`剧本标题\n${title}`);
     if (storyOutline) parts.push(`故事大纲\n${storyOutline}`);
@@ -668,12 +778,29 @@
     return parts.join("\n\n").trim();
   }
 
+  function worldviewStageOutput(snapshot) {
+    const artifacts = snapshot?.artifacts || {};
+    const natural = formatDisplayValue(artifacts.worldview_natural_language);
+    if (natural) return natural;
+    return formatDisplayValue(artifacts.worldview);
+  }
+
   // 只把平台真正对外公开的正式阶段产物整理成聊天消息。
   function visibleStageMessages(snapshot) {
     if (!snapshot) return [];
     const artifacts = snapshot?.artifacts || {};
     const currentDisplayKey = normalizeStageKey(snapshot.display_stage_key);
     const currentNatural = String(snapshot.display_stage_output_natural || "").trim();
+    const characterOutput = formatDisplayValue(
+      artifacts.character_natural_language
+      || artifacts.character_summary
+      || ((snapshot.current_stage === "characters" || snapshot.current_stage === "character") ? "人物设定自然语言说明暂未生成。" : "")
+    );
+    const sceneOutput = formatDisplayValue(
+      artifacts.scene_natural_language
+      || artifacts.core_scene_summary
+      || ((snapshot.current_stage === "scenes" || snapshot.current_stage === "scene") ? "核心场景自然语言说明暂未生成。" : "")
+    );
     const messages = [
       {
         key: "framework",
@@ -683,22 +810,22 @@
       {
         key: "worldview",
         title: "世界观",
-        output: String(artifacts.worldview_natural_language || artifacts.worldview || "").trim()
+        output: worldviewStageOutput(snapshot)
       },
       {
         key: "characters",
         title: "人物设定",
-        output: String(artifacts.character_summary || "").trim()
+        output: characterOutput
       },
       {
         key: "scenes",
         title: "核心场景",
-        output: String(artifacts.core_scene_summary || "").trim()
+        output: sceneOutput
       },
       {
         key: "final",
         title: "最终剧本",
-        output: String(artifacts.final_output_text || artifacts.final_script || "").trim()
+        output: formatDisplayValue(artifacts.final_output_text || artifacts.final_script)
       }
     ].filter((item) => item.output);
 

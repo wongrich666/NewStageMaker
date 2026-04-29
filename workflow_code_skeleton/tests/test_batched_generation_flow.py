@@ -4,11 +4,13 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from workflow_code_skeleton.app.config import settings
 from workflow_code_skeleton.app.models.inputs import WorkflowInput
 from workflow_code_skeleton.app.models.state import WorkflowState
 from workflow_code_skeleton.app.orchestrators import fastgpt_hybrid_workflow as flow
+from workflow_code_skeleton.app.services.fastgpt_client import FastGPTTransientError
 from workflow_code_skeleton.app.services.fastgpt_contracts import (
     ALL_DIALOGUES,
     ALL_HOOKS,
@@ -44,6 +46,7 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     STAGE_DIALOGUES_REVIEW,
     STAGE_DIALOGUES_REWRITE,
     STAGE_DIALOGUES_WRITING,
+    STAGE_EPISODE_PLAN_NORMALIZE,
     STAGE_FRAMEWORK,
     STAGE_FRAMEWORK_NATURALIZE,
     STAGE_HOOKS,
@@ -64,6 +67,7 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
 )
 from workflow_code_skeleton.app.utils.episode import BatchWindow, iter_episode_batches
 from workflow_code_skeleton.app.workflow_ids import (
+    CHARACTER_NATURAL_LANGUAGE_VAR,
     DIALOGUE_CURRENT_VAR,
     DIALOGUE_CURRENT_WORKFLOW_VAR,
     DIALOGUE_CURRENT_WRITE_VAR,
@@ -86,6 +90,7 @@ from workflow_code_skeleton.app.workflow_ids import (
     HOOK_MEMORY_REVISE_VAR,
     HOOK_REVIEW_OUTPUT_VAR,
     MEMORY_VAR,
+    SCENE_NATURAL_LANGUAGE_VAR,
     SCRIPT_DIALOGUE_BATCH_VAR,
     SCRIPT_CURRENT_VAR,
     SCRIPT_CURRENT_WRITE_VAR,
@@ -103,6 +108,10 @@ from workflow_code_skeleton.app.services.workflow_output_validation import (
     WorkflowOutputValidationError,
     load_workflow_output_contract,
     validate_stage_output_with_workflow_contract,
+)
+from workflow_code_skeleton.tests.test_stage_output_repair import (
+    _character_setting_json,
+    _scene_setting_json,
 )
 
 
@@ -789,6 +798,34 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         state = WorkflowState(user_input=payload, variables=dict(merged_variables))
         return state, payload, merged_variables
 
+    def test_sync_state_variables_keeps_character_structured_and_natural_outputs_separate(self) -> None:
+        state, _, _ = self._state_and_payload(10, variables={CHARACTERS: ""})
+
+        flow._sync_state_variables(
+            state,
+            {
+                CHARACTERS: json.dumps(_character_setting_json(), ensure_ascii=False),
+                CHARACTER_NATURAL_LANGUAGE_VAR: "人物小传自然语言版",
+            },
+        )
+
+        self.assertIn('"character_setting"', str(state.get_var(CHARACTERS)))
+        self.assertEqual(state.get_var(CHARACTER_NATURAL_LANGUAGE_VAR), "人物小传自然语言版")
+
+    def test_sync_state_variables_keeps_scene_structured_and_natural_outputs_separate(self) -> None:
+        state, _, _ = self._state_and_payload(10, variables={SCENES: ""})
+
+        flow._sync_state_variables(
+            state,
+            {
+                SCENES: json.dumps(_scene_setting_json(), ensure_ascii=False),
+                SCENE_NATURAL_LANGUAGE_VAR: "核心场景自然语言版",
+            },
+        )
+
+        self.assertIn('"scene_setting"', str(state.get_var(SCENES)))
+        self.assertEqual(state.get_var(SCENE_NATURAL_LANGUAGE_VAR), "核心场景自然语言版")
+
     def _script_ready_state(
         self,
         total_episodes: int,
@@ -810,6 +847,21 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         state, payload, base_variables = self._state_and_payload(total_episodes, variables=merged)
         batches = list(iter_episode_batches(total_episodes, batch_size=5))
         return state, payload, base_variables, batches
+
+    def _normalize_stage_state(
+        self,
+        total_episodes: int = 10,
+    ) -> tuple[WorkflowState, WorkflowInput, dict[str, object]]:
+        payload = _workflow_input(total_episodes)
+        variables = {
+            TOTAL_EPISODES: total_episodes,
+            STORY_OUTLINE: _framework_story_outline(),
+            USER_CHARACTERS: _framework_characters(),
+            CHARACTER_ALIAS_NAMING_RULES: "统一使用正式中文名",
+            EPISODE_PLAN: json.dumps(_framework_episode_plan(total_episodes), ensure_ascii=False),
+        }
+        state = WorkflowState(user_input=payload, variables=dict(variables))
+        return state, payload, variables
 
     def test_framework_naturalize_uses_complete_framework_snapshot_and_preserves_structured_fields(self) -> None:
         story_outline = {"opening": "故事开场", "theme": "选择"}
@@ -2880,6 +2932,145 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertEqual(artifact.get("status"), "retry_exhausted")
         self.assertEqual(int(artifact.get("format_attempt") or 0), 3)
 
+    def test_episode_plan_normalize_truncated_json_retries_then_succeeds(self) -> None:
+        state, payload, variables = self._normalize_stage_state(10)
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_EPISODE_PLAN_NORMALIZE: [
+                    {NORMALIZED_EPISODE_PLAN: '{"episodes":[{"episode":1,"title":"第1集"}]'},
+                    {NORMALIZED_EPISODE_PLAN: _normalized_plan(10)},
+                ]
+            }
+        )
+
+        result = flow.run_stage_with_contract_guard(
+            state,
+            runner,
+            STAGE_EPISODE_PLAN_NORMALIZE,
+            variables,
+            stage_key="framework",
+            message="分集规划整理",
+            output_field=NORMALIZED_EPISODE_PLAN,
+            sync_output_to_state=True,
+        )
+
+        self.assertEqual(len(runner.stage_calls(STAGE_EPISODE_PLAN_NORMALIZE)), 2)
+        self.assertEqual(
+            result[NORMALIZED_EPISODE_PLAN]["parsed_episode_count"],
+            10,
+        )
+        self.assertEqual(
+            state.variables[NORMALIZED_EPISODE_PLAN]["parsed_episode_count"],
+            10,
+        )
+        artifact = state.get_output(STAGE_EPISODE_PLAN_NORMALIZE, "contract_guard", {})
+        self.assertEqual(artifact.get("status"), "validated")
+
+    def test_episode_plan_normalize_truncated_json_three_times_stops_with_recoverable_failure(self) -> None:
+        state, payload, variables = self._normalize_stage_state(10)
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_EPISODE_PLAN_NORMALIZE: [
+                    {NORMALIZED_EPISODE_PLAN: '{"episodes":[{"episode":1,"title":"第1集"}]'},
+                    {NORMALIZED_EPISODE_PLAN: '{"episodes":[{"episode":1,"title":"第1集"}]'},
+                    {NORMALIZED_EPISODE_PLAN: '{"episodes":[{"episode":1,"title":"第1集"}]'},
+                ]
+            }
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "episode_plan_normalize|normalized_episode_plan|workflow 输出是否过长",
+        ):
+            flow.run_stage_with_contract_guard(
+                state,
+                runner,
+                STAGE_EPISODE_PLAN_NORMALIZE,
+                variables,
+                stage_key="framework",
+                message="分集规划整理",
+                output_field=NORMALIZED_EPISODE_PLAN,
+                sync_output_to_state=True,
+            )
+
+        self.assertEqual(len(runner.stage_calls(STAGE_EPISODE_PLAN_NORMALIZE)), 3)
+        self.assertNotIn(NORMALIZED_EPISODE_PLAN, state.variables)
+        artifact = state.get_output(STAGE_EPISODE_PLAN_NORMALIZE, "contract_guard", {})
+        self.assertEqual(artifact.get("status"), "retry_exhausted")
+        self.assertEqual(int(artifact.get("format_attempt") or 0), 3)
+        debug_file = Path(str(artifact.get("debug_file_path") or ""))
+        self.assertTrue(debug_file.exists())
+        debug_payload = json.loads(debug_file.read_text(encoding="utf-8"))
+        self.assertEqual(debug_payload.get("stage_name"), STAGE_EPISODE_PLAN_NORMALIZE)
+        self.assertTrue(str(debug_payload.get("last_failure_reason") or ""))
+
+    def test_empty_string_output_retries_three_times_without_polluting_state(self) -> None:
+        state, payload, variables = self._normalize_stage_state(10)
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_EPISODE_PLAN_NORMALIZE: [
+                    {NORMALIZED_EPISODE_PLAN: ""},
+                    {NORMALIZED_EPISODE_PLAN: ""},
+                    {NORMALIZED_EPISODE_PLAN: ""},
+                ]
+            }
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "episode_plan_normalize|normalized_episode_plan",
+        ):
+            flow.run_stage_with_contract_guard(
+                state,
+                runner,
+                STAGE_EPISODE_PLAN_NORMALIZE,
+                variables,
+                stage_key="framework",
+                message="分集规划整理",
+                output_field=NORMALIZED_EPISODE_PLAN,
+                sync_output_to_state=True,
+            )
+
+        self.assertEqual(len(runner.stage_calls(STAGE_EPISODE_PLAN_NORMALIZE)), 3)
+        self.assertNotIn(NORMALIZED_EPISODE_PLAN, state.variables)
+        artifact = state.get_output(STAGE_EPISODE_PLAN_NORMALIZE, "contract_guard", {})
+        self.assertEqual(artifact.get("status"), "retry_exhausted")
+        self.assertFalse(bool(artifact.get("probable_truncated_json")))
+
+    def test_http_timeout_retry_does_not_consume_format_retry_budget(self) -> None:
+        state, payload, variables = self._normalize_stage_state(10)
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_EPISODE_PLAN_NORMALIZE: [
+                    FastGPTTransientError("timeout", stage_name=STAGE_EPISODE_PLAN_NORMALIZE),
+                    {NORMALIZED_EPISODE_PLAN: '{"episodes":[{"episode":1,"title":"第1集"}]'},
+                    {NORMALIZED_EPISODE_PLAN: '{"episodes":[{"episode":1,"title":"第1集"}]'},
+                    {NORMALIZED_EPISODE_PLAN: '{"episodes":[{"episode":1,"title":"第1集"}]'},
+                ]
+            }
+        )
+
+        with patch.object(flow, "_sleep_with_checkpoints", return_value=None):
+            with self.assertRaisesRegex(
+                ValueError,
+                "episode_plan_normalize|normalized_episode_plan|workflow 输出是否过长",
+            ):
+                flow.run_stage_with_contract_guard(
+                    state,
+                    runner,
+                    STAGE_EPISODE_PLAN_NORMALIZE,
+                    variables,
+                    stage_key="framework",
+                    message="分集规划整理",
+                    output_field=NORMALIZED_EPISODE_PLAN,
+                    sync_output_to_state=True,
+                )
+
+        self.assertEqual(len(runner.stage_calls(STAGE_EPISODE_PLAN_NORMALIZE)), 4)
+        artifact = state.get_output(STAGE_EPISODE_PLAN_NORMALIZE, "contract_guard", {})
+        self.assertEqual(artifact.get("status"), "retry_exhausted")
+        self.assertEqual(int(artifact.get("format_attempt") or 0), 3)
+
     def test_hook_memory_failure_stops_current_batch_and_resume_replays_memory_only(self) -> None:
         state, payload, variables = self._state_and_payload(5)
         batches = list(iter_episode_batches(5, batch_size=5))
@@ -2911,9 +3102,13 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertEqual(len(runner.stage_calls(STAGE_HOOKS_WRITING)), 1)
         self.assertEqual(len(runner.stage_calls(STAGE_HOOK_MEMORY)), 3)
         artifact = state.get_output(STAGE_HOOK_MEMORY, "contract_guard", {})
-        self.assertTrue(bool(artifact.get("fallback_used")))
-        self.assertEqual(artifact.get("status"), "fallback_used")
-        self.assertTrue(Path(str(artifact.get("debug_file_path") or "")).exists())
+        self.assertFalse(bool(artifact.get("fallback_used")))
+        self.assertEqual(artifact.get("status"), "retry_exhausted")
+        self.assertEqual(int(artifact.get("format_attempt") or 0), 3)
+        debug_file = Path(str(artifact.get("debug_file_path") or ""))
+        self.assertTrue(debug_file.exists())
+        debug_payload = json.loads(debug_file.read_text(encoding="utf-8"))
+        self.assertTrue(str(debug_payload.get("last_failure_reason") or ""))
 
         resumed_runner = _PhaseRecordingRunner(
             stage_outputs={STAGE_HOOK_MEMORY: [{HOOK_MEMORY_OUTPUT_VAR: _hook_memory_json(label="resume-hook")}]}
@@ -2967,9 +3162,13 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertEqual(len(runner.stage_calls(STAGE_DIALOGUES_WRITING)), 1)
         self.assertEqual(len(runner.stage_calls(STAGE_DIALOGUE_MEMORY)), 3)
         artifact = state.get_output(STAGE_DIALOGUE_MEMORY, "contract_guard", {})
-        self.assertTrue(bool(artifact.get("fallback_used")))
-        self.assertEqual(artifact.get("status"), "fallback_used")
-        self.assertTrue(Path(str(artifact.get("debug_file_path") or "")).exists())
+        self.assertFalse(bool(artifact.get("fallback_used")))
+        self.assertEqual(artifact.get("status"), "retry_exhausted")
+        self.assertEqual(int(artifact.get("format_attempt") or 0), 3)
+        debug_file = Path(str(artifact.get("debug_file_path") or ""))
+        self.assertTrue(debug_file.exists())
+        debug_payload = json.loads(debug_file.read_text(encoding="utf-8"))
+        self.assertTrue(str(debug_payload.get("last_failure_reason") or ""))
 
         resumed_runner = _PhaseRecordingRunner(
             stage_outputs={
@@ -3042,9 +3241,13 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertEqual(variables[flow.LOCAL_CURRENT_BATCH_STAGE], "script")
         self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_MEMORY)), 3)
         artifact = state.get_output(STAGE_SCRIPT_MEMORY, "contract_guard", {})
-        self.assertTrue(bool(artifact.get("fallback_used")))
-        self.assertEqual(artifact.get("status"), "fallback_used")
-        self.assertTrue(Path(str(artifact.get("debug_file_path") or "")).exists())
+        self.assertFalse(bool(artifact.get("fallback_used")))
+        self.assertEqual(artifact.get("status"), "retry_exhausted")
+        self.assertEqual(int(artifact.get("format_attempt") or 0), 3)
+        debug_file = Path(str(artifact.get("debug_file_path") or ""))
+        self.assertTrue(debug_file.exists())
+        debug_payload = json.loads(debug_file.read_text(encoding="utf-8"))
+        self.assertTrue(str(debug_payload.get("last_failure_reason") or ""))
 
     def test_dialogue_rewrite_contract_guard_accepts_declared_hookcontent_without_warning(self) -> None:
         state, payload, variables = self._state_and_payload(

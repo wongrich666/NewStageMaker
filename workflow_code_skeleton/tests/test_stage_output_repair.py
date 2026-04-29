@@ -12,7 +12,10 @@ from workflow_code_skeleton.app.orchestrators.fastgpt_hybrid_workflow import (
 )
 from workflow_code_skeleton.app.models.inputs import WorkflowInput
 from workflow_code_skeleton.app.models.state import WorkflowState
-from workflow_code_skeleton.app.services.fastgpt_client import FastGPTClient
+from workflow_code_skeleton.app.services.fastgpt_client import (
+    FastGPTClient,
+    FastGPTStageFormatError,
+)
 from workflow_code_skeleton.app.services.stage_output_repair import (
     normalize_appearance_mapping_candidate,
     validate_appearance_mapping_output,
@@ -647,92 +650,84 @@ class StageOutputRepairTests(unittest.TestCase):
         parsed = json.loads(result[CHARACTERS])
         self.assertEqual(parsed["character_setting"]["characters"][0]["character_name"], "周沉")
 
-    def test_characters_natural_language_generates_minimal_fallback(self) -> None:
-        data = {"answerText": "她在高压里习惯先沉默后反击，总以为自己还能一个人扛住所有风险。"}
-        result = self._extract(STAGE_CHARACTERS, data)
+    def test_characters_natural_language_repairs_within_same_attempt(self) -> None:
+        result = self._extract(
+            STAGE_CHARACTERS,
+            {"answerText": "她在高压里习惯先沉默后反击，总以为自己还能一个人扛住所有风险。"},
+        )
         parsed = json.loads(result[CHARACTERS])
         first_character = parsed["character_setting"]["characters"][0]
         self.assertEqual(first_character["character_name"], "林夏")
         self.assertTrue(first_character["decision_logic"]["when_under_pressure"])
 
-    def test_scenes_natural_language_triggers_stage_local_restart_before_success(self) -> None:
+    def test_scenes_natural_language_requires_orchestrator_retry_not_client_rerun(self) -> None:
         client = _QueuedFastGPTClient(
             [
                 {"answerText": "核心场景包括玻璃会议室、深夜办公区和合租公寓，整体偏冷硬压抑。"},
                 {"answerText": json.dumps(_scene_setting_json(), ensure_ascii=False)},
             ]
         )
-        result = client.run_stage(STAGE_SCENES, dict(self.variables))
-        self.assertEqual(client.request_count, 2)
-        parsed = json.loads(result[SCENES])
-        self.assertEqual(len(parsed["scene_setting"]["scenes"]), 3)
+        with self.assertRaises(FastGPTStageFormatError):
+            client.run_stage(STAGE_SCENES, dict(self.variables))
+        self.assertEqual(client.request_count, 1)
 
-    def test_worldview_unknown_wrapper_triggers_stage_local_restart(self) -> None:
+    def test_worldview_unknown_wrapper_is_rejected_without_client_rerun(self) -> None:
         client = _QueuedFastGPTClient(
             [
                 {"answerText": json.dumps({"foo": "bar"}, ensure_ascii=False)},
                 {"answerText": json.dumps(_worldview_json(), ensure_ascii=False)},
             ]
         )
-        result = client.run_stage(STAGE_WORLDVIEW, dict(self.variables))
-        self.assertEqual(client.request_count, 2)
-        parsed = json.loads(result[WORLDVIEW])
-        self.assertEqual(parsed["worldview_summary"], _worldview_json()["worldview_summary"])
+        with self.assertRaises(FastGPTStageFormatError):
+            client.run_stage(STAGE_WORLDVIEW, dict(self.variables))
+        self.assertEqual(client.request_count, 1)
 
-    def test_scenes_unknown_wrapper_triggers_stage_local_restart(self) -> None:
+    def test_scenes_unknown_wrapper_is_rejected_without_client_rerun(self) -> None:
         client = _QueuedFastGPTClient(
             [
                 {"answerText": json.dumps({"foo": "bar"}, ensure_ascii=False)},
                 {"answerText": json.dumps(_scene_setting_json(), ensure_ascii=False)},
             ]
         )
-        result = client.run_stage(STAGE_SCENES, dict(self.variables))
-        self.assertEqual(client.request_count, 2)
-        parsed = json.loads(result[SCENES])
-        self.assertEqual(parsed["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
+        with self.assertRaises(FastGPTStageFormatError):
+            client.run_stage(STAGE_SCENES, dict(self.variables))
+        self.assertEqual(client.request_count, 1)
 
-    def test_characters_natural_language_triggers_stage_local_restart_before_fallback(self) -> None:
+    def test_characters_natural_language_requires_orchestrator_retry_not_client_rerun(self) -> None:
         client = _QueuedFastGPTClient(
             [
                 {"answerText": "林夏在高压里习惯先沉默后反击，总以为自己还能一个人扛住所有风险。"},
                 {"answerText": json.dumps(_character_setting_json("周沉"), ensure_ascii=False)},
             ]
         )
-        result = client.run_stage(STAGE_CHARACTERS, dict(self.variables))
-        self.assertEqual(client.request_count, 2)
-        parsed = json.loads(result[CHARACTERS])
-        self.assertEqual(parsed["character_setting"]["characters"][0]["character_name"], "周沉")
+        with self.assertRaises(FastGPTStageFormatError):
+            client.run_stage(STAGE_CHARACTERS, dict(self.variables))
+        self.assertEqual(client.request_count, 1)
 
     def test_review_json_is_not_treated_as_formal_worldview(self) -> None:
         review_json = {"approved": False, "suggestions": ["世界观过于空泛", "补充空间逻辑"]}
-        result = self._extract(STAGE_WORLDVIEW, {"answerText": json.dumps(review_json, ensure_ascii=False)})
-        parsed = json.loads(result[WORLDVIEW])
-        self.assertIn("worldview_summary", parsed)
-        self.assertNotIn("approved", parsed)
+        with self.assertRaises(FastGPTStageFormatError):
+            self._extract(STAGE_WORLDVIEW, {"answerText": json.dumps(review_json, ensure_ascii=False)})
 
     def test_review_json_is_not_treated_as_formal_characters(self) -> None:
         review_json = {"passed": False, "blocking_issues": ["对白腔调过于一致"], "summary": "需要补强"}
-        result = self._extract(STAGE_CHARACTERS, {"answerText": json.dumps(review_json, ensure_ascii=False)})
-        parsed = json.loads(result[CHARACTERS])
-        self.assertIn("character_setting", parsed)
-        self.assertNotIn("passed", parsed)
+        with self.assertRaises(FastGPTStageFormatError):
+            self._extract(STAGE_CHARACTERS, {"answerText": json.dumps(review_json, ensure_ascii=False)})
 
     def test_review_json_is_not_treated_as_formal_scenes(self) -> None:
         review_json = {"passed": False, "blocking_issues": ["场景数量不足"], "summary": "需要补强"}
         with self.assertRaises(ValueError):
             self._extract(STAGE_SCENES, {"answerText": json.dumps(review_json, ensure_ascii=False)})
 
-    def test_empty_string_uses_schema_valid_fallback(self) -> None:
-        result = self._extract(STAGE_WORLDVIEW, {"answerText": ""})
-        parsed = json.loads(result[WORLDVIEW])
-        self.assertTrue(parsed["worldview_summary"])
-        self.assertEqual(len(parsed["key_settings"]), 3)
+    def test_empty_string_requires_contract_retry(self) -> None:
+        with self.assertRaises(FastGPTStageFormatError):
+            self._extract(STAGE_WORLDVIEW, {"answerText": ""})
 
     def test_scenes_empty_string_cannot_enter_formal_cache(self) -> None:
         with self.assertRaises(ValueError):
             self._extract(STAGE_SCENES, {"answerText": ""})
 
-    def test_worldview_stage_reruns_when_only_review_json_is_returned(self) -> None:
+    def test_worldview_review_json_requires_orchestrator_retry_not_client_rerun(self) -> None:
         review_json = {"approved": False, "suggestions": ["补充时代背景", "补充视觉关键词"]}
         client = _QueuedFastGPTClient(
             [
@@ -740,12 +735,11 @@ class StageOutputRepairTests(unittest.TestCase):
                 {"answerText": json.dumps(_worldview_json(), ensure_ascii=False)},
             ]
         )
-        result = client.run_stage(STAGE_WORLDVIEW, dict(self.variables))
-        self.assertEqual(client.request_count, 2)
-        parsed = json.loads(result[WORLDVIEW])
-        self.assertEqual(parsed["worldview_summary"], _worldview_json()["worldview_summary"])
+        with self.assertRaises(FastGPTStageFormatError):
+            client.run_stage(STAGE_WORLDVIEW, dict(self.variables))
+        self.assertEqual(client.request_count, 1)
 
-    def test_characters_stage_reruns_when_only_review_json_is_returned(self) -> None:
+    def test_characters_review_json_requires_orchestrator_retry_not_client_rerun(self) -> None:
         review_json = {"passed": False, "blocking_issues": ["角色动机不完整"], "summary": "需要补强"}
         client = _QueuedFastGPTClient(
             [
@@ -753,12 +747,11 @@ class StageOutputRepairTests(unittest.TestCase):
                 {"answerText": json.dumps(_character_setting_json("周沉"), ensure_ascii=False)},
             ]
         )
-        result = client.run_stage(STAGE_CHARACTERS, dict(self.variables))
-        self.assertEqual(client.request_count, 2)
-        parsed = json.loads(result[CHARACTERS])
-        self.assertEqual(parsed["character_setting"]["characters"][0]["character_name"], "周沉")
+        with self.assertRaises(FastGPTStageFormatError):
+            client.run_stage(STAGE_CHARACTERS, dict(self.variables))
+        self.assertEqual(client.request_count, 1)
 
-    def test_scenes_stage_reruns_when_only_review_json_is_returned(self) -> None:
+    def test_scenes_review_json_requires_orchestrator_retry_not_client_rerun(self) -> None:
         review_json = {"passed": False, "blocking_issues": ["缺少 alias_usage_rules"], "summary": "需要补强"}
         client = _QueuedFastGPTClient(
             [
@@ -766,12 +759,11 @@ class StageOutputRepairTests(unittest.TestCase):
                 {"answerText": json.dumps(_scene_setting_json(), ensure_ascii=False)},
             ]
         )
-        result = client.run_stage(STAGE_SCENES, dict(self.variables))
-        self.assertEqual(client.request_count, 2)
-        parsed = json.loads(result[SCENES])
-        self.assertEqual(len(parsed["scene_setting"]["scenes"]), 3)
+        with self.assertRaises(FastGPTStageFormatError):
+            client.run_stage(STAGE_SCENES, dict(self.variables))
+        self.assertEqual(client.request_count, 1)
 
-    def test_worldview_final_attempt_uses_fallback_after_rerun_exhausted(self) -> None:
+    def test_worldview_invalid_output_fails_fast_without_client_fallback(self) -> None:
         review_json = {"approved": False, "suggestions": ["仍未形成正式世界观"]}
         client = _QueuedFastGPTClient(
             [
@@ -779,13 +771,11 @@ class StageOutputRepairTests(unittest.TestCase):
                 {"answerText": json.dumps(review_json, ensure_ascii=False)},
             ]
         )
-        result = client.run_stage(STAGE_WORLDVIEW, dict(self.variables))
-        self.assertEqual(client.request_count, 2)
-        parsed = json.loads(result[WORLDVIEW])
-        self.assertIn("worldview_summary", parsed)
-        self.assertEqual(len(parsed["key_settings"]), 3)
+        with self.assertRaises(FastGPTStageFormatError):
+            client.run_stage(STAGE_WORLDVIEW, dict(self.variables))
+        self.assertEqual(client.request_count, 1)
 
-    def test_scenes_final_attempt_raises_after_rerun_exhausted(self) -> None:
+    def test_scenes_invalid_output_fails_fast_without_client_rerun(self) -> None:
         review_json = {"passed": False, "blocking_issues": ["仍未形成 scene_setting"], "summary": "继续修订"}
         client = _QueuedFastGPTClient(
             [
@@ -793,9 +783,9 @@ class StageOutputRepairTests(unittest.TestCase):
                 {"answerText": json.dumps(review_json, ensure_ascii=False)},
             ]
         )
-        with self.assertRaises(ValueError):
+        with self.assertRaises(FastGPTStageFormatError):
             client.run_stage(STAGE_SCENES, dict(self.variables))
-        self.assertEqual(client.request_count, 2)
+        self.assertEqual(client.request_count, 1)
 
     def test_scene_input_guard_rejects_broken_worldview(self) -> None:
         broken = dict(self.variables)
@@ -983,7 +973,7 @@ class StageOutputRepairTests(unittest.TestCase):
         debug_info = client.get_last_stage_debug_info(STAGE_APPEARANCE_ALIAS_GENERATION)
         self.assertTrue(debug_info.get("appearance_h2KpLm91_empty"))
 
-    def test_appearance_empty_h2kpLm91_and_core_scene_text_triggers_stage_rerun(self) -> None:
+    def test_appearance_empty_h2kpLm91_and_core_scene_text_requires_orchestrator_retry(self) -> None:
         client = _QueuedFastGPTClient(
             [
                 {
@@ -1009,16 +999,13 @@ class StageOutputRepairTests(unittest.TestCase):
             ]
         )
 
-        result = client.run_stage(
-            STAGE_APPEARANCE_ALIAS_GENERATION,
-            dict(self.appearance_variables),
-        )
+        with self.assertRaises(FastGPTStageFormatError):
+            client.run_stage(
+                STAGE_APPEARANCE_ALIAS_GENERATION,
+                dict(self.appearance_variables),
+            )
 
-        self.assertEqual(client.request_count, 2)
-        self.assertEqual(
-            result[APPEARANCE_MAPPING]["scene_level_usage_plan"][0]["scene_name"],
-            "玻璃会议室",
-        )
+        self.assertEqual(client.request_count, 1)
         debug_info = client.get_last_stage_debug_info(STAGE_APPEARANCE_ALIAS_GENERATION)
         self.assertTrue(debug_info.get("appearance_h2KpLm91_empty"))
         summaries = list(debug_info.get("appearance_candidate_summaries") or [])
@@ -1294,6 +1281,43 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertNotIn("dramatic_function", str(stage_input[CHARACTERS]))
         self.assertIn('"scene_name":"玻璃会议室"', str(stage_input[SCENES]))
         self.assertNotIn("outfit_requirements", str(stage_input[SCENES]))
+
+    def test_appearance_generation_retries_writing_stage_before_review_when_first_output_bad(self) -> None:
+        settings.fastgpt_stage_format_retry_limit = 2
+        runner = _QueuedStageRunner(
+            [
+                {APPEARANCE_NATURAL_LANGUAGE_VAR: "这只是自然语言说明，不是结构化映射。"},
+                {APPEARANCE_MAPPING: _appearance_mapping_json()},
+                _appearance_review_json(
+                    passed=True,
+                    rewrite_required=False,
+                ),
+                {
+                    APPEARANCE_NATURAL_LANGUAGE_VAR: "林夏在会议室与回家场景之间使用不同服装别名，但同一人物锚点保持一致。"
+                },
+            ]
+        )
+        state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
+        variables = dict(self.appearance_variables)
+        state.variables.update(variables)
+
+        _ensure_appearance_outputs(state, runner, variables)
+
+        self.assertEqual(
+            runner.stage_calls,
+            [
+                STAGE_APPEARANCE_ALIAS_WRITING,
+                STAGE_APPEARANCE_ALIAS_WRITING,
+                STAGE_APPEARANCE_ALIAS_REVIEW,
+                STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+            ],
+        )
+        self.assertEqual(
+            variables[APPEARANCE_MAPPING]["appearance_mapping"]["characters"][0]["canonical_name"],
+            "林夏",
+        )
+        artifact = state.get_output(STAGE_APPEARANCE_ALIAS_WRITING, "contract_guard", {})
+        self.assertEqual(artifact.get("status"), "validated")
 
     def test_appearance_review_failure_triggers_rewrite_then_review(self) -> None:
         rewritten = _appearance_mapping_with_principle("REWRITTEN_AFTER_REVIEW")

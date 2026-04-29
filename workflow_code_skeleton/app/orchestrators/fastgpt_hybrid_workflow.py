@@ -28,6 +28,7 @@ from ..services.compact_context import (
 )
 from ..services.fastgpt_client import (
     FastGPTPayloadTooLargeError,
+    FastGPTStageFormatError,
     FastGPTTransientError,
     fastgpt_client,
 )
@@ -147,6 +148,7 @@ from ..workflow_ids import (
     APPEARANCE_REQUIREMENTS_VAR,
     APPEARANCE_REVIEW_VAR,
     CHARACTER_BIOS_VAR,
+    CHARACTER_NATURAL_LANGUAGE_VAR,
     CHARACTER_VAR,
     CORE_SCENE_INPUT_VAR,
     CORE_SCENE_FINAL_VAR,
@@ -427,6 +429,7 @@ def run_fastgpt_hybrid_workflow(
             "已从缓存恢复规范化分集计划。",
             progress_percent=7,
         )
+        sync_runtime_state(state)
     else:
         if _has_normalized_episode_plan(normalized_plan):
             logger.warning(
@@ -471,6 +474,7 @@ def run_fastgpt_hybrid_workflow(
             "已从缓存恢复世界观。",
             progress_percent=12,
         )
+        sync_runtime_state(state)
     else:
         variables.update(
             _run_fastgpt_stage(
@@ -493,6 +497,7 @@ def run_fastgpt_hybrid_workflow(
             "已从缓存恢复人物设定。",
             progress_percent=24,
         )
+        sync_runtime_state(state)
     else:
         variables.update(
             _run_fastgpt_stage(
@@ -1335,7 +1340,7 @@ def _run_pass_review_stage(
         stage_name,
         review_context,
         stage_key=stage_key,
-        message=f"{stage_label} {batch.label} 集审核（第 {review_round}/{review_loop_limit} 轮）",
+        message=f"正在审核{stage_label}：第 {batch.label} 集，第 {review_round}/{review_loop_limit} 轮",
         batch_label=batch.label,
         progress_percent=progress_percent,
         generated_episodes=generated_episodes,
@@ -1393,7 +1398,7 @@ def _run_batch_write_review_revise_loop(
         writing_stage_name,
         writing_context,
         stage_key=stage_key,
-        message=f"{stage_label} {batch.label} 集编写",
+        message=f"正在生成{stage_label}：第 {batch.label} 集",
         batch_label=batch.label,
         progress_percent=progress_percent,
         generated_episodes=generated_episodes,
@@ -1495,7 +1500,7 @@ def _run_batch_write_review_revise_loop(
             rewrite_stage_name,
             rewrite_context,
             stage_key=stage_key,
-            message=f"{stage_label} {batch.label} 集修订（第 {review_round}/{review_loop_limit} 轮）",
+            message=f"正在修订{stage_label}：第 {batch.label} 集，第 {review_round}/{review_loop_limit} 轮",
             batch_label=batch.label,
             progress_percent=progress_percent,
             generated_episodes=generated_episodes,
@@ -1855,39 +1860,39 @@ def _run_hook_batches(
             _sync_state_variables(state, variables)
             sync_runtime_state(state)
         state.set_output(STAGE_HOOK_MEMORY, "contract_guard", {})
-        hook_memory_output = _run_optional_memory_stage(
-            state,
-            runner,
-            STAGE_HOOK_MEMORY,
-            {
-                BATCH_HOOKS: batch_hooks,
-                HOOK_MEMORY: get_with_aliases(variables, HOOK_MEMORY, HOOK_MEMORY_ALIASES, ""),
-                APPEARANCE_MAPPING: _compact_stage_text(
-                    alias_plan_for_batch,
-                    builder=build_compact_appearance_context_for_batch,
-                    fallback="",
-                ),
-                TOTAL_EPISODES: variables.get(TOTAL_EPISODES),
-                BATCH_START_EPISODE: batch.start_episode,
-                EPISODE_PLAN: plan_for_batch,
-            },
-            stage_key="hook",
-            message=f"开头冲突钩子 {batch.label} 集记忆",
-            batch_label=batch.label,
-            progress_percent=progress,
-            generated_episodes=batch.end_episode,
-            fallback_output={HOOK_MEMORY: get_with_aliases(variables, HOOK_MEMORY, HOOK_MEMORY_ALIASES, "")},
-            output_field=HOOK_MEMORY,
-            batch=batch,
-            memory_normalizer=_normalize_hook_memory_output,
-            memory_kwargs={
-                "batch": batch,
-                "batch_hooks": batch_hooks,
-                "previous_memory": get_with_aliases(variables, HOOK_MEMORY, HOOK_MEMORY_ALIASES, ""),
-            },
-        )
-        hook_memory_artifact = state.get_output(STAGE_HOOK_MEMORY, "contract_guard", {})
-        if hook_memory_artifact.get("fallback_used"):
+        try:
+            hook_memory_output = _run_optional_memory_stage(
+                state,
+                runner,
+                STAGE_HOOK_MEMORY,
+                {
+                    BATCH_HOOKS: batch_hooks,
+                    HOOK_MEMORY: get_with_aliases(variables, HOOK_MEMORY, HOOK_MEMORY_ALIASES, ""),
+                    APPEARANCE_MAPPING: _compact_stage_text(
+                        alias_plan_for_batch,
+                        builder=build_compact_appearance_context_for_batch,
+                        fallback="",
+                    ),
+                    TOTAL_EPISODES: variables.get(TOTAL_EPISODES),
+                    BATCH_START_EPISODE: batch.start_episode,
+                    EPISODE_PLAN: plan_for_batch,
+                },
+                stage_key="hook",
+                message=f"正在写入开头冲突钩子记忆：第 {batch.label} 集",
+                batch_label=batch.label,
+                progress_percent=progress,
+                generated_episodes=batch.end_episode,
+                fallback_output={HOOK_MEMORY: get_with_aliases(variables, HOOK_MEMORY, HOOK_MEMORY_ALIASES, "")},
+                output_field=HOOK_MEMORY,
+                batch=batch,
+                memory_normalizer=_normalize_hook_memory_output,
+                memory_kwargs={
+                    "batch": batch,
+                    "batch_hooks": batch_hooks,
+                    "previous_memory": get_with_aliases(variables, HOOK_MEMORY, HOOK_MEMORY_ALIASES, ""),
+                },
+            )
+        except Exception:
             set_runtime_stage(
                 state,
                 "hook",
@@ -2116,58 +2121,58 @@ def _run_dialogue_batches(
             _sync_state_variables(state, variables)
             sync_runtime_state(state)
         state.set_output(STAGE_DIALOGUE_MEMORY, "contract_guard", {})
-        dialogue_memory_output = _run_optional_memory_stage(
-            state,
-            runner,
-            STAGE_DIALOGUE_MEMORY,
-            {
-                BATCH_DIALOGUES: batch_dialogues,
-                DIALOGUE_MEMORY: get_with_aliases(
-                    variables,
-                    DIALOGUE_MEMORY,
-                    DIALOGUE_MEMORY_ALIASES,
-                    "",
-                ),
-                ALL_HOOKS: copy.deepcopy(hook_payload),
-                EPISODE_PLAN: plan_for_batch,
-                APPEARANCE_MAPPING: _compact_stage_text(
-                    alias_plan_for_batch,
-                    builder=build_compact_appearance_context_for_batch,
-                    fallback="",
-                ),
-                TOTAL_EPISODES: variables.get(TOTAL_EPISODES),
-                BATCH_START_EPISODE: batch.start_episode,
-                CHARACTER_ALIAS_NAMING_RULES: variables.get(CHARACTER_ALIAS_NAMING_RULES) or "",
-            },
-            stage_key="dialogue",
-            message=f"角色对白 {batch.label} 集记忆",
-            batch_label=batch.label,
-            progress_percent=progress,
-            generated_episodes=batch.end_episode,
-            fallback_output={
-                DIALOGUE_MEMORY: get_with_aliases(
-                    variables,
-                    DIALOGUE_MEMORY,
-                    DIALOGUE_MEMORY_ALIASES,
-                    "",
-                )
-            },
-            output_field=DIALOGUE_MEMORY,
-            batch=batch,
-            memory_normalizer=_normalize_dialogue_memory_output,
-            memory_kwargs={
-                "batch": batch,
-                "batch_dialogues": batch_dialogues,
-                "previous_memory": get_with_aliases(
-                    variables,
-                    DIALOGUE_MEMORY,
-                    DIALOGUE_MEMORY_ALIASES,
-                    "",
-                ),
-            },
-        )
-        dialogue_memory_artifact = state.get_output(STAGE_DIALOGUE_MEMORY, "contract_guard", {})
-        if dialogue_memory_artifact.get("fallback_used"):
+        try:
+            dialogue_memory_output = _run_optional_memory_stage(
+                state,
+                runner,
+                STAGE_DIALOGUE_MEMORY,
+                {
+                    BATCH_DIALOGUES: batch_dialogues,
+                    DIALOGUE_MEMORY: get_with_aliases(
+                        variables,
+                        DIALOGUE_MEMORY,
+                        DIALOGUE_MEMORY_ALIASES,
+                        "",
+                    ),
+                    ALL_HOOKS: copy.deepcopy(hook_payload),
+                    EPISODE_PLAN: plan_for_batch,
+                    APPEARANCE_MAPPING: _compact_stage_text(
+                        alias_plan_for_batch,
+                        builder=build_compact_appearance_context_for_batch,
+                        fallback="",
+                    ),
+                    TOTAL_EPISODES: variables.get(TOTAL_EPISODES),
+                    BATCH_START_EPISODE: batch.start_episode,
+                    CHARACTER_ALIAS_NAMING_RULES: variables.get(CHARACTER_ALIAS_NAMING_RULES) or "",
+                },
+                stage_key="dialogue",
+                message=f"正在写入角色对白记忆：第 {batch.label} 集",
+                batch_label=batch.label,
+                progress_percent=progress,
+                generated_episodes=batch.end_episode,
+                fallback_output={
+                    DIALOGUE_MEMORY: get_with_aliases(
+                        variables,
+                        DIALOGUE_MEMORY,
+                        DIALOGUE_MEMORY_ALIASES,
+                        "",
+                    )
+                },
+                output_field=DIALOGUE_MEMORY,
+                batch=batch,
+                memory_normalizer=_normalize_dialogue_memory_output,
+                memory_kwargs={
+                    "batch": batch,
+                    "batch_dialogues": batch_dialogues,
+                    "previous_memory": get_with_aliases(
+                        variables,
+                        DIALOGUE_MEMORY,
+                        DIALOGUE_MEMORY_ALIASES,
+                        "",
+                    ),
+                },
+            )
+        except Exception:
             set_runtime_stage(
                 state,
                 "dialogue",
@@ -2459,40 +2464,37 @@ def _run_script_batches(
         memory_progress = 78 + int(((actual_index + 1) / total_batches) * 20)
         previous_script_memory = _bounded_script_memory(variables.get(LAST_SUMMARY))
         state.set_output(STAGE_SCRIPT_MEMORY, "contract_guard", {})
-        memory_output = run_stage_with_contract_guard(
-            state,
-            runner,
-            STAGE_SCRIPT_MEMORY,
-            {
-                BATCH_SCRIPT: batch_script,
-                LAST_SUMMARY: previous_script_memory,
-                APPEARANCE_MAPPING: _compact_stage_text(
-                    alias_plan_for_batch,
-                    builder=build_compact_appearance_context_for_batch,
-                    fallback="",
-                ),
-                CHARACTER_ALIAS_NAMING_RULES: variables.get(CHARACTER_ALIAS_NAMING_RULES) or "",
-            },
-            stage_key="script",
-            message=f"剧本正文 {batch.label} 集",
-            batch_label=batch.label,
-            progress_percent=memory_progress,
-            generated_episodes=batch.end_episode,
-            output_field=LAST_SUMMARY,
-            batch=batch,
-            memory_normalizer=_normalize_script_memory_output,
-            memory_kwargs={
-                "batch": batch,
-                "batch_script": batch_script,
-                "previous_memory": variables.get(LAST_SUMMARY),
-            },
-            sync_output_to_state=False,
-        )
-
-        # memory 阶段不是历史归档，而是“覆盖式滚动记忆”。
-        # 下一批 script 只吃最新摘要，避免把越来越长的原文不断回灌给模型。
-        memory_artifact = state.get_output(STAGE_SCRIPT_MEMORY, "contract_guard", {})
-        if memory_artifact.get("fallback_used"):
+        try:
+            memory_output = run_stage_with_contract_guard(
+                state,
+                runner,
+                STAGE_SCRIPT_MEMORY,
+                {
+                    BATCH_SCRIPT: batch_script,
+                    LAST_SUMMARY: previous_script_memory,
+                    APPEARANCE_MAPPING: _compact_stage_text(
+                        alias_plan_for_batch,
+                        builder=build_compact_appearance_context_for_batch,
+                        fallback="",
+                    ),
+                    CHARACTER_ALIAS_NAMING_RULES: variables.get(CHARACTER_ALIAS_NAMING_RULES) or "",
+                },
+                stage_key="script",
+                message=f"正在写入剧本正文记忆：第 {batch.label} 集",
+                batch_label=batch.label,
+                progress_percent=memory_progress,
+                generated_episodes=batch.end_episode,
+                output_field=LAST_SUMMARY,
+                batch=batch,
+                memory_normalizer=_normalize_script_memory_output,
+                memory_kwargs={
+                    "batch": batch,
+                    "batch_script": batch_script,
+                    "previous_memory": variables.get(LAST_SUMMARY),
+                },
+                sync_output_to_state=False,
+            )
+        except Exception:
             set_runtime_stage(
                 state,
                 "script",
@@ -2564,7 +2566,7 @@ def _normalize_script_memory_output(
         return json.dumps(parsed, ensure_ascii=False, indent=2)
     except Exception as exc:
         logger.warning(
-            "script memory %s output invalid; saving local fallback memory: %s",
+            "script memory %s output invalid; generated local debug preview only: %s",
             batch.label,
             _truncate_log_text(str(exc), max_chars=240),
         )
@@ -2598,7 +2600,7 @@ def _normalize_json_memory_output(
         return json.dumps(parsed, ensure_ascii=False, indent=2)
     except Exception as exc:
         logger.warning(
-            "%s memory %s output invalid; saving local fallback memory: %s",
+            "%s memory %s output invalid; generated local debug preview only: %s",
             label,
             batch.label,
             _truncate_log_text(str(exc), max_chars=240),
@@ -4275,6 +4277,110 @@ def _write_stage_debug_artifact_file(
     return str(target.resolve())
 
 
+def _stage_workflow_contract_spec(stage_name: str):
+    contract = contract_for(stage_name)
+    return load_workflow_output_contract(
+        stage_name=stage_name,
+        expected_output_kind=contract.expected_output_kind or "stage_contract",
+        workflow_json_name=contract.workflow_json_name,
+    )
+
+
+def _artifact_debug_fields(
+    *,
+    runner_debug: dict[str, Any],
+    exception: Exception | None,
+    default_missing_fields: list[str],
+) -> dict[str, Any]:
+    matched_fields = list(
+        getattr(exception, "matched_fields", None)
+        or runner_debug.get("matched_fields", [])
+        or []
+    )
+    missing_fields = list(
+        getattr(exception, "missing_fields", None)
+        or runner_debug.get("missing_fields", [])
+        or default_missing_fields
+    )
+    candidate_sources = list(
+        getattr(exception, "candidate_sources", None)
+        or runner_debug.get("candidate_sources", [])
+        or []
+    )
+    answer_text_preview = str(
+        getattr(exception, "answer_text_preview", "")
+        or runner_debug.get("answer_text_preview")
+        or ""
+    )
+    response_preview = str(
+        getattr(exception, "response_preview", "")
+        or runner_debug.get("response_preview")
+        or ""
+    )
+    return {
+        "candidate_sources": candidate_sources,
+        "matched_fields": matched_fields,
+        "missing_fields": missing_fields,
+        "probable_truncated_json": bool(
+            getattr(exception, "probable_truncated_json", False)
+            or runner_debug.get("probable_truncated_json")
+        ),
+        "answer_text_preview": answer_text_preview,
+        "response_preview": response_preview,
+        "raw_output_source": str(
+            getattr(exception, "raw_output_source", "")
+            or runner_debug.get("raw_output_source")
+            or "stage_output"
+        ),
+        "last_failure_reason": str(
+            getattr(exception, "failure_reason", "")
+            or getattr(exception, "issues", None)
+            or getattr(exception, "args", [""])[0]
+            or ""
+        ),
+    }
+
+
+def _log_stage_format_failure(
+    *,
+    contract,
+    batch_label: str | None,
+    format_attempt: int,
+    retries: int,
+    debug_fields: dict[str, Any],
+    debug_file_path: str,
+) -> None:
+    logger.warning(
+        "stage_name=%s attempt=%s/%s failure_reason=%s candidate_source=%s matched_fields=%s missing_fields=%s probable_truncated_json=%s answerText preview=%s debug_artifact=%s",
+        contract.stage_name,
+        format_attempt,
+        retries,
+        _truncate_log_text(str(debug_fields.get("last_failure_reason") or ""), max_chars=320),
+        str(debug_fields.get("raw_output_source") or "stage_output"),
+        list(debug_fields.get("matched_fields") or []),
+        list(debug_fields.get("missing_fields") or []),
+        bool(debug_fields.get("probable_truncated_json")),
+        _truncate_log_text(str(debug_fields.get("answer_text_preview") or ""), max_chars=240),
+        debug_file_path,
+    )
+
+
+def _format_retry_exhausted_error(
+    *,
+    contract,
+    debug_file_path: str,
+    failure_reason: str,
+) -> ValueError:
+    expected_fields = ", ".join(contract.output_names) or "无"
+    return ValueError(
+        f"{contract.stage_name} 输出格式重试已耗尽。"
+        f"期望字段：{expected_fields}；"
+        f"最后一次失败：{failure_reason or '未知'}；"
+        f"调试文件：{debug_file_path}；"
+        "建议检查 workflow 输出是否过长、是否缺 answerNode、是否 detail=false。"
+    )
+
+
 def _run_fastgpt_stage_once(
     state: WorkflowState,
     runner: FastGPTRunner,
@@ -4289,15 +4395,17 @@ def _run_fastgpt_stage_once(
     sync_output_to_state: bool = True,
 ) -> dict[str, Any]:
     contract = contract_for(stage_name)
+    runtime_stage_key = stage_name or stage_key
     _checkpoint(state)
     set_runtime_stage(
         state,
-        stage_key,
+        runtime_stage_key,
         message,
         batch_label=batch_label,
         progress_percent=progress_percent,
         generated_episodes=generated_episodes,
     )
+    sync_runtime_state(state)
     _sync_stage_input_aliases(stage_name, variables)
     contract.build_input_payload(variables)
     _log_fastgpt_stage_start(state, contract.label, batch_label, 1)
@@ -4339,6 +4447,7 @@ def run_stage_with_contract_guard(
 ) -> dict[str, Any]:
     contract = contract_for(stage_name)
     expected_output_kind = contract.expected_output_kind
+    runtime_stage_key = stage_name or stage_key
     if not expected_output_kind:
         return _run_fastgpt_stage(
             state,
@@ -4363,8 +4472,9 @@ def run_stage_with_contract_guard(
     canonical_name = output_field or (contract.output_names[0] if len(contract.output_names) == 1 else "")
     aliases = contract.aliases_for_output(canonical_name) if canonical_name else ()
     last_error: Exception | None = None
+    format_attempt = 0
 
-    for format_attempt in range(1, retries + 1):
+    while format_attempt < retries:
         raw_output: dict[str, Any] | None = None
         validation_meta: dict[str, Any] = {}
         try:
@@ -4404,66 +4514,97 @@ def run_stage_with_contract_guard(
             if sync_output_to_state:
                 _sync_state_variables(state, validated_output)
             runner_debug = _runner_stage_debug_info(runner, stage_name)
-            status = "fallback_used" if validation_meta.get("fallback_used") else "validated"
+            debug_fields = _artifact_debug_fields(
+                runner_debug=runner_debug,
+                exception=None,
+                default_missing_fields=[],
+            )
             artifact = build_debug_artifact(
                 spec=workflow_contract,
                 batch_label=batch_label,
                 review_round=review_round,
-                format_attempt=format_attempt,
+                format_attempt=max(1, format_attempt or 1),
                 max_format_retries=retries,
-                status=status,
+                status="validated",
                 raw_output_source=str(
                     validation_meta.get("raw_output_source")
-                    or runner_debug.get("raw_output_source")
+                    or debug_fields.get("raw_output_source")
                     or "stage_output"
                 ),
                 matched_aliases=list(validation_meta.get("matched_aliases") or aliases),
-                raw_preview=runner_debug.get("response_preview") or raw_output,
+                candidate_sources=debug_fields.get("candidate_sources"),
+                matched_fields=debug_fields.get("matched_fields") or list(validated_output.keys()),
+                missing_fields=[],
+                probable_truncated_json=bool(debug_fields.get("probable_truncated_json")),
+                answer_text_preview=debug_fields.get("answer_text_preview"),
+                response_preview=debug_fields.get("response_preview"),
+                raw_preview=debug_fields.get("response_preview") or raw_output,
                 normalized_preview=validation_meta.get("normalized_preview") or validated_output,
-                fallback_used=bool(validation_meta.get("fallback_used")),
+                fallback_used=False,
+                last_failure_reason="",
             )
             workflow_warnings = list(workflow_contract.workflow_warnings)
             workflow_warnings.extend(validation_meta.get("workflow_warnings", []) or [])
             if workflow_warnings:
                 artifact["workflow_warnings"] = workflow_warnings
-            debug_file_path = ""
-            if artifact.get("status") != "validated":
-                debug_file_path = _write_stage_debug_artifact_file(
-                    artifact=artifact,
-                    stage_variables=variables,
-                    runner_debug=runner_debug,
-                    raw_output=raw_output,
-                    batch=batch,
-                    exception=None,
-                )
-                artifact["debug_file_path"] = debug_file_path
             state.set_output(stage_name, "contract_guard", artifact)
             if workflow_warnings:
                 for warning in workflow_warnings:
                     logger.warning("%s", warning)
-            if debug_file_path:
+            return validated_output
+        except FastGPTTransientError as exc:
+            last_error = exc
+            delay_seconds = _transient_retry_delay(max(1, format_attempt + 1))
+            set_runtime_stage(
+                state,
+                runtime_stage_key,
+                "网络波动，已保留当前进度，正在自动重试。",
+                batch_label=batch_label,
+                progress_percent=progress_percent,
+                generated_episodes=generated_episodes,
+            )
+            sync_runtime_state(state)
+            logger.warning(
+                "%s%s遇到临时错误，将在 %.0f 秒后自动重试：%s",
+                contract.label,
+                _format_batch_suffix(batch_label),
+                delay_seconds,
+                exc,
+            )
+            _sleep_with_checkpoints(state, delay_seconds)
+            continue
+        except Exception as exc:
+            if _is_model_connection_error(exc):
+                last_error = exc
+                delay_seconds = _transient_retry_delay(max(1, format_attempt + 1))
+                set_runtime_stage(
+                    state,
+                    runtime_stage_key,
+                    "模型连接波动，已保留当前进度，正在自动重试。",
+                    batch_label=batch_label,
+                    progress_percent=progress_percent,
+                    generated_episodes=generated_episodes,
+                )
+                sync_runtime_state(state)
                 logger.warning(
-                    "%s%s 使用 fallback 输出，调试文件：%s",
+                    "%s%s遇到模型连接异常，将在 %.0f 秒后自动重试：%s",
                     contract.label,
                     _format_batch_suffix(batch_label),
-                    debug_file_path,
+                    delay_seconds,
+                    exc,
                 )
-            return validated_output
-        except Exception as exc:
+                _sleep_with_checkpoints(state, delay_seconds)
+                continue
             last_error = exc
+            format_attempt += 1
             runner_debug = _runner_stage_debug_info(runner, stage_name)
             issues = list(getattr(exc, "issues", []) or [])
             normalized_preview = getattr(exc, "normalized_output", None)
-            raw_output_source = str(
-                getattr(exc, "raw_output_source", "")
-                or runner_debug.get("raw_output_source")
-                or "stage_output"
+            debug_fields = _artifact_debug_fields(
+                runner_debug=runner_debug,
+                exception=exc,
+                default_missing_fields=list(contract.output_names),
             )
-            fallback_output = getattr(exc, "normalized_output", None)
-            can_use_fallback = bool(getattr(exc, "fallback_used", False)) and isinstance(
-                fallback_output,
-                dict,
-            ) and bool(fallback_output)
             artifact = build_debug_artifact(
                 spec=workflow_contract,
                 batch_label=batch_label,
@@ -4471,23 +4612,28 @@ def run_stage_with_contract_guard(
                 format_attempt=format_attempt,
                 max_format_retries=retries,
                 status=(
-                    "fallback_used"
-                    if can_use_fallback and format_attempt >= retries
-                    else "retry_exhausted"
+                    "retry_exhausted"
                     if format_attempt >= retries or _is_non_retryable(exc)
                     else "failed_retryable"
                 ),
                 validator_issues=issues,
                 exception=exc,
-                raw_output_source=raw_output_source,
+                raw_output_source=str(debug_fields.get("raw_output_source") or "stage_output"),
                 matched_aliases=list(
                     getattr(exc, "matched_aliases", None)
                     or runner_debug.get("matched_aliases", [])
                     or aliases
                 ),
-                raw_preview=runner_debug.get("response_preview") or raw_output,
+                candidate_sources=debug_fields.get("candidate_sources"),
+                matched_fields=debug_fields.get("matched_fields"),
+                missing_fields=debug_fields.get("missing_fields"),
+                probable_truncated_json=bool(debug_fields.get("probable_truncated_json")),
+                answer_text_preview=debug_fields.get("answer_text_preview"),
+                response_preview=debug_fields.get("response_preview"),
+                raw_preview=debug_fields.get("response_preview") or raw_output,
                 normalized_preview=normalized_preview or validation_meta.get("normalized_preview") or "",
-                fallback_used=bool(getattr(exc, "fallback_used", False)),
+                fallback_used=False,
+                last_failure_reason=str(debug_fields.get("last_failure_reason") or str(exc)),
             )
             debug_file_path = _write_stage_debug_artifact_file(
                 artifact=artifact,
@@ -4499,39 +4645,32 @@ def run_stage_with_contract_guard(
             )
             artifact["debug_file_path"] = debug_file_path
             state.set_output(stage_name, "contract_guard", artifact)
-            logger.warning(
-                "%s%s第 %s/%s 次格式校验失败：%s；调试文件：%s",
-                contract.label,
-                _format_batch_suffix(batch_label),
-                format_attempt,
-                retries,
-                _truncate_log_text(str(exc), max_chars=320),
-                debug_file_path,
+            _log_stage_format_failure(
+                contract=contract,
+                batch_label=batch_label,
+                format_attempt=format_attempt,
+                retries=retries,
+                debug_fields=debug_fields,
+                debug_file_path=debug_file_path,
             )
-            if can_use_fallback and format_attempt >= retries:
-                state.set_output(stage_name, "contract_guard", artifact)
-                if sync_output_to_state:
-                    _sync_state_variables(state, fallback_output)
-                logger.warning(
-                    "%s%s 输出格式重试已耗尽，已使用本地 fallback 结果继续。",
-                    contract.label,
-                    _format_batch_suffix(batch_label),
-                )
-                return dict(fallback_output)
             if _is_non_retryable(exc) or format_attempt >= retries:
                 set_runtime_stage(
                     state,
-                    stage_key,
+                    runtime_stage_key,
                     f"{contract.label} 输出格式校验失败，已保留当前进度：{exc}",
                     batch_label=batch_label,
                     progress_percent=progress_percent,
                     generated_episodes=generated_episodes,
                 )
                 sync_runtime_state(state)
-                raise
+                raise _format_retry_exhausted_error(
+                    contract=contract,
+                    debug_file_path=debug_file_path,
+                    failure_reason=str(debug_fields.get("last_failure_reason") or str(exc)),
+                ) from exc
             set_runtime_stage(
                 state,
-                stage_key,
+                runtime_stage_key,
                 "阶段输出格式异常，正在自动重试。",
                 batch_label=batch_label,
                 progress_percent=progress_percent,
@@ -4560,28 +4699,28 @@ def _run_fastgpt_stage(
 ) -> dict[str, Any]:
     """统一封装单个 FastGPT 阶段调用，负责进度上报、契约校验和网络重试。"""
     contract = contract_for(stage_name)
-    # Business audit/revise loops live inside FastGPT. Python only retries malformed
-    # stage calls when explicitly configured, while HTTP/network retry is handled
-    # by FastGPTClient.
-    stage_retries = settings.fastgpt_stage_retries if max_retries is None else max_retries
-    attempts = 1 + max(0, stage_retries)
+    runtime_stage_key = stage_name or stage_key
+    del max_retries
+    retries = _stage_format_retry_limit()
+    workflow_contract = _stage_workflow_contract_spec(stage_name)
     last_error: Exception | None = None
 
     attempt = 0
-    contract_failures = 0
+    format_failures = 0
     while True:
         attempt += 1
         _checkpoint(state)
         set_runtime_stage(
             state,
-            stage_key,
+            runtime_stage_key,
             message,
             batch_label=batch_label,
             progress_percent=progress_percent,
             generated_episodes=generated_episodes,
         )
+        sync_runtime_state(state)
         try:
-            return _run_fastgpt_stage_once(
+            output = _run_fastgpt_stage_once(
                 state,
                 runner,
                 stage_name,
@@ -4591,15 +4730,45 @@ def _run_fastgpt_stage(
                 batch_label=batch_label,
                 progress_percent=progress_percent,
                 generated_episodes=generated_episodes,
-                sync_output_to_state=sync_output_to_state,
+                sync_output_to_state=False,
             )
+            if sync_output_to_state:
+                _sync_state_variables(state, output)
+            runner_debug = _runner_stage_debug_info(runner, stage_name)
+            debug_fields = _artifact_debug_fields(
+                runner_debug=runner_debug,
+                exception=None,
+                default_missing_fields=[],
+            )
+            artifact = build_debug_artifact(
+                spec=workflow_contract,
+                batch_label=batch_label,
+                review_round=None,
+                format_attempt=max(1, format_failures or 1),
+                max_format_retries=retries,
+                status="validated",
+                raw_output_source=str(debug_fields.get("raw_output_source") or "stage_output"),
+                matched_aliases=list(runner_debug.get("matched_aliases", [])),
+                candidate_sources=debug_fields.get("candidate_sources"),
+                matched_fields=debug_fields.get("matched_fields") or list(output.keys()),
+                missing_fields=[],
+                probable_truncated_json=bool(debug_fields.get("probable_truncated_json")),
+                answer_text_preview=debug_fields.get("answer_text_preview"),
+                response_preview=debug_fields.get("response_preview"),
+                raw_preview=debug_fields.get("response_preview") or output,
+                normalized_preview=output,
+                fallback_used=False,
+                last_failure_reason="",
+            )
+            state.set_output(stage_name, "contract_guard", artifact)
+            return output
         except FastGPTTransientError as exc:
             last_error = exc
             delay_seconds = _transient_retry_delay(attempt)
             retry_message = "网络波动，已保留当前进度，正在自动重试。"
             set_runtime_stage(
                 state,
-                stage_key,
+                runtime_stage_key,
                 retry_message,
                 batch_label=batch_label,
                 progress_percent=progress_percent,
@@ -4623,7 +4792,7 @@ def _run_fastgpt_stage(
                 retry_message = "模型连接波动，已保留当前进度，正在自动重试。"
                 set_runtime_stage(
                     state,
-                    stage_key,
+                    runtime_stage_key,
                     retry_message,
                     batch_label=batch_label,
                     progress_percent=progress_percent,
@@ -4640,16 +4809,63 @@ def _run_fastgpt_stage(
                 )
                 _sleep_with_checkpoints(state, delay_seconds)
                 continue
-            contract_failures += 1
-            sync_runtime_state(state)
-            logger.warning(
-                "%s%s第 %s 次尝试失败：%s",
-                contract.label,
-                _format_batch_suffix(batch_label),
-                attempt,
-                exc,
+            format_failures += 1
+            runner_debug = _runner_stage_debug_info(runner, stage_name)
+            debug_fields = _artifact_debug_fields(
+                runner_debug=runner_debug,
+                exception=exc,
+                default_missing_fields=list(contract.output_names),
             )
-            if _is_non_retryable(exc) or contract_failures >= attempts:
+            artifact = build_debug_artifact(
+                spec=workflow_contract,
+                batch_label=batch_label,
+                review_round=None,
+                format_attempt=format_failures,
+                max_format_retries=retries,
+                status=(
+                    "retry_exhausted"
+                    if format_failures >= retries or _is_non_retryable(exc)
+                    else "failed_retryable"
+                ),
+                validator_issues=list(getattr(exc, "issues", []) or []),
+                exception=exc,
+                raw_output_source=str(debug_fields.get("raw_output_source") or "stage_output"),
+                matched_aliases=list(
+                    getattr(exc, "matched_aliases", None)
+                    or runner_debug.get("matched_aliases", [])
+                    or []
+                ),
+                candidate_sources=debug_fields.get("candidate_sources"),
+                matched_fields=debug_fields.get("matched_fields"),
+                missing_fields=debug_fields.get("missing_fields"),
+                probable_truncated_json=bool(debug_fields.get("probable_truncated_json")),
+                answer_text_preview=debug_fields.get("answer_text_preview"),
+                response_preview=debug_fields.get("response_preview"),
+                raw_preview=debug_fields.get("response_preview"),
+                normalized_preview=getattr(exc, "normalized_output", None),
+                fallback_used=False,
+                last_failure_reason=str(debug_fields.get("last_failure_reason") or str(exc)),
+            )
+            debug_file_path = _write_stage_debug_artifact_file(
+                artifact=artifact,
+                stage_variables=variables,
+                runner_debug=runner_debug,
+                raw_output=None,
+                batch=None,
+                exception=exc,
+            )
+            artifact["debug_file_path"] = debug_file_path
+            state.set_output(stage_name, "contract_guard", artifact)
+            sync_runtime_state(state)
+            _log_stage_format_failure(
+                contract=contract,
+                batch_label=batch_label,
+                format_attempt=format_failures,
+                retries=retries,
+                debug_fields=debug_fields,
+                debug_file_path=debug_file_path,
+            )
+            if _is_non_retryable(exc) or format_failures >= retries:
                 set_runtime_stage(
                     state,
                     stage_key,
@@ -4659,7 +4875,11 @@ def _run_fastgpt_stage(
                     generated_episodes=generated_episodes,
                 )
                 sync_runtime_state(state)
-                raise
+                raise _format_retry_exhausted_error(
+                    contract=contract,
+                    debug_file_path=debug_file_path,
+                    failure_reason=str(debug_fields.get("last_failure_reason") or str(exc)),
+                ) from exc
             set_runtime_stage(
                 state,
                 stage_key,
@@ -4683,6 +4903,7 @@ def _ensure_scene_outputs(
             "已从缓存恢复核心场景。",
             progress_percent=34,
         )
+        sync_runtime_state(state)
         return
 
     if _scene_stage_has_transient_state(state, variables):
@@ -4789,6 +5010,7 @@ def _ensure_appearance_outputs(
             "已从缓存恢复人物服装版本映射。",
             progress_percent=42,
         )
+        sync_runtime_state(state)
         return
     if not cached_issues:
         cached_issues = ["appearance_mapping 通过契约校验后仍无法生成本地 alias registry"]
@@ -5544,9 +5766,19 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
         state.set_var(EPISODE_PLAN_VAR, variables[EPISODE_PLAN])
     if WORLDVIEW in variables:
         state.set_var(WORLDVIEW_VAR, variables[WORLDVIEW])
+    if CHARACTER_NATURAL_LANGUAGE_VAR in variables:
+        state.set_var(
+            CHARACTER_NATURAL_LANGUAGE_VAR,
+            str(variables[CHARACTER_NATURAL_LANGUAGE_VAR] or "").strip(),
+        )
     if CHARACTERS in variables:
         state.set_var(CHARACTER_VAR, variables[CHARACTERS])
         state.set_var(FINAL_CHARACTER_VAR, variables[CHARACTERS])
+    if SCENE_NATURAL_LANGUAGE_VAR in variables:
+        state.set_var(
+            SCENE_NATURAL_LANGUAGE_VAR,
+            str(variables[SCENE_NATURAL_LANGUAGE_VAR] or "").strip(),
+        )
     if SCENES in variables:
         state.set_var(SCENE_VAR, variables[SCENES])
         state.set_var(CORE_SCENE_FINAL_VAR, variables[SCENES])
@@ -5952,6 +6184,7 @@ def _ensure_framework_and_consistency(
                 "已从缓存恢复集数一致性检查结果。",
                 progress_percent=3,
             )
+            sync_runtime_state(state)
             return
 
         if cached_consistency is False:
@@ -5963,6 +6196,7 @@ def _ensure_framework_and_consistency(
                 "正在核对分集计划和总集数。",
                 progress_percent=1,
             )
+            sync_runtime_state(state)
             consistency = _run_consistency_stage_with_self_check(
                 state,
                 runner,
@@ -5973,6 +6207,7 @@ def _ensure_framework_and_consistency(
         consistency_flag = _strict_consistency_flag(consistency.get(IS_CONSISTENT))
         if consistency_flag is True:
             set_runtime_stage(state, "validation", "集数一致性检查通过。", progress_percent=3)
+            sync_runtime_state(state)
             return
         if consistency_flag is None:
             raise ConsistencySelfCheckError(
@@ -6429,6 +6664,7 @@ def _ensure_worldview_natural_language(
             "已从缓存恢复世界观自然语言版。",
             progress_percent=18,
         )
+        sync_runtime_state(state)
         return
 
     source = _build_worldview_naturalize_source(variables)

@@ -45,12 +45,24 @@ class WorkflowOutputValidationError(ValueError):
         fallback_used: bool = False,
         matched_aliases: list[str] | None = None,
         raw_output_source: str = "stage_output",
+        candidate_sources: list[str] | None = None,
+        matched_fields: list[str] | None = None,
+        missing_fields: list[str] | None = None,
+        probable_truncated_json: bool = False,
+        answer_text_preview: str = "",
+        response_preview: str = "",
     ) -> None:
         self.issues = list(issues or [])
         self.normalized_output = dict(normalized_output or {})
         self.fallback_used = bool(fallback_used)
         self.matched_aliases = list(matched_aliases or [])
         self.raw_output_source = raw_output_source
+        self.candidate_sources = list(candidate_sources or [])
+        self.matched_fields = list(matched_fields or [])
+        self.missing_fields = list(missing_fields or [])
+        self.probable_truncated_json = bool(probable_truncated_json)
+        self.answer_text_preview = str(answer_text_preview or "")
+        self.response_preview = str(response_preview or "")
         super().__init__(message)
 
 
@@ -142,6 +154,8 @@ def validate_stage_output_with_workflow_contract(
         "raw_output_source": "stage_output",
         "fallback_used": False,
         "workflow_warnings": [],
+        "matched_fields": [],
+        "missing_fields": [],
     }
 
     kind = spec.expected_output_kind
@@ -261,7 +275,6 @@ def validate_stage_output_with_workflow_contract(
                 f"{spec.stage_name} memory 输出未通过格式契约校验",
                 issues=[f"{spec.stage_name} memory output is not valid required json"],
                 normalized_output=normalized,
-                fallback_used=True,
                 matched_aliases=matched_aliases,
             )
         meta["fallback_used"] = False
@@ -328,9 +341,16 @@ def build_debug_artifact(
     exception: Exception | None = None,
     raw_output_source: str = "stage_output",
     matched_aliases: list[str] | None = None,
+    candidate_sources: list[str] | None = None,
+    matched_fields: list[str] | None = None,
+    missing_fields: list[str] | None = None,
+    probable_truncated_json: bool = False,
+    answer_text_preview: str | None = None,
+    response_preview: str | None = None,
     raw_preview: str | None = None,
     normalized_preview: str | None = None,
     fallback_used: bool = False,
+    last_failure_reason: str = "",
 ) -> dict[str, Any]:
     return {
         "stage_name": spec.stage_name,
@@ -343,6 +363,10 @@ def build_debug_artifact(
         "status": status,
         "raw_output_source": raw_output_source,
         "matched_aliases": list(matched_aliases or []),
+        "candidate_sources": list(candidate_sources or []),
+        "matched_fields": list(matched_fields or []),
+        "missing_fields": list(missing_fields or []),
+        "probable_truncated_json": bool(probable_truncated_json),
         "variable_update_targets": list(spec.variable_update_targets),
         "workflow_contract_summary": {
             "response_format": spec.response_format,
@@ -353,9 +377,12 @@ def build_debug_artifact(
         "validator_issues": list(validator_issues or []),
         "exception_type": type(exception).__name__ if exception else "",
         "exception_message": str(exception) if exception else "",
+        "answer_text_preview": _preview(answer_text_preview),
+        "response_preview": _preview(response_preview),
         "raw_preview": _preview(raw_preview),
         "normalized_preview": _preview(normalized_preview),
         "fallback_used": bool(fallback_used),
+        "last_failure_reason": str(last_failure_reason or ""),
     }
 
 

@@ -18,6 +18,7 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     APPEARANCE_MAPPING,
     CHARACTER_COUNT,
     EPISODE_PLAN,
+    NORMALIZED_EPISODE_PLAN,
     PASS_REVIEW_JSON,
     SCRIPT_TITLE,
     STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -27,6 +28,7 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     STAGE_APPEARANCE_ALIAS_WRITING,
     STAGE_CHARACTERS,
     STAGE_DIALOGUE_REVIEW,
+    STAGE_EPISODE_PLAN_NORMALIZE,
     STAGE_FRAMEWORK,
     STAGE_FRAMEWORK_NATURALIZE,
     STAGE_HOOK_REVIEW,
@@ -44,7 +46,9 @@ from workflow_code_skeleton.app.workflow_ids import (
     APPEARANCE_MAPPING_VAR,
     APPEARANCE_NATURAL_LANGUAGE_VAR,
     APPEARANCE_REVIEW_VAR,
+    CHARACTER_NATURAL_LANGUAGE_VAR,
     CHARACTER_VAR,
+    SCENE_NATURAL_LANGUAGE_VAR,
     SCENE_VAR,
 )
 from workflow_code_skeleton.tests.test_stage_output_repair import (
@@ -99,6 +103,36 @@ def _framework_inputs() -> dict[str, object]:
         TOTAL_EPISODES: 10,
         USER_EXPECTATION: "都市情感悬疑短剧",
         CHARACTER_COUNT: 4,
+    }
+
+
+def _normalized_episode_plan_payload(total_episodes: int = 10) -> dict[str, object]:
+    return {
+        "parsed_episode_count": total_episodes,
+        "appearance_alias_planning": {},
+        "episodes": [
+            {
+                "episode": episode,
+                "title": f"第{episode}集",
+                "content": f"第{episode}集主线推进",
+                "main_character_aliases": [],
+                "appearance_events": [],
+                "long_term_stage_flags": [],
+                "scene_based_alias_hints": [],
+            }
+            for episode in range(1, total_episodes + 1)
+        ],
+    }
+
+
+def _episode_plan_normalize_inputs(total_episodes: int = 10) -> dict[str, object]:
+    framework_payload = _framework_payload()
+    return {
+        TOTAL_EPISODES: total_episodes,
+        STORY_OUTLINE: framework_payload[STORY_OUTLINE],
+        USER_CHARACTERS: framework_payload[USER_CHARACTERS],
+        EPISODE_PLAN: framework_payload[EPISODE_PLAN],
+        "character_alias_naming_rules": "统一使用正式中文名",
     }
 
 
@@ -386,18 +420,14 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         client = FastGPTClient()
         contract = contract_for(STAGE_FRAMEWORK)
 
-        with patch(
-            "workflow_code_skeleton.app.services.fastgpt_client.build_stage_output_fallback",
-            return_value=None,
-        ):
-            with self.assertLogs(fastgpt_client_logger.name, level="ERROR") as logs:
-                with self.assertRaises(ValueError):
-                    client._extract_output_payload(
-                        data,
-                        contract,
-                        _framework_inputs(),
-                        allow_fallback=True,
-                    )
+        with self.assertLogs(fastgpt_client_logger.name, level="ERROR") as logs:
+            with self.assertRaises(ValueError):
+                client._extract_output_payload(
+                    data,
+                    contract,
+                    _framework_inputs(),
+                    allow_fallback=False,
+                )
 
         joined = "\n".join(logs.output)
         self.assertNotIn(huge, joined)
@@ -405,6 +435,96 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         debug_info = client.get_last_stage_debug_info(STAGE_FRAMEWORK)
         self.assertEqual(debug_info.get("raw_response"), data)
         self.assertIn("candidate_keys", str(debug_info.get("response_preview") or ""))
+        self.assertIn("candidate_sources", debug_info)
+
+    def test_episode_plan_normalize_uses_choices_content_when_newvariables_empty(self) -> None:
+        response = {
+            "responseData": {"newVariables": []},
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                NORMALIZED_EPISODE_PLAN: _normalized_episode_plan_payload(10)
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ],
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(
+            STAGE_EPISODE_PLAN_NORMALIZE,
+            _episode_plan_normalize_inputs(),
+        )
+
+        self.assertEqual(output[NORMALIZED_EPISODE_PLAN]["parsed_episode_count"], 10)
+        debug_info = client.get_last_stage_debug_info(STAGE_EPISODE_PLAN_NORMALIZE)
+        self.assertIn("choices[0].message.content", str(debug_info.get("candidate_sources") or ""))
+
+    def test_episode_plan_normalize_markdown_code_fence_json_parses(self) -> None:
+        fenced = "```json\n" + json.dumps(
+            {
+                NORMALIZED_EPISODE_PLAN: _normalized_episode_plan_payload(8)
+            },
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n```"
+        client = FastGPTClient()
+
+        output = client._extract_output_payload(
+            {"answerText": fenced},
+            contract_for(STAGE_EPISODE_PLAN_NORMALIZE),
+            _framework_inputs(),
+            allow_fallback=False,
+        )
+
+        self.assertEqual(output[NORMALIZED_EPISODE_PLAN]["parsed_episode_count"], 8)
+
+    def test_episode_plan_normalize_double_nested_json_string_parses(self) -> None:
+        nested = json.dumps(
+            json.dumps(
+                {
+                    NORMALIZED_EPISODE_PLAN: _normalized_episode_plan_payload(6)
+                },
+                ensure_ascii=False,
+            ),
+            ensure_ascii=False,
+        )
+        client = FastGPTClient()
+
+        output = client._extract_output_payload(
+            {"choices": [{"message": {"content": nested}}]},
+            contract_for(STAGE_EPISODE_PLAN_NORMALIZE),
+            _framework_inputs(),
+            allow_fallback=False,
+        )
+
+        self.assertEqual(output[NORMALIZED_EPISODE_PLAN]["parsed_episode_count"], 6)
+
+    def test_episode_plan_normalize_truncated_json_sets_probable_truncated_debug_info(self) -> None:
+        truncated = json.dumps(
+            {
+                NORMALIZED_EPISODE_PLAN: _normalized_episode_plan_payload(3)
+            },
+            ensure_ascii=False,
+        )[:-2]
+        client = FastGPTClient()
+
+        with self.assertRaises(ValueError):
+            client._extract_output_payload(
+                {"answerText": truncated},
+                contract_for(STAGE_EPISODE_PLAN_NORMALIZE),
+                _framework_inputs(),
+                allow_fallback=False,
+            )
+
+        debug_info = client.get_last_stage_debug_info(STAGE_EPISODE_PLAN_NORMALIZE)
+        self.assertTrue(bool(debug_info.get("probable_truncated_json")))
+        self.assertIn(NORMALIZED_EPISODE_PLAN, debug_info.get("missing_fields") or [])
+        self.assertTrue(str(debug_info.get("answer_text_preview") or ""))
 
     def test_post_with_retries_uses_endpoint_timeout_and_raises_transient_on_timeout(self) -> None:
         client = FastGPTClient()
@@ -597,6 +717,50 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         self.assertEqual(parsed["character_setting"]["characters"][0]["character_name"], "林夏")
         self.assertFalse(client.get_last_stage_debug_info(STAGE_CHARACTERS).get("request_detail"))
 
+    def test_characters_stage_captures_natural_language_auxiliary_output(self) -> None:
+        response = {
+            "responseData": {
+                "updateVarResult": [
+                    {
+                        "variable": ["VARIABLE_NODE_ID", CHARACTER_VAR],
+                        "value": json.dumps(_character_setting_json(), ensure_ascii=False),
+                    },
+                    {
+                        "variable": ["VARIABLE_NODE_ID", CHARACTER_NATURAL_LANGUAGE_VAR],
+                        "value": "人物小传自然语言版",
+                    },
+                ]
+            }
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(STAGE_CHARACTERS, _input_variables())
+
+        self.assertIn("characters", output)
+        self.assertEqual(output[CHARACTER_NATURAL_LANGUAGE_VAR], "人物小传自然语言版")
+
+    def test_characters_stage_reads_natural_language_alias_from_answer_node_json(self) -> None:
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "characters": json.dumps(_character_setting_json(), ensure_ascii=False),
+                                "character_summary": "角色设定自然语言说明",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(STAGE_CHARACTERS, _input_variables())
+
+        self.assertEqual(output[CHARACTER_NATURAL_LANGUAGE_VAR], "角色设定自然语言说明")
+
     def test_detail_false_scenes_stage_still_extracts_formal_output(self) -> None:
         settings.fastgpt_scenes_detail = False
         response = {
@@ -616,6 +780,50 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         parsed = json.loads(output["scenes"])
         self.assertEqual(parsed["scene_setting"]["scenes"][0]["scene_name"], "玻璃会议室")
         self.assertFalse(client.get_last_stage_debug_info(STAGE_SCENES).get("request_detail"))
+
+    def test_scenes_stage_captures_natural_language_auxiliary_output(self) -> None:
+        response = {
+            "responseData": {
+                "updateVarResult": [
+                    {
+                        "variable": ["VARIABLE_NODE_ID", SCENE_VAR],
+                        "value": json.dumps(_scene_setting_json(), ensure_ascii=False),
+                    },
+                    {
+                        "variable": ["VARIABLE_NODE_ID", SCENE_NATURAL_LANGUAGE_VAR],
+                        "value": "核心场景自然语言版",
+                    },
+                ]
+            }
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(STAGE_SCENES, _input_variables())
+
+        self.assertIn("scenes", output)
+        self.assertEqual(output[SCENE_NATURAL_LANGUAGE_VAR], "核心场景自然语言版")
+
+    def test_scenes_stage_reads_natural_language_alias_from_choices_content(self) -> None:
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "scenes": json.dumps(_scene_setting_json(), ensure_ascii=False),
+                                "core_scene_summary": "核心场景说明",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(STAGE_SCENES, _input_variables())
+
+        self.assertEqual(output[SCENE_NATURAL_LANGUAGE_VAR], "核心场景说明")
 
     def test_detail_false_appearance_stage_still_extracts_formal_output(self) -> None:
         settings.fastgpt_appearance_alias_generation_detail = False

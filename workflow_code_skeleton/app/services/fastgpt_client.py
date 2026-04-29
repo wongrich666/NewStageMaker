@@ -79,7 +79,6 @@ from .fastgpt_contracts import (
 from .json_utils import parse_json, strip_code_fence
 from .stage_output_repair import (
     StageRepairOutcome,
-    build_stage_output_fallback,
     is_repairable_stage_output,
     normalize_appearance_mapping_candidate,
     repair_stage_output_candidate,
@@ -89,10 +88,24 @@ logger = get_logger("fastgpt_client")
 
 
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
-STAGE_AUXILIARY_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
-    "characters": (CHARACTER_NATURAL_LANGUAGE_VAR,),
-    "scenes": (SCENE_NATURAL_LANGUAGE_VAR,),
-    "appearance_alias_generation": (APPEARANCE_NATURAL_LANGUAGE_VAR,),
+STAGE_AUXILIARY_OUTPUT_KEYS: dict[str, dict[str, tuple[str, ...]]] = {
+    "characters": {
+        CHARACTER_NATURAL_LANGUAGE_VAR: (
+            CHARACTER_NATURAL_LANGUAGE_VAR,
+            "character_natural_language",
+            "character_summary",
+        ),
+    },
+    "scenes": {
+        SCENE_NATURAL_LANGUAGE_VAR: (
+            SCENE_NATURAL_LANGUAGE_VAR,
+            "scene_natural_language",
+            "core_scene_summary",
+        ),
+    },
+    "appearance_alias_generation": {
+        APPEARANCE_NATURAL_LANGUAGE_VAR: (APPEARANCE_NATURAL_LANGUAGE_VAR,),
+    },
 }
 STAGE_API_KEY_ENV_ALIASES: dict[str, tuple[str, ...]] = {
     STAGE_FRAMEWORK_NATURALIZE: ("FASTGPT_UNSTRUCTURED_API_KEY",),
@@ -206,26 +219,44 @@ class FastGPTTransientError(RuntimeError):
         self.response_text = response_text
 
 
-class FastGPTStageOutputRetryRequest(ValueError):
-    """结构化阶段未形成可消费契约输出时，要求本阶段重新调用一次。"""
+class FastGPTStageFormatError(ValueError):
+    """HTTP 成功但阶段输出仍不可消费时，交给编排层统一格式重试。"""
 
     def __init__(
         self,
         *,
         stage_name: str,
         expected_fields: Iterable[str],
-        details: str,
-        response_preview: str,
+        failure_reason: str,
+        candidate_sources: Iterable[str] | None = None,
+        matched_fields: Iterable[str] | None = None,
+        missing_fields: Iterable[str] | None = None,
+        probable_truncated_json: bool = False,
+        answer_text_preview: str = "",
+        response_preview: str = "",
+        raw_output_source: str = "none",
     ) -> None:
         self.stage_name = stage_name
         self.expected_fields = tuple(str(field) for field in expected_fields)
-        self.details = str(details or "").strip()
+        self.failure_reason = str(failure_reason or "").strip()
+        self.candidate_sources = tuple(
+            str(item) for item in list(candidate_sources or []) if str(item or "").strip()
+        )
+        self.matched_fields = tuple(
+            str(item) for item in list(matched_fields or []) if str(item or "").strip()
+        )
+        self.missing_fields = tuple(
+            str(item) for item in list(missing_fields or []) if str(item or "").strip()
+        )
+        self.probable_truncated_json = bool(probable_truncated_json)
+        self.answer_text_preview = str(answer_text_preview or "")
         self.response_preview = str(response_preview or "")
+        self.raw_output_source = str(raw_output_source or "none")
         preview = _truncate_log_text(self.response_preview, limit=500)
         message = (
             f"FastGPT 阶段 {stage_name} 未识别到可消费的契约输出，"
             f"期望字段：{', '.join(self.expected_fields)}；"
-            f"{self.details or '没有发现任何可映射到阶段契约的候选输出'}；"
+            f"{self.failure_reason or '没有发现任何可映射到阶段契约的候选输出'}；"
             f"实际返回内容：{preview}"
         )
         super().__init__(message)
@@ -276,6 +307,7 @@ class StageOutputMatch:
     matched_keys: dict[str, str]
     canonical_hits: int
     alias_hits: int
+    missing_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -348,103 +380,97 @@ class FastGPTClient:
         contract.build_input_payload(variables)
         payload_variables = self._build_wire_variables(stage_name, variables, contract)
         self._remember_stage_debug_info(stage_name, status="started", matched_aliases=[], raw_output_source="")
-        output_reruns = 0
-        if is_repairable_stage_output(stage_name):
-            output_reruns = max(
-                0,
-                int(
-                    getattr(
-                        settings,
-                        "fastgpt_stage_local_restart_retries",
-                        getattr(settings, "fastgpt_stage_output_rerun_retries", 1),
-                    )
-                ),
+        endpoint = self._endpoint_for(stage_name)
+        body = self._build_request_body(contract, payload_variables, endpoint.chat_id)
+        headers = {
+            "Authorization": f"Bearer {endpoint.api_key}",
+            "Content-Type": "application/json",
+        }
+        response = self._post_with_retries(endpoint, headers, body, stage_name)
+        try:
+            data = response.json()
+        except ValueError as exc:
+            response_preview = _truncate_log_text(_safe_response_text(response), limit=1000)
+            self._remember_stage_debug_info(
+                stage_name,
+                status="invalid_json_response",
+                raw_output_source="response.json",
+                matched_aliases=[],
+                matched_fields=[],
+                missing_fields=list(contract.output_names),
+                candidate_sources=[],
+                probable_truncated_json=False,
+                answer_text_preview="",
+                response_preview=response_preview,
+                output_keys=[],
+                raw_response={"response_text": response_preview},
+                conversation_log_available=False,
+                last_failure_reason="response.json invalid",
             )
+            raise FastGPTTransientError(
+                f"FastGPT 阶段 {stage_name} 返回了无法解析的 JSON 响应。"
+                "当前项目进度已保存，可稍后点击继续生成重试。",
+                stage_name=stage_name,
+                url=endpoint.url,
+                response_text=response_preview,
+            ) from exc
 
-        total_attempts = 1 + output_reruns
-        last_retry_request: FastGPTStageOutputRetryRequest | None = None
-        for output_attempt in range(1, total_attempts + 1):
-            # 结构化输出识别失败时重新创建 chat_id 再跑一次，
-            # 避免同一个失败回复在同一会话上下文里被模型不断延续。
-            endpoint = self._endpoint_for(stage_name)
-            body = self._build_request_body(contract, payload_variables, endpoint.chat_id)
-            headers = {
-                "Authorization": f"Bearer {endpoint.api_key}",
-                "Content-Type": "application/json",
-            }
-            response = self._post_with_retries(endpoint, headers, body, stage_name)
-            try:
-                data = response.json()
-            except ValueError as exc:
-                response_preview = _truncate_log_text(_safe_response_text(response), limit=1000)
-                self._remember_stage_debug_info(
-                    stage_name,
-                    status="invalid_json_response",
-                    raw_output_source="response.json",
-                    matched_aliases=[],
-                    answer_text_preview="",
-                    response_preview=response_preview,
-                    output_keys=[],
-                    raw_response={"response_text": response_preview},
-                    conversation_log_available=False,
-                )
-                raise FastGPTTransientError(
-                    f"FastGPT 阶段 {stage_name} 返回了无法解析的 JSON 响应。"
-                    "当前项目进度已保存，可稍后点击继续生成重试。",
-                    stage_name=stage_name,
-                    url=endpoint.url,
-                    response_text=response_preview,
-                ) from exc
-            try:
-                raw_output = self._extract_output_payload(
-                    data,
-                    contract,
-                    variables,
-                    allow_fallback=output_attempt >= total_attempts,
-                )
-            except FastGPTStageOutputRetryRequest as exc:
-                last_retry_request = exc
-                logger.warning(
-                    "FastGPT 阶段 %s 第 %s/%s 次输出未形成可消费契约结果，"
-                    "将从当前阶段开头重新请求一次：%s",
-                    stage_name,
-                    output_attempt,
-                    total_attempts,
-                    exc,
-                )
-                continue
-
+        raw_output = self._extract_output_payload(
+            data,
+            contract,
+            variables,
+            allow_fallback=False,
+        )
+        try:
             validated_output = contract.validate_output_payload(raw_output)
-            auxiliary_output = _extract_stage_auxiliary_outputs(data, stage_name)
-            if auxiliary_output:
-                logger.info(
-                    "FastGPT 阶段 %s 捕获到辅助输出：%s",
-                    stage_name,
-                    auxiliary_output.keys(),
-                )
+        except ValueError as exc:
             debug_info = self.get_last_stage_debug_info(stage_name)
-            debug_info.update(
-                {
-                    "status": "validated",
-                    "answer_text_preview": _truncate_log_text(
-                        _first_text_candidate(data),
-                        limit=300,
-                    ),
-                    "response_preview": _response_log_summary(data, answer_limit=1000),
-                    "output_keys": _candidate_output_keys(data),
-                    "raw_response": data,
-                    "conversation_log_available": False,
-                }
+            failure = FastGPTStageFormatError(
+                stage_name=stage_name,
+                expected_fields=contract.output_names,
+                failure_reason=str(exc),
+                candidate_sources=debug_info.get("candidate_sources", []),
+                matched_fields=debug_info.get("matched_fields", []),
+                missing_fields=debug_info.get("missing_fields", list(contract.output_names)),
+                probable_truncated_json=bool(debug_info.get("probable_truncated_json")),
+                answer_text_preview=str(debug_info.get("answer_text_preview") or ""),
+                response_preview=str(debug_info.get("response_preview") or ""),
+                raw_output_source=str(debug_info.get("raw_output_source") or "none"),
             )
-            self._remember_stage_debug_info(stage_name, **debug_info)
-            return {
-                **auxiliary_output,
-                **validated_output,
-            }
+            self._remember_stage_debug_info(
+                stage_name,
+                status="contract_validation_failed",
+                last_failure_reason=str(exc),
+            )
+            raise failure from exc
 
-        if last_retry_request is not None:
-            raise last_retry_request
-        raise RuntimeError(f"FastGPT 阶段 {stage_name} 未能产出合法输出。")
+        auxiliary_output = _extract_stage_auxiliary_outputs(data, stage_name)
+        if auxiliary_output:
+            logger.info(
+                "FastGPT 阶段 %s 捕获到辅助输出：%s",
+                stage_name,
+                auxiliary_output.keys(),
+            )
+        debug_info = self.get_last_stage_debug_info(stage_name)
+        debug_info.update(
+            {
+                "status": "validated",
+                "answer_text_preview": _truncate_log_text(
+                    _first_text_candidate(data),
+                    limit=300,
+                ),
+                "response_preview": _response_log_summary(data, answer_limit=1000),
+                "output_keys": _candidate_output_keys(data),
+                "raw_response": data,
+                "conversation_log_available": False,
+                "last_failure_reason": "",
+            }
+        )
+        self._remember_stage_debug_info(stage_name, **debug_info)
+        return {
+            **auxiliary_output,
+            **validated_output,
+        }
 
     def _post_with_retries(
         self,
@@ -726,6 +752,7 @@ class FastGPTClient:
         expected = contract.output_names
         validated_candidates: list[ValidatedStageOutput] = []
         rejected_candidates: list[tuple[str, str, dict[str, Any] | None]] = []
+        partial_matches: list[tuple[str, StageOutputMatch]] = []
 
         if contract.stage_name == STAGE_FRAMEWORK:
             framework_output = _extract_framework_stage_output(
@@ -875,6 +902,7 @@ class FastGPTClient:
                     match = _payload_from_candidate(variant_candidate, contract)
                     if match is None:
                         continue
+                    partial_matches.append((variant_source, match))
                     try:
                         validated_payload = contract.validate_output_payload(match.payload)
                     except ValueError as exc:
@@ -917,6 +945,7 @@ class FastGPTClient:
                     match = _payload_from_candidate(variant_candidate, contract)
                     if match is None:
                         continue
+                    partial_matches.append((variant_source, match))
                     try:
                         validated_payload = contract.validate_output_payload(match.payload)
                     except ValueError as exc:
@@ -936,6 +965,7 @@ class FastGPTClient:
                 if parsed_text is not None:
                     match = _payload_from_candidate(parsed_text, contract)
                     if match is not None:
+                        partial_matches.append((f"{source}(json)", match))
                         try:
                             validated_payload = contract.validate_output_payload(match.payload)
                         except ValueError as exc:
@@ -973,8 +1003,12 @@ class FastGPTClient:
         if selected is not None:
             self._remember_stage_debug_info(
                 contract.stage_name,
+                candidate_sources=_collect_candidate_sources(data),
                 raw_output_source=selected.source,
                 matched_aliases=sorted(set(selected.matched_keys.values())),
+                matched_fields=list(selected.payload.keys()),
+                missing_fields=[],
+                probable_truncated_json=False,
                 normalized_preview=_truncate_log_text(
                     _json_for_log(selected.validated_payload),
                     limit=800,
@@ -991,78 +1025,61 @@ class FastGPTClient:
             return selected.validated_payload
 
         details = _format_rejected_candidate_details(rejected_candidates)
-        if is_repairable_stage_output(contract.stage_name) and not allow_fallback:
-            response_summary = _response_log_summary(data, answer_limit=1000)
-            self._remember_stage_debug_info(
-                contract.stage_name,
-                status="no_valid_candidate_retryable",
-                raw_output_source="none",
-                matched_aliases=[],
-                answer_text_preview=_truncate_log_text(_first_text_candidate(data), limit=1000),
-                response_preview=response_summary,
-                output_keys=_candidate_output_keys(data),
-                raw_response=data,
-                conversation_log_available=False,
-            )
-            raise FastGPTStageOutputRetryRequest(
-                stage_name=contract.stage_name,
-                expected_fields=expected,
-                details=details,
-                response_preview=response_summary,
-            )
-
-        fallback = build_stage_output_fallback(
-            contract.stage_name,
-            source="local",
-            input_variables=variables,
-            failure_reason=details,
+        response_summary = _response_log_summary(data, answer_limit=1000)
+        answer_preview = _truncate_log_text(_first_text_candidate(data), limit=1000)
+        candidate_sources = _collect_candidate_sources(data)
+        probable_truncated_json, truncated_source = _probable_truncated_json_details(
+            data,
+            contract,
         )
-        if fallback is not None:
-            try:
-                validated_fallback = contract.validate_output_payload(fallback.payload)
-            except ValueError:
-                logger.exception(
-                    "FastGPT 阶段 %s fallback 生成后仍未通过契约校验，payload=%s",
-                    contract.stage_name,
-                    _truncate_log_text(_json_for_log(fallback.payload), limit=800),
-                )
-            else:
-                _log_stage_output_repair(
-                    contract.stage_name,
-                    "fallback",
-                    fallback,
-                )
-                self._remember_stage_debug_info(
-                    contract.stage_name,
-                    raw_output_source="local_fallback",
-                    matched_aliases=[],
-                    normalized_preview=_truncate_log_text(
-                        _json_for_log(validated_fallback),
-                        limit=800,
-                    ),
-                )
-                return validated_fallback
+        matched_source, matched_fields, missing_fields = _best_partial_match_info(
+            partial_matches,
+            expected,
+        )
+        raw_output_source = truncated_source or matched_source
+        failure_reason = details
+        if probable_truncated_json:
+            failure_reason = (
+                "输出疑似被截断；"
+                f"{details}"
+            )
 
         message = (
             f"FastGPT 阶段 {contract.stage_name} 未返回契约字段：{', '.join(expected)}；"
-            f"未找到通过校验的候选输出。{details}；"
+            f"未找到通过校验的候选输出。{failure_reason}；"
             f"候选字段：{', '.join(_candidate_output_keys(data)[:24]) or '无'}；"
-            f"answerText 预览：{_truncate_log_text(_first_text_candidate(data), limit=1000) or '空'}"
+            f"answerText 预览：{answer_preview or '空'}"
         )
         self._remember_stage_debug_info(
             contract.stage_name,
             status="no_valid_candidate",
-            raw_output_source="none",
+            raw_output_source=raw_output_source,
             matched_aliases=[],
-            answer_text_preview=_truncate_log_text(_first_text_candidate(data), limit=1000),
-            response_preview=_response_log_summary(data, answer_limit=1000),
+            matched_fields=matched_fields,
+            missing_fields=missing_fields,
+            candidate_sources=candidate_sources,
+            probable_truncated_json=probable_truncated_json,
+            answer_text_preview=answer_preview,
+            response_preview=response_summary,
             output_keys=_candidate_output_keys(data),
             raw_response=data,
             conversation_log_available=False,
             normalized_preview="",
+            last_failure_reason=failure_reason,
         )
         logger.error(message)
-        raise ValueError(message)
+        raise FastGPTStageFormatError(
+            stage_name=contract.stage_name,
+            expected_fields=expected,
+            failure_reason=failure_reason,
+            candidate_sources=candidate_sources,
+            matched_fields=matched_fields,
+            missing_fields=missing_fields,
+            probable_truncated_json=probable_truncated_json,
+            answer_text_preview=answer_preview,
+            response_preview=response_summary,
+            raw_output_source=raw_output_source,
+        )
 
 
 def _env(*names: str) -> str | None:
@@ -1294,6 +1311,59 @@ def _response_log_summary(data: Any, *, answer_limit: int = 1000) -> str:
     return _truncate_log_text(_json_for_log(summary), limit=max(600, answer_limit + 200))
 
 
+def _collect_candidate_sources(data: Any, *, limit: int = 80) -> list[str]:
+    sources: list[str] = []
+    seen: set[str] = set()
+    for source, _ in _iter_named_structured_candidates(data):
+        if source in seen:
+            continue
+        seen.add(source)
+        sources.append(source)
+        if len(sources) >= limit:
+            return sources
+    for source, _ in _iter_named_text_candidates(data):
+        if source in seen:
+            continue
+        seen.add(source)
+        sources.append(source)
+        if len(sources) >= limit:
+            return sources
+    return sources
+
+
+def _best_partial_match_info(
+    matches: list[tuple[str, StageOutputMatch]],
+    expected_fields: tuple[str, ...],
+) -> tuple[str, list[str], list[str]]:
+    if not matches:
+        return "none", [], list(expected_fields)
+    best = max(
+        matches,
+        key=lambda item: (
+            item[1].canonical_hits,
+            -item[1].alias_hits,
+            -len(item[1].missing_fields),
+            _payload_source_priority(item[0]),
+        ),
+    )
+    source, match = best
+    matched = list(match.payload.keys())
+    missing = list(match.missing_fields) or [
+        field for field in expected_fields if field not in set(matched)
+    ]
+    return source, matched, missing
+
+
+def _probable_truncated_json_details(
+    data: Any,
+    contract: FastGPTStageContract,
+) -> tuple[bool, str]:
+    for source, text in _iter_named_text_candidates(data):
+        if _looks_like_probably_truncated_json(text, contract):
+            return True, source
+    return False, ""
+
+
 def _iter_choice_message_contents(data: Any) -> Iterable[str]:
     if not isinstance(data, dict):
         return
@@ -1375,6 +1445,7 @@ def _extract_contract_payload(
         matched_keys=matched_keys,
         canonical_hits=canonical_hits,
         alias_hits=alias_hits,
+        missing_fields=tuple(missing_fields),
     )
 
 
@@ -1442,20 +1513,24 @@ def _select_best_validated_output(
 
 def _payload_source_priority(source: str) -> int:
     lowered = source.lower()
-    if "contract_json" in lowered:
-        return 8
-    if "updatevarresult" in lowered:
-        return 7
-    if "newvariables" in lowered:
-        return 6
-    if ".output" in lowered or ".outputs" in lowered or lowered.endswith("output") or lowered.endswith("outputs"):
-        return 5
-    if "pluginoutput" in lowered or ".data" in lowered or lowered.endswith("data"):
-        return 4
+    if lowered.startswith("root.newvariables"):
+        return 90
+    if lowered.startswith("root.updatevarresult"):
+        return 80
+    if lowered.startswith("responsedata.variableupdate"):
+        return 70
+    if "textoutput" in lowered:
+        return 60
+    if "answertext" in lowered:
+        return 50
     if lowered.startswith("choices"):
-        return 3
-    if "answertext" in lowered or lowered.startswith("answertext"):
-        return 2
+        return 40
+    if ".output" in lowered or ".outputs" in lowered or lowered.endswith("output") or lowered.endswith("outputs"):
+        return 30
+    if "contract_json" in lowered or "frameworkcontractjson" in lowered:
+        return 20
+    if "pluginoutput" in lowered or ".data" in lowered or lowered.endswith("data"):
+        return 10
     if source == "root":
         return 1
     return 0
@@ -2793,8 +2868,31 @@ def _iter_named_structured_candidates(data: Any) -> Iterable[tuple[str, Any]]:
     if not isinstance(data, dict):
         return
 
+    if "newVariables" in data:
+        yield ("root.newVariables", data.get("newVariables"))
+        value = data.get("newVariables")
+        if isinstance(value, dict):
+            yield from _yield_named_branch_candidates("root.newVariables", value)
+        elif isinstance(value, list):
+            yield from _yield_named_list_candidates("root.newVariables", value)
+
+    if "updateVarResult" in data:
+        yield ("root.updateVarResult", data.get("updateVarResult"))
+        value = data.get("updateVarResult")
+        if isinstance(value, dict):
+            yield from _yield_named_branch_candidates("root.updateVarResult", value)
+        elif isinstance(value, list):
+            yield from _yield_named_list_candidates("root.updateVarResult", value)
+
     response_data = data.get("responseData")
     if isinstance(response_data, dict):
+        if "variableUpdate" in response_data:
+            yield ("responseData.variableUpdate", response_data.get("variableUpdate"))
+            variable_update = response_data.get("variableUpdate")
+            if isinstance(variable_update, dict):
+                yield from _yield_named_branch_candidates("responseData.variableUpdate", variable_update)
+            elif isinstance(variable_update, list):
+                yield from _yield_named_list_candidates("responseData.variableUpdate", variable_update)
         yield from _yield_named_branch_candidates("responseData", response_data)
     elif isinstance(response_data, list):
         yield ("responseData", response_data)
@@ -2808,19 +2906,19 @@ def _yield_named_branch_candidates(prefix: str, data: dict[str, Any]) -> Iterabl
     if not isinstance(data, dict):
         return
     priority_keys = (
-        "contract_json",
-        "frameworkContractJson",
-        "variableUpdate",
-        "updateVarResult",
         "newVariables",
-        "toolCall",
+        "updateVarResult",
+        "variableUpdate",
+        "textOutput",
+        "answerText",
         "output",
         "outputs",
-        "textOutput",
+        "contract_json",
+        "frameworkContractJson",
+        "toolCall",
         "pluginOutput",
         "data",
         "toolDetail",
-        "answerText",
         "answer",
         "response",
         "result",
@@ -2850,14 +2948,24 @@ def _yield_named_list_candidates(prefix: str, values: list[Any]) -> Iterable[tup
 
 
 def _iter_named_text_candidates(data: Any) -> Iterable[tuple[str, str]]:
-    """只读取 choices/answerText 等真实文本输出槽位，避免递归扫到中间元数据。"""
+    """按统一优先级读取真实文本输出槽位，避免把推理内容当正式结果。"""
     if not isinstance(data, dict):
         return
+
+    for key in ("textOutput", "answerText"):
+        value = data.get(key)
+        if isinstance(value, str):
+            yield (f"root.{key}", strip_code_fence(value))
 
     for index, content in enumerate(_iter_choice_message_contents(data)):
         yield (f"choices[{index}].message.content", strip_code_fence(content))
 
     response_data = data.get("responseData")
+    if isinstance(response_data, dict):
+        for key in ("textOutput", "answerText"):
+            value = response_data.get(key)
+            if isinstance(value, str):
+                yield (f"responseData.{key}", strip_code_fence(value))
     if isinstance(response_data, dict):
         yield from _yield_named_text_fields("responseData", response_data)
     elif isinstance(response_data, list):
@@ -2870,11 +2978,11 @@ def _yield_named_text_fields(prefix: str, data: dict[str, Any]) -> Iterable[tupl
     """枚举某个响应分支里的文本字段，供单字段阶段做 JSON/纯文本双路解析。"""
     if not isinstance(data, dict):
         return
-    for key in ("answerText", "textOutput", "answer", "response", "result", "content", "text"):
+    for key in ("textOutput", "answerText", "answer", "response", "result", "content", "text"):
         value = data.get(key)
         if isinstance(value, str):
             yield (f"{prefix}.{key}", strip_code_fence(value))
-    for key in ("contract_json", "frameworkContractJson", "variableUpdate", "updateVarResult", "newVariables", "toolCall", "output", "outputs", "pluginOutput", "data", "toolDetail"):
+    for key in ("output", "outputs", "contract_json", "frameworkContractJson", "variableUpdate", "updateVarResult", "newVariables", "toolCall", "pluginOutput", "data", "toolDetail"):
         value = data.get(key)
         if isinstance(value, dict):
             yield from _yield_named_text_fields(f"{prefix}.{key}", value)
@@ -2893,7 +3001,7 @@ def _yield_named_text_list_fields(prefix: str, values: list[Any]) -> Iterable[tu
 
 def _extract_stage_auxiliary_outputs(data: dict[str, Any], stage_name: str) -> dict[str, Any]:
     """从响应里捞回少量仅用于展示的内部变量，不影响阶段主契约字段。"""
-    wanted_keys = STAGE_AUXILIARY_OUTPUT_KEYS.get(stage_name, ())
+    wanted_keys = STAGE_AUXILIARY_OUTPUT_KEYS.get(stage_name, {})
     if not wanted_keys:
         return {}
 
@@ -2904,14 +3012,43 @@ def _extract_stage_auxiliary_outputs(data: dict[str, Any], stage_name: str) -> d
             normalized = _dict_from_variable_items(normalized)
         if not isinstance(normalized, dict):
             continue
-        for key in wanted_keys:
-            if key in found:
+        lowered_candidate = {str(key).lower(): key for key in normalized.keys()}
+        for canonical_name, aliases in wanted_keys.items():
+            if canonical_name in found:
                 continue
-            value = normalized.get(key)
+            _, value = extract_stage_output_with_aliases(
+                normalized,
+                canonical_name,
+                aliases,
+                lowered_candidate=lowered_candidate,
+            )
             if isinstance(value, str):
                 value = value.strip()
             if value not in (None, "", [], {}):
-                found[key] = value
+                found[canonical_name] = value
+    if len(found) == len(wanted_keys):
+        return found
+
+    for _, text_candidate in _iter_named_text_candidates(data):
+        parsed = _try_parse_json(text_candidate)
+        if isinstance(parsed, list):
+            parsed = _dict_from_variable_items(parsed)
+        if not isinstance(parsed, dict):
+            continue
+        lowered_candidate = {str(key).lower(): key for key in parsed.keys()}
+        for canonical_name, aliases in wanted_keys.items():
+            if canonical_name in found:
+                continue
+            _, value = extract_stage_output_with_aliases(
+                parsed,
+                canonical_name,
+                aliases,
+                lowered_candidate=lowered_candidate,
+            )
+            if isinstance(value, str):
+                value = value.strip()
+            if value not in (None, "", [], {}):
+                found[canonical_name] = value
     return found
 
 
@@ -2919,14 +3056,75 @@ def _try_parse_json(text: str) -> Any | None:
     cleaned = strip_code_fence(text)
     if not cleaned:
         return None
-    try:
-        return parse_json(cleaned)
-    except Exception:
-        pass
-    try:
-        return json.loads(cleaned)
-    except Exception:
-        return None
+    candidate: Any = cleaned
+    for _ in range(3):
+        if not isinstance(candidate, str):
+            return candidate
+        stripped = strip_code_fence(candidate).strip()
+        if not stripped:
+            return None
+        parsed: Any | None = None
+        try:
+            parsed = parse_json(stripped)
+        except Exception:
+            parsed = None
+        if parsed is None:
+            try:
+                parsed = json.loads(stripped)
+            except Exception:
+                return None
+        candidate = parsed
+    return candidate
+
+
+def _looks_like_probably_truncated_json(
+    text: str,
+    contract: FastGPTStageContract,
+) -> bool:
+    cleaned = strip_code_fence(str(text or "")).strip()
+    if not cleaned or not cleaned.startswith(("{", "[")):
+        return False
+    lowered = cleaned.lower()
+    expected_tokens = {
+        str(field).lower()
+        for field in contract.output_names
+    }
+    for field in contract.output_names:
+        expected_tokens.update(
+            str(alias).lower()
+            for alias in contract.aliases_for_output(field)
+            if str(alias).strip()
+        )
+    if not any(token in lowered for token in expected_tokens):
+        return False
+    if _try_parse_json(cleaned) is not None:
+        return False
+    if cleaned[-1:] not in {"}", "]"}:
+        return True
+    return _bracket_balance_delta(cleaned) != 0
+
+
+def _bracket_balance_delta(text: str) -> int:
+    in_string = False
+    escaping = False
+    delta = 0
+    for char in text:
+        if escaping:
+            escaping = False
+            continue
+        if char == "\\":
+            escaping = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char in "{[":
+            delta += 1
+        elif char in "}]":
+            delta -= 1
+    return delta
 
 
 fastgpt_client = FastGPTClient()

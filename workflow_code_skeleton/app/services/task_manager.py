@@ -93,20 +93,105 @@ PROJECT_RUNNING_STATUSES = {"pending", "running", "pausing", "paused"}
 WAITING_STATUSES = {"pending", "running", "pausing"}
 STAGE_LABELS = {
     "framework": "剧本框架",
+    "framework_naturalize": "剧本框架自然语言化",
     "appearance_strategy": "服装前置策略",
+    "appearance_pre_strategy": "服装前置策略",
     "validation": "集数检查",
+    "consistency": "集数一致性检查",
+    "episode_plan_normalize": "分集计划规范化",
     "worldview": "世界观",
+    "worldview_naturalize": "世界观自然语言化",
     "character": "角色设定",
+    "characters": "角色设定",
     "scene": "核心场景",
+    "scenes": "核心场景",
     "appearance": "服装映射",
+    "appearance_alias_generation": "服装版本映射",
+    "appearance_alias_writing": "服装版本映射编写",
+    "appearance_alias_review": "服装版本映射审核",
+    "appearance_alias_rewrite": "服装版本映射修订",
+    "appearance_alias_unstructured": "服装版本映射自然语言说明",
     "hook": "开头冲突钩子",
+    "hooks": "开头冲突钩子",
+    "hooks_writing": "开头冲突钩子编写",
+    "hook_write": "开头冲突钩子编写",
+    "hooks_review": "开头冲突钩子审核",
+    "hook_review": "开头冲突钩子审核",
+    "hooks_rewrite": "开头冲突钩子修订",
+    "hook_revise": "开头冲突钩子修订",
+    "hook_memory": "开头冲突钩子记忆",
     "dialogue": "角色对话",
+    "dialogues": "角色对白",
+    "dialogues_writing": "角色对白编写",
+    "dialogue_write": "角色对白编写",
+    "dialogues_review": "角色对白审核",
+    "dialogue_review": "角色对白审核",
+    "dialogues_rewrite": "角色对白修订",
+    "dialogue_revise": "角色对白修订",
+    "dialogue_memory": "角色对白记忆",
     "script": "剧本正文",
+    "script_writing": "剧本正文编写",
+    "script_write": "剧本正文编写",
+    "script_review": "剧本正文审核",
+    "script_rewrite": "剧本正文修订",
+    "script_revise": "剧本正文修订",
+    "script_memory": "剧本正文记忆",
+    "memory": "记忆",
+    "final": "最终剧本",
     "finalize": "最终剧本",
     "finished": "已完成",
 }
 FAILED_PUBLIC_MESSAGE = "当前步骤执行失败，任务已停在上一个成功步骤，等待手动继续生成。"
 TERMINATED_PUBLIC_MESSAGE = "任务已终止，已保留当前阶段和中间产物。"
+RUNNING_STAGE_MESSAGE_FALLBACKS = {
+    "framework": "正在生成剧本框架",
+    "framework_naturalize": "正在整理剧本框架自然语言说明",
+    "appearance_strategy": "正在生成服装前置策略",
+    "appearance_pre_strategy": "正在生成服装前置策略",
+    "validation": "正在执行集数检查",
+    "consistency": "正在执行集数一致性检查",
+    "episode_plan_normalize": "正在规范化分集计划",
+    "worldview": "正在生成世界观",
+    "worldview_naturalize": "正在整理世界观自然语言说明",
+    "character": "正在生成人物设定",
+    "characters": "正在生成人物设定",
+    "scene": "正在生成核心场景",
+    "scenes": "正在生成核心场景",
+    "appearance": "正在生成服装版本映射",
+    "appearance_alias_generation": "正在生成服装版本映射",
+    "appearance_alias_writing": "正在编写服装版本映射",
+    "appearance_alias_review": "正在审核服装版本映射",
+    "appearance_alias_rewrite": "正在修订服装版本映射",
+    "appearance_alias_unstructured": "正在整理服装版本映射自然语言说明",
+    "hooks": "正在生成开头冲突钩子",
+    "hooks_writing": "正在生成开头冲突钩子",
+    "hook": "正在生成开头冲突钩子",
+    "hook_write": "正在生成开头冲突钩子",
+    "hooks_review": "正在审核开头冲突钩子",
+    "hook_review": "正在审核开头冲突钩子",
+    "hooks_rewrite": "正在修订开头冲突钩子",
+    "hook_revise": "正在修订开头冲突钩子",
+    "hook_memory": "正在写入开头冲突钩子记忆",
+    "dialogues": "正在生成角色对白",
+    "dialogues_writing": "正在生成角色对白",
+    "dialogue": "正在生成角色对白",
+    "dialogue_write": "正在生成角色对白",
+    "dialogues_review": "正在审核角色对白",
+    "dialogue_review": "正在审核角色对白",
+    "dialogues_rewrite": "正在修订角色对白",
+    "dialogue_revise": "正在修订角色对白",
+    "dialogue_memory": "正在写入角色对白记忆",
+    "script": "正在生成剧本正文",
+    "script_writing": "正在生成剧本正文",
+    "script_write": "正在生成剧本正文",
+    "script_review": "正在审核剧本正文",
+    "script_rewrite": "正在修订剧本正文",
+    "script_revise": "正在修订剧本正文",
+    "script_memory": "正在写入剧本正文记忆",
+    "final": "正在整理最终剧本",
+    "finalize": "正在整理最终剧本",
+    "finished": "已完成",
+}
 STORY_TEASER_ARTIFACT = "story_teaser"
 STORY_TEASER_SOURCE_ARTIFACT = "story_teaser_source"
 STAGE_PREVIEW_TEXT_ARTIFACT = "stage_preview_text"
@@ -124,13 +209,10 @@ PUBLIC_INPUT_PAYLOAD_KEYS = (
 PUBLIC_ARTIFACT_KEYS = (
     "script_title_content",
     "framework_natural_language",
-    "story_outline",
-    "character_bios",
-    "core_scene_input",
-    "episode_plan",
-    "worldview",
     "worldview_natural_language",
+    "character_natural_language",
     "character_summary",
+    "scene_natural_language",
     "core_scene_summary",
 )
 PUBLIC_COMPLETED_ARTIFACT_KEYS = (
@@ -147,7 +229,9 @@ COMPLETED_ARTIFACT_KEYS = (
     "framework_natural_language",
     "story_outline",
     "normalized_episode_plan",
+    "character_natural_language",
     "character_summary",
+    "scene_natural_language",
     "core_scene_summary",
     "worldview_natural_language",
     "appearance_mapping",
@@ -241,7 +325,9 @@ DEBUG_VARIABLE_MIRRORS: dict[str, tuple[str, ...]] = {
     OUTFIT_SWITCH_RULES: (OUTFIT_SWITCH_RULES_VAR,),
     WORLDVIEW: (WORLDVIEW_VAR,),
     CHARACTERS: (CHARACTER_VAR, FINAL_CHARACTER_VAR),
+    CHARACTER_NATURAL_LANGUAGE_VAR: (CHARACTER_NATURAL_LANGUAGE_VAR,),
     SCENES: (SCENE_VAR, CORE_SCENE_FINAL_VAR, FINAL_SCENE_VAR),
+    SCENE_NATURAL_LANGUAGE_VAR: (SCENE_NATURAL_LANGUAGE_VAR,),
     BATCH_START_EPISODE: (
         HOOK_START_VAR,
         DIALOGUE_START_VAR,
@@ -579,8 +665,10 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "character_bios",
         "episode_plan",
         "normalized_episode_plan",
+        "character_natural_language",
         "worldview",
         "character_summary",
+        "scene_natural_language",
         "scene_json",
         "core_scene_input",
         "core_scene_summary",
@@ -602,8 +690,10 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
     ),
     "appearance_strategy": (
         "normalized_episode_plan",
+        "character_natural_language",
         "worldview",
         "character_summary",
+        "scene_natural_language",
         "scene_json",
         "core_scene_summary",
         "character_appearance_requirements",
@@ -624,8 +714,10 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
     ),
     "consistency": (
         "normalized_episode_plan",
+        "character_natural_language",
         "worldview",
         "character_summary",
+        "scene_natural_language",
         "scene_json",
         "core_scene_summary",
         "appearance_mapping",
@@ -643,8 +735,10 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
     ),
     "episode_plan_normalize": (
         "normalized_episode_plan",
+        "character_natural_language",
         "worldview",
         "character_summary",
+        "scene_natural_language",
         "scene_json",
         "core_scene_summary",
         "appearance_mapping",
@@ -662,7 +756,9 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
     ),
     "worldview": (
         "worldview",
+        "character_natural_language",
         "character_summary",
+        "scene_natural_language",
         "scene_json",
         "core_scene_summary",
         "appearance_mapping",
@@ -679,7 +775,9 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "halted_message",
     ),
     "characters": (
+        "character_natural_language",
         "character_summary",
+        "scene_natural_language",
         "scene_json",
         "core_scene_summary",
         "appearance_mapping",
@@ -696,6 +794,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "halted_message",
     ),
     "scenes": (
+        "scene_natural_language",
         "scene_json",
         "core_scene_summary",
         "appearance_mapping",
@@ -777,6 +876,19 @@ def _select_non_empty_fields(
     return payload
 
 
+def _display_text(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2).strip()
+        except Exception:
+            return str(value).strip()
+    return str(value).strip()
+
+
 def _summarize_fastgpt_output(output: dict[str, Any]) -> str:
     parts: list[str] = []
     for key, value in (output or {}).items():
@@ -803,9 +915,27 @@ def _public_status_message(snapshot: dict[str, Any]) -> str:
         return FAILED_PUBLIC_MESSAGE
     if status == "terminated":
         return TERMINATED_PUBLIC_MESSAGE
+    if status == "paused":
+        return message or "已暂停。"
+    if status == "pausing":
+        return message or "正在暂停。"
+    if status in {"pending", "running"} and not message:
+        return _default_runtime_stage_message(snapshot)
     if not message:
         return ""
     return message
+
+
+def _default_runtime_stage_message(snapshot: dict[str, Any]) -> str:
+    stage_key = str(snapshot.get("current_stage") or "").strip().lower()
+    current_batch = str(snapshot.get("current_batch") or "").strip()
+    base = RUNNING_STAGE_MESSAGE_FALLBACKS.get(stage_key)
+    if not base:
+        label = str(snapshot.get("current_stage_label") or "").strip()
+        base = f"正在处理{label}" if label else "正在处理中"
+    if current_batch:
+        return f"{base}：第 {current_batch} 集"
+    return base
 
 
 def _completion_confirmed(snapshot: dict[str, Any] | None) -> bool:
@@ -1350,9 +1480,8 @@ class WorkflowRuntime:
             "current_stage": stage_key,
             "current_stage_label": STAGE_LABELS.get(stage_key, stage_key),
             "message": message,
+            "current_batch": str(batch_label).strip() if batch_label else None,
         }
-        if batch_label is not None:
-            payload["current_batch"] = batch_label
         if progress_percent is not None:
             payload["progress_percent"] = max(0, min(100, int(progress_percent)))
         if generated_episodes is not None:
@@ -1435,6 +1564,14 @@ class WorkflowRuntime:
                 or state.get_var(SCRIPT_FINAL_VAR, "")
                 or ""
             ).strip()
+        character_natural_language = str(
+            state.get_var(CHARACTER_NATURAL_LANGUAGE_VAR, "") or ""
+        ).strip()
+        scene_natural_language = str(
+            state.get_var(SCENE_NATURAL_LANGUAGE_VAR, "") or ""
+        ).strip()
+        structured_characters = state.get_var(CHARACTER_VAR, "")
+        structured_scenes = state.get_var(SCENE_VAR, "")
         artifacts = {
             "script_title_content": script_title_content,
             "framework_natural_language": state.get_var(FRAMEWORK_NATURAL_LANGUAGE, ""),
@@ -1444,19 +1581,18 @@ class WorkflowRuntime:
             "normalized_episode_plan": state.get_var(NORMALIZED_EPISODE_PLAN, ""),
             "worldview": state.get_var(WORLDVIEW_VAR, ""),
             "worldview_natural_language": state.get_var(WORLDVIEW_NATURAL_LANGUAGE, ""),
-            "character_summary": state.get_var(
-                CHARACTER_NATURAL_LANGUAGE_VAR,
-                state.get_var(FINAL_CHARACTER_VAR, state.get_var(CHARACTER_VAR, "")),
-            ),
-            "scene_json": state.get_var(SCENE_VAR, ""),
+            "characters": structured_characters,
+            "character_natural_language": character_natural_language,
+            "character_summary": character_natural_language
+            or ("人物设定自然语言说明暂未生成。" if _display_text(structured_characters) else ""),
+            "scene_json": structured_scenes,
+            "scene_natural_language": scene_natural_language,
             "core_scene_input": state.get_var(
                 SCENE_NATURAL_LANGUAGE_VAR,
                 state.get_var(CORE_SCENE_INPUT_VAR, ""),
             ),
-            "core_scene_summary": state.get_var(
-                SCENE_NATURAL_LANGUAGE_VAR,
-                state.get_var(SCENE_VAR, state.get_var(FINAL_SCENE_VAR, state.get_var(CORE_SCENE_FINAL_VAR, ""))),
-            ),
+            "core_scene_summary": scene_natural_language
+            or ("核心场景自然语言说明暂未生成。" if _display_text(structured_scenes) else ""),
             "character_appearance_requirements": state.get_var(CHARACTER_APPEARANCE_REQUIREMENTS, ""),
             "character_alias_naming_rules": state.get_var(CHARACTER_ALIAS_NAMING_RULES, ""),
             "outfit_switch_rules": state.get_var(OUTFIT_SWITCH_RULES, ""),
@@ -1718,17 +1854,19 @@ class TaskManager:
         snapshot: dict[str, Any],
         artifacts: dict[str, Any],
     ) -> str:
-        raw_episode_plan = str(artifacts.get("episode_plan") or "").strip()
-        if not raw_episode_plan:
+        raw_episode_plan = artifacts.get("episode_plan")
+        if raw_episode_plan in (None, "", {}, []):
             return ""
         parsed = self._parse_episode_plan_display_json(raw_episode_plan)
         if parsed is None:
-            return raw_episode_plan
+            return _display_text(raw_episode_plan)
 
         display_text = self._fallback_episode_plan_display(parsed)
-        return display_text or raw_episode_plan
+        return display_text or self._episode_plan_display_json_text(parsed) or _display_text(raw_episode_plan)
 
-    def _parse_episode_plan_display_json(self, raw_episode_plan: str) -> Any | None:
+    def _parse_episode_plan_display_json(self, raw_episode_plan: Any) -> Any | None:
+        if isinstance(raw_episode_plan, (dict, list)):
+            return copy.deepcopy(raw_episode_plan)
         text = str(raw_episode_plan or "").strip()
         if not text or text[0] not in "[{":
             return None
@@ -1868,9 +2006,21 @@ class TaskManager:
             reached.add("episode_plan_normalize")
         if str(artifacts.get("worldview") or "").strip():
             reached.add("worldview")
-        if str(artifacts.get("character_summary") or "").strip():
+        if any(
+            str(artifacts.get(key) or "").strip()
+            for key in ("character_natural_language", "character_summary")
+        ) or any(
+            str(variables.get(key) or "").strip()
+            for key in (CHARACTERS, CHARACTER_NATURAL_LANGUAGE_VAR)
+        ):
             reached.add("characters")
-        if str(artifacts.get("core_scene_summary") or "").strip():
+        if any(
+            str(artifacts.get(key) or "").strip()
+            for key in ("scene_natural_language", "core_scene_summary", "scene_json")
+        ) or any(
+            str(variables.get(key) or "").strip()
+            for key in (SCENES, SCENE_NATURAL_LANGUAGE_VAR)
+        ):
             reached.add("scenes")
         if variables.get(APPEARANCE_MAPPING):
             reached.add("appearance")
@@ -1910,18 +2060,49 @@ class TaskManager:
             return "episode_plan_normalize" if variables.get(NORMALIZED_EPISODE_PLAN) else "consistency"
         mapping = {
             "framework": "framework",
+            "framework_naturalize": "framework",
             "appearance_strategy": "appearance_strategy",
+            "appearance_pre_strategy": "appearance_strategy",
+            "consistency": "consistency",
+            "episode_plan_normalize": "episode_plan_normalize",
             "worldview": "worldview",
+            "worldview_naturalize": "worldview",
             "character": "characters",
             "characters": "characters",
             "scene": "scenes",
             "scenes": "scenes",
             "appearance": "appearance",
+            "appearance_alias_generation": "appearance",
+            "appearance_alias_writing": "appearance",
+            "appearance_alias_review": "appearance",
+            "appearance_alias_rewrite": "appearance",
+            "appearance_alias_unstructured": "appearance",
             "hook": "hooks",
             "hooks": "hooks",
+            "hooks_writing": "hooks",
+            "hook_write": "hooks",
+            "hooks_review": "hooks",
+            "hook_review": "hooks",
+            "hooks_rewrite": "hooks",
+            "hook_revise": "hooks",
+            "hook_memory": "hooks",
             "dialogue": "dialogues",
             "dialogues": "dialogues",
+            "dialogues_writing": "dialogues",
+            "dialogue_write": "dialogues",
+            "dialogues_review": "dialogues",
+            "dialogue_review": "dialogues",
+            "dialogues_rewrite": "dialogues",
+            "dialogue_revise": "dialogues",
+            "dialogue_memory": "dialogues",
             "script": "script",
+            "script_writing": "script",
+            "script_write": "script",
+            "script_review": "script",
+            "script_rewrite": "script",
+            "script_revise": "script",
+            "script_memory": "script",
+            "memory": "script",
             "finalize": "final",
             "final": "final",
             "finished": "final",
@@ -1940,6 +2121,7 @@ class TaskManager:
         artifacts: dict[str, Any],
     ) -> dict[str, str]:
         """只挑用户需要看的正式阶段内容，并补一段自然语言版摘要减轻等待焦虑。"""
+        raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
         stage_order = ("framework", "worldview", "characters", "scenes", "final")
         stage_title_map = {
             "framework": "剧本框架",
@@ -1949,11 +2131,11 @@ class TaskManager:
             "final": "最终剧本",
         }
         stage_outputs = {
-            "framework": self._framework_stage_output_text(artifacts),
-            "worldview": str(artifacts.get("worldview") or "").strip(),
-            "characters": str(artifacts.get("character_summary") or "").strip(),
-            "scenes": str(artifacts.get("core_scene_summary") or "").strip(),
-            "final": str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip(),
+            "framework": self._framework_stage_output_text(raw_artifacts),
+            "worldview": self._worldview_stage_output_text(raw_artifacts),
+            "characters": self._character_stage_output_text(snapshot, artifacts),
+            "scenes": self._scene_stage_output_text(snapshot, artifacts),
+            "final": _display_text(artifacts.get("final_output_text") or artifacts.get("final_script") or raw_artifacts.get("final_output_text") or raw_artifacts.get("final_script")),
         }
 
         current_stage = self._snapshot_stage_to_rollback_stage(
@@ -2011,19 +2193,20 @@ class TaskManager:
 
     def _framework_stage_output_text(self, artifacts: dict[str, Any]) -> str:
         """把框架阶段的几个正式字段拼成一份可直接阅读的阶段成品。"""
-        title = str(artifacts.get("script_title_content") or "").strip()
-        story_outline = str(artifacts.get("story_outline") or "").strip()
-        character_bios = str(artifacts.get("character_bios") or "").strip()
-        core_scene_input = str(
+        natural = _display_text(artifacts.get("framework_natural_language"))
+        if natural:
+            return natural
+        title = _display_text(artifacts.get("script_title_content"))
+        story_outline = _display_text(artifacts.get("story_outline"))
+        character_bios = _display_text(artifacts.get("character_bios"))
+        core_scene_input = _display_text(
             artifacts.get("core_scene_summary")
             or artifacts.get("core_scene_input")
             or ""
-        ).strip()
-        episode_plan = str(
-            artifacts.get(EPISODE_PLAN_DISPLAY_ARTIFACT)
-            or artifacts.get("episode_plan")
-            or ""
-        ).strip()
+        )
+        episode_plan = _display_text(artifacts.get(EPISODE_PLAN_DISPLAY_ARTIFACT))
+        if not episode_plan:
+            episode_plan = self._episode_plan_display_text({}, artifacts)
         parts: list[str] = []
         if title:
             parts.append(f"剧本标题\n{title}")
@@ -2036,6 +2219,62 @@ class TaskManager:
         if episode_plan:
             parts.append(f"分集计划\n{episode_plan}")
         return "\n\n".join(parts).strip()
+
+    def _worldview_stage_output_text(self, artifacts: dict[str, Any]) -> str:
+        natural = _display_text(artifacts.get("worldview_natural_language"))
+        if natural:
+            return natural
+        return _display_text(artifacts.get("worldview"))
+
+    def _character_stage_output_text(
+        self,
+        snapshot: dict[str, Any],
+        artifacts: dict[str, Any],
+    ) -> str:
+        raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        natural = _display_text(
+            artifacts.get("character_natural_language")
+            or artifacts.get("character_summary")
+            or raw_artifacts.get("character_natural_language")
+            or raw_artifacts.get("character_summary")
+        )
+        if natural:
+            return natural
+        if _display_text(raw_artifacts.get("characters")):
+            return "人物设定自然语言说明暂未生成。"
+        debug_variables = (
+            (snapshot.get("debug_state") or {}).get("variables")
+            if isinstance(snapshot.get("debug_state"), dict)
+            else {}
+        )
+        if isinstance(debug_variables, dict) and _display_text(debug_variables.get(CHARACTERS)):
+            return "人物设定自然语言说明暂未生成。"
+        return ""
+
+    def _scene_stage_output_text(
+        self,
+        snapshot: dict[str, Any],
+        artifacts: dict[str, Any],
+    ) -> str:
+        raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        natural = _display_text(
+            artifacts.get("scene_natural_language")
+            or artifacts.get("core_scene_summary")
+            or raw_artifacts.get("scene_natural_language")
+            or raw_artifacts.get("core_scene_summary")
+        )
+        if natural:
+            return natural
+        if _display_text(raw_artifacts.get("scene_json")):
+            return "核心场景自然语言说明暂未生成。"
+        debug_variables = (
+            (snapshot.get("debug_state") or {}).get("variables")
+            if isinstance(snapshot.get("debug_state"), dict)
+            else {}
+        )
+        if isinstance(debug_variables, dict) and _display_text(debug_variables.get(SCENES)):
+            return "核心场景自然语言说明暂未生成。"
+        return ""
 
     def _stage_preview_text(
         self,
@@ -2140,6 +2379,7 @@ class TaskManager:
             "total_episodes": int(snapshot.get("total_episodes") or 0),
             "current_stage": snapshot.get("current_stage"),
             "current_stage_label": snapshot.get("current_stage_label") or "待开始",
+            "current_batch": snapshot.get("current_batch"),
             "completion_confirmed": completion_confirmed,
             "awaiting_user_confirmation": awaiting_confirmation,
             "cache_retained": bool(snapshot.get("cache_retained", False) or awaiting_confirmation),
@@ -2571,12 +2811,17 @@ class TaskManager:
         )
         worldview_done = self._progress_value_present(artifacts.get("worldview"))
         character_done = self._progress_value_present(
-            artifacts.get("character_summary") or variables.get(CHARACTERS)
+            artifacts.get("character_natural_language")
+            or artifacts.get("character_summary")
+            or variables.get(CHARACTERS)
+            or variables.get(CHARACTER_NATURAL_LANGUAGE_VAR)
         )
         scene_done = self._progress_value_present(
-            artifacts.get("core_scene_summary")
+            artifacts.get("scene_natural_language")
+            or artifacts.get("core_scene_summary")
             or artifacts.get("scene_json")
             or variables.get(SCENES)
+            or variables.get(SCENE_NATURAL_LANGUAGE_VAR)
         )
         appearance_done = self._progress_value_present(
             variables.get(APPEARANCE_MAPPING) or artifacts.get("appearance_mapping")
