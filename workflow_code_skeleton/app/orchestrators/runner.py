@@ -16,6 +16,7 @@ def run_configured_workflow(
     runtime=None,
     model_option: ModelOption | None = None,
     resume_snapshot: dict | None = None,
+    client=None,
 ) -> WorkflowState:
     backend = settings.workflow_backend
     if backend in {"fastgpt", "hybrid", "fastgpt_hybrid"}:
@@ -24,6 +25,7 @@ def run_configured_workflow(
             workflow_spec_path=workflow_spec_path,
             runtime=runtime,
             model_option=model_option,
+            client=client,
             resume_snapshot=resume_snapshot,
         )
     if backend in {"local", "json", "legacy"}:

@@ -222,6 +222,7 @@ PUBLIC_INPUT_PAYLOAD_KEYS = (
     "user_expectation",
     "character_count",
     "total_episodes",
+    "script_format_mode",
 )
 PUBLIC_ARTIFACT_KEYS = (
     "script_title_content",
@@ -241,6 +242,7 @@ COMPLETED_INPUT_PAYLOAD_KEYS = (
     "title",
     "story_outline",
     "total_episodes",
+    "script_format_mode",
 )
 COMPLETED_ARTIFACT_KEYS = (
     "script_title_content",
@@ -4421,15 +4423,26 @@ class TaskManager:
         self._update_snapshot(record, status="running", message="开始执行工作流。")
         runtime: WorkflowRuntime | None = None
         try:
+            from .fastgpt_client import FastGPTClient
+
             workflow_input = WorkflowInput.from_dict(record.input_payload)
             spec = None if use_fastgpt_backend() else WorkflowSpec(record.workflow_spec_path)
             runtime = WorkflowRuntime(manager=self, record=record, spec=spec)
+            script_format_mode = str(record.input_payload.get("script_format_mode") or "").strip().lower()
+            if script_format_mode:
+                logger.info(
+                    "任务 %s 启用 script_format_mode=%s；正文编写/修订将优先使用对应的专用 FastGPT API key。",
+                    record.task_id,
+                    script_format_mode,
+                )
+            runner = FastGPTClient(script_api_profile=script_format_mode)
 
             state = run_configured_workflow(
                 workflow_input,
                 workflow_spec_path=record.workflow_spec_path,
                 runtime=runtime,
                 model_option=record.model_option,
+                client=runner,
                 resume_snapshot=record.resume_snapshot,
             )
 

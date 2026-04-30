@@ -2604,6 +2604,25 @@ a {
   font-weight: 600;
 }
 
+.runtime-mode-pill,
+.composer-mode-note,
+#scriptFormatText,
+#composerModeText {
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.composer-mode-note {
+  margin: 0;
+  color: #7e8792;
+  font-size: 11px;
+  text-align: center;
+}
+
+.composer-mode-note strong {
+  color: #d6dce5;
+  font-weight: 700;
+}
+
 .runtime-note {
   min-height: 16px;
   margin: 0;
@@ -3349,10 +3368,10 @@ a {
   .workspace-body .sidebar-section-head-compact,
   .workspace-body .workspace-pick-meta,
   .workspace-body .workspace-pick-state,
-  .workspace-body .tool-shortcut small,
-  .workspace-body .runtime-note,
-  .workspace-body .runtime-foot,
-  .workspace-body .runtime-pill .runtime-kicker,
+.workspace-body .tool-shortcut small,
+.workspace-body .runtime-note,
+.workspace-body .runtime-foot,
+.workspace-body .runtime-pill .runtime-kicker,
   .workspace-body .chat-bubble-meta,
   .workspace-body .chat-bubble-preview-label,
   .workspace-body .chat-empty-state p,
@@ -3928,6 +3947,16 @@ a {
 .workspace-body .progress-fill {
   background: linear-gradient(90deg, var(--mono-accent), var(--mono-accent-strong));
   box-shadow: 0 0 16px color-mix(in srgb, var(--mono-accent) 28%, transparent);
+}
+
+.chat-workspace-shell[data-script-format-mode="waibao"] .runtime-mode-pill {
+  border-color: color-mix(in srgb, var(--mono-accent) 30%, var(--mono-border));
+  background: color-mix(in srgb, var(--mono-surface) 88%, var(--mono-accent) 12%);
+}
+
+.chat-workspace-shell[data-script-format-mode="waibao"] #scriptFormatText,
+.chat-workspace-shell[data-script-format-mode="waibao"] #composerModeText {
+  color: var(--mono-accent-strong);
 }
 
 .workspace-body .chat-message.user .chat-bubble {

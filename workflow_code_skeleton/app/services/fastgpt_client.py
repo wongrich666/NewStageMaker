@@ -115,6 +115,9 @@ STAGE_API_KEY_ENV_ALIASES: dict[str, tuple[str, ...]] = {
     STAGE_FRAMEWORK_NATURALIZE: ("FASTGPT_UNSTRUCTURED_API_KEY",),
     STAGE_WORLDVIEW_NATURALIZE: ("FASTGPT_UNSTRUCTURED_API_KEY",),
     STAGE_CHARACTERS_NATURALIZE: ("FASTGPT_UNSTRUCTURED_API_KEY",),
+    STAGE_APPEARANCE_ALIAS_GENERATION: (
+        "FASTGPT_APPEARANCE_ALIAS_WRITING_API_KEY",
+    ),
     STAGE_APPEARANCE_ALIAS_WRITING: (
         "FASTGPT_APPEARANCE_ALIAS_WRITING_API_KEY",
     ),
@@ -157,6 +160,25 @@ STAGE_API_KEY_ENV_ALIASES: dict[str, tuple[str, ...]] = {
     STAGE_DIALOGUE_REVIEW: ("FASTGPT_DIALOGUE_REVIEW_API_KEY", "FASTGPT_DIALOGUES_REVIEW_API_KEY", "FASTGPT_DIALOGUE_API_KEY"),
     STAGE_DIALOGUE_REVISE: ("FASTGPT_DIALOGUE_REVISE_API_KEY", "FASTGPT_DIALOGUES_REWRITE_API_KEY", "FASTGPT_DIALOGUE_API_KEY"),
     STAGE_DIALOGUE_MEMORY: ("FASTGPT_DIALOGUE_MEMORY_API_KEY", "FASTGPT_DIALOGUES_MEMORY_API_KEY", "FASTGPT_MEMORY_API_KEY", "FASTGPT_DIALOGUE_API_KEY"),
+}
+SCRIPT_API_PROFILE_STAGE_KEY_ENV_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
+    "waibao": {
+        STAGE_SCRIPT_WRITING: (
+            "FASTGPT_SCRIPT_WAIBAO_WRITING_API_KEY",
+        ),
+        STAGE_SCRIPT_WRITE: (
+            "FASTGPT_SCRIPT_WAIBAO_WRITING_API_KEY",
+        ),
+        STAGE_SCRIPT_REWRITE: (
+            "FASTGPT_SCRIPT_WAIBAO_REWRITE_API_KEY",
+        ),
+        STAGE_SCRIPT_REVISE: (
+            "FASTGPT_SCRIPT_WAIBAO_REWRITE_API_KEY",
+        ),
+    }
+}
+STAGE_ENV_PREFIX_API_KEY_BYPASS = {
+    STAGE_APPEARANCE_ALIAS_GENERATION,
 }
 TEXT_FIRST_MULTI_FIELD_STAGES = {
     STAGE_FRAMEWORK,
@@ -359,8 +381,9 @@ class FastGPTClient:
     Each stage can use its own API key, or all stages can share FASTGPT_API_KEY.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, script_api_profile: str = "") -> None:
         self._last_stage_debug_info: dict[str, dict[str, Any]] = {}
+        self._script_api_profile = _normalize_script_api_profile(script_api_profile)
 
     def get_last_stage_debug_info(self, stage_name: str) -> dict[str, Any]:
         cache = getattr(self, "_last_stage_debug_info", None)
@@ -645,16 +668,36 @@ class FastGPTClient:
 
     def _endpoint_for(self, stage_name: str) -> FastGPTEndpoint:
         env_prefix = f"FASTGPT_{stage_name.upper()}"
+        profile_aliases = _stage_api_profile_aliases(self._script_api_profile, stage_name)
+        stage_api_key_candidates: list[str] = list(profile_aliases)
+        if stage_name not in STAGE_ENV_PREFIX_API_KEY_BYPASS:
+            stage_api_key_candidates.append(f"{env_prefix}_API_KEY")
+        stage_api_key_candidates.extend(STAGE_API_KEY_ENV_ALIASES.get(stage_name, ()))
+        stage_api_key_candidates.append("FASTGPT_API_KEY")
         api_key_source, api_key = _env_with_name(
-            f"{env_prefix}_API_KEY",
-            *STAGE_API_KEY_ENV_ALIASES.get(stage_name, ()),
-            "FASTGPT_API_KEY",
+            *stage_api_key_candidates,
         )
         if not api_key:
             raise ValueError(
                 f"缺少 FastGPT API Key：请在 workflow_code_skeleton/.env 中配置 "
                 f"{env_prefix}_API_KEY 或 FASTGPT_API_KEY"
             )
+        if self._script_api_profile and profile_aliases:
+            if api_key_source in profile_aliases:
+                logger.info(
+                    "FastGPT script_api_profile=%s 命中专用 API key：stage=%s source=%s",
+                    self._script_api_profile,
+                    stage_name,
+                    api_key_source,
+                )
+            else:
+                logger.warning(
+                    "FastGPT script_api_profile=%s 未命中专用 API key：stage=%s preferred=%s，当前回退到=%s",
+                    self._script_api_profile,
+                    stage_name,
+                    list(profile_aliases),
+                    api_key_source or "unknown",
+                )
 
         url_source, raw_url = _env_with_name(
             f"{env_prefix}_CHAT_COMPLETIONS_URL",
@@ -1127,6 +1170,18 @@ class FastGPTClient:
 
 def _env(*names: str) -> str | None:
     return _env_with_name(*names)[1]
+
+
+def _normalize_script_api_profile(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in SCRIPT_API_PROFILE_STAGE_KEY_ENV_ALIASES else ""
+
+
+def _stage_api_profile_aliases(profile: str, stage_name: str) -> tuple[str, ...]:
+    if not profile:
+        return ()
+    stage_aliases = SCRIPT_API_PROFILE_STAGE_KEY_ENV_ALIASES.get(profile, {})
+    return tuple(stage_aliases.get(stage_name, ()))
 
 
 def _merge_optional_text(*parts: Any) -> str:

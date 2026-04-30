@@ -408,6 +408,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "core_scene_input",
             "character_bios",
             "episode_plan",
+            "script_format_mode",
         ):
             value = data.get(optional_key)
             if value not in (None, "", [], {}):
@@ -444,6 +445,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "core_scene_input",
             "character_bios",
             "episode_plan",
+            "script_format_mode",
         ):
             value = data.get(optional_key)
             if value not in (None, "", [], {}):

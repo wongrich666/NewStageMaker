@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>IDEA TO SCRIPT 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260429-06">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260430-01">
 </head>
 <body class="workspace-body">
   <main class="chat-workspace-shell">
@@ -63,6 +63,7 @@
             </summary>
             <div id="toolList" class="tool-shortcut-list"></div>
           </details>
+          <button id="waibaoScriptBtn" class="sidebar-profile-btn" type="button">外包专属格式</button>
         </section>
 
         <div class="sidebar-group sidebar-links">
@@ -109,6 +110,10 @@
             <div class="runtime-pill">
               <span class="runtime-kicker">状态</span>
               <strong id="statusText">待开始</strong>
+            </div>
+            <div class="runtime-pill runtime-mode-pill">
+              <span class="runtime-kicker">模式</span>
+              <strong id="scriptFormatText">标准格式</strong>
             </div>
             <div class="runtime-pill">
               <span class="runtime-kicker">阶段</span>
@@ -197,6 +202,7 @@
         </div>
 
         <p id="formHint" class="composer-hint">只需要填写故事期待、角色数量和总集数。</p>
+        <p class="composer-mode-note">当前创作模式：<strong id="composerModeText">标准格式</strong></p>
 
         <div id="completionPanel" class="completion-panel compact-completion">
           <p id="cacheNoticeText" class="muted">系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。</p>
@@ -328,6 +334,6 @@
       loginUrl: "{{ url_for('login_page') }}"
     };
   </script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260429-06"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260430-01"></script>
 </body>
 </html>

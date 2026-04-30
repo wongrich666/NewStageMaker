@@ -24,6 +24,7 @@
     workspaceSidebar: $("workspaceCard"),
     sidebarToggleBtn: $("sidebarToggleBtn"),
     assistantToolsFolder: $("assistantToolsFolder"),
+    waibaoScriptBtn: $("waibaoScriptBtn"),
     toolList: $("toolList"),
     toolPanel: $("toolPanel"),
     toolPanelTitle: $("toolPanelTitle"),
@@ -94,10 +95,12 @@
     progressText: $("progressText"),
     projectText: $("projectText"),
     taskText: $("taskText"),
+    scriptFormatText: $("scriptFormatText"),
     chatTranscript: $("chatTranscript"),
     outputTitle: $("outputTitle"),
     outputNaturalBox: $("outputNaturalBox"),
-    finalOutputBox: $("finalOutputBox")
+    finalOutputBox: $("finalOutputBox"),
+    composerModeText: $("composerModeText"),
   };
 
   const state = {
@@ -242,6 +245,7 @@
     if (normalized) {
       url.searchParams.set("project_id", String(normalized));
       url.searchParams.delete("mode");
+      url.searchParams.delete("script_format_mode");
     } else {
       url.searchParams.delete("project_id");
       if (!isFreshWorkspaceMode()) {
@@ -251,7 +255,7 @@
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   }
 
-  function buildWorkspaceUrl({ projectId = null, fresh = false } = {}) {
+  function buildWorkspaceUrl({ projectId = null, fresh = false, scriptFormatMode = "" } = {}) {
     const url = currentUrl();
     const basePath = window.scriptMakerConfig.workspaceUrl || url.pathname;
     url.pathname = basePath;
@@ -259,10 +263,15 @@
     url.searchParams.delete("mode");
     url.searchParams.delete("section");
     url.searchParams.delete("panel");
+    url.searchParams.delete("script_format_mode");
     if (projectId) {
       url.searchParams.set("project_id", String(projectId));
     } else if (fresh) {
       url.searchParams.set("mode", "new");
+      const normalizedFormat = String(scriptFormatMode || "").trim().toLowerCase();
+      if (normalizedFormat) {
+        url.searchParams.set("script_format_mode", normalizedFormat);
+      }
     }
     return `${url.pathname}${url.search}${url.hash}`;
   }
@@ -280,8 +289,8 @@
     renderSnapshot(null);
   }
 
-  function openWorkspaceInNewPage({ projectId = null, fresh = false } = {}) {
-    window.open(buildWorkspaceUrl({ projectId, fresh }), "_blank", "noopener");
+  function openWorkspaceInNewPage({ projectId = null, fresh = false, scriptFormatMode = "" } = {}) {
+    window.open(buildWorkspaceUrl({ projectId, fresh, scriptFormatMode }), "_blank", "noopener");
   }
 
   function statusLabel(status) {
@@ -378,6 +387,38 @@
   function inputLineCount(text) {
     const normalized = String(text || "").replace(/\r\n/g, "\n");
     return normalized ? normalized.split("\n").length : 1;
+  }
+
+  function normalizeScriptFormatMode(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return normalized === "waibao" ? "waibao" : "";
+  }
+
+  function selectedScriptFormatMode() {
+    const urlMode = normalizeScriptFormatMode(currentUrl().searchParams.get("script_format_mode"));
+    if (urlMode) return urlMode;
+    return normalizeScriptFormatMode(state.latestSnapshot?.input_payload?.script_format_mode);
+  }
+
+  function scriptFormatModeLabel(value) {
+    return normalizeScriptFormatMode(value) === "waibao" ? "外包专属格式" : "标准格式";
+  }
+
+  function syncScriptFormatModeUi(snapshot = null) {
+    const mode = normalizeScriptFormatMode(snapshot?.input_payload?.script_format_mode)
+      || selectedScriptFormatMode();
+    const label = scriptFormatModeLabel(mode);
+    if (els.scriptFormatText) {
+      els.scriptFormatText.textContent = label;
+      els.scriptFormatText.dataset.mode = mode || "default";
+    }
+    if (els.composerModeText) {
+      els.composerModeText.textContent = label;
+      els.composerModeText.dataset.mode = mode || "default";
+    }
+    if (els.workspaceShell) {
+      els.workspaceShell.dataset.scriptFormatMode = mode || "default";
+    }
   }
 
   function syncExpectationInputHeight() {
@@ -1212,6 +1253,7 @@
         els.outputNaturalBox.textContent = "当前还没有阶段成品。";
       }
       els.finalOutputBox.textContent = "暂无内容";
+      syncScriptFormatModeUi(null);
       renderChatTranscript(null);
       syncElapsedTimer(null);
       if (els.cacheNoticeText) {
@@ -1243,6 +1285,7 @@
     els.projectText.textContent = `当前剧本：${projectTitle}`;
     els.projectText.title = `当前剧本：${projectTitle}`;
     els.taskText.textContent = `任务：${snapshot.task_id || "未创建"}`;
+    syncScriptFormatModeUi(snapshot);
     if (els.outputTitle) {
       els.outputTitle.textContent = displayPayload.title || "当前阶段输出";
     }
@@ -1769,6 +1812,7 @@
   function buildPayload() {
     const expectation = String(els.expectationInput.value || "").trim() || fallbackExpectationForRestart();
     const modelSelectionId = selectedModelId();
+    const scriptFormatMode = selectedScriptFormatMode();
     const payload = {
       user_expectation: expectation,
       character_count: Number(els.characterCountInput.value || 0),
@@ -1782,6 +1826,9 @@
     if (payload.character_count <= 0) throw new Error("角色数量必须大于 0。");
     if (payload.total_episodes <= 0) throw new Error("总集数必须大于 0。");
     if (!payload.model_selection_id) throw new Error("当前没有可用模型，请先完成 .env 配置。");
+    if (scriptFormatMode) {
+      payload.script_format_mode = scriptFormatMode;
+    }
     return payload;
   }
 
@@ -2585,6 +2632,11 @@
     els.newScriptBtn?.addEventListener("click", () => {
       if (!requireLogin()) return;
       openWorkspaceInNewPage({ fresh: true });
+    });
+
+    els.waibaoScriptBtn?.addEventListener("click", () => {
+      if (!requireLogin()) return;
+      openWorkspaceInNewPage({ fresh: true, scriptFormatMode: "waibao" });
     });
 
     els.openCommunityPanelLink?.addEventListener("click", (event) => {

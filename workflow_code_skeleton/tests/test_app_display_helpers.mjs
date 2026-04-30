@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appJsPath = path.join(__dirname, "..", "app", "web", "static", "app.js");
@@ -22,8 +22,12 @@ const bootstrap = [
   "const MAX_EXPECTATION_LINES = 5;",
   "const state = { expandedUserPrompts: {} };",
   extractBetween("function normalizeNumber(value) {", "\n\n  function currentUrl() {"),
+  extractBetween("function currentUrl() {", "\n\n  function updateUrlParams(mutator) {"),
+  extractBetween("function buildWorkspaceUrl({ projectId = null, fresh = false, scriptFormatMode = \"\" } = {}) {", "\n\n  function switchToFreshWorkspace() {"),
   extractBetween("function promptToggleKey(snapshot) {", "\n\n  function inputLineCount(text) {"),
   extractBetween("function inputLineCount(text) {", "\n\n  function syncExpectationInputHeight() {"),
+  extractBetween("function normalizeScriptFormatMode(value) {", "\n\n  function selectedScriptFormatMode() {"),
+  extractBetween("function scriptFormatModeLabel(value) {", "\n\n  function syncScriptFormatModeUi(snapshot = null) {"),
   extractBetween("function normalizeStageKey(stageKey) {", "\n\n  function formatDisplayValue(value) {"),
   extractBetween("function formatDisplayValue(value) {", "\n\n  // 把框架阶段的多个正式产物拼成一个完整回复，方便在聊天流里整体展示。"),
   extractBetween("function compactMessageText(value) {", "\n\n  async function copyTextToClipboard(text) {"),
@@ -43,7 +47,7 @@ const bootstrap = [
   extractBetween("function renderAssistantStageBubble(message) {", "\n\n  function renderThinkingBubble(thinkingState) {"),
   extractBetween("function renderThinkingBubble(thinkingState) {", "\n\n  function transcriptSignature(snapshot) {"),
   extractBetween("function flashCopyButton(button, label) {", "\n\n  function projectTooltip(item) {"),
-  "module.exports = { formatDisplayValue, normalizeStageKey, compactMessageText, partialScriptOutput, statusNoteFrom, frameworkStageOutput, worldviewStageOutput, visibleStageMessages, thinkingStateFrom, thinkingMessageCopyText, renderCopyButton, renderUserPromptBubble, renderAssistantStageBubble, renderThinkingBubble, flashCopyButton };",
+  "module.exports = { buildWorkspaceUrl, normalizeScriptFormatMode, scriptFormatModeLabel, formatDisplayValue, normalizeStageKey, compactMessageText, partialScriptOutput, statusNoteFrom, frameworkStageOutput, worldviewStageOutput, visibleStageMessages, thinkingStateFrom, thinkingMessageCopyText, renderCopyButton, renderUserPromptBubble, renderAssistantStageBubble, renderThinkingBubble, flashCopyButton };",
 ].join("\n\n");
 
 const context = {
@@ -55,7 +59,14 @@ const context = {
   Boolean,
   Number,
   Set,
+  URL,
   window: {
+    location: {
+      href: "https://example.test/workspace?auth_token=token123",
+    },
+    scriptMakerConfig: {
+      workspaceUrl: "/workspace",
+    },
     setTimeout: (fn) => fn(),
   },
 };
@@ -74,7 +85,23 @@ const {
   renderAssistantStageBubble,
   renderThinkingBubble,
   flashCopyButton,
+  buildWorkspaceUrl,
+  normalizeScriptFormatMode,
+  scriptFormatModeLabel,
 } = context.module.exports;
+
+test("build workspace url keeps waibao script format mode for fresh workspace", () => {
+  const url = buildWorkspaceUrl({ fresh: true, scriptFormatMode: "waibao" });
+
+  assert.match(url, /mode=new/);
+  assert.match(url, /script_format_mode=waibao/);
+});
+
+test("script format mode label distinguishes waibao from default", () => {
+  assert.equal(normalizeScriptFormatMode("waibao"), "waibao");
+  assert.equal(scriptFormatModeLabel("waibao"), "外包专属格式");
+  assert.equal(scriptFormatModeLabel(""), "标准格式");
+});
 
 test("framework natural language is preferred over structured raw artifacts", () => {
   const output = frameworkStageOutput({

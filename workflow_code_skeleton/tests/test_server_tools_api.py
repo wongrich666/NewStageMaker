@@ -146,8 +146,37 @@ class ServerToolsApiTests(unittest.TestCase):
         self.assertIn('id="refreshCommunityBtn"', text)
         self.assertIn('id="closeCommunityPanelBtn"', text)
         self.assertIn('id="openCommunityPanelLink"', text)
+        self.assertIn('id="waibaoScriptBtn"', text)
+        self.assertIn('id="scriptFormatText"', text)
+        self.assertIn('id="composerModeText"', text)
         self.assertIn('class="tool-panel community-panel hidden"', text)
         self.assertIn("section=community", text)
+
+    def test_start_workflow_keeps_script_format_mode_in_input_payload(self) -> None:
+        fake_snapshot = {
+            "project_id": 88,
+            "task_id": "task-waibao",
+            "status": "pending",
+            "input_payload": {"script_format_mode": "waibao"},
+        }
+        with patch("workflow_code_skeleton.app.server.task_manager.start_task", return_value=fake_snapshot) as mocked:
+            response = self.client.post(
+                "/api/workflows/start",
+                headers=self.headers,
+                json={
+                    "user_expectation": "写一个外包专属格式的都市短剧",
+                    "character_count": 6,
+                    "total_episodes": 15,
+                    "model_selection_id": "default",
+                    "script_format_mode": "waibao",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        call = mocked.call_args.kwargs
+        self.assertEqual(call["input_payload"]["script_format_mode"], "waibao")
 
     def test_home_page_renders_public_community_entries(self) -> None:
         fake_assets = [

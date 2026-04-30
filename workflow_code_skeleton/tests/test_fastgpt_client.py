@@ -43,6 +43,7 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     STAGE_SCENES,
     STAGE_SCRIPT_REWRITE,
     STAGE_SCRIPT_REVIEW,
+    STAGE_SCRIPT_WRITING,
     STAGE_WORLDVIEW_NATURALIZE,
     STORY_OUTLINE,
     TOTAL_EPISODES,
@@ -668,6 +669,23 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
                     endpoint = client._endpoint_for(stage_name)
                 self.assertEqual(endpoint.api_key, "default-key")
 
+    def test_appearance_generation_stage_does_not_use_legacy_generation_api_key(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "FASTGPT_APPEARANCE_ALIAS_GENERATION_API_KEY": "legacy-generation-key",
+                "FASTGPT_APPEARANCE_ALIAS_WRITING_API_KEY": "appearance-writing-key",
+                "FASTGPT_API_KEY": "default-key",
+            },
+            clear=False,
+        ):
+            client = FastGPTClient()
+            endpoint = client._endpoint_for(STAGE_APPEARANCE_ALIAS_GENERATION)
+
+        self.assertEqual(endpoint.api_key, "appearance-writing-key")
+        self.assertEqual(endpoint.api_key_source, "FASTGPT_APPEARANCE_ALIAS_WRITING_API_KEY")
+        self.assertNotEqual(endpoint.api_key, "legacy-generation-key")
+
     def test_appearance_stages_read_stage_specific_timeouts(self) -> None:
         stage_to_timeout = {
             STAGE_APPEARANCE_ALIAS_WRITING: 601,
@@ -689,6 +707,51 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
                     client = FastGPTClient()
                     endpoint = client._endpoint_for(stage_name)
                 self.assertEqual(endpoint.timeout, timeout_value)
+
+    def test_waibao_script_profile_prefers_dedicated_script_write_and_rewrite_keys(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "FASTGPT_SCRIPT_WAIBAO_WRITING_API_KEY": "waibao-write-key",
+                "FASTGPT_SCRIPT_WAIBAO_REWRITE_API_KEY": "waibao-rewrite-key",
+                "FASTGPT_SCRIPT_WRITING_API_KEY": "default-write-key",
+                "FASTGPT_SCRIPT_REWRITE_API_KEY": "default-rewrite-key",
+                "FASTGPT_API_KEY": "default-key",
+            },
+            clear=False,
+        ):
+            client = FastGPTClient(script_api_profile="waibao")
+            write_endpoint = client._endpoint_for(STAGE_SCRIPT_WRITING)
+            rewrite_endpoint = client._endpoint_for(STAGE_SCRIPT_REWRITE)
+            review_endpoint = client._endpoint_for(STAGE_SCRIPT_REVIEW)
+
+        self.assertEqual(write_endpoint.api_key, "waibao-write-key")
+        self.assertEqual(rewrite_endpoint.api_key, "waibao-rewrite-key")
+        self.assertEqual(write_endpoint.api_key_source, "FASTGPT_SCRIPT_WAIBAO_WRITING_API_KEY")
+        self.assertEqual(rewrite_endpoint.api_key_source, "FASTGPT_SCRIPT_WAIBAO_REWRITE_API_KEY")
+        self.assertNotEqual(review_endpoint.api_key, "waibao-write-key")
+        self.assertNotEqual(review_endpoint.api_key, "waibao-rewrite-key")
+
+    def test_default_script_profile_keeps_standard_script_keys(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "FASTGPT_SCRIPT_WAIBAO_WRITING_API_KEY": "waibao-write-key",
+                "FASTGPT_SCRIPT_WAIBAO_REWRITE_API_KEY": "waibao-rewrite-key",
+                "FASTGPT_SCRIPT_WRITING_API_KEY": "default-write-key",
+                "FASTGPT_SCRIPT_REWRITE_API_KEY": "default-rewrite-key",
+                "FASTGPT_API_KEY": "default-key",
+            },
+            clear=False,
+        ):
+            client = FastGPTClient()
+            write_endpoint = client._endpoint_for(STAGE_SCRIPT_WRITING)
+            rewrite_endpoint = client._endpoint_for(STAGE_SCRIPT_REWRITE)
+
+        self.assertEqual(write_endpoint.api_key, "default-write-key")
+        self.assertEqual(rewrite_endpoint.api_key, "default-rewrite-key")
+        self.assertEqual(write_endpoint.api_key_source, "FASTGPT_SCRIPT_WRITING_API_KEY")
+        self.assertEqual(rewrite_endpoint.api_key_source, "FASTGPT_SCRIPT_REWRITE_API_KEY")
 
     def test_payload_warn_limit_logs_length_summary(self) -> None:
         settings.fastgpt_stage_payload_warn_chars = 50
