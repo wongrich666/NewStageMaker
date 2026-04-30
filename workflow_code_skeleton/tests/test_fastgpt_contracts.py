@@ -5,6 +5,15 @@ import json
 import unittest
 
 from workflow_code_skeleton.app.services.fastgpt_contracts import (
+    APPEARANCE_MAPPING,
+    BATCH_SCRIPT,
+    BATCH_START_EPISODE,
+    CHARACTERS,
+    EPISODE_PLAN,
+    EPISODE_WORD_COUNT,
+    LEGACY_WIRE_INPUT_ALIASES_OVERRIDES,
+    SCRIPT_MEMORY,
+    WORLDVIEW,
     CHARACTER_SEARCH_INTENT,
     STAGE_APPEARANCE_ALIAS_REVIEW,
     STAGE_APPEARANCE_ALIAS_REWRITE,
@@ -20,6 +29,7 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     STAGE_FINAL,
     STAGE_FRAMEWORK,
     STAGE_FRAMEWORK_NATURALIZE,
+    STAGE_CHARACTERS_NATURALIZE,
     STAGE_HOOKS_REVIEW,
     STAGE_HOOKS_REWRITE,
     STAGE_HOOKS_WRITING,
@@ -41,6 +51,7 @@ class FastGPTContractsTestCase(unittest.TestCase):
         direct_stages = (
             STAGE_FRAMEWORK,
             STAGE_FRAMEWORK_NATURALIZE,
+            STAGE_CHARACTERS_NATURALIZE,
             STAGE_APPEARANCE_PRE_STRATEGY,
             STAGE_CONSISTENCY,
             STAGE_EPISODE_PLAN_NORMALIZE,
@@ -120,6 +131,21 @@ class FastGPTContractsTestCase(unittest.TestCase):
                 [],
                 msg=f"{stage_name} public inputs not covered by contract aliases: {missing}",
             )
+
+    def test_script_review_declares_narrow_wire_override(self) -> None:
+        self.assertEqual(
+            LEGACY_WIRE_INPUT_ALIASES_OVERRIDES.get(STAGE_SCRIPT_REVIEW),
+            {
+                WORLDVIEW: "yuozoGpo",
+                CHARACTERS: "fFM0mroW",
+                APPEARANCE_MAPPING: "h2KpLm91",
+                EPISODE_PLAN: "pxtQY7p2",
+                SCRIPT_MEMORY: "dzt6kORx",
+                BATCH_SCRIPT: "zS2LXibg",
+                EPISODE_WORD_COUNT: "eBEWC07Q",
+                BATCH_START_EPISODE: "d4sfifeZ",
+            },
+        )
 
 
 if __name__ == "__main__":

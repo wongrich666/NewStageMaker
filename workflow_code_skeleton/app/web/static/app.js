@@ -926,6 +926,17 @@
     return parts.filter(Boolean).join("\n\n");
   }
 
+  function thinkingMessageCopyText(snapshot) {
+    const thinkingState = thinkingStateFrom(snapshot);
+    if (!thinkingState) return "";
+    const parts = [compactMessageText(thinkingState.content)];
+    const note = compactMessageText(thinkingState.note);
+    if (note && note !== parts[0]) {
+      parts.push(note);
+    }
+    return parts.filter(Boolean).join("\n\n");
+  }
+
   function renderCopyButton(kind, key) {
     const attributes = [`data-chat-action="copy-message"`];
     if (kind) attributes.push(`data-copy-kind="${escapeHtml(kind)}"`);
@@ -1012,7 +1023,10 @@
           <div class="chat-bubble">
             <div class="chat-bubble-head">
               <span class="chat-bubble-title">${escapeHtml(stateLabel)}</span>
-              <span class="chat-bubble-meta">${escapeHtml(stageLabel)}</span>
+              <span class="chat-bubble-head-actions">
+                <span class="chat-bubble-meta">${escapeHtml(stageLabel)}</span>
+                ${renderCopyButton("thinking_state", "current")}
+              </span>
             </div>
             <div class="chat-bubble-content"><span>${escapeHtml(content)}</span></div>
             ${thinkingState.note ? `
@@ -1073,7 +1087,7 @@
       `).join("");
       els.chatTranscript.innerHTML = `
         <section class="chat-empty-state">
-          <strong>剧本创作需求请写在这里~</strong>
+          <strong>剧本创作工作台</strong>
           <p>直接输入你的创作需求，平台会把剧本框架和剧本正文按对话流展示，中间过程统一显示创作状态。</p>
           <div class="chat-empty-tools">${suggestions}</div>
         </section>
@@ -2112,6 +2126,18 @@
     }, 1000);
   }
 
+  function flashCopyButton(button, label) {
+    if (!button) return;
+    const original = button.dataset.originalLabel || button.textContent || "copy";
+    button.dataset.originalLabel = original;
+    button.textContent = label;
+    button.disabled = true;
+    window.setTimeout(() => {
+      button.textContent = original;
+      button.disabled = false;
+    }, 1000);
+  }
+
   function projectTooltip(item) {
       return [
       `剧本：${projectDisplayTitle(item)}`,
@@ -2705,14 +2731,21 @@
           text = userPromptCopyText(state.latestSnapshot);
         } else if (kind === "stage_output") {
           text = stageMessageCopyText(state.latestSnapshot, key);
+        } else if (kind === "thinking_state") {
+          text = thinkingMessageCopyText(state.latestSnapshot);
         }
         copyTextToClipboard(text)
           .then((copied) => {
             if (copied) {
+              flashCopyButton(copyButton, "已复制");
               showCopyToast();
+            } else {
+              flashCopyButton(copyButton, "复制失败");
+              showToast("复制失败", "当前消息暂时没有可复制的文本。");
             }
           })
           .catch((error) => {
+            flashCopyButton(copyButton, "复制失败");
             showToast("复制失败", friendlyErrorText(error, "请稍后重试。"));
           });
         return;

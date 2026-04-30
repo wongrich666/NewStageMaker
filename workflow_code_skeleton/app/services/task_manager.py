@@ -45,6 +45,8 @@ from .fastgpt_contracts import (
     TOTAL_EPISODES,
     USER_CHARACTERS,
     USER_CONTENT_BASELINE,
+    UNSTRUCTURED_CONTENT_KIND,
+    UNSTRUCTURED_SOURCE,
     USER_SCENES,
     WORLDVIEW,
     WORLDVIEW_NATURAL_LANGUAGE,
@@ -91,6 +93,8 @@ from ..workflow_ids import (
     SCRIPT_START_VAR,
     STORY_OUTLINE_VAR,
     TITLE_VAR,
+    UNSTRUCTURED_KIND_VAR,
+    UNSTRUCTURED_SOURCE_VAR,
     WORLDVIEW_VAR,
 )
 
@@ -950,6 +954,12 @@ def _meaningful_stage_output_text(value: Any) -> str:
 
 EXPORT_TECHNICAL_KEY_PATTERN = re.compile(r'^\s*"?[A-Za-z_][A-Za-z0-9_]*"?\s*:\s*(.*)$')
 EXPORT_JSON_FENCE_PATTERN = re.compile(r"```(?:json|text|markdown)?\s*([\s\S]*?)```", re.IGNORECASE)
+CHARACTER_PLACEHOLDER_PATTERN = re.compile(
+    r"(待补全|待完善|未提供|未补充|暂无|待填写|待定|省略|TBD|TODO|N/?A|None|null)",
+    re.IGNORECASE,
+)
+CHARACTER_HEADING_ONLY_PATTERN = re.compile(r"^(人物定位|人物小传|关系特点|出场记忆点)\s*[：:]?\s*$")
+CHARACTER_LABEL_LINE_PATTERN = re.compile(r"^【[^】]+】\s*[^：:\n]{1,20}$")
 
 
 def _strip_export_code_fences(text: str) -> str:
@@ -973,6 +983,13 @@ def _clean_export_key_line(line: str) -> str:
             return ""
         return value.strip(' "')
     return text.strip(' "')
+
+
+def _truncate_log_text(text: Any, *, max_chars: int = 500) -> str:
+    compact = " ".join(str(text or "").split())
+    if len(compact) <= max_chars:
+        return compact
+    return compact[:max_chars].rstrip() + "..."
 
 
 def clean_export_readable_text(value: Any) -> str:
@@ -1023,6 +1040,40 @@ def clean_export_readable_text(value: Any) -> str:
     if current:
         paragraphs.append(" ".join(current).strip())
     return "\n\n".join(paragraph for paragraph in paragraphs if paragraph).strip()
+
+
+def _placeholder_cleaned_text(value: Any) -> str:
+    return clean_export_readable_text(value).strip()
+
+
+def _is_placeholder_like_character_text(value: Any) -> bool:
+    text = _placeholder_cleaned_text(value)
+    if not text:
+        return True
+    compact = re.sub(r"[\s，。；：:、,【】（）()“”\"'`·\-_/]", "", text)
+    if not compact:
+        return True
+    if CHARACTER_HEADING_ONLY_PATTERN.fullmatch(text):
+        return True
+    if compact.lower() in {
+        "待补全",
+        "待完善",
+        "未提供",
+        "未补充",
+        "暂无",
+        "待填写",
+        "待定",
+        "省略",
+        "tbd",
+        "todo",
+        "na",
+        "none",
+        "null",
+    }:
+        return True
+    if CHARACTER_PLACEHOLDER_PATTERN.search(text) and len(compact) <= 18:
+        return True
+    return False
 
 
 def _summarize_fastgpt_output(output: dict[str, Any]) -> str:
@@ -1657,26 +1708,42 @@ def _character_name_from_item(item: dict[str, Any]) -> str:
     return "未命名角色"
 
 
+def _meaningful_character_fragment(value: Any) -> str:
+    text = clean_export_readable_text(value).strip().strip("，。；： ")
+    if not text or _is_placeholder_like_character_text(text):
+        return ""
+    return text
+
+
 def _character_display_summary(item: dict[str, Any]) -> str:
     snippets: list[str] = []
-    role = str(item.get("story_role") or item.get("role_type") or item.get("identity") or "").strip()
+    role = _meaningful_character_fragment(
+        item.get("story_role") or item.get("role_type") or item.get("identity")
+    )
     if role:
         snippets.append(f"人物定位：{role}")
-    motivation = str(item.get("core_motivation") or item.get("core_desire") or "").strip()
-    plot_function = str(item.get("plot_function") or item.get("dramatic_value") or "").strip()
+    motivation = _meaningful_character_fragment(
+        item.get("core_motivation") or item.get("core_desire")
+    )
+    plot_function = _meaningful_character_fragment(
+        item.get("plot_function") or item.get("dramatic_value")
+    )
     appearance = item.get("appearance") if isinstance(item.get("appearance"), dict) else {}
     behavior = item.get("behavior") if isinstance(item.get("behavior"), dict) else {}
-    appearance_text = str(appearance.get("overall_look") or item.get("appearance_anchor") or "").strip()
-    behavior_text = str(behavior.get("social_interaction_style") or item.get("personality") or "").strip()
+    appearance_text = _meaningful_character_fragment(
+        appearance.get("overall_look") or item.get("appearance_anchor")
+    )
+    behavior_text = _meaningful_character_fragment(
+        behavior.get("social_interaction_style") or item.get("personality")
+    )
     short_bits = [bit for bit in (appearance_text, behavior_text, motivation, plot_function) if bit]
     if short_bits:
         snippets.append("人物小传：" + "；".join(short_bits[:4]))
-    memory_point = str(
+    memory_point = _meaningful_character_fragment(
         item.get("entry_memory_point")
         or item.get("appearance_anchor")
         or item.get("recognizable_scene_signal")
-        or ""
-    ).strip()
+    )
     if memory_point:
         snippets.append(f"出场记忆点：{memory_point}")
     return "\n".join(snippets).strip()
@@ -1708,12 +1775,72 @@ def _natural_text_covers_all_characters(natural_text: str, structured_value: Any
     return all(name and name in normalized_text for name in names)
 
 
-def _preferred_character_display_text(natural_text: Any, structured_value: Any) -> str:
-    natural = str(natural_text or "").strip()
-    if natural and _natural_text_covers_all_characters(natural, structured_value):
-        return natural
+def _character_natural_text_quality_issues(natural_text: Any, structured_value: Any) -> list[str]:
+    natural = clean_export_readable_text(natural_text).strip()
+    if not natural:
+        return []
+    issues: list[str] = []
+    if not _natural_text_covers_all_characters(natural, structured_value):
+        issues.append("missing_character_coverage")
+        return issues
+
+    characters = _character_items_from_value(structured_value)
+    lines = [line.strip() for line in natural.replace("\r", "").split("\n") if line.strip()]
+    compact_natural = re.sub(r"[\s，。；：:、,【】（）()“”\"'`·\-_/]", "", natural)
+    informative_lines = [
+        line
+        for line in lines
+        if not CHARACTER_HEADING_ONLY_PATTERN.fullmatch(line)
+        and not CHARACTER_LABEL_LINE_PATTERN.fullmatch(line)
+        and not _is_placeholder_like_character_text(line)
+        and len(re.sub(r"[\s，。；：:、,【】（）()“”\"'`·\-_/]", "", line)) >= 10
+    ]
+    placeholder_matches = CHARACTER_PLACEHOLDER_PATTERN.findall(natural)
+    placeholder_lines = [
+        line for line in lines if CHARACTER_PLACEHOLDER_PATTERN.search(line) or _is_placeholder_like_character_text(line)
+    ]
+    if placeholder_matches and (
+        len(placeholder_matches) >= max(2, len(characters))
+        or len(placeholder_lines) >= max(2, len(lines) // 2)
+    ):
+        issues.append("placeholder_heavy_natural_language")
+
+    if len(characters) > 1:
+        minimum_lines = min(3, max(2, len(characters) // 2))
+        if len(informative_lines) < minimum_lines:
+            average_compact_chars = (
+                len(compact_natural) / max(1, len(characters))
+                if compact_natural
+                else 0
+            )
+            if average_compact_chars < 12:
+                issues.append("low_information_character_bios")
+        unique_lines = {
+            re.sub(r"\s+", "", line)
+            for line in informative_lines
+            if re.sub(r"\s+", "", line)
+        }
+        if len(informative_lines) >= 2 and len(unique_lines) <= max(1, len(informative_lines) // 2):
+            issues.append("low_information_character_bios")
+
+    deduped: list[str] = []
+    for issue in issues:
+        if issue not in deduped:
+            deduped.append(issue)
+    return deduped
+
+
+def _select_character_display_text(natural_text: Any, structured_value: Any) -> tuple[str, list[str]]:
+    natural = clean_export_readable_text(natural_text).strip()
+    issues = _character_natural_text_quality_issues(natural, structured_value) if natural else []
+    if natural and not issues:
+        return natural, []
     fallback = _structured_character_display_text(structured_value)
-    return fallback or natural
+    return fallback or natural, issues
+
+
+def _preferred_character_display_text(natural_text: Any, structured_value: Any) -> str:
+    return _select_character_display_text(natural_text, structured_value)[0]
 
 
 def use_fastgpt_backend() -> bool:
@@ -1913,10 +2040,16 @@ class WorkflowRuntime:
         raw_character_natural_language = str(
             state.get_var(CHARACTER_NATURAL_LANGUAGE_VAR, "") or ""
         ).strip()
-        character_natural_language = _preferred_character_display_text(
+        character_natural_language, character_natural_language_issues = _select_character_display_text(
             raw_character_natural_language,
             state.get_var(CHARACTER_VAR, ""),
         )
+        if raw_character_natural_language and character_natural_language_issues:
+            logger.warning(
+                "character_natural_language_rejected issues=%s preview=%s",
+                ",".join(character_natural_language_issues),
+                _truncate_log_text(raw_character_natural_language, max_chars=240),
+            )
         appearance_natural_language = str(
             state.get_var(APPEARANCE_NATURAL_LANGUAGE_VAR, "") or ""
         ).strip()
@@ -4708,6 +4841,288 @@ class TaskManager:
     def _sentence_fragment(self, value: Any) -> str:
         return clean_export_readable_text(value).strip().strip("，。；： ")
 
+    def _snapshot_record_for_update(
+        self,
+        project_id: int,
+        snapshot: dict[str, Any],
+    ) -> TaskRecord:
+        existing = self._projects.get(project_id)
+        if existing is not None:
+            return existing
+        return TaskRecord(
+            user_id=int(snapshot.get("user_id") or 0),
+            project_id=project_id,
+            task_id=str(snapshot.get("task_id", "")),
+            workflow_spec_path=str(snapshot.get("workflow_spec_path", "")),
+            input_payload=snapshot.get("input_payload", {}),
+            model_option=settings.resolve_model_selection(
+                (snapshot.get("model_option") or {}).get("id")
+            ),
+            snapshot=copy.deepcopy(snapshot),
+        )
+
+    def _apply_snapshot_variable_artifact_updates(
+        self,
+        project_id: int,
+        snapshot: dict[str, Any],
+        *,
+        artifact_updates: dict[str, Any],
+        variable_updates: dict[str, Any],
+    ) -> None:
+        if artifact_updates:
+            artifacts = snapshot.setdefault("artifacts", {})
+            if isinstance(artifacts, dict):
+                artifacts.update(artifact_updates)
+        debug_state = snapshot.setdefault("debug_state", {})
+        if not isinstance(debug_state, dict):
+            debug_state = {}
+            snapshot["debug_state"] = debug_state
+        debug_variables = debug_state.setdefault("variables", {})
+        if not isinstance(debug_variables, dict):
+            debug_variables = {}
+            debug_state["variables"] = debug_variables
+        debug_variables.update(variable_updates)
+
+        record = self._snapshot_record_for_update(project_id, snapshot)
+        record_debug_state = copy.deepcopy(
+            record.snapshot.get("debug_state") if isinstance(record.snapshot.get("debug_state"), dict) else {}
+        )
+        if not isinstance(record_debug_state, dict):
+            record_debug_state = {}
+        record_debug_variables = record_debug_state.setdefault("variables", {})
+        if not isinstance(record_debug_variables, dict):
+            record_debug_variables = {}
+            record_debug_state["variables"] = record_debug_variables
+        record_debug_variables.update(variable_updates)
+        self._update_snapshot(
+            record,
+            artifacts=artifact_updates,
+            debug_state=record_debug_state,
+        )
+
+    def _build_export_character_naturalize_stage_variables(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        structured = self._snapshot_export_value(
+            snapshot,
+            artifact_keys=("characters", "character_bios"),
+            variable_keys=(CHARACTERS, CHARACTER_VAR),
+            input_keys=("character_bios",),
+        )
+        source_value = _jsonish_value(structured)
+        if source_value is None:
+            source_text = str(structured or "").strip()
+        else:
+            try:
+                source_text = json.dumps(source_value, ensure_ascii=False, indent=2)
+            except Exception:
+                source_text = str(structured or "").strip()
+        return {
+            UNSTRUCTURED_SOURCE: source_text,
+            UNSTRUCTURED_CONTENT_KIND: "generic",
+            UNSTRUCTURED_SOURCE_VAR: source_text,
+            UNSTRUCTURED_KIND_VAR: "generic",
+        }
+
+    def _ensure_export_character_natural_language(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        project_id: int,
+    ) -> str:
+        structured = self._snapshot_export_value(
+            snapshot,
+            artifact_keys=("characters", "character_bios"),
+            variable_keys=(CHARACTERS, CHARACTER_VAR),
+            input_keys=("character_bios",),
+        )
+        existing = self._snapshot_export_value(
+            snapshot,
+            artifact_keys=("character_natural_language",),
+            variable_keys=(CHARACTER_NATURAL_LANGUAGE_VAR,),
+        ) or self._snapshot_export_value(snapshot, artifact_keys=("character_summary",))
+        preferred, issues = _select_character_display_text(existing, structured)
+        existing_text = _meaningful_stage_output_text(self._sanitize_export_section_text(existing))
+        if existing_text and not issues:
+            logger.info("character_natural_language_export status=reuse_existing project_id=%s", project_id)
+            return preferred
+        if existing_text and issues:
+            logger.warning(
+                "character_natural_language_export status=reject_existing project_id=%s issues=%s preview=%s",
+                project_id,
+                ",".join(issues),
+                _truncate_log_text(existing_text, max_chars=240),
+            )
+
+        if structured in (None, "", {}, []):
+            logger.info("character_natural_language_export status=skip_missing_characters project_id=%s", project_id)
+            return ""
+        if not use_fastgpt_backend():
+            logger.info("character_natural_language_export status=skip_non_fastgpt_backend project_id=%s", project_id)
+            return ""
+
+        try:
+            workflow_input = WorkflowInput.from_dict(self._snapshot_input_payload(snapshot))
+            stage_variables = self._build_export_character_naturalize_stage_variables(snapshot)
+            from ..orchestrators.fastgpt_hybrid_workflow import run_stage_with_contract_guard
+            from .fastgpt_client import FastGPTClient
+            from .fastgpt_contracts import STAGE_CHARACTERS_NATURALIZE
+
+            state = WorkflowState(user_input=workflow_input, variables=dict(stage_variables))
+            runner = FastGPTClient()
+            output = run_stage_with_contract_guard(
+                state,
+                runner,
+                STAGE_CHARACTERS_NATURALIZE,
+                stage_variables,
+                stage_key="character",
+                message="正在整理人物小传自然语言说明。",
+                output_field=CHARACTER_NATURAL_LANGUAGE_VAR,
+                sync_output_to_state=False,
+            )
+            natural = str(output.get(CHARACTER_NATURAL_LANGUAGE_VAR) or "").strip()
+            natural = _meaningful_stage_output_text(self._sanitize_export_section_text(natural))
+            issues = _character_natural_text_quality_issues(natural, structured) if natural else []
+            if not natural or issues:
+                logger.warning(
+                    "character_natural_language_export status=empty_or_rejected_after_stage project_id=%s issues=%s preview=%s",
+                    project_id,
+                    ",".join(issues),
+                    _truncate_log_text(natural, max_chars=240),
+                )
+                return ""
+            self._apply_snapshot_variable_artifact_updates(
+                project_id,
+                snapshot,
+                artifact_updates={
+                    "character_natural_language": natural,
+                    "character_summary": natural,
+                },
+                variable_updates={CHARACTER_NATURAL_LANGUAGE_VAR: natural},
+            )
+            logger.info(
+                "character_natural_language_export status=generated_and_persisted project_id=%s",
+                project_id,
+            )
+            return natural
+        except Exception as exc:
+            logger.warning(
+                "character_natural_language_export status=fallback_after_failure project_id=%s preview=%s",
+                project_id,
+                _truncate_log_text(str(exc), max_chars=320),
+            )
+            return ""
+
+    def _build_export_appearance_stage_variables(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        artifacts = self._snapshot_artifacts_dict(snapshot)
+        input_payload = self._snapshot_input_payload(snapshot)
+        variables = copy.deepcopy(self._snapshot_debug_variables(snapshot))
+        if not isinstance(variables, dict):
+            variables = {}
+
+        def fill(key: str, *candidates: Any) -> None:
+            if variables.get(key) not in (None, "", {}, []):
+                return
+            for candidate in candidates:
+                if candidate not in (None, "", {}, []):
+                    variables[key] = candidate
+                    return
+
+        fill(WORLDVIEW, artifacts.get("worldview"), input_payload.get("worldview"))
+        fill(STORY_OUTLINE, artifacts.get("story_outline"), input_payload.get("story_outline"))
+        fill(
+            EPISODE_PLAN,
+            artifacts.get("normalized_episode_plan"),
+            artifacts.get("episode_plan"),
+            input_payload.get("episode_plan"),
+        )
+        fill(USER_CHARACTERS, artifacts.get("character_bios"), input_payload.get("character_bios"))
+        fill(CHARACTERS, artifacts.get("characters"), artifacts.get("character_bios"))
+        fill(SCENES, artifacts.get("scene_json"), artifacts.get("core_scene_input"))
+        fill(
+            CHARACTER_ALIAS_NAMING_RULES,
+            artifacts.get("character_alias_naming_rules"),
+            input_payload.get("character_alias_naming_rules"),
+            input_payload.get("alias_naming_rules"),
+        )
+        fill(APPEARANCE_MAPPING, artifacts.get("appearance_mapping"))
+        return variables
+
+    def _ensure_export_appearance_natural_language(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        project_id: int,
+    ) -> str:
+        existing = _meaningful_stage_output_text(
+            self._sanitize_export_section_text(
+                self._snapshot_export_value(
+                    snapshot,
+                    artifact_keys=(APPEARANCE_NATURAL_LANGUAGE_ARTIFACT,),
+                    variable_keys=(APPEARANCE_NATURAL_LANGUAGE_VAR, "c7VnQ4eX"),
+                )
+            )
+        )
+        if existing:
+            logger.info("appearance_natural_language_export status=reuse_existing project_id=%s", project_id)
+            return existing
+
+        structured = self._snapshot_export_value(
+            snapshot,
+            artifact_keys=("appearance_mapping",),
+            variable_keys=(APPEARANCE_MAPPING, APPEARANCE_MAPPING_VAR),
+        )
+        if structured in (None, "", {}, []):
+            logger.info("appearance_natural_language_export status=skip_missing_mapping project_id=%s", project_id)
+            return ""
+        if not use_fastgpt_backend():
+            logger.info("appearance_natural_language_export status=skip_non_fastgpt_backend project_id=%s", project_id)
+            return ""
+
+        try:
+            workflow_input = WorkflowInput.from_dict(self._snapshot_input_payload(snapshot))
+            stage_variables = self._build_export_appearance_stage_variables(snapshot)
+            from ..orchestrators.fastgpt_hybrid_workflow import run_stage_with_contract_guard
+            from .fastgpt_client import FastGPTClient
+            from .fastgpt_contracts import STAGE_APPEARANCE_ALIAS_UNSTRUCTURED
+
+            state = WorkflowState(user_input=workflow_input, variables=dict(stage_variables))
+            runner = FastGPTClient()
+            output = run_stage_with_contract_guard(
+                state,
+                runner,
+                STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
+                stage_variables,
+                stage_key="appearance",
+                message="正在整理服装版本自然语言说明。",
+                output_field=APPEARANCE_NATURAL_LANGUAGE_VAR,
+                sync_output_to_state=False,
+            )
+            natural = str(output.get(APPEARANCE_NATURAL_LANGUAGE_VAR) or "").strip()
+            natural = _meaningful_stage_output_text(self._sanitize_export_section_text(natural))
+            if not natural:
+                logger.warning(
+                    "appearance_natural_language_export status=empty_after_stage project_id=%s",
+                    project_id,
+                )
+                return ""
+            self._apply_snapshot_variable_artifact_updates(
+                project_id,
+                snapshot,
+                artifact_updates={APPEARANCE_NATURAL_LANGUAGE_ARTIFACT: natural},
+                variable_updates={APPEARANCE_NATURAL_LANGUAGE_VAR: natural},
+            )
+            logger.info(
+                "appearance_natural_language_export status=generated_and_persisted project_id=%s",
+                project_id,
+            )
+            return natural
+        except Exception as exc:
+            logger.warning(
+                "appearance_natural_language_export status=fallback_after_failure project_id=%s preview=%s",
+                project_id,
+                _truncate_log_text(str(exc), max_chars=320),
+            )
+            return ""
+
     def _extract_labeled_export_segment(
         self,
         value: Any,
@@ -4852,39 +5267,50 @@ class TaskManager:
             "character_registry",
             "character_alias_registry",
         )
-        for candidate in (
-            self._snapshot_export_value(snapshot, artifact_keys=("character_natural_language",)),
-            self._snapshot_export_value(snapshot, variable_keys=(CHARACTER_NATURAL_LANGUAGE_VAR,)),
-            self._snapshot_export_value(snapshot, artifact_keys=("character_summary",)),
-        ):
-            text = _meaningful_stage_output_text(
-                self._sanitize_export_section_text(candidate, banned_prefixes=banned)
-            )
-            if text:
-                return text
-
         structured = self._snapshot_export_value(
             snapshot,
             artifact_keys=("characters", "character_bios"),
             variable_keys=(CHARACTERS, CHARACTER_VAR),
             input_keys=("character_bios",),
         )
+        for candidate in (
+            self._snapshot_export_value(snapshot, artifact_keys=("character_natural_language",)),
+            self._snapshot_export_value(snapshot, variable_keys=(CHARACTER_NATURAL_LANGUAGE_VAR,)),
+            self._snapshot_export_value(snapshot, artifact_keys=("character_summary",)),
+        ):
+            sanitized = self._sanitize_export_section_text(candidate, banned_prefixes=banned)
+            text = _meaningful_stage_output_text(sanitized)
+            issues = _character_natural_text_quality_issues(text, structured) if text else []
+            if text and not issues:
+                return text
+            if sanitized and issues:
+                logger.warning(
+                    "character_export_text_rejected issues=%s preview=%s",
+                    ",".join(issues),
+                    _truncate_log_text(sanitized, max_chars=240),
+                )
         characters = _character_items_from_value(structured)
         if not characters:
             return ""
         sections: list[str] = []
         for item in characters:
             name = _character_name_from_item(item)
-            role = self._sentence_fragment(item.get("story_role") or item.get("role_type") or item.get("identity"))
-            personality = self._sentence_fragment(item.get("personality") or item.get("speech_profile"))
-            desire = self._sentence_fragment(item.get("core_desire") or item.get("core_motivation") or item.get("deep_motivation"))
-            relationship = self._sentence_fragment(
+            role = _meaningful_character_fragment(
+                item.get("story_role") or item.get("role_type") or item.get("identity")
+            )
+            personality = _meaningful_character_fragment(
+                item.get("personality") or item.get("speech_profile")
+            )
+            desire = _meaningful_character_fragment(
+                item.get("core_desire") or item.get("core_motivation") or item.get("deep_motivation")
+            )
+            relationship = _meaningful_character_fragment(
                 item.get("relationship_to_protagonist")
                 or item.get("relationships_with_others")
                 or item.get("relationships")
             )
-            growth = self._sentence_fragment(item.get("growth_arc") or item.get("plot_function"))
-            appearance = self._sentence_fragment(
+            growth = _meaningful_character_fragment(item.get("growth_arc") or item.get("plot_function"))
+            appearance = _meaningful_character_fragment(
                 item.get("appearance_anchor")
                 or item.get("appearance")
                 or item.get("appearance_description")
@@ -5032,11 +5458,9 @@ class TaskManager:
         parts: list[str] = [title or f"project_{snapshot.get('project_id')}"]
         for heading, section_text in (
             ("故事梗概", self._story_outline_export_text(snapshot)),
-            ("世界观设定", self._worldview_export_text(snapshot)),
             ("人物小传", self._character_export_text(snapshot)),
             ("人物服饰说明", self._appearance_export_text(snapshot)),
             ("核心场景", self._scene_export_text(snapshot)),
-            ("分集计划", self._episode_plan_export_text(snapshot)),
         ):
             cleaned = self._sanitize_export_section_text(section_text)
             if cleaned:
@@ -5498,6 +5922,8 @@ class TaskManager:
                     f"缺少：{_format_episode_ranges(missing)}。"
                     "请先继续生成缺失批次，再下载成品。"
                 )
+        self._ensure_export_character_natural_language(snapshot, project_id=project_id)
+        self._ensure_export_appearance_natural_language(snapshot, project_id=project_id)
         content = self._build_docx_export_source_text(snapshot)
         if not content:
             raise ValueError("当前项目还没有可保存的最终剧本")

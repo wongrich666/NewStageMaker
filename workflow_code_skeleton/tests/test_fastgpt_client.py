@@ -15,11 +15,19 @@ from workflow_code_skeleton.app.services.fastgpt_client import (
     logger as fastgpt_client_logger,
 )
 from workflow_code_skeleton.app.services.fastgpt_contracts import (
+    ALL_DIALOGUES,
+    ALL_HOOKS,
     APPEARANCE_MAPPING,
+    BATCH_SCRIPT,
+    BATCH_START_EPISODE,
+    CHARACTERS,
     CHARACTER_COUNT,
     EPISODE_PLAN,
+    EPISODE_WORD_COUNT,
+    LAST_SUMMARY,
     NORMALIZED_EPISODE_PLAN,
     PASS_REVIEW_JSON,
+    SCENES,
     SCRIPT_TITLE,
     STAGE_APPEARANCE_ALIAS_GENERATION,
     STAGE_APPEARANCE_ALIAS_REVIEW,
@@ -33,6 +41,7 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     STAGE_FRAMEWORK_NATURALIZE,
     STAGE_HOOK_REVIEW,
     STAGE_SCENES,
+    STAGE_SCRIPT_REWRITE,
     STAGE_SCRIPT_REVIEW,
     STAGE_WORLDVIEW_NATURALIZE,
     STORY_OUTLINE,
@@ -40,6 +49,7 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     USER_CHARACTERS,
     USER_EXPECTATION,
     USER_SCENES,
+    WORLDVIEW,
     contract_for,
 )
 from workflow_code_skeleton.app.workflow_ids import (
@@ -48,8 +58,21 @@ from workflow_code_skeleton.app.workflow_ids import (
     APPEARANCE_REVIEW_VAR,
     CHARACTER_NATURAL_LANGUAGE_VAR,
     CHARACTER_VAR,
+    DIALOGUE_FINAL_VAR,
+    EPISODE_PLAN_VAR,
+    EPISODE_WORD_COUNT_VAR,
+    HOOK_FINAL_VAR,
+    MEMORY_VAR,
     SCENE_NATURAL_LANGUAGE_VAR,
     SCENE_VAR,
+    SCRIPT_CURRENT_VAR,
+    SCRIPT_CURRENT_WRITE_VAR,
+    SCRIPT_MEMORY_OUTPUT_VAR,
+    SCRIPT_MEMORY_WRITE_INPUT_VAR,
+    SCRIPT_DIALOGUE_BATCH_VAR,
+    SCRIPT_HOOK_BATCH_VAR,
+    SCRIPT_START_VAR,
+    WORLDVIEW_VAR,
 )
 from workflow_code_skeleton.tests.test_stage_output_repair import (
     _appearance_input_variables,
@@ -79,6 +102,7 @@ class _QueuedFastGPTClient(FastGPTClient):
         super().__init__()
         self._responses = list(responses)
         self.request_count = 0
+        self.request_bodies: list[dict[str, object]] = []
 
     def _endpoint_for(self, stage_name: str):  # type: ignore[override]
         return FastGPTEndpoint(
@@ -91,8 +115,9 @@ class _QueuedFastGPTClient(FastGPTClient):
         )
 
     def _post_with_retries(self, endpoint, headers, body, stage_name):  # type: ignore[override]
-        del endpoint, headers, body, stage_name
+        del endpoint, headers, stage_name
         self.request_count += 1
+        self.request_bodies.append(body)
         if not self._responses:
             raise AssertionError("No fake FastGPT response left for test")
         return _FakeResponse(self._responses.pop(0))
@@ -205,6 +230,23 @@ def _scene_setting_from_output(output_text: str) -> dict[str, object]:
         if isinstance(wrapped.get("scene_setting"), dict):
             return wrapped["scene_setting"]
     return parsed["scene_setting"]
+
+
+def _script_review_inputs() -> dict[str, object]:
+    return {
+        WORLDVIEW: json.dumps({"tone": "近未来都市"}, ensure_ascii=False),
+        CHARACTERS: json.dumps(_character_setting_json(), ensure_ascii=False),
+        SCENES: json.dumps(_scene_setting_json(), ensure_ascii=False),
+        APPEARANCE_MAPPING: _appearance_mapping_json(),
+        EPISODE_PLAN: json.dumps(_normalized_episode_plan_payload(5), ensure_ascii=False),
+        TOTAL_EPISODES: 5,
+        EPISODE_WORD_COUNT: 800,
+        LAST_SUMMARY: json.dumps({"carry": "上一批记忆"}, ensure_ascii=False),
+        BATCH_START_EPISODE: 1,
+        BATCH_SCRIPT: "第1集\n场景一：测试正文",
+        ALL_HOOKS: json.dumps({"episodes": [{"episode": 1, "hook": "旧钩子"}]}, ensure_ascii=False),
+        ALL_DIALOGUES: json.dumps({"episodes": [{"episode": 1, "dialogue": "旧对白"}]}, ensure_ascii=False),
+    }
 
 
 def _appearance_review_json(
@@ -705,6 +747,144 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         self.assertEqual(ctx.exception.stage_name, STAGE_FRAMEWORK)
         self.assertNotIn(huge_expectation, str(ctx.exception))
         self.assertTrue(bool(ctx.exception.largest_variables))
+
+    def test_script_review_payload_only_sends_prompt_referenced_wire_variables(self) -> None:
+        settings.fastgpt_stage_payload_warn_chars = 1000000
+        settings.fastgpt_stage_payload_hard_chars = 2000000
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            _pass_review_json(
+                                passed=True,
+                                rewrite_required=False,
+                                summary="ok",
+                                blocking_issues=[],
+                                non_blocking_issues=[],
+                                rewrite_start_episode=1,
+                                stage="five_episode_continuity_review",
+                            ),
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(STAGE_SCRIPT_REVIEW, _script_review_inputs())
+
+        self.assertTrue(output["passed"])
+        self.assertEqual(client.request_count, 1)
+        self.assertEqual(len(client.request_bodies), 1)
+        body_variables = dict(client.request_bodies[0]["variables"])
+        self.assertEqual(
+            set(body_variables.keys()),
+            {
+                WORLDVIEW_VAR,
+                CHARACTER_VAR,
+                APPEARANCE_MAPPING_VAR,
+                EPISODE_PLAN_VAR,
+                MEMORY_VAR,
+                SCRIPT_CURRENT_VAR,
+                EPISODE_WORD_COUNT_VAR,
+                SCRIPT_START_VAR,
+            },
+        )
+        for unexpected in (
+            SCRIPT_HOOK_BATCH_VAR,
+            HOOK_FINAL_VAR,
+            SCRIPT_DIALOGUE_BATCH_VAR,
+            DIALOGUE_FINAL_VAR,
+            SCRIPT_CURRENT_WRITE_VAR,
+            SCRIPT_MEMORY_WRITE_INPUT_VAR,
+            SCRIPT_MEMORY_OUTPUT_VAR,
+            "blkSS7dY",
+        ):
+            self.assertNotIn(unexpected, body_variables)
+
+        debug_info = client.get_last_stage_debug_info(STAGE_SCRIPT_REVIEW)
+        payload_stats = dict(debug_info.get("payload_stats") or {})
+        self.assertEqual(
+            set(payload_stats.get("variable_keys") or []),
+            {
+                WORLDVIEW_VAR,
+                CHARACTER_VAR,
+                APPEARANCE_MAPPING_VAR,
+                EPISODE_PLAN_VAR,
+                MEMORY_VAR,
+                SCRIPT_CURRENT_VAR,
+                EPISODE_WORD_COUNT_VAR,
+                SCRIPT_START_VAR,
+            },
+        )
+
+    def test_script_review_character_wire_value_does_not_bundle_scenes(self) -> None:
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            _pass_review_json(
+                                passed=True,
+                                rewrite_required=False,
+                                summary="ok",
+                                blocking_issues=[],
+                                non_blocking_issues=[],
+                                rewrite_start_episode=1,
+                                stage="five_episode_continuity_review",
+                            ),
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+        client = _QueuedFastGPTClient([response])
+        inputs = _script_review_inputs()
+
+        client.run_stage(STAGE_SCRIPT_REVIEW, inputs)
+
+        body_variables = dict(client.request_bodies[0]["variables"])
+        self.assertEqual(body_variables[CHARACTER_VAR], inputs[CHARACTERS])
+        self.assertNotIn("【场景结果JSON】", str(body_variables[CHARACTER_VAR]))
+
+    def test_script_rewrite_keeps_legacy_hook_dialogue_aliases_and_character_scene_bundle(self) -> None:
+        response = {
+            "responseData": {
+                "updateVarResult": [
+                    {
+                        "variable": ["VARIABLE_NODE_ID", SCRIPT_CURRENT_VAR],
+                        "value": "第1集\n场景一：修订后正文",
+                    }
+                ]
+            }
+        }
+        client = _QueuedFastGPTClient([response])
+        inputs = _script_review_inputs()
+        inputs[PASS_REVIEW_JSON] = json.dumps(
+            _pass_review_json(
+                passed=False,
+                rewrite_required=True,
+                summary="needs rewrite",
+                blocking_issues=["hook issue"],
+                non_blocking_issues=[],
+                rewrite_start_episode=1,
+                stage="five_episode_continuity_review",
+            ),
+            ensure_ascii=False,
+        )
+
+        output = client.run_stage(STAGE_SCRIPT_REWRITE, inputs)
+
+        self.assertIn(BATCH_SCRIPT, output)
+        body_variables = dict(client.request_bodies[0]["variables"])
+        self.assertIn(SCRIPT_HOOK_BATCH_VAR, body_variables)
+        self.assertIn(HOOK_FINAL_VAR, body_variables)
+        self.assertIn(SCRIPT_DIALOGUE_BATCH_VAR, body_variables)
+        self.assertIn(DIALOGUE_FINAL_VAR, body_variables)
+        self.assertIn("【场景结果JSON】", str(body_variables[CHARACTER_VAR]))
 
     def test_detail_false_characters_stage_still_extracts_formal_output(self) -> None:
         settings.fastgpt_characters_detail = False

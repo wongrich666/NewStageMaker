@@ -552,6 +552,15 @@ def render_script(doc: Document, script_text: Any):
     if not script_body.strip():
         return
 
+    heading_added = False
+    stripped_body = script_body.lstrip()
+    if stripped_body.startswith("剧本正文"):
+        normalized_lines = stripped_body.splitlines()
+        if normalized_lines and normalized_lines[0].strip() == "剧本正文":
+            script_body = "\n".join(normalized_lines[1:]).lstrip()
+    add_heading(doc, "剧本正文", level=1)
+    heading_added = True
+
     lines = script_body.splitlines()
     for line in lines:
         stripped = line.strip()
@@ -599,7 +608,9 @@ def render_script(doc: Document, script_text: Any):
 
         # 剧本正文标题本身
         elif stripped == "剧本正文":
-            add_heading(doc, stripped, level=1)
+            if not heading_added:
+                add_heading(doc, stripped, level=1)
+                heading_added = True
 
         # 普通段落
         else:

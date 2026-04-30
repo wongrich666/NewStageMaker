@@ -3958,6 +3958,11 @@ a {
   color: var(--mono-text);
 }
 
+.chat-copy-btn:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
 .toast-card.toast-card-compact {
   min-width: 0;
   padding: 10px 14px;
@@ -4032,4 +4037,30 @@ a {
     inset: auto;
     margin-top: 12px;
   }
+}
+
+/* Final restraint pass: keep accent as text/border only, never as a yellow fill. */
+.status-pill-public,
+.status-pill-pending,
+.mono-page .btn-primary,
+.workspace-body .btn-primary,
+.workspace-body .sidebar-create-btn,
+.mono-page .btn-public,
+.workspace-body .btn-public {
+  color: var(--mono-accent, #c5a24f);
+  background: var(--mono-surface, #1f1f1f);
+  border-color: rgba(197, 162, 79, 0.28);
+  box-shadow: var(--mono-shadow, none);
+}
+
+.mono-page .btn-primary:hover:not(:disabled),
+.workspace-body .btn-primary:hover:not(:disabled),
+.workspace-body .sidebar-create-btn:hover,
+.mono-page .btn-public:hover:not(:disabled),
+.workspace-body .btn-public:hover:not(:disabled),
+.status-pill-public:hover,
+.status-pill-pending:hover {
+  color: var(--mono-accent-strong, #d1b06a);
+  background: var(--mono-surface-soft, #2a2a2a);
+  border-color: rgba(197, 162, 79, 0.38);
 }

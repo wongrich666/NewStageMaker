@@ -98,6 +98,44 @@ class ServerToolsApiTests(unittest.TestCase):
             self.assertIn("chat-workspace-shell", text)
             self.assertIn("workspace-sidebar", text)
 
+    def test_logged_in_pages_redirect_directly_to_workspace(self) -> None:
+        username = f"pg_{uuid.uuid4().hex[:8]}"
+        user = auth_store.register_user(username, "password123")
+        token = auth_store.create_session_token(user.id)
+
+        for path in ("/", "/login", "/register"):
+            response = self.client.get(f"{path}?auth_token={token}", follow_redirects=False)
+            self.assertEqual(response.status_code, 302)
+            self.assertIn("/workspace", response.headers["Location"])
+            self.assertIn(f"auth_token={token}", response.headers["Location"])
+
+    def test_login_and_register_submit_redirect_directly_to_workspace(self) -> None:
+        username = f"lg_{uuid.uuid4().hex[:8]}"
+        auth_store.register_user(username, "password123")
+
+        login_response = self.client.post(
+            "/login",
+            data={"username": username, "password": "password123"},
+            follow_redirects=False,
+        )
+        self.assertEqual(login_response.status_code, 302)
+        self.assertIn("/workspace", login_response.headers["Location"])
+        self.assertIn("auth_token=", login_response.headers["Location"])
+
+        register_username = f"rg_{uuid.uuid4().hex[:8]}"
+        register_response = self.client.post(
+            "/register",
+            data={
+                "username": register_username,
+                "password": "password123",
+                "confirm_password": "password123",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(register_response.status_code, 302)
+        self.assertIn("/workspace", register_response.headers["Location"])
+        self.assertIn("auth_token=", register_response.headers["Location"])
+
     def test_workspace_page_contains_community_section_and_refresh_controls(self) -> None:
         response = self.client.get("/workspace", headers=self.headers)
 

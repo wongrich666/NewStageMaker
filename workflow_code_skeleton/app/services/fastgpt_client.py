@@ -33,6 +33,7 @@ from .fastgpt_contracts import (
     HOOK_MEMORY,
     LAST_SUMMARY,
     LEGACY_INPUT_ALIASES,
+    LEGACY_WIRE_INPUT_ALIASES_OVERRIDES,
     MAX_RETRIES,
     NORMALIZED_EPISODE_PLAN,
     OUTFIT_SWITCH_RULES,
@@ -71,6 +72,7 @@ from .fastgpt_contracts import (
     SCRIPT_MEMORY,
     STAGE_WORLDVIEW,
     STAGE_WORLDVIEW_NATURALIZE,
+    STAGE_CHARACTERS_NATURALIZE,
     USER_CONTENT_BASELINE,
     FastGPTStageContract,
     contract_for,
@@ -112,6 +114,7 @@ STAGE_AUXILIARY_OUTPUT_KEYS: dict[str, dict[str, tuple[str, ...]]] = {
 STAGE_API_KEY_ENV_ALIASES: dict[str, tuple[str, ...]] = {
     STAGE_FRAMEWORK_NATURALIZE: ("FASTGPT_UNSTRUCTURED_API_KEY",),
     STAGE_WORLDVIEW_NATURALIZE: ("FASTGPT_UNSTRUCTURED_API_KEY",),
+    STAGE_CHARACTERS_NATURALIZE: ("FASTGPT_UNSTRUCTURED_API_KEY",),
     STAGE_APPEARANCE_ALIAS_WRITING: (
         "FASTGPT_APPEARANCE_ALIAS_WRITING_API_KEY",
     ),
@@ -590,7 +593,9 @@ class FastGPTClient:
                 f"当前为：{settings.fastgpt_variable_mode}"
             )
 
-        aliases = LEGACY_INPUT_ALIASES.get(stage_name)
+        aliases = LEGACY_WIRE_INPUT_ALIASES_OVERRIDES.get(stage_name)
+        if aliases is None:
+            aliases = LEGACY_INPUT_ALIASES.get(stage_name)
         if not aliases:
             return contract.build_input_payload(variables)
 
@@ -604,7 +609,7 @@ class FastGPTClient:
                 _set_wire_values(wire, wire_names, variables[BATCH_DIALOGUES])
                 continue
             if canonical_name in variables:
-                if _is_script_family_stage(stage_name) and canonical_name == CHARACTERS:
+                if _should_bundle_script_character_scene(stage_name) and canonical_name == CHARACTERS:
                     _set_wire_values(
                         wire,
                         wire_names,
@@ -614,7 +619,7 @@ class FastGPTClient:
                         ),
                     )
                     continue
-                if _is_script_family_stage(stage_name) and canonical_name == SCENES:
+                if _should_bundle_script_character_scene(stage_name) and canonical_name == SCENES:
                     continue
                 if canonical_name == CHARACTER_APPEARANCE_REQUIREMENTS:
                     _set_wire_values(
@@ -1216,6 +1221,12 @@ def _build_script_character_scene_bundle(characters: Any, scenes: Any) -> str:
             f"{scene_text}"
         ).strip()
     return character_text or scene_text
+
+
+def _should_bundle_script_character_scene(stage_name: str) -> bool:
+    if stage_name == STAGE_SCRIPT_REVIEW:
+        return False
+    return _is_script_family_stage(stage_name)
 
 
 def _is_script_family_stage(stage_name: str) -> bool:

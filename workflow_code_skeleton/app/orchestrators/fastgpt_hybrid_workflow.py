@@ -80,6 +80,7 @@ from ..services.fastgpt_contracts import (
     STAGE_APPEARANCE_PRE_STRATEGY,
     STAGE_FRAMEWORK,
     STAGE_FRAMEWORK_NATURALIZE,
+    STAGE_CHARACTERS_NATURALIZE,
     STAGE_CHARACTERS,
     STAGE_CONSISTENCY,
     STAGE_DIALOGUES,
@@ -338,6 +339,7 @@ SCRIPT_EPISODE_HEADING_PATTERN = re.compile(
     r"(?=^[ \t>#*\-]*第\s*([0-9０-９一二三四五六七八九十百千万两零〇]+)\s*集(?:\s*[:：]|$))",
     re.MULTILINE,
 )
+CHARACTER_NATURALIZE_READY_FLAG = "__character_naturalize_ready__"
 REVIEW_ROUND_MESSAGE_PATTERN = re.compile(r"(第\s*\d+\s*/\s*\d+\s*轮)")
 
 
@@ -512,6 +514,7 @@ def run_fastgpt_hybrid_workflow(
                 progress_percent=24,
             )
         )
+    _ensure_character_natural_language(state, runner, variables)
     _sync_state_variables(state, variables)
 
     _ensure_scene_outputs(state, runner, variables)
@@ -6619,6 +6622,24 @@ def _build_worldview_naturalize_source(variables: dict[str, Any]) -> str:
         return str(worldview_value).strip()
 
 
+def _build_character_naturalize_source(variables: dict[str, Any]) -> str:
+    character_value = variables.get(CHARACTERS)
+    if isinstance(character_value, str):
+        text = character_value.strip()
+        if text:
+            try:
+                character_value = parse_json(text)
+            except Exception:
+                return text
+    if character_value in (None, ""):
+        fallback_text = str(variables.get(CHARACTER_NATURAL_LANGUAGE_VAR) or "").strip()
+        return fallback_text
+    try:
+        return json.dumps(character_value, ensure_ascii=False, indent=2)
+    except Exception:
+        return str(character_value).strip()
+
+
 def _framework_naturalize_structured_value(value: Any) -> Any:
     if isinstance(value, (dict, list)):
         return copy.deepcopy(value)
@@ -6702,6 +6723,54 @@ def _ensure_worldview_natural_language(
         sync_output_to_state=False,
     )
     variables.update(output)
+
+
+def _ensure_character_natural_language(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    variables: dict[str, Any],
+) -> None:
+    if not _has_value(variables.get(CHARACTERS)):
+        return
+    if (
+        _has_value(variables.get(CHARACTER_NATURAL_LANGUAGE_VAR))
+        and bool(variables.get(CHARACTER_NATURALIZE_READY_FLAG))
+    ):
+        set_runtime_stage(
+            state,
+            "character",
+            "已从缓存恢复人物小传自然语言版。",
+            progress_percent=26,
+        )
+        sync_runtime_state(state)
+        return
+
+    source = _build_character_naturalize_source(variables)
+    if not source:
+        return
+
+    stage_variables = dict(variables)
+    stage_variables[UNSTRUCTURED_SOURCE] = source
+    stage_variables[UNSTRUCTURED_CONTENT_KIND] = "generic"
+    stage_variables[UNSTRUCTURED_SOURCE_VAR] = source
+    stage_variables[UNSTRUCTURED_KIND_VAR] = "generic"
+    output = run_stage_with_contract_guard(
+        state,
+        runner,
+        STAGE_CHARACTERS_NATURALIZE,
+        stage_variables,
+        stage_key="character",
+        message="正在整理人物小传自然语言说明。",
+        progress_percent=26,
+        output_field=CHARACTER_NATURAL_LANGUAGE_VAR,
+        sync_output_to_state=False,
+    )
+    naturalized = str(output.get(CHARACTER_NATURAL_LANGUAGE_VAR) or "").strip()
+    if naturalized:
+        variables[CHARACTER_NATURAL_LANGUAGE_VAR] = naturalized
+        state.set_var(CHARACTER_NATURAL_LANGUAGE_VAR, naturalized)
+    variables[CHARACTER_NATURALIZE_READY_FLAG] = True
+    state.set_var(CHARACTER_NATURALIZE_READY_FLAG, True)
 
 
 def _select_complete_framework_episode_plan_source(

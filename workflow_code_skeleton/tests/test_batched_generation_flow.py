@@ -49,6 +49,7 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     STAGE_EPISODE_PLAN_NORMALIZE,
     STAGE_FRAMEWORK,
     STAGE_FRAMEWORK_NATURALIZE,
+    STAGE_CHARACTERS_NATURALIZE,
     STAGE_HOOKS,
     STAGE_HOOK_MEMORY,
     STAGE_HOOK_REVIEW,
@@ -993,6 +994,29 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertIn("近未来沿海都市", str(call["unstructured_source"]))
         self.assertIn(WORLDVIEW_NATURAL_LANGUAGE, variables)
         self.assertEqual(variables[WORLDVIEW], worldview_payload)
+
+    def test_character_naturalize_uses_structured_characters_and_keeps_formal_output(self) -> None:
+        characters_payload = _character_setting_json()
+        state, _, variables = self._state_and_payload(
+            10,
+            variables={CHARACTERS: json.dumps(characters_payload, ensure_ascii=False)},
+        )
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_CHARACTERS_NATURALIZE: [
+                    {UNSTRUCTURED_OUTPUT_VAR: "林夏：项目负责人，性格冷静克制。\n顾川：主角的重要对手与镜像。"}
+                ]
+            }
+        )
+
+        flow._ensure_character_natural_language(state, runner, variables)
+
+        call = runner.stage_calls(STAGE_CHARACTERS_NATURALIZE)[0]
+        self.assertEqual(call["unstructured_kind"], "generic")
+        self.assertIn('"character_setting"', str(call["unstructured_source"]))
+        self.assertIn(CHARACTER_NATURAL_LANGUAGE_VAR, variables)
+        self.assertEqual(variables[CHARACTERS], json.dumps(characters_payload, ensure_ascii=False))
+        self.assertEqual(state.get_var(CHARACTER_NATURAL_LANGUAGE_VAR), "林夏：项目负责人，性格冷静克制。\n顾川：主角的重要对手与镜像。")
 
     def test_framework_and_worldview_natural_language_do_not_overwrite_each_other(self) -> None:
         state, payload, variables = self._state_and_payload(

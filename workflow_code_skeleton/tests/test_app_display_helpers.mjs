@@ -21,13 +21,17 @@ const bootstrap = [
   'const RUNNING_STATUSES = new Set(["pending", "running", "pausing"]);',
   extractBetween("function normalizeStageKey(stageKey) {", "\n\n  function formatDisplayValue(value) {"),
   extractBetween("function formatDisplayValue(value) {", "\n\n  // 把框架阶段的多个正式产物拼成一个完整回复，方便在聊天流里整体展示。"),
+  extractBetween("function compactMessageText(value) {", "\n\n  async function copyTextToClipboard(text) {"),
   extractBetween("function runtimeLoadingSuffix(snapshot, nowMs = Date.now()) {", "\n\n  function defaultRuntimeMessage(snapshot) {"),
   extractBetween("function defaultRuntimeMessage(snapshot) {", "\n\n  // 当前状态下只保留必要提示，避免和“当前阶段”重复。"),
   extractBetween("function statusNoteFrom(snapshot, nowMs = Date.now()) {", "\n\n  function creationStatusLabel(snapshot) {"),
+  extractBetween("function creationStatusLabel(snapshot) {", "\n\n  // 把后端阶段名统一折叠成前端可识别的正式阶段键。"),
   extractBetween("function frameworkStageOutput(snapshot) {", "\n\n  function worldviewStageOutput(snapshot) {"),
   extractBetween("function worldviewStageOutput(snapshot) {", "\n\n  // 只把平台真正对外公开的正式阶段产物整理成聊天消息。"),
   extractBetween("function visibleStageMessages(snapshot) {", "\n\n  // 内部阶段统一折叠成“思考分析”，避免把中间工作流细节直接暴露给用户。"),
-  "module.exports = { formatDisplayValue, normalizeStageKey, partialScriptOutput, statusNoteFrom, frameworkStageOutput, worldviewStageOutput, visibleStageMessages };",
+  extractBetween("function thinkingStateFrom(snapshot) {", "\n\n  function userPromptSummary(snapshot) {"),
+  extractBetween("function thinkingMessageCopyText(snapshot) {", "\n\n  function renderCopyButton(kind, key) {"),
+  "module.exports = { formatDisplayValue, normalizeStageKey, compactMessageText, partialScriptOutput, statusNoteFrom, frameworkStageOutput, worldviewStageOutput, visibleStageMessages, thinkingStateFrom, thinkingMessageCopyText };",
 ].join("\n\n");
 
 const context = {
@@ -48,6 +52,8 @@ const {
   frameworkStageOutput,
   worldviewStageOutput,
   visibleStageMessages,
+  thinkingStateFrom,
+  thinkingMessageCopyText,
 } = context.module.exports;
 
 test("framework natural language is preferred over structured raw artifacts", () => {
@@ -202,4 +208,40 @@ test("status note stays clear for failed and paused states", () => {
     statusNoteFrom({ status: "paused", message: "" }),
     "已暂停。",
   );
+});
+
+test("running snapshots still expose a live stage-status bubble after earlier outputs exist", () => {
+  const thinking = thinkingStateFrom({
+    status: "running",
+    current_stage: "script_review",
+    current_stage_label: "剧本正文审核",
+    current_batch: "6-10",
+    artifacts: {
+      framework_natural_language: "框架自然语言版",
+      script_batches_display: [
+        { start_episode: 1, end_episode: 5, content: "第1集\n正文 1" },
+      ],
+    },
+  });
+
+  assert.equal(thinking?.stateLabel, "创作中");
+  assert.match(thinking?.content || "", /正在审核剧本正文：第 6-10 集/);
+});
+
+test("thinking bubble copy text includes the visible runtime message and note", () => {
+  const text = thinkingMessageCopyText({
+    status: "running",
+    current_stage: "script_review",
+    current_stage_label: "剧本正文审核",
+    current_batch: "6-10",
+    message: "",
+    artifacts: {
+      framework_natural_language: "框架自然语言版",
+    },
+    runtime_state: {
+      message: "正在审核剧本正文：第 6-10 集",
+    },
+  });
+
+  assert.match(text, /正在审核剧本正文：第 6-10 集/);
 });

@@ -12,6 +12,7 @@ from ..workflow_ids import (
     APPEARANCE_REQUIREMENTS_VAR,
     APPEARANCE_REVIEW_VAR,
     CHARACTER_BIOS_VAR,
+    CHARACTER_NATURAL_LANGUAGE_VAR,
     CHARACTER_SEARCH_INTENT_VAR,
     CHARACTER_MAX_RETRY_VAR,
     CHARACTER_VAR,
@@ -161,6 +162,7 @@ STAGE_CONSISTENCY = "consistency"
 STAGE_EPISODE_PLAN_NORMALIZE = "episode_plan_normalize"
 STAGE_WORLDVIEW = "worldview"
 STAGE_WORLDVIEW_NATURALIZE = "worldview_naturalize"
+STAGE_CHARACTERS_NATURALIZE = "characters_naturalize"
 STAGE_CHARACTERS = "characters"
 STAGE_SCENES = "scenes"
 STAGE_APPEARANCE_ALIAS_GENERATION = "appearance_alias_generation"
@@ -907,6 +909,10 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, LegacyInputAlias]] = {
         UNSTRUCTURED_SOURCE: UNSTRUCTURED_SOURCE_VAR,
         UNSTRUCTURED_CONTENT_KIND: UNSTRUCTURED_KIND_VAR,
     },
+    STAGE_CHARACTERS_NATURALIZE: {
+        UNSTRUCTURED_SOURCE: UNSTRUCTURED_SOURCE_VAR,
+        UNSTRUCTURED_CONTENT_KIND: UNSTRUCTURED_KIND_VAR,
+    },
     STAGE_CHARACTERS: {
         WORLDVIEW: WORLDVIEW_VAR,
         USER_CHARACTERS: CHARACTER_BIOS_VAR,
@@ -1276,6 +1282,23 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, LegacyInputAlias]] = {
 }
 
 
+# Keep broad legacy alias coverage for compatibility with workflow public input
+# declarations, but allow individual stages to further trim what is actually sent
+# on the wire when their active system prompt only references a smaller subset.
+LEGACY_WIRE_INPUT_ALIASES_OVERRIDES: dict[str, dict[str, LegacyInputAlias]] = {
+    STAGE_SCRIPT_REVIEW: {
+        WORLDVIEW: WORLDVIEW_VAR,
+        CHARACTERS: CHARACTER_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        EPISODE_PLAN: EPISODE_PLAN_VAR,
+        SCRIPT_MEMORY: MEMORY_VAR,
+        BATCH_SCRIPT: SCRIPT_CURRENT_VAR,
+        EPISODE_WORD_COUNT: EPISODE_WORD_COUNT_VAR,
+        BATCH_START_EPISODE: SCRIPT_START_VAR,
+    },
+}
+
+
 STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
     STAGE_FRAMEWORK: FastGPTStageContract(
         stage_name=STAGE_FRAMEWORK,
@@ -1391,6 +1414,17 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_aliases={WORLDVIEW_NATURAL_LANGUAGE: (UNSTRUCTURED_OUTPUT_VAR,)},
         fastgpt_responsibility="把结构化世界观改写成普通人可读的自然语言说明。",
         local_responsibility="保留结构化 worldview 正式产物，并额外缓存自然语言世界观说明供前端展示和辅助输入。",
+        expected_output_kind="unstructured_natural_language_text",
+        workflow_json_name="自然语言化.json",
+    ),
+    STAGE_CHARACTERS_NATURALIZE: FastGPTStageContract(
+        stage_name=STAGE_CHARACTERS_NATURALIZE,
+        label="人物小传自然语言化",
+        input_names=(UNSTRUCTURED_SOURCE, UNSTRUCTURED_CONTENT_KIND),
+        output_types={CHARACTER_NATURAL_LANGUAGE_VAR: "string"},
+        output_aliases={CHARACTER_NATURAL_LANGUAGE_VAR: (UNSTRUCTURED_OUTPUT_VAR,)},
+        fastgpt_responsibility="把结构化人物设定或原始人物小传整理成普通人可读的人物小传自然语言说明。",
+        local_responsibility="保留结构化人物设定正式产物，并额外缓存统一自然语言人物小传供前端展示和导出使用。",
         expected_output_kind="unstructured_natural_language_text",
         workflow_json_name="自然语言化.json",
     ),

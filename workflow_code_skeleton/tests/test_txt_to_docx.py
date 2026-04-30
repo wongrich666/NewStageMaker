@@ -147,6 +147,7 @@ class TxtToDocxCompatibilityTests(unittest.TestCase):
             self.assertIn("长夜回潮", text)
             self.assertIn("人物服饰说明", text)
             self.assertIn("默认称呼：林夏【日常】", text)
+            self.assertIn("剧本正文", text)
             self.assertIn("第1集：风起", text)
 
 

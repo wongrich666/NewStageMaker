@@ -133,6 +133,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
     @app.get("/")
     def index():
+        if _current_user():
+            return redirect(url_for("workspace_page", auth_token=_current_auth_token()))
         return render_template(
             "home.html",
             current_user=_current_user(),
@@ -168,7 +170,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @app.get("/login")
     def login_page():
         if _current_user():
-            return redirect(url_for("index", auth_token=_current_auth_token()))
+            return redirect(url_for("workspace_page", auth_token=_current_auth_token()))
         return render_template("login.html")
 
     @app.post("/login")
@@ -179,12 +181,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not user:
             return render_template("login.html", error="用户名或密码错误", username=username), 400
         auth_token = _login_user(user)
-        return redirect(url_for("index", auth_token=auth_token))
+        return redirect(url_for("workspace_page", auth_token=auth_token))
 
     @app.get("/register")
     def register_page():
         if _current_user():
-            return redirect(url_for("index", auth_token=_current_auth_token()))
+            return redirect(url_for("workspace_page", auth_token=_current_auth_token()))
         return render_template("register.html")
 
     @app.post("/register")
@@ -207,7 +209,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 username=username,
             ), 400
         auth_token = _login_user(user)
-        return redirect(url_for("index", auth_token=auth_token))
+        return redirect(url_for("workspace_page", auth_token=auth_token))
 
     @app.get("/logout")
     def logout():
