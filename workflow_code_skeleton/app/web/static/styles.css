@@ -1955,8 +1955,9 @@ a {
 .chat-user-meta {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-  margin-top: 12px;
+  margin: 0;
 }
 
 .chat-chip {
@@ -3941,6 +3942,29 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+.chat-bubble-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.chat-bubble-foot-meta,
+.chat-bubble-foot-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-bubble-foot-actions {
+  margin-left: auto;
 }
 
 .chat-copy-btn {

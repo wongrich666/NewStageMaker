@@ -941,7 +941,7 @@
     const attributes = [`data-chat-action="copy-message"`];
     if (kind) attributes.push(`data-copy-kind="${escapeHtml(kind)}"`);
     if (key) attributes.push(`data-copy-key="${escapeHtml(key)}"`);
-    return `<button class="chat-copy-btn" type="button" ${attributes.join(" ")}>copy</button>`;
+    return `<button class="chat-copy-btn" type="button" ${attributes.join(" ")}>复制</button>`;
   }
 
   function renderUserPromptBubble(snapshot) {
@@ -961,10 +961,6 @@
           <div class="chat-bubble">
             <div class="chat-bubble-head">
               <span class="chat-bubble-title">创作指令</span>
-              <span class="chat-bubble-head-actions">
-                <span class="chat-bubble-meta">输入</span>
-                ${renderCopyButton("user_prompt", "current")}
-              </span>
             </div>
             <pre class="chat-bubble-content${collapsed ? " chat-bubble-content-collapsed" : ""}">${escapeHtml(expectation)}</pre>
             ${lineCount > MAX_EXPECTATION_LINES ? `
@@ -975,7 +971,12 @@
                 data-prompt-key="${escapeHtml(toggleKey)}"
               >${collapsed ? `展开全文（${lineCount}行）` : "收起"}</button>
             ` : ""}
-            ${chips.length ? `<div class="chat-user-meta">${chips.map((item) => `<span class="chat-chip">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+            <div class="chat-bubble-foot">
+              <div class="chat-user-meta">${chips.map((item) => `<span class="chat-chip">${escapeHtml(item)}</span>`).join("")}</div>
+              <div class="chat-bubble-foot-actions">
+                ${renderCopyButton("user_prompt", "current")}
+              </div>
+            </div>
           </div>
         </div>
       </article>
@@ -990,10 +991,6 @@
           <div class="chat-bubble">
             <div class="chat-bubble-head">
               <span class="chat-bubble-title">${escapeHtml(message.title)}</span>
-              <span class="chat-bubble-head-actions">
-                <span class="chat-bubble-meta">阶段产出</span>
-                ${renderCopyButton("stage_output", message.key)}
-              </span>
             </div>
             <pre class="chat-bubble-content">${escapeHtml(message.output)}</pre>
             ${message.natural ? `
@@ -1002,6 +999,14 @@
                 <p class="chat-bubble-preview-text">${escapeHtml(message.natural)}</p>
               </div>
             ` : ""}
+            <div class="chat-bubble-foot">
+              <div class="chat-bubble-foot-meta">
+                <span class="chat-bubble-meta">阶段产出</span>
+              </div>
+              <div class="chat-bubble-foot-actions">
+                ${renderCopyButton("stage_output", message.key)}
+              </div>
+            </div>
           </div>
         </div>
       </article>
@@ -1023,10 +1028,6 @@
           <div class="chat-bubble">
             <div class="chat-bubble-head">
               <span class="chat-bubble-title">${escapeHtml(stateLabel)}</span>
-              <span class="chat-bubble-head-actions">
-                <span class="chat-bubble-meta">${escapeHtml(stageLabel)}</span>
-                ${renderCopyButton("thinking_state", "current")}
-              </span>
             </div>
             <div class="chat-bubble-content"><span>${escapeHtml(content)}</span></div>
             ${thinkingState.note ? `
@@ -1035,6 +1036,14 @@
                 <p class="chat-bubble-preview-text">${escapeHtml(thinkingState.note)}</p>
               </div>
             ` : ""}
+            <div class="chat-bubble-foot">
+              <div class="chat-bubble-foot-meta">
+                <span class="chat-bubble-meta">${escapeHtml(stageLabel)}</span>
+              </div>
+              <div class="chat-bubble-foot-actions">
+                ${renderCopyButton("thinking_state", "current")}
+              </div>
+            </div>
           </div>
         </div>
       </article>
@@ -2128,7 +2137,7 @@
 
   function flashCopyButton(button, label) {
     if (!button) return;
-    const original = button.dataset.originalLabel || button.textContent || "copy";
+    const original = button.dataset.originalLabel || button.textContent || "复制";
     button.dataset.originalLabel = original;
     button.textContent = label;
     button.disabled = true;

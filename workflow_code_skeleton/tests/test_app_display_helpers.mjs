@@ -19,6 +19,11 @@ function extractBetween(startToken, endToken) {
 
 const bootstrap = [
   'const RUNNING_STATUSES = new Set(["pending", "running", "pausing"]);',
+  "const MAX_EXPECTATION_LINES = 5;",
+  "const state = { expandedUserPrompts: {} };",
+  extractBetween("function normalizeNumber(value) {", "\n\n  function currentUrl() {"),
+  extractBetween("function promptToggleKey(snapshot) {", "\n\n  function inputLineCount(text) {"),
+  extractBetween("function inputLineCount(text) {", "\n\n  function syncExpectationInputHeight() {"),
   extractBetween("function normalizeStageKey(stageKey) {", "\n\n  function formatDisplayValue(value) {"),
   extractBetween("function formatDisplayValue(value) {", "\n\n  // 把框架阶段的多个正式产物拼成一个完整回复，方便在聊天流里整体展示。"),
   extractBetween("function compactMessageText(value) {", "\n\n  async function copyTextToClipboard(text) {"),
@@ -30,8 +35,15 @@ const bootstrap = [
   extractBetween("function worldviewStageOutput(snapshot) {", "\n\n  // 只把平台真正对外公开的正式阶段产物整理成聊天消息。"),
   extractBetween("function visibleStageMessages(snapshot) {", "\n\n  // 内部阶段统一折叠成“思考分析”，避免把中间工作流细节直接暴露给用户。"),
   extractBetween("function thinkingStateFrom(snapshot) {", "\n\n  function userPromptSummary(snapshot) {"),
+  extractBetween("function userPromptSummary(snapshot) {", "\n\n  function userPromptCopyText(snapshot) {"),
   extractBetween("function thinkingMessageCopyText(snapshot) {", "\n\n  function renderCopyButton(kind, key) {"),
-  "module.exports = { formatDisplayValue, normalizeStageKey, compactMessageText, partialScriptOutput, statusNoteFrom, frameworkStageOutput, worldviewStageOutput, visibleStageMessages, thinkingStateFrom, thinkingMessageCopyText };",
+  extractBetween("function escapeHtml(text) {", "\n\n  // 优先使用后端返回的辅助工具定义，拿不到时退回本地默认配置，保证主页面不会被工具区拖垮。"),
+  extractBetween("function renderCopyButton(kind, key) {", "\n\n  function renderUserPromptBubble(snapshot) {"),
+  extractBetween("function renderUserPromptBubble(snapshot) {", "\n\n  function renderAssistantStageBubble(message) {"),
+  extractBetween("function renderAssistantStageBubble(message) {", "\n\n  function renderThinkingBubble(thinkingState) {"),
+  extractBetween("function renderThinkingBubble(thinkingState) {", "\n\n  function transcriptSignature(snapshot) {"),
+  extractBetween("function flashCopyButton(button, label) {", "\n\n  function projectTooltip(item) {"),
+  "module.exports = { formatDisplayValue, normalizeStageKey, compactMessageText, partialScriptOutput, statusNoteFrom, frameworkStageOutput, worldviewStageOutput, visibleStageMessages, thinkingStateFrom, thinkingMessageCopyText, renderCopyButton, renderUserPromptBubble, renderAssistantStageBubble, renderThinkingBubble, flashCopyButton };",
 ].join("\n\n");
 
 const context = {
@@ -43,6 +55,9 @@ const context = {
   Boolean,
   Number,
   Set,
+  window: {
+    setTimeout: (fn) => fn(),
+  },
 };
 vm.runInNewContext(bootstrap, context, { filename: appJsPath });
 
@@ -54,6 +69,11 @@ const {
   visibleStageMessages,
   thinkingStateFrom,
   thinkingMessageCopyText,
+  renderCopyButton,
+  renderUserPromptBubble,
+  renderAssistantStageBubble,
+  renderThinkingBubble,
+  flashCopyButton,
 } = context.module.exports;
 
 test("framework natural language is preferred over structured raw artifacts", () => {
@@ -244,4 +264,71 @@ test("thinking bubble copy text includes the visible runtime message and note", 
   });
 
   assert.match(text, /正在审核剧本正文：第 6-10 集/);
+});
+
+test("copy button label uses Chinese copy text", () => {
+  assert.match(renderCopyButton("user_prompt", "current"), />复制<\/button>/);
+});
+
+test("user prompt bubble renders copy in bottom meta row with counts", () => {
+  const html = renderUserPromptBubble({
+    project_id: 12,
+    input_payload: {
+      user_expectation: "写一个关于职场逆袭的短剧。",
+      character_count: 7,
+      total_episodes: 15,
+    },
+  });
+
+  assert.match(html, /chat-bubble-foot/);
+  assert.match(html, /角色数量 7/);
+  assert.match(html, /总集数 15/);
+  assert.match(html, />复制<\/button>/);
+  assert.doesNotMatch(html, /chat-bubble-head-actions/);
+});
+
+test("assistant stage bubble renders copy in footer instead of header", () => {
+  const html = renderAssistantStageBubble({
+    key: "framework",
+    title: "剧本框架",
+    output: "这是阶段输出。",
+    natural: "这是阶段说明。",
+  });
+  const head = html.match(/<div class="chat-bubble-head">[\s\S]*?<\/div>/)?.[0] || "";
+
+  assert.match(html, /chat-bubble-foot/);
+  assert.match(html, /阶段产出/);
+  assert.match(html, />复制<\/button>/);
+  assert.doesNotMatch(head, /复制/);
+  assert.doesNotMatch(head, /chat-bubble-head-actions/);
+});
+
+test("thinking bubble renders current stage label and copy in footer", () => {
+  const html = renderThinkingBubble({
+    stageLabel: "剧本正文审核：第 6-10 集",
+    stateLabel: "创作中",
+    content: "正在审核剧本正文：第 6-10 集",
+    note: "",
+  });
+  const head = html.match(/<div class="chat-bubble-head">[\s\S]*?<\/div>/)?.[0] || "";
+
+  assert.match(html, /chat-bubble-foot/);
+  assert.match(html, /剧本正文审核：第 6-10 集/);
+  assert.match(html, />复制<\/button>/);
+  assert.doesNotMatch(head, /复制/);
+  assert.doesNotMatch(head, /chat-bubble-head-actions/);
+});
+
+test("flash copy button restores the default Chinese label", () => {
+  const button = {
+    dataset: {},
+    textContent: "复制",
+    disabled: false,
+  };
+
+  flashCopyButton(button, "已复制");
+
+  assert.equal(button.dataset.originalLabel, "复制");
+  assert.equal(button.textContent, "复制");
+  assert.equal(button.disabled, false);
 });
