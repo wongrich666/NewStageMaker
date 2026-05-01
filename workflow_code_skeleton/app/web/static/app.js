@@ -401,7 +401,7 @@
   }
 
   function scriptFormatModeLabel(value) {
-    return normalizeScriptFormatMode(value) === "waibao" ? "外包专属格式" : "标准格式";
+    return normalizeScriptFormatMode(value) === "waibao" ? "外包专属格式" : "传统链路";
   }
 
   function syncScriptFormatModeUi(snapshot = null) {
@@ -1865,6 +1865,7 @@
           : item.status === "completed"
             ? " completed"
             : "";
+        const modeLabel = scriptFormatModeLabel(item?.input_payload?.script_format_mode);
         return `
           <button
             class="workspace-pick${activeClass}${statusClass}"
@@ -1875,7 +1876,7 @@
           >
             <span class="workspace-pick-main">
               <span class="workspace-pick-title">${escapeHtml(projectDisplayTitle(item))}</span>
-              <span class="workspace-pick-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${item.current_stage_label || statusLabel(item.status)}`)}</span>
+              <span class="workspace-pick-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${modeLabel} · ${item.current_stage_label || statusLabel(item.status)}`)}</span>
             </span>
             <span class="workspace-pick-state">${escapeHtml(statusLabel(item.status))}</span>
           </button>
@@ -2197,6 +2198,7 @@
   function projectTooltip(item) {
       return [
       `剧本：${projectDisplayTitle(item)}`,
+      `模式：${scriptFormatModeLabel(item?.input_payload?.script_format_mode)}`,
       `进度：${Number(item.progress_percent || 0)}%`,
       `当前阶段：${item.current_stage_label || statusLabel(item.status)}`,
       `当前状态：${statusLabel(item.status)}`

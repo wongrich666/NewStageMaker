@@ -1399,58 +1399,49 @@ class BatchedGenerationFlowTests(unittest.TestCase):
             [1, 6],
         )
 
-    def test_script_batch_local_validation_blocks_duplicate_episode_headings(self) -> None:
+    def test_script_write_missing_episodes_auto_repairs_with_supplement(self) -> None:
         state, payload, variables = self._state_and_payload(5)
-        settings.fastgpt_stage_format_retry_limit = 3
         runner = _PhaseRecordingRunner(
             stage_outputs={
                 STAGE_SCRIPT_WRITING: [
                     {
-                        BATCH_SCRIPT: "\n\n".join(
-                            [
-                                "第1集：\n场景一：第1集正文",
-                                "第1集：\n场景一：重复的第1集正文",
-                                "第2集：\n场景一：第2集正文",
-                                "第3集：\n场景一：第3集正文",
-                                "第4集：\n场景一：第4集正文",
-                            ]
-                        )
+                        BATCH_SCRIPT: _script_batch_text([1, 2, 3, 4])
                     },
                     {
-                        BATCH_SCRIPT: "\n\n".join(
-                            [
-                                "第1集：\n场景一：第1集正文",
-                                "第1集：\n场景一：重复的第1集正文",
-                                "第2集：\n场景一：第2集正文",
-                                "第3集：\n场景一：第3集正文",
-                                "第4集：\n场景一：第4集正文",
-                            ]
-                        )
-                    },
-                    {
-                        BATCH_SCRIPT: "\n\n".join(
-                            [
-                                "第1集：\n场景一：第1集正文",
-                                "第1集：\n场景一：重复的第1集正文",
-                                "第2集：\n场景一：第2集正文",
-                                "第3集：\n场景一：第3集正文",
-                                "第4集：\n场景一：第4集正文",
-                            ]
-                        )
+                        BATCH_SCRIPT: _script_batch_text([5])
                     },
                 ]
             }
         )
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "script_writing|输出未通过正文批次校验|script batch 1-5",
-        ):
-            flow._run_batched_generation(state, runner, payload, variables)
+        flow._run_batched_generation(state, runner, payload, variables)
 
-        self.assertEqual(len(runner.memory_calls()), 0)
-        self.assertEqual(str(variables.get(ALL_SCRIPT, "") or "").strip(), "")
-        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_WRITING)), 3)
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_WRITING)), 2)
+        script_text = str(variables.get(ALL_SCRIPT, "") or "")
+        self.assertIn("第5集", script_text)
+        self.assertFalse(flow.validate_batch_script_text(script_text, BatchWindow(1, 5)))
+
+    def test_script_write_auto_repairs_by_downgrading_batch_size(self) -> None:
+        state, payload, variables = self._state_and_payload(5)
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_SCRIPT_WRITING: [
+                    {BATCH_SCRIPT: _script_batch_text([1])},
+                    {BATCH_SCRIPT: _script_batch_text([1])},
+                    {BATCH_SCRIPT: _script_batch_text([1])},
+                    {BATCH_SCRIPT: _script_batch_text([1, 2, 3])},
+                    {BATCH_SCRIPT: _script_batch_text([4, 5])},
+                ]
+            }
+        )
+
+        flow._run_batched_generation(state, runner, payload, variables)
+
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_WRITING)), 5)
+        script_text = str(variables.get(ALL_SCRIPT, "") or "")
+        self.assertIn("第3集", script_text)
+        self.assertIn("第5集", script_text)
+        self.assertFalse(flow.validate_batch_script_text(script_text, BatchWindow(1, 5)))
 
     def test_final_guard_rejects_duplicate_hook_episodes(self) -> None:
         variables = self._base_variables(10)

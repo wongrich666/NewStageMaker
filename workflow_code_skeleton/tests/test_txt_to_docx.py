@@ -150,6 +150,58 @@ class TxtToDocxCompatibilityTests(unittest.TestCase):
             self.assertIn("剧本正文", text)
             self.assertIn("第1集：风起", text)
 
+    def test_convert_skips_legacy_appearance_and_registry_json_blocks(self) -> None:
+        source = """长夜回潮
+
+人物服饰说明
+【角色】林夏
+默认称呼：林夏【日常】
+
+appearance_mapping
+```json
+{
+  "appearance_mapping": {
+    "characters": [
+      {
+        "character_name": "林夏",
+        "default_name": "林夏【日常】"
+      }
+    ]
+  }
+}
+```
+
+character_registry
+```json
+{
+  "character_registry": {
+    "林夏": {
+      "default_name": "林夏【日常】"
+    }
+  }
+}
+```
+
+剧本正文
+第1集：风起
+林夏：先查人，再查船。
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            txt_path = Path(tmpdir) / "skip_legacy_json.txt"
+            docx_path = Path(tmpdir) / "skip_legacy_json.docx"
+            txt_path.write_text(source, encoding="utf-8")
+
+            convert(str(txt_path), str(docx_path))
+
+            doc = Document(str(docx_path))
+            text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+            self.assertIn("人物服饰说明", text)
+            self.assertIn("默认称呼：林夏【日常】", text)
+            self.assertIn("剧本正文", text)
+            self.assertNotIn("appearance_mapping", text)
+            self.assertNotIn("character_registry", text)
+            self.assertNotIn("附加数据", text)
+
 
 if __name__ == "__main__":
     unittest.main()

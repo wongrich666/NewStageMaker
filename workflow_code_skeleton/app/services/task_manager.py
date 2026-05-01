@@ -256,10 +256,6 @@ COMPLETED_ARTIFACT_KEYS = (
     "core_scene_summary",
     "worldview_natural_language",
     APPEARANCE_NATURAL_LANGUAGE_ARTIFACT,
-    "appearance_mapping",
-    "character_registry",
-    "character_alias_registry",
-    "episode_alias_plan",
     "final_script",
     "final_output_text",
 )
@@ -5355,7 +5351,8 @@ class TaskManager:
             if appearance:
                 fragments.append(f"视觉辨识点则是{appearance}")
             if not fragments:
-                fragments.append("人物设定暂未补充完整。")
+                sections.append(name)
+                continue
             sections.append(f"{name}：" + "，".join(fragments).strip("，") + "。")
         return "\n".join(section for section in sections if section).strip()
 

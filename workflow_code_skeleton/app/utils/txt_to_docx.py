@@ -36,6 +36,17 @@ PLAIN_SECTION_HEADINGS = (
     "剧本正文",
 )
 
+SKIPPED_EXPORT_JSON_LABEL_FRAGMENTS = (
+    "appearance_mapping",
+    "服装版本映射",
+    "character_registry",
+    "character_alias_registry",
+    "episode_alias_plan",
+    "appearance_continuity_memory",
+    "pass_review_json",
+    "appearance_review",
+)
+
 
 # ─────────────────────────── 样式辅助 ───────────────────────────
 
@@ -228,8 +239,40 @@ def _section_is_code_fence(text: str) -> bool:
     return content.startswith("```json") or content.startswith("```")
 
 
+def _strip_skipped_json_subblocks(text: Any) -> str:
+    content = str(text or "")
+    for fragment in SKIPPED_EXPORT_JSON_LABEL_FRAGMENTS:
+        pattern = re.compile(
+            rf"(?:^|\n)\s*{re.escape(fragment)}\s*\n```(?:json)?\s*.*?```",
+            re.IGNORECASE | re.DOTALL,
+        )
+        content = pattern.sub("\n", content)
+    return content.strip()
+
+
+def _should_skip_export_json_block(label: Any, data: Any) -> bool:
+    label_text = normalize_text(label).lower()
+    if any(fragment.lower() in label_text for fragment in SKIPPED_EXPORT_JSON_LABEL_FRAGMENTS):
+        return True
+    if isinstance(data, dict):
+        keys = {str(key).lower() for key in data.keys()}
+        if keys.intersection(
+            {
+                "appearance_mapping",
+                "character_registry",
+                "character_alias_registry",
+                "episode_alias_plan",
+                "appearance_continuity_memory",
+                "pass_review_json",
+                "appearance_review",
+            }
+        ):
+            return True
+    return False
+
+
 def render_plain_section(doc: Document, title: str, text: Any):
-    content = normalize_text(text)
+    content = normalize_text(_strip_skipped_json_subblocks(text))
     if not content:
         return
     add_heading(doc, title, level=1)
@@ -688,6 +731,9 @@ def convert(input_path: str, output_path: str):
     for block in parsed["json_blocks"]:
         label = block["label"]
         data = block["data"]
+
+        if _should_skip_export_json_block(label, data):
+            continue
 
         if isinstance(data, dict) and "_parse_error" in data:
             add_heading(doc, label or "数据块", level=1)
