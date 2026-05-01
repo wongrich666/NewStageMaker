@@ -99,6 +99,7 @@ from ..workflow_ids import (
 )
 
 logger = get_logger("task_manager")
+_ONE_SHOT_WARNING_KEYS: set[str] = set()
 
 PROJECT_RUNNING_STATUSES = {"pending", "running", "pausing", "paused"}
 WAITING_STATUSES = {"pending", "running", "pausing"}
@@ -1427,6 +1428,18 @@ def _parse_episode_token(value: str) -> int | None:
     return total or None
 
 
+def _warning_signature(kind: str, issues: list[str], preview: str) -> str:
+    return f"{kind}|{','.join(issues)}|{preview.strip()}"
+
+
+def _log_warning_once(kind: str, issues: list[str], preview: str) -> None:
+    signature = _warning_signature(kind, issues, preview)
+    if signature in _ONE_SHOT_WARNING_KEYS:
+        return
+    _ONE_SHOT_WARNING_KEYS.add(signature)
+    logger.warning("%s issues=%s preview=%s", kind, ",".join(issues), preview)
+
+
 def _script_batch_window(
     start_episode: int,
     *,
@@ -2047,9 +2060,9 @@ class WorkflowRuntime:
             state.get_var(CHARACTER_VAR, ""),
         )
         if raw_character_natural_language and character_natural_language_issues:
-            logger.warning(
-                "character_natural_language_rejected issues=%s preview=%s",
-                ",".join(character_natural_language_issues),
+            _log_warning_once(
+                "character_natural_language_rejected",
+                character_natural_language_issues,
                 _truncate_log_text(raw_character_natural_language, max_chars=240),
             )
         appearance_natural_language = str(
@@ -5297,9 +5310,9 @@ class TaskManager:
             if text and not issues:
                 return text
             if sanitized and issues:
-                logger.warning(
-                    "character_export_text_rejected issues=%s preview=%s",
-                    ",".join(issues),
+                _log_warning_once(
+                    "character_export_text_rejected",
+                    issues,
                     _truncate_log_text(sanitized, max_chars=240),
                 )
         characters = _character_items_from_value(structured)

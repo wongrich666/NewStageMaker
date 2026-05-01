@@ -2,14 +2,29 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Iterable
 
 import requests
 
 from ..config import settings
+from .compact_context import (
+    build_compact_appearance_context_for_batch,
+    build_compact_character_context_for_appearance,
+    build_compact_character_context_for_dialogues,
+    build_compact_character_context_for_hooks,
+    build_compact_character_context_for_scenes,
+    build_compact_character_context_for_script,
+    build_compact_scene_context_for_appearance,
+    build_compact_scene_context_for_script,
+    build_compact_story_outline_context,
+    build_compact_worldview_context,
+)
 from ..utils.logger import get_logger
 from ..workflow_ids import (
     APPEARANCE_MAPPING_VAR,
@@ -26,6 +41,8 @@ from .fastgpt_contracts import (
     APPEARANCE_MAPPING,
     BATCH_DIALOGUES,
     BATCH_HOOKS,
+    BATCH_SCRIPT,
+    BATCH_START_EPISODE,
     CHARACTERS,
     CHARACTER_ALIAS_NAMING_RULES,
     CHARACTER_APPEARANCE_REQUIREMENTS,
@@ -35,8 +52,11 @@ from .fastgpt_contracts import (
     LEGACY_INPUT_ALIASES,
     LEGACY_WIRE_INPUT_ALIASES_OVERRIDES,
     MAX_RETRIES,
+    EPISODE_PLAN,
     NORMALIZED_EPISODE_PLAN,
     OUTFIT_SWITCH_RULES,
+    PASS_REVIEW_JSON,
+    STORY_OUTLINE,
     STAGE_APPEARANCE_ALIAS_GENERATION,
     STAGE_APPEARANCE_ALIAS_REVIEW,
     STAGE_APPEARANCE_ALIAS_REWRITE,
@@ -55,11 +75,14 @@ from .fastgpt_contracts import (
     STAGE_FRAMEWORK,
     STAGE_FRAMEWORK_NATURALIZE,
     STAGE_CHARACTERS,
+    STAGE_HOOKS,
     STAGE_HOOK_MEMORY,
     STAGE_HOOK_REVIEW,
     STAGE_HOOK_REVISE,
     STAGE_HOOK_WRITE,
     STAGE_HOOKS_REVIEW,
+    STAGE_HOOKS_REWRITE,
+    STAGE_HOOKS_WRITING,
     SCENES,
     STAGE_SCENES,
     STAGE_SCRIPT,
@@ -70,6 +93,8 @@ from .fastgpt_contracts import (
     STAGE_SCRIPT_WRITING,
     STAGE_SCRIPT_MEMORY,
     SCRIPT_MEMORY,
+    TOTAL_EPISODES,
+    WORLDVIEW,
     STAGE_WORLDVIEW,
     STAGE_WORLDVIEW_NATURALIZE,
     STAGE_CHARACTERS_NATURALIZE,
@@ -738,32 +763,6 @@ class FastGPTClient:
             for key, value in variables.items()
         }
         detail = _detail_enabled_for_stage(contract.stage_name)
-        body = {
-            "chatId": chat_id,
-            "stream": False,
-            "detail": detail,
-            "variables": safe_variables,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": (
-                        f"执行阶段：{contract.label}。"
-                        "读取输入，"
-                        "并只返回约定的输出字段。"
-                    ),
-                }
-            ],
-        }
-        payload_stats = _build_request_payload_stats(
-            contract.stage_name,
-            safe_variables,
-            body,
-        )
-        self._remember_stage_debug_info(
-            contract.stage_name,
-            payload_stats=payload_stats,
-            request_detail=detail,
-        )
         warn_limit = max(
             0,
             int(getattr(settings, "fastgpt_stage_payload_warn_chars", 120000)),
@@ -772,6 +771,60 @@ class FastGPTClient:
             warn_limit,
             int(getattr(settings, "fastgpt_stage_payload_hard_chars", 240000)),
         )
+        body = _build_fastgpt_request_body(
+            chat_id=chat_id,
+            detail=detail,
+            variables=safe_variables,
+            label=contract.label,
+        )
+        initial_payload_stats = _build_request_payload_stats(
+            contract.stage_name,
+            safe_variables,
+            body,
+        )
+        compaction_meta: dict[str, Any] = {}
+        payload_stats = initial_payload_stats
+        if payload_stats["body_chars"] > warn_limit:
+            safe_variables, compaction_meta = _compact_stage_request_variables(
+                contract=contract,
+                variables=safe_variables,
+                before_stats=initial_payload_stats,
+                chat_id=chat_id,
+                detail=detail,
+                warn_limit=warn_limit,
+                hard_limit=hard_limit,
+            )
+            body = _build_fastgpt_request_body(
+                chat_id=chat_id,
+                detail=detail,
+                variables=safe_variables,
+                label=contract.label,
+            )
+            payload_stats = _build_request_payload_stats(
+                contract.stage_name,
+                safe_variables,
+                body,
+            )
+        self._remember_stage_debug_info(
+            contract.stage_name,
+            payload_stats=payload_stats,
+            payload_stats_before_compact=initial_payload_stats,
+            payload_compaction=compaction_meta,
+            request_detail=detail,
+        )
+        if compaction_meta:
+            logger.warning(
+                "FastGPT 阶段 %s payload 已压缩：before=%s after=%s warn=%s hard=%s removed_keys=%s compacted_keys=%s before_top=%s after_top=%s",
+                contract.stage_name,
+                compaction_meta.get("before_chars"),
+                compaction_meta.get("after_chars"),
+                warn_limit,
+                hard_limit,
+                compaction_meta.get("removed_keys"),
+                compaction_meta.get("compacted_keys"),
+                _format_largest_payload_fields(list(compaction_meta.get("largest_before") or [])),
+                _format_largest_payload_fields(list(compaction_meta.get("largest_after") or [])),
+            )
         if payload_stats["body_chars"] > warn_limit:
             logger.warning(
                 "FastGPT 阶段 %s payload 过大：body=%s，warn=%s，detail=%s，变量=%s，最大字段=%s",
@@ -1263,6 +1316,583 @@ def _payload_preview(value: Any, *, limit: int = 120) -> str:
     except Exception:
         text = str(value)
     return _truncate_log_text(text, limit=limit)
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if isinstance(value, bool):
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _build_fastgpt_request_body(
+    *,
+    chat_id: str,
+    detail: bool,
+    variables: dict[str, Any],
+    label: str,
+) -> dict[str, Any]:
+    return {
+        "chatId": chat_id,
+        "stream": False,
+        "detail": detail,
+        "variables": variables,
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    f"执行阶段：{label}。"
+                    "读取输入，"
+                    "并只返回约定的输出字段。"
+                ),
+            }
+        ],
+    }
+
+
+def _compact_stage_request_variables(
+    *,
+    contract: FastGPTStageContract,
+    variables: dict[str, Any],
+    before_stats: dict[str, Any],
+    chat_id: str,
+    detail: bool,
+    warn_limit: int,
+    hard_limit: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    work = dict(variables)
+    removed_keys: list[str] = []
+    compacted_keys: list[str] = []
+    workflow_references = _workflow_referenced_wire_keys(
+        contract.workflow_json_name,
+        tuple(str(key) for key in work.keys()),
+    )
+    alias_map = _stage_legacy_wire_aliases(contract.stage_name)
+
+    if workflow_references:
+        for key in list(work.keys()):
+            if key in workflow_references:
+                continue
+            removed_keys.append(key)
+            work.pop(key, None)
+
+    batch_start = _extract_stage_int_value(
+        work,
+        alias_map.get(BATCH_START_EPISODE, ()),
+    )
+    total_episodes = _extract_stage_int_value(
+        work,
+        alias_map.get(TOTAL_EPISODES, ()),
+    )
+
+    for canonical_name in (
+        PASS_REVIEW_JSON,
+        HOOK_MEMORY,
+        DIALOGUE_MEMORY,
+        SCRIPT_MEMORY,
+        LAST_SUMMARY,
+        WORLDVIEW,
+        STORY_OUTLINE,
+        CHARACTERS,
+        SCENES,
+        APPEARANCE_MAPPING,
+        EPISODE_PLAN,
+        NORMALIZED_EPISODE_PLAN,
+        ALL_HOOKS,
+        ALL_DIALOGUES,
+        ALL_SCRIPT,
+    ):
+        wire_names = alias_map.get(canonical_name, ())
+        if not wire_names:
+            continue
+        present = [name for name in wire_names if name in work]
+        if not present:
+            continue
+        compacted = _compact_stage_canonical_value(
+            stage_name=contract.stage_name,
+            canonical_name=canonical_name,
+            value=work[present[0]],
+            batch_start_episode=batch_start,
+            total_episodes=total_episodes,
+        )
+        if compacted is None:
+            continue
+        original_chars = _payload_chars(work[present[0]])
+        compacted_chars = _payload_chars(compacted)
+        if compacted_chars >= original_chars:
+            continue
+        for wire_name in present:
+            work[wire_name] = compacted
+            compacted_keys.append(wire_name)
+
+    for canonical_name, wire_names in alias_map.items():
+        present = [name for name in wire_names if name in work]
+        if len(present) <= 1:
+            continue
+        primary = _select_primary_wire_key(present, workflow_references)
+        primary_signature = _stable_payload_signature(work.get(primary))
+        for wire_name in present:
+            if wire_name == primary or wire_name in workflow_references:
+                continue
+            if _stable_payload_signature(work.get(wire_name)) != primary_signature:
+                continue
+            removed_keys.append(wire_name)
+            work.pop(wire_name, None)
+
+    attempts = 0
+    current_stats = _build_request_payload_stats(
+        contract.stage_name,
+        work,
+        _build_fastgpt_request_body(
+            chat_id=chat_id,
+            detail=detail,
+            variables=work,
+            label=contract.label,
+        ),
+    )
+    target_limit = hard_limit if before_stats["body_chars"] > hard_limit else warn_limit
+    while current_stats["body_chars"] > target_limit and attempts < 8:
+        attempts += 1
+        largest = next(
+            (item for item in current_stats["largest_variables"] if item.get("name") in work),
+            None,
+        )
+        if not isinstance(largest, dict):
+            break
+        key = str(largest.get("name") or "").strip()
+        if not key:
+            break
+        if workflow_references and key not in workflow_references:
+            removed_keys.append(key)
+            work.pop(key, None)
+        else:
+            compacted = _compact_generic_payload_value(work.get(key))
+            if compacted is None:
+                break
+            if _payload_chars(compacted) >= _payload_chars(work.get(key)):
+                break
+            work[key] = compacted
+            compacted_keys.append(key)
+        current_stats = _build_request_payload_stats(
+            contract.stage_name,
+            work,
+            _build_fastgpt_request_body(
+                chat_id=chat_id,
+                detail=detail,
+                variables=work,
+                label=contract.label,
+            ),
+        )
+
+    meta = {
+        "before_chars": int(before_stats["body_chars"]),
+        "after_chars": int(current_stats["body_chars"]),
+        "removed_keys": removed_keys,
+        "compacted_keys": compacted_keys,
+        "largest_before": list(before_stats.get("largest_variables") or []),
+        "largest_after": list(current_stats.get("largest_variables") or []),
+    }
+    if (
+        not removed_keys
+        and not compacted_keys
+        and int(current_stats["body_chars"]) >= int(before_stats["body_chars"])
+    ):
+        meta = {}
+    return work, meta
+
+
+def _compact_stage_canonical_value(
+    *,
+    stage_name: str,
+    canonical_name: str,
+    value: Any,
+    batch_start_episode: int,
+    total_episodes: int,
+) -> Any | None:
+    if canonical_name == PASS_REVIEW_JSON:
+        return _compact_review_payload_value(value)
+    if canonical_name in {HOOK_MEMORY, DIALOGUE_MEMORY, SCRIPT_MEMORY, LAST_SUMMARY}:
+        return _compact_memory_payload_value(value)
+    if canonical_name == WORLDVIEW:
+        return build_compact_worldview_context(value)
+    if canonical_name == STORY_OUTLINE:
+        return build_compact_story_outline_context(value)
+    if canonical_name == CHARACTERS:
+        return _compact_character_payload_for_stage(stage_name, value)
+    if canonical_name == SCENES:
+        return _compact_scene_payload_for_stage(stage_name, value)
+    if canonical_name == APPEARANCE_MAPPING:
+        return _compact_appearance_mapping_payload(value)
+    if canonical_name in {EPISODE_PLAN, NORMALIZED_EPISODE_PLAN}:
+        return _compact_episode_plan_payload(
+            value,
+            batch_start_episode=batch_start_episode,
+            total_episodes=total_episodes,
+        )
+    if canonical_name == ALL_SCRIPT:
+        return _compact_previous_script_payload(value)
+    if canonical_name in {ALL_HOOKS, ALL_DIALOGUES}:
+        return _compact_large_text_payload(value, max_chars=1800)
+    return None
+
+
+def _compact_character_payload_for_stage(stage_name: str, value: Any) -> str:
+    if stage_name == STAGE_SCENES:
+        return build_compact_character_context_for_scenes(value)
+    if stage_name in APPEARANCE_DETAIL_STAGES or stage_name == STAGE_APPEARANCE_PRE_STRATEGY:
+        return build_compact_character_context_for_appearance(value)
+    if stage_name in {
+        STAGE_HOOKS,
+        STAGE_HOOKS_WRITING,
+        STAGE_HOOKS_REVIEW,
+        STAGE_HOOKS_REWRITE,
+        STAGE_HOOK_WRITE,
+        STAGE_HOOK_REVIEW,
+        STAGE_HOOK_REVISE,
+        STAGE_HOOK_MEMORY,
+    }:
+        return build_compact_character_context_for_hooks(value)
+    if stage_name in {
+        STAGE_DIALOGUES,
+        STAGE_DIALOGUES_WRITING,
+        STAGE_DIALOGUES_REVIEW,
+        STAGE_DIALOGUES_REWRITE,
+        STAGE_DIALOGUE_WRITE,
+        STAGE_DIALOGUE_REVIEW,
+        STAGE_DIALOGUE_REVISE,
+        STAGE_DIALOGUE_MEMORY,
+    }:
+        return build_compact_character_context_for_dialogues(value)
+    return build_compact_character_context_for_script(value)
+
+
+def _compact_scene_payload_for_stage(stage_name: str, value: Any) -> str:
+    if stage_name in APPEARANCE_DETAIL_STAGES or stage_name == STAGE_APPEARANCE_PRE_STRATEGY:
+        return build_compact_scene_context_for_appearance(value)
+    return build_compact_scene_context_for_script(value)
+
+
+def _compact_episode_plan_payload(
+    value: Any,
+    *,
+    batch_start_episode: int,
+    total_episodes: int,
+) -> str | None:
+    parsed = _try_parse_jsonish(value)
+    if not isinstance(parsed, dict):
+        return _compact_large_text_payload(value, max_chars=2200)
+    episodes = parsed.get("episodes")
+    if not isinstance(episodes, list):
+        return json.dumps(parsed, ensure_ascii=False, separators=(",", ":"), default=str)
+    selected = episodes
+    if batch_start_episode > 0:
+        batch_end_episode = batch_start_episode + 4
+        if total_episodes > 0:
+            batch_end_episode = min(batch_end_episode, total_episodes)
+        selected = [
+            item for item in episodes
+            if isinstance(item, dict)
+            and batch_start_episode <= _safe_int(item.get("episode")) <= batch_end_episode
+        ] or selected
+    compacted_episodes: list[dict[str, Any]] = []
+    for item in selected:
+        if not isinstance(item, dict):
+            continue
+        compacted_item = {
+            "episode": _safe_int(item.get("episode")),
+            "title": str(item.get("title") or "").strip(),
+            "content": _compact_large_text_payload(item.get("content"), max_chars=260),
+        }
+        for extra_key in (
+            "main_character_aliases",
+            "appearance_events",
+            "scene_based_alias_hints",
+            "long_term_stage_flags",
+        ):
+            if extra_key in item:
+                extra_value = item.get(extra_key)
+                if isinstance(extra_value, list):
+                    compacted_item[extra_key] = extra_value[:3]
+        compacted_episodes.append(compacted_item)
+    compacted = {"episodes": compacted_episodes}
+    if "parsed_episode_count" in parsed:
+        compacted["parsed_episode_count"] = parsed.get("parsed_episode_count")
+    if "appearance_alias_planning" in parsed:
+        compacted["appearance_alias_planning"] = _try_parse_jsonish(
+            build_compact_appearance_context_for_batch(parsed.get("appearance_alias_planning"))
+        ) or parsed.get("appearance_alias_planning")
+    return json.dumps(compacted, ensure_ascii=False, separators=(",", ":"), default=str)
+
+
+def _compact_review_payload_value(value: Any) -> str:
+    parsed = _try_parse_jsonish(value)
+    if not isinstance(parsed, dict):
+        return _compact_large_text_payload(value, max_chars=1200)
+    compacted: dict[str, Any] = {
+        "passed": bool(parsed.get("passed")),
+        "rewrite_required": bool(parsed.get("rewrite_required")),
+        "blocking_issues": _normalize_review_issue_list(parsed.get("blocking_issues")),
+    }
+    summary = _compact_large_text_payload(parsed.get("summary"), max_chars=240)
+    if summary:
+        compacted["summary"] = summary
+    rewrite_start_episode = _safe_int(parsed.get("rewrite_start_episode"))
+    if rewrite_start_episode > 0:
+        compacted["rewrite_start_episode"] = rewrite_start_episode
+    stage = str(parsed.get("stage") or "").strip()
+    if stage:
+        compacted["stage"] = stage
+    return json.dumps(compacted, ensure_ascii=False, separators=(",", ":"), default=str)
+
+
+def _compact_memory_payload_value(value: Any, *, max_chars: int = 1600) -> str:
+    parsed = _try_parse_jsonish(value)
+    if isinstance(parsed, dict):
+        priority_keys = (
+            "summary",
+            "batch_summary",
+            "carry",
+            "must_continue",
+            "continuity",
+            "current_state",
+            "open_threads",
+            "pending_conflicts",
+            "appearance_state",
+            "next_batch_focus",
+        )
+        compacted: dict[str, Any] = {}
+        for key in priority_keys:
+            if key not in parsed:
+                continue
+            compacted_value = _compact_generic_payload_value(parsed.get(key), max_chars=max_chars // 2)
+            if compacted_value not in (None, "", [], {}):
+                compacted[key] = compacted_value
+        if compacted:
+            return json.dumps(compacted, ensure_ascii=False, separators=(",", ":"), default=str)
+        return _compact_large_text_payload(parsed, max_chars=max_chars)
+    return _compact_large_text_payload(value, max_chars=max_chars)
+
+
+def _compact_previous_script_payload(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    sections = re.split(
+        r"(?=^[ \t>#*\-]*第\s*[0-9０-９一二三四五六七八九十百千万两零〇]+\s*集(?:\s*[:：]|$))",
+        text,
+        flags=re.MULTILINE,
+    )
+    sections = [section.strip() for section in sections if section.strip()]
+    if len(sections) <= 2:
+        return _compact_large_text_payload(text, max_chars=2200)
+    return "\n\n".join(sections[-2:])[:2200].strip()
+
+
+def _compact_appearance_mapping_payload(value: Any) -> str:
+    parsed = _try_parse_jsonish(value)
+    if not isinstance(parsed, dict):
+        return _compact_large_text_payload(value, max_chars=2200)
+    if isinstance(parsed.get("appearance_mapping"), dict):
+        mapping = parsed.get("appearance_mapping")
+    else:
+        mapping = parsed
+    if not isinstance(mapping, dict):
+        return _compact_large_text_payload(value, max_chars=2200)
+    characters = mapping.get("characters")
+    if not isinstance(characters, list):
+        return _compact_large_text_payload(mapping, max_chars=2200)
+    compacted_characters: list[dict[str, Any]] = []
+    for item in characters:
+        if not isinstance(item, dict):
+            continue
+        variants = item.get("outfit_variants")
+        compacted_variants: list[dict[str, Any]] = []
+        if isinstance(variants, list):
+            for variant in variants[:3]:
+                if not isinstance(variant, dict):
+                    continue
+                compacted_variants.append(
+                    {
+                        "alias_name": str(
+                            variant.get("alias_name")
+                            or variant.get("default_name")
+                            or ""
+                        ).strip(),
+                        "applicable_identity_state": str(
+                            variant.get("applicable_identity_state") or ""
+                        ).strip(),
+                        "outfit_description": _compact_large_text_payload(
+                            variant.get("outfit_description"),
+                            max_chars=120,
+                        ),
+                        "usage_rule": _compact_large_text_payload(
+                            variant.get("usage_rule"),
+                            max_chars=120,
+                        ),
+                    }
+                )
+        compacted_characters.append(
+            {
+                "character_name": str(
+                    item.get("canonical_name")
+                    or item.get("character_name")
+                    or item.get("default_name")
+                    or ""
+                ).strip(),
+                "default_name": str(item.get("default_name") or "").strip(),
+                "same_person_anchor": _compact_generic_payload_value(
+                    item.get("same_person_anchor"),
+                    max_chars=160,
+                ),
+                "forbidden_generic_names": item.get("forbidden_generic_names") or [],
+                "outfit_variants": compacted_variants,
+            }
+        )
+    compacted = {
+        "characters": compacted_characters,
+    }
+    if "global_naming_style" in mapping:
+        compacted["global_naming_style"] = mapping.get("global_naming_style")
+    return json.dumps(compacted, ensure_ascii=False, separators=(",", ":"), default=str)
+
+
+def _compact_generic_payload_value(value: Any, *, max_chars: int = 1800) -> Any | None:
+    if value in (None, "", [], {}):
+        return value
+    if isinstance(value, str):
+        return _compact_large_text_payload(value, max_chars=max_chars)
+    parsed = _try_parse_jsonish(value)
+    if isinstance(parsed, (dict, list)):
+        return _compact_large_text_payload(parsed, max_chars=max_chars)
+    return _compact_large_text_payload(value, max_chars=max_chars)
+
+
+def _compact_large_text_payload(value: Any, *, max_chars: int) -> str:
+    text = _payload_to_text(value)
+    if len(text) <= max_chars:
+        return text
+    head = max(200, int(max_chars * 0.55))
+    tail = max(120, max_chars - head - 32)
+    if head + tail >= len(text):
+        return text[:max_chars]
+    return (
+        text[:head].rstrip()
+        + "\n……（中间内容已压缩）……\n"
+        + text[-tail:].lstrip()
+    )[:max_chars].strip()
+
+
+def _payload_to_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    try:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+    except Exception:
+        return str(value or "").strip()
+
+
+def _normalize_review_issue_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        result: list[str] = []
+        for item in value[:8]:
+            text = _compact_large_text_payload(item, max_chars=160)
+            if text:
+                result.append(text)
+        return result
+    text = str(value or "").strip()
+    return [text] if text else []
+
+
+def _extract_stage_int_value(variables: dict[str, Any], wire_names: tuple[str, ...]) -> int:
+    for wire_name in wire_names:
+        try:
+            value = int(variables.get(wire_name))
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return 0
+
+
+def _select_primary_wire_key(
+    wire_names: list[str],
+    referenced_keys: set[str],
+) -> str:
+    for wire_name in wire_names:
+        if wire_name in referenced_keys:
+            return wire_name
+    return wire_names[0]
+
+
+def _stable_payload_signature(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=str)
+    except Exception:
+        return str(value)
+
+
+def _stage_legacy_wire_aliases(stage_name: str) -> dict[str, tuple[str, ...]]:
+    aliases = LEGACY_WIRE_INPUT_ALIASES_OVERRIDES.get(stage_name)
+    if aliases is None:
+        aliases = LEGACY_INPUT_ALIASES.get(stage_name) or {}
+    return {
+        canonical_name: _as_wire_names(wire_names)
+        for canonical_name, wire_names in aliases.items()
+    }
+
+
+@lru_cache(maxsize=1)
+def _workflow_jsons_root() -> Path | None:
+    root = Path(__file__).resolve().parents[3]
+    for child in root.iterdir():
+        if child.is_dir() and "workflow_jsons" in child.name:
+            return child
+    return None
+
+
+@lru_cache(maxsize=128)
+def _workflow_json_text(workflow_json_name: str) -> str:
+    root = _workflow_jsons_root()
+    if root is None or not workflow_json_name:
+        return ""
+    path = root / workflow_json_name
+    if not path.exists():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+
+def _workflow_referenced_wire_keys(
+    workflow_json_name: str,
+    candidate_keys: tuple[str, ...],
+) -> set[str]:
+    text = _workflow_json_text(workflow_json_name)
+    if not text:
+        return set(candidate_keys)
+    found: set[str] = set()
+    for key in candidate_keys:
+        if not key:
+            continue
+        pattern = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(key)}(?![A-Za-z0-9_])")
+        if pattern.search(text):
+            found.add(key)
+    return found
+
+
+def _try_parse_jsonish(value: Any) -> Any | None:
+    if isinstance(value, (dict, list)):
+        return value
+    text = str(value or "").strip()
+    if not text or text[0] not in "{[":
+        return None
+    try:
+        return parse_json(text)
+    except Exception:
+        return None
 
 
 def _build_script_character_scene_bundle(characters: Any, scenes: Any) -> str:

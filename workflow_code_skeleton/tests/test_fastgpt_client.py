@@ -811,6 +811,96 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         self.assertNotIn(huge_expectation, str(ctx.exception))
         self.assertTrue(bool(ctx.exception.largest_variables))
 
+    def test_script_rewrite_payload_over_hard_limit_compacts_before_http(self) -> None:
+        settings.fastgpt_stage_payload_warn_chars = 50
+        settings.fastgpt_stage_payload_hard_chars = 7000
+        response = {
+            "responseData": {
+                "updateVarResult": [
+                    {
+                        "variable": ["VARIABLE_NODE_ID", SCRIPT_CURRENT_VAR],
+                        "value": "第1集\n场景一：修订后正文",
+                    }
+                ]
+            }
+        }
+        client = _QueuedFastGPTClient([response])
+        inputs = _script_review_inputs()
+        inputs[PASS_REVIEW_JSON] = json.dumps(
+            _pass_review_json(
+                passed=False,
+                rewrite_required=True,
+                summary="S" * 5000,
+                blocking_issues=["B" * 1500, "C" * 1500],
+                non_blocking_issues=["N" * 1500] * 8,
+                rewrite_start_episode=1,
+                stage="five_episode_continuity_review",
+            ),
+            ensure_ascii=False,
+        )
+
+        output = client.run_stage(STAGE_SCRIPT_REWRITE, inputs)
+
+        self.assertIn(BATCH_SCRIPT, output)
+        self.assertEqual(client.request_count, 1)
+        debug_info = client.get_last_stage_debug_info(STAGE_SCRIPT_REWRITE)
+        payload_stats = dict(debug_info.get("payload_stats") or {})
+        payload_before = dict(debug_info.get("payload_stats_before_compact") or {})
+        payload_compaction = dict(debug_info.get("payload_compaction") or {})
+        self.assertGreater(int(payload_before.get("body_chars") or 0), settings.fastgpt_stage_payload_hard_chars)
+        self.assertLessEqual(int(payload_stats.get("body_chars") or 0), settings.fastgpt_stage_payload_hard_chars)
+        self.assertLess(int(payload_compaction.get("after_chars") or 0), int(payload_compaction.get("before_chars") or 0))
+        self.assertTrue(bool(payload_compaction.get("removed_keys")))
+        self.assertTrue(bool(payload_compaction.get("compacted_keys")))
+
+    def test_script_rewrite_payload_compacts_review_json_to_required_fields(self) -> None:
+        settings.fastgpt_stage_payload_warn_chars = 50
+        settings.fastgpt_stage_payload_hard_chars = 7000
+        response = {
+            "responseData": {
+                "updateVarResult": [
+                    {
+                        "variable": ["VARIABLE_NODE_ID", SCRIPT_CURRENT_VAR],
+                        "value": "第1集\n场景一：修订后正文",
+                    }
+                ]
+            }
+        }
+        client = _QueuedFastGPTClient([response])
+        inputs = _script_review_inputs()
+        inputs[PASS_REVIEW_JSON] = json.dumps(
+            _pass_review_json(
+                passed=False,
+                rewrite_required=True,
+                summary="S" * 5000,
+                blocking_issues=["钩子断裂", "人物动机失真"],
+                non_blocking_issues=["N" * 1200, "M" * 1200],
+                rewrite_start_episode=1,
+                stage="five_episode_continuity_review",
+            ),
+            ensure_ascii=False,
+        )
+
+        client.run_stage(STAGE_SCRIPT_REWRITE, inputs)
+
+        body_variables = dict(client.request_bodies[0]["variables"])
+        review_values = [
+            value
+            for value in body_variables.values()
+            if isinstance(value, str)
+            and '"passed"' in value
+            and '"rewrite_required"' in value
+            and '"blocking_issues"' in value
+        ]
+        self.assertEqual(len(review_values), 1)
+        compacted_review = json.loads(review_values[0])
+        self.assertEqual(
+            set(compacted_review.keys()),
+            {"passed", "rewrite_required", "blocking_issues", "summary", "rewrite_start_episode", "stage"},
+        )
+        self.assertNotIn("non_blocking_issues", compacted_review)
+        self.assertLessEqual(len(str(compacted_review["summary"])), 260)
+
     def test_script_review_payload_only_sends_prompt_referenced_wire_variables(self) -> None:
         settings.fastgpt_stage_payload_warn_chars = 1000000
         settings.fastgpt_stage_payload_hard_chars = 2000000
