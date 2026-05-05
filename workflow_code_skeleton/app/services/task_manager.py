@@ -51,6 +51,12 @@ from .fastgpt_contracts import (
     WORLDVIEW,
     WORLDVIEW_NATURAL_LANGUAGE,
 )
+from .runtime_paths import (
+    get_runtime_data_dir,
+    load_runtime_manifest,
+    resolve_project_snapshot_path,
+    update_runtime_manifest,
+)
 from .workflow_spec import WorkflowSpec
 from ..utils.logger import get_logger
 from ..utils.episode import (
@@ -59,6 +65,17 @@ from ..utils.episode import (
     iter_episode_batches,
     rewrite_start_validation_message,
     validate_rewrite_start_episode,
+)
+from ..utils.user_visible_text import (
+    build_user_visible_section,
+    clean_user_visible_text,
+    export_safe_text,
+    has_meaningful_content,
+    is_machine_structured_content,
+    is_meaningful_text,
+    is_placeholder_text,
+    normalize_user_visible_text,
+    pick_best_user_visible_value,
 )
 from ..workflow_ids import (
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
@@ -924,35 +941,11 @@ def _select_non_empty_fields(
 
 
 def _display_text(value: Any) -> str:
-    if value in (None, ""):
-        return ""
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, (dict, list)):
-        try:
-            return json.dumps(value, ensure_ascii=False, indent=2).strip()
-        except Exception:
-            return str(value).strip()
-    return str(value).strip()
-
-
-PLACEHOLDER_STAGE_OUTPUTS = {
-    "剧本框架自然语言说明暂未生成。",
-    "世界观自然语言说明暂未生成。",
-    "人物设定自然语言说明暂未生成。",
-    "核心场景自然语言说明暂未生成。",
-}
+    return normalize_user_visible_text(value).strip()
 
 
 def _meaningful_stage_output_text(value: Any) -> str:
-    text = _display_text(value)
-    if not text:
-        return ""
-    if text in PLACEHOLDER_STAGE_OUTPUTS:
-        return ""
-    if text in {"{}", "[]", "[object Object]"}:
-        return ""
-    return text
+    return clean_user_visible_text(value).strip()
 
 
 EXPORT_TECHNICAL_KEY_PATTERN = re.compile(r'^\s*"?[A-Za-z_][A-Za-z0-9_]*"?\s*:\s*(.*)$')
@@ -997,86 +990,20 @@ def _truncate_log_text(text: Any, *, max_chars: int = 500) -> str:
 
 def clean_export_readable_text(value: Any) -> str:
     """把可能来自 JSON、markdown 或字段化文本的内容清洗成适合导出的自然语言。"""
-    if value in (None, "", {}, []):
-        return ""
-    if isinstance(value, (dict, list)):
-        parts: list[str] = []
-        items = value.items() if isinstance(value, dict) else enumerate(value, start=1)
-        for key, item in items:
-            cleaned = clean_export_readable_text(item)
-            if not cleaned:
-                continue
-            if isinstance(value, dict) and isinstance(key, str) and re.search(r"[\u4e00-\u9fff]", key):
-                parts.append(f"{key}：{cleaned}")
-            else:
-                parts.append(cleaned)
-        return "\n".join(part for part in parts if part).strip()
-
-    text = _strip_export_code_fences(str(value or ""))
-    parsed = _jsonish_value(text)
-    if parsed is not None:
-        return clean_export_readable_text(parsed)
-
-    cleaned_lines: list[str] = []
-    for raw_line in text.replace("\r", "").split("\n"):
-        line = _clean_export_key_line(raw_line)
-        if not line:
-            if cleaned_lines and cleaned_lines[-1] != "":
-                cleaned_lines.append("")
-            continue
-        cleaned_lines.append(line)
-
-    while cleaned_lines and cleaned_lines[0] == "":
-        cleaned_lines.pop(0)
-    while cleaned_lines and cleaned_lines[-1] == "":
-        cleaned_lines.pop()
-
-    paragraphs: list[str] = []
-    current: list[str] = []
-    for line in cleaned_lines:
-        if line == "":
-            if current:
-                paragraphs.append(" ".join(current).strip())
-                current = []
-            continue
-        current.append(line)
-    if current:
-        paragraphs.append(" ".join(current).strip())
-    return "\n\n".join(paragraph for paragraph in paragraphs if paragraph).strip()
+    return normalize_user_visible_text(value).strip()
 
 
 def _placeholder_cleaned_text(value: Any) -> str:
-    return clean_export_readable_text(value).strip()
+    return clean_user_visible_text(value).strip()
 
 
 def _is_placeholder_like_character_text(value: Any) -> bool:
     text = _placeholder_cleaned_text(value)
     if not text:
         return True
-    compact = re.sub(r"[\s，。；：:、,【】（）()“”\"'`·\-_/]", "", text)
-    if not compact:
-        return True
     if CHARACTER_HEADING_ONLY_PATTERN.fullmatch(text):
         return True
-    if compact.lower() in {
-        "待补全",
-        "待完善",
-        "未提供",
-        "未补充",
-        "暂无",
-        "待填写",
-        "待定",
-        "省略",
-        "tbd",
-        "todo",
-        "na",
-        "none",
-        "null",
-    }:
-        return True
-    if CHARACTER_PLACEHOLDER_PATTERN.search(text) and len(compact) <= 18:
-        return True
-    return False
+    return is_placeholder_text(text)
 
 
 def _summarize_fastgpt_output(output: dict[str, Any]) -> str:
@@ -1501,11 +1428,15 @@ def _best_script_text_candidate(
     best_score = (-1, -1, -1)
     seen: set[str] = set()
     for candidate in candidates:
-        text = str(candidate or "").strip()
+        text = clean_user_visible_text(candidate).strip()
         if not text or text in seen:
+            continue
+        if not is_meaningful_text(text):
             continue
         seen.add(text)
         episodes = _script_episode_numbers(text, total_episodes=total_episodes)
+        if is_machine_structured_content(candidate) and not episodes:
+            continue
         score = (
             len(episodes),
             episodes[-1] if episodes else 0,
@@ -2038,7 +1969,7 @@ class WorkflowRuntime:
         )
 
     def sync_from_state(self, state: WorkflowState) -> None:
-        script_title_content = str(state.get_var(TITLE_VAR, "") or "").strip()
+        script_title_content = export_safe_text(state.get_var(TITLE_VAR, "")).strip()
         final_script_text = _resolve_best_script_text(
             total_episodes=_safe_int(getattr(state.user_input, "total_episodes", 0), 0),
             artifacts={},
@@ -2046,7 +1977,7 @@ class WorkflowRuntime:
             final_output_text=state.final_output_text,
         )
         if not final_script_text:
-            final_script_text = str(
+            final_script_text = clean_user_visible_text(
                 state.final_output_text
                 or state.get_var(FINAL_SCRIPT, "")
                 or state.get_var(SCRIPT_FINAL_VAR, "")
@@ -2055,9 +1986,10 @@ class WorkflowRuntime:
         raw_character_natural_language = str(
             state.get_var(CHARACTER_NATURAL_LANGUAGE_VAR, "") or ""
         ).strip()
+        structured_characters = state.get_var(CHARACTER_VAR, "")
         character_natural_language, character_natural_language_issues = _select_character_display_text(
             raw_character_natural_language,
-            state.get_var(CHARACTER_VAR, ""),
+            structured_characters,
         )
         if raw_character_natural_language and character_natural_language_issues:
             _log_warning_once(
@@ -2065,27 +1997,45 @@ class WorkflowRuntime:
                 character_natural_language_issues,
                 _truncate_log_text(raw_character_natural_language, max_chars=240),
             )
-        appearance_natural_language = str(
-            state.get_var(APPEARANCE_NATURAL_LANGUAGE_VAR, "") or ""
-        ).strip()
-        scene_natural_language = str(
-            state.get_var(SCENE_NATURAL_LANGUAGE_VAR, "") or ""
-        ).strip()
-        structured_characters = state.get_var(CHARACTER_VAR, "")
         structured_scenes = state.get_var(SCENE_VAR, "")
+        framework_natural_language = build_user_visible_section(
+            "剧本框架",
+            {
+                "故事梗概": state.get_var(STORY_OUTLINE_VAR, ""),
+                "人物小传": state.get_var(CHARACTER_BIOS_VAR, ""),
+                "核心场景": state.get_var(CORE_SCENE_INPUT_VAR, ""),
+                "分集计划": state.get_var(EPISODE_PLAN_VAR, ""),
+            },
+            state.get_var(FRAMEWORK_NATURAL_LANGUAGE, ""),
+        )
+        worldview_natural_language = build_user_visible_section(
+            "世界观设定",
+            state.get_var(WORLDVIEW_VAR, ""),
+            state.get_var(WORLDVIEW_NATURAL_LANGUAGE, ""),
+        )
+        appearance_natural_language = build_user_visible_section(
+            "人物服饰说明",
+            state.get_var(APPEARANCE_MAPPING, ""),
+            state.get_var(APPEARANCE_NATURAL_LANGUAGE_VAR, ""),
+        )
+        scene_natural_language = build_user_visible_section(
+            "核心场景",
+            structured_scenes,
+            state.get_var(SCENE_NATURAL_LANGUAGE_VAR, ""),
+        )
         partial_script_artifacts = _partial_script_artifacts_from_variables(
             total_episodes=_safe_int(getattr(state.user_input, "total_episodes", 0), 0),
             variables=state.variables,
         )
         artifacts = {
             "script_title_content": script_title_content,
-            "framework_natural_language": state.get_var(FRAMEWORK_NATURAL_LANGUAGE, ""),
+            "framework_natural_language": framework_natural_language,
             "story_outline": state.get_var(STORY_OUTLINE_VAR, ""),
             "character_bios": state.get_var(CHARACTER_BIOS_VAR, ""),
             "episode_plan": state.get_var(EPISODE_PLAN_VAR, ""),
             "normalized_episode_plan": state.get_var(NORMALIZED_EPISODE_PLAN, ""),
             "worldview": state.get_var(WORLDVIEW_VAR, ""),
-            "worldview_natural_language": state.get_var(WORLDVIEW_NATURAL_LANGUAGE, ""),
+            "worldview_natural_language": worldview_natural_language,
             "characters": structured_characters,
             "character_natural_language": character_natural_language,
             "character_summary": character_natural_language,
@@ -2128,18 +2078,38 @@ class WorkflowRuntime:
 
 class TaskManager:
     def __init__(self) -> None:
-        self.base_dir = Path(__file__).resolve().parents[2] / "runtime_data"
-        self.projects_dir = self.base_dir / "projects"
-        self.exports_dir = self.base_dir / "exports"
-        self.index_path = self.base_dir / "index.json"
-        self.projects_dir.mkdir(parents=True, exist_ok=True)
-        self.exports_dir.mkdir(parents=True, exist_ok=True)
+        _ONE_SHOT_WARNING_KEYS.clear()
+        self.set_storage_root(get_runtime_data_dir())
 
         self._lock = threading.RLock()
         self._tasks: dict[str, TaskRecord] = {}
         self._projects: dict[int, TaskRecord] = {}
         self._index = self._load_index()
         self._repair_persisted_snapshots()
+
+    def set_storage_root(
+        self,
+        runtime_data_dir: Path,
+        *,
+        runtime_archive_dir: Path | None = None,
+    ) -> None:
+        self.base_dir = Path(runtime_data_dir).resolve()
+        self.runtime_root = (
+            self.base_dir.parent
+            if self.base_dir.name == "runtime_data"
+            else self.base_dir
+        )
+        self.runtime_archive_dir = (
+            Path(runtime_archive_dir).resolve()
+            if runtime_archive_dir is not None
+            else self.runtime_root / "runtime_archive"
+        )
+        self.runtime_manifest_path = self.runtime_archive_dir / "manifest.json"
+        self.projects_dir = self.base_dir / "projects"
+        self.exports_dir = self.base_dir / "exports"
+        self.index_path = self.base_dir / "index.json"
+        self.projects_dir.mkdir(parents=True, exist_ok=True)
+        self.exports_dir.mkdir(parents=True, exist_ok=True)
 
     def _load_index(self) -> dict[str, Any]:
         if self.index_path.exists():
@@ -2209,6 +2179,45 @@ class TaskManager:
 
     def _project_path(self, project_id: int) -> Path:
         return self.projects_dir / f"{project_id}.json"
+
+    def _runtime_relpath(self, path: Path) -> str:
+        try:
+            return path.resolve().relative_to(self.runtime_root).as_posix()
+        except ValueError:
+            return path.resolve().as_posix()
+
+    def _iter_project_snapshot_paths(self) -> list[Path]:
+        active_paths = sorted(self.projects_dir.glob("*.json"))
+        seen_project_ids: set[int] = set()
+        paths: list[Path] = []
+
+        for path in active_paths:
+            paths.append(path)
+            try:
+                seen_project_ids.add(int(path.stem))
+            except ValueError:
+                continue
+
+        manifest = load_runtime_manifest(manifest_path=self.runtime_manifest_path)
+        for entry in manifest.get("entries", {}).values():
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("category") or "") != "projects":
+                continue
+            project_id = _safe_int(entry.get("project_id"), 0)
+            if project_id in seen_project_ids:
+                continue
+            archived_path_text = str(entry.get("archived_path") or "").strip()
+            if not archived_path_text:
+                continue
+            archived_path = Path(archived_path_text)
+            if not archived_path.is_absolute():
+                archived_path = (self.runtime_root / archived_path).resolve()
+            if archived_path.exists():
+                paths.append(archived_path)
+                if project_id > 0:
+                    seen_project_ids.add(project_id)
+        return paths
 
     def _persist_snapshot(self, record: TaskRecord) -> None:
         path = self._project_path(record.project_id)
@@ -2357,15 +2366,12 @@ class TaskManager:
         )
         if not isinstance(debug_variables, dict):
             debug_variables = {}
-        structured_characters = (
-            debug_variables.get(CHARACTERS)
-            or raw_artifacts.get("characters")
-            or raw_artifacts.get(CHARACTER_VAR)
-            or ""
-        )
         for key in (
             "framework_natural_language",
             "worldview_natural_language",
+            "final_output_text",
+            "final_script",
+            PARTIAL_SCRIPT_ARTIFACT,
         ):
             text = _meaningful_stage_output_text(artifacts.get(key))
             if text:
@@ -2394,10 +2400,14 @@ class TaskManager:
             return ""
         parsed = self._parse_episode_plan_display_json(raw_episode_plan)
         if parsed is None:
-            return _display_text(raw_episode_plan)
+            return clean_user_visible_text(raw_episode_plan)
 
         display_text = self._fallback_episode_plan_display(parsed)
-        return display_text or self._episode_plan_display_json_text(parsed) or _display_text(raw_episode_plan)
+        return (
+            clean_user_visible_text(display_text)
+            or clean_user_visible_text(self._episode_plan_display_json_text(parsed))
+            or clean_user_visible_text(raw_episode_plan)
+        )
 
     def _parse_episode_plan_display_json(self, raw_episode_plan: Any) -> Any | None:
         if isinstance(raw_episode_plan, (dict, list)):
@@ -2657,11 +2667,11 @@ class TaskManager:
     ) -> dict[str, str]:
         """只挑用户需要看的正式阶段内容，并补一段自然语言版摘要减轻等待焦虑。"""
         raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
-        partial_script_output = _display_text(
+        partial_script_output = clean_user_visible_text(
             artifacts.get(PARTIAL_SCRIPT_ARTIFACT)
             or raw_artifacts.get(PARTIAL_SCRIPT_ARTIFACT)
         )
-        final_stage_output = _display_text(
+        final_stage_output = pick_best_user_visible_value(
             artifacts.get("final_output_text")
             or artifacts.get("final_script")
             or raw_artifacts.get("final_output_text")
@@ -2738,10 +2748,10 @@ class TaskManager:
         }
 
     def _framework_stage_output_text(self, artifacts: dict[str, Any]) -> str:
-        return _meaningful_stage_output_text(artifacts.get("framework_natural_language"))
+        return pick_best_user_visible_value(artifacts.get("framework_natural_language"))
 
     def _worldview_stage_output_text(self, artifacts: dict[str, Any]) -> str:
-        return _meaningful_stage_output_text(artifacts.get("worldview_natural_language"))
+        return pick_best_user_visible_value(artifacts.get("worldview_natural_language"))
 
     def _character_stage_output_text(
         self,
@@ -2749,13 +2759,13 @@ class TaskManager:
         artifacts: dict[str, Any],
     ) -> str:
         raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
-        natural = _display_text(
+        natural = pick_best_user_visible_value(
             artifacts.get("character_natural_language")
             or artifacts.get("character_summary")
             or raw_artifacts.get("character_natural_language")
             or raw_artifacts.get("character_summary")
         )
-        return _meaningful_stage_output_text(natural)
+        return natural
 
     def _scene_stage_output_text(
         self,
@@ -2763,13 +2773,13 @@ class TaskManager:
         artifacts: dict[str, Any],
     ) -> str:
         raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
-        natural = _display_text(
+        natural = pick_best_user_visible_value(
             artifacts.get("scene_natural_language")
             or artifacts.get("core_scene_summary")
             or raw_artifacts.get("scene_natural_language")
             or raw_artifacts.get("core_scene_summary")
         )
-        return _meaningful_stage_output_text(natural)
+        return natural
 
     def _stage_preview_text(
         self,
@@ -2780,7 +2790,7 @@ class TaskManager:
         raw_output: str,
     ) -> str:
         """阶段展示只走本地格式化，不再额外触发展示摘要调用。"""
-        text = str(raw_output or "").strip()
+        text = clean_user_visible_text(raw_output).strip()
         if not text:
             return ""
         return self._fallback_stage_preview(stage_title, text)
@@ -3236,13 +3246,7 @@ class TaskManager:
         return len(completed)
 
     def _progress_value_present(self, value: Any) -> bool:
-        if value is None:
-            return False
-        if isinstance(value, str):
-            return bool(value.strip())
-        if isinstance(value, (dict, list, tuple, set)):
-            return bool(value)
-        return True
+        return has_meaningful_content(value)
 
     def _progress_stage_key(self, snapshot: dict[str, Any], variables: dict[str, Any]) -> str:
         batch_stage = str(variables.get(LOCAL_CURRENT_BATCH_STAGE) or "").strip().lower()
@@ -3449,13 +3453,13 @@ class TaskManager:
             COMPLETED_INPUT_PAYLOAD_KEYS,
         )
         artifacts = snapshot.get("artifacts") or {}
-        title = str(
+        title = clean_user_visible_text(
             artifacts.get("script_title_content")
             or snapshot.get("title")
             or input_payload.get("title")
             or ""
         ).strip()
-        story_outline = str(
+        story_outline = clean_user_visible_text(
             artifacts.get("story_outline")
             or input_payload.get("story_outline")
             or ""
@@ -3475,6 +3479,34 @@ class TaskManager:
             compacted.get("artifacts") or {},
             COMPLETED_ARTIFACT_KEYS,
         )
+        artifacts = compacted.get("artifacts") if isinstance(compacted.get("artifacts"), dict) else {}
+        if isinstance(artifacts, dict):
+            for key in (
+                "script_title_content",
+                "framework_natural_language",
+                "story_outline",
+                "character_natural_language",
+                "character_summary",
+                "scene_natural_language",
+                "core_scene_summary",
+                "worldview_natural_language",
+                APPEARANCE_NATURAL_LANGUAGE_ARTIFACT,
+                "final_script",
+                "final_output_text",
+            ):
+                text = clean_user_visible_text(artifacts.get(key))
+                if text:
+                    artifacts[key] = text
+                else:
+                    artifacts.pop(key, None)
+            if is_meaningful_text(artifacts.get(APPEARANCE_NATURAL_LANGUAGE_ARTIFACT)):
+                for key in (
+                    "appearance_mapping",
+                    "character_registry",
+                    "character_alias_registry",
+                    "episode_alias_plan",
+                ):
+                    artifacts.pop(key, None)
         compacted["input_payload"] = self._completed_input_payload(compacted)
         compacted["current_node_id"] = None
         compacted["current_node_name"] = None
@@ -3501,8 +3533,14 @@ class TaskManager:
         record = self._projects.get(project_id)
         if record:
             return record.clone_snapshot()
-        path = self._project_path(project_id)
-        if not path.exists():
+        path = resolve_project_snapshot_path(
+            project_id,
+            projects_dir=self.projects_dir,
+            base_root=self.runtime_root,
+            manifest_path=self.runtime_manifest_path,
+            archive_dir=self.runtime_archive_dir,
+        )
+        if path is None or not path.exists():
             return None
         return json.loads(path.read_text(encoding="utf-8"))
 
@@ -3510,7 +3548,7 @@ class TaskManager:
         record = self._tasks.get(task_id)
         if record:
             return record.clone_snapshot()
-        for path in self.projects_dir.glob("*.json"):
+        for path in self._iter_project_snapshot_paths():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
             except Exception:
@@ -3568,7 +3606,7 @@ class TaskManager:
                     return snapshot
 
             candidates: list[dict[str, Any]] = []
-            for path in self.projects_dir.glob("*.json"):
+            for path in self._iter_project_snapshot_paths():
                 try:
                     data = json.loads(path.read_text(encoding="utf-8"))
                 except Exception:
@@ -3801,7 +3839,7 @@ class TaskManager:
             artifacts.pop(STORY_TEASER_SOURCE_ARTIFACT, None)
             snapshot["artifacts"] = artifacts
         if final_script is not None:
-            text = str(final_script).strip()
+            text = clean_user_visible_text(final_script).strip()
             artifacts = dict(snapshot.get("artifacts") or {})
             artifacts["final_script"] = text
             artifacts["final_output_text"] = text
@@ -4017,7 +4055,7 @@ class TaskManager:
         snapshots: dict[int, dict[str, Any]] = {}
         for project_id, record in self._projects.items():
             snapshots[int(project_id)] = record.clone_snapshot()
-        for path in self.projects_dir.glob("*.json"):
+        for path in self._iter_project_snapshot_paths():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
             except Exception:
@@ -4796,6 +4834,31 @@ class TaskManager:
                     raise ValueError("您没有权限清空该项目")
                 owner_user_id = int(snapshot.get("user_id") or owner_user_id or 0)
             path.unlink()
+        else:
+            archived_path = resolve_project_snapshot_path(
+                project_id,
+                projects_dir=self.projects_dir,
+                base_root=self.runtime_root,
+                manifest_path=self.runtime_manifest_path,
+                archive_dir=self.runtime_archive_dir,
+            )
+            if archived_path and archived_path.exists():
+                if user_id is not None:
+                    try:
+                        snapshot = json.loads(archived_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        snapshot = {}
+                    if not self._snapshot_belongs_to_user(snapshot, user_id):
+                        raise ValueError("您没有权限清空该项目")
+                    owner_user_id = int(snapshot.get("user_id") or owner_user_id or 0)
+                archived_path.unlink()
+
+        update_runtime_manifest(
+            removals=(self._runtime_relpath(self._project_path(project_id)),),
+            manifest_path=self.runtime_manifest_path,
+            archive_dir=self.runtime_archive_dir,
+            repo_root=self.runtime_root,
+        )
 
         latest_by_user = dict(self._index.get("latest_project_by_user", {}))
         if owner_user_id is not None and latest_by_user.get(str(owner_user_id)) == project_id:
@@ -4827,21 +4890,28 @@ class TaskManager:
         artifact_keys: tuple[str, ...] = (),
         variable_keys: tuple[str, ...] = (),
         input_keys: tuple[str, ...] = (),
+        require_meaningful: bool = False,
     ) -> Any:
         artifacts = self._snapshot_artifacts_dict(snapshot)
         for key in artifact_keys:
             value = artifacts.get(key)
             if value not in (None, "", {}, []):
+                if require_meaningful and not has_meaningful_content(value):
+                    continue
                 return value
         variables = self._snapshot_debug_variables(snapshot)
         for key in variable_keys:
             value = variables.get(key)
             if value not in (None, "", {}, []):
+                if require_meaningful and not has_meaningful_content(value):
+                    continue
                 return value
         input_payload = self._snapshot_input_payload(snapshot)
         for key in input_keys:
             value = input_payload.get(key)
             if value not in (None, "", {}, []):
+                if require_meaningful and not has_meaningful_content(value):
+                    continue
                 return value
         return None
 
@@ -4851,21 +4921,10 @@ class TaskManager:
         *,
         banned_prefixes: tuple[str, ...] = (),
     ) -> str:
-        cleaned = clean_export_readable_text(value)
-        if not cleaned:
-            return ""
-        if not banned_prefixes:
-            return cleaned
-        lines = [
-            line
-            for line in cleaned.splitlines()
-            if str(line).strip()
-            and not any(str(line).strip().startswith(prefix) for prefix in banned_prefixes)
-        ]
-        return "\n".join(lines).strip()
+        return clean_user_visible_text(value, banned_prefixes=banned_prefixes)
 
     def _sentence_fragment(self, value: Any) -> str:
-        return clean_export_readable_text(value).strip().strip("，。；： ")
+        return export_safe_text(value).strip().strip("，。；： ")
 
     def _snapshot_record_for_update(
         self,
@@ -4964,7 +5023,12 @@ class TaskManager:
             snapshot,
             artifact_keys=("character_natural_language",),
             variable_keys=(CHARACTER_NATURAL_LANGUAGE_VAR,),
-        ) or self._snapshot_export_value(snapshot, artifact_keys=("character_summary",))
+            require_meaningful=True,
+        ) or self._snapshot_export_value(
+            snapshot,
+            artifact_keys=("character_summary",),
+            require_meaningful=True,
+        )
         preferred, issues = _select_character_display_text(existing, structured)
         existing_text = _meaningful_stage_output_text(self._sanitize_export_section_text(existing))
         if existing_text and not issues:
@@ -4978,7 +5042,7 @@ class TaskManager:
                 _truncate_log_text(existing_text, max_chars=240),
             )
 
-        if structured in (None, "", {}, []):
+        if not has_meaningful_content(structured):
             logger.info("character_natural_language_export status=skip_missing_characters project_id=%s", project_id)
             return ""
         if not use_fastgpt_backend():
@@ -5096,7 +5160,7 @@ class TaskManager:
             artifact_keys=("appearance_mapping",),
             variable_keys=(APPEARANCE_MAPPING, APPEARANCE_MAPPING_VAR),
         )
-        if structured in (None, "", {}, []):
+        if not has_meaningful_content(structured):
             logger.info("appearance_natural_language_export status=skip_missing_mapping project_id=%s", project_id)
             return ""
         if not use_fastgpt_backend():
@@ -5228,6 +5292,7 @@ class TaskManager:
             snapshot,
             artifact_keys=("framework_natural_language",),
             variable_keys=(FRAMEWORK_NATURAL_LANGUAGE,),
+            require_meaningful=True,
         )
         natural_excerpt = self._extract_labeled_export_segment(
             natural,
@@ -5267,12 +5332,14 @@ class TaskManager:
         return self._sanitize_export_section_text(value)
 
     def _worldview_export_text(self, snapshot: dict[str, Any]) -> str:
-        natural = self._snapshot_export_value(
-            snapshot,
-            artifact_keys=("worldview_natural_language",),
-            variable_keys=(WORLDVIEW_NATURAL_LANGUAGE,),
+        text = pick_best_user_visible_value(
+            self._snapshot_export_value(
+                snapshot,
+                artifact_keys=("worldview_natural_language",),
+                variable_keys=(WORLDVIEW_NATURAL_LANGUAGE,),
+                require_meaningful=True,
+            )
         )
-        text = _meaningful_stage_output_text(self._sanitize_export_section_text(natural))
         if text:
             return text
         source = self._snapshot_export_value(
@@ -5304,16 +5371,17 @@ class TaskManager:
             self._snapshot_export_value(snapshot, variable_keys=(CHARACTER_NATURAL_LANGUAGE_VAR,)),
             self._snapshot_export_value(snapshot, artifact_keys=("character_summary",)),
         ):
-            sanitized = self._sanitize_export_section_text(candidate, banned_prefixes=banned)
+            raw_text = clean_export_readable_text(candidate).strip()
+            sanitized = self._sanitize_export_section_text(raw_text, banned_prefixes=banned)
             text = _meaningful_stage_output_text(sanitized)
-            issues = _character_natural_text_quality_issues(text, structured) if text else []
+            issues = _character_natural_text_quality_issues(raw_text, structured) if raw_text else []
             if text and not issues:
                 return text
-            if sanitized and issues:
+            if raw_text and (issues or (not text and is_placeholder_text(raw_text))):
                 _log_warning_once(
                     "character_export_text_rejected",
-                    issues,
-                    _truncate_log_text(sanitized, max_chars=240),
+                    issues or ["placeholder_heavy_natural_language"],
+                    _truncate_log_text(raw_text, max_chars=240),
                 )
         characters = _character_items_from_value(structured)
         if not characters:
@@ -5355,7 +5423,8 @@ class TaskManager:
             if appearance:
                 fragments.append(f"视觉辨识点则是{appearance}")
             if not fragments:
-                fragments.append("人物设定暂未补充完整。")
+                sections.append(name)
+                continue
             sections.append(f"{name}：" + "，".join(fragments).strip("，") + "。")
         return "\n".join(section for section in sections if section).strip()
 
@@ -5365,7 +5434,7 @@ class TaskManager:
             self._snapshot_export_value(snapshot, variable_keys=(APPEARANCE_NATURAL_LANGUAGE_VAR, "c7VnQ4eX")),
             self._snapshot_export_value(snapshot, artifact_keys=(APPEARANCE_NATURAL_LANGUAGE_ARTIFACT,)),
         ):
-            text = _meaningful_stage_output_text(self._sanitize_export_section_text(candidate))
+            text = pick_best_user_visible_value(candidate)
             if text:
                 return text
 
@@ -5425,7 +5494,7 @@ class TaskManager:
             self._snapshot_export_value(snapshot, artifact_keys=("scene_natural_language", "core_scene_summary")),
             self._snapshot_export_value(snapshot, variable_keys=(SCENE_NATURAL_LANGUAGE_VAR,)),
         ):
-            text = _meaningful_stage_output_text(self._sanitize_export_section_text(candidate))
+            text = pick_best_user_visible_value(candidate)
             if text:
                 return text
 
@@ -5484,6 +5553,7 @@ class TaskManager:
         parts: list[str] = [title or f"project_{snapshot.get('project_id')}"]
         for heading, section_text in (
             ("故事梗概", self._story_outline_export_text(snapshot)),
+            ("世界观设定", self._worldview_export_text(snapshot)),
             ("人物小传", self._character_export_text(snapshot)),
             ("人物服饰说明", self._appearance_export_text(snapshot)),
             ("核心场景", self._scene_export_text(snapshot)),

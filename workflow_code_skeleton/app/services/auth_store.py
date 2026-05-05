@@ -5,9 +5,10 @@ import secrets
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 
 from werkzeug.security import check_password_hash, generate_password_hash
+
+from .runtime_paths import get_runtime_data_dir
 
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_\-\u4e00-\u9fff]{2,20}$")
@@ -40,7 +41,7 @@ def validate_password(password: str) -> str:
 
 class AuthStore:
     def __init__(self) -> None:
-        self.base_dir = Path(__file__).resolve().parents[2] / "runtime_data"
+        self.base_dir = get_runtime_data_dir()
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.base_dir / "users.db"
         self._init_db()

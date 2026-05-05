@@ -24,6 +24,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
+from .user_visible_text import clean_user_visible_text, is_meaningful_text, normalize_user_visible_text
+
 logger = logging.getLogger(__name__)
 
 PLAIN_SECTION_HEADINGS = (
@@ -118,70 +120,19 @@ def _json_fallback(value: Any) -> str:
 def normalize_list(value: Any, *, _depth: int = 0) -> list[str]:
     """把任意值尽量转换成可读字符串列表。"""
     if _depth > 5:
-        text = _json_fallback(value).strip()
+        text = clean_user_visible_text(value).strip()
         return [text] if text else []
-    if value is None:
+    text = clean_user_visible_text(value).strip()
+    if not text:
         return []
-    if isinstance(value, str):
-        text = value.strip()
-        return [text] if text else []
-    if isinstance(value, (int, float, bool)):
-        return [str(value)]
-    if isinstance(value, dict):
-        preferred_items: list[str] = []
-        for key in ("name", "value", "description", "text", "label", "title"):
-            text = normalize_text(safe_get(value, key), _depth=_depth + 1)
-            if text:
-                preferred_items.append(text)
-        if preferred_items:
-            return preferred_items
-        items: list[str] = []
-        for key, item in value.items():
-            if item in (None, "", [], {}):
-                continue
-            child_items = normalize_list(item, _depth=_depth + 1)
-            if not child_items:
-                child_text = normalize_text(item, _depth=_depth + 1)
-                if child_text:
-                    items.append(f"{key}：{child_text}")
-                continue
-            if len(child_items) == 1:
-                items.append(f"{key}：{child_items[0]}")
-            else:
-                items.append(f"{key}：")
-                items.extend(f"- {entry}" for entry in child_items)
-        return items or [item for item in [_json_fallback(value).strip()] if item]
-    if isinstance(value, (list, tuple, set)):
-        items: list[str] = []
-        for item in value:
-            child_items = normalize_list(item, _depth=_depth + 1)
-            if child_items:
-                items.extend(child_items)
-                continue
-            child_text = normalize_text(item, _depth=_depth + 1)
-            if child_text:
-                items.append(child_text)
-        return items
-    text = str(value).strip()
-    return [text] if text else []
+    return [line.strip() for line in text.splitlines() if line.strip()] or [text]
 
 
 def normalize_text(value: Any, *, _depth: int = 0) -> str:
     """把任意值尽量转换成单段可读文本。"""
     if _depth > 5:
-        return _json_fallback(value).strip()
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, (int, float, bool)):
-        return str(value)
-    if isinstance(value, (list, tuple, set, dict)):
-        items = normalize_list(value, _depth=_depth + 1)
-        if items:
-            return "\n".join(item for item in items if item)
-        return _json_fallback(value).strip()
-    return str(value).strip()
+        return clean_user_visible_text(value).strip()
+    return normalize_user_visible_text(value).strip()
 
 
 def split_plain_sections(text: str) -> tuple[str, dict[str, str]]:
@@ -424,7 +375,8 @@ def render_character(doc: Document, char: Any):
 
     if not isinstance(char, dict):
         fallback_text = normalize_text(char)
-        render_field(doc, "人物信息", fallback_text or "未提供")
+        if fallback_text:
+            render_field(doc, "人物信息", fallback_text)
         return
 
     simple_fields = {
@@ -708,14 +660,18 @@ def convert(input_path: str, output_path: str):
                         render_character(doc, char)
                     except Exception as exc:
                         logger.warning("render_character failed, fallback to plain text: %s", exc)
-                        render_character(doc, normalize_text(char) or "未提供")
+                        fallback_character = normalize_text(char)
+                        if fallback_character:
+                            render_character(doc, fallback_character)
                     add_divider(doc)
             else:
                 try:
                     render_character(doc, characters)
                 except Exception as exc:
                     logger.warning("render_character fallback block failed: %s", exc)
-                    render_field(doc, "人物信息", normalize_text(characters) or "未提供")
+                    fallback_characters = normalize_text(characters)
+                    if fallback_characters:
+                        render_field(doc, "人物信息", fallback_characters)
 
         # 场景设定
         elif isinstance(data, dict) and "scene_setting" in data and not rendered_scene_section:
@@ -730,19 +686,26 @@ def convert(input_path: str, output_path: str):
                         render_scene(doc, scene)
                     except Exception as exc:
                         logger.warning("render_scene failed, fallback to plain text: %s", exc)
-                        render_scene(doc, normalize_text(scene) or "未提供")
+                        fallback_scene = normalize_text(scene)
+                        if fallback_scene:
+                            render_scene(doc, fallback_scene)
                     add_divider(doc)
             else:
                 try:
                     render_scene(doc, scenes)
                 except Exception as exc:
                     logger.warning("render_scene fallback block failed: %s", exc)
-                    render_field(doc, "场景说明", normalize_text(scenes) or "未提供")
+                    fallback_scenes = normalize_text(scenes)
+                    if fallback_scenes:
+                        render_field(doc, "场景说明", fallback_scenes)
 
         # 通用 JSON（未知结构）
         else:
+            generic_text = normalize_text(data)
+            if not is_meaningful_text(generic_text):
+                generic_text = "该数据块未能整理为可直接阅读的章节内容。"
             add_heading(doc, label or "附加数据", level=1)
-            add_para(doc, normalize_text(data) or _json_fallback(data), size=9)
+            add_para(doc, generic_text, size=9)
 
     # ── 剧本正文 ──
     if parsed["script"]:

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from workflow_code_skeleton.app.services.fastgpt_contracts import (
     CHARACTERS,
@@ -36,6 +35,7 @@ from workflow_code_skeleton.app.workflow_ids import (
     SCENE_NATURAL_LANGUAGE_VAR,
     SCENE_VAR,
 )
+from workflow_code_skeleton.tests.test_support import WorkspaceTempDir
 
 
 def _iso_now() -> str:
@@ -138,16 +138,11 @@ def _snapshot(*, current_stage: str = "framework", framework_natural: str = "框
 
 class TaskManagerPublicSnapshotTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = TemporaryDirectory()
+        self.temp_dir = WorkspaceTempDir(prefix="task-manager-public-")
         self.addCleanup(self.temp_dir.cleanup)
         self.manager = TaskManager()
-        base_dir = Path(self.temp_dir.name)
-        self.manager.base_dir = base_dir
-        self.manager.projects_dir = base_dir / "projects"
-        self.manager.exports_dir = base_dir / "exports"
-        self.manager.index_path = base_dir / "index.json"
-        self.manager.projects_dir.mkdir(parents=True, exist_ok=True)
-        self.manager.exports_dir.mkdir(parents=True, exist_ok=True)
+        base_dir = Path(self.temp_dir.name) / "runtime_data"
+        self.manager.set_storage_root(base_dir, runtime_archive_dir=Path(self.temp_dir.name) / "runtime_archive")
         self.manager._tasks.clear()
         self.manager._projects.clear()
         self.manager._index = {

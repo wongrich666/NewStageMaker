@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -11,6 +10,7 @@ from workflow_code_skeleton.app.utils.txt_to_docx import (
     render_character,
     render_script,
 )
+from workflow_code_skeleton.tests.test_support import workspace_tempdir
 
 
 class TxtToDocxCompatibilityTests(unittest.TestCase):
@@ -90,7 +90,7 @@ class TxtToDocxCompatibilityTests(unittest.TestCase):
 场景1：旧码头
 林夏：先查人，再查船。
 """
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with workspace_tempdir(prefix="txt-to-docx-") as tmpdir:
             txt_path = Path(tmpdir) / "legacy_export.txt"
             docx_path = Path(tmpdir) / "legacy_export.docx"
             txt_path.write_text(source, encoding="utf-8")
@@ -134,7 +134,7 @@ class TxtToDocxCompatibilityTests(unittest.TestCase):
 场景1：旧码头
 林夏：先查人，再查船。
 """
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with workspace_tempdir(prefix="txt-to-docx-") as tmpdir:
             txt_path = Path(tmpdir) / "readable_export.txt"
             docx_path = Path(tmpdir) / "readable_export.docx"
             txt_path.write_text(source, encoding="utf-8")

@@ -3,7 +3,16 @@ __pycache__/
 *.pyc
 output*.txt
 debug_state*.json
+# Runtime data and archives
 runtime_data/
+runtime_archive/
+.tmp_test_workspaces/
+*.tmp
+*.dump
+*.log
+# Large runtime dumps and generated artifacts
+output/
+debug/
 CODER_README.md
 FASTGPT_CONTRACTS.md
 tests/
