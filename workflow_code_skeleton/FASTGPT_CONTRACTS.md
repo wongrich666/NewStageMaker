@@ -210,6 +210,9 @@
 
 人物小传最终导出字段优先级：
 
+导出读取顺序要求：character_natural_language / dT7mQ2Nz 优先。
+导出兜底要求：fFM0mroW / character_setting.characters 兜底。
+
 1. `character_natural_language / dT7mQ2Nz` 优先
 2. `character_summary` 兼容旧快照
 3. `fFM0mroW / character_setting.characters` 兜底生成可读自然语言人物小传

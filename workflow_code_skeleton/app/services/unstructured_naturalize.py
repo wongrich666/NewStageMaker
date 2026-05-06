@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from ..utils.user_visible_text import (
     clean_user_visible_text,
+    is_meaningful_text,
     is_machine_structured_content,
     is_placeholder_text,
     normalize_user_visible_text,
@@ -76,20 +77,44 @@ def extract_unstructured_stage_output_text(
     output: Mapping[str, Any] | None,
     *,
     output_field: str,
+    text_cleaner: Callable[[Any], str] | None = None,
+    text_is_usable: Callable[[Any], bool] | None = None,
 ) -> str:
     if not isinstance(output, Mapping):
         return ""
+    cleaner = text_cleaner or (lambda value: clean_user_visible_text(value).strip())
+    usability_checker = text_is_usable or (lambda value: bool(str(value or "").strip()) and not is_placeholder_text(value))
     for key in (output_field, UNSTRUCTURED_OUTPUT_VAR, "answerText"):
         if key not in output:
             continue
         value = output.get(key)
         if is_machine_structured_content(value):
             continue
-        text = clean_user_visible_text(value).strip()
-        if not text or is_placeholder_text(text):
+        text = str(cleaner(value) or "").strip()
+        if not usability_checker(text):
             continue
         return text
     return ""
+
+
+def clean_multiline_character_text(value: Any) -> str:
+    if not isinstance(value, str):
+        return clean_user_visible_text(value).strip()
+    raw = value.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [clean_user_visible_text(line).strip() for line in raw.split("\n")]
+    lines = [line for line in lines if line]
+    if len(lines) > 1:
+        return "\n".join(lines).strip()
+    return clean_user_visible_text(value).strip()
+
+
+def character_natural_text_is_usable(value: Any) -> bool:
+    text = clean_multiline_character_text(value)
+    if not text:
+        return False
+    if CHARACTER_PLACEHOLDER_PATTERN.search(text):
+        return False
+    return is_meaningful_text(text)
 
 
 def build_character_unstructured_source(
@@ -136,7 +161,7 @@ def _character_source_candidate_text(value: Any, *, prefer_structured: bool) -> 
 
     if prefer_structured:
         return ""
-    text = clean_user_visible_text(value).strip()
+    text = clean_multiline_character_text(value).strip()
     if not text or is_placeholder_text(text):
         return ""
     return text

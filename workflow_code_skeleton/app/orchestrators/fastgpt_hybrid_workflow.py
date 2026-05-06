@@ -137,6 +137,8 @@ from ..services.stage_output_repair import (
 from ..services.unstructured_naturalize import (
     build_character_unstructured_source,
     build_unstructured_stage_variables,
+    character_natural_text_is_usable,
+    clean_multiline_character_text,
     extract_unstructured_stage_output_text,
     resolve_unstructured_content_kind,
 )
@@ -149,7 +151,7 @@ from ..services.workflow_output_validation import (
 )
 from ..utils.episode import BatchWindow, iter_episode_batches, iter_episode_batches_from
 from ..utils.logger import get_logger
-from ..utils.user_visible_text import clean_user_visible_text, has_meaningful_content, is_meaningful_text
+from ..utils.user_visible_text import has_meaningful_content, is_meaningful_text
 from ..workflow_ids import (
     APPEARANCE_NATURAL_LANGUAGE_VAR,
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
@@ -7279,6 +7281,80 @@ def _build_character_naturalize_source(variables: dict[str, Any]) -> str:
     )
 
 
+def _character_items_from_value(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    from ..services.task_manager_common import _character_items_from_value as _impl
+
+    return _impl(*args, **kwargs)
+
+
+def _character_name_from_item(*args: Any, **kwargs: Any) -> str:
+    from ..services.task_manager_common import _character_name_from_item as _impl
+
+    return _impl(*args, **kwargs)
+
+
+def _meaningful_character_fragment(*args: Any, **kwargs: Any) -> str:
+    from ..services.task_manager_common import _meaningful_character_fragment as _impl
+
+    return _impl(*args, **kwargs)
+
+
+def _character_structured_fallback_text(value: Any) -> str:
+    characters = _character_items_from_value(value)
+    if not characters:
+        return ""
+
+    sections: list[str] = []
+    for item in characters:
+        name = _character_name_from_item(item)
+        role = _meaningful_character_fragment(
+            item.get("story_role") or item.get("role_type") or item.get("identity")
+        )
+        personality = _meaningful_character_fragment(
+            item.get("personality") or item.get("speech_profile")
+        )
+        desire = _meaningful_character_fragment(
+            item.get("core_desire") or item.get("core_motivation") or item.get("deep_motivation")
+        )
+        relationship = _meaningful_character_fragment(
+            item.get("relationship_to_protagonist")
+            or item.get("relationships_with_others")
+            or item.get("relationships")
+            or item.get("relation_modes")
+        )
+        growth = _meaningful_character_fragment(
+            item.get("growth_arc") or item.get("plot_function") or item.get("dramatic_value")
+        )
+        appearance = _meaningful_character_fragment(
+            item.get("appearance_anchor")
+            or item.get("appearance")
+            or item.get("appearance_description")
+        )
+
+        fragments: list[str] = []
+        if role:
+            fragments.append(f"是故事中的{role}")
+        if personality:
+            fragments.append(f"性格上{personality}")
+        if desire:
+            fragments.append(f"内在驱动力集中在{desire}")
+        if relationship:
+            fragments.append(f"与其他角色的关系重点在于{relationship}")
+        if growth:
+            fragments.append(f"人物成长会落在{growth}")
+        if appearance:
+            fragments.append(f"视觉辨识点则是{appearance}")
+
+        if not name:
+            continue
+        if fragments:
+            sections.append(f"{name}：" + "，".join(fragments).strip("，") + "。")
+        else:
+            sections.append(name)
+
+    return "\n".join(section for section in sections if section).strip()
+
+
 def _framework_naturalize_structured_value(value: Any) -> Any:
     if isinstance(value, (dict, list)):
         return copy.deepcopy(value)
@@ -7389,22 +7465,15 @@ def _ensure_character_natural_language(
         or has_meaningful_content(variables.get(CHARACTER_BIOS_VAR))
     ):
         return
-    fallback_text = str(
-        _preferred_character_display_text(
-            "",
-            variables.get(CHARACTERS)
-            or variables.get(CHARACTER_VAR)
-            or variables.get(USER_CHARACTERS)
-            or variables.get(CHARACTER_BIOS_VAR),
-        )
-        or ""
-    ).strip()
+    fallback_text = _character_structured_fallback_text(
+        variables.get(CHARACTERS) or variables.get(CHARACTER_VAR)
+    )
     if not fallback_text:
-        fallback_text = clean_user_visible_text(
+        fallback_text = clean_multiline_character_text(
             variables.get(USER_CHARACTERS) or variables.get(CHARACTER_BIOS_VAR)
         ).strip()
     if (
-        is_meaningful_text(variables.get(CHARACTER_NATURAL_LANGUAGE_VAR))
+        character_natural_text_is_usable(variables.get(CHARACTER_NATURAL_LANGUAGE_VAR))
         and bool(variables.get(CHARACTER_NATURALIZE_READY_FLAG))
     ):
         set_runtime_stage(
@@ -7418,7 +7487,7 @@ def _ensure_character_natural_language(
 
     source = _build_character_naturalize_source(variables)
     if not source:
-        if is_meaningful_text(fallback_text):
+        if character_natural_text_is_usable(fallback_text):
             variables[CHARACTER_NATURAL_LANGUAGE_VAR] = fallback_text
             state.set_var(CHARACTER_NATURAL_LANGUAGE_VAR, fallback_text)
         variables[CHARACTER_NATURALIZE_READY_FLAG] = True
@@ -7447,15 +7516,18 @@ def _ensure_character_natural_language(
         naturalized = extract_unstructured_stage_output_text(
             output,
             output_field=CHARACTER_NATURAL_LANGUAGE_VAR,
+            text_cleaner=clean_multiline_character_text,
+            text_is_usable=character_natural_text_is_usable,
         )
     except Exception as exc:
         logger.warning(
             "人物小传自然语言化失败，改用结构化人设本地兜底：%s",
             str(exc),
         )
-    if not is_meaningful_text(naturalized):
+    if not character_natural_text_is_usable(naturalized):
         naturalized = fallback_text
-    if is_meaningful_text(naturalized):
+    naturalized = clean_multiline_character_text(naturalized)
+    if character_natural_text_is_usable(naturalized):
         variables[CHARACTER_NATURAL_LANGUAGE_VAR] = naturalized
         state.set_var(CHARACTER_NATURAL_LANGUAGE_VAR, naturalized)
     variables[CHARACTER_NATURALIZE_READY_FLAG] = True
@@ -7919,7 +7991,7 @@ def _normalize_alias_display_name(value: Any) -> str:
         return text
     if any(bracket in note for bracket in "【】[]()（）"):
         return text
-    return f"{base}【{note}】"
+    return f"{base}({note})"
 
 
 def _build_character_registry(appearance_mapping: dict[str, Any]) -> dict[str, Any]:
