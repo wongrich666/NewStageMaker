@@ -35,6 +35,7 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
     STAGE_APPEARANCE_ALIAS_WRITING,
     STAGE_CHARACTERS,
+    STAGE_CHARACTERS_NATURALIZE,
     STAGE_DIALOGUE_REVIEW,
     STAGE_EPISODE_PLAN_NORMALIZE,
     STAGE_FRAMEWORK,
@@ -1102,6 +1103,49 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         output = client.run_stage(STAGE_CHARACTERS, _input_variables())
 
         self.assertEqual(output[CHARACTER_NATURAL_LANGUAGE_VAR], "角色设定自然语言说明")
+
+    def test_characters_naturalize_stage_falls_back_to_answer_text_when_variable_update_missing(self) -> None:
+        response = {
+            "answerText": "林夏：项目负责人，冷静克制，目标是保住团队。\n顾川：关键对手，始终试图把局势握在自己手里。"
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(
+            STAGE_CHARACTERS_NATURALIZE,
+            {
+                "unstructured_source": '{"character_setting":{"characters":[{"character_name":"林夏"}]}}',
+                "unstructured_content_kind": "generic",
+            },
+        )
+
+        self.assertEqual(
+            output[CHARACTER_NATURAL_LANGUAGE_VAR],
+            "林夏：项目负责人，冷静克制，目标是保住团队。\n顾川：关键对手，始终试图把局势握在自己手里。",
+        )
+
+    def test_characters_naturalize_stage_prefers_zxla_variable_over_answer_text(self) -> None:
+        response = {
+            "responseData": {
+                "updateVarResult": [
+                    {
+                        "variable": ["VARIABLE_NODE_ID", "zxlaPMOY"],
+                        "value": "正式人物小传自然语言版",
+                    }
+                ]
+            },
+            "answerText": "这是不应该覆盖 zxlaPMOY 的兜底文本",
+        }
+        client = _QueuedFastGPTClient([response])
+
+        output = client.run_stage(
+            STAGE_CHARACTERS_NATURALIZE,
+            {
+                "unstructured_source": '{"character_setting":{"characters":[{"character_name":"林夏"}]}}',
+                "unstructured_content_kind": "generic",
+            },
+        )
+
+        self.assertEqual(output[CHARACTER_NATURAL_LANGUAGE_VAR], "正式人物小传自然语言版")
 
     def test_detail_false_scenes_stage_still_extracts_formal_output(self) -> None:
         settings.fastgpt_scenes_detail = False

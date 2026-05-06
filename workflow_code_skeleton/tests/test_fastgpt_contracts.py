@@ -93,6 +93,15 @@ class FastGPTContractsTestCase(unittest.TestCase):
         self.assertIn("FASTGPT_SCRIPT_MEMORY_API_KEY=fastgpt-", env_text)
         self.assertNotIn("FASTGPT_SCRIPT_MEMORY_API_KEY==", env_text)
 
+    def test_contract_markdown_documents_unstructured_workflow_variables_and_character_export_priority(self) -> None:
+        markdown = Path("workflow_code_skeleton/FASTGPT_CONTRACTS.md").read_text(encoding="utf-8")
+
+        self.assertIn("w2RJzalk", markdown)
+        self.assertIn("unstructuredContentKind", markdown)
+        self.assertIn("zxlaPMOY", markdown)
+        self.assertIn("character_natural_language / dT7mQ2Nz 优先", markdown)
+        self.assertIn("fFM0mroW / character_setting.characters 兜底", markdown)
+
     def test_characters_stage_accepts_optional_search_intent_input(self) -> None:
         contract = contract_for(STAGE_CHARACTERS)
 

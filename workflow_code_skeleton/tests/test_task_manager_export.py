@@ -13,8 +13,11 @@ from workflow_code_skeleton.app.services.task_manager import (
     TaskManager,
 )
 from workflow_code_skeleton.app.workflow_ids import (
+    CHARACTER_BIOS_VAR,
     APPEARANCE_NATURAL_LANGUAGE_VAR,
     CHARACTER_NATURAL_LANGUAGE_VAR,
+    UNSTRUCTURED_KIND_VAR,
+    UNSTRUCTURED_SOURCE_VAR,
 )
 from workflow_code_skeleton.tests.test_support import WorkspaceTempDir
 
@@ -570,6 +573,49 @@ class TaskManagerExportTests(unittest.TestCase):
             "周临：这位关键配角长期在夹缝中求生",
             saved_snapshot["debug_state"]["variables"][CHARACTER_NATURAL_LANGUAGE_VAR],
         )
+
+    def test_build_export_character_naturalize_stage_variables_uses_raw_character_bios_when_structured_missing(self) -> None:
+        snapshot = _snapshot_with_export_artifacts()
+        snapshot["artifacts"].pop("characters", None)
+        snapshot["artifacts"].pop("character_bios", None)
+        snapshot["debug_state"]["variables"].pop(CHARACTER_BIOS_VAR, None)
+        snapshot["input_payload"]["character_bios"] = (
+            "林夏：项目负责人，冷静克制，目标是保住团队并追出旧案真相。\n"
+            "顾川：关键对手，强势隐忍，想守住自己在财团里的位置。"
+        )
+
+        variables = self.manager._build_export_character_naturalize_stage_variables(snapshot)
+
+        self.assertEqual(variables[UNSTRUCTURED_KIND_VAR], "generic")
+        self.assertIn("林夏：项目负责人", variables[UNSTRUCTURED_SOURCE_VAR])
+        self.assertNotIn("待补全", variables[UNSTRUCTURED_SOURCE_VAR])
+
+    def test_save_final_script_persists_structured_character_fallback_when_naturalize_fails(self) -> None:
+        snapshot = _snapshot_with_export_artifacts()
+        snapshot["artifacts"].pop("character_natural_language", None)
+        snapshot["artifacts"].pop("character_summary", None)
+        snapshot["artifacts"]["characters"] = _structured_characters_payload()
+        self._persist(snapshot)
+
+        with patch(
+            "workflow_code_skeleton.app.orchestrators.fastgpt_hybrid_workflow.run_stage_with_contract_guard",
+            side_effect=RuntimeError("upstream unavailable"),
+        ):
+            docx_path = self.manager.save_final_script(1, user_id=1)
+
+        self.assertTrue(docx_path.exists())
+        saved_snapshot = self.manager.get_project_snapshot(1, user_id=1, public_view=False)
+        persisted = str(saved_snapshot["artifacts"]["character_natural_language"] or "")
+        self.assertIn("林夏：是故事中的主角", persisted)
+        self.assertIn("顾川：是故事中的关键对手", persisted)
+        self.assertNotIn("待补全", persisted)
+
+        txt_text = docx_path.with_suffix(".txt").read_text(encoding="utf-8")
+        docx_text = self._read_docx_text(docx_path)
+        for text in (txt_text, docx_text):
+            self.assertIn("林夏：是故事中的主角", text)
+            self.assertIn("顾川：是故事中的关键对手", text)
+            self.assertNotIn("【待补全：补充人物定位】", text)
 
     def test_save_final_script_skips_character_hydration_when_existing_text_available(self) -> None:
         snapshot = _snapshot_with_export_artifacts()

@@ -109,6 +109,9 @@ from workflow_code_skeleton.app.services.workflow_output_validation import (
     load_workflow_output_contract,
     validate_stage_output_with_workflow_contract,
 )
+from workflow_code_skeleton.app.services.unstructured_naturalize import (
+    resolve_unstructured_content_kind,
+)
 from workflow_code_skeleton.tests.test_stage_output_repair import (
     _character_setting_json,
     _scene_setting_json,
@@ -1028,6 +1031,52 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertEqual(variables[CHARACTERS], json.dumps(characters_payload, ensure_ascii=False))
         self.assertEqual(state.get_var(CHARACTER_NATURAL_LANGUAGE_VAR), "林夏：项目负责人，性格冷静克制。\n顾川：主角的重要对手与镜像。")
 
+    def test_character_naturalize_uses_user_character_bios_when_structured_output_missing(self) -> None:
+        state, _, variables = self._state_and_payload(
+            10,
+            variables={
+                CHARACTERS: "",
+                USER_CHARACTERS: "林夏：项目负责人，外冷内热，目标是保住团队并追查旧案。\n顾川：强势克制，是主角的关键对手与镜像。",
+            },
+        )
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_CHARACTERS_NATURALIZE: [
+                    {"answerText": "林夏：项目负责人，外冷内热，目标是保住团队并追查旧案。\n顾川：强势克制，是主角的关键对手与镜像。"}
+                ]
+            }
+        )
+
+        flow._ensure_character_natural_language(state, runner, variables)
+
+        call = runner.stage_calls(STAGE_CHARACTERS_NATURALIZE)[0]
+        self.assertEqual(call["unstructured_kind"], "generic")
+        self.assertIn("林夏：项目负责人", str(call["unstructured_source"]))
+        self.assertEqual(
+            state.get_var(CHARACTER_NATURAL_LANGUAGE_VAR),
+            "林夏：项目负责人，外冷内热，目标是保住团队并追查旧案。\n顾川：强势克制，是主角的关键对手与镜像。",
+        )
+
+    def test_character_naturalize_falls_back_to_structured_summary_when_stage_returns_placeholder(self) -> None:
+        state, _, variables = self._state_and_payload(
+            10,
+            variables={CHARACTERS: _rich_characters_text()},
+        )
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_CHARACTERS_NATURALIZE: [
+                    {UNSTRUCTURED_OUTPUT_VAR: "【待补全：补充人物定位】"}
+                ]
+            }
+        )
+
+        flow._ensure_character_natural_language(state, runner, variables)
+
+        natural = str(state.get_var(CHARACTER_NATURAL_LANGUAGE_VAR) or "")
+        self.assertIn("林夏", natural)
+        self.assertIn("故事中的主角", natural)
+        self.assertNotIn("待补全", natural)
+
     def test_framework_and_worldview_natural_language_do_not_overwrite_each_other(self) -> None:
         state, payload, variables = self._state_and_payload(
             10,
@@ -1075,6 +1124,29 @@ class BatchedGenerationFlowTests(unittest.TestCase):
                 canonical_name=FRAMEWORK_NATURAL_LANGUAGE,
                 aliases=(UNSTRUCTURED_OUTPUT_VAR,),
             )
+
+    def test_unstructured_natural_language_validator_falls_back_to_answer_text(self) -> None:
+        spec = load_workflow_output_contract(
+            stage_name=STAGE_CHARACTERS_NATURALIZE,
+            expected_output_kind="unstructured_natural_language_text",
+            workflow_json_name="自然语言化.json",
+        )
+
+        normalized, meta = validate_stage_output_with_workflow_contract(
+            {"answerText": "林夏：人物小传自然语言版。"},
+            spec=spec,
+            canonical_name=CHARACTER_NATURAL_LANGUAGE_VAR,
+            aliases=(UNSTRUCTURED_OUTPUT_VAR,),
+        )
+
+        self.assertEqual(normalized[CHARACTER_NATURAL_LANGUAGE_VAR], "林夏：人物小传自然语言版。")
+        self.assertIn("answerText", meta["matched_aliases"])
+
+    def test_resolve_unstructured_content_kind_maps_supported_stages(self) -> None:
+        self.assertEqual(resolve_unstructured_content_kind(STAGE_FRAMEWORK_NATURALIZE), "framework")
+        self.assertEqual(resolve_unstructured_content_kind(STAGE_WORLDVIEW_NATURALIZE), "worldview")
+        self.assertEqual(resolve_unstructured_content_kind(STAGE_CHARACTERS_NATURALIZE), "generic")
+        self.assertEqual(resolve_unstructured_content_kind("character_bio_naturalize"), "generic")
 
     def test_three_phase_order_runs_all_hooks_before_dialogues_and_script(self) -> None:
         state, payload, variables = self._state_and_payload(10)

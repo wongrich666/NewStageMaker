@@ -282,6 +282,12 @@ def validate_stage_output_with_workflow_contract(
         return normalized, meta
 
     if kind == "unstructured_natural_language_text":
+        if candidate is None and isinstance(output, dict):
+            raw_value = output.get("answerText")
+            if raw_value is not None:
+                candidate = raw_value
+                matched_aliases = [*matched_aliases, "answerText"]
+                meta["matched_aliases"] = matched_aliases
         if not isinstance(candidate, str):
             raise WorkflowOutputValidationError(
                 f"{spec.stage_name} 输出必须是自然语言字符串",

@@ -9,6 +9,11 @@ globals().update(
     {name: getattr(_task_manager_common, name) for name in dir(_task_manager_common) if name.startswith("_")}
 )
 from .task_state import TaskRecord
+from .unstructured_naturalize import (
+    build_character_unstructured_source,
+    build_unstructured_stage_variables,
+    extract_unstructured_stage_output_text,
+)
 
 
 class RuntimeExportStoreMixin:
@@ -166,26 +171,50 @@ class RuntimeExportStoreMixin:
         )
 
     def _build_export_character_naturalize_stage_variables(self, snapshot: dict[str, Any]) -> dict[str, Any]:
-        structured = self._snapshot_export_value(
-            snapshot,
-            artifact_keys=("characters", "character_bios"),
-            variable_keys=(CHARACTERS, CHARACTER_VAR),
-            input_keys=("character_bios",),
+        debug_variables = self._snapshot_debug_variables(snapshot)
+        input_payload = self._snapshot_input_payload(snapshot)
+        source_text = build_character_unstructured_source(
+            {
+                CHARACTERS: self._snapshot_export_value(
+                    snapshot,
+                    artifact_keys=("characters", "character_bios"),
+                    variable_keys=(CHARACTERS, CHARACTER_VAR),
+                ),
+                USER_CHARACTERS: self._snapshot_export_value(
+                    snapshot,
+                    variable_keys=(USER_CHARACTERS, CHARACTER_BIOS_VAR),
+                    input_keys=("character_bios",),
+                ),
+                CHARACTER_NATURAL_LANGUAGE_VAR: debug_variables.get(CHARACTER_NATURAL_LANGUAGE_VAR),
+                CHARACTER_BIOS_VAR: input_payload.get("character_bios"),
+            }
         )
-        source_value = _jsonish_value(structured)
-        if source_value is None:
-            source_text = str(structured or "").strip()
-        else:
-            try:
-                source_text = json.dumps(source_value, ensure_ascii=False, indent=2)
-            except Exception:
-                source_text = str(structured or "").strip()
-        return {
-            UNSTRUCTURED_SOURCE: source_text,
-            UNSTRUCTURED_CONTENT_KIND: "generic",
-            UNSTRUCTURED_SOURCE_VAR: source_text,
-            UNSTRUCTURED_KIND_VAR: "generic",
-        }
+        return build_unstructured_stage_variables(
+            source_text,
+            stage_name=STAGE_CHARACTERS_NATURALIZE,
+            source_stage=STAGE_CHARACTERS,
+        )
+
+    def _persist_export_character_natural_language(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        project_id: int,
+        natural_text: str,
+    ) -> str:
+        natural = _meaningful_stage_output_text(self._sanitize_export_section_text(natural_text))
+        if not natural:
+            return ""
+        self._apply_snapshot_variable_artifact_updates(
+            project_id,
+            snapshot,
+            artifact_updates={
+                "character_natural_language": natural,
+                "character_summary": natural,
+            },
+            variable_updates={CHARACTER_NATURAL_LANGUAGE_VAR: natural},
+        )
+        return natural
 
     def _ensure_export_character_natural_language(
         self,
@@ -199,6 +228,15 @@ class RuntimeExportStoreMixin:
             variable_keys=(CHARACTERS, CHARACTER_VAR),
             input_keys=("character_bios",),
         )
+        fallback_text = str(_preferred_character_display_text("", structured) or "").strip()
+        if not fallback_text:
+            fallback_text = self._sanitize_export_section_text(
+                self._snapshot_export_value(
+                    snapshot,
+                    variable_keys=(USER_CHARACTERS, CHARACTER_BIOS_VAR),
+                    input_keys=("character_bios",),
+                )
+            )
         existing = self._snapshot_export_value(
             snapshot,
             artifact_keys=("character_natural_language",),
@@ -227,11 +265,27 @@ class RuntimeExportStoreMixin:
             return ""
         if not use_fastgpt_backend():
             logger.info("character_natural_language_export status=skip_non_fastgpt_backend project_id=%s", project_id)
-            return ""
+            return self._persist_export_character_natural_language(
+                snapshot,
+                project_id=project_id,
+                natural_text=fallback_text,
+            )
+
+        stage_variables = self._build_export_character_naturalize_stage_variables(snapshot)
+        source_text = str(stage_variables.get(UNSTRUCTURED_SOURCE) or "").strip()
+        if not source_text:
+            logger.warning(
+                "character_natural_language_export status=skip_invalid_source project_id=%s",
+                project_id,
+            )
+            return self._persist_export_character_natural_language(
+                snapshot,
+                project_id=project_id,
+                natural_text=fallback_text,
+            )
 
         try:
             workflow_input = WorkflowInput.from_dict(self._snapshot_input_payload(snapshot))
-            stage_variables = self._build_export_character_naturalize_stage_variables(snapshot)
             from ..orchestrators.fastgpt_hybrid_workflow import run_stage_with_contract_guard
             from .fastgpt_client import FastGPTClient
             from .fastgpt_contracts import STAGE_CHARACTERS_NATURALIZE
@@ -248,7 +302,10 @@ class RuntimeExportStoreMixin:
                 output_field=CHARACTER_NATURAL_LANGUAGE_VAR,
                 sync_output_to_state=False,
             )
-            natural = str(output.get(CHARACTER_NATURAL_LANGUAGE_VAR) or "").strip()
+            natural = extract_unstructured_stage_output_text(
+                output,
+                output_field=CHARACTER_NATURAL_LANGUAGE_VAR,
+            )
             natural = _meaningful_stage_output_text(self._sanitize_export_section_text(natural))
             issues = _character_natural_text_quality_issues(natural, structured) if natural else []
             if not natural or issues:
@@ -258,15 +315,15 @@ class RuntimeExportStoreMixin:
                     ",".join(issues),
                     _truncate_log_text(natural, max_chars=240),
                 )
-                return ""
-            self._apply_snapshot_variable_artifact_updates(
-                project_id,
+                return self._persist_export_character_natural_language(
+                    snapshot,
+                    project_id=project_id,
+                    natural_text=fallback_text,
+                )
+            self._persist_export_character_natural_language(
                 snapshot,
-                artifact_updates={
-                    "character_natural_language": natural,
-                    "character_summary": natural,
-                },
-                variable_updates={CHARACTER_NATURAL_LANGUAGE_VAR: natural},
+                project_id=project_id,
+                natural_text=natural,
             )
             logger.info(
                 "character_natural_language_export status=generated_and_persisted project_id=%s",
@@ -279,7 +336,11 @@ class RuntimeExportStoreMixin:
                 project_id,
                 _truncate_log_text(str(exc), max_chars=320),
             )
-            return ""
+            return self._persist_export_character_natural_language(
+                snapshot,
+                project_id=project_id,
+                natural_text=fallback_text,
+            )
 
     def _build_export_appearance_stage_variables(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         artifacts = self._snapshot_artifacts_dict(snapshot)

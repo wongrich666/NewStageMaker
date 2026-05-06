@@ -128,10 +128,17 @@ from ..services.fastgpt_contracts import (
     to_jsonable_value,
 )
 from ..services.json_utils import normalize_pass_review, parse_json
+from ..services.task_manager_common import _preferred_character_display_text
 from ..services.stage_output_repair import (
     normalize_appearance_mapping_candidate,
     validate_appearance_mapping_output,
     validate_scenes_output,
+)
+from ..services.unstructured_naturalize import (
+    build_character_unstructured_source,
+    build_unstructured_stage_variables,
+    extract_unstructured_stage_output_text,
+    resolve_unstructured_content_kind,
 )
 from ..services.workflow_output_validation import (
     WorkflowOutputValidationError,
@@ -142,7 +149,7 @@ from ..services.workflow_output_validation import (
 )
 from ..utils.episode import BatchWindow, iter_episode_batches, iter_episode_batches_from
 from ..utils.logger import get_logger
-from ..utils.user_visible_text import has_meaningful_content, is_meaningful_text
+from ..utils.user_visible_text import clean_user_visible_text, has_meaningful_content, is_meaningful_text
 from ..workflow_ids import (
     APPEARANCE_NATURAL_LANGUAGE_VAR,
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
@@ -7266,21 +7273,10 @@ def _build_worldview_naturalize_source(variables: dict[str, Any]) -> str:
 
 
 def _build_character_naturalize_source(variables: dict[str, Any]) -> str:
-    character_value = variables.get(CHARACTERS)
-    if isinstance(character_value, str):
-        text = character_value.strip()
-        if text:
-            try:
-                character_value = parse_json(text)
-            except Exception:
-                return text
-    if character_value in (None, ""):
-        fallback_text = str(variables.get(CHARACTER_NATURAL_LANGUAGE_VAR) or "").strip()
-        return fallback_text
-    try:
-        return json.dumps(character_value, ensure_ascii=False, indent=2)
-    except Exception:
-        return str(character_value).strip()
+    return build_character_unstructured_source(
+        variables,
+        extra_candidates=(variables.get(USER_CHARACTERS), variables.get(CHARACTER_BIOS_VAR)),
+    )
 
 
 def _framework_naturalize_structured_value(value: Any) -> Any:
@@ -7311,11 +7307,12 @@ def _ensure_framework_natural_language(
         )
         return
 
-    stage_variables = dict(variables)
-    stage_variables[UNSTRUCTURED_SOURCE] = _build_framework_naturalize_source(payload, variables)
-    stage_variables[UNSTRUCTURED_CONTENT_KIND] = "framework"
-    stage_variables[UNSTRUCTURED_SOURCE_VAR] = stage_variables[UNSTRUCTURED_SOURCE]
-    stage_variables[UNSTRUCTURED_KIND_VAR] = stage_variables[UNSTRUCTURED_CONTENT_KIND]
+    stage_variables = build_unstructured_stage_variables(
+        _build_framework_naturalize_source(payload, variables),
+        stage_name=STAGE_FRAMEWORK_NATURALIZE,
+        source_stage=STAGE_FRAMEWORK,
+        variables=variables,
+    )
     output = run_stage_with_contract_guard(
         state,
         runner,
@@ -7328,6 +7325,12 @@ def _ensure_framework_natural_language(
         sync_output_to_state=False,
     )
     variables.update(output)
+    naturalized = extract_unstructured_stage_output_text(
+        output,
+        output_field=FRAMEWORK_NATURAL_LANGUAGE,
+    )
+    if naturalized:
+        variables[FRAMEWORK_NATURAL_LANGUAGE] = naturalized
 
 
 def _ensure_worldview_natural_language(
@@ -7349,11 +7352,12 @@ def _ensure_worldview_natural_language(
     if not source:
         return
 
-    stage_variables = dict(variables)
-    stage_variables[UNSTRUCTURED_SOURCE] = source
-    stage_variables[UNSTRUCTURED_CONTENT_KIND] = "worldview"
-    stage_variables[UNSTRUCTURED_SOURCE_VAR] = source
-    stage_variables[UNSTRUCTURED_KIND_VAR] = "worldview"
+    stage_variables = build_unstructured_stage_variables(
+        source,
+        stage_name=STAGE_WORLDVIEW_NATURALIZE,
+        source_stage=STAGE_WORLDVIEW,
+        variables=variables,
+    )
     output = run_stage_with_contract_guard(
         state,
         runner,
@@ -7366,6 +7370,12 @@ def _ensure_worldview_natural_language(
         sync_output_to_state=False,
     )
     variables.update(output)
+    naturalized = extract_unstructured_stage_output_text(
+        output,
+        output_field=WORLDVIEW_NATURAL_LANGUAGE,
+    )
+    if naturalized:
+        variables[WORLDVIEW_NATURAL_LANGUAGE] = naturalized
 
 
 def _ensure_character_natural_language(
@@ -7373,8 +7383,26 @@ def _ensure_character_natural_language(
     runner: FastGPTRunner,
     variables: dict[str, Any],
 ) -> None:
-    if not has_meaningful_content(variables.get(CHARACTERS)):
+    if not (
+        has_meaningful_content(variables.get(CHARACTERS))
+        or has_meaningful_content(variables.get(USER_CHARACTERS))
+        or has_meaningful_content(variables.get(CHARACTER_BIOS_VAR))
+    ):
         return
+    fallback_text = str(
+        _preferred_character_display_text(
+            "",
+            variables.get(CHARACTERS)
+            or variables.get(CHARACTER_VAR)
+            or variables.get(USER_CHARACTERS)
+            or variables.get(CHARACTER_BIOS_VAR),
+        )
+        or ""
+    ).strip()
+    if not fallback_text:
+        fallback_text = clean_user_visible_text(
+            variables.get(USER_CHARACTERS) or variables.get(CHARACTER_BIOS_VAR)
+        ).strip()
     if (
         is_meaningful_text(variables.get(CHARACTER_NATURAL_LANGUAGE_VAR))
         and bool(variables.get(CHARACTER_NATURALIZE_READY_FLAG))
@@ -7390,25 +7418,43 @@ def _ensure_character_natural_language(
 
     source = _build_character_naturalize_source(variables)
     if not source:
+        if is_meaningful_text(fallback_text):
+            variables[CHARACTER_NATURAL_LANGUAGE_VAR] = fallback_text
+            state.set_var(CHARACTER_NATURAL_LANGUAGE_VAR, fallback_text)
+        variables[CHARACTER_NATURALIZE_READY_FLAG] = True
+        state.set_var(CHARACTER_NATURALIZE_READY_FLAG, True)
         return
 
-    stage_variables = dict(variables)
-    stage_variables[UNSTRUCTURED_SOURCE] = source
-    stage_variables[UNSTRUCTURED_CONTENT_KIND] = "generic"
-    stage_variables[UNSTRUCTURED_SOURCE_VAR] = source
-    stage_variables[UNSTRUCTURED_KIND_VAR] = "generic"
-    output = run_stage_with_contract_guard(
-        state,
-        runner,
-        STAGE_CHARACTERS_NATURALIZE,
-        stage_variables,
-        stage_key="character",
-        message="正在整理人物小传自然语言说明。",
-        progress_percent=26,
-        output_field=CHARACTER_NATURAL_LANGUAGE_VAR,
-        sync_output_to_state=False,
+    stage_variables = build_unstructured_stage_variables(
+        source,
+        stage_name=STAGE_CHARACTERS_NATURALIZE,
+        source_stage=STAGE_CHARACTERS,
+        variables=variables,
     )
-    naturalized = str(output.get(CHARACTER_NATURAL_LANGUAGE_VAR) or "").strip()
+    naturalized = ""
+    try:
+        output = run_stage_with_contract_guard(
+            state,
+            runner,
+            STAGE_CHARACTERS_NATURALIZE,
+            stage_variables,
+            stage_key="character",
+            message="正在整理人物小传自然语言说明。",
+            progress_percent=26,
+            output_field=CHARACTER_NATURAL_LANGUAGE_VAR,
+            sync_output_to_state=False,
+        )
+        naturalized = extract_unstructured_stage_output_text(
+            output,
+            output_field=CHARACTER_NATURAL_LANGUAGE_VAR,
+        )
+    except Exception as exc:
+        logger.warning(
+            "人物小传自然语言化失败，改用结构化人设本地兜底：%s",
+            str(exc),
+        )
+    if not is_meaningful_text(naturalized):
+        naturalized = fallback_text
     if is_meaningful_text(naturalized):
         variables[CHARACTER_NATURAL_LANGUAGE_VAR] = naturalized
         state.set_var(CHARACTER_NATURAL_LANGUAGE_VAR, naturalized)

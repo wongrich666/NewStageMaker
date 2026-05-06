@@ -439,13 +439,19 @@ class StageCacheMixin:
         artifacts: dict[str, Any],
     ) -> str:
         raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
-        natural = pick_best_user_visible_value(
+        structured = (
+            artifacts.get("characters")
+            or raw_artifacts.get("characters")
+            or raw_artifacts.get("character_bios")
+        )
+        natural = _preferred_character_display_text(
             artifacts.get("character_natural_language")
             or artifacts.get("character_summary")
             or raw_artifacts.get("character_natural_language")
-            or raw_artifacts.get("character_summary")
+            or raw_artifacts.get("character_summary"),
+            structured,
         )
-        return natural
+        return pick_best_user_visible_value(natural)
 
     def _scene_stage_output_text(
         self,

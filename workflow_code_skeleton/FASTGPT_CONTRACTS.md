@@ -44,6 +44,7 @@
 | `episode_plan_normalize` | `分集计划规范化.json` | `normalized_episode_plan` |
 | `worldview` | `世界观生成.json` | `worldview` |
 | `worldview_naturalize` | `自然语言化.json` | `worldview_natural_language` |
+| `characters_naturalize` | `自然语言化.json` | `dT7mQ2Nz` / `character_natural_language` |
 | `characters` | `人设生成.json` | `characters` |
 | `scenes` | `场景生成.json` | `scenes` |
 | `appearance_alias_writing` | `服装版本映射编写.json` | `appearance_mapping` |
@@ -106,6 +107,16 @@
 | `dT7mQ2Nz` | 人物小传自然语言版 |
 | `n8PqLs4V` | 场景自然语言版 |
 | `c7VnQ4eX` | 服装映射自然语言说明 |
+
+### 自然语言化 workflow 固定变量
+
+当前 `自然语言化.json` workflow 使用下面三个稳定变量：
+
+| workflow 变量 | 说明 |
+| --- | --- |
+| `w2RJzalk` | 需要去结构化 / 自然语言化的输入内容 |
+| `unstructuredContentKind` | 自然语言化类型，只支持 `framework` / `worldview` / `generic` |
+| `zxlaPMOY` | 自然语言化后的正式输出，后端应优先从该变量读取 |
 
 规则：
 
@@ -192,7 +203,17 @@
   - `dT7mQ2Nz`
   - `character_natural_language`
   - `character_summary`
+- `w2RJzalk` 的人物自然语言化输入优先来自 `characters / fFM0mroW`；如果结构化人设缺失，才回退到 `user_characters / yYYOuumm`
+- `unstructuredContentKind` 对人物自然语言化固定传 `generic`，因为当前 workflow 只支持 `framework / worldview / generic`
+- `zxlaPMOY` 为空时，契约层会再用 `answerText` 兜底
 - 自然语言结果不能覆盖正式结构化 `fFM0mroW / characters`
+
+人物小传最终导出字段优先级：
+
+1. `character_natural_language / dT7mQ2Nz` 优先
+2. `character_summary` 兼容旧快照
+3. `fFM0mroW / character_setting.characters` 兜底生成可读自然语言人物小传
+4. 不允许导出 `【待补全：补充人物定位】`、原始 JSON、字面量变量名
 
 ### scenes
 
