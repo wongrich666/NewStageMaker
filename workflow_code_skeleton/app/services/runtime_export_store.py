@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 """Extracted TaskManager mixin for RuntimeExportStoreMixin."""
@@ -9,13 +8,15 @@ globals().update(
     {name: getattr(_task_manager_common, name) for name in dir(_task_manager_common) if name.startswith("_")}
 )
 from .task_state import TaskRecord
+from .fastgpt_contracts import (
+    STAGE_CHARACTERS,
+    STAGE_CHARACTERS_NATURALIZE,
+)
 from .unstructured_naturalize import (
     build_character_unstructured_source,
     build_unstructured_stage_variables,
     extract_unstructured_stage_output_text,
 )
-
-
 class RuntimeExportStoreMixin:
     def _best_final_script_text(self, snapshot: dict[str, Any]) -> str:
         artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
@@ -216,6 +217,58 @@ class RuntimeExportStoreMixin:
         )
         return natural
 
+    def _character_structured_fallback_text(self, structured: Any) -> str:
+        characters = _character_items_from_value(structured)
+        if not characters:
+            return ""
+
+        sections: list[str] = []
+        for item in characters:
+            name = _character_name_from_item(item)
+            role = _meaningful_character_fragment(
+                item.get("story_role") or item.get("role_type") or item.get("identity")
+            )
+            personality = _meaningful_character_fragment(
+                item.get("personality") or item.get("speech_profile")
+            )
+            desire = _meaningful_character_fragment(
+                item.get("core_desire") or item.get("core_motivation") or item.get("deep_motivation")
+            )
+            relationship = _meaningful_character_fragment(
+                item.get("relationship_to_protagonist")
+                or item.get("relationships_with_others")
+                or item.get("relationships")
+            )
+            growth = _meaningful_character_fragment(item.get("growth_arc") or item.get("plot_function"))
+            appearance = _meaningful_character_fragment(
+                item.get("appearance_anchor")
+                or item.get("appearance")
+                or item.get("appearance_description")
+            )
+
+            fragments: list[str] = []
+            if role:
+                fragments.append(f"是故事中的{role}")
+            if personality:
+                fragments.append(f"性格上{personality}")
+            if desire:
+                fragments.append(f"内在驱动力集中在{desire}")
+            if relationship:
+                fragments.append(f"与其他角色的关系重点在于{relationship}")
+            if growth:
+                fragments.append(f"人物成长会落在{growth}")
+            if appearance:
+                fragments.append(f"视觉辨识点则是{appearance}")
+
+            if not name:
+                continue
+            if fragments:
+                sections.append(f"{name}：" + "，".join(fragments).strip("，") + "。")
+            else:
+                sections.append(name)
+
+        return "\n".join(section for section in sections if section).strip()
+
     def _ensure_export_character_natural_language(
         self,
         snapshot: dict[str, Any],
@@ -228,7 +281,7 @@ class RuntimeExportStoreMixin:
             variable_keys=(CHARACTERS, CHARACTER_VAR),
             input_keys=("character_bios",),
         )
-        fallback_text = str(_preferred_character_display_text("", structured) or "").strip()
+        fallback_text = self._character_structured_fallback_text(structured)
         if not fallback_text:
             fallback_text = self._sanitize_export_section_text(
                 self._snapshot_export_value(
@@ -624,50 +677,7 @@ class RuntimeExportStoreMixin:
                     issues or ["placeholder_heavy_natural_language"],
                     _truncate_log_text(raw_text, max_chars=240),
                 )
-        characters = _character_items_from_value(structured)
-        if not characters:
-            return ""
-        sections: list[str] = []
-        for item in characters:
-            name = _character_name_from_item(item)
-            role = _meaningful_character_fragment(
-                item.get("story_role") or item.get("role_type") or item.get("identity")
-            )
-            personality = _meaningful_character_fragment(
-                item.get("personality") or item.get("speech_profile")
-            )
-            desire = _meaningful_character_fragment(
-                item.get("core_desire") or item.get("core_motivation") or item.get("deep_motivation")
-            )
-            relationship = _meaningful_character_fragment(
-                item.get("relationship_to_protagonist")
-                or item.get("relationships_with_others")
-                or item.get("relationships")
-            )
-            growth = _meaningful_character_fragment(item.get("growth_arc") or item.get("plot_function"))
-            appearance = _meaningful_character_fragment(
-                item.get("appearance_anchor")
-                or item.get("appearance")
-                or item.get("appearance_description")
-            )
-            fragments: list[str] = []
-            if role:
-                fragments.append(f"是故事中的{role}")
-            if personality:
-                fragments.append(f"性格上{personality}")
-            if desire:
-                fragments.append(f"内在驱动力集中在{desire}")
-            if relationship:
-                fragments.append(f"与其他角色的关系重点在于{relationship}")
-            if growth:
-                fragments.append(f"人物成长会落在{growth}")
-            if appearance:
-                fragments.append(f"视觉辨识点则是{appearance}")
-            if not fragments:
-                sections.append(name)
-                continue
-            sections.append(f"{name}：" + "，".join(fragments).strip("，") + "。")
-        return "\n".join(section for section in sections if section).strip()
+        return self._character_structured_fallback_text(structured)
 
     def _appearance_export_text(self, snapshot: dict[str, Any]) -> str:
         for candidate in (

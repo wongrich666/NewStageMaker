@@ -18,6 +18,7 @@ from ..services.compact_context import (
     build_compact_appearance_context_for_batch,
     build_compact_character_context_for_appearance,
     build_compact_character_context_for_dialogues,
+    build_compact_character_context_for_dialogues,
     build_compact_character_context_for_hooks,
     build_compact_character_context_for_scenes,
     build_compact_character_context_for_script,
@@ -128,7 +129,6 @@ from ..services.fastgpt_contracts import (
     to_jsonable_value,
 )
 from ..services.json_utils import normalize_pass_review, parse_json
-from ..services.task_manager_common import _preferred_character_display_text
 from ..services.stage_output_repair import (
     normalize_appearance_mapping_candidate,
     validate_appearance_mapping_output,
@@ -9122,3 +9122,9 @@ def _parse_chinese_number(raw: str) -> int | None:
         return None
     total += section + number
     return total or None
+
+def _preferred_character_display_text(*args: Any, **kwargs: Any) -> str:
+    """Lazy proxy to avoid importing task_manager_common during module initialization."""
+    from ..services.task_manager_common import _preferred_character_display_text as _impl
+
+    return _impl(*args, **kwargs)

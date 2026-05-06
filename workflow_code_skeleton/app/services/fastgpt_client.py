@@ -33,6 +33,7 @@ from ..workflow_ids import (
     CORE_SCENE_FINAL_VAR,
     SCENE_NATURAL_LANGUAGE_VAR,
     SCENE_VAR,
+    UNSTRUCTURED_OUTPUT_VAR,
 )
 from .fastgpt_contracts import (
     ALL_DIALOGUES,
@@ -115,12 +116,50 @@ from .stage_output_repair import (
 
 logger = get_logger("fastgpt_client")
 
+def _promote_unstructured_update_var_result(stage_name: str, response_json: dict[str, Any]) -> None:
+    if stage_name != STAGE_CHARACTERS_NATURALIZE:
+        return
+
+    response_data = response_json.get("responseData")
+    if not isinstance(response_data, dict):
+        return
+
+    update_results = response_data.get("updateVarResult")
+    if not isinstance(update_results, list):
+        return
+
+    for item in update_results:
+        if not isinstance(item, dict):
+            continue
+
+        variable = item.get("variable")
+        value = item.get("value")
+        variable_key = ""
+
+        if isinstance(variable, list) and variable:
+            variable_key = str(variable[-1] or "")
+        elif isinstance(variable, str):
+            variable_key = variable
+
+        if variable_key in {UNSTRUCTURED_OUTPUT_VAR, "zxlaPMOY"} and str(value or "").strip():
+            response_json[CHARACTER_NATURAL_LANGUAGE_VAR] = value
+            response_json["character_natural_language"] = value
+            return
 
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 STAGE_AUXILIARY_OUTPUT_KEYS: dict[str, dict[str, tuple[str, ...]]] = {
     "characters": {
         CHARACTER_NATURAL_LANGUAGE_VAR: (
             CHARACTER_NATURAL_LANGUAGE_VAR,
+            "character_natural_language",
+            "character_summary",
+        ),
+    },
+    STAGE_CHARACTERS_NATURALIZE: {
+        CHARACTER_NATURAL_LANGUAGE_VAR: (
+            CHARACTER_NATURAL_LANGUAGE_VAR,
+            UNSTRUCTURED_OUTPUT_VAR,
+            "zxlaPMOY",
             "character_natural_language",
             "character_summary",
         ),
@@ -467,7 +506,7 @@ class FastGPTClient:
                 url=endpoint.url,
                 response_text=response_preview,
             ) from exc
-
+        _promote_unstructured_update_var_result(stage_name, data)
         raw_output = self._extract_output_payload(
             data,
             contract,
@@ -520,6 +559,16 @@ class FastGPTClient:
             }
         )
         self._remember_stage_debug_info(stage_name, **debug_info)
+
+        if (
+            stage_name == STAGE_CHARACTERS_NATURALIZE
+            and CHARACTER_NATURAL_LANGUAGE_VAR in auxiliary_output
+        ):
+            validated_output = dict(validated_output)
+            validated_output[CHARACTER_NATURAL_LANGUAGE_VAR] = auxiliary_output[
+                CHARACTER_NATURAL_LANGUAGE_VAR
+            ]
+
         return {
             **auxiliary_output,
             **validated_output,
