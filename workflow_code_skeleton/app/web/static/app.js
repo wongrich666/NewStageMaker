@@ -204,7 +204,7 @@
     },
     new_framework: {
       key: "new_framework",
-      label: "15节拍剧本框架",
+      label: "【新】15内容剧本框架",
       help: "单独生成 15 节拍剧本框架 / 剧本大纲，并支持下载 TXT。",
       runUrl: "/api/tools/new-framework",
       fields: [
@@ -2717,7 +2717,7 @@
       }
     }
     state.toolResults[state.activeTool] = null;
-    renderToolOutput(state.activeTool, "正在调用 FastGPT 工具，请稍候。");
+    renderToolOutput(state.activeTool, "框架生成中，请稍候~");
     const data = await requestJson(currentToolRunUrl(state.activeTool), {
       method: "POST",
       body: JSON.stringify(payload)

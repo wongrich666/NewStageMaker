@@ -65,10 +65,10 @@ class ServerToolsApiTests(unittest.TestCase):
         fake_result = {
             "ok": True,
             "tool_id": "new_framework",
-            "title": "15节拍剧本框架",
+            "title": "【新】15内容剧本框架",
             "output": "15 节拍框架正文",
             "text": "15 节拍框架正文",
-            "filename": "15节拍剧本框架_20260506_153000.txt",
+            "filename": "【新】15内容剧本框架_20260506_153000.txt",
             "debug": {"chosen_output_source": "root.answerText"},
             "schema": {"fields": [{"name": "story"}]},
         }
@@ -90,7 +90,7 @@ class ServerToolsApiTests(unittest.TestCase):
         payload = response.get_json()
         self.assertTrue(payload["success"])
         self.assertEqual(payload["tool_id"], "new_framework")
-        self.assertEqual(payload["filename"], "15节拍剧本框架_20260506_153000.txt")
+        self.assertEqual(payload["filename"], "【新】15内容剧本框架_20260506_153000.txt")
         mocked.assert_called_once_with(
             "new_framework",
             {
