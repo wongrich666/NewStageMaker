@@ -243,6 +243,8 @@ PUBLIC_INPUT_PAYLOAD_KEYS = (
     "total_episodes",
     "script_format_mode",
 )
+AUXILIARY_TOOL_ASSET_KIND = "tool_result"
+AUXILIARY_TOOL_CACHE_NOTICE = "辅助工具结果已保存到用户资产，可随时回来查看、修改或删除。"
 PUBLIC_ARTIFACT_KEYS = (
     "script_title_content",
     "framework_natural_language",
@@ -949,6 +951,17 @@ def _meaningful_stage_output_text(value: Any) -> str:
     return clean_user_visible_text(value).strip()
 
 
+def clean_multiline_user_visible_text(value: Any) -> str:
+    if not isinstance(value, str):
+        return clean_user_visible_text(value).strip()
+    raw = value.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [clean_user_visible_text(line).strip() for line in raw.split("\n")]
+    non_empty_lines = [line for line in lines if line]
+    if len(non_empty_lines) > 1:
+        return "\n".join(non_empty_lines).strip()
+    return clean_user_visible_text(value).strip()
+
+
 EXPORT_TECHNICAL_KEY_PATTERN = re.compile(r'^\s*"?[A-Za-z_][A-Za-z0-9_]*"?\s*:\s*(.*)$')
 EXPORT_JSON_FENCE_PATTERN = re.compile(r"```(?:json|text|markdown)?\s*([\s\S]*?)```", re.IGNORECASE)
 CHARACTER_PLACEHOLDER_PATTERN = re.compile(
@@ -1155,6 +1168,8 @@ def _can_stage_rollback(snapshot: dict[str, Any] | None) -> bool:
 
 
 def _cache_notice(snapshot: dict[str, Any]) -> str:
+    if str(snapshot.get("asset_kind") or "").strip() == AUXILIARY_TOOL_ASSET_KIND:
+        return AUXILIARY_TOOL_CACHE_NOTICE
     if _completion_confirmed(snapshot):
         return COMPLETION_CONFIRMED_NOTICE
     if _awaiting_completion_confirmation(snapshot):

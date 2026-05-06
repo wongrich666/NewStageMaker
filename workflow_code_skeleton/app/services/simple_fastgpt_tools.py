@@ -133,7 +133,7 @@ TOOL_DEFINITIONS: dict[str, SimpleToolDefinition] = {
     ),
     "new_framework": SimpleToolDefinition(
         key="new_framework",
-        label="【新】15内容剧本框架",
+        label="15节拍剧本框架",
         env_prefix="FASTGPT_NEW_FRAMEWORK",
         help_text="单独生成 15 节拍剧本框架 / 剧本大纲，并支持下载 TXT。",
         json_name_patterns=("15内容新框架编写", "【新】15内容剧本框架"),
@@ -200,7 +200,7 @@ TOOL_DEFINITIONS: dict[str, SimpleToolDefinition] = {
         force_field_overrides=True,
         prefer_structured_output=True,
         prefer_named_text_over_choices=True,
-        filename_prefix="【新】15内容剧本框架",
+        filename_prefix="15节拍剧本框架",
         run_path="/api/tools/new-framework",
     ),
 }
@@ -485,7 +485,7 @@ def _resolved_tool(tool_key: str) -> ResolvedSimpleTool:
         message_field = definition.fallback_message_field
         source = "tool_definition"
         help_text = (
-            f"{definition.help_text} 当前表单字段使用代码侧友好映射，并对接 "
+            f"{definition.help_text} "
             f"{json_path.name}。"
             if json_path
             else definition.help_text

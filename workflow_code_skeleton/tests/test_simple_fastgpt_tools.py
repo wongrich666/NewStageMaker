@@ -41,6 +41,7 @@ class SimpleFastGPTToolsTests(unittest.TestCase):
         self.assertIn("a1LYQ4vP", tool_map["punchup"]["input_variables"])
         self.assertIn("n5ZHYrj8", tool_map["character_reskin"]["input_variables"])
         self.assertEqual(tool_map["new_framework"]["run_url"], "/api/tools/new-framework")
+        self.assertEqual(tool_map["new_framework"]["title"], "15节拍剧本框架")
 
     def test_list_simple_tools_marks_dedicated_api_key_as_configured(self) -> None:
         with patch.dict(

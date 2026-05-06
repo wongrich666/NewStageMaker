@@ -12,6 +12,9 @@ from .task_state import TaskRecord
 
 
 class StageCacheMixin:
+    def _is_auxiliary_tool_asset(self, snapshot: dict[str, Any] | None) -> bool:
+        return str((snapshot or {}).get("asset_kind") or "").strip() == AUXILIARY_TOOL_ASSET_KIND
+
     def _snapshot_belongs_to_user(
         self,
         snapshot: dict[str, Any] | None,
@@ -34,6 +37,7 @@ class StageCacheMixin:
         allowed_keys = list(PUBLIC_ARTIFACT_KEYS)
         if str(snapshot.get("status") or "") == "completed":
             allowed_keys.extend(PUBLIC_COMPLETED_ARTIFACT_KEYS)
+        is_tool_asset = self._is_auxiliary_tool_asset(snapshot)
         raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
         artifacts = _select_non_empty_fields(
             raw_artifacts,
@@ -46,18 +50,26 @@ class StageCacheMixin:
         )
         if not isinstance(debug_variables, dict):
             debug_variables = {}
-        for key in (
+        text_keys = (
             "framework_natural_language",
             "worldview_natural_language",
-            "final_output_text",
-            "final_script",
             PARTIAL_SCRIPT_ARTIFACT,
-        ):
+        )
+        if not is_tool_asset:
+            text_keys += ("final_output_text", "final_script")
+        for key in text_keys:
             text = _meaningful_stage_output_text(artifacts.get(key))
             if text:
                 artifacts[key] = text
             else:
                 artifacts.pop(key, None)
+        if is_tool_asset:
+            for key in ("final_output_text", "final_script"):
+                text = clean_multiline_user_visible_text(raw_artifacts.get(key))
+                if text:
+                    artifacts[key] = text
+                else:
+                    artifacts.pop(key, None)
         episode_plan_display = self._episode_plan_display_text(snapshot, snapshot.get("artifacts") or {})
         if episode_plan_display:
             artifacts[EPISODE_PLAN_DISPLAY_ARTIFACT] = episode_plan_display
@@ -351,13 +363,22 @@ class StageCacheMixin:
             artifacts.get(PARTIAL_SCRIPT_ARTIFACT)
             or raw_artifacts.get(PARTIAL_SCRIPT_ARTIFACT)
         )
-        final_stage_output = pick_best_user_visible_value(
-            artifacts.get("final_output_text")
-            or artifacts.get("final_script")
-            or raw_artifacts.get("final_output_text")
-            or raw_artifacts.get("final_script")
-            or partial_script_output
-        )
+        if self._is_auxiliary_tool_asset(snapshot):
+            final_stage_output = clean_multiline_user_visible_text(
+                artifacts.get("final_output_text")
+                or artifacts.get("final_script")
+                or raw_artifacts.get("final_output_text")
+                or raw_artifacts.get("final_script")
+                or ""
+            )
+        else:
+            final_stage_output = pick_best_user_visible_value(
+                artifacts.get("final_output_text")
+                or artifacts.get("final_script")
+                or raw_artifacts.get("final_output_text")
+                or raw_artifacts.get("final_script")
+                or partial_script_output
+            )
         stage_order = ("framework", "worldview", "final")
         stage_title_map = {
             "framework": "剧本框架",
@@ -571,6 +592,9 @@ class StageCacheMixin:
             "current_stage": snapshot.get("current_stage"),
             "current_stage_label": snapshot.get("current_stage_label") or "待开始",
             "current_batch": snapshot.get("current_batch"),
+            "asset_kind": snapshot.get("asset_kind") or "project",
+            "tool_key": str(snapshot.get("tool_key") or "").strip(),
+            "tool_label": str(snapshot.get("tool_label") or "").strip(),
             "completion_confirmed": completion_confirmed,
             "awaiting_user_confirmation": awaiting_confirmation,
             "cache_retained": bool(snapshot.get("cache_retained", False) or awaiting_confirmation),
@@ -1161,6 +1185,47 @@ class StageCacheMixin:
 
     def _compact_completed_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         compacted = copy.deepcopy(snapshot)
+        if self._is_auxiliary_tool_asset(snapshot):
+            compacted["artifacts"] = _select_non_empty_fields(
+                compacted.get("artifacts") or {},
+                ("story_outline", "final_script", "final_output_text", "tool_filename", "tool_output_type"),
+            )
+            artifacts = compacted.get("artifacts") if isinstance(compacted.get("artifacts"), dict) else {}
+            if isinstance(artifacts, dict):
+                story_outline = clean_user_visible_text(artifacts.get("story_outline")).strip()
+                if story_outline:
+                    artifacts["story_outline"] = story_outline
+                else:
+                    artifacts.pop("story_outline", None)
+                for key in ("final_script", "final_output_text"):
+                    text = clean_multiline_user_visible_text(artifacts.get(key))
+                    if text:
+                        artifacts[key] = text
+                    else:
+                        artifacts.pop(key, None)
+                filename = clean_user_visible_text(artifacts.get("tool_filename")).strip()
+                if filename:
+                    artifacts["tool_filename"] = filename
+                else:
+                    artifacts.pop("tool_filename", None)
+                output_type = clean_user_visible_text(artifacts.get("tool_output_type")).strip()
+                if output_type:
+                    artifacts["tool_output_type"] = output_type
+                else:
+                    artifacts.pop("tool_output_type", None)
+            compacted["input_payload"] = copy.deepcopy(compacted.get("input_payload") or {})
+            compacted["current_node_id"] = None
+            compacted["current_node_name"] = None
+            compacted["current_batch"] = None
+            compacted.pop("debug_state", None)
+            compacted.pop("logs", None)
+            compacted.pop("error", None)
+            compacted.pop("prompt_fixes", None)
+            compacted["completion_confirmed"] = True
+            compacted["awaiting_user_confirmation"] = False
+            compacted["cache_retained"] = False
+            compacted["message"] = str(compacted.get("message") or "").strip() or "辅助工具结果已保存。"
+            return compacted
         compacted["artifacts"] = _select_non_empty_fields(
             compacted.get("artifacts") or {},
             COMPLETED_ARTIFACT_KEYS,
@@ -1222,6 +1287,7 @@ class StageCacheMixin:
         include_private: bool,
         use_teaser: bool,
     ) -> dict[str, Any]:
+        is_tool_asset = self._is_auxiliary_tool_asset(snapshot)
         input_payload = snapshot.get("input_payload") or {}
         artifacts = snapshot.get("artifacts") or {}
         progress_metrics = self._snapshot_progress_metrics(snapshot)
@@ -1231,9 +1297,10 @@ class StageCacheMixin:
             or ""
         ).strip()
         final_script = self._best_final_script_text(snapshot)
-        summary = self._fallback_story_teaser(story_outline) if use_teaser else ""
+        summary_source = story_outline or (final_script if is_tool_asset else "")
+        summary = self._fallback_story_teaser(summary_source) if use_teaser else ""
         if not summary:
-            summary = story_outline or "这个作品还没有填写故事梗概。"
+            summary = summary_source or "这个作品还没有填写故事梗概。"
         payload = {
             "project_id": snapshot.get("project_id"),
             "task_id": snapshot.get("task_id"),
@@ -1255,7 +1322,14 @@ class StageCacheMixin:
             "completion_confirmed": _completion_confirmed(snapshot),
             "awaiting_user_confirmation": _awaiting_completion_confirmation(snapshot),
             "cache_notice": _cache_notice(snapshot),
+            "asset_kind": snapshot.get("asset_kind") or "project",
+            "tool_key": str(snapshot.get("tool_key") or "").strip(),
+            "tool_label": str(snapshot.get("tool_label") or "").strip(),
+            "tool_filename": str(artifacts.get("tool_filename") or "").strip(),
         }
+        if is_tool_asset:
+            payload["current_stage_label"] = str(snapshot.get("tool_label") or snapshot.get("current_stage_label") or "辅助工具结果")
+            payload["generated_episodes"] = 0
         if include_private:
             payload["final_preview"] = final_script[:500]
         return payload

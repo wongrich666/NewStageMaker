@@ -302,6 +302,34 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         except Exception as exc:
             return _json_error(str(exc), status=500, fallback="工具执行失败，请稍后重试。")
         flattened = dict(result)
+        asset_saved = False
+        saved_asset = None
+        asset_save_error = ""
+        if str(flattened.get("text") or "").strip():
+            try:
+                saved_asset = task_manager.save_auxiliary_asset(
+                    user_id=_require_user_id(),
+                    tool_key=tool_key,
+                    request_payload=data if isinstance(data, dict) else {},
+                    result=result,
+                )
+                asset_saved = True
+            except Exception as exc:
+                asset_save_error = _sanitize_error_message(
+                    str(exc),
+                    status=500,
+                    fallback="结果已生成，但写入用户资产失败，请稍后重试。",
+                )
+        flattened["asset_saved"] = asset_saved
+        if saved_asset is not None:
+            flattened["saved_asset"] = saved_asset
+        if asset_save_error:
+            flattened["asset_save_error"] = asset_save_error
+        result["asset_saved"] = asset_saved
+        if saved_asset is not None:
+            result["saved_asset"] = saved_asset
+        if asset_save_error:
+            result["asset_save_error"] = asset_save_error
         ok = bool(flattened.pop("ok", True))
         return _json_ok(ok=ok, result=result, **flattened)
 

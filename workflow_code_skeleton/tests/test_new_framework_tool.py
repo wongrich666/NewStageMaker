@@ -101,7 +101,7 @@ class NewFrameworkToolTests(unittest.TestCase):
         self.assertEqual(result["output_type"], "json")
         self.assertIn("夜行审判", result["text"])
         self.assertEqual(result["debug"]["chosen_output_source"], "newVariables.beatFrameworkContractJson")
-        self.assertTrue(str(result["filename"]).startswith("【新】15内容剧本框架_"))
+        self.assertTrue(str(result["filename"]).startswith("15节拍剧本框架_"))
         self.assertTrue(str(result["filename"]).endswith(".txt"))
 
     def test_new_framework_accepts_answer_text_fallback(self) -> None:

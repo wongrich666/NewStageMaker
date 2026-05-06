@@ -20,6 +20,12 @@ from .unstructured_naturalize import (
 class RuntimeExportStoreMixin:
     def _best_final_script_text(self, snapshot: dict[str, Any]) -> str:
         artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        if str(snapshot.get("asset_kind") or "").strip() == AUXILIARY_TOOL_ASSET_KIND:
+            return clean_multiline_user_visible_text(
+                artifacts.get("final_output_text")
+                or artifacts.get("final_script")
+                or ""
+            )
         debug_state = snapshot.get("debug_state") if isinstance(snapshot.get("debug_state"), dict) else {}
         variables = debug_state.get("variables") if isinstance(debug_state.get("variables"), dict) else {}
         input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}

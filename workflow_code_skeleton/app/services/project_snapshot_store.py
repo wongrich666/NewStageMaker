@@ -329,9 +329,13 @@ class ProjectSnapshotStoreMixin:
             latest_by_user = self._index.get("latest_project_by_user", {})
             latest_project_id = latest_by_user.get(str(int(user_id)))
             if latest_project_id:
-                snapshot = self.get_project_snapshot(int(latest_project_id), user_id=user_id)
-                if snapshot:
-                    return snapshot
+                snapshot = self.get_project_snapshot(
+                    int(latest_project_id),
+                    user_id=user_id,
+                    public_view=False,
+                )
+                if snapshot and not self._is_auxiliary_tool_asset(snapshot):
+                    return self._public_snapshot(snapshot)
 
             candidates: list[dict[str, Any]] = []
             for path in self._iter_project_snapshot_paths():
@@ -339,7 +343,10 @@ class ProjectSnapshotStoreMixin:
                     data = json.loads(path.read_text(encoding="utf-8"))
                 except Exception:
                     continue
-                if self._snapshot_belongs_to_user(data, user_id):
+                if (
+                    self._snapshot_belongs_to_user(data, user_id)
+                    and not self._is_auxiliary_tool_asset(data)
+                ):
                     candidates.append(data)
             if not candidates:
                 return None
@@ -352,7 +359,22 @@ class ProjectSnapshotStoreMixin:
         latest_project_id = self._index.get("latest_project_id")
         if not latest_project_id:
             return None
-        return self.get_project_snapshot(int(latest_project_id))
+        snapshot = self.get_project_snapshot(int(latest_project_id), public_view=False)
+        if snapshot and not self._is_auxiliary_tool_asset(snapshot):
+            return self._public_snapshot(snapshot)
+
+        candidates = [
+            item
+            for item in self._all_project_snapshots()
+            if not self._is_auxiliary_tool_asset(item)
+        ]
+        if not candidates:
+            return None
+        candidates.sort(
+            key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""),
+            reverse=True,
+        )
+        return self._public_snapshot(candidates[0])
 
     def get_project_snapshot(
         self,
@@ -396,6 +418,7 @@ class ProjectSnapshotStoreMixin:
             self._asset_summary(snapshot, include_private=True, use_teaser=False)
             for snapshot in self._all_project_snapshots()
             if self._snapshot_belongs_to_user(snapshot, user_id)
+            and str(snapshot.get("asset_kind") or "").strip() != AUXILIARY_TOOL_ASSET_KIND
         ]
         projects.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return projects
@@ -407,6 +430,7 @@ class ProjectSnapshotStoreMixin:
             if str(snapshot.get("visibility") or "private") == "public"
             and str(snapshot.get("status") or "") == "completed"
             and _completion_confirmed(snapshot)
+            and str(snapshot.get("asset_kind") or "").strip() != AUXILIARY_TOOL_ASSET_KIND
             and bool(self._best_final_script_text(snapshot))
         ]
         assets.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
@@ -421,6 +445,8 @@ class ProjectSnapshotStoreMixin:
         if str(snapshot.get("status") or "") != "completed":
             return None
         if not _completion_confirmed(snapshot):
+            return None
+        if str(snapshot.get("asset_kind") or "").strip() == AUXILIARY_TOOL_ASSET_KIND:
             return None
         artifacts = snapshot.get("artifacts") or {}
         final_script = self._best_final_script_text(snapshot)

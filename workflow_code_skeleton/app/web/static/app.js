@@ -123,6 +123,7 @@
     communityAssets: [],
     editingProjectId: null,
     editingProjectStatus: null,
+    editingAssetKind: "",
     editingAssetLocked: false,
     assetDeleteConfirmResolver: null,
     assetDeleteHideTimer: null,
@@ -204,7 +205,7 @@
     },
     new_framework: {
       key: "new_framework",
-      label: "【新】15内容剧本框架",
+      label: "15节拍剧本框架",
       help: "单独生成 15 节拍剧本框架 / 剧本大纲，并支持下载 TXT。",
       runUrl: "/api/tools/new-framework",
       fields: [
@@ -1544,13 +1545,13 @@
     const title = String(els.editAssetTitle?.value || "").trim();
     const summary = String(els.editAssetSummary?.value || "").trim();
     if (!title) {
-      return { valid: false, message: "剧本标题不能为空。" };
+      return { valid: false, message: "资产标题不能为空。" };
     }
     if (title.length > 120) {
-      return { valid: false, message: "剧本标题请控制在 120 字以内。" };
+      return { valid: false, message: "资产标题请控制在 120 字以内。" };
     }
     if (summary.length > 20000) {
-      return { valid: false, message: "故事梗概请控制在 20000 字以内。" };
+      return { valid: false, message: "摘要内容请控制在 20000 字以内。" };
     }
     return { valid: true, message: "" };
   }
@@ -1704,6 +1705,18 @@
     return state.toolResults[toolKey] || null;
   }
 
+  function isToolAsset(assetLike) {
+    return String(assetLike?.asset_kind || "").trim() === "tool_result";
+  }
+
+  function assetTypeLabel(assetLike) {
+    return isToolAsset(assetLike) ? "辅助工具" : "剧本资产";
+  }
+
+  function assetWorkflowLabel(assetLike) {
+    return String(assetLike?.tool_label || "").trim() || assetTypeLabel(assetLike);
+  }
+
   function downloadToolButtonEnabled(toolKey = state.activeTool) {
     const result = currentToolResult(toolKey);
     return Boolean(result?.text && result?.filename);
@@ -1845,7 +1858,6 @@
     }
     els.toolForms.innerHTML = `
       <div class="tool-form-head">
-        <h3>${escapeHtml(tool.label)}</h3>
         <p>${escapeHtml(tool.help)}</p>
         ${tool.jsonFile ? `<small class="tool-form-meta">工作流：${escapeHtml(tool.jsonFile)}</small>` : ""}
       </div>
@@ -2532,7 +2544,7 @@
       return;
     }
     if (!assets.length) {
-      els.assetsList.innerHTML = emptyCard("还没有剧本资产");
+      els.assetsList.innerHTML = emptyCard("还没有用户资产");
       return;
     }
     const { visibleItems, hasMore } = paginateItems(assets, state.assetsPage, 6);
@@ -2540,21 +2552,25 @@
       <article class="asset-tile">
         <div class="asset-topline">
           <span class="status-pill ${item.status === "completed" ? "status-pill-completed" : ""}">${escapeHtml(statusLabel(item.status))}</span>
-          ${item.completion_confirmed ? '<span class="status-pill status-pill-locked">已锁定</span>' : item.awaiting_user_confirmation ? '<span class="status-pill status-pill-pending">待确认</span>' : ""}
+          ${isToolAsset(item)
+            ? `<span class="status-pill status-pill-pending">${escapeHtml(assetTypeLabel(item))}</span>`
+            : (item.completion_confirmed ? '<span class="status-pill status-pill-locked">已锁定</span>' : item.awaiting_user_confirmation ? '<span class="status-pill status-pill-pending">待确认</span>' : "")}
           <span class="status-pill ${item.visibility === "public" ? "status-pill-public" : "status-pill-private"}">${escapeHtml(visibilityLabel(item.visibility))}</span>
         </div>
         <h3>${escapeHtml(projectDisplayTitle(item))}</h3>
         <p>${escapeHtml(item.summary)}</p>
         <div class="asset-meta">
           <span>项目 ${escapeHtml(item.project_id)}</span>
-          <span>${escapeHtml(item.current_stage_label || "待开始")}</span>
-          <span>${escapeHtml(item.generated_episodes || 0)} / ${escapeHtml(item.total_episodes || 0)}</span>
+          <span>${escapeHtml(isToolAsset(item) ? assetWorkflowLabel(item) : (item.current_stage_label || "待开始"))}</span>
+          <span>${escapeHtml(isToolAsset(item)
+            ? (item.tool_filename || "已保存结果")
+            : `${item.generated_episodes || 0} / ${item.total_episodes || 0}`)}</span>
         </div>
         <div class="asset-actions">
-          <button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>
-          <button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">新页面打开</button>
-          ${item.completion_confirmed ? "" : `<button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">修改</button>`}
-          <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : "公开成品"}</button>
+          ${isToolAsset(item) ? "" : `<button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>`}
+          ${isToolAsset(item) ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">新页面打开</button>`}
+          ${item.completion_confirmed && !isToolAsset(item) ? "" : `<button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">${isToolAsset(item) ? "查看结果" : "修改"}</button>`}
+          <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : (isToolAsset(item) ? "公开结果" : "公开成品")}</button>
           <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除</button>
         </div>
       </article>
@@ -2604,7 +2620,8 @@
     const artifacts = project.artifacts || {};
     state.editingProjectId = Number(projectId);
     state.editingProjectStatus = String(project.status || "");
-    state.editingAssetLocked = Boolean(project.completion_confirmed);
+    state.editingAssetKind = String(project.asset_kind || "").trim();
+    state.editingAssetLocked = Boolean(project.completion_confirmed && state.editingAssetKind !== "tool_result");
     const locked = state.editingAssetLocked;
     els.editAssetTitle.value = project.title || input.title || "";
     els.editAssetSummary.value = input.story_outline || artifacts.story_outline || "";
@@ -2654,6 +2671,7 @@
   function closeAssetEditor() {
     state.editingProjectId = null;
     state.editingProjectStatus = null;
+    state.editingAssetKind = "";
     state.editingAssetLocked = false;
     [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].forEach((field) => {
       if (field) field.disabled = false;
@@ -2680,7 +2698,7 @@
     await loadProjects({ restoreSelection: true, restoreInputs: false });
     await loadAssets();
     await loadCommunity();
-    showToast(nextVisibility === "public" ? "已公开成品" : "已设为不公开", "资产可见性已经更新。");
+    showToast(nextVisibility === "public" ? "已设为公开" : "已设为不公开", "资产可见性已经更新。");
   }
 
   async function deleteAsset(projectId, button = null) {
@@ -2703,7 +2721,7 @@
       });
       await loadAssets();
       await loadCommunity();
-      showToast("资产已删除", "该剧本资产已从当前账号移除。");
+      showToast("资产已删除", "该用户资产已从当前账号移除。");
     });
   }
 
@@ -2726,15 +2744,30 @@
     const output = result.output ?? data.output ?? result.result ?? "";
     const text = String(result.text || data.text || formatToolOutput(output) || "").trim();
     const filename = String(result.filename || data.filename || "").trim();
+    const assetSaved = Boolean(result.asset_saved || data.asset_saved);
+    const assetSaveError = String(result.asset_save_error || data.asset_save_error || "").trim();
     state.toolResults[state.activeTool] = {
       text,
       filename,
-      outputType: result.output_type || data.output_type || "text"
+      outputType: result.output_type || data.output_type || "text",
+      assetSaved,
+      savedAsset: result.saved_asset || data.saved_asset || null
     };
     renderToolOutput(state.activeTool);
+    if (assetSaved) {
+      try {
+        await loadAssets();
+      } catch (_) {
+        // 结果已经生成并写入后端，不阻断当前工具面板的成功态展示。
+      }
+    }
     showToast(
       "辅助工具运行完成",
-      `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果。`,
+      assetSaveError
+        ? `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果，但写入用户资产失败了。`
+        : (assetSaved
+          ? `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果，并已保存到用户资产。`
+          : `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果。`),
     );
   }
 

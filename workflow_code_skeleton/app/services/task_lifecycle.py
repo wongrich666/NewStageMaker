@@ -89,6 +89,148 @@ class TaskLifecycleMixin:
         thread.start()
         return self._public_snapshot(record.clone_snapshot())
 
+    def _render_auxiliary_asset_text(self, value: Any) -> str:
+        if isinstance(value, str):
+            return clean_multiline_user_visible_text(value)
+        if isinstance(value, (dict, list)):
+            try:
+                return clean_multiline_user_visible_text(
+                    json.dumps(value, ensure_ascii=False, indent=2)
+                )
+            except Exception:
+                return clean_multiline_user_visible_text(str(value))
+        return clean_multiline_user_visible_text(value)
+
+    def _auxiliary_asset_title(
+        self,
+        *,
+        tool_label: str,
+        request_payload: dict[str, Any],
+        result: dict[str, Any],
+    ) -> str:
+        suffix = ""
+        filename = str(result.get("filename") or "").strip()
+        if filename:
+            stem = Path(filename).stem.strip()
+            prefix = f"{tool_label}_"
+            if stem.startswith(prefix):
+                suffix = stem[len(prefix):].strip()
+            elif stem and stem != tool_label:
+                suffix = stem
+        if not suffix:
+            output = result.get("output")
+            if isinstance(output, dict):
+                for key in ("script_title_content", "title", "script_title"):
+                    value = clean_user_visible_text(output.get(key)).strip()
+                    if value:
+                        suffix = value
+                        break
+        if not suffix:
+            suffix = clean_user_visible_text(
+                request_payload.get("project_title") or request_payload.get("title") or ""
+            ).strip()
+        return f"{tool_label}｜{suffix}" if suffix else tool_label
+
+    def _auxiliary_asset_story_outline(
+        self,
+        *,
+        request_payload: dict[str, Any],
+        final_text: str,
+    ) -> str:
+        for key in (
+            "story_outline",
+            "story",
+            "user_expectation",
+            "source_outline",
+            "target_style",
+            "characters",
+            "source_characters",
+            "text",
+        ):
+            text = clean_user_visible_text(request_payload.get(key)).strip()
+            if text:
+                return text
+        return clean_multiline_user_visible_text(final_text)
+
+    def save_auxiliary_asset(
+        self,
+        *,
+        user_id: int,
+        tool_key: str,
+        request_payload: dict[str, Any],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        tool_label = clean_user_visible_text(result.get("title") or tool_key).strip() or "辅助工具"
+        final_text = self._render_auxiliary_asset_text(result.get("text") or result.get("output") or "")
+        if not final_text:
+            raise ValueError("辅助工具结果为空，暂时无法保存到用户资产。")
+
+        project_id = self._next_project_id()
+        timestamp = now_iso()
+        story_outline = self._auxiliary_asset_story_outline(
+            request_payload=request_payload,
+            final_text=final_text,
+        )
+        title = self._auxiliary_asset_title(
+            tool_label=tool_label,
+            request_payload=request_payload,
+            result=result,
+        )
+        total_episodes = _safe_int(request_payload.get("total_episodes"), 0)
+        snapshot = {
+            "user_id": int(user_id),
+            "project_id": project_id,
+            "task_id": f"tool-{tool_key}-{uuid.uuid4().hex[:10]}",
+            "status": "completed",
+            "title": title,
+            "message": "辅助工具结果已保存到用户资产。",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "finished_at": timestamp,
+            "workflow_spec_path": "",
+            "visibility": "private",
+            "model_option": None,
+            "asset_kind": AUXILIARY_TOOL_ASSET_KIND,
+            "tool_key": str(tool_key or "").strip(),
+            "tool_label": tool_label,
+            "tool_request_payload": copy.deepcopy(request_payload or {}),
+            "tool_output_type": str(result.get("output_type") or "").strip(),
+            "tool_output_source": str((result.get("debug") or {}).get("chosen_output_source") or "").strip(),
+            "input_payload": {
+                "title": title,
+                "story_outline": story_outline,
+                "total_episodes": max(0, int(total_episodes or 0)),
+            },
+            "artifacts": {
+                "story_outline": story_outline,
+                "final_script": final_text,
+                "final_output_text": final_text,
+                "tool_filename": clean_user_visible_text(result.get("filename")).strip(),
+                "tool_output_type": str(result.get("output_type") or "").strip(),
+            },
+            "logs": [],
+            "progress_percent": 100,
+            "generated_episodes": 0,
+            "total_episodes": max(0, int(total_episodes or 0)),
+            "current_stage": str(tool_key or "").strip(),
+            "current_stage_label": tool_label,
+            "current_node_id": None,
+            "current_node_name": None,
+            "current_batch": None,
+            "completion_confirmed": True,
+            "awaiting_user_confirmation": False,
+            "cache_retained": False,
+            "debug_state": {},
+            "wait_elapsed_ms": 0,
+            "wait_started_at": None,
+        }
+        compacted = self._compact_completed_snapshot(snapshot)
+        self._project_path(project_id).write_text(
+            json.dumps(compacted, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return self._public_snapshot(compacted)
+
     def update_project_asset(
         self,
         project_id: int,
@@ -103,7 +245,8 @@ class TaskLifecycleMixin:
             snapshot = self.get_project_snapshot(project_id, user_id=user_id, public_view=False)
         if not snapshot or not self._snapshot_belongs_to_user(snapshot, user_id):
             raise ValueError("项目不存在或无权操作")
-        if _completion_confirmed(snapshot) and any(
+        is_tool_asset = self._is_auxiliary_tool_asset(snapshot)
+        if (not is_tool_asset) and _completion_confirmed(snapshot) and any(
             key in changes for key in ("title", "story_outline", "final_script")
         ):
             raise ValueError("该剧本已确认满意完成，正文内容已锁定；如需调整请重新生成。公开/私有仍可随时切换。")
@@ -121,11 +264,12 @@ class TaskLifecycleMixin:
         if story_outline:
             snapshot.setdefault("input_payload", {})["story_outline"] = story_outline
             artifacts = dict(snapshot.get("artifacts") or {})
+            artifacts["story_outline"] = story_outline
             artifacts.pop(STORY_TEASER_ARTIFACT, None)
             artifacts.pop(STORY_TEASER_SOURCE_ARTIFACT, None)
             snapshot["artifacts"] = artifacts
         if final_script is not None:
-            text = clean_user_visible_text(final_script).strip()
+            text = clean_multiline_user_visible_text(final_script) if is_tool_asset else clean_user_visible_text(final_script).strip()
             artifacts = dict(snapshot.get("artifacts") or {})
             artifacts["final_script"] = text
             artifacts["final_output_text"] = text

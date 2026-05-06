@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 import unittest
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from workflow_code_skeleton.app.server import create_app
 from workflow_code_skeleton.app.services.auth_store import auth_store
@@ -65,10 +65,10 @@ class ServerToolsApiTests(unittest.TestCase):
         fake_result = {
             "ok": True,
             "tool_id": "new_framework",
-            "title": "【新】15内容剧本框架",
+            "title": "15节拍剧本框架",
             "output": "15 节拍框架正文",
             "text": "15 节拍框架正文",
-            "filename": "【新】15内容剧本框架_20260506_153000.txt",
+            "filename": "15节拍剧本框架_20260506_153000.txt",
             "debug": {"chosen_output_source": "root.answerText"},
             "schema": {"fields": [{"name": "story"}]},
         }
@@ -90,7 +90,7 @@ class ServerToolsApiTests(unittest.TestCase):
         payload = response.get_json()
         self.assertTrue(payload["success"])
         self.assertEqual(payload["tool_id"], "new_framework")
-        self.assertEqual(payload["filename"], "【新】15内容剧本框架_20260506_153000.txt")
+        self.assertEqual(payload["filename"], "15节拍剧本框架_20260506_153000.txt")
         mocked.assert_called_once_with(
             "new_framework",
             {
@@ -102,6 +102,91 @@ class ServerToolsApiTests(unittest.TestCase):
                 "target_audience": "",
             },
         )
+
+    def test_new_framework_api_saves_successful_result_into_user_assets(self) -> None:
+        fake_result = {
+            "ok": True,
+            "tool_id": "new_framework",
+            "title": "15节拍剧本框架",
+            "output": "第一行\n第二行",
+            "text": "第一行\n第二行",
+            "filename": "15节拍剧本框架_夜行审判.txt",
+            "debug": {"chosen_output_source": "root.answerText"},
+            "schema": {"fields": [{"name": "story"}]},
+        }
+        saved_asset = {
+            "project_id": 99,
+            "asset_kind": "tool_result",
+            "title": "15节拍剧本框架｜夜行审判",
+        }
+        request_payload = {
+            "story": "测试故事",
+            "character_count": 5,
+            "story_scale": "连载爆款短剧",
+            "total_episodes": 60,
+            "genre_tone": "",
+            "target_audience": "",
+        }
+        with patch("workflow_code_skeleton.app.server.run_simple_tool", return_value=fake_result), patch(
+            "workflow_code_skeleton.app.server.task_manager.save_auxiliary_asset",
+            return_value=saved_asset,
+        ) as mocked_save:
+            response = self.client.post(
+                "/api/tools/new-framework",
+                headers=self.headers,
+                json=request_payload,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["asset_saved"])
+        self.assertEqual(payload["saved_asset"], saved_asset)
+        self.assertTrue(payload["result"]["asset_saved"])
+        self.assertEqual(payload["result"]["saved_asset"], saved_asset)
+        mocked_save.assert_called_once_with(
+            user_id=ANY,
+            tool_key="new_framework",
+            request_payload=request_payload,
+            result=fake_result,
+        )
+
+    def test_new_framework_api_reports_asset_save_failure_without_losing_result(self) -> None:
+        fake_result = {
+            "ok": True,
+            "tool_id": "new_framework",
+            "title": "15节拍剧本框架",
+            "output": "15 节拍框架正文",
+            "text": "15 节拍框架正文",
+            "filename": "15节拍剧本框架_20260506_153000.txt",
+            "debug": {"chosen_output_source": "root.answerText"},
+            "schema": {"fields": [{"name": "story"}]},
+        }
+        with patch("workflow_code_skeleton.app.server.run_simple_tool", return_value=fake_result), patch(
+            "workflow_code_skeleton.app.server.task_manager.save_auxiliary_asset",
+            side_effect=RuntimeError("磁盘写入失败"),
+        ):
+            response = self.client.post(
+                "/api/tools/new-framework",
+                headers=self.headers,
+                json={
+                    "story": "测试故事",
+                    "character_count": 5,
+                    "story_scale": "连载爆款短剧",
+                    "total_episodes": 60,
+                    "genre_tone": "",
+                    "target_audience": "",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertFalse(payload["asset_saved"])
+        self.assertIn("写入用户资产失败", payload["asset_save_error"])
+        self.assertFalse(payload["result"]["asset_saved"])
+        self.assertIn("写入用户资产失败", payload["result"]["asset_save_error"])
+        self.assertEqual(payload["text"], "15 节拍框架正文")
 
     def test_run_tool_api_surfaces_specific_tool_error(self) -> None:
         error = ToolExecutionError(
