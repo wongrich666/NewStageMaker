@@ -142,6 +142,44 @@ APPEARANCE_MAPPING_STAGE_NAMES = {
     STAGE_APPEARANCE_ALIAS_REWRITE,
 }
 APPEARANCE_DEFAULT_FORBIDDEN_GENERIC_NAMES = ["男主", "女主", "反派", "配角"]
+
+_NEW_ALIAS_NAME_RE = re.compile(
+    r"^(?P<name>[^()（）【】\[\]\s]{1,40})\((?P<tag>[^()（）【】\[\]\s]{1,40})\)$"
+)
+_OLD_ALIAS_NAME_RE = re.compile(r"^(?P<name>[^【】()（）\[\]\s]{1,40})【(?P<tag>[^【】()（）\[\]\s]{1,40})】$")
+_CN_PAREN_ALIAS_NAME_RE = re.compile(r"^(?P<name>[^【】()（）\[\]\s]{1,40})（(?P<tag>[^【】()（）\[\]\s]{1,40})）$")
+
+_GENERIC_ALIAS_NAMES = {"男主", "女主", "反派", "配角", "主角", "男二", "女二", "路人"}
+
+
+def normalize_appearance_alias_name(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    old_match = _OLD_ALIAS_NAME_RE.match(text)
+    if old_match:
+        return f"{old_match.group('name')}({old_match.group('tag')})"
+
+    cn_paren_match = _CN_PAREN_ALIAS_NAME_RE.match(text)
+    if cn_paren_match:
+        return f"{cn_paren_match.group('name')}({cn_paren_match.group('tag')})"
+
+    return text
+
+
+def _is_valid_new_alias_name(value: object) -> bool:
+    text = normalize_appearance_alias_name(value)
+    match = _NEW_ALIAS_NAME_RE.match(text)
+    if not match:
+        return False
+
+    character_name = match.group("name").strip()
+    if character_name in _GENERIC_ALIAS_NAMES:
+        return False
+
+    return True
+
 APPEARANCE_TOP_LEVEL_ALIASES: dict[str, tuple[str, ...]] = {
     "mapping_principle": ("mapping_principle", "mappingPrinciple", "principle"),
     "global_naming_style": ("global_naming_style", "globalNamingStyle", "naming_style"),
@@ -2085,7 +2123,7 @@ def _canonicalize_appearance_mapping_body(
         warnings.append("appearance_mapping.mapping_principle 缺失，已补默认映射原则")
     if not str(normalized.get("global_naming_style") or "").strip():
         normalized["global_naming_style"] = (
-            "统一使用“角色中文全名【场景/状态/身份】”格式；常态默认使用 default_name。"
+            "统一使用“角色中文全名(场景/状态/身份)”格式；常态默认使用 default_name。"
         )
         warnings.append("appearance_mapping.global_naming_style 缺失，已补默认命名风格")
     if not isinstance(normalized.get("characters"), list):
@@ -2265,15 +2303,33 @@ def _normalize_appearance_outfit_variants(
                 variant[field_name] = raw
             else:
                 variant[field_name] = _normalize_text_value(raw)
-        alias_name = str(variant.get("alias_name") or "").strip()
+        alias_name = normalize_appearance_alias_name(variant.get("alias_name"))
+
         if not alias_name:
-            alias_name = default_name or _default_variant_alias_name(character_name, variant_index)
-            if alias_name:
-                variant["alias_name"] = alias_name
+            alias_name = _default_variant_alias_name(character_name or default_name, variant_index)
+            variant["alias_name"] = alias_name
+            warnings.append(
+                "appearance_mapping.characters"
+                f"[{index}].outfit_variants[{variant_index}].alias_name 缺失，已补为 {alias_name}"
+            )
+        else:
+            normalized_alias_name = normalize_appearance_alias_name(alias_name)
+            if normalized_alias_name != str(variant.get("alias_name") or "").strip():
                 warnings.append(
                     "appearance_mapping.characters"
-                    f"[{index}].outfit_variants[{variant_index}].alias_name 缺失，已补为 {alias_name}"
+                    f"[{index}].outfit_variants[{variant_index}].alias_name 已从旧格式归一化为 {normalized_alias_name}"
                 )
+            alias_name = normalized_alias_name
+            variant["alias_name"] = alias_name
+
+        if not _is_valid_new_alias_name(alias_name):
+            fallback_alias_name = _default_variant_alias_name(character_name or default_name, variant_index)
+            warnings.append(
+                "appearance_mapping.characters"
+                f"[{index}].outfit_variants[{variant_index}].alias_name={alias_name} 不符合新格式，已回退为 {fallback_alias_name}"
+            )
+            alias_name = fallback_alias_name
+            variant["alias_name"] = alias_name
         identity_state = str(variant.get("applicable_identity_state") or "").strip()
         if not identity_state:
             identity_state = _extract_identity_state_from_alias(alias_name) or "常态"
@@ -2538,14 +2594,14 @@ def _stable_character_id(name: str, *, index: int) -> str:
 
 def _default_variant_alias_name(character_name: str, variant_index: int) -> str:
     base = str(character_name or "").strip() or f"角色{variant_index}"
-    return f"{base}【常态】"
+    return f"{base}(常态)"
 
 
 def _extract_identity_state_from_alias(alias_name: str) -> str:
     text = str(alias_name or "").strip()
     if not text:
         return ""
-    for pattern in (r"【([^】]+)】", r"\[([^\]]+)\]"):
+    for pattern in (r"\(([^)]+)\)", r"（([^）]+)）", r"【([^】]+)】", r"\[([^\]]+)\]"):
         match = re.search(pattern, text)
         if match:
             return str(match.group(1) or "").strip()
@@ -2746,9 +2802,14 @@ def _validate_appearance_mapping_contract_shape(value: Any) -> list[str]:
             ):
                 if not str(variant.get(key) or "").strip():
                     issues.append(f"{variant_prefix}.{key} 不能为空")
-            alias_name = str(variant.get("alias_name") or "").strip()
-            if alias_name and ("【" not in alias_name or "】" not in alias_name):
-                issues.append(f"{variant_prefix}.alias_name 必须包含中文方括号【】")
+            alias_name = normalize_appearance_alias_name(variant.get("alias_name"))
+            if alias_name:
+                variant["alias_name"] = alias_name
+
+            if not _is_valid_new_alias_name(alias_name):
+                issues.append(
+                    f"{variant_prefix}.alias_name 必须使用“角色中文全名(场景/状态/身份)”格式"
+                )
             if not _normalize_string_list(variant.get("visual_keypoints")):
                 issues.append(f"{variant_prefix}.visual_keypoints 必须是非空数组")
 
@@ -2797,11 +2858,15 @@ def _validate_appearance_mapping_local_review(value: Any) -> list[str]:
                 if not isinstance(alias_item, dict):
                     issues.append(f"{alias_prefix} 必须是 object")
                     continue
-                alias_name = str(alias_item.get("recommended_alias_name") or "").strip()
+                alias_name = normalize_appearance_alias_name(alias_item.get("recommended_alias_name"))
                 if not alias_name:
                     issues.append(f"{alias_prefix}.recommended_alias_name 不能为空")
-                elif "【" not in alias_name or "】" not in alias_name:
-                    issues.append(f"{alias_prefix}.recommended_alias_name 必须包含中文方括号【】")
+                else:
+                    alias_item["recommended_alias_name"] = alias_name
+                    if not _is_valid_new_alias_name(alias_name):
+                        issues.append(
+                            f"{alias_prefix}.recommended_alias_name 必须使用“角色中文全名(场景/状态/身份)”格式"
+                        )
                 if not str(alias_item.get("reason") or "").strip():
                     issues.append(f"{alias_prefix}.reason 不能为空")
 
@@ -2823,11 +2888,15 @@ def _validate_appearance_mapping_local_review(value: Any) -> list[str]:
                 if not isinstance(alias_item, dict):
                     issues.append(f"{alias_prefix} 必须是 object")
                     continue
-                alias_name = str(alias_item.get("alias_name") or "").strip()
+                alias_name = normalize_appearance_alias_name(alias_item.get("alias_name"))
                 if not alias_name:
                     issues.append(f"{alias_prefix}.alias_name 不能为空")
-                elif "【" not in alias_name or "】" not in alias_name:
-                    issues.append(f"{alias_prefix}.alias_name 必须包含中文方括号【】")
+                else:
+                    alias_item["alias_name"] = alias_name
+                    if not _is_valid_new_alias_name(alias_name):
+                        issues.append(
+                            f"{alias_prefix}.alias_name 必须使用“角色中文全名(场景/状态/身份)”格式"
+                        )
                 if not str(alias_item.get("reason") or "").strip():
                     issues.append(f"{alias_prefix}.reason 不能为空")
     return issues
