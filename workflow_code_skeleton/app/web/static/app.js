@@ -90,6 +90,7 @@
     profileMessage: $("profileMessage"),
     toolForms: $("toolForms"),
     runToolBtn: $("runToolBtn"),
+    downloadToolBtn: $("downloadToolBtn"),
     toolOutputBox: $("toolOutputBox"),
 
     statusText: $("statusText"),
@@ -127,6 +128,8 @@
     assetDeleteHideTimer: null,
     toolDefinitions: {},
     activeTool: "character_reskin",
+    toolDrafts: {},
+    toolResults: {},
     loadingActions: {},
     assetsStatus: "idle",
     assetsError: "",
@@ -195,6 +198,22 @@
         { name: "source_script", label: "原剧本正文", type: "textarea", placeholder: "原剧本正文。", required: true },
         { name: "total_episodes", label: "总集数", type: "number", placeholder: "总集数。", required: true },
         { name: "episode_word_count", label: "每集正文字数", type: "number", placeholder: "每集字数。", required: true }
+      ],
+      configured: false,
+      source: "fallback"
+    },
+    new_framework: {
+      key: "new_framework",
+      label: "15节拍剧本框架",
+      help: "单独生成 15 节拍剧本框架 / 剧本大纲，并支持下载 TXT。",
+      runUrl: "/api/tools/new-framework",
+      fields: [
+        { name: "story", label: "用户想要的故事", type: "textarea", placeholder: "输入故事方向、题材、人设、世界观、核心设定或一句话梗概。", required: true, defaultValue: "" },
+        { name: "character_count", label: "角色数量", type: "number", placeholder: "需要生成的核心角色数量。", required: true, defaultValue: "" },
+        { name: "story_scale", label: "故事体量", type: "input", placeholder: "例如：电影、短剧、长篇连续剧、单集剧本。", required: false, defaultValue: "连载爆款短剧" },
+        { name: "total_episodes", label: "总集数或章节数", type: "number", placeholder: "例如 60。", required: true, defaultValue: 60 },
+        { name: "genre_tone", label: "题材风格", type: "input", placeholder: "例如：悬疑复仇、都市情感、古装权谋。", required: false, defaultValue: "" },
+        { name: "target_audience", label: "目标受众或平台风格", type: "input", placeholder: "例如：短剧爽感、长剧强情节、女性向。", required: false, defaultValue: "" }
       ],
       configured: false,
       source: "fallback"
@@ -1387,6 +1406,9 @@
     if (els.runToolBtn) {
       els.runToolBtn.disabled = isActionLoading("runTool") || !toolValidation.valid;
     }
+    if (els.downloadToolBtn) {
+      els.downloadToolBtn.disabled = isActionLoading("runTool") || !downloadToolButtonEnabled();
+    }
     if (els.saveAssetEditBtn && state.editingProjectId) {
       els.saveAssetEditBtn.disabled = isActionLoading("saveAsset") || !assetValidation.valid;
     }
@@ -1574,6 +1596,7 @@
       help: tool.help || fallback.help || "",
       configured: tool.configured !== false,
       source: tool.source || fallback.source || "fallback",
+      runUrl: tool.run_url || fallback.runUrl || "",
       jsonFile: tool.json_file || tool.workflow_json_file || null,
       fields: Array.isArray(tool.fields) && tool.fields.length
         ? tool.fields.map((field) => ({
@@ -1581,10 +1604,140 @@
           label: field.label || field.name,
           type: field.type || "input",
           placeholder: field.placeholder || "",
-          required: Boolean(field.required)
+          required: Boolean(field.required),
+          defaultValue: field.default_value ?? field.defaultValue ?? ""
         }))
         : (fallback.fields || []).map((field) => ({ ...field }))
     };
+  }
+
+  function currentToolRunUrl(toolKey = state.activeTool) {
+    const tool = toolConfig(toolKey);
+    return tool?.runUrl || `/api/tools/${toolKey}/run`;
+  }
+
+  function projectTitleCandidate() {
+    const title = runtimeProjectDisplayTitle(state.latestSnapshot);
+    if (!title || ["未选中", "未命名剧本"].includes(title) || /^项目\s+\d+$/.test(title)) {
+      return "";
+    }
+    return title;
+  }
+
+  function currentExpectationCandidate() {
+    return String(els.expectationInput?.value || "").trim()
+      || String(state.latestSnapshot?.input_payload?.user_expectation || "").trim();
+  }
+
+  function currentCharacterCountCandidate() {
+    const fromInput = Number(els.characterCountInput?.value || 0);
+    if (Number.isFinite(fromInput) && fromInput > 0) return fromInput;
+    const fromSnapshot = Number(state.latestSnapshot?.input_payload?.character_count || 0);
+    return Number.isFinite(fromSnapshot) && fromSnapshot > 0 ? fromSnapshot : "";
+  }
+
+  function currentEpisodeCountCandidate() {
+    const fromInput = Number(els.episodeCountInput?.value || 0);
+    if (Number.isFinite(fromInput) && fromInput > 0) return fromInput;
+    const fromSnapshot = Number(state.latestSnapshot?.input_payload?.total_episodes || 0);
+    return Number.isFinite(fromSnapshot) && fromSnapshot > 0 ? fromSnapshot : "";
+  }
+
+  function buildNewFrameworkStoryPrefill() {
+    const parts = [];
+    const title = projectTitleCandidate();
+    const expectation = currentExpectationCandidate();
+    if (title) {
+      parts.push(`剧本标题：${title}`);
+    }
+    if (expectation) {
+      parts.push(expectation);
+    }
+    return parts.join("\n").trim();
+  }
+
+  function toolFieldInitialValue(toolKey, field) {
+    if (toolKey === "new_framework") {
+      if (field.name === "story") return buildNewFrameworkStoryPrefill();
+      if (field.name === "character_count") return currentCharacterCountCandidate();
+      if (field.name === "total_episodes") return currentEpisodeCountCandidate() || field.defaultValue || 60;
+      if (field.name === "story_scale") return field.defaultValue || "连载爆款短剧";
+      if (field.name === "genre_tone") return "";
+      if (field.name === "target_audience") return "";
+    }
+    return field.defaultValue ?? "";
+  }
+
+  function normalizeToolFieldValue(field, value) {
+    if (field.type === "number") {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed > 0 ? String(parsed) : "";
+    }
+    return String(value ?? "").trim();
+  }
+
+  function ensureToolDraft(toolKey) {
+    const tool = toolConfig(toolKey);
+    const existing = state.toolDrafts[tool.key] || {};
+    const nextDraft = {};
+    for (const field of tool.fields || []) {
+      const hasExistingValue = Object.prototype.hasOwnProperty.call(existing, field.name);
+      nextDraft[field.name] = hasExistingValue
+        ? normalizeToolFieldValue(field, existing[field.name])
+        : normalizeToolFieldValue(field, toolFieldInitialValue(tool.key, field));
+    }
+    state.toolDrafts[tool.key] = nextDraft;
+    return nextDraft;
+  }
+
+  function rememberCurrentToolDraft() {
+    const tool = toolConfig(state.activeTool);
+    const currentDraft = state.toolDrafts[tool.key] ? { ...state.toolDrafts[tool.key] } : {};
+    document.querySelectorAll("[data-tool-field]").forEach((field) => {
+      const key = field.dataset.toolField;
+      currentDraft[key] = field.type === "number" ? String(field.value || "").trim() : String(field.value || "");
+    });
+    state.toolDrafts[tool.key] = currentDraft;
+  }
+
+  function currentToolResult(toolKey = state.activeTool) {
+    return state.toolResults[toolKey] || null;
+  }
+
+  function downloadToolButtonEnabled(toolKey = state.activeTool) {
+    const result = currentToolResult(toolKey);
+    return Boolean(result?.text && result?.filename);
+  }
+
+  function renderToolOutput(toolKey = state.activeTool, fallbackText = "") {
+    const result = currentToolResult(toolKey);
+    if (els.toolOutputBox) {
+      els.toolOutputBox.textContent = result?.text
+        || fallbackText
+        || (isAuthenticated()
+          ? "这里会显示辅助工具结果。"
+          : "登录后可使用辅助工具。");
+    }
+    if (els.downloadToolBtn) {
+      const shouldShow = Boolean(result?.text && result?.filename);
+      els.downloadToolBtn.classList.toggle("hidden", !shouldShow);
+      els.downloadToolBtn.disabled = !shouldShow || isActionLoading("runTool");
+      if (shouldShow) {
+        els.downloadToolBtn.textContent = "下载 TXT";
+      }
+    }
+  }
+
+  function downloadTextFile(text, filename) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const objectUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = filename || "tool_output.txt";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 0);
   }
 
   function renderToolList() {
@@ -1686,6 +1839,7 @@
     if (!els.toolForms) return;
     const tool = toolConfig(toolKey);
     state.activeTool = tool.key;
+    const toolDraft = ensureToolDraft(tool.key);
     if (els.toolPanelTitle) {
       els.toolPanelTitle.textContent = tool.label;
     }
@@ -1695,20 +1849,21 @@
         <p>${escapeHtml(tool.help)}</p>
         ${tool.jsonFile ? `<small class="tool-form-meta">工作流：${escapeHtml(tool.jsonFile)}</small>` : ""}
       </div>
-      <div class="tool-field-grid">
+        <div class="tool-field-grid">
         ${tool.fields.map((field) => {
+          const fieldValue = toolDraft[field.name] ?? "";
           if (field.type === "textarea") {
             return `
               <label class="field tool-field wide-field">
                 <span>${escapeHtml(field.label)}${field.required ? " *" : ""}</span>
-                <textarea data-tool-field="${escapeHtml(field.name)}" placeholder="${escapeHtml(field.placeholder)}"></textarea>
+                <textarea data-tool-field="${escapeHtml(field.name)}" placeholder="${escapeHtml(field.placeholder)}">${escapeHtml(fieldValue)}</textarea>
               </label>
             `;
           }
           return `
             <label class="field tool-field">
               <span>${escapeHtml(field.label)}${field.required ? " *" : ""}</span>
-              <input data-tool-field="${escapeHtml(field.name)}" type="${escapeHtml(field.type === "number" ? "number" : "text")}" placeholder="${escapeHtml(field.placeholder)}">
+              <input data-tool-field="${escapeHtml(field.name)}" type="${escapeHtml(field.type === "number" ? "number" : "text")}" placeholder="${escapeHtml(field.placeholder)}" value="${escapeHtml(fieldValue)}">
             </label>
           `;
         }).join("")}
@@ -1720,13 +1875,14 @@
         ? "登录后可运行"
         : (tool.configured ? `运行${tool.label}` : `${tool.label} 待配置`);
     }
-    if (els.toolOutputBox) {
-      els.toolOutputBox.textContent = !isAuthenticated()
+    renderToolOutput(
+      tool.key,
+      !isAuthenticated()
         ? "登录后可使用辅助工具。"
         : (tool.configured
           ? "这里会显示辅助工具结果。"
-          : "当前工具还未配置 API Key，配置后即可运行。");
-    }
+          : "当前工具还未配置 API Key，配置后即可运行。")
+    );
     syncButtons();
   }
 
@@ -2554,18 +2710,42 @@
   async function runActiveTool() {
     if (!requireLogin()) return;
     const payload = collectToolPayload();
-    els.toolOutputBox.textContent = "正在调用 FastGPT 工具，请稍候。";
-    const data = await requestJson(`/api/tools/${state.activeTool}/run`, {
+    if (state.activeTool === "new_framework") {
+      const projectTitle = projectTitleCandidate();
+      if (projectTitle) {
+        payload.project_title = projectTitle;
+      }
+    }
+    state.toolResults[state.activeTool] = null;
+    renderToolOutput(state.activeTool, "正在调用 FastGPT 工具，请稍候。");
+    const data = await requestJson(currentToolRunUrl(state.activeTool), {
       method: "POST",
       body: JSON.stringify(payload)
     });
     const result = data.result || data;
     const output = result.output ?? data.output ?? result.result ?? "";
-    els.toolOutputBox.textContent = formatToolOutput(output);
+    const text = String(result.text || data.text || formatToolOutput(output) || "").trim();
+    const filename = String(result.filename || data.filename || "").trim();
+    state.toolResults[state.activeTool] = {
+      text,
+      filename,
+      outputType: result.output_type || data.output_type || "text"
+    };
+    renderToolOutput(state.activeTool);
     showToast(
       "辅助工具运行完成",
       `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果。`,
     );
+  }
+
+  function downloadActiveToolResult() {
+    const result = currentToolResult();
+    if (!result?.text || !result?.filename) {
+      showToast("暂无可下载内容", "请先成功生成 15 节拍剧本框架。");
+      return;
+    }
+    downloadTextFile(result.text, result.filename);
+    showToast("TXT 已开始下载", result.filename);
   }
 
   async function updateUsername(event) {
@@ -2691,8 +2871,14 @@
         syncButtons();
       });
     });
-    els.toolForms?.addEventListener("input", syncButtons);
-    els.toolForms?.addEventListener("change", syncButtons);
+    els.toolForms?.addEventListener("input", () => {
+      rememberCurrentToolDraft();
+      syncButtons();
+    });
+    els.toolForms?.addEventListener("change", () => {
+      rememberCurrentToolDraft();
+      syncButtons();
+    });
     [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].filter(Boolean).forEach((el) => {
       el.addEventListener("input", syncButtons);
       el.addEventListener("change", syncButtons);
@@ -2920,6 +3106,7 @@
 
     els.closeToolPanelBtn?.addEventListener("click", closeToolPanel);
     els.closeCommunityPanelBtn?.addEventListener("click", closeCommunityPanel);
+    els.downloadToolBtn?.addEventListener("click", downloadActiveToolResult);
 
     els.runToolBtn?.addEventListener("click", async () => {
       try {

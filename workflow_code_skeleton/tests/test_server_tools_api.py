@@ -61,6 +61,48 @@ class ServerToolsApiTests(unittest.TestCase):
         self.assertEqual(payload["result"]["output"], "审核通过，节奏顺畅。")
         mocked.assert_called_once_with("hot_review", {"text": "测试正文"})
 
+    def test_new_framework_api_uses_dedicated_route_and_returns_filename(self) -> None:
+        fake_result = {
+            "ok": True,
+            "tool_id": "new_framework",
+            "title": "15节拍剧本框架",
+            "output": "15 节拍框架正文",
+            "text": "15 节拍框架正文",
+            "filename": "15节拍剧本框架_20260506_153000.txt",
+            "debug": {"chosen_output_source": "root.answerText"},
+            "schema": {"fields": [{"name": "story"}]},
+        }
+        with patch("workflow_code_skeleton.app.server.run_simple_tool", return_value=fake_result) as mocked:
+            response = self.client.post(
+                "/api/tools/new-framework",
+                headers=self.headers,
+                json={
+                    "story": "测试故事",
+                    "character_count": 5,
+                    "story_scale": "连载爆款短剧",
+                    "total_episodes": 60,
+                    "genre_tone": "",
+                    "target_audience": "",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["tool_id"], "new_framework")
+        self.assertEqual(payload["filename"], "15节拍剧本框架_20260506_153000.txt")
+        mocked.assert_called_once_with(
+            "new_framework",
+            {
+                "story": "测试故事",
+                "character_count": 5,
+                "story_scale": "连载爆款短剧",
+                "total_episodes": 60,
+                "genre_tone": "",
+                "target_audience": "",
+            },
+        )
+
     def test_run_tool_api_surfaces_specific_tool_error(self) -> None:
         error = ToolExecutionError(
             "爆款文审核缺少必填项：text",

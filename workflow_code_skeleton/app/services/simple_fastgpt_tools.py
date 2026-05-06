@@ -5,6 +5,7 @@ import json
 import os
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ class SimpleToolField:
     placeholder: str
     required: bool = False
     source: str = "workflow_json"
+    default_value: Any = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +44,13 @@ class SimpleToolDefinition:
     json_name_patterns: tuple[str, ...]
     fallback_fields: tuple[SimpleToolField, ...] = ()
     fallback_message_field: str | None = None
+    field_overrides: tuple[SimpleToolField, ...] = ()
+    field_aliases: tuple[tuple[str, str], ...] = ()
+    force_field_overrides: bool = False
+    prefer_structured_output: bool = False
+    prefer_named_text_over_choices: bool = False
+    filename_prefix: str | None = None
+    run_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +70,10 @@ class ResolvedSimpleTool:
     visible_output_fields: tuple[str, ...]
     api_key_envs: tuple[str, ...]
     url_envs: tuple[str, ...]
+    prefer_structured_output: bool
+    prefer_named_text_over_choices: bool
+    filename_prefix: str | None
+    run_path: str
 
 
 class ToolExecutionError(RuntimeError):
@@ -118,6 +131,78 @@ TOOL_DEFINITIONS: dict[str, SimpleToolDefinition] = {
         help_text="保留主剧情结构，重点替换人物设定与角色表现。",
         json_name_patterns=("只换人设", "换皮只换人设"),
     ),
+    "new_framework": SimpleToolDefinition(
+        key="new_framework",
+        label="15节拍剧本框架",
+        env_prefix="FASTGPT_NEW_FRAMEWORK",
+        help_text="单独生成 15 节拍剧本框架 / 剧本大纲，并支持下载 TXT。",
+        json_name_patterns=("15内容新框架编写", "15节拍剧本框架"),
+        field_overrides=(
+            SimpleToolField(
+                name="story",
+                label="用户想要的故事",
+                input_type="textarea",
+                placeholder="输入故事方向、题材、人设、世界观、核心设定或一句话梗概。",
+                required=True,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="character_count",
+                label="角色数量",
+                input_type="number",
+                placeholder="需要生成的核心角色数量。",
+                required=True,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="story_scale",
+                label="故事体量",
+                input_type="input",
+                placeholder="例如：电影、短剧、长篇连续剧、单集剧本。",
+                required=False,
+                source="tool_definition",
+                default_value="连载爆款短剧",
+            ),
+            SimpleToolField(
+                name="total_episodes",
+                label="总集数或章节数",
+                input_type="number",
+                placeholder="例如 60。",
+                required=True,
+                source="tool_definition",
+                default_value=60,
+            ),
+            SimpleToolField(
+                name="genre_tone",
+                label="题材风格",
+                input_type="input",
+                placeholder="例如：悬疑复仇、都市情感、古装权谋、奇幻冒险。",
+                required=False,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="target_audience",
+                label="目标受众或平台风格",
+                input_type="input",
+                placeholder="例如：短剧爽感、长剧强情节、女性向、年轻观众。",
+                required=False,
+                source="tool_definition",
+            ),
+        ),
+        field_aliases=(
+            ("story", "wjmWDwbg"),
+            ("character_count", "tsv3A9ac"),
+            ("story_scale", "storyScale"),
+            ("total_episodes", "bFgF0xfY"),
+            ("genre_tone", "genreTone"),
+            ("target_audience", "targetAudience"),
+        ),
+        force_field_overrides=True,
+        prefer_structured_output=True,
+        prefer_named_text_over_choices=True,
+        filename_prefix="15节拍剧本框架",
+        run_path="/api/tools/new-framework",
+    ),
 }
 
 
@@ -135,18 +220,7 @@ def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, An
     resolved = _resolved_tool(tool_key)
     definition = resolved.definition
     payload = user_payload if isinstance(user_payload, dict) else {}
-    missing = [
-        field_name
-        for field_name in resolved.required_fields
-        if str(payload.get(field_name) or "").strip() == ""
-    ]
-    if missing:
-        raise ToolExecutionError(
-            f"{definition.label} 缺少必填项：{', '.join(missing)}",
-            tool_id=definition.key,
-            debug={"missing_fields": missing},
-            status_code=400,
-        )
+    prepared_payload, payload_debug = _prepare_tool_payload(resolved, payload)
 
     api_key_envs = resolved.api_key_envs
     api_key_name, api_key = _env_with_name(*api_key_envs)
@@ -161,11 +235,11 @@ def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, An
     url = (url or DEFAULT_FASTGPT_URL).strip().rstrip("/")
 
     variables = {
-        alias: _normalize_value(payload.get(field_name))
+        alias: _normalize_value(prepared_payload.get(field_name))
         for field_name, alias in resolved.variable_aliases.items()
-        if field_name in payload and str(payload.get(field_name) or "").strip() != ""
+        if field_name in prepared_payload
     }
-    content = _tool_message_content(resolved, payload)
+    content = _tool_message_content(resolved, prepared_payload)
     body = {
         "chatId": f"scriptmaker-tool-{definition.key}-{uuid.uuid4().hex[:8]}",
         "stream": False,
@@ -247,17 +321,79 @@ def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, An
         "internal_variables": list(resolved.internal_variables),
         "visible_output_fields": list(resolved.visible_output_fields),
         "chosen_output_source": output_source,
+        "normalized_payload": payload_debug,
         "response_preview": _truncate_text(_json_text(data), limit=1200),
     }
+    rendered_text = _render_tool_text(output)
+    filename_payload = dict(payload_debug)
+    project_title = str(payload.get("project_title") or "").strip()
+    if project_title:
+        filename_payload["project_title"] = project_title
+    filename = _build_tool_filename(resolved, output, filename_payload)
     return {
         "ok": True,
         "tool_id": definition.key,
         "title": definition.label,
         "output": output,
         "output_type": "json" if isinstance(output, (dict, list)) else "text",
+        "text": rendered_text,
+        "filename": filename,
         "debug": debug,
         "schema": _serialize_tool(resolved),
     }
+
+
+def _prepare_tool_payload(
+    resolved: ResolvedSimpleTool,
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    prepared: dict[str, Any] = {}
+    missing_fields: list[str] = []
+    invalid_fields: list[str] = []
+
+    for field in resolved.fields:
+        raw_value = payload.get(field.name)
+        if field.input_type == "number":
+            if _tool_value_is_blank(raw_value):
+                if field.required:
+                    missing_fields.append(field.name)
+                elif _has_meaningful_tool_value(field.default_value):
+                    prepared[field.name] = _coerce_positive_int(field.default_value)
+                continue
+            number = _coerce_positive_int(raw_value)
+            if number is None:
+                invalid_fields.append(field.name)
+                continue
+            prepared[field.name] = number
+            continue
+
+        text = str(raw_value or "").strip()
+        if not text:
+            if field.required:
+                missing_fields.append(field.name)
+            elif _has_meaningful_tool_value(field.default_value):
+                prepared[field.name] = _normalize_value(field.default_value)
+            elif field.name in payload:
+                prepared[field.name] = ""
+            continue
+        prepared[field.name] = text
+
+    if missing_fields:
+        raise ToolExecutionError(
+            f"{resolved.definition.label} 缺少必填项：{', '.join(missing_fields)}",
+            tool_id=resolved.definition.key,
+            debug={"missing_fields": missing_fields},
+            status_code=400,
+        )
+    if invalid_fields:
+        raise ToolExecutionError(
+            f"{resolved.definition.label} 字段格式无效：{', '.join(invalid_fields)} 必须是正整数",
+            tool_id=resolved.definition.key,
+            debug={"invalid_fields": invalid_fields},
+            status_code=400,
+        )
+
+    return prepared, copy.deepcopy(prepared)
 
 
 def _serialize_tool(resolved: ResolvedSimpleTool) -> dict[str, Any]:
@@ -275,6 +411,7 @@ def _serialize_tool(resolved: ResolvedSimpleTool) -> dict[str, Any]:
         "configured_url": (url_value or DEFAULT_FASTGPT_URL).strip().rstrip("/"),
         "help": resolved.help_text,
         "source": resolved.source,
+        "run_url": resolved.run_path,
         "json_file": resolved.json_path.name if resolved.json_path else None,
         "workflow_json_file": resolved.json_path.name if resolved.json_path else None,
         "api_key_envs": list(resolved.api_key_envs),
@@ -293,6 +430,7 @@ def _serialize_tool(resolved: ResolvedSimpleTool) -> dict[str, Any]:
                 "placeholder": field.placeholder,
                 "required": field.required,
                 "source": field.source,
+                "default_value": field.default_value,
             }
             for field in resolved.fields
         ],
@@ -305,6 +443,7 @@ def _serialize_tool(resolved: ResolvedSimpleTool) -> dict[str, Any]:
                     "placeholder": field.placeholder,
                     "required": field.required,
                     "source": field.source,
+                    "default_value": field.default_value,
                 }
                 for field in resolved.fields
             ],
@@ -334,7 +473,24 @@ def _resolved_tool(tool_key: str) -> ResolvedSimpleTool:
         updated_variables=updated_variables,
     )
 
-    if fields:
+    override_aliases = {field_name: alias for field_name, alias in definition.field_aliases}
+    if definition.force_field_overrides and definition.field_overrides:
+        fields = definition.field_overrides
+        required_fields = tuple(field.name for field in fields if field.required)
+        variable_aliases = {
+            field.name: override_aliases.get(field.name, field.name)
+            for field in fields
+            if field.name != definition.fallback_message_field
+        }
+        message_field = definition.fallback_message_field
+        source = "tool_definition"
+        help_text = (
+            f"{definition.help_text} 当前表单字段使用代码侧友好映射，并对接 "
+            f"{json_path.name}。"
+            if json_path
+            else definition.help_text
+        )
+    elif fields:
         required_fields = tuple(field.name for field in fields if field.required)
         variable_aliases = {field.name: field.name for field in fields}
         message_field = None
@@ -368,6 +524,10 @@ def _resolved_tool(tool_key: str) -> ResolvedSimpleTool:
         visible_output_fields=visible_output_fields,
         api_key_envs=(f"{definition.env_prefix}_API_KEY", "FASTGPT_API_KEY"),
         url_envs=(f"{definition.env_prefix}_CHAT_COMPLETIONS_URL", "FASTGPT_CHAT_COMPLETIONS_URL"),
+        prefer_structured_output=definition.prefer_structured_output,
+        prefer_named_text_over_choices=definition.prefer_named_text_over_choices,
+        filename_prefix=definition.filename_prefix,
+        run_path=definition.run_path or f"/api/tools/{definition.key}/run",
     )
 
 
@@ -445,6 +605,7 @@ def _infer_fields_from_workflow_json(workflow: dict[str, Any] | None) -> tuple[S
                 placeholder=description or f"请输入{label}",
                 required=bool(item.get("required")),
                 source="workflow_json",
+                default_value=item.get("defaultValue"),
             )
         )
     return tuple(fields)
@@ -520,13 +681,21 @@ def _extract_tool_output(
     data: Any,
     resolved: ResolvedSimpleTool,
 ) -> tuple[Any, str] | None:
-    for source, value in _iter_tool_text_candidates(data):
+    if resolved.prefer_structured_output:
+        structured = _extract_structured_output(data, resolved)
+        if structured is not None:
+            return structured
+    for source, value in _iter_tool_text_candidates(
+        data,
+        prefer_named_text_over_choices=resolved.prefer_named_text_over_choices,
+    ):
         normalized = _normalize_tool_output_value(value)
         if normalized not in (None, "", [], {}):
             return normalized, source
-    structured = _extract_structured_output(data, resolved)
-    if structured is not None:
-        return structured
+    if not resolved.prefer_structured_output:
+        structured = _extract_structured_output(data, resolved)
+        if structured is not None:
+            return structured
     return None
 
 
@@ -551,11 +720,19 @@ def _extract_structured_output(
     return None
 
 
-def _iter_tool_text_candidates(data: Any) -> list[tuple[str, Any]]:
+def _iter_tool_text_candidates(
+    data: Any,
+    *,
+    prefer_named_text_over_choices: bool = False,
+) -> list[tuple[str, Any]]:
     candidates: list[tuple[str, Any]] = []
     if isinstance(data, dict):
-        candidates.extend(_iter_choice_text_candidates(data))
-        candidates.extend(_iter_named_text_candidates("root", data))
+        if prefer_named_text_over_choices:
+            candidates.extend(_iter_named_text_candidates("root", data))
+            candidates.extend(_iter_choice_text_candidates(data))
+        else:
+            candidates.extend(_iter_choice_text_candidates(data))
+            candidates.extend(_iter_named_text_candidates("root", data))
         response_data = data.get("responseData")
         if isinstance(response_data, dict):
             candidates.extend(_iter_named_text_candidates("responseData", response_data))
@@ -764,6 +941,90 @@ def _parse_jsonish_text(text: str) -> Any | None:
             return parsed.strip()
         return nested
     return parsed
+
+
+def _tool_value_is_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return False
+
+
+def _has_meaningful_tool_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def _coerce_positive_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        number = float(value)
+    except Exception:
+        return None
+    if not number.is_integer() or number <= 0:
+        return None
+    return int(number)
+
+
+def _render_tool_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2).strip()
+        except Exception:
+            return str(value).strip()
+    return str(value or "").strip()
+
+
+def _build_tool_filename(
+    resolved: ResolvedSimpleTool,
+    output: Any,
+    payload: dict[str, Any],
+) -> str | None:
+    if not resolved.filename_prefix:
+        return None
+    suffix = _derive_tool_filename_suffix(resolved, output, payload) or datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_suffix = _sanitize_filename_fragment(suffix) or datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{resolved.filename_prefix}_{safe_suffix}.txt"
+
+
+def _derive_tool_filename_suffix(
+    resolved: ResolvedSimpleTool,
+    output: Any,
+    payload: dict[str, Any],
+) -> str:
+    if resolved.definition.key != "new_framework":
+        return ""
+    project_title = str(payload.get("project_title") or "").strip()
+    if project_title:
+        return project_title
+    if isinstance(output, dict):
+        for key in ("script_title_content", "title", "script_title"):
+            value = str(output.get(key) or "").strip()
+            if value:
+                return value
+    text = _render_tool_text(output)
+    lines = [line.strip() for line in text.replace("\r", "").split("\n") if line.strip()]
+    if len(lines) >= 2 and lines[0] == "剧本标题":
+        return lines[1]
+    return ""
+
+
+def _sanitize_filename_fragment(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    cleaned = "".join(ch if ch not in '<>:"/\\|?*' else "_" for ch in text)
+    cleaned = " ".join(cleaned.split()).strip(" ._")
+    return cleaned[:60]
 
 
 def _env(*names: str) -> str | None:

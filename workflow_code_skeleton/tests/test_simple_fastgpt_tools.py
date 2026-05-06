@@ -28,17 +28,19 @@ class SimpleFastGPTToolsTests(unittest.TestCase):
 
         self.assertEqual(
             set(tool_map),
-            {"hot_review", "reskin", "punchup", "character_reskin"},
+            {"hot_review", "reskin", "punchup", "character_reskin", "new_framework"},
         )
         self.assertEqual(tool_map["hot_review"]["workflow_json_file"], "爆款文审核.json")
         self.assertEqual(tool_map["reskin"]["workflow_json_file"], "换皮.json")
         self.assertEqual(tool_map["punchup"]["workflow_json_file"], "增加爽感.json")
         self.assertEqual(tool_map["character_reskin"]["workflow_json_file"], "只换人设.json")
+        self.assertEqual(tool_map["new_framework"]["workflow_json_file"], "15内容新框架编写.json")
         self.assertEqual(tool_map["hot_review"]["source"], "fallback")
         self.assertEqual(tool_map["hot_review"]["fields"][0]["name"], "text")
         self.assertIn("ju_ben_biao_ti", tool_map["reskin"]["input_variables"])
         self.assertIn("a1LYQ4vP", tool_map["punchup"]["input_variables"])
         self.assertIn("n5ZHYrj8", tool_map["character_reskin"]["input_variables"])
+        self.assertEqual(tool_map["new_framework"]["run_url"], "/api/tools/new-framework")
 
     def test_list_simple_tools_marks_dedicated_api_key_as_configured(self) -> None:
         with patch.dict(
@@ -95,7 +97,11 @@ class SimpleFastGPTToolsTests(unittest.TestCase):
 
     def test_run_simple_tool_extracts_structured_output_from_list_form_variable_updates(self) -> None:
         resolved = tools._resolved_tool("character_reskin")
-        payload = {field_name: f"{field_name} 输入" for field_name in resolved.required_fields}
+        payload = {}
+        for field in resolved.fields:
+            if field.name not in resolved.required_fields:
+                continue
+            payload[field.name] = 12 if field.input_type == "number" else f"{field.name} 输入"
         payload["n5ZHYrj8"] = "原始角色设定"
         output_variable = resolved.updated_variables[0]
 

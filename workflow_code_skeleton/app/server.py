@@ -272,10 +272,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=500, fallback="辅助工具列表加载失败，请稍后重试。")
         return _json_ok(ok=True, tools=tools)
 
-    @app.post("/api/tools/<tool_key>/run")
-    @_login_required
-    def run_tool(tool_key: str):
-        data = request.get_json(silent=True) or {}
+    def _run_tool_request(tool_key: str, data: dict):
         try:
             result = run_simple_tool(tool_key, data)
         except ToolExecutionError as exc:
@@ -307,6 +304,18 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         flattened = dict(result)
         ok = bool(flattened.pop("ok", True))
         return _json_ok(ok=ok, result=result, **flattened)
+
+    @app.post("/api/tools/<tool_key>/run")
+    @_login_required
+    def run_tool(tool_key: str):
+        data = request.get_json(silent=True) or {}
+        return _run_tool_request(tool_key, data)
+
+    @app.post("/api/tools/new-framework")
+    @_login_required
+    def run_new_framework_tool():
+        data = request.get_json(silent=True) or {}
+        return _run_tool_request("new_framework", data)
 
     @app.get("/api/projects/latest")
     @_login_required
