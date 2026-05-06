@@ -314,6 +314,23 @@
     </section>
   </aside>
 
+  <aside id="assetDeleteDialog" class="profile-panel hidden" aria-hidden="true">
+    <div class="profile-backdrop" id="assetDeleteBackdrop"></div>
+    <section class="profile-drawer confirm-drawer" aria-labelledby="assetDeleteDialogTitle">
+      <div class="section-head compact-head">
+        <div>
+          <p class="eyebrow">Delete Asset</p>
+          <h3 id="assetDeleteDialogTitle">确认删除资产</h3>
+        </div>
+      </div>
+      <p id="assetDeleteMessage" class="confirm-message">确定要删除这个资产吗？此操作不可恢复。</p>
+      <div class="control-row confirm-actions">
+        <button id="cancelDeleteAssetBtn" class="btn btn-ghost" type="button">取消</button>
+        <button id="confirmDeleteAssetBtn" class="btn btn-danger" type="button">确认删除</button>
+      </div>
+    </section>
+  </aside>
+
   <script>
     window.scriptMakerConfig = {
       isAuthenticated: {{ 'true' if current_user else 'false' }},

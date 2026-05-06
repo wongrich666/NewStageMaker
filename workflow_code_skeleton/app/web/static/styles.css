@@ -786,6 +786,13 @@ a {
   padding: 0 10px 10px;
 }
 
+.workspace-pick-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
 .workspace-pick,
 .workspace-empty {
   width: 100%;
@@ -855,6 +862,13 @@ a {
   color: var(--muted);
   font-size: 12px;
   background: rgba(103, 150, 238, 0.1);
+}
+
+.workspace-pick-delete {
+  min-height: 44px;
+  padding: 0 12px;
+  align-self: stretch;
+  white-space: nowrap;
 }
 
 .toast-stack {
@@ -1051,6 +1065,22 @@ a {
   border: 1px solid var(--line);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.72);
+}
+
+.confirm-drawer {
+  width: min(520px, calc(100% - 36px));
+  inset: auto 18px 18px auto;
+  max-height: none;
+}
+
+.confirm-message {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.confirm-actions {
+  justify-content: flex-end;
 }
 
 .completion-panel {
@@ -1500,6 +1530,12 @@ a {
 
 .workspace-body .workspace-pick-state {
   background: rgba(255, 255, 255, 0.04);
+}
+
+.workspace-body .workspace-pick-delete {
+  color: #ffd9cf;
+  background: rgba(198, 86, 40, 0.18);
+  border-color: rgba(198, 86, 40, 0.28);
 }
 
 .tools-folder .tool-shortcut-list {

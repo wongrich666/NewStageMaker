@@ -70,6 +70,11 @@
     assetsList: $("assetsList"),
     communityList: $("communityList"),
     assetEditor: $("assetEditor"),
+    assetDeleteDialog: $("assetDeleteDialog"),
+    assetDeleteBackdrop: $("assetDeleteBackdrop"),
+    assetDeleteMessage: $("assetDeleteMessage"),
+    confirmDeleteAssetBtn: $("confirmDeleteAssetBtn"),
+    cancelDeleteAssetBtn: $("cancelDeleteAssetBtn"),
     editAssetTitle: $("editAssetTitle"),
     editAssetSummary: $("editAssetSummary"),
     editAssetPrivacy: $("editAssetPrivacy"),
@@ -118,6 +123,8 @@
     editingProjectId: null,
     editingProjectStatus: null,
     editingAssetLocked: false,
+    assetDeleteConfirmResolver: null,
+    assetDeleteHideTimer: null,
     toolDefinitions: {},
     activeTool: "character_reskin",
     loadingActions: {},
@@ -1866,19 +1873,29 @@
             ? " completed"
             : "";
         return `
-          <button
-            class="workspace-pick${activeClass}${statusClass}"
-            type="button"
-            data-action="select-project"
-            data-project-id="${escapeHtml(item.project_id)}"
-            title="${escapeHtml(projectTooltip(item))}"
-          >
-            <span class="workspace-pick-main">
-              <span class="workspace-pick-title">${escapeHtml(projectDisplayTitle(item))}</span>
-              <span class="workspace-pick-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${item.current_stage_label || statusLabel(item.status)}`)}</span>
-            </span>
-            <span class="workspace-pick-state">${escapeHtml(statusLabel(item.status))}</span>
-          </button>
+          <div class="workspace-pick-row">
+            <button
+              class="workspace-pick${activeClass}${statusClass}"
+              type="button"
+              data-action="select-project"
+              data-project-id="${escapeHtml(item.project_id)}"
+              title="${escapeHtml(projectTooltip(item))}"
+            >
+              <span class="workspace-pick-main">
+                <span class="workspace-pick-title">${escapeHtml(projectDisplayTitle(item))}</span>
+                <span class="workspace-pick-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${item.current_stage_label || statusLabel(item.status)}`)}</span>
+              </span>
+              <span class="workspace-pick-state">${escapeHtml(statusLabel(item.status))}</span>
+            </button>
+            <button
+              class="btn btn-danger workspace-pick-delete"
+              type="button"
+              data-action="delete-asset"
+              data-project-id="${escapeHtml(item.project_id)}"
+              aria-label="${escapeHtml(`删除 ${projectDisplayTitle(item)}`)}"
+              title="${escapeHtml(`删除 ${projectDisplayTitle(item)}`)}"
+            >删除</button>
+          </div>
         `;
       }).join("");
     };
@@ -2168,6 +2185,68 @@
     }, 5000);
   }
 
+  function findOwnedAsset(projectId) {
+    const targetId = Number(projectId);
+    if (!Number.isFinite(targetId)) return null;
+    return state.assets.find((item) => Number(item.project_id) === targetId)
+      || state.projects.find((item) => Number(item.project_id) === targetId)
+      || (Number(state.latestSnapshot?.project_id) === targetId ? state.latestSnapshot : null);
+  }
+
+  function assetDeletePromptMessage(projectId) {
+    const item = findOwnedAsset(projectId);
+    const title = projectDisplayTitle(item);
+    if (title && title !== "未选中") {
+      return `确定要删除“${title}”吗？此操作不可恢复。`;
+    }
+    return "确定要删除这个资产吗？此操作不可恢复。";
+  }
+
+  function closeAssetDeleteDialog() {
+    if (!els.assetDeleteDialog || els.assetDeleteDialog.classList.contains("hidden")) return;
+    els.assetDeleteDialog.classList.remove("panel-open");
+    if (state.assetDeleteHideTimer) {
+      window.clearTimeout(state.assetDeleteHideTimer);
+    }
+    state.assetDeleteHideTimer = window.setTimeout(() => {
+      els.assetDeleteDialog?.classList.add("hidden");
+      els.assetDeleteDialog?.setAttribute("aria-hidden", "true");
+      state.assetDeleteHideTimer = null;
+    }, 180);
+  }
+
+  function settleAssetDeleteDialog(confirmed) {
+    const resolver = state.assetDeleteConfirmResolver;
+    state.assetDeleteConfirmResolver = null;
+    closeAssetDeleteDialog();
+    if (resolver) {
+      resolver(Boolean(confirmed));
+    }
+  }
+
+  function confirmAssetDeletion(projectId) {
+    const message = assetDeletePromptMessage(projectId);
+    if (!els.assetDeleteDialog || !els.assetDeleteMessage || !els.confirmDeleteAssetBtn || !els.cancelDeleteAssetBtn) {
+      return Promise.resolve(window.confirm(message));
+    }
+    if (state.assetDeleteConfirmResolver) {
+      settleAssetDeleteDialog(false);
+    }
+    if (state.assetDeleteHideTimer) {
+      window.clearTimeout(state.assetDeleteHideTimer);
+      state.assetDeleteHideTimer = null;
+    }
+    els.assetDeleteMessage.textContent = message;
+    els.assetDeleteDialog.classList.remove("hidden");
+    els.assetDeleteDialog.setAttribute("aria-hidden", "false");
+    window.requestAnimationFrame(() => {
+      els.assetDeleteDialog?.classList.add("panel-open");
+    });
+    return new Promise((resolve) => {
+      state.assetDeleteConfirmResolver = resolve;
+    });
+  }
+
   function showCopyToast() {
     const stack = ensureToastStack();
     const card = document.createElement("div");
@@ -2448,26 +2527,28 @@
     showToast(nextVisibility === "public" ? "已公开成品" : "已设为不公开", "资产可见性已经更新。");
   }
 
-  async function deleteAsset(projectId) {
+  async function deleteAsset(projectId, button = null) {
     if (!requireLogin()) return;
-    const ok = window.confirm("确认删除这个剧本资产吗？删除后不可恢复。");
+    const ok = await confirmAssetDeletion(projectId);
     if (!ok) return;
-    const wasCurrentProject = Number(projectId) === Number(state.projectId);
-    const wasEditingAsset = Number(projectId) === Number(state.editingProjectId);
-    await requestJson(`/api/projects/${projectId}`, { method: "DELETE" });
-    if (wasEditingAsset) {
-      closeAssetEditor();
-    }
-    if (wasCurrentProject) {
-      switchToFreshWorkspace();
-    }
-    await loadProjects({
-      restoreSelection: !wasCurrentProject,
-      restoreInputs: false
+    await withActionLoading(`deleteAsset:${projectId}`, button, "删除中...", async () => {
+      const wasCurrentProject = Number(projectId) === Number(state.projectId);
+      const wasEditingAsset = Number(projectId) === Number(state.editingProjectId);
+      await requestJson(`/api/projects/${projectId}`, { method: "DELETE" });
+      if (wasEditingAsset) {
+        closeAssetEditor();
+      }
+      if (wasCurrentProject) {
+        switchToFreshWorkspace();
+      }
+      await loadProjects({
+        restoreSelection: !wasCurrentProject,
+        restoreInputs: false
+      });
+      await loadAssets();
+      await loadCommunity();
+      showToast("资产已删除", "该剧本资产已从当前账号移除。");
     });
-    await loadAssets();
-    await loadCommunity();
-    showToast("资产已删除", "该剧本资产已从当前账号移除。");
   }
 
   async function runActiveTool() {
@@ -2704,9 +2785,15 @@
       try {
         if (button.dataset.action === "select-project") {
           await loadProjectDetail(projectId, { restoreInputs: true, scroll: false });
+        } else if (button.dataset.action === "delete-asset") {
+          await deleteAsset(projectId, button);
         }
       } catch (error) {
-        showStatusError(error, "项目加载失败，请稍后重试。");
+        const fallback = button.dataset.action === "delete-asset"
+          ? "资产操作失败，请稍后重试。"
+          : "项目加载失败，请稍后重试。";
+        showStatusError(error, fallback);
+        showToast(button.dataset.action === "delete-asset" ? "资产操作失败" : "项目加载失败", friendlyErrorText(error, "请稍后重试。"));
       }
     }));
 
@@ -2730,11 +2817,26 @@
         } else if (button.dataset.action === "toggle-privacy") {
           await toggleAssetPrivacy(projectId, button.dataset.visibility);
         } else if (button.dataset.action === "delete-asset") {
-          await deleteAsset(projectId);
+          await deleteAsset(projectId, button);
         }
       } catch (error) {
         showToast("资产操作失败", friendlyErrorText(error, "请稍后重试。"));
         showStatusError(error, "资产操作失败，请稍后重试。");
+      }
+    });
+
+    els.assetDeleteBackdrop?.addEventListener("click", () => {
+      settleAssetDeleteDialog(false);
+    });
+    els.cancelDeleteAssetBtn?.addEventListener("click", () => {
+      settleAssetDeleteDialog(false);
+    });
+    els.confirmDeleteAssetBtn?.addEventListener("click", () => {
+      settleAssetDeleteDialog(true);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && state.assetDeleteConfirmResolver) {
+        settleAssetDeleteDialog(false);
       }
     });
 
