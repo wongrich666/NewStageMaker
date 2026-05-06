@@ -11,17 +11,37 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from dotenv import load_dotenv
+
+
+@lru_cache(maxsize=1)
+def _ensure_simple_tools_env_loaded() -> tuple[str, ...]:
+    loaded_paths: list[str] = []
+    load_dotenv(override=False)
+    module_path = Path(__file__).resolve()
+    repo_root = module_path.parents[3]
+    app_root = module_path.parents[2]
+    for candidate in (repo_root / ".env", app_root / ".env"):
+        if not candidate.exists():
+            continue
+        load_dotenv(candidate, override=False)
+        loaded_paths.append(str(candidate))
+    return tuple(loaded_paths)
+
+
+_ensure_simple_tools_env_loaded()
 
 from ..config import settings
 from ..utils.logger import get_logger
-from .fastgpt_client import FastGPTTransientError
 from .json_utils import strip_code_fence
+from .runtime_paths import get_runtime_data_dir
 
 logger = get_logger("simple_fastgpt_tools")
 
 
 DEFAULT_FASTGPT_URL = "https://api.fastgpt.in/api/v1/chat/completions"
 TOOL_RESPONSE_TEXT_KEYS = ("answerText", "answer", "content", "text", "response", "result")
+RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,11 +66,15 @@ class SimpleToolDefinition:
     fallback_message_field: str | None = None
     field_overrides: tuple[SimpleToolField, ...] = ()
     field_aliases: tuple[tuple[str, str], ...] = ()
+    payload_aliases: tuple[tuple[str, str], ...] = ()
     force_field_overrides: bool = False
     prefer_structured_output: bool = False
     prefer_named_text_over_choices: bool = False
     filename_prefix: str | None = None
     run_path: str | None = None
+    max_attempts: int = 1
+    retry_instruction: str | None = None
+    empty_output_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,19 +120,38 @@ TOOL_DEFINITIONS: dict[str, SimpleToolDefinition] = {
         key="hot_review",
         label="爆款文审核",
         env_prefix="FASTGPT_HOT_REVIEW",
-        help_text="提交一段文本，让工具返回爆款爽剧诊断意见。",
+        help_text="提交待审核剧本，让工具返回完整爆款文审核意见，并支持下载 TXT。",
         json_name_patterns=("爆款文审核",),
-        fallback_fields=(
+        field_overrides=(
             SimpleToolField(
-                name="text",
-                label="待审核文本",
+                name="review_text",
+                label="待审核剧本",
                 input_type="textarea",
                 placeholder="粘贴待审核的剧本、大纲或片段。",
                 required=True,
-                source="fallback",
+                source="tool_definition",
             ),
         ),
-        fallback_message_field="text",
+        field_aliases=(("review_text", "td2X8WXX"),),
+        payload_aliases=(
+            ("review_text", "td2X8WXX"),
+            ("review_text", "text"),
+            ("review_text", "content"),
+            ("review_text", "script"),
+            ("review_text", "input"),
+            ("review_text", "story"),
+            ("review_text", "review_text"),
+            ("review_text", "source_text"),
+        ),
+        force_field_overrides=True,
+        filename_prefix="爆款文审核意见",
+        max_attempts=3,
+        retry_instruction="请直接按照系统提示词输出完整审核报告，不要返回空内容。",
+        empty_output_message=(
+            "爆款文审核没有返回可展示结果。可能原因：FASTGPT_HOT_REVIEW_API_KEY 未被当前进程读取、"
+            "待审核文本未映射到 td2X8WXX、AI 节点未产生 answerText、或 FastGPT 返回空输出。"
+            "请查看后端 debug 文件。"
+        ),
     ),
     "reskin": SimpleToolDefinition(
         key="reskin",
@@ -197,11 +240,26 @@ TOOL_DEFINITIONS: dict[str, SimpleToolDefinition] = {
             ("genre_tone", "genreTone"),
             ("target_audience", "targetAudience"),
         ),
+        payload_aliases=(
+            ("story", "wjmWDwbg"),
+            ("character_count", "tsv3A9ac"),
+            ("story_scale", "storyScale"),
+            ("total_episodes", "bFgF0xfY"),
+            ("genre_tone", "genreTone"),
+            ("target_audience", "targetAudience"),
+        ),
         force_field_overrides=True,
         prefer_structured_output=True,
         prefer_named_text_over_choices=True,
         filename_prefix="15节拍剧本框架",
         run_path="/api/tools/new-framework",
+        max_attempts=3,
+        retry_instruction="请直接输出完整的 15 节拍剧本框架正文，不要返回空内容。",
+        empty_output_message=(
+            "15节拍剧本框架没有返回可展示结果。可能原因：AI 节点未产生 answerText、"
+            "工作流 response_format 与提示词冲突、输入变量缺失、或 beatFrameworkContractJson 未写入。"
+            "请查看后端 debug 文件。"
+        ),
     ),
 }
 
@@ -210,10 +268,38 @@ VISIBLE_TOOL_KEYS: tuple[str, ...] = tuple(TOOL_DEFINITIONS.keys())
 
 
 def list_simple_tools() -> list[dict[str, Any]]:
-    return [
-        _serialize_tool(_resolved_tool(tool_key))
-        for tool_key in VISIBLE_TOOL_KEYS
-    ]
+    return [_serialize_tool(_resolved_tool(tool_key)) for tool_key in VISIBLE_TOOL_KEYS]
+
+
+def diagnose_simple_tool_environment(
+    tool_key: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved = _resolved_tool(tool_key)
+    api_info = _resolve_api_key_info(resolved)
+    url_info = _resolve_url_info(resolved)
+    request_variable_keys: list[str] = []
+    if isinstance(payload, dict):
+        try:
+            prepared_payload, _ = _prepare_tool_payload(resolved, payload)
+        except ToolExecutionError:
+            prepared_payload = {}
+        request_variable_keys = sorted(_build_tool_variables(resolved, prepared_payload).keys())
+    expected_variable_keys = list(dict.fromkeys(resolved.variable_aliases.values())) or list(resolved.input_variables)
+    return {
+        "tool_key": resolved.definition.key,
+        "api_env": resolved.api_key_envs[0],
+        "api_key_env_used": api_info["env_used"],
+        "api_key_present": api_info["present"],
+        "api_key_length": api_info["length"],
+        "api_key_source": api_info["source"],
+        "url_env": url_info["env"],
+        "url_present": url_info["present"],
+        "workflow_json_exists": bool(resolved.json_path and resolved.json_path.exists()),
+        "workflow_json_path": str(resolved.json_path) if resolved.json_path else "",
+        "request_variable_keys": request_variable_keys,
+        "expected_variable_keys": expected_variable_keys,
+    }
 
 
 def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, Any]:
@@ -221,126 +307,324 @@ def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, An
     definition = resolved.definition
     payload = user_payload if isinstance(user_payload, dict) else {}
     prepared_payload, payload_debug = _prepare_tool_payload(resolved, payload)
+    variables = _build_tool_variables(resolved, prepared_payload)
 
-    api_key_envs = resolved.api_key_envs
-    api_key_name, api_key = _env_with_name(*api_key_envs)
-    if not api_key:
-        raise ToolExecutionError(
-            f"{definition.label} 还未配置 API Key，请先配置 {api_key_envs[0]} 或 FASTGPT_API_KEY。",
-            tool_id=definition.key,
-            debug={"api_key_envs": list(api_key_envs)},
-            status_code=400,
-        )
-    url_name, url = _env_with_name(*resolved.url_envs)
-    url = (url or DEFAULT_FASTGPT_URL).strip().rstrip("/")
+    env_debug = diagnose_simple_tool_environment(definition.key, prepared_payload)
+    api_info = _resolve_api_key_info(resolved)
+    url_info = _resolve_url_info(resolved)
 
-    variables = {
-        alias: _normalize_value(prepared_payload.get(field_name))
-        for field_name, alias in resolved.variable_aliases.items()
-        if field_name in prepared_payload
-    }
-    content = _tool_message_content(resolved, prepared_payload)
-    body = {
-        "chatId": f"scriptmaker-tool-{definition.key}-{uuid.uuid4().hex[:8]}",
-        "stream": False,
-        "detail": True,
-        "variables": variables,
-        "messages": [{"role": "user", "content": content}],
-    }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    logger.info(
-        "调用辅助工具 %s，json=%s，source=%s，url_env=%s，api_env=%s，输入字段=%s",
-        definition.key,
-        resolved.json_path.name if resolved.json_path else "",
-        resolved.source,
-        url_name or resolved.url_envs[0],
-        api_key_name or resolved.api_key_envs[0],
-        ", ".join(sorted(variables.keys())),
-    )
-    response = requests.post(
-        url,
-        headers=headers,
-        json=body,
-        timeout=int(getattr(settings, "fastgpt_timeout", 300)),
-    )
-    if response.status_code >= 400:
-        text = " ".join((response.text or "").strip().split())
-        message = f"{definition.label} 请求失败（HTTP {response.status_code}）。"
-        debug = {
-            "status_code": response.status_code,
-            "reason": response.reason or "",
-            "response_preview": _truncate_text(text, limit=600),
-            "url": url,
-        }
-        if response.status_code in {429, 500, 502, 503, 504}:
-            raise FastGPTTransientError(
-                message,
-                stage_name=definition.key,
-                status_code=response.status_code,
-                url=url,
-                response_text=text,
-            )
-        raise ToolExecutionError(message, tool_id=definition.key, debug=debug, status_code=400)
-    try:
-        data = response.json()
-    except Exception as exc:
+    if not api_info["value"]:
         raise ToolExecutionError(
-            f"{definition.label} 返回了无法解析的响应。",
-            tool_id=definition.key,
-            debug={"response_preview": _truncate_text(response.text, limit=1000), "url": url},
-            status_code=400,
-        ) from exc
-
-    extracted = _extract_tool_output(data, resolved)
-    if extracted is None:
-        raise ToolExecutionError(
-            f"{definition.label} 没有返回可展示结果。请检查 workflow 是否缺少 answerNode，或确认最终输出是否写到了正式变量。",
+            _missing_api_key_message(resolved),
             tool_id=definition.key,
             debug={
-                "workflow_json_file": resolved.json_path.name if resolved.json_path else None,
-                "answer_node_names": list(resolved.answer_node_names),
-                "updated_variables": list(resolved.updated_variables),
-                "visible_output_fields": list(resolved.visible_output_fields),
-                "api_key_envs": list(resolved.api_key_envs),
-                "response_preview": _truncate_text(_json_text(data), limit=1200),
+                **env_debug,
+                "request_variables": copy.deepcopy(variables),
             },
             status_code=400,
         )
 
-    output, output_source = extracted
-    debug = {
-        "workflow_json_file": resolved.json_path.name if resolved.json_path else None,
-        "workflow_json_path": str(resolved.json_path) if resolved.json_path else "",
-        "source": resolved.source,
-        "answer_node_names": list(resolved.answer_node_names),
-        "updated_variables": list(resolved.updated_variables),
-        "input_variables": list(resolved.input_variables),
-        "internal_variables": list(resolved.internal_variables),
-        "visible_output_fields": list(resolved.visible_output_fields),
-        "chosen_output_source": output_source,
-        "normalized_payload": payload_debug,
-        "response_preview": _truncate_text(_json_text(data), limit=1200),
+    url = str(url_info["value"] or DEFAULT_FASTGPT_URL).strip().rstrip("/")
+    headers = {
+        "Authorization": f"Bearer {api_info['value']}",
+        "Content-Type": "application/json",
     }
-    rendered_text = _render_tool_text(output)
-    filename_payload = dict(payload_debug)
-    project_title = str(payload.get("project_title") or "").strip()
-    if project_title:
-        filename_payload["project_title"] = project_title
-    filename = _build_tool_filename(resolved, output, filename_payload)
-    return {
-        "ok": True,
-        "tool_id": definition.key,
-        "title": definition.label,
-        "output": output,
-        "output_type": "json" if isinstance(output, (dict, list)) else "text",
-        "text": rendered_text,
-        "filename": filename,
-        "debug": debug,
-        "schema": _serialize_tool(resolved),
-    }
+    base_content = _tool_message_content(resolved, prepared_payload)
+    request_variable_keys = sorted(variables.keys())
+    logger.info(
+        "调用辅助工具 %s，api_env=%s，api_key_present=%s，api_key_length=%s，api_key_source=%s，url_env=%s，url_present=%s，workflow_json_path=%s，请求变量=%s",
+        definition.key,
+        resolved.api_key_envs[0],
+        api_info["present"],
+        api_info["length"],
+        api_info["source"],
+        url_info["env"],
+        url_info["present"],
+        str(resolved.json_path) if resolved.json_path else "",
+        ", ".join(request_variable_keys),
+    )
+
+    attempts_debug: list[dict[str, Any]] = []
+    final_error_message = definition.empty_output_message or _generic_empty_output_message(definition.label)
+    final_failure_reason = "unknown"
+    final_status_code = 502
+    last_response_preview = ""
+    last_candidate_paths: list[str] = []
+    last_updated_variables: dict[str, Any] = {}
+    last_data: Any = None
+
+    for attempt_index in range(1, max(1, definition.max_attempts) + 1):
+        content = _tool_message_content_for_attempt(base_content, definition.retry_instruction, attempt_index)
+        body = _build_request_body(definition.key, variables, content)
+        status_code: int | None = None
+        response_preview = ""
+        candidate_paths: list[str] = []
+        updated_variables: dict[str, Any] = {}
+        visible_output_fields = list(resolved.visible_output_fields)
+        failure_reason = ""
+
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                json=body,
+                timeout=int(getattr(settings, "fastgpt_timeout", 300)),
+            )
+        except requests.Timeout as exc:
+            failure_reason = "timeout"
+            final_error_message = f"{definition.label} 请求超时，请稍后重试。"
+            final_failure_reason = failure_reason
+            attempt_debug = _build_attempt_debug(
+                tool_key=definition.key,
+                attempt_index=attempt_index,
+                status_code=None,
+                api_info=api_info,
+                request_variable_keys=request_variable_keys,
+                response_preview="",
+                candidate_paths=[],
+                updated_variables={},
+                visible_output_fields=visible_output_fields,
+                failure_reason=failure_reason,
+            )
+            attempts_debug.append(attempt_debug)
+            _log_attempt_failure(attempt_debug)
+            if attempt_index < max(1, definition.max_attempts):
+                continue
+            debug = _build_failure_debug(
+                resolved,
+                env_debug=env_debug,
+                variables=variables,
+                payload_debug=payload_debug,
+                status_code=504,
+                response_preview="",
+                parsed_response=last_data,
+                candidate_paths=[],
+                updated_variables={},
+                retry_attempts=attempts_debug,
+                final_failure_reason=final_failure_reason,
+            )
+            debug["debug_artifact_path"] = _write_simple_tool_debug_artifact(debug)
+            raise ToolExecutionError(
+                final_error_message,
+                tool_id=definition.key,
+                debug=debug,
+                status_code=504,
+            ) from exc
+        except requests.RequestException as exc:
+            final_error_message = f"{definition.label} 请求失败，请稍后重试。"
+            final_failure_reason = "request_exception"
+            final_status_code = 502
+            attempt_debug = _build_attempt_debug(
+                tool_key=definition.key,
+                attempt_index=attempt_index,
+                status_code=None,
+                api_info=api_info,
+                request_variable_keys=request_variable_keys,
+                response_preview=_truncate_text(str(exc), limit=800),
+                candidate_paths=[],
+                updated_variables={},
+                visible_output_fields=visible_output_fields,
+                failure_reason=final_failure_reason,
+            )
+            attempts_debug.append(attempt_debug)
+            _log_attempt_failure(attempt_debug)
+            debug = _build_failure_debug(
+                resolved,
+                env_debug=env_debug,
+                variables=variables,
+                payload_debug=payload_debug,
+                status_code=502,
+                response_preview=_truncate_text(str(exc), limit=800),
+                parsed_response=None,
+                candidate_paths=[],
+                updated_variables={},
+                retry_attempts=attempts_debug,
+                final_failure_reason=final_failure_reason,
+            )
+            debug["debug_artifact_path"] = _write_simple_tool_debug_artifact(debug)
+            raise ToolExecutionError(
+                final_error_message,
+                tool_id=definition.key,
+                debug=debug,
+                status_code=502,
+            ) from exc
+
+        status_code = int(response.status_code or 0)
+        response_preview = _truncate_text(response.text, limit=1200)
+        if status_code >= 400:
+            failure_reason = f"http_{status_code}"
+            final_error_message = f"{definition.label} 请求失败（HTTP {status_code}）。"
+            final_failure_reason = failure_reason
+            final_status_code = status_code if status_code in RETRYABLE_HTTP_STATUSES else 400
+            attempt_debug = _build_attempt_debug(
+                tool_key=definition.key,
+                attempt_index=attempt_index,
+                status_code=status_code,
+                api_info=api_info,
+                request_variable_keys=request_variable_keys,
+                response_preview=response_preview,
+                candidate_paths=[],
+                updated_variables={},
+                visible_output_fields=visible_output_fields,
+                failure_reason=failure_reason,
+            )
+            attempts_debug.append(attempt_debug)
+            _log_attempt_failure(attempt_debug)
+            if status_code in RETRYABLE_HTTP_STATUSES and attempt_index < max(1, definition.max_attempts):
+                continue
+            debug = _build_failure_debug(
+                resolved,
+                env_debug=env_debug,
+                variables=variables,
+                payload_debug=payload_debug,
+                status_code=status_code,
+                response_preview=response_preview,
+                parsed_response=None,
+                candidate_paths=[],
+                updated_variables={},
+                retry_attempts=attempts_debug,
+                final_failure_reason=final_failure_reason,
+            )
+            debug["debug_artifact_path"] = _write_simple_tool_debug_artifact(debug)
+            raise ToolExecutionError(
+                final_error_message,
+                tool_id=definition.key,
+                debug=debug,
+                status_code=final_status_code,
+            )
+
+        try:
+            data = response.json()
+        except Exception as exc:
+            final_error_message = f"{definition.label} 返回了无法解析的响应。"
+            final_failure_reason = "invalid_json"
+            final_status_code = 502
+            debug = _build_failure_debug(
+                resolved,
+                env_debug=env_debug,
+                variables=variables,
+                payload_debug=payload_debug,
+                status_code=status_code,
+                response_preview=response_preview,
+                parsed_response=None,
+                candidate_paths=[],
+                updated_variables={},
+                retry_attempts=attempts_debug,
+                final_failure_reason=final_failure_reason,
+            )
+            debug["debug_artifact_path"] = _write_simple_tool_debug_artifact(debug)
+            raise ToolExecutionError(
+                final_error_message,
+                tool_id=definition.key,
+                debug=debug,
+                status_code=502,
+            ) from exc
+
+        last_data = data
+        response_preview = _truncate_text(_json_text(data), limit=1200)
+        candidate_paths = _collect_candidate_paths(data, resolved)
+        updated_variables = _collect_updated_variable_values(data, resolved)
+        extracted = _extract_tool_output(data, resolved)
+        system_error_text = _find_system_error_text(data)
+        transient_error_text = _find_transient_error_text(data)
+
+        if extracted is not None:
+            output, output_source = extracted
+            debug = {
+                **env_debug,
+                "workflow_json_file": resolved.json_path.name if resolved.json_path else None,
+                "workflow_json_path": str(resolved.json_path) if resolved.json_path else "",
+                "source": resolved.source,
+                "answer_node_names": list(resolved.answer_node_names),
+                "updated_variables": updated_variables,
+                "input_variables": list(resolved.input_variables),
+                "internal_variables": list(resolved.internal_variables),
+                "visible_output_fields": list(resolved.visible_output_fields),
+                "chosen_output_source": output_source,
+                "normalized_payload": payload_debug,
+                "request_variables": copy.deepcopy(variables),
+                "request_variable_keys": request_variable_keys,
+                "response_preview": response_preview,
+                "candidate_paths": candidate_paths,
+                "retry_attempts": attempts_debug,
+                "api_key_source": api_info["source"],
+            }
+            rendered_text = _render_tool_text(output)
+            filename_payload = dict(payload_debug)
+            project_title = str(payload.get("project_title") or "").strip()
+            if project_title:
+                filename_payload["project_title"] = project_title
+            filename = _build_tool_filename(resolved, output, filename_payload)
+            return {
+                "ok": True,
+                "tool_id": definition.key,
+                "title": definition.label,
+                "output": output,
+                "output_type": "json" if isinstance(output, (dict, list)) else "text",
+                "text": rendered_text,
+                "filename": filename,
+                "debug": debug,
+                "schema": _serialize_tool(resolved),
+            }
+
+        if system_error_text:
+            failure_reason = "system_error_text"
+            final_error_message = f"{definition.label} 返回了临时错误，请稍后重试。"
+            final_failure_reason = failure_reason
+            final_status_code = 502
+            response_preview = _truncate_text(system_error_text, limit=1200)
+        elif transient_error_text:
+            failure_reason = "transient_error"
+            final_error_message = f"{definition.label} 返回了临时错误，请稍后重试。"
+            final_failure_reason = failure_reason
+            final_status_code = 502
+            response_preview = _truncate_text(transient_error_text, limit=1200)
+        else:
+            failure_reason = "empty_output"
+            final_error_message = definition.empty_output_message or _generic_empty_output_message(definition.label)
+            final_failure_reason = failure_reason
+            final_status_code = 502
+
+        last_response_preview = response_preview
+        last_candidate_paths = candidate_paths
+        last_updated_variables = updated_variables
+        attempt_debug = _build_attempt_debug(
+            tool_key=definition.key,
+            attempt_index=attempt_index,
+            status_code=status_code,
+            api_info=api_info,
+            request_variable_keys=request_variable_keys,
+            response_preview=response_preview,
+            candidate_paths=candidate_paths,
+            updated_variables=updated_variables,
+            visible_output_fields=visible_output_fields,
+            failure_reason=failure_reason,
+        )
+        attempts_debug.append(attempt_debug)
+        _log_attempt_failure(attempt_debug)
+        if attempt_index < max(1, definition.max_attempts):
+            continue
+
+    debug = _build_failure_debug(
+        resolved,
+        env_debug=env_debug,
+        variables=variables,
+        payload_debug=payload_debug,
+        status_code=final_status_code,
+        response_preview=last_response_preview,
+        parsed_response=last_data,
+        candidate_paths=last_candidate_paths,
+        updated_variables=last_updated_variables,
+        retry_attempts=attempts_debug,
+        final_failure_reason=final_failure_reason,
+    )
+    debug["debug_artifact_path"] = _write_simple_tool_debug_artifact(debug)
+    raise ToolExecutionError(
+        final_error_message,
+        tool_id=definition.key,
+        debug=debug,
+        status_code=final_status_code,
+    )
 
 
 def _prepare_tool_payload(
@@ -350,9 +634,10 @@ def _prepare_tool_payload(
     prepared: dict[str, Any] = {}
     missing_fields: list[str] = []
     invalid_fields: list[str] = []
+    alias_map = _payload_alias_map(resolved.definition)
 
     for field in resolved.fields:
-        raw_value = payload.get(field.name)
+        raw_value = _payload_value_for_field(payload, field.name, alias_map.get(field.name, ()))
         if field.input_type == "number":
             if _tool_value_is_blank(raw_value):
                 if field.required:
@@ -397,18 +682,19 @@ def _prepare_tool_payload(
 
 
 def _serialize_tool(resolved: ResolvedSimpleTool) -> dict[str, Any]:
+    api_info = _resolve_api_key_info(resolved)
+    url_info = _resolve_url_info(resolved)
     definition = resolved.definition
-    api_key_name, _ = _env_with_name(*resolved.api_key_envs)
-    url_name, url_value = _env_with_name(*resolved.url_envs)
     return {
         "tool_id": definition.key,
         "key": definition.key,
         "title": definition.label,
         "label": definition.label,
-        "configured": bool(_env(*resolved.api_key_envs)),
-        "configured_api_key_env": api_key_name,
-        "configured_url_env": url_name,
-        "configured_url": (url_value or DEFAULT_FASTGPT_URL).strip().rstrip("/"),
+        "configured": api_info["present"],
+        "configured_api_key_env": api_info["env_used"],
+        "configured_api_key_source": api_info["source"],
+        "configured_url_env": url_info["env"],
+        "configured_url": str(url_info["value"] or DEFAULT_FASTGPT_URL).strip().rstrip("/"),
         "help": resolved.help_text,
         "source": resolved.source,
         "run_url": resolved.run_path,
@@ -485,21 +771,24 @@ def _resolved_tool(tool_key: str) -> ResolvedSimpleTool:
         message_field = definition.fallback_message_field
         source = "tool_definition"
         help_text = (
-            f"{definition.help_text} "
-            f"{json_path.name}。"
+            f"{definition.help_text} 当前表单字段按工具定义映射到 {json_path.name}。"
             if json_path
             else definition.help_text
         )
     elif fields:
         required_fields = tuple(field.name for field in fields if field.required)
-        variable_aliases = {field.name: field.name for field in fields}
+        variable_aliases = {field.name: override_aliases.get(field.name, field.name) for field in fields}
         message_field = None
         source = "workflow_json"
         help_text = f"{definition.help_text} 当前表单字段来自 {json_path.name}。"
     else:
         fields = definition.fallback_fields
         required_fields = tuple(field.name for field in fields if field.required)
-        variable_aliases = {field.name: field.name for field in fields if field.name != definition.fallback_message_field}
+        variable_aliases = {
+            field.name: override_aliases.get(field.name, field.name)
+            for field in fields
+            if field.name != definition.fallback_message_field
+        }
         message_field = definition.fallback_message_field
         source = "fallback"
         help_text = (
@@ -534,7 +823,10 @@ def _resolved_tool(tool_key: str) -> ResolvedSimpleTool:
 @lru_cache(maxsize=1)
 def _workflow_json_dir() -> Path | None:
     repo_root = Path(__file__).resolve().parents[3]
-    for child in repo_root.iterdir():
+    exact = repo_root / "workflow_jsons"
+    if exact.is_dir():
+        return exact
+    for child in sorted(repo_root.iterdir()):
         if child.is_dir() and "workflow_jsons" in child.name:
             return child
     return None
@@ -634,11 +926,7 @@ def _infer_updated_variables(workflow: dict[str, Any] | None) -> tuple[str, ...]
                 if not isinstance(update, dict):
                     continue
                 variable = update.get("variable")
-                if (
-                    isinstance(variable, list)
-                    and len(variable) >= 2
-                    and str(variable[1] or "").strip()
-                ):
+                if isinstance(variable, list) and len(variable) >= 2 and str(variable[1] or "").strip():
                     variables.append(str(variable[1]).strip())
     return tuple(dict.fromkeys(variables))
 
@@ -675,6 +963,28 @@ def _tool_message_content(resolved: ResolvedSimpleTool, payload: dict[str, Any])
         f"请执行辅助工具“{resolved.definition.label}”。"
         "请严格读取 variables，并只返回最终给用户看的结果。"
     )
+
+
+def _tool_message_content_for_attempt(
+    base_content: str,
+    retry_instruction: str | None,
+    attempt_index: int,
+) -> str:
+    if attempt_index <= 1 or not retry_instruction:
+        return base_content
+    if not base_content.strip():
+        return retry_instruction.strip()
+    return f"{base_content.rstrip()}\n\n{retry_instruction.strip()}"
+
+
+def _build_request_body(tool_key: str, variables: dict[str, Any], content: str) -> dict[str, Any]:
+    return {
+        "chatId": f"scriptmaker-tool-{tool_key}-{uuid.uuid4().hex[:8]}",
+        "stream": False,
+        "detail": True,
+        "variables": copy.deepcopy(variables),
+        "messages": [{"role": "user", "content": content}],
+    }
 
 
 def _extract_tool_output(
@@ -1002,7 +1312,8 @@ def _derive_tool_filename_suffix(
     payload: dict[str, Any],
 ) -> str:
     if resolved.definition.key != "new_framework":
-        return ""
+        project_title = str(payload.get("project_title") or "").strip()
+        return project_title
     project_title = str(payload.get("project_title") or "").strip()
     if project_title:
         return project_title
@@ -1027,11 +1338,39 @@ def _sanitize_filename_fragment(value: str) -> str:
     return cleaned[:60]
 
 
+def _resolve_api_key_info(resolved: ResolvedSimpleTool) -> dict[str, Any]:
+    env_used, value = _env_with_name(*resolved.api_key_envs)
+    source = "missing"
+    if env_used == resolved.api_key_envs[0]:
+        source = "dedicated"
+    elif env_used == "FASTGPT_API_KEY":
+        source = "fallback_global"
+    return {
+        "env": resolved.api_key_envs[0],
+        "env_used": env_used,
+        "value": value,
+        "present": bool(value),
+        "length": len(value or ""),
+        "source": source,
+    }
+
+
+def _resolve_url_info(resolved: ResolvedSimpleTool) -> dict[str, Any]:
+    env_used, value = _env_with_name(*resolved.url_envs)
+    return {
+        "env": env_used or resolved.url_envs[0],
+        "env_used": env_used,
+        "value": value,
+        "present": bool(value),
+    }
+
+
 def _env(*names: str) -> str | None:
     return _env_with_name(*names)[1]
 
 
 def _env_with_name(*names: str) -> tuple[str | None, str | None]:
+    _ensure_simple_tools_env_loaded()
     for name in names:
         value = os.getenv(name)
         if value is not None and str(value).strip():
@@ -1057,3 +1396,214 @@ def _json_text(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False, default=str)
     except Exception:
         return str(value)
+
+
+def _payload_alias_map(definition: SimpleToolDefinition) -> dict[str, tuple[str, ...]]:
+    alias_map: dict[str, list[str]] = {}
+    for target, alias in definition.payload_aliases:
+        alias_map.setdefault(target, []).append(alias)
+    return {key: tuple(values) for key, values in alias_map.items()}
+
+
+def _payload_value_for_field(payload: dict[str, Any], field_name: str, aliases: tuple[str, ...]) -> Any:
+    if field_name in payload:
+        return payload.get(field_name)
+    for alias in aliases:
+        if alias in payload:
+            return payload.get(alias)
+    return None
+
+
+def _build_tool_variables(resolved: ResolvedSimpleTool, prepared_payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        alias: _normalize_value(prepared_payload.get(field_name))
+        for field_name, alias in resolved.variable_aliases.items()
+        if field_name in prepared_payload
+    }
+
+
+def _collect_candidate_paths(data: Any, resolved: ResolvedSimpleTool) -> list[str]:
+    paths: list[str] = []
+    for source, candidate in _iter_structured_candidate_sources(data):
+        paths.append(source)
+        if isinstance(candidate, dict):
+            for field in resolved.updated_variables:
+                if field in candidate:
+                    paths.append(f"{source}.{field}")
+    for source, _ in _iter_tool_text_candidates(
+        data,
+        prefer_named_text_over_choices=resolved.prefer_named_text_over_choices,
+    ):
+        paths.append(source)
+    if isinstance(data, dict):
+        for field in resolved.updated_variables:
+            if field in data:
+                paths.append(f"root.{field}")
+    return list(dict.fromkeys(paths))
+
+
+def _collect_updated_variable_values(data: Any, resolved: ResolvedSimpleTool) -> dict[str, Any]:
+    collected: dict[str, Any] = {}
+    for _, candidate in _iter_structured_candidate_sources(data):
+        if not isinstance(candidate, dict):
+            continue
+        for field in resolved.updated_variables:
+            if field in candidate and field not in collected:
+                collected[field] = candidate.get(field)
+    if isinstance(data, dict):
+        for field in resolved.updated_variables:
+            if field in data and field not in collected:
+                collected[field] = data.get(field)
+    return collected
+
+
+def _find_system_error_text(data: Any) -> str:
+    matches = _find_named_values(data, {"system_error_text", "systemerrortext"})
+    for value in matches:
+        text = _render_tool_text(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _find_transient_error_text(data: Any) -> str:
+    text = _json_text(data).lower()
+    if "transient error" in text:
+        return "transient error"
+    return ""
+
+
+def _find_named_values(data: Any, target_keys: set[str], *, _depth: int = 0) -> list[Any]:
+    if _depth > 5:
+        return []
+    matches: list[Any] = []
+    if isinstance(data, dict):
+        for key, value in data.items():
+            normalized = str(key or "").replace("_", "").lower()
+            if normalized in target_keys:
+                matches.append(value)
+            if isinstance(value, (dict, list)):
+                matches.extend(_find_named_values(value, target_keys, _depth=_depth + 1))
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, (dict, list)):
+                matches.extend(_find_named_values(item, target_keys, _depth=_depth + 1))
+    return matches
+
+
+def _build_attempt_debug(
+    *,
+    tool_key: str,
+    attempt_index: int,
+    status_code: int | None,
+    api_info: dict[str, Any],
+    request_variable_keys: list[str],
+    response_preview: str,
+    candidate_paths: list[str],
+    updated_variables: dict[str, Any],
+    visible_output_fields: list[str],
+    failure_reason: str,
+) -> dict[str, Any]:
+    return {
+        "tool_key": tool_key,
+        "attempt_index": attempt_index,
+        "status_code": status_code,
+        "api_key_present": api_info["present"],
+        "api_key_source": api_info["source"],
+        "request_variable_keys": list(request_variable_keys),
+        "response_preview": response_preview,
+        "extracted_candidate_paths": list(candidate_paths),
+        "updated_variables": copy.deepcopy(updated_variables),
+        "visible_output_fields": list(visible_output_fields),
+        "failure_reason": failure_reason,
+    }
+
+
+def _log_attempt_failure(attempt_debug: dict[str, Any]) -> None:
+    logger.warning(
+        "辅助工具 %s 第 %s 次尝试失败，status=%s，api_key_present=%s，api_key_source=%s，请求变量=%s，failure_reason=%s，candidate_paths=%s，updated_variables=%s，visible_output_fields=%s，response_preview=%s",
+        attempt_debug.get("tool_key"),
+        attempt_debug.get("attempt_index"),
+        attempt_debug.get("status_code"),
+        attempt_debug.get("api_key_present"),
+        attempt_debug.get("api_key_source"),
+        ", ".join(attempt_debug.get("request_variable_keys") or []),
+        attempt_debug.get("failure_reason"),
+        ", ".join(attempt_debug.get("extracted_candidate_paths") or []),
+        ", ".join(sorted((attempt_debug.get("updated_variables") or {}).keys())),
+        ", ".join(attempt_debug.get("visible_output_fields") or []),
+        _truncate_text(attempt_debug.get("response_preview"), limit=400),
+    )
+
+
+def _build_failure_debug(
+    resolved: ResolvedSimpleTool,
+    *,
+    env_debug: dict[str, Any],
+    variables: dict[str, Any],
+    payload_debug: dict[str, Any],
+    status_code: int,
+    response_preview: str,
+    parsed_response: Any,
+    candidate_paths: list[str],
+    updated_variables: dict[str, Any],
+    retry_attempts: list[dict[str, Any]],
+    final_failure_reason: str,
+) -> dict[str, Any]:
+    parsed_response_keys: list[str]
+    if isinstance(parsed_response, dict):
+        parsed_response_keys = sorted(parsed_response.keys())
+    elif isinstance(parsed_response, list):
+        parsed_response_keys = [f"list[{len(parsed_response)}]"]
+    elif parsed_response is None:
+        parsed_response_keys = []
+    else:
+        parsed_response_keys = [type(parsed_response).__name__]
+    return {
+        **env_debug,
+        "workflow_json_path": str(resolved.json_path) if resolved.json_path else "",
+        "workflow_json_file": resolved.json_path.name if resolved.json_path else None,
+        "status_code": status_code,
+        "request_variables": copy.deepcopy(variables),
+        "normalized_payload": copy.deepcopy(payload_debug),
+        "response_preview": response_preview,
+        "parsed_response_keys": parsed_response_keys,
+        "candidate_paths": list(candidate_paths),
+        "updated_variables": copy.deepcopy(updated_variables),
+        "visible_output_fields": list(resolved.visible_output_fields),
+        "retry_attempts": copy.deepcopy(retry_attempts),
+        "final_failure_reason": final_failure_reason,
+    }
+
+
+def _write_simple_tool_debug_artifact(debug_payload: dict[str, Any]) -> str:
+    try:
+        base_dir = get_runtime_data_dir() / "debug" / "simple_tools"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        tool_key = str(debug_payload.get("tool_key") or debug_payload.get("tool_id") or "tool").strip() or "tool"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        path = base_dir / f"{tool_key}__{timestamp}.json"
+        path.write_text(
+            json.dumps(debug_payload, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        return str(path)
+    except Exception:
+        logger.warning("辅助工具 debug artifact 写入失败", exc_info=True)
+        return ""
+
+
+def _missing_api_key_message(resolved: ResolvedSimpleTool) -> str:
+    if resolved.definition.key == "hot_review":
+        return (
+            "当前 Python 进程未读取到 FASTGPT_HOT_REVIEW_API_KEY。"
+            "请检查 .env 是否被加载、PyCharm/PowerShell 是否重启、Run Configuration 是否配置环境变量。"
+        )
+    return (
+        f"{resolved.definition.label} 还未配置 API Key，请先配置 {resolved.api_key_envs[0]}。"
+        "如需兜底，也可以配置 FASTGPT_API_KEY。"
+    )
+
+
+def _generic_empty_output_message(label: str) -> str:
+    return f"{label} 没有返回可展示结果。请检查 workflow 最终输出是否写到了正式变量。"

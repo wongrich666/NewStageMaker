@@ -148,9 +148,9 @@
     hot_review: {
       key: "hot_review",
       label: "爆款文审核",
-      help: "提交一段文本，让工具返回审核意见。",
+      help: "提交待审核剧本，让工具返回完整审核意见，并支持下载 TXT。",
       fields: [
-        { name: "text", label: "待检测文本", type: "textarea", placeholder: "粘贴要审核的正文、大纲或片段。", required: true }
+        { name: "review_text", label: "待审核剧本", type: "textarea", placeholder: "粘贴待审核的剧本、大纲或片段。", required: true }
       ],
       configured: false,
       source: "fallback"
@@ -2735,7 +2735,7 @@
       }
     }
     state.toolResults[state.activeTool] = null;
-    renderToolOutput(state.activeTool, "框架生成中，请稍候~");
+    renderToolOutput(state.activeTool, "生成中，请稍候~");
     const data = await requestJson(currentToolRunUrl(state.activeTool), {
       method: "POST",
       body: JSON.stringify(payload)
@@ -2773,8 +2773,10 @@
 
   function downloadActiveToolResult() {
     const result = currentToolResult();
+    const tool = toolConfig(state.activeTool);
+    const toolLabel = tool?.label || "辅助工具结果";
     if (!result?.text || !result?.filename) {
-      showToast("暂无可下载内容", "请先成功生成 15 节拍剧本框架。");
+      showToast("暂无可下载内容", `请先成功生成${toolLabel}。`);
       return;
     }
     downloadTextFile(result.text, result.filename);
