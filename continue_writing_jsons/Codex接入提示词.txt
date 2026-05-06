@@ -1,0 +1,139 @@
+你现在要把“短剧本续写工作流包”接入现有项目。请按阶段顺序执行，不要跳步。
+
+目标功能：
+在辅助工具中新增一个独立按钮“续写剧本”。用户输入：短剧本正文、短剧本已有集数、希望续写到的集数、希望续写方向、新结局要求、允许新增人物、允许新增场景、每集正文字数。系统按五集一批循环续写，最终提供 txt 下载。
+
+本次我提供了 25 个 FastGPT 工作流 JSON：
+01_续写输入规范化.json
+02_原剧本分集规范化.json
+03_原剧本连续性档案提取.json
+04_世界观圣经提取.json
+05_人物与alias圣经提取.json
+06_场景与道具圣经提取.json
+07_续写目标契约生成.json
+08_续写总纲与终局路线生成.json
+09_续写分集计划生成.json
+10_续写分集计划审核.json
+11_续写分集计划修订.json
+12_续写开头冲突钩子生成.json
+13_续写开头冲突钩子审核.json
+14_续写开头冲突钩子修订.json
+15_续写开头冲突钩子记忆存储.json
+16_续写角色对白生成.json
+17_续写角色对白审核.json
+18_续写角色对白修订.json
+19_续写角色对白记忆存储.json
+20_续写剧本正文生成.json
+21_续写剧本正文审核.json
+22_续写剧本正文修订.json
+23_续写剧本正文记忆存储.json
+24_最终全局连贯性审核.json
+25_最终合并剧本文本.json
+
+请完成以下接入工作：
+
+一、配置环境变量
+为每个工作流预留 API Key/工作流 ID 配置，命名建议：
+FASTGPT_CONT_INPUT_NORMALIZE_API_KEY
+FASTGPT_CONT_SCRIPT_NORMALIZE_API_KEY
+FASTGPT_CONT_CONTINUITY_ARCHIVE_API_KEY
+FASTGPT_CONT_WORLDVIEW_BIBLE_API_KEY
+FASTGPT_CONT_CHARACTER_ALIAS_BIBLE_API_KEY
+FASTGPT_CONT_SCENE_PROP_BIBLE_API_KEY
+FASTGPT_CONT_GOAL_CONTRACT_API_KEY
+FASTGPT_CONT_MASTER_OUTLINE_API_KEY
+FASTGPT_CONT_EPISODE_PLAN_API_KEY
+FASTGPT_CONT_EPISODE_PLAN_AUDIT_API_KEY
+FASTGPT_CONT_EPISODE_PLAN_REVISE_API_KEY
+FASTGPT_CONT_HOOK_WRITE_API_KEY
+FASTGPT_CONT_HOOK_AUDIT_API_KEY
+FASTGPT_CONT_HOOK_REVISE_API_KEY
+FASTGPT_CONT_HOOK_MEMORY_API_KEY
+FASTGPT_CONT_DIALOGUE_WRITE_API_KEY
+FASTGPT_CONT_DIALOGUE_AUDIT_API_KEY
+FASTGPT_CONT_DIALOGUE_REVISE_API_KEY
+FASTGPT_CONT_DIALOGUE_MEMORY_API_KEY
+FASTGPT_CONT_SCRIPT_WRITE_API_KEY
+FASTGPT_CONT_SCRIPT_AUDIT_API_KEY
+FASTGPT_CONT_SCRIPT_REVISE_API_KEY
+FASTGPT_CONT_SCRIPT_MEMORY_API_KEY
+FASTGPT_CONT_GLOBAL_AUDIT_API_KEY
+FASTGPT_CONT_FINAL_MERGE_API_KEY
+
+如果现有 FastGPT 调用层支持统一 app id + api key，请按项目现有约定实现，不要重复造轮子。
+
+二、前端入口
+在辅助工具中新增“续写剧本”按钮和表单字段：
+short_script_body：多行文本，必填。
+existing_episode_count：数字，必填。
+target_episode_count：数字，必填，必须大于 existing_episode_count。
+continuation_direction：多行文本，可空。
+new_ending_request：多行文本，可空。
+allowed_new_characters：多行文本，可空。
+allowed_new_scenes：多行文本，可空。
+episode_word_count：数字，默认 600。
+batch_size：数字，默认 5。
+
+三、后端编排顺序
+一次性前置流程：
+01 输入规范化
+02 原剧本分集规范化
+03 原剧本连续性档案提取
+04 世界观圣经提取
+05 人物与alias圣经提取
+06 场景与道具圣经提取
+07 续写目标契约生成
+08 续写总纲与终局路线生成
+
+循环流程：
+current_start_episode = existing_episode_count + 1。
+while current_start_episode <= target_episode_count:
+  09 生成当前批次分集计划
+  10 审核分集计划
+  11 修订分集计划
+  12 生成当前批次开头冲突钩子
+  13 审核开头冲突钩子
+  14 修订开头冲突钩子
+  15 存储开头冲突钩子记忆
+  16 生成当前批次角色对白
+  17 审核角色对白
+  18 修订角色对白
+  19 存储角色对白记忆
+  20 生成当前批次剧本正文
+  21 审核剧本正文
+  22 修订剧本正文
+  23 存储剧本正文连续性记忆
+  将 revised_script_body 追加到 all_continuation_script_body。
+  current_start_episode += batch_size。
+
+循环结束后：
+24 最终全局连贯性审核
+25 最终合并剧本文本
+将 final_merged_script_text 保存为 txt，并给前端下载按钮。
+
+四、变量映射
+请严格映射这些变量名：
+raw_script_body、existing_episode_count、target_episode_count、continuation_direction、new_ending_request、allowed_new_characters、allowed_new_scenes、episode_word_count、batch_size、current_start_episode。
+
+内部变量使用：
+continuation_input_pack、normalized_existing_script、existing_continuity_archive、continuation_worldview_bible、continuation_character_alias_bible、continuation_scene_prop_bible、continuation_goal_contract、continuation_master_outline、current_episode_plan、episode_plan_audit、revised_episode_plan、current_hook_content、hook_audit、revised_hook_content、hook_memory、current_dialogue_content、dialogue_audit、revised_dialogue_content、dialogue_memory、current_script_body、script_body_audit、revised_script_body、script_continuity_memory、all_continuation_script_body、global_continuity_audit、final_merged_script_text。
+
+五、错误处理
+如果 01 返回 input_quality_report 中存在 blocking 风险，例如 target_episode_count <= existing_episode_count，直接返回用户可读错误，不进入后续流程。
+如果某个审核节点返回 fail 或 blocking_issues 不为空，仍然调用对应修订节点；修订后继续下一步。不要把审核 JSON 暴露给最终用户，除非调试模式打开。
+如果 FastGPT 调用失败，记录 workflow_name、current_start_episode、payload keys、错误文本，并在前端显示“当前阶段失败”。
+
+六、测试要求
+新增最小集成测试：
+1. 已有 3 集，续写到 5 集，batch_size=5，应只生成第4-5集。
+2. 已有 5 集，续写到 12 集，batch_size=5，应循环两次：6-10，11-12。
+3. allowed_new_characters 为空时，检查最终正文不应出现明显新命名主角。
+4. target_episode_count <= existing_episode_count 时应阻断。
+5. 最终 txt 下载内容应包含原剧本正文和续写正文。
+
+七、不要做的事
+不要把 25 个工作流合成一个巨型 prompt。
+不要让正文生成节点绕过分集计划、钩子、对白。
+不要把审核结果直接当最终正文输出。
+不要把五集合计字数误当每集字数。
+不要在最终 txt 前后加调试说明。
