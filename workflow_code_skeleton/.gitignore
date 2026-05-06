@@ -1,9 +1,42 @@
 .env
+.env.local
+
+# Python caches
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyc.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+
+# Local CLI/debug outputs
 output*.txt
 debug_state*.json
+*.tmp
+*.dump
+*.log
+
+# Repository-local transient artifacts
+debug/
+output/
+logs/
+tmp/
+temp/
+cache/
+generated/
+intermediate/
+.tmp_test_workspaces/
+
+# Runtime-generated data and archives
 runtime_data/
+runtime_archive/
+
+# Optional local notes
 CODER_README.md
-FASTGPT_CONTRACTS.md
-tests/

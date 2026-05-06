@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from workflow_code_skeleton.app.services.fastgpt_contracts import (
     CHARACTERS,
@@ -36,6 +35,7 @@ from workflow_code_skeleton.app.workflow_ids import (
     SCENE_NATURAL_LANGUAGE_VAR,
     SCENE_VAR,
 )
+from workflow_code_skeleton.tests.test_support import WorkspaceTempDir
 
 
 def _iso_now() -> str:
@@ -138,16 +138,11 @@ def _snapshot(*, current_stage: str = "framework", framework_natural: str = "框
 
 class TaskManagerPublicSnapshotTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = TemporaryDirectory()
+        self.temp_dir = WorkspaceTempDir(prefix="task-manager-public-")
         self.addCleanup(self.temp_dir.cleanup)
         self.manager = TaskManager()
-        base_dir = Path(self.temp_dir.name)
-        self.manager.base_dir = base_dir
-        self.manager.projects_dir = base_dir / "projects"
-        self.manager.exports_dir = base_dir / "exports"
-        self.manager.index_path = base_dir / "index.json"
-        self.manager.projects_dir.mkdir(parents=True, exist_ok=True)
-        self.manager.exports_dir.mkdir(parents=True, exist_ok=True)
+        base_dir = Path(self.temp_dir.name) / "runtime_data"
+        self.manager.set_storage_root(base_dir, runtime_archive_dir=Path(self.temp_dir.name) / "runtime_archive")
         self.manager._tasks.clear()
         self.manager._projects.clear()
         self.manager._index = {
@@ -319,6 +314,53 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
         self.assertEqual(public["display_stage_output"], "世界观自然语言版")
         self.assertNotIn("character_natural_language", public["artifacts"])
         self.assertNotIn("character_summary", public["artifacts"])
+
+    def test_public_snapshot_does_not_leak_structured_character_scene_or_placeholder_content(self) -> None:
+        snapshot = _snapshot(current_stage="characters", framework_natural="框架自然语言版", worldview_natural="世界观自然语言版")
+        snapshot["artifacts"]["character_summary"] = "【待补全：补充人物定位】"
+        snapshot["artifacts"]["scene_natural_language"] = ""
+        snapshot["artifacts"]["characters"] = json.dumps(
+            {
+                "character_setting": {
+                    "characters": [
+                        {
+                            "character_name": "林夏",
+                            "story_role": "主角",
+                            "core_motivation": "查清真相",
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        snapshot["artifacts"]["scene_json"] = json.dumps(
+            {
+                "scene_setting": {
+                    "scenes": [
+                        {
+                            "scene_name": "旧港调度塔",
+                            "story_function": "推进旧案调查",
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+
+        public = self.manager._public_snapshot(snapshot)
+        visible_text = "\n".join(
+            [
+                str(public.get("display_stage_output") or ""),
+                str(public.get("message") or ""),
+                "\n".join(str(value or "") for value in (public.get("artifacts") or {}).values()),
+            ]
+        )
+
+        self.assertNotIn("【待补全：补充人物定位】", visible_text)
+        self.assertNotIn("character_setting", visible_text)
+        self.assertNotIn("scene_setting", visible_text)
+        self.assertNotIn("[object Object]", visible_text)
+        self.assertNotIn("待补全", visible_text)
 
     def test_running_public_snapshot_exposes_approved_partial_script_batches_before_final(self) -> None:
         snapshot = _snapshot(current_stage="script")

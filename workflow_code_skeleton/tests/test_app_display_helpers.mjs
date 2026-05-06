@@ -100,7 +100,7 @@ test("build workspace url keeps waibao script format mode for fresh workspace", 
 test("script format mode label distinguishes waibao from default", () => {
   assert.equal(normalizeScriptFormatMode("waibao"), "waibao");
   assert.equal(scriptFormatModeLabel("waibao"), "外包专属格式");
-  assert.equal(scriptFormatModeLabel(""), "传统链路");
+  assert.equal(scriptFormatModeLabel(""), "标准格式");
 });
 
 test("framework natural language is preferred over structured raw artifacts", () => {

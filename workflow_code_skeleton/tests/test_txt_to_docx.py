@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -11,6 +10,7 @@ from workflow_code_skeleton.app.utils.txt_to_docx import (
     render_character,
     render_script,
 )
+from workflow_code_skeleton.tests.test_support import workspace_tempdir
 
 
 class TxtToDocxCompatibilityTests(unittest.TestCase):
@@ -90,7 +90,7 @@ class TxtToDocxCompatibilityTests(unittest.TestCase):
 场景1：旧码头
 林夏：先查人，再查船。
 """
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with workspace_tempdir(prefix="txt-to-docx-") as tmpdir:
             txt_path = Path(tmpdir) / "legacy_export.txt"
             docx_path = Path(tmpdir) / "legacy_export.docx"
             txt_path.write_text(source, encoding="utf-8")
@@ -134,7 +134,7 @@ class TxtToDocxCompatibilityTests(unittest.TestCase):
 场景1：旧码头
 林夏：先查人，再查船。
 """
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with workspace_tempdir(prefix="txt-to-docx-") as tmpdir:
             txt_path = Path(tmpdir) / "readable_export.txt"
             docx_path = Path(tmpdir) / "readable_export.docx"
             txt_path.write_text(source, encoding="utf-8")
@@ -150,57 +150,46 @@ class TxtToDocxCompatibilityTests(unittest.TestCase):
             self.assertIn("剧本正文", text)
             self.assertIn("第1集：风起", text)
 
-    def test_convert_skips_legacy_appearance_and_registry_json_blocks(self) -> None:
+    def test_convert_readback_omits_placeholders_and_mapping_json_labels(self) -> None:
         source = """长夜回潮
 
+故事梗概
+林夏重返港城调查沉船旧案，旧同盟与旧敌人同时逼近。
+
+世界观设定
+故事发生在资源高度集中的近未来港城，航运财团与城市治理深度绑定。
+
+人物小传
+林夏：作为调查负责人，性格冷静克制，目标是查清真相并保住团队。
+
 人物服饰说明
-【角色】林夏
-默认称呼：林夏【日常】
+服饰版本自然语言说明：林夏平时穿深色风衣与冷调衬衫，进入会议室摊牌时会切换成更锋利的交锋态着装。
 
-appearance_mapping
-```json
-{
-  "appearance_mapping": {
-    "characters": [
-      {
-        "character_name": "林夏",
-        "default_name": "林夏【日常】"
-      }
-    ]
-  }
-}
-```
-
-character_registry
-```json
-{
-  "character_registry": {
-    "林夏": {
-      "default_name": "林夏【日常】"
-    }
-  }
-}
-```
+核心场景
+旧港调度塔负责暴露旧案线索，封闭会议室集中呈现角色对峙与关系撕裂。
 
 剧本正文
 第1集：风起
-林夏：先查人，再查船。
+1-1 旧港调度塔 夜
+林夏：先盯住泊位记录，再查是谁删了监控。
 """
-        with tempfile.TemporaryDirectory() as tmpdir:
-            txt_path = Path(tmpdir) / "skip_legacy_json.txt"
-            docx_path = Path(tmpdir) / "skip_legacy_json.docx"
+        with workspace_tempdir(prefix="txt-to-docx-") as tmpdir:
+            txt_path = Path(tmpdir) / "acceptance_export.txt"
+            docx_path = Path(tmpdir) / "acceptance_export.docx"
             txt_path.write_text(source, encoding="utf-8")
 
             convert(str(txt_path), str(docx_path))
 
             doc = Document(str(docx_path))
-            text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
-            self.assertIn("人物服饰说明", text)
-            self.assertIn("默认称呼：林夏【日常】", text)
-            self.assertIn("剧本正文", text)
+            text = "\n".join(paragraph.text for paragraph in doc.paragraphs if paragraph.text)
+            self.assertIn("服饰版本自然语言说明", text)
+            self.assertIn("林夏：作为调查负责人", text)
+            self.assertNotIn("待补全", text)
+            self.assertNotIn("TODO", text)
+            self.assertNotIn("服装版本映射内容", text)
             self.assertNotIn("appearance_mapping", text)
-            self.assertNotIn("character_registry", text)
-            self.assertNotIn("附加数据", text)
+            self.assertNotIn("{", text)
+            self.assertNotIn("}", text)
 
 
 if __name__ == "__main__":

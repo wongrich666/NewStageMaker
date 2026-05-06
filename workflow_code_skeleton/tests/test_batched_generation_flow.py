@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from workflow_code_skeleton.app.config import settings
@@ -114,6 +113,7 @@ from workflow_code_skeleton.tests.test_stage_output_repair import (
     _character_setting_json,
     _scene_setting_json,
 )
+from workflow_code_skeleton.tests.test_support import workspace_tempdir
 
 
 def _workflow_input(total_episodes: int) -> WorkflowInput:
@@ -768,7 +768,12 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         settings.batch_size = 5
         settings.fastgpt_stage_review_revise_max_loops = 10
         settings.fastgpt_stage_format_retry_limit = 3
-        self._debug_artifact_dir = Path("workflow_code_skeleton") / "debug" / "fastgpt_stage_failures"
+        self._debug_artifact_dir = (
+            Path("workflow_code_skeleton")
+            / "runtime_data"
+            / "debug"
+            / "fastgpt_stage_failures"
+        )
         self._cleanup_debug_artifacts()
 
     def tearDown(self) -> None:
@@ -785,6 +790,11 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         for path in self._debug_artifact_dir.glob("*.json"):
             try:
                 path.unlink()
+            except OSError:
+                pass
+        for path in (self._debug_artifact_dir, self._debug_artifact_dir.parent):
+            try:
+                path.rmdir()
             except OSError:
                 pass
 
@@ -1399,49 +1409,57 @@ class BatchedGenerationFlowTests(unittest.TestCase):
             [1, 6],
         )
 
-    def test_script_write_missing_episodes_auto_repairs_with_supplement(self) -> None:
+    def test_script_batch_local_validation_auto_repairs_duplicate_episode_headings(self) -> None:
         state, payload, variables = self._state_and_payload(5)
+        settings.fastgpt_stage_format_retry_limit = 3
         runner = _PhaseRecordingRunner(
             stage_outputs={
                 STAGE_SCRIPT_WRITING: [
                     {
-                        BATCH_SCRIPT: _script_batch_text([1, 2, 3, 4])
+                        BATCH_SCRIPT: "\n\n".join(
+                            [
+                                "第1集：\n场景一：第1集正文",
+                                "第1集：\n场景一：重复的第1集正文",
+                                "第2集：\n场景一：第2集正文",
+                                "第3集：\n场景一：第3集正文",
+                                "第4集：\n场景一：第4集正文",
+                            ]
+                        )
                     },
                     {
-                        BATCH_SCRIPT: _script_batch_text([5])
+                        BATCH_SCRIPT: "\n\n".join(
+                            [
+                                "第1集：\n场景一：第1集正文",
+                                "第1集：\n场景一：重复的第1集正文",
+                                "第2集：\n场景一：第2集正文",
+                                "第3集：\n场景一：第3集正文",
+                                "第4集：\n场景一：第4集正文",
+                            ]
+                        )
+                    },
+                    {
+                        BATCH_SCRIPT: "\n\n".join(
+                            [
+                                "第1集：\n场景一：第1集正文",
+                                "第1集：\n场景一：重复的第1集正文",
+                                "第2集：\n场景一：第2集正文",
+                                "第3集：\n场景一：第3集正文",
+                                "第4集：\n场景一：第4集正文",
+                            ]
+                        )
                     },
                 ]
             }
         )
 
-        flow._run_batched_generation(state, runner, payload, variables)
+        with self.assertLogs(flow.logger.name, level="WARNING") as logs:
+            flow._run_batched_generation(state, runner, payload, variables)
 
-        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_WRITING)), 2)
-        script_text = str(variables.get(ALL_SCRIPT, "") or "")
-        self.assertIn("第5集", script_text)
-        self.assertFalse(flow.validate_batch_script_text(script_text, BatchWindow(1, 5)))
-
-    def test_script_write_auto_repairs_by_downgrading_batch_size(self) -> None:
-        state, payload, variables = self._state_and_payload(5)
-        runner = _PhaseRecordingRunner(
-            stage_outputs={
-                STAGE_SCRIPT_WRITING: [
-                    {BATCH_SCRIPT: _script_batch_text([1])},
-                    {BATCH_SCRIPT: _script_batch_text([1])},
-                    {BATCH_SCRIPT: _script_batch_text([1])},
-                    {BATCH_SCRIPT: _script_batch_text([1, 2, 3])},
-                    {BATCH_SCRIPT: _script_batch_text([4, 5])},
-                ]
-            }
-        )
-
-        flow._run_batched_generation(state, runner, payload, variables)
-
-        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_WRITING)), 5)
-        script_text = str(variables.get(ALL_SCRIPT, "") or "")
-        self.assertIn("第3集", script_text)
-        self.assertIn("第5集", script_text)
-        self.assertFalse(flow.validate_batch_script_text(script_text, BatchWindow(1, 5)))
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_WRITING)), 4)
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REWRITE)), 0)
+        self.assertEqual(len(runner.memory_calls()), 1)
+        self.assertIn("第5集", str(variables.get(ALL_SCRIPT, "") or ""))
+        self.assertTrue(any("script_auto_repair" in item for item in logs.output))
 
     def test_final_guard_rejects_duplicate_hook_episodes(self) -> None:
         variables = self._base_variables(10)
@@ -1663,6 +1681,116 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         joined = "\n".join(issues)
         self.assertIn("out-of-window", joined)
         self.assertIn("missing", joined)
+
+    def test_script_auto_repair_helpers_detect_missing_and_recoverable_errors(self) -> None:
+        failure_reasons = [
+            "script batch 46-50 is missing episodes: 第47-50集",
+            "script episode 47 is missing a scene heading such as 47-1",
+        ]
+
+        self.assertEqual(flow._detect_missing_episodes(failure_reasons), [47, 48, 49, 50])
+        self.assertTrue(flow.is_recoverable_script_error(failure_reasons))
+
+    def test_script_write_missing_episodes_auto_repairs_by_appending(self) -> None:
+        state, payload, variables, batches = self._script_ready_state(5)
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_SCRIPT_WRITING: [
+                    {BATCH_SCRIPT: _script_batch_text([1, 2, 3])},
+                    {BATCH_SCRIPT: _script_batch_text([1, 2, 3])},
+                    {BATCH_SCRIPT: _script_batch_text([1, 2, 3])},
+                    {BATCH_SCRIPT: _script_batch_text([4, 5])},
+                ]
+            }
+        )
+
+        with self.assertLogs(flow.logger.name, level="WARNING") as logs:
+            flow._run_all_script_batches(
+                state,
+                runner,
+                payload,
+                variables,
+                batches=batches,
+                normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+                episode_alias_plan=None,
+                rewrite_from_stage="",
+            )
+
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_WRITING)), 4)
+        self.assertEqual(runner.stage_calls(STAGE_SCRIPT_WRITING)[-1]["plan_episodes"], [4, 5])
+        self.assertIn("第1集", str(variables.get(ALL_SCRIPT) or ""))
+        self.assertIn("第5集", str(variables.get(ALL_SCRIPT) or ""))
+        self.assertTrue(any("script_auto_repair" in item and "补写" in item for item in logs.output))
+
+    def test_script_write_missing_scene_heading_auto_repairs_with_structure_rewrite(self) -> None:
+        state, payload, variables, batches = self._script_ready_state(5)
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_SCRIPT_WRITING: [
+                    {BATCH_SCRIPT: _script_batch_text_without_scene_headings([1, 2, 3, 4, 5])},
+                    {BATCH_SCRIPT: _script_batch_text_without_scene_headings([1, 2, 3, 4, 5])},
+                    {BATCH_SCRIPT: _script_batch_text_without_scene_headings([1, 2, 3, 4, 5])},
+                ],
+                STAGE_SCRIPT_REWRITE: [
+                    {BATCH_SCRIPT: _script_batch_text([1, 2, 3, 4, 5])}
+                ],
+            }
+        )
+
+        with self.assertLogs(flow.logger.name, level="WARNING") as logs:
+            flow._run_all_script_batches(
+                state,
+                runner,
+                payload,
+                variables,
+                batches=batches,
+                normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+                episode_alias_plan=None,
+                rewrite_from_stage="",
+            )
+
+        self.assertEqual(len(runner.stage_calls(STAGE_SCRIPT_REWRITE)), 1)
+        self.assertIn("1-1", str(variables.get(ALL_SCRIPT) or ""))
+        self.assertTrue(any("script_auto_repair" in item and "结构修复" in item for item in logs.output))
+
+    def test_script_write_auto_repairs_then_falls_back_to_smaller_batches(self) -> None:
+        state, payload, variables, batches = self._script_ready_state(5)
+        runner = _PhaseRecordingRunner(
+            stage_outputs={
+                STAGE_SCRIPT_WRITING: [
+                    {BATCH_SCRIPT: _script_batch_text([1, 2, 3])},
+                    {BATCH_SCRIPT: _script_batch_text([1, 2, 3])},
+                    {BATCH_SCRIPT: _script_batch_text([1, 2, 3])},
+                    {BATCH_SCRIPT: _script_batch_text([4])},
+                    {BATCH_SCRIPT: _script_batch_text([1, 2, 3])},
+                    {BATCH_SCRIPT: _script_batch_text([4, 5])},
+                ],
+                STAGE_SCRIPT_REWRITE: [
+                    {BATCH_SCRIPT: _script_batch_text([1, 2, 3, 4])}
+                ],
+            }
+        )
+
+        with self.assertLogs(flow.logger.name, level="WARNING") as logs:
+            flow._run_all_script_batches(
+                state,
+                runner,
+                payload,
+                variables,
+                batches=batches,
+                normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+                episode_alias_plan=None,
+                rewrite_from_stage="",
+            )
+
+        script_write_starts = [
+            int(call["batch_start"])
+            for call in runner.stage_calls(STAGE_SCRIPT_WRITING)
+        ]
+        self.assertEqual(script_write_starts, [1, 1, 1, 4, 1, 4])
+        self.assertEqual(sorted(int(key) for key in variables[flow.LOCAL_SCRIPT_BATCHES].keys()), [1, 4])
+        self.assertIn("第5集", str(variables.get(ALL_SCRIPT) or ""))
+        self.assertTrue(any("script_auto_repair" in item and "缩小批次" in item for item in logs.output))
 
     def test_script_memory_failure_stops_current_batch_and_resume_replays_memory_only(self) -> None:
         previous_memory = json.dumps(
@@ -3346,7 +3474,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertEqual(rewrite_call["dialogue_hook_prompt_alias_episodes"], [1, 2, 3, 4, 5])
 
     def test_workflow_json_dir_env_override_is_respected(self) -> None:
-        with TemporaryDirectory() as tmpdir:
+        with workspace_tempdir(prefix="workflow-json-dir-") as tmpdir:
             target_dir = Path(tmpdir)
             target_file = target_dir / "角色对话修订.json"
             target_file.write_text("{}", encoding="utf-8")

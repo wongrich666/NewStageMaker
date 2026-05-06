@@ -142,6 +142,7 @@ from ..services.workflow_output_validation import (
 )
 from ..utils.episode import BatchWindow, iter_episode_batches, iter_episode_batches_from
 from ..utils.logger import get_logger
+from ..utils.user_visible_text import has_meaningful_content, is_meaningful_text
 from ..workflow_ids import (
     APPEARANCE_NATURAL_LANGUAGE_VAR,
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
@@ -256,6 +257,8 @@ FRAMEWORK_TITLE_MIN_LENGTH = 2
 FRAMEWORK_TEXT_MIN_LENGTH = 10
 CONSISTENCY_SELF_CHECK_ATTEMPTS = 2
 BATCH_REVIEW_MAX_LOOPS = 10
+SCRIPT_AUTO_REPAIR_MAX_RETRIES = 3
+SCRIPT_AUTO_REPAIR_BATCH_FALLBACKS = {5: 3, 3: 2}
 PRE_STRATEGY_RUNTIME_FIELDS = (
     CHARACTER_APPEARANCE_REQUIREMENTS,
     CHARACTER_ALIAS_NAMING_RULES,
@@ -356,6 +359,22 @@ class FrameworkOutputValidationError(ValueError):
 
 class ConsistencySelfCheckError(ValueError):
     """一致性阶段没有产出严格 true/false 时，阻止误打回 framework。"""
+
+
+class _RetryWithSmallerScriptBatch(ValueError):
+    def __init__(
+        self,
+        *,
+        batch: BatchWindow,
+        next_batch_size: int,
+        failure_reasons: list[str],
+    ) -> None:
+        self.batch = batch
+        self.next_batch_size = int(next_batch_size)
+        self.failure_reasons = [str(item).strip() for item in failure_reasons if str(item).strip()]
+        super().__init__(
+            f"script batch {batch.label} auto repair exhausted; retry with smaller batch size {next_batch_size}"
+        )
 
 
 @dataclass(frozen=True)
@@ -471,7 +490,7 @@ def run_fastgpt_hybrid_workflow(
             )
     _sync_state_variables(state, variables)
 
-    if _has_value(variables.get(WORLDVIEW)):
+    if has_meaningful_content(variables.get(WORLDVIEW)):
         set_runtime_stage(
             state,
             "worldview",
@@ -494,7 +513,7 @@ def run_fastgpt_hybrid_workflow(
     _ensure_worldview_natural_language(state, runner, variables)
     _sync_state_variables(state, variables)
 
-    if _has_value(variables.get(CHARACTERS)):
+    if has_meaningful_content(variables.get(CHARACTERS)):
         set_runtime_stage(
             state,
             "character",
@@ -1397,40 +1416,7 @@ def _run_batch_write_review_revise_loop(
     variables[retry_var] = 0
     variables.pop(PASS_REVIEW_JSON, None)
 
-    writing_output: dict[str, Any]
-    if stage_key == "script" and output_field == BATCH_SCRIPT and callable(approved_output_validator):
-        try:
-            current_output = _generate_script_batch_once(
-                state,
-                runner,
-                stage_name=writing_stage_name,
-                stage_key=stage_key,
-                message=f"正在生成{stage_label}：第 {batch.label} 集",
-                context=writing_context,
-                output_field=output_field,
-                batch=batch,
-                progress_percent=progress_percent,
-                generated_episodes=generated_episodes,
-                validator=lambda candidate: list(approved_output_validator(candidate) or []),
-            )
-        except WorkflowOutputValidationError as exc:
-            if not is_recoverable_script_error(list(exc.issues or [])):
-                raise
-            current_output = _auto_repair_script_output(
-                state,
-                runner,
-                writing_stage_name=writing_stage_name,
-                writing_context=writing_context,
-                batch=batch,
-                progress_percent=progress_percent,
-                generated_episodes=generated_episodes,
-                output_field=output_field,
-                approved_output_validator=lambda candidate: list(approved_output_validator(candidate) or []),
-                initial_text=str((exc.normalized_output or {}).get(output_field) or ""),
-                failure_reasons=list(exc.issues or []),
-            )
-        writing_output = {output_field: current_output}
-    else:
+    try:
         writing_output = run_stage_with_contract_guard(
             state,
             runner,
@@ -1449,6 +1435,33 @@ def _run_batch_write_review_revise_loop(
             sync_output_to_state=False,
         )
         current_output = writing_output[output_field]
+    except Exception as exc:
+        if stage_key != "script" or output_field != BATCH_SCRIPT or not callable(approved_output_validator):
+            raise
+        failure_reasons, invalid_output, _ = _script_stage_validation_details(
+            exc,
+            state=state,
+            stage_name=writing_stage_name,
+            output_field=output_field,
+        )
+        current_output = _auto_repair_script_output(
+            state,
+            runner,
+            variables=variables,
+            batch=batch,
+            stage_label=stage_label,
+            output_field=output_field,
+            current_output_var=current_output_var,
+            writing_stage_name=writing_stage_name,
+            rewrite_stage_name=rewrite_stage_name,
+            writing_context=writing_context,
+            rewrite_context_builder=rewrite_context_builder,
+            progress_percent=progress_percent,
+            generated_episodes=generated_episodes,
+            approved_output_validator=approved_output_validator,
+            failure_reasons=failure_reasons,
+            current_output=invalid_output,
+        )
     set_with_aliases(
         variables,
         output_field,
@@ -2413,58 +2426,103 @@ def _run_script_batches(
                 memory_fields=("previous_batch_summary", "script_memory"),
             )
             progress = 72 + int((actual_index / total_batches) * 20)
-            batch_script, review_payload = _run_batch_write_review_revise_loop(
-                state,
-                runner,
-                variables=variables,
-                batch=batch,
-                stage_key="script",
-                stage_label="剧本正文",
-                output_field=BATCH_SCRIPT,
-                current_output_var=SCRIPT_CURRENT_VAR,
-                review_output_var=SCRIPT_REVIEW_OUTPUT_VAR,
-                retry_var=SCRIPT_RETRY_VAR,
-                max_retry_var=SCRIPT_MAX_RETRY_VAR,
-                writing_stage_name=script_write_stage,
-                review_stage_name=STAGE_SCRIPT_REVIEW,
-                rewrite_stage_name=script_revise_stage,
-                writing_context=script_base,
-                review_context_builder=lambda current_output: {
-                    **_build_script_stage_context(
-                        variables,
-                        batch=batch,
-                        plan_for_batch=plan_for_batch,
-                        normalized_plan_for_batch=normalized_plan_for_batch,
-                        alias_plan_for_batch=alias_plan_for_batch,
-                        hook_payload=hook_payload,
-                        dialogue_payload=dialogue_payload,
-                        script_memory=_bounded_script_memory(variables.get(LAST_SUMMARY)),
-                        script_stage_name=STAGE_SCRIPT_REVIEW,
+            try:
+                batch_script, review_payload = _run_batch_write_review_revise_loop(
+                    state,
+                    runner,
+                    variables=variables,
+                    batch=batch,
+                    stage_key="script",
+                    stage_label="剧本正文",
+                    output_field=BATCH_SCRIPT,
+                    current_output_var=SCRIPT_CURRENT_VAR,
+                    review_output_var=SCRIPT_REVIEW_OUTPUT_VAR,
+                    retry_var=SCRIPT_RETRY_VAR,
+                    max_retry_var=SCRIPT_MAX_RETRY_VAR,
+                    writing_stage_name=script_write_stage,
+                    review_stage_name=STAGE_SCRIPT_REVIEW,
+                    rewrite_stage_name=script_revise_stage,
+                    writing_context=script_base,
+                    review_context_builder=lambda current_output: {
+                        **_build_script_stage_context(
+                            variables,
+                            batch=batch,
+                            plan_for_batch=plan_for_batch,
+                            normalized_plan_for_batch=normalized_plan_for_batch,
+                            alias_plan_for_batch=alias_plan_for_batch,
+                            hook_payload=hook_payload,
+                            dialogue_payload=dialogue_payload,
+                            script_memory=_bounded_script_memory(variables.get(LAST_SUMMARY)),
+                            script_stage_name=STAGE_SCRIPT_REVIEW,
+                        ),
+                        BATCH_SCRIPT: current_output,
+                    },
+                    rewrite_context_builder=lambda current_output, current_review: {
+                        **_build_script_stage_context(
+                            variables,
+                            batch=batch,
+                            plan_for_batch=plan_for_batch,
+                            normalized_plan_for_batch=normalized_plan_for_batch,
+                            alias_plan_for_batch=alias_plan_for_batch,
+                            hook_payload=hook_payload,
+                            dialogue_payload=dialogue_payload,
+                            script_memory=_bounded_script_memory(variables.get(LAST_SUMMARY)),
+                            script_stage_name=script_revise_stage,
+                        ),
+                        BATCH_SCRIPT: current_output,
+                        PASS_REVIEW_JSON: current_review,
+                    },
+                    progress_percent=progress,
+                    generated_episodes=generated_before_batch,
+                    approved_output_validator=lambda current_output: validate_batch_script_text(
+                        current_output,
+                        batch,
                     ),
-                    BATCH_SCRIPT: current_output,
-                },
-                rewrite_context_builder=lambda current_output, current_review: {
-                    **_build_script_stage_context(
-                        variables,
-                        batch=batch,
-                        plan_for_batch=plan_for_batch,
-                        normalized_plan_for_batch=normalized_plan_for_batch,
-                        alias_plan_for_batch=alias_plan_for_batch,
-                        hook_payload=hook_payload,
-                        dialogue_payload=dialogue_payload,
-                        script_memory=_bounded_script_memory(variables.get(LAST_SUMMARY)),
-                        script_stage_name=script_revise_stage,
-                    ),
-                    BATCH_SCRIPT: current_output,
-                    PASS_REVIEW_JSON: current_review,
-                },
-                progress_percent=progress,
-                generated_episodes=generated_before_batch,
-                approved_output_validator=lambda current_output: validate_batch_script_text(
-                    current_output,
+                )
+            except _RetryWithSmallerScriptBatch as exc:
+                smaller_batches = _split_batch_window(
                     batch,
-                ),
-            )
+                    batch_size=exc.next_batch_size,
+                )
+                logger.warning(
+                    {
+                        "type": "script_auto_repair",
+                        "strategy": "缩小批次",
+                        "missing_episodes": _detect_missing_episodes(exc.failure_reasons),
+                        "retry_count": SCRIPT_AUTO_REPAIR_MAX_RETRIES,
+                        "batch_label": batch.label,
+                        "next_batch_size": exc.next_batch_size,
+                        "failure_reasons": list(exc.failure_reasons[:10]),
+                    }
+                )
+                set_runtime_stage(
+                    state,
+                    "script",
+                    f"剧本正文 {batch.label} 集自动修复未完成，正在降级为 {exc.next_batch_size} 集批次继续生成。",
+                    batch_label=batch.label,
+                    progress_percent=progress,
+                    generated_episodes=generated_before_batch,
+                )
+                sync_runtime_state(state)
+                set_with_aliases(variables, BATCH_SCRIPT, "", SCRIPT_BATCH_ALIASES)
+                variables[SCRIPT_CURRENT_VAR] = ""
+                variables[SCRIPT_RETRY_VAR] = 0
+                _sync_state_variables(state, variables)
+                sync_runtime_state(state)
+                remaining_batches = list(batches[index + 1 :])
+                _run_script_batches(
+                    state,
+                    runner,
+                    payload,
+                    variables,
+                    batches=[*smaller_batches, *remaining_batches],
+                    normalized_plan=normalized_plan,
+                    episode_alias_plan=episode_alias_plan,
+                    rewrite_from_stage=rewrite_from_stage,
+                    batch_index_offset=actual_index,
+                    total_batches=actual_index + len(smaller_batches) + len(remaining_batches),
+                )
+                return
             state.set_output(STAGE_SCRIPT_REVIEW, "last_committed_review", copy.deepcopy(review_payload))
             set_with_aliases(variables, BATCH_SCRIPT, batch_script, SCRIPT_BATCH_ALIASES)
             script_episode_cache.update(_extract_script_episode_map(batch_script, batch))
@@ -3025,7 +3083,7 @@ def _script_episode_heading_matches(text: str) -> list[re.Match[str]]:
     return list(SCRIPT_EPISODE_HEADING_PATTERN.finditer(text))
 
 
-def _extract_script_episode_sequence(text: Any) -> list[int]:
+def __extract_script_episode_sequence(text: Any) -> list[int]:
     source = str(text or "").strip()
     if not source:
         return []
@@ -3042,7 +3100,7 @@ def _duplicate_episode_numbers(sequence: list[int]) -> list[int]:
 
 
 def _validate_script_batch_output_legacy(batch_script: Any, *, batch: BatchWindow) -> list[str]:
-    sequence = _extract_script_episode_sequence(batch_script)
+    sequence = __extract_script_episode_sequence(batch_script)
     if not sequence:
         return [f"剧本正文 {batch.label} 集缺少可识别的集标题，无法确认当前批次覆盖范围。"]
 
@@ -3122,7 +3180,7 @@ def _validate_script_batch_output(batch_script: Any, *, batch: BatchWindow) -> l
     if any(marker in lowered or marker in text for marker in report_markers):
         return [f"script batch {batch.label} looks like a review/report, not script正文"]
 
-    sequence = _extract_script_episode_sequence(text)
+    sequence = __extract_script_episode_sequence(text)
     if not sequence:
         return [f"script batch {batch.label} has no recognizable episode headings"]
 
@@ -3172,424 +3230,487 @@ def validate_batch_script_text(text: Any, batch: BatchWindow) -> list[str]:
     return _validate_script_batch_output(text, batch=batch)
 
 
-_SCRIPT_RECOVERABLE_ERROR_MARKERS = (
-    "is missing episodes",
-    "missing a scene heading",
-    "has duplicate episode headings",
-    "episode order is invalid",
-    "must start from episode",
-)
-_SCRIPT_PLACEHOLDER_REPAIR_MARKERS = ("待补全", "待补充", "尚未明确", "暂未明确", "待定", "未提供")
+def _script_stage_validation_details(
+    exc: Exception,
+    *,
+    state: WorkflowState | None,
+    stage_name: str,
+    output_field: str,
+) -> tuple[list[str], str, dict[str, Any]]:
+    validation_error = getattr(exc, "contract_validation_error", None)
+    if validation_error is None and isinstance(exc, WorkflowOutputValidationError):
+        validation_error = exc
+    if validation_error is None and isinstance(exc.__cause__, WorkflowOutputValidationError):
+        validation_error = exc.__cause__
+
+    artifact = getattr(exc, "contract_guard_artifact", None)
+    if not isinstance(artifact, dict) and state is not None:
+        artifact = state.get_output(stage_name, "contract_guard", {})
+    if not isinstance(artifact, dict):
+        artifact = {}
+
+    reasons = [
+        str(item).strip()
+        for item in list(getattr(validation_error, "issues", []) or [])
+        if str(item).strip()
+    ]
+    if not reasons:
+        reasons = [
+            str(item).strip()
+            for item in list(getattr(exc, "validator_issues", []) or [])
+            if str(item).strip()
+        ]
+    if not reasons:
+        reasons = [
+            str(item).strip()
+            for item in list(artifact.get("validator_issues") or [])
+            if str(item).strip()
+        ]
+    if not reasons and str(artifact.get("last_failure_reason") or "").strip():
+        reasons = [str(artifact.get("last_failure_reason") or "").strip()]
+
+    normalized_output = getattr(validation_error, "normalized_output", None)
+    if not normalized_output:
+        normalized_output = getattr(exc, "normalized_output", None)
+    candidate_text = ""
+    if isinstance(normalized_output, dict):
+        candidate_text = str(normalized_output.get(output_field) or "").strip()
+    elif isinstance(normalized_output, str):
+        candidate_text = normalized_output.strip()
+
+    return reasons, candidate_text, artifact
+
+
+def _extract_episode_ranges_from_text(text: str) -> list[int]:
+    episodes: set[int] = set()
+    for match in re.finditer(
+        r"第\s*([0-9０-９一二三四五六七八九十百千万两零〇]+)"
+        r"(?:\s*[-－—~～到至]\s*([0-9０-９一二三四五六七八九十百千万两零〇]+))?\s*集",
+        str(text or ""),
+    ):
+        start = _parse_episode_token(match.group(1) or "")
+        end = _parse_episode_token(match.group(2) or "") if match.group(2) else start
+        if start is None or end is None:
+            continue
+        left = min(start, end)
+        right = max(start, end)
+        episodes.update(range(left, right + 1))
+    return sorted(episodes)
 
 
 def _detect_missing_episodes(failure_reasons: list[str]) -> list[int]:
-    missing: list[int] = []
-    for reason in failure_reasons or []:
+    missing: set[int] = set()
+    for reason in failure_reasons:
         text = str(reason or "").strip()
-        if "missing episodes:" not in text:
+        if not text:
             continue
-        suffix = text.split("missing episodes:", 1)[-1].strip()
-        for start_text, end_text in re.findall(r"(\d+)\s*-\s*(\d+)", suffix):
-            start = _safe_int(start_text, 0)
-            end = _safe_int(end_text, 0)
-            if start > 0 and end >= start:
-                missing.extend(range(start, end + 1))
-        consumed = re.sub(r"\d+\s*-\s*\d+", " ", suffix)
-        for token in re.findall(r"\d+", consumed):
-            number = _safe_int(token, 0)
-            if number > 0:
-                missing.append(number)
-    return sorted(set(missing))
+        lowered = text.lower()
+        if "missing episodes" not in lowered and "缺少集" not in text:
+            continue
+        missing.update(_extract_episode_ranges_from_text(text))
+    return sorted(missing)
 
 
-def is_recoverable_script_error(failure_reasons: list[str]) -> bool:
-    for reason in failure_reasons or []:
-        text = str(reason or "").strip().lower()
-        if any(marker in text for marker in _SCRIPT_RECOVERABLE_ERROR_MARKERS):
+def _script_error_has_missing_scene_heading(failure_reasons: list[str]) -> bool:
+    for reason in failure_reasons:
+        text = str(reason or "").strip()
+        lowered = text.lower()
+        if "missing a scene heading" in lowered or "缺少场景编号" in text or "缺少场景" in text:
             return True
     return False
 
 
-def _script_output_looks_truncated(text: Any, *, batch: BatchWindow) -> bool:
-    content = str(text or "").strip()
-    if not content:
-        return True
-    sequence = extract_script_episode_sequence(content)
-    if not sequence:
-        return True
-    highest = max(sequence)
-    if highest < batch.end_episode:
-        return True
-    return f"第{batch.end_episode}集" not in content and str(batch.end_episode) not in content
+def _script_error_has_duplicate_episodes(failure_reasons: list[str]) -> bool:
+    for reason in failure_reasons:
+        text = str(reason or "").strip()
+        lowered = text.lower()
+        if "duplicate episode" in lowered or "重复集" in text:
+            return True
+    return False
 
 
-def _should_retry_with_smaller_batch(
+def _script_output_looks_truncated(
+    batch_script: Any,
+    *,
     batch: BatchWindow,
-    retry_count: int,
     failure_reasons: list[str],
+) -> bool:
+    text = str(batch_script or "").strip()
+    if not text:
+        return False
+    sequence = __extract_script_episode_sequence(text)
+    if sequence and max(sequence) < batch.end_episode:
+        return True
+    missing = _detect_missing_episodes(failure_reasons)
+    if missing and batch.end_episode in missing:
+        return True
+    return False
+
+
+def is_recoverable_script_error(failure_reasons: list[str]) -> bool:
+    missing = _detect_missing_episodes(failure_reasons)
+    if missing:
+        return True
+    if _script_error_has_missing_scene_heading(failure_reasons):
+        return True
+    if _script_error_has_duplicate_episodes(failure_reasons):
+        return True
+    for reason in failure_reasons:
+        text = str(reason or "").strip()
+        lowered = text.lower()
+        if "truncated" in lowered or "截断" in text or "提前结束" in text:
+            return True
+    return False
+
+
+def _script_auto_repair_review_payload(
     *,
-    current_batch_size: int,
-) -> int | None:
-    del batch, failure_reasons
-    if retry_count < 3:
-        return None
-    if current_batch_size >= 5:
-        return 3
-    if current_batch_size == 3:
-        return 2
-    return None
-
-
-def _append_script_repair_instruction(
-    base_context: dict[str, Any],
-    *,
-    instruction: str,
-    current_output: str = "",
-) -> dict[str, Any]:
-    context = copy.deepcopy(base_context)
-    prompt_parts = [str(context.get(USER_EXPECTATION) or "").strip(), "[代码侧自动修复要求]", instruction.strip()]
-    if current_output.strip():
-        prompt_parts.append("以下是已经生成的现有内容，请在其基础上继续或修复，不要重复已存在的剧情：")
-        prompt_parts.append(current_output.strip())
-    context[USER_EXPECTATION] = "\n\n".join(part for part in prompt_parts if part).strip()
-    if current_output.strip():
-        set_with_aliases(context, BATCH_SCRIPT, current_output.strip(), SCRIPT_BATCH_ALIASES)
-    return context
-
-
-def _validate_script_stage_output_text(
-    raw_output: dict[str, Any],
-    *,
-    stage_name: str,
-    output_field: str,
     batch: BatchWindow,
-    validator: Any = None,
-) -> str:
-    contract = contract_for(stage_name)
-    spec = load_workflow_output_contract(
-        stage_name=stage_name,
-        expected_output_kind=contract.expected_output_kind,
-        workflow_json_name=contract.workflow_json_name,
-    )
-    aliases = contract.aliases_for_output(output_field)
-    validated_output, _ = validate_stage_output_with_workflow_contract(
-        raw_output,
-        spec=spec,
-        canonical_name=output_field,
-        aliases=aliases,
-        batch_validator=validator,
-    )
-    return str(validated_output.get(output_field) or "").strip()
-
-
-def _build_subbatch_script_context(
-    base_context: dict[str, Any],
-    *,
-    sub_batch: BatchWindow,
-    accumulated_text: str = "",
+    strategy: str,
+    summary: str,
+    instructions: list[str],
 ) -> dict[str, Any]:
-    context = copy.deepcopy(base_context)
-    raw_plan = str(base_context.get(EPISODE_PLAN) or "")
-    normalized_plan = base_context.get(NORMALIZED_EPISODE_PLAN)
-    plan_for_batch, normalized_plan_for_batch = _get_episode_batch_plan_context(
-        normalized_plan,
-        sub_batch.start_episode,
-        batch_size=sub_batch.size,
+    blocking_issues = [str(item).strip() for item in instructions if str(item).strip()]
+    return {
+        REVIEW_PASSED: False,
+        REWRITE_REQUIRED: True,
+        BLOCKING_ISSUES: blocking_issues,
+        "non_blocking_issues": [],
+        "summary": summary,
+        "rewrite_start_episode": batch.start_episode,
+        "stage": f"script_auto_repair_{strategy}",
+    }
+
+
+def _merge_script_repair_output(
+    current_output: Any,
+    repair_output: Any,
+    *,
+    batch: BatchWindow,
+    repair_batch: BatchWindow,
+) -> str:
+    episode_map = _extract_script_episode_map(str(current_output or ""), batch)
+    episode_map.update(_extract_script_episode_map(str(repair_output or ""), repair_batch))
+    return _join_script_episode_map(episode_map)
+
+
+def _is_contiguous_episode_window(episodes: list[int]) -> bool:
+    return bool(episodes) and episodes == list(range(episodes[0], episodes[-1] + 1))
+
+
+def _script_missing_episode_append_window(
+    current_output: Any,
+    *,
+    batch: BatchWindow,
+    missing_episodes: list[int],
+) -> BatchWindow | None:
+    if not _is_contiguous_episode_window(missing_episodes):
+        return None
+    sequence = __extract_script_episode_sequence(current_output)
+    if not sequence:
+        return None
+    written = [episode for episode in sequence if batch.start_episode <= episode <= batch.end_episode]
+    if not written:
+        return None
+    if max(written) >= missing_episodes[0] or missing_episodes[0] != max(written) + 1:
+        return None
+    return BatchWindow(start_episode=missing_episodes[0], end_episode=missing_episodes[-1])
+
+
+def _script_batch_plan_from_context(
+    context: dict[str, Any],
+    *,
+    batch: BatchWindow,
+) -> tuple[str, dict[str, Any] | None]:
+    plan_source = context.get(EPISODE_PLAN)
+    raw_plan = ""
+    if isinstance(plan_source, dict):
+        raw_plan = json.dumps(plan_source, ensure_ascii=False)
+    else:
+        raw_plan = str(plan_source or "").strip()
+    return _get_episode_batch_plan_context(
+        context.get(NORMALIZED_EPISODE_PLAN),
+        batch.start_episode,
+        batch_size=batch.size,
         raw_episode_plan=raw_plan,
+    )
+
+
+def _script_repair_writing_context(
+    writing_context: dict[str, Any],
+    *,
+    current_output: Any,
+    batch: BatchWindow,
+    repair_batch: BatchWindow,
+    strategy: str,
+    missing_episodes: list[int],
+) -> dict[str, Any]:
+    context = copy.deepcopy(writing_context)
+    plan_for_batch, normalized_plan_for_batch = _script_batch_plan_from_context(
+        writing_context,
+        batch=repair_batch,
     )
     _apply_batch_episode_plan_context(
         context,
         plan_for_batch=plan_for_batch,
         normalized_plan_for_batch=normalized_plan_for_batch,
     )
-    sub_hooks = slice_object_episodes_for_batch(base_context.get(ALL_HOOKS), sub_batch)
-    sub_dialogues = slice_object_episodes_for_batch(base_context.get(ALL_DIALOGUES), sub_batch)
-    context[ALL_HOOKS] = copy.deepcopy(sub_hooks)
-    context[ALL_DIALOGUES] = copy.deepcopy(sub_dialogues)
-    set_with_aliases(context, BATCH_HOOKS, sub_hooks, SCRIPT_HOOK_INPUT_ALIASES)
-    set_with_aliases(context, BATCH_DIALOGUES, sub_dialogues, SCRIPT_DIALOGUE_INPUT_ALIASES)
-    context[BATCH_START_EPISODE] = sub_batch.start_episode
-    context[ALL_SCRIPT] = _local_batch_script_summary(accumulated_text) if accumulated_text.strip() else str(base_context.get(ALL_SCRIPT) or "")
+    context[BATCH_START_EPISODE] = repair_batch.start_episode
+    hook_payload = slice_object_episodes_for_batch(
+        writing_context.get(BATCH_HOOKS) or writing_context.get(ALL_HOOKS),
+        repair_batch,
+    )
+    dialogue_payload = slice_object_episodes_for_batch(
+        writing_context.get(BATCH_DIALOGUES) or writing_context.get(ALL_DIALOGUES),
+        repair_batch,
+    )
+    context[ALL_HOOKS] = copy.deepcopy(hook_payload)
+    context[ALL_DIALOGUES] = copy.deepcopy(dialogue_payload)
+    set_with_aliases(context, BATCH_HOOKS, hook_payload, SCRIPT_HOOK_INPUT_ALIASES)
+    set_with_aliases(context, BATCH_DIALOGUES, dialogue_payload, SCRIPT_DIALOGUE_INPUT_ALIASES)
+    current_text = str(current_output or "").strip()
+    if current_text:
+        if strategy == "append_missing":
+            current_range = _format_episode_ranges(
+                [episode for episode in __extract_script_episode_sequence(current_text) if episode > 0]
+            )
+            missing_range = _format_episode_ranges(missing_episodes)
+            note = (
+                "【自动补写上下文】已生成内容覆盖"
+                f"{current_range or '部分集次'}，缺少 {missing_range or repair_batch.label}。"
+                "请只补全缺失集次，不要重复已有内容，并从缺失起始集继续写。"
+            )
+            context[ALL_SCRIPT] = _join_script_parts(context.get(ALL_SCRIPT), note, current_text)
+        else:
+            context[ALL_SCRIPT] = _join_script_parts(context.get(ALL_SCRIPT), current_text)
     return context
 
 
-def _generate_script_batch_once(
-    state: WorkflowState,
-    runner: FastGPTRunner,
+def _should_retry_with_smaller_batch(
     *,
-    stage_name: str,
-    stage_key: str,
-    message: str,
-    context: dict[str, Any],
-    output_field: str,
     batch: BatchWindow,
-    progress_percent: int,
-    generated_episodes: int,
-    validator: Any = None,
-) -> str:
-    raw_output = _run_fastgpt_stage_once(
-        state,
-        runner,
-        stage_name,
-        context,
-        stage_key=stage_key,
-        message=message,
-        batch_label=batch.label,
-        progress_percent=progress_percent,
-        generated_episodes=generated_episodes,
-        sync_output_to_state=False,
-    )
-    return _validate_script_stage_output_text(
-        raw_output,
-        stage_name=stage_name,
-        output_field=output_field,
-        batch=batch,
-        validator=validator,
-    )
+    retry_count: int,
+    failure_reasons: list[str],
+) -> int | None:
+    if retry_count < SCRIPT_AUTO_REPAIR_MAX_RETRIES:
+        return None
+    if not is_recoverable_script_error(failure_reasons):
+        return None
+    return SCRIPT_AUTO_REPAIR_BATCH_FALLBACKS.get(batch.size)
 
 
-def _retry_script_with_smaller_batches(
-    state: WorkflowState,
-    runner: FastGPTRunner,
-    *,
-    writing_stage_name: str,
-    writing_context: dict[str, Any],
-    output_field: str,
-    batch: BatchWindow,
-    progress_percent: int,
-    generated_episodes: int,
-    approved_output_validator: Any,
-    smaller_batch_size: int,
-) -> str:
-    combined_text = ""
-    current_start = batch.start_episode
-    while current_start <= batch.end_episode:
-        sub_batch = BatchWindow.from_start(
-            current_start,
-            batch.end_episode,
-            batch_size=smaller_batch_size,
+def _split_batch_window(batch: BatchWindow, *, batch_size: int) -> list[BatchWindow]:
+    normalized_size = max(1, int(batch_size or 1))
+    sub_batches: list[BatchWindow] = []
+    start_episode = batch.start_episode
+    while start_episode <= batch.end_episode:
+        end_episode = min(batch.end_episode, start_episode + normalized_size - 1)
+        sub_batches.append(
+            BatchWindow(start_episode=start_episode, end_episode=end_episode)
         )
-        sub_context = _build_subbatch_script_context(
-            writing_context,
-            sub_batch=sub_batch,
-            accumulated_text=combined_text,
-        )
-        instruction = (
-            f"请完整生成第{sub_batch.start_episode}-{sub_batch.end_episode}集。\n"
-            "每一集必须包含：第xx集标题 + xx-1 场景编号。\n"
-            "不要提前结束，不要跳集。"
-        )
-        repaired_text = _auto_repair_script_output(
-            state,
-            runner,
-            writing_stage_name=writing_stage_name,
-            writing_context=sub_context,
-            batch=sub_batch,
-            progress_percent=progress_percent,
-            generated_episodes=generated_episodes,
-            output_field=output_field,
-            approved_output_validator=approved_output_validator,
-            initial_text="",
-            failure_reasons=[f"script batch {sub_batch.label} downgraded to smaller batch"],
-            batch_size=sub_batch.size,
-            initial_instruction=instruction,
-        )
-        combined_text = merge_batch_script(combined_text, repaired_text, sub_batch)
-        current_start = sub_batch.end_episode + 1
-
-    combined_issues = list(approved_output_validator(combined_text) or []) if callable(approved_output_validator) else []
-    if combined_issues:
-        raise WorkflowOutputValidationError(
-            f"{writing_stage_name} 输出未通过正文批次校验",
-            issues=combined_issues,
-            normalized_output={output_field: combined_text},
-        )
-    return combined_text
+        start_episode = end_episode + 1
+    return sub_batches
 
 
 def _auto_repair_script_output(
     state: WorkflowState,
     runner: FastGPTRunner,
     *,
-    writing_stage_name: str,
-    writing_context: dict[str, Any],
+    variables: dict[str, Any],
     batch: BatchWindow,
+    stage_label: str,
+    output_field: str,
+    current_output_var: str,
+    writing_stage_name: str,
+    rewrite_stage_name: str,
+    writing_context: dict[str, Any],
+    rewrite_context_builder,
     progress_percent: int,
     generated_episodes: int,
-    output_field: str,
-    approved_output_validator: Any,
-    initial_text: str,
+    approved_output_validator,
     failure_reasons: list[str],
-    batch_size: int | None = None,
-    initial_instruction: str = "",
+    current_output: Any,
 ) -> str:
-    max_retry = 3
-    current_text = str(initial_text or "").strip()
-    current_issues = [str(item).strip() for item in list(failure_reasons or []) if str(item).strip()]
-    effective_batch_size = max(1, int(batch_size or batch.size or 5))
+    current_text = str(current_output or "").strip()
+    issues = [str(item).strip() for item in failure_reasons if str(item).strip()]
+    if not current_text and not issues:
+        raise ValueError(f"{stage_label} {batch.label} 集自动修复失败：缺少可修复上下文。")
 
-    if initial_instruction.strip():
-        current_issues = [initial_instruction.strip(), *current_issues]
-
-    for retry_count in range(1, max_retry + 1):
-        missing_episodes = _detect_missing_episodes(current_issues)
-        truncated = _script_output_looks_truncated(current_text, batch=batch)
-        smaller_batch_size = _should_retry_with_smaller_batch(
-            batch,
-            retry_count,
-            current_issues,
-            current_batch_size=effective_batch_size,
+    recoverable = is_recoverable_script_error(issues) or _script_output_looks_truncated(
+        current_text,
+        batch=batch,
+        failure_reasons=issues,
+    )
+    if not recoverable:
+        raise ValueError(
+            f"{stage_label} {batch.label} 集输出校验失败，且不属于可自动修复类型："
+            + "；".join(issues[:10] or ["未知失败"])
         )
 
-        if smaller_batch_size is not None:
-            logger.warning(
-                {
-                    "type": "script_auto_repair",
-                    "strategy": "降级批次",
-                    "missing_episodes": missing_episodes,
-                    "retry_count": retry_count,
-                    "batch": batch.label,
-                    "smaller_batch_size": smaller_batch_size,
-                }
-            )
-            return _retry_script_with_smaller_batches(
-                state,
-                runner,
-                writing_stage_name=writing_stage_name,
-                writing_context=writing_context,
-                output_field=output_field,
+    for retry_count in range(1, SCRIPT_AUTO_REPAIR_MAX_RETRIES + 1):
+        next_batch_size = _should_retry_with_smaller_batch(
+            batch=batch,
+            retry_count=retry_count,
+            failure_reasons=issues,
+        )
+        if next_batch_size is not None:
+            raise _RetryWithSmallerScriptBatch(
                 batch=batch,
-                progress_percent=progress_percent,
-                generated_episodes=generated_episodes,
-                approved_output_validator=approved_output_validator,
-                smaller_batch_size=smaller_batch_size,
+                next_batch_size=next_batch_size,
+                failure_reasons=issues,
             )
 
-        if retry_count == 1 and missing_episodes:
+        missing_episodes = _detect_missing_episodes(issues)
+        truncated = _script_output_looks_truncated(
+            current_text,
+            batch=batch,
+            failure_reasons=issues,
+        )
+        duplicate_episodes = _script_error_has_duplicate_episodes(issues)
+        missing_scene_heading = _script_error_has_missing_scene_heading(issues)
+        append_batch = _script_missing_episode_append_window(
+            current_text,
+            batch=batch,
+            missing_episodes=missing_episodes,
+        )
+
+        strategy = "重写"
+        repair_batch = batch
+        repair_stage_name = rewrite_stage_name
+        repair_context: dict[str, Any]
+        repair_validator_batch = batch
+
+        if retry_count == 1 and append_batch is not None:
             strategy = "补写"
-            repair_batch = BatchWindow(
-                start_episode=min(missing_episodes),
-                end_episode=max(missing_episodes),
-            )
-            instruction = (
-                f"你刚刚生成了第{batch.start_episode}-{batch.end_episode}集，但缺少以下集数：\n"
-                f"第{_format_episode_ranges(missing_episodes)}集\n\n"
-                "请补全缺失部分：\n"
-                "* 不要重复已有内容\n"
-                f"* 从第{repair_batch.start_episode}集开始写\n"
-                "* 每一集必须包含：第xx集 + xx-1 场景\n"
-                "* 保持风格一致"
-            )
-            repair_context = _append_script_repair_instruction(
+            repair_batch = append_batch
+            repair_stage_name = writing_stage_name
+            repair_validator_batch = repair_batch
+            repair_context = _script_repair_writing_context(
                 writing_context,
-                instruction=instruction,
                 current_output=current_text,
-            )
-            logger.warning(
-                {
-                    "type": "script_auto_repair",
-                    "strategy": strategy,
-                    "missing_episodes": missing_episodes,
-                    "retry_count": retry_count,
-                }
-            )
-            supplement_text = _generate_script_batch_once(
-                state,
-                runner,
-                stage_name=writing_stage_name,
-                stage_key="script",
-                message=f"正在自动补写剧本正文：第 {batch.label} 集，第 {retry_count}/{max_retry} 次",
-                context=repair_context,
-                output_field=output_field,
-                batch=repair_batch,
-                progress_percent=progress_percent,
-                generated_episodes=generated_episodes,
-                validator=lambda candidate: validate_batch_script_text(candidate, repair_batch),
-            )
-            repaired_text = merge_batch_script(current_text, supplement_text, repair_batch)
-        elif retry_count == 2 and any("missing a scene heading" in issue for issue in current_issues):
-            strategy = "结构修复"
-            instruction = (
-                "请修复以下剧本格式：\n"
-                "* 每一集必须包含 xx-1 场景编号\n"
-                "* 不修改剧情内容\n"
-                "* 只补结构"
-            )
-            repair_context = _append_script_repair_instruction(
-                writing_context,
-                instruction=instruction,
-                current_output=current_text,
-            )
-            logger.warning(
-                {
-                    "type": "script_auto_repair",
-                    "strategy": strategy,
-                    "missing_episodes": missing_episodes,
-                    "retry_count": retry_count,
-                }
-            )
-            repaired_text = _generate_script_batch_once(
-                state,
-                runner,
-                stage_name=writing_stage_name,
-                stage_key="script",
-                message=f"正在自动修复剧本结构：第 {batch.label} 集，第 {retry_count}/{max_retry} 次",
-                context=repair_context,
-                output_field=output_field,
                 batch=batch,
-                progress_percent=progress_percent,
-                generated_episodes=generated_episodes,
-                validator=lambda candidate: validate_batch_script_text(candidate, batch),
+                repair_batch=repair_batch,
+                strategy="append_missing",
+                missing_episodes=missing_episodes,
             )
         else:
-            strategy = "重写"
-            instruction = (
-                f"你刚刚的输出被截断或结构不完整，没有完整生成第{batch.start_episode}-{batch.end_episode}集。\n\n"
-                "请重新生成完整批次：\n"
-                f"* 必须包含第{', '.join(str(ep) for ep in range(batch.start_episode, batch.end_episode + 1))}集\n"
-                "* 每集至少一个场景（xx-1）\n"
-                "* 不允许提前结束"
+            if retry_count == 1 and missing_scene_heading and not truncated and not duplicate_episodes:
+                strategy = "结构修复"
+            repair_payload = _script_auto_repair_review_payload(
+                batch=batch,
+                strategy=(
+                    "repair_structure"
+                    if strategy == "结构修复"
+                    else "rewrite_batch"
+                ),
+                summary=(
+                    f"{stage_label} {batch.label} 集需要补全缺失结构。"
+                    if strategy == "结构修复"
+                    else f"{stage_label} {batch.label} 集输出不完整，需要重新生成完整批次。"
+                ),
+                instructions=(
+                    [
+                        "请修复以下剧本格式：每一集必须包含 xx-1 场景编号；"
+                        "不要改动既有剧情事实；只补结构，不要输出审核说明。"
+                    ]
+                    if strategy == "结构修复"
+                    else [
+                        f"你刚刚的输出被截断或缺集，没有完整生成第{batch.label}集。",
+                        "请重新生成完整批次。",
+                        "必须覆盖本批次全部集数，且不要提前结束。",
+                        "每一集至少包含“第xx集”标题和一个“xx-1”场景编号。",
+                        "不要输出审核报告、JSON 或补充说明。",
+                    ]
+                ),
             )
-            repair_context = _append_script_repair_instruction(
-                writing_context,
-                instruction=instruction,
-                current_output="",
-            )
-            logger.warning(
-                {
-                    "type": "script_auto_repair",
-                    "strategy": strategy,
-                    "missing_episodes": missing_episodes,
-                    "retry_count": retry_count,
-                }
-            )
-            repaired_text = _generate_script_batch_once(
+            repair_context = rewrite_context_builder(current_text, repair_payload)
+
+        logger.warning(
+            {
+                "type": "script_auto_repair",
+                "strategy": strategy,
+                "missing_episodes": list(missing_episodes),
+                "retry_count": retry_count,
+                "batch_label": batch.label,
+                "failure_reasons": list(issues[:10]),
+            }
+        )
+        set_runtime_stage(
+            state,
+            "script",
+            f"{stage_label} {batch.label} 集输出不完整，正在自动修复（{strategy}，第 {retry_count}/{SCRIPT_AUTO_REPAIR_MAX_RETRIES} 次）。",
+            batch_label=batch.label,
+            progress_percent=progress_percent,
+            generated_episodes=generated_episodes,
+        )
+        sync_runtime_state(state)
+
+        try:
+            repair_output = run_stage_with_contract_guard(
                 state,
                 runner,
-                stage_name=writing_stage_name,
+                repair_stage_name,
+                repair_context,
                 stage_key="script",
-                message=f"正在自动重写剧本正文：第 {batch.label} 集，第 {retry_count}/{max_retry} 次",
-                context=repair_context,
-                output_field=output_field,
-                batch=batch,
+                message=f"正在自动修复{stage_label}：第 {batch.label} 集（{strategy}）",
+                batch_label=batch.label,
                 progress_percent=progress_percent,
                 generated_episodes=generated_episodes,
-                validator=lambda candidate: validate_batch_script_text(candidate, batch),
+                output_field=output_field,
+                batch=repair_validator_batch,
+                review_round=retry_count,
+                validator=(
+                    (lambda candidate: validate_batch_script_text(candidate, repair_validator_batch))
+                    if strategy == "补写"
+                    else (lambda candidate: list(approved_output_validator(candidate) or []))
+                ),
+                sync_output_to_state=False,
+                max_format_retries=1,
             )
+            candidate_text = str(repair_output.get(output_field) or "").strip()
+            if strategy == "补写":
+                candidate_text = _merge_script_repair_output(
+                    current_text,
+                    candidate_text,
+                    batch=batch,
+                    repair_batch=repair_batch,
+                )
+        except Exception as repair_exc:
+            repair_issues, candidate_text, _ = _script_stage_validation_details(
+                repair_exc,
+                state=state,
+                stage_name=repair_stage_name,
+                output_field=output_field,
+            )
+            if strategy == "补写" and candidate_text:
+                candidate_text = _merge_script_repair_output(
+                    current_text,
+                    candidate_text,
+                    batch=batch,
+                    repair_batch=repair_batch,
+                )
+            if not candidate_text:
+                raise
+            issues = repair_issues or list(approved_output_validator(candidate_text) or [])
+            current_text = candidate_text
+            variables[current_output_var] = current_text
+            continue
 
-        current_text = str(repaired_text or "").strip()
-        current_issues = [
+        validation_issues = [
             str(item).strip()
-            for item in list(approved_output_validator(current_text) or [])
+            for item in list(approved_output_validator(candidate_text) or [])
             if str(item).strip()
-        ] if callable(approved_output_validator) else []
-        if not current_issues:
-            return current_text
+        ]
+        if not validation_issues:
+            variables[current_output_var] = candidate_text
+            return candidate_text
+        current_text = candidate_text
+        issues = validation_issues
+        variables[current_output_var] = current_text
 
-    raise WorkflowOutputValidationError(
-        f"{writing_stage_name} 输出未通过正文批次校验",
-        issues=current_issues or [f"script batch {batch.label} auto repair exhausted"],
-        normalized_output={output_field: current_text},
+    raise ValueError(
+        f"{stage_label} {batch.label} 集自动修复失败，已达到最多 {SCRIPT_AUTO_REPAIR_MAX_RETRIES} 次："
+        + "；".join(issues[:10] or ["未知失败"])
     )
 
 
@@ -4008,7 +4129,7 @@ def _ensure_script_sequence_before_final(
     if total_episodes <= 0:
         return
 
-    sequence = _extract_script_episode_sequence(script_text)
+    sequence = __extract_script_episode_sequence(script_text)
     if not sequence:
         return
 
@@ -4669,7 +4790,48 @@ def _runner_stage_debug_info(runner: FastGPTRunner, stage_name: str) -> dict[str
 
 
 def _debug_artifact_dir() -> Path:
-    return Path(__file__).resolve().parents[2] / "debug" / "fastgpt_stage_failures"
+    return (
+        Path(__file__).resolve().parents[2]
+        / "runtime_data"
+        / "debug"
+        / "fastgpt_stage_failures"
+    )
+
+
+def _prune_stage_debug_artifacts(
+    debug_dir: Path,
+    *,
+    max_files: int = 20,
+    max_age_days: int = 7,
+) -> None:
+    try:
+        files = sorted(
+            (path for path in debug_dir.glob("*.json") if path.is_file()),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return
+
+    cutoff_timestamp = datetime.now().timestamp() - max(1, int(max_age_days)) * 86400
+    stale: list[Path] = []
+    stale.extend(files[max(0, int(max_files)):])
+    for path in files:
+        try:
+            if path.stat().st_mtime < cutoff_timestamp:
+                stale.append(path)
+        except OSError:
+            continue
+
+    seen: set[Path] = set()
+    for path in stale:
+        if path in seen:
+            continue
+        seen.add(path)
+        try:
+            path.unlink()
+        except OSError:
+            continue
 
 
 def _safe_debug_filename_part(value: str) -> str:
@@ -4734,6 +4896,7 @@ def _write_stage_debug_artifact_file(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
+    _prune_stage_debug_artifacts(debug_dir)
     return str(target.resolve())
 
 
@@ -4839,6 +5002,25 @@ def _format_retry_exhausted_error(
         f"调试文件：{debug_file_path}；"
         "建议检查 workflow 输出是否过长、是否缺 answerNode、是否 detail=false。"
     )
+
+
+def _attach_contract_guard_error_meta(
+    exc: ValueError,
+    *,
+    validation_error: WorkflowOutputValidationError | None,
+    validator_issues: list[str],
+    artifact: dict[str, Any],
+) -> ValueError:
+    setattr(exc, "validator_issues", list(validator_issues or []))
+    setattr(exc, "contract_guard_artifact", copy.deepcopy(artifact))
+    if validation_error is not None:
+        setattr(exc, "contract_validation_error", validation_error)
+        setattr(
+            exc,
+            "normalized_output",
+            copy.deepcopy(getattr(validation_error, "normalized_output", {}) or {}),
+        )
+    return exc
 
 
 def _run_fastgpt_stage_once(
@@ -5124,10 +5306,16 @@ def run_stage_with_contract_guard(
                     generated_episodes=generated_episodes,
                 )
                 sync_runtime_state(state)
-                raise _format_retry_exhausted_error(
+                formatted_error = _format_retry_exhausted_error(
                     contract=contract,
                     debug_file_path=debug_file_path,
                     failure_reason=str(debug_fields.get("last_failure_reason") or str(exc)),
+                )
+                raise _attach_contract_guard_error_meta(
+                    formatted_error,
+                    validation_error=exc if isinstance(exc, WorkflowOutputValidationError) else None,
+                    validator_issues=issues,
+                    artifact=artifact,
                 ) from exc
             set_runtime_stage(
                 state,
@@ -5667,7 +5855,7 @@ def _try_generate_appearance_unstructured_output(
     runner: FastGPTRunner,
     variables: dict[str, Any],
 ) -> None:
-    if _has_value(variables.get(APPEARANCE_NATURAL_LANGUAGE_VAR)):
+    if is_meaningful_text(variables.get(APPEARANCE_NATURAL_LANGUAGE_VAR)):
         return
 
     stage_variables = dict(variables)
@@ -5706,7 +5894,7 @@ def _try_generate_appearance_unstructured_output(
         return
 
     natural_language = str(output.get(APPEARANCE_NATURAL_LANGUAGE_VAR) or "").strip()
-    if natural_language:
+    if is_meaningful_text(natural_language):
         variables[APPEARANCE_NATURAL_LANGUAGE_VAR] = natural_language
         state.set_var(APPEARANCE_NATURAL_LANGUAGE_VAR, natural_language)
         sync_runtime_state(state)
@@ -7114,7 +7302,7 @@ def _ensure_framework_natural_language(
     payload: WorkflowInput,
     variables: dict[str, Any],
 ) -> None:
-    if _has_value(variables.get(FRAMEWORK_NATURAL_LANGUAGE)):
+    if is_meaningful_text(variables.get(FRAMEWORK_NATURAL_LANGUAGE)):
         set_runtime_stage(
             state,
             "framework",
@@ -7147,7 +7335,7 @@ def _ensure_worldview_natural_language(
     runner: FastGPTRunner,
     variables: dict[str, Any],
 ) -> None:
-    if _has_value(variables.get(WORLDVIEW_NATURAL_LANGUAGE)):
+    if is_meaningful_text(variables.get(WORLDVIEW_NATURAL_LANGUAGE)):
         set_runtime_stage(
             state,
             "worldview",
@@ -7185,10 +7373,10 @@ def _ensure_character_natural_language(
     runner: FastGPTRunner,
     variables: dict[str, Any],
 ) -> None:
-    if not _has_value(variables.get(CHARACTERS)):
+    if not has_meaningful_content(variables.get(CHARACTERS)):
         return
     if (
-        _has_value(variables.get(CHARACTER_NATURAL_LANGUAGE_VAR))
+        is_meaningful_text(variables.get(CHARACTER_NATURAL_LANGUAGE_VAR))
         and bool(variables.get(CHARACTER_NATURALIZE_READY_FLAG))
     ):
         set_runtime_stage(
@@ -7221,7 +7409,7 @@ def _ensure_character_natural_language(
         sync_output_to_state=False,
     )
     naturalized = str(output.get(CHARACTER_NATURAL_LANGUAGE_VAR) or "").strip()
-    if naturalized:
+    if is_meaningful_text(naturalized):
         variables[CHARACTER_NATURAL_LANGUAGE_VAR] = naturalized
         state.set_var(CHARACTER_NATURAL_LANGUAGE_VAR, naturalized)
     variables[CHARACTER_NATURALIZE_READY_FLAG] = True
@@ -8156,7 +8344,7 @@ def assert_complete_script(all_script: Any, total_episodes: int) -> None:
     )
     expected = list(range(1, int(total_episodes) + 1))
     found = sorted(episode_map)
-    duplicates = _duplicate_episode_numbers(_extract_script_episode_sequence(text))
+    duplicates = _duplicate_episode_numbers(__extract_script_episode_sequence(text))
     if duplicates:
         raise ValueError(f"ALL_SCRIPT has duplicate episodes: {_format_episode_ranges(duplicates)}")
     missing = [episode for episode in expected if episode not in set(found)]
