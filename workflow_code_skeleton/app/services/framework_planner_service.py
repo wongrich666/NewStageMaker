@@ -458,25 +458,34 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
     try:
         response_json = response.json()
     except ValueError as exc:
-        debug_detail = _write_debug_artifact(
+        _log_stage_output_parse_exception(
             stage=definition.stage,
-            workflow_spec=workflow_spec,
-            request_variables=request_variables,
-            payload=normalized_payload,
-            response_raw=response_text,
-            parse_error="response.json invalid",
+            payload_keys=sorted(normalized_payload.keys()),
+            exc=exc,
+            raw_return_object=response_text,
         )
-        logger.warning(
-            "框架策划阶段 %s 返回非法 JSON 响应，payload_keys=%s",
-            definition.stage,
-            sorted(normalized_payload.keys()),
-        )
-        raise FrameworkPlannerStageError(
-            "当前阶段返回格式异常，请重试或查看日志",
-            stage=definition.stage,
-            status_code=502,
-            detail=debug_detail,
-        ) from exc
+        if definition.stage == "01":
+            response_json = response_text
+        else:
+            debug_detail = _write_debug_artifact(
+                stage=definition.stage,
+                workflow_spec=workflow_spec,
+                request_variables=request_variables,
+                payload=normalized_payload,
+                response_raw=response_text,
+                parse_error="response.json invalid",
+            )
+            logger.warning(
+                "框架策划阶段 %s 返回非法 JSON 响应，payload_keys=%s",
+                definition.stage,
+                sorted(normalized_payload.keys()),
+            )
+            raise FrameworkPlannerStageError(
+                "当前阶段返回格式异常，请重试或查看日志",
+                stage=definition.stage,
+                status_code=502,
+                detail=debug_detail,
+            ) from exc
 
     try:
         data, display_text, parse_warnings = _extract_stage_output(
@@ -485,26 +494,49 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             response_json=response_json,
         )
     except Exception as exc:
-        debug_detail = _write_debug_artifact(
+        _log_stage_output_parse_exception(
             stage=definition.stage,
-            workflow_spec=workflow_spec,
-            request_variables=request_variables,
-            payload=normalized_payload,
-            response_raw=response_json,
-            parse_error=str(exc),
+            payload_keys=sorted(normalized_payload.keys()),
+            exc=exc,
+            raw_return_object=response_json,
         )
-        logger.warning(
-            "框架策划阶段 %s 输出解析失败，payload_keys=%s，error=%s",
-            definition.stage,
-            sorted(normalized_payload.keys()),
-            exc,
-        )
-        raise FrameworkPlannerStageError(
-            "当前阶段返回格式异常，请重试或查看日志",
-            stage=definition.stage,
-            status_code=502,
-            detail=debug_detail,
-        ) from exc
+        if definition.stage == "01":
+            parse_warnings = [
+                f"阶段 01 输出解析异常，已回退到安全解析：{type(exc).__name__}: {exc}"
+            ]
+            safe_output, safe_warnings = safe_parse_stage_output(
+                response_json,
+                ("source_brief", "display_text"),
+            )
+            parse_warnings.extend(safe_warnings)
+            data = _normalize_stage_output(
+                definition.stage,
+                safe_output,
+                parse_warnings=parse_warnings,
+            )
+            _log_stage_parse_warnings(definition.stage, parse_warnings)
+            display_text = _extract_display_text(response_json, data)
+        else:
+            debug_detail = _write_debug_artifact(
+                stage=definition.stage,
+                workflow_spec=workflow_spec,
+                request_variables=request_variables,
+                payload=normalized_payload,
+                response_raw=response_json,
+                parse_error=str(exc),
+            )
+            logger.warning(
+                "框架策划阶段 %s 输出解析失败，payload_keys=%s，error=%s",
+                definition.stage,
+                sorted(normalized_payload.keys()),
+                exc,
+            )
+            raise FrameworkPlannerStageError(
+                "当前阶段返回格式异常，请重试或查看日志",
+                stage=definition.stage,
+                status_code=502,
+                detail=debug_detail,
+            ) from exc
 
     return {
         "ok": True,
@@ -1344,6 +1376,23 @@ def _attach_parse_warnings_to_validation_report(
     return normalized
 
 
+def _log_stage_output_parse_exception(
+    *,
+    stage: str,
+    payload_keys: list[str],
+    exc: Exception,
+    raw_return_object: Any,
+) -> None:
+    logger.exception(
+        "框架策划阶段 %s 输出解析异常，payload_keys=%s，exception_type=%s，exception=%s，raw_return_object=%s",
+        stage,
+        payload_keys,
+        type(exc).__name__,
+        str(exc),
+        _preview_return_object(raw_return_object),
+    )
+
+
 def _log_stage_parse_warnings(stage: str, parse_warnings: list[str]) -> None:
     warning_list = [str(item).strip() for item in parse_warnings if str(item).strip()]
     if not warning_list:
@@ -1970,3 +2019,15 @@ def _truncate_text(value: str, *, limit: int = 800) -> str:
     if len(text) <= limit:
         return text
     return f"{text[:limit]}..."
+
+
+def _preview_return_object(value: Any, *, limit: int = 2400) -> str:
+    if isinstance(value, str):
+        return _truncate_text(value, limit=limit)
+    try:
+        return _truncate_text(
+            json.dumps(value, ensure_ascii=False, default=str),
+            limit=limit,
+        )
+    except Exception:
+        return _truncate_text(repr(value), limit=limit)
