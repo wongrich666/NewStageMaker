@@ -912,6 +912,7 @@ def _extract_stage_output(
     parse_warnings: list[str] = []
     stage_payload_keys = sorted(set(payload_keys or []))
     try:
+        # Normalize 01~07 root responses before any .get() access in candidate iteration.
         root_response = normalize_stage_response(
             response_json,
             stage=definition.stage,
@@ -1335,6 +1336,7 @@ def _extract_display_text(
     payload_keys: list[str] | None = None,
 ) -> str:
     safe_data = data if isinstance(data, dict) else {}
+    stage_payload_keys = sorted(set(payload_keys or []))
     for key in ("display_text", "displayText"):
         value = safe_data.get(key)
         if isinstance(value, str) and value.strip():
@@ -1344,13 +1346,13 @@ def _extract_display_text(
         root_response = normalize_stage_response(
             response_json,
             stage=stage,
-            payload_keys=sorted(set(payload_keys or [])),
+            payload_keys=stage_payload_keys,
         )
     except Exception as exc:
         if stage:
             _log_stage_output_parse_exception(
                 stage=stage,
-                payload_keys=sorted(set(payload_keys or [])),
+                payload_keys=stage_payload_keys,
                 exc=exc,
                 raw_return_object=response_json,
             )
@@ -1426,6 +1428,7 @@ def normalize_stage_response(
     stage: str = "",
     payload_keys: list[str] | None = None,
 ) -> dict[str, Any]:
+    """Normalize 01~07 FastGPT stage output into a dict so downstream .get() calls stay safe."""
     try:
         parsed = _parse_candidate_value(root_response)
     except Exception as exc:
