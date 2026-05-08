@@ -405,11 +405,11 @@
             "input",
             "reference"
           ],
-          "selectedTypeIndex": 1,
           "value": [
             "toolparams04b6d3",
             "search_query"
-          ]
+          ],
+          "selectedTypeIndex": 1
         }
       ],
       "outputs": [
@@ -417,20 +417,17 @@
           "id": "system_rawResponse",
           "key": "system_rawResponse",
           "required": true,
-          "label": "原始响应",
-          "description": "工具的原始响应",
+          "label": "workflow:raw_response",
+          "description": "workflow:tool_raw_response_description",
           "valueType": "any",
-          "type": "static",
-          "valueDesc": ""
+          "type": "static"
         },
         {
           "id": "system_error_text",
           "key": "system_error_text",
           "type": "error",
           "valueType": "string",
-          "label": "错误信息",
-          "valueDesc": "",
-          "description": ""
+          "label": "workflow:error_text"
         }
       ],
       "pluginId": "http-69f170167846cab59f7c6064/web_search",
