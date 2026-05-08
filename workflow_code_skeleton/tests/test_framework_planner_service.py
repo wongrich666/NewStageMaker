@@ -269,6 +269,51 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertEqual(parsed_from_dict["character_plan"]["protagonist"]["name"], "林渡")
         self.assertIsInstance(dict_warnings, list)
 
+    def test_normalize_stage_response_accepts_list_string_and_dict(self) -> None:
+        normalized_from_list = service.normalize_stage_response(
+            [{"source_brief": {"source_title": "夜行审判"}}],
+            stage="01",
+            payload_keys=["source_text"],
+        )
+        self.assertIsInstance(normalized_from_list, dict)
+        self.assertEqual(normalized_from_list["source_brief"]["source_title"], "夜行审判")
+
+        normalized_from_string = service.normalize_stage_response(
+            service.json.dumps({"responseData": {"answerText": "ok"}}, ensure_ascii=False),
+            stage="01",
+            payload_keys=["source_text"],
+        )
+        self.assertIsInstance(normalized_from_string, dict)
+        self.assertEqual(normalized_from_string["responseData"]["answerText"], "ok")
+
+        normalized_from_dict = service.normalize_stage_response(
+            {"answerText": "done"},
+            stage="01",
+            payload_keys=["source_text"],
+        )
+        self.assertIsInstance(normalized_from_dict, dict)
+        self.assertEqual(normalized_from_dict["answerText"], "done")
+
+    def test_iter_response_candidates_accepts_list_root_response(self) -> None:
+        workflow_spec = service.load_stage_workflow_spec("01")
+        candidates = list(
+            service._iter_response_candidates(
+                [
+                    {
+                        "responseData": {
+                            "answerText": "list root answer",
+                        }
+                    }
+                ],
+                workflow_spec,
+                stage="01",
+                payload_keys=["source_text"],
+            )
+        )
+
+        self.assertTrue(candidates)
+        self.assertIn(("root.responseData.answerText", "list root answer"), candidates)
+
     def test_stage_01_accepts_list_root_response_and_uses_first_dict(self) -> None:
         def _fake_post(url, *, headers=None, json=None, timeout=None):
             del url, headers, json, timeout

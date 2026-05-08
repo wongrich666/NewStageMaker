@@ -912,7 +912,11 @@ def _extract_stage_output(
     parse_warnings: list[str] = []
     stage_payload_keys = sorted(set(payload_keys or []))
     try:
-        root_response = _safe_root_mapping(response_json)
+        root_response = normalize_stage_response(
+            response_json,
+            stage=definition.stage,
+            payload_keys=stage_payload_keys,
+        )
     except Exception as exc:
         _log_stage_output_parse_exception(
             stage=definition.stage,
@@ -931,6 +935,8 @@ def _extract_stage_output(
                 response_json,
                 workflow_spec,
                 root_response=root_response,
+                stage=definition.stage,
+                payload_keys=stage_payload_keys,
             )
         )
     except Exception as exc:
@@ -1008,18 +1014,28 @@ def _iter_response_candidates(
     workflow_spec: FrameworkPlannerWorkflowSpec,
     *,
     root_response: dict[str, Any] | None = None,
+    stage: str = "",
+    payload_keys: list[str] | None = None,
 ):
     if response_json not in (None, "", [], {}):
         yield "raw_response", response_json
 
-    root_response = root_response if isinstance(root_response, dict) else _safe_root_mapping(response_json)
+    stage_payload_keys = sorted(set(payload_keys or []))
+    root_response = normalize_stage_response(
+        root_response if root_response is not None else response_json,
+        stage=stage,
+        payload_keys=stage_payload_keys,
+    )
+    response_data = root_response.get("responseData")
+    if not isinstance(response_data, dict):
+        response_data = {}
     containers = [
         ("root", root_response),
         ("root.newVariables", root_response.get("newVariables")),
-        ("root.responseData", (root_response.get("responseData") or {})),
+        ("root.responseData", response_data),
         (
             "root.responseData.newVariables",
-            ((root_response.get("responseData") or {}).get("newVariables")),
+            response_data.get("newVariables"),
         ),
     ]
     for source, value in containers:
@@ -1033,7 +1049,7 @@ def _iter_response_candidates(
 
     for list_source, items in (
         ("root.updateVarResult", root_response.get("updateVarResult")),
-        ("root.responseData.updateVarResult", (root_response.get("responseData") or {}).get("updateVarResult")),
+        ("root.responseData.updateVarResult", response_data.get("updateVarResult")),
     ):
         if not isinstance(items, list):
             continue
@@ -1052,8 +1068,8 @@ def _iter_response_candidates(
 
     for source, value in (
         ("root.answerText", root_response.get("answerText")),
-        ("root.responseData.answerText", (root_response.get("responseData") or {}).get("answerText")),
-        ("root.responseData.responseText", (root_response.get("responseData") or {}).get("responseText")),
+        ("root.responseData.answerText", response_data.get("answerText")),
+        ("root.responseData.responseText", response_data.get("responseText")),
     ):
         if value not in (None, "", [], {}):
             yield source, value
@@ -1325,7 +1341,11 @@ def _extract_display_text(
             return value.strip()
 
     try:
-        root_response = _safe_root_mapping(response_json)
+        root_response = normalize_stage_response(
+            response_json,
+            stage=stage,
+            payload_keys=sorted(set(payload_keys or [])),
+        )
     except Exception as exc:
         if stage:
             _log_stage_output_parse_exception(
@@ -1400,18 +1420,71 @@ def _stage_text_placeholder() -> str:
     return "未明确，需后续确认……"
 
 
-def _safe_root_mapping(value: Any) -> dict[str, Any]:
-    parsed = _parse_candidate_value(value)
-    if isinstance(parsed, dict):
-        return parsed
-    if isinstance(parsed, list):
+def normalize_stage_response(
+    root_response: Any,
+    *,
+    stage: str = "",
+    payload_keys: list[str] | None = None,
+) -> dict[str, Any]:
+    try:
+        parsed = _parse_candidate_value(root_response)
+    except Exception as exc:
+        if stage:
+            _log_stage_output_parse_exception(
+                stage=stage,
+                payload_keys=sorted(set(payload_keys or [])),
+                exc=exc,
+                raw_return_object=root_response,
+            )
+        return {}
+
+    while isinstance(parsed, list):
         first_item = _first_non_empty_list_item(parsed)
         if first_item is None:
             return {}
-        reparsed = _parse_candidate_value(first_item)
-        if isinstance(reparsed, dict):
-            return reparsed
+        try:
+            parsed = _parse_candidate_value(first_item)
+        except Exception as exc:
+            if stage:
+                _log_stage_output_parse_exception(
+                    stage=stage,
+                    payload_keys=sorted(set(payload_keys or [])),
+                    exc=exc,
+                    raw_return_object=first_item,
+                )
+            return {}
+
+    if isinstance(parsed, str):
+        text = parsed.strip()
+        if not text:
+            return {}
+        try:
+            reparsed = json.loads(text)
+        except Exception as exc:
+            if stage:
+                _log_stage_output_parse_exception(
+                    stage=stage,
+                    payload_keys=sorted(set(payload_keys or [])),
+                    exc=exc,
+                    raw_return_object=text,
+                )
+            try:
+                reparsed = parse_json(text)
+            except Exception:
+                return {}
+        return normalize_stage_response(
+            reparsed,
+            stage=stage,
+            payload_keys=payload_keys,
+        )
+
+    if isinstance(parsed, dict):
+        return parsed
     return {}
+
+
+def _safe_root_mapping(value: Any) -> dict[str, Any]:
+    return normalize_stage_response(value)
 
 
 def _first_non_empty_list_item(items: list[Any]) -> Any:
