@@ -19,6 +19,11 @@ class _FakeResponse:
         return self._payload
 
 
+class _FakeInvalidJsonResponse(_FakeResponse):
+    def json(self):
+        raise ValueError("invalid json payload")
+
+
 def _basic_config() -> dict[str, object]:
     return {
         "project_title": "夜行审判",
@@ -291,6 +296,40 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["data"]["source_brief"]["source_title"], "夜行审判")
         self.assertEqual(payload["display_text"], "list root ok")
+
+    def test_stage_01_handles_invalid_json_response_text_and_keeps_source_brief_dict(self) -> None:
+        raw_text = service.json.dumps(
+            [
+                {
+                    "source_brief": {
+                        "source_title": "夜行审判",
+                        "core_premise": "invalid json fallback",
+                    }
+                }
+            ],
+            ensure_ascii=False,
+        )
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json, timeout
+            return _FakeInvalidJsonResponse(text=raw_text)
+
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_API_KEY": "fastgpt-global-key",
+                "FASTGPT_CHAT_COMPLETIONS_URL": "https://api.fastgpt.in/api/v1/chat/completions",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                payload = service.run_framework_planner_stage("01", _basic_config())
+
+        self.assertTrue(payload["ok"])
+        self.assertIsInstance(payload["data"]["source_brief"], dict)
+        self.assertEqual(payload["data"]["source_brief"]["source_title"], "夜行审判")
+        self.assertEqual(payload["display_text"], "未明确，需后续确认……")
 
     def test_stage_04_accepts_string_root_json_response(self) -> None:
         raw_text = service.json.dumps(

@@ -492,6 +492,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             definition=definition,
             workflow_spec=workflow_spec,
             response_json=response_json,
+            payload_keys=sorted(normalized_payload.keys()),
         )
     except Exception as exc:
         _log_stage_output_parse_exception(
@@ -515,7 +516,12 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 parse_warnings=parse_warnings,
             )
             _log_stage_parse_warnings(definition.stage, parse_warnings)
-            display_text = _extract_display_text(response_json, data)
+            display_text = _extract_display_text(
+                response_json,
+                data,
+                stage=definition.stage,
+                payload_keys=sorted(normalized_payload.keys()),
+            )
         else:
             debug_detail = _write_debug_artifact(
                 stage=definition.stage,
@@ -900,11 +906,59 @@ def _extract_stage_output(
     definition: FrameworkPlannerStageDefinition,
     workflow_spec: FrameworkPlannerWorkflowSpec,
     response_json: Any,
+    payload_keys: list[str] | None = None,
 ) -> tuple[dict[str, Any], str, list[str]]:
     output_aliases = definition.output_aliases
     parse_warnings: list[str] = []
-    for _source, candidate in _iter_response_candidates(response_json, workflow_spec):
-        mapped, candidate_warnings = _coerce_candidate_to_stage_output(definition, candidate, output_aliases)
+    stage_payload_keys = sorted(set(payload_keys or []))
+    try:
+        root_response = _safe_root_mapping(response_json)
+    except Exception as exc:
+        _log_stage_output_parse_exception(
+            stage=definition.stage,
+            payload_keys=stage_payload_keys,
+            exc=exc,
+            raw_return_object=response_json,
+        )
+        parse_warnings.append(
+            f"阶段 {definition.stage} 根响应解析异常，已回退为空对象：{type(exc).__name__}: {exc}"
+        )
+        root_response = {}
+
+    try:
+        response_candidates = list(
+            _iter_response_candidates(
+                response_json,
+                workflow_spec,
+                root_response=root_response,
+            )
+        )
+    except Exception as exc:
+        _log_stage_output_parse_exception(
+            stage=definition.stage,
+            payload_keys=stage_payload_keys,
+            exc=exc,
+            raw_return_object=response_json,
+        )
+        parse_warnings.append(
+            f"阶段 {definition.stage} 候选输出提取异常，已回退到安全解析：{type(exc).__name__}: {exc}"
+        )
+        response_candidates = [("safe_root_fallback", root_response or response_json)]
+
+    for source, candidate in response_candidates:
+        try:
+            mapped, candidate_warnings = _coerce_candidate_to_stage_output(definition, candidate, output_aliases)
+        except Exception as exc:
+            _log_stage_output_parse_exception(
+                stage=definition.stage,
+                payload_keys=stage_payload_keys,
+                exc=exc,
+                raw_return_object=candidate,
+            )
+            parse_warnings.append(
+                f"阶段 {definition.stage} 候选 {source} 解析异常，已跳过：{type(exc).__name__}: {exc}"
+            )
+            continue
         if mapped is not None:
             parse_warnings.extend(candidate_warnings)
             safe_output, safe_warnings = safe_parse_stage_output(
@@ -918,14 +972,19 @@ def _extract_stage_output(
                 parse_warnings=parse_warnings,
             )
             _log_stage_parse_warnings(definition.stage, parse_warnings)
-            display_text = _extract_display_text(response_json, normalized)
+            display_text = _extract_display_text(
+                response_json,
+                normalized,
+                stage=definition.stage,
+                payload_keys=stage_payload_keys,
+            )
             return normalized, display_text, parse_warnings
 
     parse_warnings.append(
-        f"未能提取阶段 {definition.stage} 约定输出字段 {definition.output_fields}，已回退到空结构占位"
+        f"未能提取阶段 {definition.stage} 约定输出字段 {definition.output_fields}，已回退到安全解析占位"
     )
     safe_output, safe_warnings = safe_parse_stage_output(
-        _empty_stage_output(definition.stage),
+        root_response or response_json or _empty_stage_output(definition.stage),
         (*definition.output_fields, "display_text"),
     )
     parse_warnings.extend(safe_warnings)
@@ -935,18 +994,25 @@ def _extract_stage_output(
         parse_warnings=parse_warnings,
     )
     _log_stage_parse_warnings(definition.stage, parse_warnings)
-    display_text = _extract_display_text(response_json, normalized)
+    display_text = _extract_display_text(
+        response_json,
+        normalized,
+        stage=definition.stage,
+        payload_keys=stage_payload_keys,
+    )
     return normalized, display_text, parse_warnings
 
 
 def _iter_response_candidates(
     response_json: Any,
     workflow_spec: FrameworkPlannerWorkflowSpec,
+    *,
+    root_response: dict[str, Any] | None = None,
 ):
     if response_json not in (None, "", [], {}):
         yield "raw_response", response_json
 
-    root_response = _safe_root_mapping(response_json)
+    root_response = root_response if isinstance(root_response, dict) else _safe_root_mapping(response_json)
     containers = [
         ("root", root_response),
         ("root.newVariables", root_response.get("newVariables")),
@@ -1183,6 +1249,9 @@ def _normalize_stage_output(
         if not isinstance(normalized.get("source_brief"), dict):
             warnings.append("source_brief 不是 dict，已回退为对象占位")
         normalized["source_brief"] = _normalize_object_like(normalized.get("source_brief"), key_name="content")
+        if not normalized["source_brief"]:
+            warnings.append("source_brief 缺少有效内容，已填充占位文本")
+            normalized["source_brief"] = {"content": _stage_text_placeholder()}
         return normalized
     if stage == "02":
         if not isinstance(normalized.get("worldview_plan"), dict):
@@ -1242,19 +1311,41 @@ def _normalize_stage_output(
     return normalized
 
 
-def _extract_display_text(response_json: Any, data: dict[str, Any]) -> str:
+def _extract_display_text(
+    response_json: Any,
+    data: dict[str, Any],
+    *,
+    stage: str = "",
+    payload_keys: list[str] | None = None,
+) -> str:
+    safe_data = data if isinstance(data, dict) else {}
     for key in ("display_text", "displayText"):
-        value = data.get(key)
+        value = safe_data.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
-    root_response = _safe_root_mapping(response_json)
+
+    try:
+        root_response = _safe_root_mapping(response_json)
+    except Exception as exc:
+        if stage:
+            _log_stage_output_parse_exception(
+                stage=stage,
+                payload_keys=sorted(set(payload_keys or [])),
+                exc=exc,
+                raw_return_object=response_json,
+            )
+        root_response = {}
+
+    response_data = root_response.get("responseData")
+    if not isinstance(response_data, dict):
+        response_data = {}
     for value in (
         root_response.get("answerText"),
-        (root_response.get("responseData") or {}).get("answerText"),
+        response_data.get("answerText"),
     ):
         if isinstance(value, str) and value.strip():
             return value.strip()
-    return json.dumps(data, ensure_ascii=False, indent=2)
+    return _stage_text_placeholder()
 
 
 def _empty_stage_output(stage: str) -> dict[str, Any]:
@@ -1303,6 +1394,10 @@ def _stage_output_placeholder(key: str) -> Any:
             "parse_warning": [],
         }
     return {}
+
+
+def _stage_text_placeholder() -> str:
+    return "未明确，需后续确认……"
 
 
 def _safe_root_mapping(value: Any) -> dict[str, Any]:
@@ -2022,12 +2117,13 @@ def _truncate_text(value: str, *, limit: int = 800) -> str:
 
 
 def _preview_return_object(value: Any, *, limit: int = 2400) -> str:
-    if isinstance(value, str):
-        return _truncate_text(value, limit=limit)
     try:
-        return _truncate_text(
-            json.dumps(value, ensure_ascii=False, default=str),
-            limit=limit,
-        )
-    except Exception:
         return _truncate_text(repr(value), limit=limit)
+    except Exception:
+        try:
+            return _truncate_text(
+                json.dumps(value, ensure_ascii=False, default=str),
+                limit=limit,
+            )
+        except Exception:
+            return "<unprintable>"
