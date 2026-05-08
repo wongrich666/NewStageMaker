@@ -22,6 +22,7 @@ logger = get_logger("framework_planner_service")
 DEFAULT_FASTGPT_URL = "https://api.fastgpt.in/api/v1/chat/completions"
 FRAMEWORK_PLANNER_STORAGE_KEY = "frameworkPlannerState.v2"
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
+FRAMEWORK_CONTRACT_GLOB = "00_*.md"
 REQUIRED_BEAT_FIELDS = (
     "beat_no",
     "beat_name",
@@ -74,6 +75,7 @@ class FrameworkPlannerWorkflowSpec:
     public_variable_keys: tuple[str, ...]
     internal_variable_keys: tuple[str, ...]
     answer_node_names: tuple[str, ...]
+    contract_path: Path | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +88,17 @@ class FrameworkPlannerEndpoint:
     workflow_id_source: str
     chat_id: str
     timeout: int
+
+
+LEGACY_STAGE_API_KEY_ENVS: dict[str, tuple[str, ...]] = {
+    "01": ("FASTGPT_BETTER_FRAMEWORK_EXTRACT",),
+    "02": ("FASTGPT_BETTER_FRAMEWORK_WORLDVIEW",),
+    "03": ("FASTGPT_BETTER_FRAMEWORK_CHARACTERS",),
+    "04": ("FASTGPT_BETTER_FRAMEWORK_PLOT_KEY_POINT_PLANNING",),
+    "05": ("FASTGPT_BETTER_FRAMEWORK_CHARACTER_STORYLINE",),
+    "06": ("FASTGPT_BETTER_FRAMEWORK_GENERATE_UPDATE",),
+    "07": ("FASTGPT_BETTER_FRAMEWORK_FRAMEWORK_INSPECTION",),
+}
 
 
 class FrameworkPlannerStageError(RuntimeError):
@@ -408,7 +421,7 @@ def framework_planner_backend_ready() -> bool:
 
 def stage_has_real_backend(stage: str) -> bool:
     definition = stage_definition(stage)
-    for env_name in (f"{definition.env_prefix}_API_KEY", "FASTGPT_API_KEY"):
+    for env_name in _stage_api_key_env_names(definition):
         if _env(env_name):
             return True
     return False
@@ -427,6 +440,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             "raw": {
                 "mock": True,
                 "workflow_json_path": str(workflow_spec.path),
+                "workflow_contract_path": str(workflow_spec.contract_path) if workflow_spec.contract_path else "",
             },
             "display_text": display_text,
         }
@@ -495,12 +509,13 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         "ok": True,
         "stage": definition.stage,
         "data": data,
-        "raw": {
-            "mock": False,
-            "workflow_json_path": str(workflow_spec.path),
-            "url": endpoint.url,
-            "workflow_id": endpoint.workflow_id,
-            "response": response_json,
+            "raw": {
+                "mock": False,
+                "workflow_json_path": str(workflow_spec.path),
+                "workflow_contract_path": str(workflow_spec.contract_path) if workflow_spec.contract_path else "",
+                "url": endpoint.url,
+                "workflow_id": endpoint.workflow_id,
+                "response": response_json,
         },
         "display_text": display_text,
     }
@@ -581,6 +596,17 @@ def framework_workflow_dir() -> Path:
     return path
 
 
+@lru_cache(maxsize=1)
+def resolve_framework_contract_path() -> Path | None:
+    exact = framework_workflow_dir() / "00_CONTRACT.md"
+    if exact.exists():
+        return exact
+    matches = sorted(framework_workflow_dir().glob(FRAMEWORK_CONTRACT_GLOB))
+    if matches:
+        return matches[0]
+    return None
+
+
 @lru_cache(maxsize=None)
 def resolve_stage_workflow_path(stage: str) -> Path:
     definition = stage_definition(stage)
@@ -635,6 +661,7 @@ def load_stage_workflow_spec(stage: str) -> FrameworkPlannerWorkflowSpec:
         public_variable_keys=tuple(public_keys),
         internal_variable_keys=tuple(internal_keys),
         answer_node_names=tuple(name for name in answer_node_names if name),
+        contract_path=resolve_framework_contract_path(),
     )
 
 
@@ -693,22 +720,23 @@ def _build_stage_request_variables(
 
 
 def _resolve_stage_endpoint(definition: FrameworkPlannerStageDefinition) -> FrameworkPlannerEndpoint:
-    api_key_source, api_key = _env_with_name(
-        f"{definition.env_prefix}_API_KEY",
-        "FASTGPT_API_KEY",
-    )
+    api_key_envs = _stage_api_key_env_names(definition)
+    api_key_source, api_key = _env_with_name(*api_key_envs)
     if not api_key:
         raise FrameworkPlannerStageError(
             "未配置 FastGPT API Key",
             stage=definition.stage,
             status_code=500,
-            detail={"expected_envs": [f"{definition.env_prefix}_API_KEY", "FASTGPT_API_KEY"]},
+            detail={"expected_envs": list(api_key_envs)},
         )
 
     url_source, raw_url = _env_with_name(
         f"{definition.env_prefix}_URL",
         f"{definition.env_prefix}_CHAT_COMPLETIONS_URL",
         f"{definition.env_prefix}_BASE_URL",
+        "FASTGPT_FRAMEWORK_URL",
+        "FASTGPT_FRAMEWORK_CHAT_COMPLETIONS_URL",
+        "FASTGPT_FRAMEWORK_BASE_URL",
         "FASTGPT_CHAT_COMPLETIONS_URL",
         "FASTGPT_BASE_URL",
     )
@@ -716,6 +744,7 @@ def _resolve_stage_endpoint(definition: FrameworkPlannerStageDefinition) -> Fram
 
     workflow_id_source, workflow_id = _env_with_name(
         f"{definition.env_prefix}_WORKFLOW_ID",
+        "FASTGPT_FRAMEWORK_WORKFLOW_ID",
     )
 
     timeout = int(_env(f"{definition.env_prefix}_TIMEOUT", "FASTGPT_TIMEOUT") or getattr(settings, "fastgpt_timeout", 300))
@@ -731,6 +760,15 @@ def _resolve_stage_endpoint(definition: FrameworkPlannerStageDefinition) -> Fram
         workflow_id_source=workflow_id_source or "",
         chat_id=chat_id,
         timeout=max(1, timeout),
+    )
+
+
+def _stage_api_key_env_names(definition: FrameworkPlannerStageDefinition) -> tuple[str, ...]:
+    return (
+        f"{definition.env_prefix}_API_KEY",
+        *LEGACY_STAGE_API_KEY_ENVS.get(definition.stage, ()),
+        "FASTGPT_FRAMEWORK_API_KEY",
+        "FASTGPT_API_KEY",
     )
 
 

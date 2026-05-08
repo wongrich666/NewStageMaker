@@ -53,6 +53,7 @@ def _stage_04_payload() -> dict[str, object]:
 class FrameworkPlannerServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         service.framework_workflow_dir.cache_clear()
+        service.resolve_framework_contract_path.cache_clear()
         service.resolve_stage_workflow_path.cache_clear()
         service.load_stage_workflow_spec.cache_clear()
 
@@ -117,6 +118,59 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         variables = body["variables"]
         self.assertEqual(variables["mode"], "创作")
         self.assertEqual(variables["zHrEcynX"], "创作")
+        self.assertEqual(variables["user_requirements"], "主角必须有明显成长弧光。")
+
+    def test_stage_04_keeps_framework_score_report_and_user_requirements_in_request_variables(self) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            captured["url"] = url
+            captured["headers"] = headers or {}
+            captured["body"] = json or {}
+            captured["timeout"] = timeout
+            return _FakeResponse(
+                payload={
+                    "newVariables": {
+                        "d3ixvj8d": service.json.dumps(
+                            {
+                                "beat_checkpoint_timeline": [],
+                                "checkpoint_explanation": {"overview": "empty"},
+                            },
+                            ensure_ascii=False,
+                        ),
+                    }
+                }
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_API_KEY": "fastgpt-global-key",
+                "FASTGPT_CHAT_COMPLETIONS_URL": "https://api.fastgpt.in/api/v1/chat/completions",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                payload = _stage_04_payload()
+                payload["framework_score_report"] = "REVISE\\n需要补强中点反转。"
+                service.run_framework_planner_stage("04", payload)
+
+        variables = captured["body"]["variables"]
+        self.assertEqual(variables["user_requirements"], "固定 15 beat")
+        self.assertEqual(variables["framework_score_report"], "REVISE\\n需要补强中点反转。")
+
+    def test_stage_has_real_backend_accepts_legacy_and_framework_api_key_envs(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "FASTGPT_FRAMEWORK_API_KEY": "fastgpt-framework-key",
+                "FASTGPT_BETTER_FRAMEWORK_PLOT_KEY_POINT_PLANNING": "fastgpt-legacy-stage-key",
+            },
+            clear=True,
+        ):
+            self.assertTrue(service.stage_has_real_backend("01"))
+            self.assertTrue(service.stage_has_real_backend("04"))
 
     def test_stage_04_parses_internal_json_string_from_fastgpt(self) -> None:
         beat_payload = {
