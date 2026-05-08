@@ -1404,7 +1404,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_aliases={WORLDVIEW: (WORLDVIEW_VAR,)},
         fastgpt_responsibility="完成世界观提取、生成、审核、修订，返回最终可用世界观。",
         local_responsibility="不做业务审核循环，只校验 worldview 是否按契约返回并缓存。",
-        workflow_json_name="世界观生成.json",
+        workflow_json_name="02_世界观方案生成更新.json",
     ),
     STAGE_WORLDVIEW_NATURALIZE: FastGPTStageContract(
         stage_name=STAGE_WORLDVIEW_NATURALIZE,
@@ -1436,7 +1436,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         output_aliases={CHARACTERS: (CHARACTER_VAR,)},
         fastgpt_responsibility="完成人设生成、审核、修订、整理。",
         local_responsibility="不做业务审核循环，只校验 characters 是否按契约返回并缓存。",
-        workflow_json_name="人设生成.json",
+        workflow_json_name="03_人设方案生成更新.json",
     ),
     STAGE_SCENES: FastGPTStageContract(
         stage_name=STAGE_SCENES,

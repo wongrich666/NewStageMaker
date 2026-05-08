@@ -18,6 +18,13 @@ from flask import (
 from .models.inputs import derive_script_title_content
 from .services.auth_store import auth_store
 from .services.fastgpt_client import FastGPTTransientError
+from .services.framework_planner_service import (
+    FRAMEWORK_PLANNER_STORAGE_KEY,
+    FrameworkPlannerStageError,
+    framework_planner_backend_ready,
+    run_framework_planner_score,
+    run_framework_planner_stage,
+)
 from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
 from .services.task_manager import task_manager
 
@@ -150,6 +157,17 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             current_auth_token=_current_auth_token(),
         )
 
+    @app.get("/framework-planner")
+    @_login_required
+    def framework_planner_page():
+        return render_template(
+            "framework_planner.html",
+            current_user=_current_user(),
+            current_auth_token=_current_auth_token(),
+            framework_backend_ready=framework_planner_backend_ready(),
+            framework_planner_storage_key=FRAMEWORK_PLANNER_STORAGE_KEY,
+        )
+
     @app.get("/community/<int:project_id>")
     def community_detail_page(project_id: int):
         asset = task_manager.get_public_asset(project_id)
@@ -268,6 +286,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def list_tools():
         try:
             tools = list_simple_tools()
+            for tool in tools:
+                if str(tool.get("tool_id") or "") != "hot_review":
+                    continue
+                fields = tool.get("fields") or []
+                for field in fields:
+                    if str(field.get("name") or "") == "review_text":
+                        field["name"] = "text"
         except Exception as exc:
             return _json_error(str(exc), status=500, fallback="辅助工具列表加载失败，请稍后重试。")
         return _json_ok(ok=True, tools=tools)
@@ -344,6 +369,66 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def run_new_framework_tool():
         data = request.get_json(silent=True) or {}
         return _run_tool_request("new_framework", data)
+
+    def _framework_planner_error(
+        stage: str,
+        message: str,
+        *,
+        status: int = 400,
+        detail: dict | None = None,
+    ):
+        return jsonify(
+            {
+                "ok": False,
+                "stage": stage,
+                "error": message,
+                "detail": detail or {},
+            }
+        ), status
+
+    @app.post("/api/framework-planner/stage/04/score")
+    @_login_required
+    def run_framework_planner_stage_score():
+        data = request.get_json(silent=True) or {}
+        try:
+            payload = run_framework_planner_score(data)
+        except FrameworkPlannerStageError as exc:
+            return _framework_planner_error(
+                exc.stage,
+                str(exc),
+                status=exc.status_code,
+                detail=exc.detail,
+            )
+        except Exception as exc:
+            return _framework_planner_error(
+                "04",
+                "评分接口执行失败，请稍后重试。",
+                status=500,
+                detail={"message": str(exc)},
+            )
+        return jsonify(payload)
+
+    @app.post("/api/framework-planner/stage/<stage>")
+    @_login_required
+    def run_framework_planner_stage_api(stage: str):
+        data = request.get_json(silent=True) or {}
+        try:
+            payload = run_framework_planner_stage(stage, data)
+        except FrameworkPlannerStageError as exc:
+            return _framework_planner_error(
+                exc.stage,
+                str(exc),
+                status=exc.status_code,
+                detail=exc.detail,
+            )
+        except Exception as exc:
+            return _framework_planner_error(
+                str(stage).zfill(2),
+                "框架策划阶段执行失败，请稍后重试。",
+                status=500,
+                detail={"message": str(exc)},
+            )
+        return jsonify(payload)
 
     @app.get("/api/projects/latest")
     @_login_required
