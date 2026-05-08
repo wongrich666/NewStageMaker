@@ -875,9 +875,14 @@ def _extract_stage_output(
         mapped, candidate_warnings = _coerce_candidate_to_stage_output(definition, candidate, output_aliases)
         if mapped is not None:
             parse_warnings.extend(candidate_warnings)
+            safe_output, safe_warnings = safe_parse_stage_output(
+                mapped,
+                (*definition.output_fields, "display_text"),
+            )
+            parse_warnings.extend(safe_warnings)
             normalized = _normalize_stage_output(
                 definition.stage,
-                mapped,
+                safe_output,
                 parse_warnings=parse_warnings,
             )
             _log_stage_parse_warnings(definition.stage, parse_warnings)
@@ -887,9 +892,14 @@ def _extract_stage_output(
     parse_warnings.append(
         f"未能提取阶段 {definition.stage} 约定输出字段 {definition.output_fields}，已回退到空结构占位"
     )
+    safe_output, safe_warnings = safe_parse_stage_output(
+        _empty_stage_output(definition.stage),
+        (*definition.output_fields, "display_text"),
+    )
+    parse_warnings.extend(safe_warnings)
     normalized = _normalize_stage_output(
         definition.stage,
-        _empty_stage_output(definition.stage),
+        safe_output,
         parse_warnings=parse_warnings,
     )
     _log_stage_parse_warnings(definition.stage, parse_warnings)
@@ -1084,6 +1094,51 @@ def _parse_candidate_value(candidate: Any) -> Any:
         return cleaned
 
 
+def safe_parse_stage_output(
+    stage_response: Any,
+    required_keys: tuple[str, ...] | list[str],
+) -> tuple[dict[str, Any], list[str]]:
+    warnings: list[str] = []
+    parsed = _parse_candidate_value(stage_response)
+
+    if isinstance(parsed, list):
+        warnings.append("阶段输出为 list，已取第一个元素作为解析对象")
+        first_item = _first_non_empty_list_item(parsed)
+        parsed = _parse_candidate_value(first_item) if first_item is not None else {}
+
+    if isinstance(parsed, str):
+        text = parsed.strip()
+        if text:
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                try:
+                    parsed = parse_json(text)
+                except Exception:
+                    warnings.append("阶段输出字符串无法解析为 JSON，已回退为空对象")
+                    parsed = {}
+        else:
+            parsed = {}
+
+    if isinstance(parsed, list):
+        warnings.append("阶段输出二次解析后仍为 list，已再次取第一个元素作为解析对象")
+        first_item = _first_non_empty_list_item(parsed)
+        parsed = _parse_candidate_value(first_item) if first_item is not None else {}
+
+    if not isinstance(parsed, dict):
+        warnings.append(f"阶段输出不是 dict，而是 {type(parsed).__name__}，已回退为空对象")
+        parsed = {}
+
+    safe_output = dict(parsed)
+    for key in tuple(required_keys):
+        if key in safe_output and safe_output.get(key) not in (None, "", [], {}):
+            continue
+        safe_output[key] = _stage_output_placeholder(key)
+        if key != "display_text":
+            warnings.append(f"缺少关键字段 {key}，已填充占位结构")
+    return safe_output, warnings
+
+
 def _normalize_stage_output(
     stage: str,
     data: dict[str, Any],
@@ -1190,6 +1245,30 @@ def _empty_stage_output(stage: str) -> dict[str, Any]:
         return {
             "framework_plan_package": {},
             "validation_report": {},
+        }
+    return {}
+
+
+def _stage_output_placeholder(key: str) -> Any:
+    if key == "display_text":
+        return ""
+    if key == "beat_checkpoint_timeline":
+        return []
+    if key == "checkpoint_explanation":
+        return {
+            "overview": "未明确，需后续确认……",
+            "beat_notes": [],
+        }
+    if key == "character_storylines":
+        return []
+    if key == "adaptation_guide":
+        return {}
+    if key == "framework_plan_package":
+        return {}
+    if key == "validation_report":
+        return {
+            "summary": "未明确，需后续确认……",
+            "parse_warning": [],
         }
     return {}
 

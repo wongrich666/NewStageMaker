@@ -242,6 +242,28 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertEqual(len(payload["data"]["beat_checkpoint_timeline"]), 15)
         self.assertEqual(payload["data"]["checkpoint_explanation"]["overview"], "评分后修订版")
 
+    def test_safe_parse_stage_output_accepts_list_string_and_dict(self) -> None:
+        parsed_from_list, list_warnings = service.safe_parse_stage_output(
+            [{"source_brief": {"source_title": "夜行审判"}}],
+            ("source_brief", "display_text"),
+        )
+        self.assertEqual(parsed_from_list["source_brief"]["source_title"], "夜行审判")
+        self.assertIsInstance(list_warnings, list)
+
+        parsed_from_string, string_warnings = service.safe_parse_stage_output(
+            service.json.dumps({"worldview_plan": {"world_type": "近未来都市"}}, ensure_ascii=False),
+            ("worldview_plan", "display_text"),
+        )
+        self.assertEqual(parsed_from_string["worldview_plan"]["world_type"], "近未来都市")
+        self.assertIsInstance(string_warnings, list)
+
+        parsed_from_dict, dict_warnings = service.safe_parse_stage_output(
+            {"character_plan": {"protagonist": {"name": "林渡"}}},
+            ("character_plan", "display_text"),
+        )
+        self.assertEqual(parsed_from_dict["character_plan"]["protagonist"]["name"], "林渡")
+        self.assertIsInstance(dict_warnings, list)
+
     def test_stage_01_accepts_list_root_response_and_uses_first_dict(self) -> None:
         def _fake_post(url, *, headers=None, json=None, timeout=None):
             del url, headers, json, timeout
