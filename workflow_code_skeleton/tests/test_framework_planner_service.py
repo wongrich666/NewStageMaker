@@ -50,6 +50,26 @@ def _stage_04_payload() -> dict[str, object]:
     }
 
 
+def _stage_07_payload() -> dict[str, object]:
+    return {
+        "mode": "创作",
+        "basic_config": _basic_config(),
+        "source_brief": {"source_title": "夜行审判"},
+        "worldview_plan": {"world_type": "近未来都市"},
+        "character_plan": {"protagonist": {"name": "林渡"}},
+        "beat_checkpoint_timeline": [{"beat_no": 1, "beat_name": "开场"}] * 15,
+        "checkpoint_explanation": {"overview": "ok"},
+        "character_storylines": [{"id": "main", "title": "主角成长线", "decision": "keep"}],
+        "storyline_decisions": [{"storyline_id": "main", "decision": "keep"}],
+        "adaptation_guide": {"core_setting_adjustments": "ok"},
+        "user_edit_history": [],
+        "previous_framework_plan_package": {},
+        "user_feedback": "",
+        "adaptation_direction": "强化中点反转和强情绪推进。",
+        "user_requirements": "保持主角成长弧。",
+    }
+
+
 class FrameworkPlannerServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         service.framework_workflow_dir.cache_clear()
@@ -221,6 +241,102 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(len(payload["data"]["beat_checkpoint_timeline"]), 15)
         self.assertEqual(payload["data"]["checkpoint_explanation"]["overview"], "评分后修订版")
+
+    def test_stage_01_accepts_list_root_response_and_uses_first_dict(self) -> None:
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json, timeout
+            return _FakeResponse(
+                payload=[
+                    {
+                        "source_brief": {"source_title": "夜行审判", "core_premise": "list root"},
+                        "display_text": "list root ok",
+                    }
+                ]
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_API_KEY": "fastgpt-global-key",
+                "FASTGPT_CHAT_COMPLETIONS_URL": "https://api.fastgpt.in/api/v1/chat/completions",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                payload = service.run_framework_planner_stage("01", _basic_config())
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["data"]["source_brief"]["source_title"], "夜行审判")
+        self.assertEqual(payload["display_text"], "list root ok")
+
+    def test_stage_04_accepts_string_root_json_response(self) -> None:
+        raw_text = service.json.dumps(
+            {
+                "beat_checkpoint_timeline": [
+                    {
+                        "beat_no": index + 1,
+                        "beat_name": service.FIFTEEN_BEAT_NAMES[index],
+                        "act": "第一幕" if index < 6 else "第二幕" if index < 12 else "第三幕",
+                        "episode_range": f"第{index + 1}集",
+                        "checkpoint_title": f"{service.FIFTEEN_BEAT_NAMES[index]}卡点",
+                        "narrative_function": "推进主线",
+                        "plot_content": "剧情推进",
+                        "character_change": "人物变化",
+                        "conflict_upgrade": "冲突升级",
+                        "hook_or_reversal": "结尾反转",
+                        "linked_storylines": ["主角成长线"],
+                    }
+                    for index in range(15)
+                ],
+                "checkpoint_explanation": {"overview": "string root ok"},
+                "display_text": "string root display",
+            },
+            ensure_ascii=False,
+        )
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json, timeout
+            return _FakeResponse(payload=raw_text)
+
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_API_KEY": "fastgpt-global-key",
+                "FASTGPT_CHAT_COMPLETIONS_URL": "https://api.fastgpt.in/api/v1/chat/completions",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                payload = service.run_framework_planner_stage("04", _stage_04_payload())
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(len(payload["data"]["beat_checkpoint_timeline"]), 15)
+        self.assertEqual(payload["data"]["checkpoint_explanation"]["overview"], "string root ok")
+        self.assertEqual(payload["display_text"], "string root display")
+
+    def test_stage_07_falls_back_to_empty_structures_and_sets_parse_warning(self) -> None:
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json, timeout
+            return _FakeResponse(payload=["not-a-dict"])
+
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_API_KEY": "fastgpt-global-key",
+                "FASTGPT_CHAT_COMPLETIONS_URL": "https://api.fastgpt.in/api/v1/chat/completions",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                payload = service.run_framework_planner_stage("07", _stage_07_payload())
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["data"]["framework_plan_package"], {})
+        self.assertIsInstance(payload["data"]["validation_report"].get("parse_warning"), list)
+        self.assertTrue(payload["raw"]["parse_warning"])
 
     def test_score_endpoint_returns_stable_framework_score_report_string(self) -> None:
         payload = service.run_framework_planner_score(

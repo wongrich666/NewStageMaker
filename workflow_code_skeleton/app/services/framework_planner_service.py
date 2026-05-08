@@ -441,6 +441,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 "mock": True,
                 "workflow_json_path": str(workflow_spec.path),
                 "workflow_contract_path": str(workflow_spec.contract_path) if workflow_spec.contract_path else "",
+                "parse_warning": [],
             },
             "display_text": display_text,
         }
@@ -478,7 +479,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         ) from exc
 
     try:
-        data, display_text = _extract_stage_output(
+        data, display_text, parse_warnings = _extract_stage_output(
             definition=definition,
             workflow_spec=workflow_spec,
             response_json=response_json,
@@ -516,9 +517,10 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 "url": endpoint.url,
                 "workflow_id": endpoint.workflow_id,
                 "response": response_json,
-        },
-        "display_text": display_text,
-    }
+                "parse_warning": parse_warnings,
+            },
+            "display_text": display_text,
+        }
 
 
 def run_framework_planner_score(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -865,31 +867,51 @@ def _extract_stage_output(
     *,
     definition: FrameworkPlannerStageDefinition,
     workflow_spec: FrameworkPlannerWorkflowSpec,
-    response_json: dict[str, Any],
-) -> tuple[dict[str, Any], str]:
+    response_json: Any,
+) -> tuple[dict[str, Any], str, list[str]]:
     output_aliases = definition.output_aliases
+    parse_warnings: list[str] = []
     for _source, candidate in _iter_response_candidates(response_json, workflow_spec):
-        mapped = _coerce_candidate_to_stage_output(definition, candidate, output_aliases)
+        mapped, candidate_warnings = _coerce_candidate_to_stage_output(definition, candidate, output_aliases)
         if mapped is not None:
-            normalized = _normalize_stage_output(definition.stage, mapped)
+            parse_warnings.extend(candidate_warnings)
+            normalized = _normalize_stage_output(
+                definition.stage,
+                mapped,
+                parse_warnings=parse_warnings,
+            )
+            _log_stage_parse_warnings(definition.stage, parse_warnings)
             display_text = _extract_display_text(response_json, normalized)
-            return normalized, display_text
-    raise ValueError(
-        f"未能从阶段 {definition.stage} 的返回结果中提取输出字段：{definition.output_fields}"
+            return normalized, display_text, parse_warnings
+
+    parse_warnings.append(
+        f"未能提取阶段 {definition.stage} 约定输出字段 {definition.output_fields}，已回退到空结构占位"
     )
+    normalized = _normalize_stage_output(
+        definition.stage,
+        _empty_stage_output(definition.stage),
+        parse_warnings=parse_warnings,
+    )
+    _log_stage_parse_warnings(definition.stage, parse_warnings)
+    display_text = _extract_display_text(response_json, normalized)
+    return normalized, display_text, parse_warnings
 
 
 def _iter_response_candidates(
-    response_json: dict[str, Any],
+    response_json: Any,
     workflow_spec: FrameworkPlannerWorkflowSpec,
 ):
+    if response_json not in (None, "", [], {}):
+        yield "raw_response", response_json
+
+    root_response = _safe_root_mapping(response_json)
     containers = [
-        ("root", response_json),
-        ("root.newVariables", response_json.get("newVariables")),
-        ("root.responseData", (response_json.get("responseData") or {})),
+        ("root", root_response),
+        ("root.newVariables", root_response.get("newVariables")),
+        ("root.responseData", (root_response.get("responseData") or {})),
         (
             "root.responseData.newVariables",
-            ((response_json.get("responseData") or {}).get("newVariables")),
+            ((root_response.get("responseData") or {}).get("newVariables")),
         ),
     ]
     for source, value in containers:
@@ -902,8 +924,8 @@ def _iter_response_candidates(
                         yield f"{source}.{key}", nested
 
     for list_source, items in (
-        ("root.updateVarResult", response_json.get("updateVarResult")),
-        ("root.responseData.updateVarResult", (response_json.get("responseData") or {}).get("updateVarResult")),
+        ("root.updateVarResult", root_response.get("updateVarResult")),
+        ("root.responseData.updateVarResult", (root_response.get("responseData") or {}).get("updateVarResult")),
     ):
         if not isinstance(items, list):
             continue
@@ -921,14 +943,14 @@ def _iter_response_candidates(
                     yield f"{list_source}[{index}].value", value
 
     for source, value in (
-        ("root.answerText", response_json.get("answerText")),
-        ("root.responseData.answerText", (response_json.get("responseData") or {}).get("answerText")),
-        ("root.responseData.responseText", (response_json.get("responseData") or {}).get("responseText")),
+        ("root.answerText", root_response.get("answerText")),
+        ("root.responseData.answerText", (root_response.get("responseData") or {}).get("answerText")),
+        ("root.responseData.responseText", (root_response.get("responseData") or {}).get("responseText")),
     ):
         if value not in (None, "", [], {}):
             yield source, value
 
-    for index, choice in enumerate(response_json.get("choices") or []):
+    for index, choice in enumerate(root_response.get("choices") or []):
         if not isinstance(choice, dict):
             continue
         message = choice.get("message") or {}
@@ -943,34 +965,84 @@ def _coerce_candidate_to_stage_output(
     definition: FrameworkPlannerStageDefinition,
     candidate: Any,
     output_aliases: dict[str, tuple[str, ...]],
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, list[str]]:
     parsed = _parse_candidate_value(candidate)
     if parsed is None:
-        return None
+        return None, []
 
+    if isinstance(parsed, list):
+        return _coerce_list_candidate_to_stage_output(definition, parsed, output_aliases)
+
+    return _coerce_non_list_candidate_to_stage_output(definition, parsed, output_aliases)
+
+
+def _coerce_list_candidate_to_stage_output(
+    definition: FrameworkPlannerStageDefinition,
+    parsed: list[Any],
+    output_aliases: dict[str, tuple[str, ...]],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    warnings: list[str] = []
+    first_item = _first_non_empty_list_item(parsed)
+    if first_item is not None:
+        first_parsed = _parse_candidate_value(first_item)
+        if isinstance(first_parsed, dict) and _dict_contains_output_aliases(definition, first_parsed, output_aliases):
+            warnings.append("收到 list 返回，已取第一个元素作为解析对象")
+            mapped, nested_warnings = _coerce_non_list_candidate_to_stage_output(
+                definition,
+                first_parsed,
+                output_aliases,
+            )
+            return mapped, warnings + nested_warnings
+        if definition.stage not in {"05", "06"}:
+            warnings.append("收到 list 返回，已取第一个元素作为解析对象")
+            mapped, nested_warnings = _coerce_non_list_candidate_to_stage_output(
+                definition,
+                first_parsed,
+                output_aliases,
+            )
+            if mapped is not None:
+                return mapped, warnings + nested_warnings
+
+    if len(definition.output_fields) == 1:
+        warnings.append(f"收到 list 返回，已按 {definition.output_fields[0]} 原样接收")
+        return {definition.output_fields[0]: parsed}, warnings
+
+    if definition.stage == "04":
+        warnings.append("收到 list 返回，已按 beat_checkpoint_timeline 原样接收，并为 checkpoint_explanation 使用占位结构")
+        return {
+            "beat_checkpoint_timeline": parsed,
+            "checkpoint_explanation": {},
+        }, warnings
+
+    warnings.append("收到 list 返回，但未能识别为多字段输出对象，已回退为空结构")
+    return _empty_stage_output(definition.stage), warnings
+
+
+def _coerce_non_list_candidate_to_stage_output(
+    definition: FrameworkPlannerStageDefinition,
+    parsed: Any,
+    output_aliases: dict[str, tuple[str, ...]],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    warnings: list[str] = []
     if len(definition.output_fields) == 1:
         field = definition.output_fields[0]
         if isinstance(parsed, dict):
             direct = _find_value_by_aliases(parsed, output_aliases.get(field, (field,)))
             if direct is not None:
-                return {field: direct}
+                return _with_optional_display_text({field: direct}, parsed), warnings
             if "data" in parsed and isinstance(parsed["data"], dict):
                 nested = _find_value_by_aliases(parsed["data"], output_aliases.get(field, (field,)))
                 if nested is not None:
-                    return {field: nested}
+                    return _with_optional_display_text({field: nested}, parsed, parsed["data"]), warnings
             if field in parsed:
-                return {field: parsed[field]}
-            return {field: parsed}
-        return {field: parsed}
-
-    if definition.stage == "04" and isinstance(parsed, list):
-        return {
-            "beat_checkpoint_timeline": parsed,
-            "checkpoint_explanation": {},
-        }
+                return _with_optional_display_text({field: parsed[field]}, parsed), warnings
+            warnings.append(f"未找到 {field} 对应键，已将整个 dict 作为 {field} 的解析对象")
+            return _with_optional_display_text({field: parsed}, parsed), warnings
+        return {field: parsed}, warnings
 
     if not isinstance(parsed, dict):
-        return None
+        warnings.append(f"多字段输出解析结果不是 dict，而是 {type(parsed).__name__}")
+        return None, warnings
 
     data_source = parsed.get("data") if isinstance(parsed.get("data"), dict) else None
     mapped: dict[str, Any] = {}
@@ -986,8 +1058,13 @@ def _coerce_candidate_to_stage_output(
         if value is not None:
             mapped[field] = value
     if mapped:
-        return mapped
-    return None
+        mapped = _with_optional_display_text(mapped, parsed, data_source)
+        missing_fields = [field for field in definition.output_fields if field not in mapped]
+        if missing_fields:
+            warnings.append(f"缺少输出字段 {missing_fields}，已使用阶段默认占位补齐")
+        return mapped, warnings
+    warnings.append(f"未能从 dict 中识别阶段 {definition.stage} 的输出字段 {definition.output_fields}")
+    return None, warnings
 
 
 def _parse_candidate_value(candidate: Any) -> Any:
@@ -996,24 +1073,45 @@ def _parse_candidate_value(candidate: Any) -> Any:
     text = str(candidate or "").strip()
     if not text:
         return None
+    cleaned = strip_code_fence(text)
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
     try:
         return parse_json(text)
     except Exception:
-        return strip_code_fence(text)
+        return cleaned
 
 
-def _normalize_stage_output(stage: str, data: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(data)
+def _normalize_stage_output(
+    stage: str,
+    data: dict[str, Any],
+    *,
+    parse_warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    warnings = parse_warnings if parse_warnings is not None else []
+    normalized = dict(data if isinstance(data, dict) else {})
     if stage == "01":
+        if not isinstance(normalized.get("source_brief"), dict):
+            warnings.append("source_brief 不是 dict，已回退为对象占位")
         normalized["source_brief"] = _normalize_object_like(normalized.get("source_brief"), key_name="content")
         return normalized
     if stage == "02":
+        if not isinstance(normalized.get("worldview_plan"), dict):
+            warnings.append("worldview_plan 不是 dict，已回退为对象占位")
         normalized["worldview_plan"] = _normalize_object_like(normalized.get("worldview_plan"), key_name="content")
         return normalized
     if stage == "03":
+        if not isinstance(normalized.get("character_plan"), dict):
+            warnings.append("character_plan 不是 dict，已回退为对象占位")
         normalized["character_plan"] = _normalize_object_like(normalized.get("character_plan"), key_name="content")
         return normalized
     if stage == "04":
+        if not isinstance(normalized.get("beat_checkpoint_timeline"), list):
+            warnings.append("beat_checkpoint_timeline 不是 list，已回退为 15 条占位节拍")
+        if not isinstance(normalized.get("checkpoint_explanation"), (dict, str)):
+            warnings.append("checkpoint_explanation 不是 dict/str，已回退为说明占位")
         normalized["beat_checkpoint_timeline"] = _normalize_beat_timeline(
             normalized.get("beat_checkpoint_timeline")
         )
@@ -1023,16 +1121,24 @@ def _normalize_stage_output(stage: str, data: dict[str, Any]) -> dict[str, Any]:
         )
         return normalized
     if stage == "05":
+        if not isinstance(normalized.get("character_storylines"), list):
+            warnings.append("character_storylines 不是 list，已回退为空数组")
         normalized["character_storylines"] = _normalize_character_storylines(
             normalized.get("character_storylines")
         )
         return normalized
     if stage == "06":
+        if not isinstance(normalized.get("adaptation_guide"), (dict, list, str)):
+            warnings.append("adaptation_guide 类型异常，已回退为空对象")
         normalized["adaptation_guide"] = _normalize_adaptation_guide(
             normalized.get("adaptation_guide")
         )
         return normalized
     if stage == "07":
+        if not isinstance(normalized.get("framework_plan_package"), dict):
+            warnings.append("framework_plan_package 不是 dict，已回退为对象占位")
+        if not isinstance(normalized.get("validation_report"), (dict, list, str)):
+            warnings.append("validation_report 类型异常，已回退为对象占位")
         normalized["framework_plan_package"] = _normalize_object_like(
             normalized.get("framework_plan_package"),
             key_name="content",
@@ -1040,22 +1146,134 @@ def _normalize_stage_output(stage: str, data: dict[str, Any]) -> dict[str, Any]:
         normalized["validation_report"] = _normalize_validation_report(
             normalized.get("validation_report")
         )
+        if warnings:
+            normalized["validation_report"] = _attach_parse_warnings_to_validation_report(
+                normalized["validation_report"],
+                warnings,
+            )
         return normalized
     return normalized
 
 
-def _extract_display_text(response_json: dict[str, Any], data: dict[str, Any]) -> str:
+def _extract_display_text(response_json: Any, data: dict[str, Any]) -> str:
     for key in ("display_text", "displayText"):
         value = data.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+    root_response = _safe_root_mapping(response_json)
     for value in (
-        response_json.get("answerText"),
-        (response_json.get("responseData") or {}).get("answerText"),
+        root_response.get("answerText"),
+        (root_response.get("responseData") or {}).get("answerText"),
     ):
         if isinstance(value, str) and value.strip():
             return value.strip()
     return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def _empty_stage_output(stage: str) -> dict[str, Any]:
+    if stage == "01":
+        return {"source_brief": {}}
+    if stage == "02":
+        return {"worldview_plan": {}}
+    if stage == "03":
+        return {"character_plan": {}}
+    if stage == "04":
+        return {
+            "beat_checkpoint_timeline": [],
+            "checkpoint_explanation": {},
+        }
+    if stage == "05":
+        return {"character_storylines": []}
+    if stage == "06":
+        return {"adaptation_guide": {}}
+    if stage == "07":
+        return {
+            "framework_plan_package": {},
+            "validation_report": {},
+        }
+    return {}
+
+
+def _safe_root_mapping(value: Any) -> dict[str, Any]:
+    parsed = _parse_candidate_value(value)
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, list):
+        first_item = _first_non_empty_list_item(parsed)
+        if first_item is None:
+            return {}
+        reparsed = _parse_candidate_value(first_item)
+        if isinstance(reparsed, dict):
+            return reparsed
+    return {}
+
+
+def _first_non_empty_list_item(items: list[Any]) -> Any:
+    for item in items:
+        if item not in (None, "", [], {}):
+            return item
+    return None
+
+
+def _dict_contains_output_aliases(
+    definition: FrameworkPlannerStageDefinition,
+    parsed: dict[str, Any],
+    output_aliases: dict[str, tuple[str, ...]],
+) -> bool:
+    nested = parsed.get("data") if isinstance(parsed.get("data"), dict) else {}
+    for field in definition.output_fields:
+        aliases = output_aliases.get(field, (field,))
+        if any(alias in parsed for alias in aliases):
+            return True
+        if isinstance(nested, dict) and any(alias in nested for alias in aliases):
+            return True
+    return False
+
+
+def _with_optional_display_text(
+    mapped: dict[str, Any],
+    *sources: Any,
+) -> dict[str, Any]:
+    result = dict(mapped)
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for key in ("display_text", "displayText"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                result["display_text"] = value.strip()
+                return result
+    return result
+
+
+def _attach_parse_warnings_to_validation_report(
+    report: dict[str, Any],
+    parse_warnings: list[str],
+) -> dict[str, Any]:
+    normalized = dict(report if isinstance(report, dict) else {})
+    if not parse_warnings:
+        return normalized
+    warning_list = [str(item).strip() for item in parse_warnings if str(item).strip()]
+    if not warning_list:
+        return normalized
+    existing_warnings = normalized.get("warnings")
+    if isinstance(existing_warnings, list):
+        existing_warnings.extend(warning_list)
+    else:
+        normalized["warnings"] = warning_list
+    normalized["parse_warning"] = warning_list
+    return normalized
+
+
+def _log_stage_parse_warnings(stage: str, parse_warnings: list[str]) -> None:
+    warning_list = [str(item).strip() for item in parse_warnings if str(item).strip()]
+    if not warning_list:
+        return
+    logger.warning(
+        "框架策划阶段 %s 输出解析出现降级处理：%s",
+        stage,
+        " | ".join(warning_list),
+    )
 
 
 def _normalize_object_like(value: Any, *, key_name: str = "content") -> dict[str, Any]:
@@ -1098,10 +1316,13 @@ def _normalize_checkpoint_explanation(value: Any, timeline: list[dict[str, Any]]
         beat_notes = value.get("beat_notes")
         if not isinstance(beat_notes, list):
             beat_notes = []
-        if beat_notes:
+        if beat_notes or overview:
             return {
-                "overview": overview,
-                "beat_notes": beat_notes,
+                "overview": overview or "该卡点说明与同一条十五节拍时间轴一一对应，用于解释各节拍的叙事功能与阶段作用。",
+                "beat_notes": beat_notes or [
+                    {"beat_no": item["beat_no"], "explanation": item["plot_content"]}
+                    for item in timeline
+                ],
             }
     elif isinstance(value, str) and value.strip():
         return {
