@@ -900,10 +900,10 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, LegacyInputAlias]] = {
         CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
     },
     STAGE_WORLDVIEW: {
-        STORY_OUTLINE: STORY_OUTLINE_VAR,
-        USER_SCENES: CORE_SCENE_INPUT_VAR,
-        USER_CHARACTERS: CHARACTER_BIOS_VAR,
-        EPISODE_PLAN: EPISODE_PLAN_VAR,
+        STORY_OUTLINE: (STORY_OUTLINE_VAR, "source_brief"),
+        USER_SCENES: (CORE_SCENE_INPUT_VAR, "locked_basic_config"),
+        USER_CHARACTERS: (CHARACTER_BIOS_VAR, "previous_worldview_plan"),
+        EPISODE_PLAN: (EPISODE_PLAN_VAR, "user_feedback", "adaptation_direction"),
     },
     STAGE_WORLDVIEW_NATURALIZE: {
         UNSTRUCTURED_SOURCE: UNSTRUCTURED_SOURCE_VAR,
@@ -914,10 +914,15 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, LegacyInputAlias]] = {
         UNSTRUCTURED_CONTENT_KIND: UNSTRUCTURED_KIND_VAR,
     },
     STAGE_CHARACTERS: {
-        WORLDVIEW: WORLDVIEW_VAR,
-        USER_CHARACTERS: CHARACTER_BIOS_VAR,
-        STORY_OUTLINE: STORY_OUTLINE_VAR,
-        CHARACTER_SEARCH_INTENT: CHARACTER_SEARCH_INTENT_VAR,
+        WORLDVIEW: (WORLDVIEW_VAR, "worldview_plan"),
+        USER_CHARACTERS: (CHARACTER_BIOS_VAR, "source_brief"),
+        STORY_OUTLINE: (STORY_OUTLINE_VAR, "locked_basic_config"),
+        CHARACTER_SEARCH_INTENT: (
+            CHARACTER_SEARCH_INTENT_VAR,
+            "previous_character_plan",
+            "user_feedback",
+            "adaptation_direction",
+        ),
     },
     STAGE_SCENES: {
         WORLDVIEW: WORLDVIEW_VAR,

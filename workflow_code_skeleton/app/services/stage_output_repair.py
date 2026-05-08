@@ -148,6 +148,7 @@ _NEW_ALIAS_NAME_RE = re.compile(
 )
 _OLD_ALIAS_NAME_RE = re.compile(r"^(?P<name>[^【】()（）\[\]\s]{1,40})【(?P<tag>[^【】()（）\[\]\s]{1,40})】$")
 _CN_PAREN_ALIAS_NAME_RE = re.compile(r"^(?P<name>[^【】()（）\[\]\s]{1,40})（(?P<tag>[^【】()（）\[\]\s]{1,40})）$")
+_CANONICAL_ALIAS_NAME_RE = re.compile(r"^(?P<name>[^【】()（）\[\]\s]{1,40})【(?P<tag>[^【】()（）\[\]\s]{1,40})】$")
 
 _GENERIC_ALIAS_NAMES = {"男主", "女主", "反派", "配角", "主角", "男二", "女二", "路人"}
 
@@ -159,18 +160,22 @@ def normalize_appearance_alias_name(value: object) -> str:
 
     old_match = _OLD_ALIAS_NAME_RE.match(text)
     if old_match:
-        return f"{old_match.group('name')}({old_match.group('tag')})"
+        return f"{old_match.group('name')}【{old_match.group('tag')}】"
 
     cn_paren_match = _CN_PAREN_ALIAS_NAME_RE.match(text)
     if cn_paren_match:
-        return f"{cn_paren_match.group('name')}({cn_paren_match.group('tag')})"
+        return f"{cn_paren_match.group('name')}【{cn_paren_match.group('tag')}】"
+
+    new_match = _NEW_ALIAS_NAME_RE.match(text)
+    if new_match:
+        return f"{new_match.group('name')}【{new_match.group('tag')}】"
 
     return text
 
 
 def _is_valid_new_alias_name(value: object) -> bool:
     text = normalize_appearance_alias_name(value)
-    match = _NEW_ALIAS_NAME_RE.match(text)
+    match = _CANONICAL_ALIAS_NAME_RE.match(text)
     if not match:
         return False
 
@@ -2123,7 +2128,7 @@ def _canonicalize_appearance_mapping_body(
         warnings.append("appearance_mapping.mapping_principle 缺失，已补默认映射原则")
     if not str(normalized.get("global_naming_style") or "").strip():
         normalized["global_naming_style"] = (
-            "统一使用“角色中文全名(场景/状态/身份)”格式；常态默认使用 default_name。"
+            "统一使用“角色中文全名【场景/状态/身份】”格式；常态默认使用 default_name。"
         )
         warnings.append("appearance_mapping.global_naming_style 缺失，已补默认命名风格")
     if not isinstance(normalized.get("characters"), list):
@@ -2808,7 +2813,7 @@ def _validate_appearance_mapping_contract_shape(value: Any) -> list[str]:
 
             if not _is_valid_new_alias_name(alias_name):
                 issues.append(
-                    f"{variant_prefix}.alias_name 必须使用“角色中文全名(场景/状态/身份)”格式"
+                    f"{variant_prefix}.alias_name 必须使用“角色中文全名【场景/状态/身份】”格式"
                 )
             if not _normalize_string_list(variant.get("visual_keypoints")):
                 issues.append(f"{variant_prefix}.visual_keypoints 必须是非空数组")
@@ -2865,7 +2870,7 @@ def _validate_appearance_mapping_local_review(value: Any) -> list[str]:
                     alias_item["recommended_alias_name"] = alias_name
                     if not _is_valid_new_alias_name(alias_name):
                         issues.append(
-                            f"{alias_prefix}.recommended_alias_name 必须使用“角色中文全名(场景/状态/身份)”格式"
+                            f"{alias_prefix}.recommended_alias_name 必须使用“角色中文全名【场景/状态/身份】”格式"
                         )
                 if not str(alias_item.get("reason") or "").strip():
                     issues.append(f"{alias_prefix}.reason 不能为空")
@@ -2895,7 +2900,7 @@ def _validate_appearance_mapping_local_review(value: Any) -> list[str]:
                     alias_item["alias_name"] = alias_name
                     if not _is_valid_new_alias_name(alias_name):
                         issues.append(
-                            f"{alias_prefix}.alias_name 必须使用“角色中文全名(场景/状态/身份)”格式"
+                            f"{alias_prefix}.alias_name 必须使用“角色中文全名【场景/状态/身份】”格式"
                         )
                 if not str(alias_item.get("reason") or "").strip():
                     issues.append(f"{alias_prefix}.reason 不能为空")

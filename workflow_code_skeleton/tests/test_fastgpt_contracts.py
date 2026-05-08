@@ -47,6 +47,10 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
 
 
 class FastGPTContractsTestCase(unittest.TestCase):
+    @staticmethod
+    def _repo_root() -> Path:
+        return Path(__file__).resolve().parents[2]
+
     def test_direct_fastgpt_stages_declare_workflow_json_name(self) -> None:
         direct_stages = (
             STAGE_FRAMEWORK,
@@ -83,7 +87,7 @@ class FastGPTContractsTestCase(unittest.TestCase):
             )
 
     def test_env_example_documents_current_stage_keys(self) -> None:
-        env_text = Path("workflow_code_skeleton/.env.example").read_text(encoding="utf-8")
+        env_text = (self._repo_root() / "workflow_code_skeleton" / ".env.example").read_text(encoding="utf-8")
         self.assertIn("FASTGPT_STAGE_FORMAT_RETRY_LIMIT=3", env_text)
         self.assertIn("FASTGPT_STAGE_REVIEW_REVISE_MAX_LOOPS=10", env_text)
         self.assertIn("FASTGPT_APPEARANCE_ALIAS_WRITING_API_KEY=fastgpt-", env_text)
@@ -94,7 +98,7 @@ class FastGPTContractsTestCase(unittest.TestCase):
         self.assertNotIn("FASTGPT_SCRIPT_MEMORY_API_KEY==", env_text)
 
     def test_contract_markdown_documents_unstructured_workflow_variables_and_character_export_priority(self) -> None:
-        markdown = Path("workflow_code_skeleton/FASTGPT_CONTRACTS.md").read_text(encoding="utf-8")
+        markdown = (self._repo_root() / "workflow_code_skeleton" / "FASTGPT_CONTRACTS.md").read_text(encoding="utf-8")
 
         self.assertIn("w2RJzalk", markdown)
         self.assertIn("unstructuredContentKind", markdown)
@@ -115,7 +119,7 @@ class FastGPTContractsTestCase(unittest.TestCase):
         self.assertEqual(payload[CHARACTER_SEARCH_INTENT], "")
 
     def test_main_workflow_public_inputs_are_covered_by_contract_aliases(self) -> None:
-        repo_root = Path(__file__).resolve().parents[2]
+        repo_root = self._repo_root()
         for stage_name, contract in STAGE_CONTRACTS.items():
             workflow_json_name = str(contract.workflow_json_name or "").strip()
             if not workflow_json_name:
