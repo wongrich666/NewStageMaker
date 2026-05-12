@@ -224,11 +224,7 @@
     STAGE_SEQUENCE.forEach((stageKey) => {
       next.stage_state[stageKey] = Object.assign(clone(initialState.stage_state[stageKey]), next.stage_state[stageKey] || {});
     });
-    syncStorylineDecisions(next);
-    if (!VIEW_DEFS.some((item) => item.id === next.current_view)) {
-      next.current_view = "basic";
-    }
-    return next;
+    return syncStageFlow(next);
   }
 
   function mergeInto(target, source) {
@@ -298,16 +294,25 @@
     }[stageKey] || "";
   }
 
-  function viewUnlocked(viewId) {
+  function stageBlockedByUpstream(stage) {
+    return Boolean(stage && stage.locked && !stage.confirmed);
+  }
+
+  function viewUnlockedFor(targetState, viewId) {
+    const stageState = targetState && targetState.stage_state ? targetState.stage_state : {};
     const stageKey = stageKeyForView(viewId);
     if (stageKey === "basic") return true;
-    if (stageKey === "worldview") return state.stage_state.basic.confirmed;
-    if (stageKey === "character") return state.stage_state.worldview.confirmed;
-    if (stageKey === "beat") return state.stage_state.character.confirmed;
-    if (stageKey === "storylines") return state.stage_state.beat.confirmed;
-    if (stageKey === "guide") return state.stage_state.storylines.confirmed;
-    if (stageKey === "package") return state.stage_state.guide.confirmed;
+    if (stageKey === "worldview") return Boolean((stageState.basic || {}).confirmed);
+    if (stageKey === "character") return Boolean((stageState.worldview || {}).confirmed);
+    if (stageKey === "beat") return Boolean((stageState.character || {}).confirmed);
+    if (stageKey === "storylines") return Boolean((stageState.beat || {}).confirmed);
+    if (stageKey === "guide") return Boolean((stageState.storylines || {}).confirmed);
+    if (stageKey === "package") return Boolean((stageState.guide || {}).confirmed);
     return false;
+  }
+
+  function viewUnlocked(viewId) {
+    return viewUnlockedFor(state, viewId);
   }
 
   function setCurrentView(viewId) {
@@ -371,15 +376,23 @@
     }
   }
 
-  function hasStageData(stageKey) {
+  function hasStageDataFor(targetState, stageKey) {
     if (stageKey === "basic") return true;
-    if (stageKey === "worldview") return !isEmptyValue(state.worldview_plan);
-    if (stageKey === "character") return !isEmptyValue(state.character_plan);
-    if (stageKey === "beat") return Array.isArray(state.beat_checkpoint_timeline) && state.beat_checkpoint_timeline.length > 0;
-    if (stageKey === "storylines") return Array.isArray(state.character_storylines) && state.character_storylines.length > 0;
-    if (stageKey === "guide") return !isEmptyValue(state.adaptation_guide);
-    if (stageKey === "package") return !isEmptyValue(state.framework_plan_package);
+    if (stageKey === "worldview") return !isEmptyValue(targetState.worldview_plan);
+    if (stageKey === "character") return !isEmptyValue(targetState.character_plan);
+    if (stageKey === "beat") {
+      return Array.isArray(targetState.beat_checkpoint_timeline) && targetState.beat_checkpoint_timeline.length > 0;
+    }
+    if (stageKey === "storylines") {
+      return Array.isArray(targetState.character_storylines) && targetState.character_storylines.length > 0;
+    }
+    if (stageKey === "guide") return !isEmptyValue(targetState.adaptation_guide);
+    if (stageKey === "package") return !isEmptyValue(targetState.framework_plan_package);
     return false;
+  }
+
+  function hasStageData(stageKey) {
+    return hasStageDataFor(state, stageKey);
   }
 
   function downstreamStages(stageKey) {
@@ -390,6 +403,71 @@
   function firstViewForStage(stageKey) {
     const item = VIEW_DEFS.find((view) => view.stageKey === stageKey);
     return item ? item.id : "basic";
+  }
+
+  function firstAccessibleView(targetState) {
+    return (VIEW_DEFS.find((item) => viewUnlockedFor(targetState, item.id)) || VIEW_DEFS[0]).id;
+  }
+
+  function reconcileStageState(targetState) {
+    if (!targetState || typeof targetState !== "object") return targetState;
+    targetState.stage_state = targetState.stage_state || clone(initialState.stage_state);
+
+    STAGE_SEQUENCE.forEach((stageKey) => {
+      targetState.stage_state[stageKey] = Object.assign(
+        clone(initialState.stage_state[stageKey]),
+        targetState.stage_state[stageKey] || {}
+      );
+    });
+
+    STAGE_SEQUENCE.forEach((stageKey) => {
+      const stage = targetState.stage_state[stageKey];
+      const unlocked = viewUnlockedFor(targetState, firstViewForStage(stageKey));
+
+      if (stageKey === "basic") {
+        stage.locked = Boolean(stage.confirmed);
+        if (stage.confirmed) {
+          stage.status = "confirmed";
+        } else if (stage.status !== "running" && stage.status !== "error") {
+          stage.status = "editing";
+        }
+        return;
+      }
+
+      stage.locked = !unlocked;
+
+      if (stage.confirmed) {
+        stage.status = "confirmed";
+        return;
+      }
+
+      if (!unlocked) {
+        stage.status = "locked";
+        return;
+      }
+
+      if (stage.status === "running" || stage.status === "error") {
+        return;
+      }
+
+      stage.status = hasStageDataFor(targetState, stageKey)
+        ? (stage.status === "updated" ? "updated" : "generated")
+        : "idle";
+    });
+
+    if (!VIEW_DEFS.some((item) => item.id === targetState.current_view)) {
+      targetState.current_view = "basic";
+    }
+    if (!viewUnlockedFor(targetState, targetState.current_view)) {
+      targetState.current_view = firstAccessibleView(targetState);
+    }
+
+    return targetState;
+  }
+
+  function syncStageFlow(targetState) {
+    syncStorylineDecisions(targetState);
+    return reconcileStageState(targetState);
   }
 
   function rollbackStage(stageKey) {
@@ -429,6 +507,7 @@
     ui.editMode.beatExplanation = false;
     ui.editMode.guide = false;
     state.current_view = firstViewForStage(stageKey);
+    syncStageFlow(state);
     recordHistory("rollback", { stageKey });
     showToast("已回退并清空下游确认状态");
     render();
@@ -500,6 +579,7 @@
   }
 
   function render() {
+    syncStageFlow(state);
     saveState();
     app.innerHTML = `
       <div class="fp-shell">
@@ -706,7 +786,7 @@
   function renderPlanStageView(options) {
     const stage = state.stage_state[options.stageKey];
     const data = state[options.dataKey];
-    const locked = stage.locked;
+    const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
     const editing = ui.editMode[options.stageKey];
     const feedback = state.feedback[options.stageKey] || "";
@@ -720,9 +800,9 @@
           ${stageStatusTag(options.stageKey)}
         </div>
         ${confirmed ? `<div class="fp-inline-warning">${escapeHtml(options.title)}已确认并锁定。下游内容已基于当前版本生成，如需改动请显式回退。</div>` : ""}
-        ${locked ? `<div class="fp-empty">请先确认上游阶段。</div>` : editing ? renderEditorBlock(options.dataKey, options.title) : renderDataBlock(data)}
+        ${blocked ? `<div class="fp-empty">请先确认上游阶段。</div>` : editing ? renderEditorBlock(options.dataKey, options.title) : renderDataBlock(data)}
         ${renderStageError(options.stageKey)}
-        ${!locked ? `
+        ${!blocked && !confirmed ? `
           <div class="fp-field" style="margin-top:14px">
             <label>用户修改意见 / AI 更新反馈</label>
             <textarea data-feedback-key="${options.stageKey}" placeholder="这里的内容会作为 user_feedback 传给后端 revise 接口。">${escapeHtml(feedback)}</textarea>
@@ -735,10 +815,10 @@
             <button class="fp-btn" data-action="cancel-editor" data-editor-stage="${options.stageKey}">取消</button>
             <button class="fp-btn primary" data-action="save-editor" data-editor-key="${options.dataKey}" data-stage-key="${options.stageKey}">更新${escapeHtml(options.title)}</button>
           ` : `
-            <button class="fp-btn" data-action="run-stage-generate" data-stage-key="${options.stageKey}" ${locked || confirmed || isStageLoading(options.stageKey) ? "disabled" : ""}>生成${escapeHtml(options.title)}</button>
-            <button class="fp-btn" data-action="run-stage-revise" data-stage-key="${options.stageKey}" ${locked || confirmed || isStageLoading(options.stageKey) || isEmptyValue(data) ? "disabled" : ""}>基于意见更新</button>
-            <button class="fp-btn" data-action="open-editor" data-editor-stage="${options.stageKey}" data-editor-key="${options.dataKey}" ${locked || confirmed || isEmptyValue(data) ? "disabled" : ""}>编辑</button>
-            <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="${options.stageKey}" ${locked || confirmed || isEmptyValue(data) ? "disabled" : ""}>确认并进入${escapeHtml(options.nextTitle)}</button>
+            <button class="fp-btn" data-action="run-stage-generate" data-stage-key="${options.stageKey}" ${blocked || confirmed || isStageLoading(options.stageKey) ? "disabled" : ""}>生成${escapeHtml(options.title)}</button>
+            <button class="fp-btn" data-action="run-stage-revise" data-stage-key="${options.stageKey}" ${blocked || confirmed || isStageLoading(options.stageKey) || isEmptyValue(data) ? "disabled" : ""}>基于意见更新</button>
+            <button class="fp-btn" data-action="open-editor" data-editor-stage="${options.stageKey}" data-editor-key="${options.dataKey}" ${blocked || confirmed || isEmptyValue(data) ? "disabled" : ""}>编辑</button>
+            <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="${options.stageKey}" ${blocked || confirmed || isEmptyValue(data) ? "disabled" : ""}>确认并进入${escapeHtml(options.nextTitle)}</button>
           `}
         </div>
       </section>
@@ -747,7 +827,7 @@
 
   function renderBeatTimelineView() {
     const stage = state.stage_state.beat;
-    const locked = stage.locked;
+    const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
     const editing = ui.editMode.beatTimeline;
     const canConfirm = state.beat_checkpoint_timeline.length === 15 && !isEmptyValue(state.checkpoint_explanation);
@@ -761,9 +841,9 @@
           ${stageStatusTag("beat")}
         </div>
         ${confirmed ? `<div class="fp-inline-warning">04 阶段已确认并锁定，05 人物故事线会严格基于这 15 个节拍继续拆解。</div>` : ""}
-        ${locked ? `<div class="fp-empty">请先确认人设方案。</div>` : editing ? renderEditorBlock("beat_checkpoint_timeline", "三幕十五节拍卡点时间轴") : renderBeatTimeline(state.beat_checkpoint_timeline)}
+        ${blocked ? `<div class="fp-empty">请先确认人设方案。</div>` : editing ? renderEditorBlock("beat_checkpoint_timeline", "三幕十五节拍卡点时间轴") : renderBeatTimeline(state.beat_checkpoint_timeline)}
         ${renderStageError("beat")}
-        ${!locked ? `
+        ${!blocked && !confirmed ? `
           <div class="fp-field" style="margin-top:14px">
             <label>04 用户反馈 / 修改意见</label>
             <textarea data-feedback-key="beat" placeholder="这里会作为 user_feedback 传给 04 revise；framework_score_report 会自动从评分接口读取。">${escapeHtml(state.feedback.beat || "")}</textarea>
@@ -782,11 +862,11 @@
             <button class="fp-btn" data-action="cancel-editor" data-editor-stage="beatTimeline">取消</button>
             <button class="fp-btn primary" data-action="save-editor" data-editor-key="beat_checkpoint_timeline" data-stage-key="beat">更新时间轴</button>
           ` : `
-            <button class="fp-btn" data-action="run-stage-generate" data-stage-key="beat" ${locked || confirmed || isStageLoading("beat") ? "disabled" : ""}>生成时间轴</button>
-            <button class="fp-btn" data-action="run-stage-revise" data-stage-key="beat" ${locked || confirmed || isStageLoading("beat") || !state.beat_checkpoint_timeline.length ? "disabled" : ""}>基于意见更新</button>
-            <button class="fp-btn" data-action="run-score-loop" ${locked || confirmed || isStageLoading("beat") ? "disabled" : ""}>运行评分循环（最多 3 轮）</button>
-            <button class="fp-btn" data-action="open-editor" data-editor-stage="beatTimeline" data-editor-key="beat_checkpoint_timeline" ${locked || confirmed || !state.beat_checkpoint_timeline.length ? "disabled" : ""}>编辑时间轴</button>
-            <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="beat" ${locked || confirmed || !canConfirm ? "disabled" : ""}>确认并进入人物故事线</button>
+            <button class="fp-btn" data-action="run-stage-generate" data-stage-key="beat" ${blocked || confirmed || isStageLoading("beat") ? "disabled" : ""}>生成时间轴</button>
+            <button class="fp-btn" data-action="run-stage-revise" data-stage-key="beat" ${blocked || confirmed || isStageLoading("beat") || !state.beat_checkpoint_timeline.length ? "disabled" : ""}>基于意见更新</button>
+            <button class="fp-btn" data-action="run-score-loop" ${blocked || confirmed || isStageLoading("beat") ? "disabled" : ""}>运行评分循环（最多 3 轮）</button>
+            <button class="fp-btn" data-action="open-editor" data-editor-stage="beatTimeline" data-editor-key="beat_checkpoint_timeline" ${blocked || confirmed || !state.beat_checkpoint_timeline.length ? "disabled" : ""}>编辑时间轴</button>
+            <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="beat" ${blocked || confirmed || !canConfirm ? "disabled" : ""}>确认并进入人物故事线</button>
           `}
         </div>
       </section>
@@ -826,7 +906,7 @@
 
   function renderBeatExplanationView() {
     const stage = state.stage_state.beat;
-    const locked = stage.locked;
+    const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
     const editing = ui.editMode.beatExplanation;
     return `
@@ -838,14 +918,14 @@
           </div>
           ${stageStatusTag("beat")}
         </div>
-        ${locked ? `<div class="fp-empty">请先确认人设方案。</div>` : editing ? renderEditorBlock("checkpoint_explanation", "卡点说明") : renderDataBlock(state.checkpoint_explanation)}
+        ${blocked ? `<div class="fp-empty">请先确认人设方案。</div>` : editing ? renderEditorBlock("checkpoint_explanation", "卡点说明") : renderDataBlock(state.checkpoint_explanation)}
         <div class="fp-actions">
           ${editing ? `
             <button class="fp-btn" data-action="cancel-editor" data-editor-stage="beatExplanation">取消</button>
             <button class="fp-btn primary" data-action="save-editor" data-editor-key="checkpoint_explanation" data-stage-key="beat">更新卡点说明</button>
           ` : `
-            <button class="fp-btn" data-action="open-editor" data-editor-stage="beatExplanation" data-editor-key="checkpoint_explanation" ${locked || confirmed || isEmptyValue(state.checkpoint_explanation) ? "disabled" : ""}>编辑说明</button>
-            <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="beat" ${locked || confirmed || state.beat_checkpoint_timeline.length !== 15 || isEmptyValue(state.checkpoint_explanation) ? "disabled" : ""}>确认 04 并进入人物故事线</button>
+            <button class="fp-btn" data-action="open-editor" data-editor-stage="beatExplanation" data-editor-key="checkpoint_explanation" ${blocked || confirmed || isEmptyValue(state.checkpoint_explanation) ? "disabled" : ""}>编辑说明</button>
+            <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="beat" ${blocked || confirmed || state.beat_checkpoint_timeline.length !== 15 || isEmptyValue(state.checkpoint_explanation) ? "disabled" : ""}>确认 04 并进入人物故事线</button>
           `}
         </div>
       </section>
@@ -854,7 +934,7 @@
 
   function renderStorylinesView() {
     const stage = state.stage_state.storylines;
-    const locked = stage.locked;
+    const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
     return `
       <section class="fp-card fp-section">
@@ -866,9 +946,9 @@
           ${stageStatusTag("storylines")}
         </div>
         ${confirmed ? `<div class="fp-inline-warning">人物故事线已确认并锁定。06 阶段的整体改编指引会以当前故事线取舍为准。</div>` : ""}
-        ${locked ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineCards(state.character_storylines, { concise: true })}
+        ${blocked ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineCards(state.character_storylines, { concise: true })}
         ${renderStageError("storylines")}
-        ${!locked ? `
+        ${!blocked && !confirmed ? `
           <div class="fp-field" style="margin-top:14px">
             <label>05 用户反馈 / 修改意见</label>
             <textarea data-feedback-key="storylines" placeholder="会作为 user_feedback 传入 stage 05 revise。">${escapeHtml(state.feedback.storylines || "")}</textarea>
@@ -877,10 +957,10 @@
         <div class="fp-lock-note">故事线处理支持 keep / simplify / delete。只有先更新，再确认，06 才会解锁。</div>
         <div class="fp-actions">
           ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="storylines">回退到此阶段并清空下游</button>` : ""}
-          <button class="fp-btn" data-action="run-stage-generate" data-stage-key="storylines" ${locked || confirmed || isStageLoading("storylines") ? "disabled" : ""}>生成人物故事线</button>
-          <button class="fp-btn" data-action="run-stage-revise" data-stage-key="storylines" ${locked || confirmed || isStageLoading("storylines") || !state.character_storylines.length ? "disabled" : ""}>基于意见更新</button>
-          <button class="fp-btn" data-action="go-view" data-view="storyline_details" ${locked || !state.character_storylines.length ? "disabled" : ""}>查看详细故事线</button>
-          <button class="fp-btn primary" data-action="go-view" data-view="storyline_decisions" ${locked || !state.character_storylines.length ? "disabled" : ""}>进入故事线处理</button>
+          <button class="fp-btn" data-action="run-stage-generate" data-stage-key="storylines" ${blocked || confirmed || isStageLoading("storylines") ? "disabled" : ""}>生成人物故事线</button>
+          <button class="fp-btn" data-action="run-stage-revise" data-stage-key="storylines" ${blocked || confirmed || isStageLoading("storylines") || !state.character_storylines.length ? "disabled" : ""}>基于意见更新</button>
+          <button class="fp-btn" data-action="go-view" data-view="storyline_details" ${blocked || !state.character_storylines.length ? "disabled" : ""}>查看详细故事线</button>
+          <button class="fp-btn primary" data-action="go-view" data-view="storyline_decisions" ${blocked || !state.character_storylines.length ? "disabled" : ""}>进入故事线处理</button>
         </div>
       </section>
     `;
@@ -888,7 +968,7 @@
 
   function renderStorylineDetailsView() {
     const stage = state.stage_state.storylines;
-    const locked = stage.locked;
+    const blocked = stageBlockedByUpstream(stage);
     return `
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
@@ -898,10 +978,10 @@
           </div>
           ${stageStatusTag("storylines")}
         </div>
-        ${locked ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineCards(state.character_storylines, { detailed: true })}
+        ${blocked ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineCards(state.character_storylines, { detailed: true })}
         <div class="fp-actions">
-          <button class="fp-btn" data-action="go-view" data-view="storylines" ${locked ? "disabled" : ""}>返回故事线总览</button>
-          <button class="fp-btn primary" data-action="go-view" data-view="storyline_decisions" ${locked || !state.character_storylines.length ? "disabled" : ""}>去处理保留 / 精简 / 删除</button>
+          <button class="fp-btn" data-action="go-view" data-view="storylines" ${blocked ? "disabled" : ""}>返回故事线总览</button>
+          <button class="fp-btn primary" data-action="go-view" data-view="storyline_decisions" ${blocked || !state.character_storylines.length ? "disabled" : ""}>去处理保留 / 精简 / 删除</button>
         </div>
       </section>
     `;
@@ -909,7 +989,7 @@
 
   function renderStorylineDecisionView() {
     const stage = state.stage_state.storylines;
-    const locked = stage.locked;
+    const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
     const canConfirm = state.character_storylines.length > 0;
     return `
@@ -921,11 +1001,11 @@
           </div>
           ${stageStatusTag("storylines")}
         </div>
-        ${locked ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineDecisionGrid()}
+        ${blocked ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineDecisionGrid()}
         <div class="fp-actions">
           ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="storylines">回退到此阶段并清空下游</button>` : ""}
-          <button class="fp-btn" data-action="go-view" data-view="storyline_details" ${locked ? "disabled" : ""}>返回详情查看</button>
-          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="storylines" ${locked || confirmed || !canConfirm ? "disabled" : ""}>确认并进入整体改编指引</button>
+          <button class="fp-btn" data-action="go-view" data-view="storyline_details" ${blocked ? "disabled" : ""}>返回详情查看</button>
+          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="storylines" ${blocked || confirmed || !canConfirm ? "disabled" : ""}>确认并进入整体改编指引</button>
         </div>
       </section>
     `;
@@ -933,7 +1013,7 @@
 
   function renderGuideView() {
     const stage = state.stage_state.guide;
-    const locked = stage.locked;
+    const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
     const editing = ui.editMode.guide;
     return `
@@ -946,9 +1026,9 @@
           ${stageStatusTag("guide")}
         </div>
         ${confirmed ? `<div class="fp-inline-warning">整体改编指引已确认并锁定。现在可以生成最终 JSON 策划包。</div>` : ""}
-        ${locked ? `<div class="fp-empty">请先确认 05 阶段。</div>` : editing ? renderEditorBlock("adaptation_guide", "整体改编指引") : renderGuideCards(state.adaptation_guide)}
+        ${blocked ? `<div class="fp-empty">请先确认 05 阶段。</div>` : editing ? renderEditorBlock("adaptation_guide", "整体改编指引") : renderGuideCards(state.adaptation_guide)}
         ${renderStageError("guide")}
-        ${!locked ? `
+        ${!blocked && !confirmed ? `
           <div class="fp-field" style="margin-top:14px">
             <label>06 用户反馈 / 修改意见</label>
             <textarea data-feedback-key="guide" placeholder="会作为 user_feedback 传入 stage 06 revise。">${escapeHtml(state.feedback.guide || "")}</textarea>
@@ -960,10 +1040,10 @@
             <button class="fp-btn" data-action="cancel-editor" data-editor-stage="guide">取消</button>
             <button class="fp-btn primary" data-action="save-editor" data-editor-key="adaptation_guide" data-stage-key="guide">更新改编指引</button>
           ` : `
-            <button class="fp-btn" data-action="run-stage-generate" data-stage-key="guide" ${locked || confirmed || isStageLoading("guide") ? "disabled" : ""}>生成改编指引</button>
-            <button class="fp-btn" data-action="run-stage-revise" data-stage-key="guide" ${locked || confirmed || isStageLoading("guide") || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>基于意见更新</button>
-            <button class="fp-btn" data-action="open-editor" data-editor-stage="guide" data-editor-key="adaptation_guide" ${locked || confirmed || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>编辑</button>
-            <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="guide" ${locked || confirmed || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>确认并进入最终 JSON 输出</button>
+            <button class="fp-btn" data-action="run-stage-generate" data-stage-key="guide" ${blocked || confirmed || isStageLoading("guide") ? "disabled" : ""}>生成改编指引</button>
+            <button class="fp-btn" data-action="run-stage-revise" data-stage-key="guide" ${blocked || confirmed || isStageLoading("guide") || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>基于意见更新</button>
+            <button class="fp-btn" data-action="open-editor" data-editor-stage="guide" data-editor-key="adaptation_guide" ${blocked || confirmed || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>编辑</button>
+            <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="guide" ${blocked || confirmed || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>确认并进入最终 JSON 输出</button>
           `}
         </div>
       </section>
@@ -1190,7 +1270,7 @@
       <div class="fp-footer">
         <div class="fp-footer-note">localStorage 自动保存已开启。上游确认后不能直接改；如需修改，请使用显式回退。</div>
         <div class="fp-top-actions">
-          <button class="fp-btn" data-action="go-view" data-view="${previous ? previous.id : ""}" ${previous ? "" : "disabled"}>上一步</button>
+          <button class="fp-btn" data-action="go-view" data-view="${previous ? previous.id : ""}" ${previous && viewUnlocked(previous.id) ? "" : "disabled"}>上一步</button>
           <button class="fp-btn primary" data-action="go-view" data-view="${next ? next.id : ""}" ${next && viewUnlocked(next.id) ? "" : "disabled"}>下一步</button>
         </div>
       </div>
@@ -1344,24 +1424,52 @@
   }
 
   function applyStageResponse(stageNo, response) {
-    state.raw_stage_responses[stageNo] = response.raw || {};
-    state.display_texts[stageNo] = response.display_text || "";
-    if (stageNo === "01") state.source_brief = response.data.source_brief || {};
-    if (stageNo === "02") state.worldview_plan = response.data.worldview_plan || {};
-    if (stageNo === "03") state.character_plan = response.data.character_plan || {};
+    const safeResponse = response && typeof response === "object" ? response : {};
+    const safeData = safeResponse.data && typeof safeResponse.data === "object" ? safeResponse.data : {};
+    state.raw_stage_responses[stageNo] = safeResponse.raw || {};
+    state.display_texts[stageNo] = safeResponse.display_text || "";
+    if (stageNo === "01") {
+      state.source_brief = safeData.source_brief && typeof safeData.source_brief === "object" && !Array.isArray(safeData.source_brief)
+        ? safeData.source_brief
+        : {};
+    }
+    if (stageNo === "02") {
+      state.worldview_plan = safeData.worldview_plan && typeof safeData.worldview_plan === "object" && !Array.isArray(safeData.worldview_plan)
+        ? safeData.worldview_plan
+        : {};
+    }
+    if (stageNo === "03") {
+      state.character_plan = safeData.character_plan && typeof safeData.character_plan === "object" && !Array.isArray(safeData.character_plan)
+        ? safeData.character_plan
+        : {};
+    }
     if (stageNo === "04") {
-      state.beat_checkpoint_timeline = response.data.beat_checkpoint_timeline || [];
-      state.checkpoint_explanation = response.data.checkpoint_explanation || {};
+      state.beat_checkpoint_timeline = Array.isArray(safeData.beat_checkpoint_timeline)
+        ? safeData.beat_checkpoint_timeline
+        : [];
+      state.checkpoint_explanation = safeData.checkpoint_explanation && typeof safeData.checkpoint_explanation === "object" && !Array.isArray(safeData.checkpoint_explanation)
+        ? safeData.checkpoint_explanation
+        : {};
     }
     if (stageNo === "05") {
-      state.character_storylines = response.data.character_storylines || [];
-      syncStorylineDecisions(state);
+      state.character_storylines = Array.isArray(safeData.character_storylines)
+        ? safeData.character_storylines
+        : [];
     }
-    if (stageNo === "06") state.adaptation_guide = response.data.adaptation_guide || {};
+    if (stageNo === "06") {
+      state.adaptation_guide = safeData.adaptation_guide && typeof safeData.adaptation_guide === "object" && !Array.isArray(safeData.adaptation_guide)
+        ? safeData.adaptation_guide
+        : {};
+    }
     if (stageNo === "07") {
-      state.framework_plan_package = response.data.framework_plan_package || {};
-      state.validation_report = response.data.validation_report || {};
+      state.framework_plan_package = safeData.framework_plan_package && typeof safeData.framework_plan_package === "object" && !Array.isArray(safeData.framework_plan_package)
+        ? safeData.framework_plan_package
+        : {};
+      state.validation_report = safeData.validation_report && typeof safeData.validation_report === "object" && !Array.isArray(safeData.validation_report)
+        ? safeData.validation_report
+        : {};
     }
+    syncStageFlow(state);
   }
 
   function syncStorylineDecisions(targetState) {
@@ -1420,7 +1528,8 @@
       state.stage_state.basic.status = "confirmed";
       unlockStage("worldview");
       state.current_view = "worldview";
-      recordHistory("confirm_stage", { stageKey: "basic", stageNo: "01", sourceBrief: Boolean(response.data.source_brief) });
+      syncStageFlow(state);
+      recordHistory("confirm_stage", { stageKey: "basic", stageNo: "01", sourceBrief: !isEmptyValue(state.source_brief) });
       showToast("基础配置已确认，并已生成 source_brief");
       render();
     } catch (error) {
@@ -1461,6 +1570,7 @@
       unlockStage("package");
       state.current_view = "package";
     }
+    syncStageFlow(state);
     recordHistory("confirm_stage", { stageKey, stageNo: stageNoForKey(stageKey) });
     showToast("已确认并锁定，已解锁下游阶段");
     render();
@@ -1500,6 +1610,7 @@
       if (editorKey === "beat_checkpoint_timeline") ui.editMode.beatTimeline = false;
       if (editorKey === "checkpoint_explanation") ui.editMode.beatExplanation = false;
       if (stageKey === "guide") ui.editMode.guide = false;
+      syncStageFlow(state);
       recordHistory("save_editor", { stageKey, editorKey });
       showToast("已更新，确认后才会解锁下游");
       render();
@@ -1515,6 +1626,7 @@
     syncStorylineDecisions(state);
     state.stage_state.storylines.status = "updated";
     state.stage_state.storylines.confirmed = false;
+    syncStageFlow(state);
     recordHistory("storyline_decision", { storylineId, decision });
     saveState();
     render();
@@ -1557,6 +1669,7 @@
     syncStorylineDecisions(state);
     state.stage_state.storylines.status = "updated";
     state.stage_state.storylines.confirmed = false;
+    syncStageFlow(state);
     recordHistory("update_storyline_detail", { storylineId });
     ui.modalStorylineId = null;
     showToast("故事线已更新，仍需确认");
@@ -1648,6 +1761,7 @@
       // ignore
     }
     state = clone(initialState);
+    syncStageFlow(state);
     ui.toast = "";
     ui.loading = {};
     ui.stageErrors = {};
