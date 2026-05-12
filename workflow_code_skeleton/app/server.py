@@ -27,6 +27,10 @@ from .services.framework_planner_service import (
 )
 from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
 from .services.task_manager import task_manager
+from .utils.logger import get_logger
+
+
+logger = get_logger("server")
 
 
 def default_workflow_spec_path() -> str:
@@ -412,6 +416,17 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @_login_required
     def run_framework_planner_stage_api(stage: str):
         data = request.get_json(silent=True) or {}
+        source_text = ""
+        if isinstance(data, dict):
+            source_text = str(data.get("source_text") or "")
+            if not source_text and isinstance(data.get("basic_config"), dict):
+                source_text = str(data["basic_config"].get("source_text") or "")
+        logger.info(
+            "framework planner api request: stage=%s payload_keys=%s source_text_length=%s",
+            str(stage).zfill(2),
+            sorted(data.keys()) if isinstance(data, dict) else [],
+            len(source_text),
+        )
         try:
             payload = run_framework_planner_stage(stage, data)
         except FrameworkPlannerStageError as exc:
@@ -422,6 +437,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 detail=exc.detail,
             )
         except Exception as exc:
+            logger.exception(
+                "framework planner api unexpected error: stage=%s payload_keys=%s",
+                str(stage).zfill(2),
+                sorted(data.keys()) if isinstance(data, dict) else [],
+            )
             return _framework_planner_error(
                 str(stage).zfill(2),
                 "框架策划阶段执行失败，请稍后重试。",

@@ -9,6 +9,7 @@ from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
@@ -431,7 +432,15 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
     definition = stage_definition(stage)
     normalized_payload = _normalize_payload(payload)
     workflow_spec = load_stage_workflow_spec(definition.stage)
+    diagnostics = _stage_runtime_diagnostics(definition, normalized_payload)
+    _log_stage_entry(definition, diagnostics)
     if _should_use_mock_backend(definition):
+        reason = (
+            "FRAMEWORK_PLANNER_USE_MOCK=true，已命中 mock 分支"
+            if diagnostics["mock_enabled"]
+            else "未检测到可用 FastGPT API Key，已回退 mock 分支"
+        )
+        _log_stage_not_entering_fastgpt(definition, diagnostics, reason=reason)
         data, display_text = _build_mock_stage_output(definition.stage, normalized_payload)
         return {
             "ok": True,
@@ -442,18 +451,49 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 "workflow_json_path": str(workflow_spec.path),
                 "workflow_contract_path": str(workflow_spec.contract_path) if workflow_spec.contract_path else "",
                 "parse_warning": [],
+                "diagnostics": diagnostics,
             },
             "display_text": display_text,
         }
 
     request_variables = _build_stage_request_variables(definition, normalized_payload, workflow_spec)
-    endpoint = _resolve_stage_endpoint(definition)
+    try:
+        endpoint = _resolve_stage_endpoint(definition)
+    except FrameworkPlannerStageError as exc:
+        _log_stage_not_entering_fastgpt(
+            definition,
+            diagnostics,
+            reason=exc.detail.get("reason") or str(exc),
+        )
+        raise _build_fastgpt_stage_error(
+            definition=definition,
+            diagnostics=diagnostics,
+            reason=exc.detail.get("reason") or str(exc),
+            status_code=exc.status_code,
+            entered_fastgpt_request=False,
+            exc=exc,
+            extra_detail=exc.detail,
+        ) from exc
+
+    logger.info(
+        "FastGPT endpoint resolved: stage=%s url_source=%s endpoint=%s workflow_id_missing_but_api_key_mode_enabled=%s",
+        definition.stage,
+        endpoint.url_source or "default",
+        endpoint.url,
+        not bool(endpoint.workflow_id) and bool(endpoint.api_key),
+    )
     body = _build_request_body(definition, request_variables, endpoint)
     headers = {
         "Authorization": f"Bearer {endpoint.api_key}",
         "Content-Type": "application/json",
     }
-    response = _post_with_retries(definition, endpoint, headers, body)
+    response = _post_with_retries(
+        definition,
+        endpoint,
+        headers,
+        body,
+        diagnostics=diagnostics,
+    )
     response_text = _safe_response_text(response)
     try:
         response_json = response.json()
@@ -556,6 +596,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 "workflow_id": endpoint.workflow_id,
                 "response": response_json,
                 "parse_warning": parse_warnings,
+                "diagnostics": diagnostics,
             },
             "display_text": display_text,
         }
@@ -764,28 +805,33 @@ def _resolve_stage_endpoint(definition: FrameworkPlannerStageDefinition) -> Fram
     api_key_source, api_key = _env_with_name(*api_key_envs)
     if not api_key:
         raise FrameworkPlannerStageError(
-            "未配置 FastGPT API Key",
+            "阶段未配置可用的 FastGPT API Key",
             stage=definition.stage,
             status_code=500,
-            detail={"expected_envs": list(api_key_envs)},
+            detail={
+                "reason": "缺少 FastGPT API Key 配置",
+                "expected_envs": list(api_key_envs),
+            },
         )
 
-    url_source, raw_url = _env_with_name(
-        f"{definition.env_prefix}_URL",
-        f"{definition.env_prefix}_CHAT_COMPLETIONS_URL",
-        f"{definition.env_prefix}_BASE_URL",
-        "FASTGPT_FRAMEWORK_URL",
-        "FASTGPT_FRAMEWORK_CHAT_COMPLETIONS_URL",
-        "FASTGPT_FRAMEWORK_BASE_URL",
-        "FASTGPT_CHAT_COMPLETIONS_URL",
-        "FASTGPT_BASE_URL",
-    )
-    url = _normalize_fastgpt_url(raw_url or DEFAULT_FASTGPT_URL)
+    url_envs = _stage_url_env_names(definition)
+    url_source, raw_url = _env_with_name(*url_envs)
+    try:
+        url = _normalize_fastgpt_url(raw_url or DEFAULT_FASTGPT_URL)
+    except ValueError as exc:
+        raise FrameworkPlannerStageError(
+            "阶段 FastGPT URL 配置无效",
+            stage=definition.stage,
+            status_code=500,
+            detail={
+                "reason": f"FastGPT URL 配置无效：{exc}",
+                "expected_envs": list(url_envs),
+                "configured_value": str(raw_url or "").strip(),
+            },
+        ) from exc
 
-    workflow_id_source, workflow_id = _env_with_name(
-        f"{definition.env_prefix}_WORKFLOW_ID",
-        "FASTGPT_FRAMEWORK_WORKFLOW_ID",
-    )
+    workflow_id_envs = _stage_workflow_id_env_names(definition)
+    workflow_id_source, workflow_id = _env_with_name(*workflow_id_envs)
 
     timeout = int(_env(f"{definition.env_prefix}_TIMEOUT", "FASTGPT_TIMEOUT") or getattr(settings, "fastgpt_timeout", 300))
     chat_id_prefix = _env("FASTGPT_CHAT_ID_PREFIX") or "framework-planner"
@@ -808,7 +854,31 @@ def _stage_api_key_env_names(definition: FrameworkPlannerStageDefinition) -> tup
         f"{definition.env_prefix}_API_KEY",
         *LEGACY_STAGE_API_KEY_ENVS.get(definition.stage, ()),
         "FASTGPT_FRAMEWORK_API_KEY",
+        "FASTGPT_NEW_FRAMEWORK_API_KEY",
         "FASTGPT_API_KEY",
+    )
+
+
+def _stage_url_env_names(definition: FrameworkPlannerStageDefinition) -> tuple[str, ...]:
+    return (
+        f"{definition.env_prefix}_URL",
+        f"{definition.env_prefix}_API_URL",
+        f"{definition.env_prefix}_CHAT_COMPLETIONS_URL",
+        f"{definition.env_prefix}_BASE_URL",
+        "FASTGPT_FRAMEWORK_URL",
+        "FASTGPT_FRAMEWORK_API_URL",
+        "FASTGPT_FRAMEWORK_CHAT_COMPLETIONS_URL",
+        "FASTGPT_FRAMEWORK_BASE_URL",
+        "FASTGPT_CHAT_COMPLETIONS_URL",
+        "FASTGPT_API_URL",
+        "FASTGPT_BASE_URL",
+    )
+
+
+def _stage_workflow_id_env_names(definition: FrameworkPlannerStageDefinition) -> tuple[str, ...]:
+    return (
+        f"{definition.env_prefix}_WORKFLOW_ID",
+        "FASTGPT_FRAMEWORK_WORKFLOW_ID",
     )
 
 
@@ -841,12 +911,26 @@ def _post_with_retries(
     endpoint: FrameworkPlannerEndpoint,
     headers: dict[str, str],
     body: dict[str, Any],
+    *,
+    diagnostics: dict[str, Any] | None = None,
 ) -> requests.Response:
     attempts = max(1, int(getattr(settings, "fastgpt_http_retries", 2)) + 1)
     delay = max(0.0, float(getattr(settings, "fastgpt_http_retry_delay", 1.5)))
     last_exception: Exception | None = None
+    last_response: requests.Response | None = None
+    safe_diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
 
     for attempt_index in range(1, attempts + 1):
+        _log_fastgpt_pre_request(
+            definition=definition,
+            endpoint=endpoint,
+            headers=headers,
+            body=body,
+            attempt_index=attempt_index,
+            attempts=attempts,
+        )
+        attempt_started_at = time.monotonic()
+        response: requests.Response | None = None
         try:
             response = requests.post(
                 endpoint.url,
@@ -856,49 +940,159 @@ def _post_with_retries(
             )
         except requests.Timeout as exc:
             last_exception = exc
+            response = _exception_response(exc)
+            if response is not None:
+                last_response = response
+            elapsed_seconds = time.monotonic() - attempt_started_at
+            _log_fastgpt_request_exception(
+                definition=definition,
+                endpoint=endpoint,
+                exc=exc,
+                attempt_index=attempt_index,
+                attempts=attempts,
+                elapsed_seconds=elapsed_seconds,
+                entered_requests_post=True,
+                response=response,
+            )
             if attempt_index >= attempts:
-                raise FrameworkPlannerStageError(
-                    f"阶段 {definition.stage} 请求超时",
-                    stage=definition.stage,
+                final_error = _build_fastgpt_stage_error(
+                    definition=definition,
+                    diagnostics=safe_diagnostics,
+                    reason=f"FastGPT 请求超时，已重试 {attempts} 次仍失败",
                     status_code=504,
-                    detail={"url": endpoint.url},
-                ) from exc
+                    entered_fastgpt_request=True,
+                    exc=exc,
+                    endpoint=endpoint,
+                    response=response,
+                    attempts=attempts,
+                )
+                _log_fastgpt_attempts_exhausted(
+                    definition=definition,
+                    endpoint=endpoint,
+                    attempts=attempts,
+                    exc=exc,
+                    response=response,
+                    status_code=final_error.status_code,
+                )
+                raise final_error from exc
             time.sleep(delay * attempt_index)
             continue
         except requests.RequestException as exc:
             last_exception = exc
+            response = _exception_response(exc)
+            if response is not None:
+                last_response = response
+            elapsed_seconds = time.monotonic() - attempt_started_at
+            _log_fastgpt_request_exception(
+                definition=definition,
+                endpoint=endpoint,
+                exc=exc,
+                attempt_index=attempt_index,
+                attempts=attempts,
+                elapsed_seconds=elapsed_seconds,
+                entered_requests_post=True,
+                response=response,
+            )
             if attempt_index >= attempts:
-                raise FrameworkPlannerStageError(
-                    f"阶段 {definition.stage} 网络请求失败",
-                    stage=definition.stage,
+                final_error = _build_fastgpt_stage_error(
+                    definition=definition,
+                    diagnostics=safe_diagnostics,
+                    reason=f"FastGPT 网络请求失败，已重试 {attempts} 次仍失败",
                     status_code=502,
-                    detail={"url": endpoint.url},
-                ) from exc
+                    entered_fastgpt_request=True,
+                    exc=exc,
+                    endpoint=endpoint,
+                    response=response,
+                    attempts=attempts,
+                )
+                _log_fastgpt_attempts_exhausted(
+                    definition=definition,
+                    endpoint=endpoint,
+                    attempts=attempts,
+                    exc=exc,
+                    response=response,
+                    status_code=final_error.status_code,
+                )
+                raise final_error from exc
             time.sleep(delay * attempt_index)
             continue
 
+        last_response = response
+        _log_fastgpt_response(
+            definition=definition,
+            response=response,
+            attempt_index=attempt_index,
+            elapsed_seconds=time.monotonic() - attempt_started_at,
+        )
         if response.status_code in RETRYABLE_HTTP_STATUSES and attempt_index < attempts:
+            _log_fastgpt_request_exception(
+                definition=definition,
+                endpoint=endpoint,
+                exc=None,
+                attempt_index=attempt_index,
+                attempts=attempts,
+                elapsed_seconds=time.monotonic() - attempt_started_at,
+                entered_requests_post=True,
+                response=response,
+                reason=f"HTTP {response.status_code}，准备重试",
+            )
             time.sleep(delay * attempt_index)
             continue
 
         if response.status_code >= 400:
-            raise FrameworkPlannerStageError(
-                f"阶段 {definition.stage} 请求失败",
-                stage=definition.stage,
+            final_error = _build_fastgpt_stage_error(
+                definition=definition,
+                diagnostics=safe_diagnostics,
+                reason=f"FastGPT 返回 HTTP {response.status_code}",
                 status_code=502 if response.status_code >= 500 else 400,
-                detail={
-                    "url": endpoint.url,
-                    "status_code": response.status_code,
-                    "response_preview": _truncate_text(_safe_response_text(response), limit=1200),
-                },
+                entered_fastgpt_request=True,
+                endpoint=endpoint,
+                response=response,
+                attempts=attempts,
             )
+            _log_fastgpt_request_exception(
+                definition=definition,
+                endpoint=endpoint,
+                exc=None,
+                attempt_index=attempt_index,
+                attempts=attempts,
+                elapsed_seconds=time.monotonic() - attempt_started_at,
+                entered_requests_post=True,
+                response=response,
+                reason=f"FastGPT 返回 HTTP {response.status_code}",
+            )
+            if response.status_code >= 500:
+                _log_fastgpt_attempts_exhausted(
+                    definition=definition,
+                    endpoint=endpoint,
+                    attempts=attempts,
+                    exc=None,
+                    response=response,
+                    status_code=final_error.status_code,
+                )
+            raise final_error
         return response
 
-    raise FrameworkPlannerStageError(
-        f"阶段 {definition.stage} 请求失败：{last_exception}",
-        stage=definition.stage,
+    final_error = _build_fastgpt_stage_error(
+        definition=definition,
+        diagnostics=safe_diagnostics,
+        reason="FastGPT 请求未成功完成",
         status_code=502,
+        entered_fastgpt_request=True,
+        exc=last_exception,
+        endpoint=endpoint,
+        response=last_response,
+        attempts=attempts,
     )
+    _log_fastgpt_attempts_exhausted(
+        definition=definition,
+        endpoint=endpoint,
+        attempts=attempts,
+        exc=last_exception,
+        response=last_response,
+        status_code=final_error.status_code,
+    )
+    raise final_error
 
 
 def _extract_stage_output(
@@ -1575,6 +1769,261 @@ def _log_stage_parse_warnings(stage: str, parse_warnings: list[str]) -> None:
     )
 
 
+def _stage_runtime_diagnostics(
+    definition: FrameworkPlannerStageDefinition,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    api_key_source, api_key = _env_with_name(*_stage_api_key_env_names(definition))
+    workflow_id_source, workflow_id = _env_with_name(*_stage_workflow_id_env_names(definition))
+    url_source, configured_url = _env_with_name(*_stage_url_env_names(definition))
+    timeout_raw = _env(f"{definition.env_prefix}_TIMEOUT", "FASTGPT_TIMEOUT")
+    timeout_seconds = int(timeout_raw or getattr(settings, "fastgpt_timeout", 300) or 300)
+    resolved_url = DEFAULT_FASTGPT_URL
+    url_error = ""
+    try:
+        resolved_url = _normalize_fastgpt_url(configured_url or DEFAULT_FASTGPT_URL)
+    except Exception as exc:
+        url_error = f"{type(exc).__name__}: {exc}"
+        resolved_url = str(configured_url or DEFAULT_FASTGPT_URL).strip()
+    return {
+        "payload_keys": sorted(payload.keys()),
+        "source_text_length": _source_text_length_from_payload(payload),
+        "mock_enabled": _env_bool("FRAMEWORK_PLANNER_USE_MOCK", default=False),
+        "has_api_key": bool(api_key),
+        "api_key_source": api_key_source or "",
+        "api_key_env_candidates": list(_stage_api_key_env_names(definition)),
+        "has_workflow_id": bool(workflow_id),
+        "workflow_id_source": workflow_id_source or "",
+        "workflow_id_env_candidates": list(_stage_workflow_id_env_names(definition)),
+        "base_url_configured": bool(configured_url),
+        "url_source": url_source or ("default" if not configured_url else ""),
+        "configured_url": str(configured_url or "").strip(),
+        "resolved_url": resolved_url,
+        "url_normalize_error": url_error,
+        "timeout_seconds": max(1, timeout_seconds),
+        "workflow_id_missing_but_api_key_mode_enabled": bool(api_key) and not bool(workflow_id),
+    }
+
+
+def _log_stage_entry(
+    definition: FrameworkPlannerStageDefinition,
+    diagnostics: dict[str, Any],
+) -> None:
+    logger.info(
+        "框架策划阶段入口：stage=%s payload_keys=%s source_text_length=%s current_api_key_config=%s mock_enabled=%s has_api_key=%s has_workflow_id=%s workflow_id_config=%s base_url_config=%s endpoint=%s workflow_id_missing_but_api_key_mode_enabled=%s",
+        definition.stage,
+        diagnostics.get("payload_keys", []),
+        diagnostics.get("source_text_length", 0),
+        diagnostics.get("api_key_source") or "未命中",
+        diagnostics.get("mock_enabled", False),
+        diagnostics.get("has_api_key", False),
+        diagnostics.get("has_workflow_id", False),
+        diagnostics.get("workflow_id_source") or "未命中",
+        diagnostics.get("url_source") or "default",
+        diagnostics.get("resolved_url") or DEFAULT_FASTGPT_URL,
+        diagnostics.get("workflow_id_missing_but_api_key_mode_enabled", False),
+    )
+
+
+def _log_stage_not_entering_fastgpt(
+    definition: FrameworkPlannerStageDefinition,
+    diagnostics: dict[str, Any],
+    *,
+    reason: str,
+) -> None:
+    logger.warning(
+        "stage %s 未进入 FastGPT 调用，reason=%s payload_keys=%s source_text_length=%s mock_enabled=%s has_api_key=%s has_workflow_id=%s base_url_configured=%s api_key_source=%s workflow_id_source=%s url_source=%s endpoint=%s",
+        definition.stage,
+        reason,
+        diagnostics.get("payload_keys", []),
+        diagnostics.get("source_text_length", 0),
+        diagnostics.get("mock_enabled", False),
+        diagnostics.get("has_api_key", False),
+        diagnostics.get("has_workflow_id", False),
+        diagnostics.get("base_url_configured", False),
+        diagnostics.get("api_key_source") or "未命中",
+        diagnostics.get("workflow_id_source") or "未命中",
+        diagnostics.get("url_source") or "default",
+        diagnostics.get("resolved_url") or DEFAULT_FASTGPT_URL,
+    )
+
+
+def _log_fastgpt_pre_request(
+    *,
+    definition: FrameworkPlannerStageDefinition,
+    endpoint: FrameworkPlannerEndpoint,
+    headers: dict[str, str],
+    body: dict[str, Any],
+    attempt_index: int,
+    attempts: int,
+) -> None:
+    logger.info(
+        "即将请求 FastGPT：stage=%s attempt=%s/%s url=%s timeout_seconds=%s has_authorization=%s workflow_id_missing_but_api_key_mode_enabled=%s payload_keys=%s payload_lengths=%s",
+        definition.stage,
+        attempt_index,
+        attempts,
+        endpoint.url,
+        endpoint.timeout,
+        bool(str(headers.get("Authorization") or "").strip()),
+        not bool(endpoint.workflow_id) and bool(endpoint.api_key),
+        sorted(body.keys()),
+        _mapping_length_summary(body),
+    )
+
+
+def _log_fastgpt_response(
+    *,
+    definition: FrameworkPlannerStageDefinition,
+    response: requests.Response,
+    attempt_index: int,
+    elapsed_seconds: float,
+) -> None:
+    logger.info(
+        "FastGPT 请求成功返回：stage=%s attempt=%s status_code=%s content_type=%s elapsed_seconds=%.3f response_preview=%s json_decode_success=%s",
+        definition.stage,
+        attempt_index,
+        getattr(response, "status_code", 0),
+        _safe_header_lookup(response, "Content-Type"),
+        elapsed_seconds,
+        _truncate_text(_safe_response_text(response), limit=500),
+        _response_json_decode_success(response),
+    )
+
+
+def _log_fastgpt_request_exception(
+    *,
+    definition: FrameworkPlannerStageDefinition,
+    endpoint: FrameworkPlannerEndpoint,
+    attempt_index: int,
+    attempts: int,
+    elapsed_seconds: float,
+    entered_requests_post: bool,
+    response: requests.Response | None,
+    exc: Exception | None = None,
+    reason: str = "",
+) -> None:
+    message = str(exc) if exc else str(reason or "").strip()
+    logger.warning(
+        "FastGPT 请求异常：stage=%s attempt=%s/%s url=%s timeout_seconds=%s exception_type=%s exception_message=%s requests_exception_category=%s elapsed_seconds=%.3f entered_requests_post=%s response_received=%s status_code=%s content_type=%s response_preview=%s",
+        definition.stage,
+        attempt_index,
+        attempts,
+        endpoint.url,
+        endpoint.timeout,
+        type(exc).__name__ if exc else "",
+        message,
+        _classify_request_exception(exc, response=response),
+        elapsed_seconds,
+        entered_requests_post,
+        response is not None,
+        getattr(response, "status_code", 0) if response is not None else 0,
+        _safe_header_lookup(response, "Content-Type") if response is not None else "",
+        _truncate_text(_safe_response_text(response), limit=500) if response is not None else "",
+    )
+
+
+def _log_fastgpt_attempts_exhausted(
+    *,
+    definition: FrameworkPlannerStageDefinition,
+    endpoint: FrameworkPlannerEndpoint,
+    attempts: int,
+    exc: Exception | None,
+    response: requests.Response | None,
+    status_code: int,
+) -> None:
+    logger.error(
+        "FastGPT 请求三次均失败，返回 %s：stage=%s attempts=%s url=%s last_exception_type=%s last_exception_message=%s response_received=%s response_status_code=%s response_preview=%s",
+        status_code,
+        definition.stage,
+        attempts,
+        endpoint.url,
+        type(exc).__name__ if exc else "",
+        str(exc) if exc else "",
+        response is not None,
+        getattr(response, "status_code", 0) if response is not None else 0,
+        _truncate_text(_safe_response_text(response), limit=500) if response is not None else "",
+    )
+
+
+def _build_fastgpt_stage_error(
+    *,
+    definition: FrameworkPlannerStageDefinition,
+    diagnostics: dict[str, Any],
+    reason: str,
+    status_code: int,
+    entered_fastgpt_request: bool,
+    exc: Exception | None = None,
+    endpoint: FrameworkPlannerEndpoint | None = None,
+    response: requests.Response | None = None,
+    attempts: int = 0,
+    extra_detail: dict[str, Any] | None = None,
+) -> FrameworkPlannerStageError:
+    return FrameworkPlannerStageError(
+        f"阶段 {definition.stage} 请求 FastGPT 失败",
+        stage=definition.stage,
+        status_code=status_code,
+        detail=_fastgpt_failure_detail(
+            diagnostics=diagnostics,
+            reason=reason,
+            entered_fastgpt_request=entered_fastgpt_request,
+            exc=exc,
+            endpoint=endpoint,
+            response=response,
+            attempts=attempts,
+            extra_detail=extra_detail,
+        ),
+    )
+
+
+def _fastgpt_failure_detail(
+    *,
+    diagnostics: dict[str, Any],
+    reason: str,
+    entered_fastgpt_request: bool,
+    exc: Exception | None = None,
+    endpoint: FrameworkPlannerEndpoint | None = None,
+    response: requests.Response | None = None,
+    attempts: int = 0,
+    extra_detail: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    detail: dict[str, Any] = {
+        "reason": str(reason or "").strip() or "阶段未成功请求 FastGPT",
+        "has_api_key": bool((endpoint.api_key if endpoint else None) or diagnostics.get("has_api_key")),
+        "has_workflow_id": bool((endpoint.workflow_id if endpoint else None) or diagnostics.get("has_workflow_id")),
+        "base_url_configured": bool(diagnostics.get("base_url_configured")),
+        "entered_fastgpt_request": bool(entered_fastgpt_request),
+        "exception_type": type(exc).__name__ if exc else "",
+        "exception_message": str(exc) if exc else "",
+        "last_exception_type": type(exc).__name__ if exc else "",
+        "last_exception_message": str(exc) if exc else "",
+        "api_key_source": diagnostics.get("api_key_source") or "",
+        "workflow_id_source": (endpoint.workflow_id_source if endpoint else "") or diagnostics.get("workflow_id_source") or "",
+        "url_source": (endpoint.url_source if endpoint else "") or diagnostics.get("url_source") or "",
+        "url": (endpoint.url if endpoint else diagnostics.get("resolved_url")) or "",
+        "endpoint_url": (endpoint.url if endpoint else diagnostics.get("resolved_url")) or "",
+        "timeout_seconds": (endpoint.timeout if endpoint else diagnostics.get("timeout_seconds")) or 0,
+        "attempts": attempts or int(getattr(settings, "fastgpt_http_retries", 2) or 0) + 1,
+        "payload_keys": diagnostics.get("payload_keys", []),
+        "source_text_length": diagnostics.get("source_text_length", 0),
+        "workflow_id_missing_but_api_key_mode_enabled": diagnostics.get("workflow_id_missing_but_api_key_mode_enabled", False),
+    }
+    if response is not None:
+        detail.update(
+            {
+                "status_code": getattr(response, "status_code", 0),
+                "content_type": _safe_header_lookup(response, "Content-Type"),
+                "response_preview": _truncate_text(_safe_response_text(response), limit=500),
+                "json_decode_success": _response_json_decode_success(response),
+            }
+        )
+    if isinstance(extra_detail, dict):
+        for key, value in extra_detail.items():
+            if key in {"Authorization", "authorization", "token", "api_key", "apiKey"}:
+                continue
+            detail.setdefault(key, value)
+    return detail
+
+
 def _normalize_object_like(value: Any, *, key_name: str = "content") -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -1794,6 +2243,105 @@ def _safe_response_text(response: requests.Response) -> str:
         return response.text
     except Exception:
         return ""
+
+
+def _safe_header_lookup(response: requests.Response, key: str) -> str:
+    try:
+        if response is None:
+            return ""
+        headers = getattr(response, "headers", {}) or {}
+        value = headers.get(key)
+        return str(value).strip() if value is not None else ""
+    except Exception:
+        return ""
+
+
+def _response_json_decode_success(response: requests.Response) -> bool:
+    try:
+        if response is None:
+            return False
+        response.json()
+        return True
+    except Exception:
+        return False
+
+
+def _exception_response(exc: Exception) -> requests.Response | None:
+    response = getattr(exc, "response", None)
+    return response if response is not None else None
+
+
+def _classify_request_exception(
+    exc: Exception | None,
+    *,
+    response: requests.Response | None = None,
+) -> str:
+    if isinstance(exc, requests.ConnectTimeout):
+        return "ConnectTimeout"
+    if isinstance(exc, requests.ReadTimeout):
+        return "ReadTimeout"
+    if isinstance(exc, requests.Timeout):
+        return "Timeout"
+    if isinstance(exc, requests.ConnectionError):
+        return "ConnectionError"
+    if isinstance(exc, requests.HTTPError):
+        return "HTTPError"
+    if isinstance(exc, json.JSONDecodeError):
+        return "JSONDecodeError"
+    if response is not None and getattr(response, "status_code", 0) >= 400:
+        return "HTTPError"
+    if exc is None:
+        return "Other"
+    return "Other"
+
+
+def _mapping_length_summary(value: Any) -> dict[str, Any]:
+    mapping = value if isinstance(value, dict) else {}
+    return {
+        key: _value_length_summary(item)
+        for key, item in mapping.items()
+    }
+
+
+def _value_length_summary(value: Any) -> Any:
+    if isinstance(value, str):
+        return {"type": "str", "length": len(value)}
+    if isinstance(value, dict):
+        return {
+            "type": "dict",
+            "size": len(value),
+            "keys": sorted(value.keys()),
+            "field_lengths": {
+                key: _value_size_metric(item)
+                for key, item in value.items()
+            },
+        }
+    if isinstance(value, (list, tuple, set)):
+        return {
+            "type": type(value).__name__,
+            "size": len(value),
+        }
+    return {
+        "type": type(value).__name__,
+        "length": len(str(value)) if value not in (None, "") else 0,
+    }
+
+
+def _value_size_metric(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, (list, tuple, set, dict)):
+        return len(value)
+    return len(str(value))
+
+
+def _source_text_length_from_payload(payload: dict[str, Any]) -> int:
+    source_text = payload.get("source_text")
+    if source_text is None and isinstance(payload.get("basic_config"), dict):
+        source_text = payload["basic_config"].get("source_text")
+    return len(str(source_text or ""))
 
 
 def _write_debug_artifact(
@@ -2174,14 +2722,19 @@ def _normalize_fastgpt_url(raw_url: str) -> str:
         raise ValueError("FastGPT 接口地址不能为空")
     if not url.startswith(("http://", "https://")):
         raise ValueError(f"FastGPT 接口地址必须以 http:// 或 https:// 开头：{url}")
-    if url.endswith("/api/v1"):
-        return f"{url}/chat/completions"
     if url.endswith("/api/v1/chat/completions"):
         return url
     if url.endswith("/api/v1/chat/completions/"):
         return url.rstrip("/")
     if url.endswith("/api/v1"):
         return f"{url}/chat/completions"
+    if url.endswith("/api"):
+        return f"{url}/v1/chat/completions"
+    parts = urlsplit(url)
+    normalized_path = parts.path.rstrip("/")
+    if not normalized_path:
+        normalized_path = "/api/v1/chat/completions"
+        return urlunsplit((parts.scheme, parts.netloc, normalized_path, parts.query, parts.fragment))
     return url
 
 

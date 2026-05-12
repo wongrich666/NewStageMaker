@@ -5,6 +5,8 @@ import uuid
 import unittest
 from unittest.mock import patch
 
+import requests
+
 from workflow_code_skeleton.app.server import create_app
 from workflow_code_skeleton.app.services.auth_store import auth_store
 
@@ -157,6 +159,43 @@ class ServerFrameworkPlannerApiTests(unittest.TestCase):
         self.assertEqual(data["stage"], "02")
         self.assertIn("缺少必填项", data["error"])
         self.assertIn("missing_fields", data["detail"])
+
+    def test_stage_01_timeout_returns_structured_fastgpt_failure_detail(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_FRAMEWORK_API_KEY": "fastgpt-framework-key",
+                "FASTGPT_API_URL": "https://api.fastgpt.in/api/v1",
+            },
+            clear=True,
+        ):
+            with patch(
+                "workflow_code_skeleton.app.services.framework_planner_service.requests.post",
+                side_effect=requests.Timeout("upstream timeout"),
+            ):
+                response = self.client.post(
+                    "/api/framework-planner/stage/01",
+                    headers=self.headers,
+                    json=_basic_config(),
+                )
+
+        self.assertEqual(response.status_code, 504)
+        data = response.get_json()
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["stage"], "01")
+        self.assertEqual(data["error"], "阶段 01 请求 FastGPT 失败")
+        self.assertEqual(data["detail"]["reason"], "FastGPT 请求超时，已重试 3 次仍失败")
+        self.assertEqual(data["detail"]["url"], "https://api.fastgpt.in/api/v1/chat/completions")
+        self.assertEqual(data["detail"]["attempts"], 3)
+        self.assertTrue(data["detail"]["has_api_key"])
+        self.assertFalse(data["detail"]["has_workflow_id"])
+        self.assertTrue(data["detail"]["base_url_configured"])
+        self.assertTrue(data["detail"]["entered_fastgpt_request"])
+        self.assertEqual(data["detail"]["exception_type"], "Timeout")
+        self.assertIn("upstream timeout", data["detail"]["exception_message"])
+        self.assertEqual(data["detail"]["last_exception_type"], "Timeout")
+        self.assertIn("upstream timeout", data["detail"]["last_exception_message"])
 
 
 if __name__ == "__main__":

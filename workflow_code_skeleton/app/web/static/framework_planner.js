@@ -192,6 +192,12 @@
     error.stage = (data && data.stage) || fallbackStage;
     error.status = status || 500;
     error.detail = (data && data.detail) || {};
+    error.reason = error.detail && typeof error.detail.reason === "string"
+      ? error.detail.reason.trim()
+      : "";
+    error.lastExceptionMessage = error.detail && typeof error.detail.last_exception_message === "string"
+      ? error.detail.last_exception_message.trim()
+      : "";
     return error;
   }
 
@@ -1508,7 +1514,14 @@
     const label = `阶段 ${stageNo}`;
     if (!error) return `${label} 执行失败`;
     const message = error.message || `${label} 执行失败`;
+    const reason = error.reason || (error.detail && typeof error.detail.reason === "string" ? error.detail.reason.trim() : "");
+    const lastExceptionMessage = error.lastExceptionMessage
+      || (error.detail && typeof error.detail.last_exception_message === "string" ? error.detail.last_exception_message.trim() : "");
     if (/格式异常/.test(message)) return `${label} 返回格式异常，请重试或查看日志。`;
+    if (lastExceptionMessage && lastExceptionMessage !== message && lastExceptionMessage !== reason) {
+      return `${label}：${message}（${lastExceptionMessage}）`;
+    }
+    if (reason && reason !== message) return `${label}：${message}（${reason}）`;
     return `${label}：${message}`;
   }
 

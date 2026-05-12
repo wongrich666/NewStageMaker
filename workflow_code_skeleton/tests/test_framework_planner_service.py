@@ -5,15 +5,26 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import requests
+
 from workflow_code_skeleton.app.services import framework_planner_service as service
 
 
 class _FakeResponse:
-    def __init__(self, *, status_code: int = 200, payload=None, text: str = "", reason: str = "OK") -> None:
+    def __init__(
+        self,
+        *,
+        status_code: int = 200,
+        payload=None,
+        text: str = "",
+        reason: str = "OK",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.status_code = status_code
         self._payload = payload if payload is not None else {}
         self.text = text
         self.reason = reason
+        self.headers = headers or {"Content-Type": "application/json"}
 
     def json(self):
         return self._payload
@@ -711,6 +722,51 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertEqual(payload["data"]["framework_plan_package"], {})
         self.assertIsInstance(payload["data"]["validation_report"].get("parse_warning"), list)
         self.assertTrue(payload["raw"]["parse_warning"])
+
+    def test_stage_endpoint_resolution_accepts_fastgpt_api_url_and_new_framework_api_key_alias(self) -> None:
+        definition = service.stage_definition("01")
+        with patch.dict(
+            os.environ,
+            {
+                "FASTGPT_NEW_FRAMEWORK_API_KEY": "framework-new-key",
+                "FASTGPT_API_URL": "https://api.fastgpt.in/api/v1",
+            },
+            clear=True,
+        ):
+            endpoint = service._resolve_stage_endpoint(definition)
+
+        self.assertEqual(endpoint.api_key_source, "FASTGPT_NEW_FRAMEWORK_API_KEY")
+        self.assertEqual(endpoint.url_source, "FASTGPT_API_URL")
+        self.assertEqual(endpoint.url, "https://api.fastgpt.in/api/v1/chat/completions")
+
+    def test_stage_01_timeout_returns_structured_fastgpt_failure_detail(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_FRAMEWORK_API_KEY": "fastgpt-framework-key",
+                "FASTGPT_API_URL": "https://api.fastgpt.in/api/v1",
+            },
+            clear=True,
+        ):
+            with patch.object(service.requests, "post", side_effect=requests.Timeout("upstream timeout")):
+                with self.assertRaises(service.FrameworkPlannerStageError) as ctx:
+                    service.run_framework_planner_stage("01", _basic_config())
+
+        exc = ctx.exception
+        self.assertEqual(str(exc), "阶段 01 请求 FastGPT 失败")
+        self.assertEqual(exc.status_code, 504)
+        self.assertEqual(exc.detail["reason"], "FastGPT 请求超时，已重试 3 次仍失败")
+        self.assertEqual(exc.detail["url"], "https://api.fastgpt.in/api/v1/chat/completions")
+        self.assertEqual(exc.detail["attempts"], 3)
+        self.assertTrue(exc.detail["has_api_key"])
+        self.assertFalse(exc.detail["has_workflow_id"])
+        self.assertTrue(exc.detail["base_url_configured"])
+        self.assertTrue(exc.detail["entered_fastgpt_request"])
+        self.assertEqual(exc.detail["exception_type"], "Timeout")
+        self.assertIn("upstream timeout", exc.detail["exception_message"])
+        self.assertEqual(exc.detail["last_exception_type"], "Timeout")
+        self.assertIn("upstream timeout", exc.detail["last_exception_message"])
 
     def test_score_endpoint_returns_stable_framework_score_report_string(self) -> None:
         payload = service.run_framework_planner_score(
