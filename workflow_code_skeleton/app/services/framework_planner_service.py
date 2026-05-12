@@ -795,6 +795,8 @@ def _build_stage_request_variables(
     for key, value in payload.items():
         if key in variables or _is_blank(value):
             continue
+        if definition.stage in STAGE_DEFINITIONS and key not in public_keys:
+            continue
         variables[key] = _wire_value(value)
 
     return variables
@@ -1148,7 +1150,12 @@ def _extract_stage_output(
 
     for source, candidate in response_candidates:
         try:
-            mapped, candidate_warnings = _coerce_candidate_to_stage_output(definition, candidate, output_aliases)
+            mapped, candidate_warnings = _coerce_candidate_to_stage_output(
+                definition,
+                candidate,
+                output_aliases,
+                allow_dict_as_field=source in {"root_fallback", "raw_response_fallback", "safe_root_fallback"},
+            )
         except Exception as exc:
             _log_stage_output_parse_exception(
                 stage=definition.stage,
@@ -1184,6 +1191,7 @@ def _extract_stage_output(
     parse_warnings.append(
         f"未能提取阶段 {definition.stage} 约定输出字段 {definition.output_fields}，已回退到安全解析占位"
     )
+    parse_warnings.extend(_candidate_diagnostics(definition, response_candidates, output_aliases))
     safe_output, safe_warnings = safe_parse_stage_output(
         root_response or response_json or _empty_stage_output(definition.stage),
         (*definition.output_fields, "display_text"),
@@ -1221,30 +1229,67 @@ def _iter_response_candidates(
         stage=stage,
         payload_keys=stage_payload_keys,
     )
+    definition = STAGE_DEFINITIONS.get(str(stage).zfill(2))
     response_data = root_response.get("responseData")
-    if not isinstance(response_data, dict):
-        response_data = {}
-    containers = [
-        ("root", root_response),
-        ("root.newVariables", root_response.get("newVariables")),
-        ("root.responseData", response_data),
-        (
-            "root.responseData.newVariables",
-            response_data.get("newVariables"),
-        ),
-    ]
-    for source, value in containers:
+    response_data_dict = response_data if isinstance(response_data, dict) else {}
+    response_data_items = _response_data_items(response_data)
+    yielded: set[tuple[str, int]] = set()
+
+    def emit(source: str, value: Any):
+        if value in (None, "", [], {}):
+            return
+        marker = (source, id(value))
+        if marker in yielded:
+            return
+        yielded.add(marker)
+        yield source, value
+
+    if definition is not None:
+        for index, node in reversed(response_data_items):
+            value = node.get("answerText")
+            if value in (None, "", [], {}):
+                continue
+            if _candidate_has_required_output_key(definition, value):
+                module_name = str(node.get("moduleName") or node.get("name") or "").strip()
+                source = f"responseData[{index}].answerText"
+                logger.info(
+                    "stage=%s candidate_source=responseData.answerText moduleName=%s required_key_hit=True summary=%s keys=%s",
+                    definition.stage,
+                    module_name,
+                    _candidate_summary(value, limit=300),
+                    _candidate_keys(value),
+                )
+                yield from emit(source, value)
+
+    for index, node in response_data_items:
+        if str(node.get("moduleType") or node.get("flowNodeType") or "").strip() != "answerNode":
+            continue
+        for field, value in _iter_text_fields(node):
+            yield from emit(f"responseData[{index}].{field}", value)
+
+    for index, node in reversed(response_data_items):
+        if str(node.get("moduleType") or node.get("flowNodeType") or "").strip() != "chatNode":
+            continue
+        value = node.get("answerText")
         if value not in (None, "", [], {}):
-            yield source, value
+            yield from emit(f"responseData[{index}].answerText", value)
+
+    variable_containers = [
+        ("root.newVariables", root_response.get("newVariables")),
+        ("root.variables", root_response.get("variables")),
+        ("root.responseData.newVariables", response_data_dict.get("newVariables")),
+        ("root.responseData.variables", response_data_dict.get("variables")),
+    ]
+    for source, value in variable_containers:
+        yield from emit(source, value)
         if isinstance(value, dict):
             for key, nested in value.items():
                 if key in workflow_spec.internal_variable_keys or key in workflow_spec.public_variable_keys:
-                    if nested not in (None, "", [], {}):
-                        yield f"{source}.{key}", nested
+                    yield from emit(f"{source}.{key}", nested)
 
     for list_source, items in (
         ("root.updateVarResult", root_response.get("updateVarResult")),
-        ("root.responseData.updateVarResult", response_data.get("updateVarResult")),
+        ("root.responseData.updateVarResult", response_data_dict.get("updateVarResult")),
     ):
         if not isinstance(items, list):
             continue
@@ -1258,16 +1303,14 @@ def _iter_response_candidates(
                 variable_key = str(variable or item.get("key") or "").strip()
             value = item.get("value")
             if variable_key in workflow_spec.internal_variable_keys or variable_key in workflow_spec.public_variable_keys:
-                if value not in (None, "", [], {}):
-                    yield f"{list_source}[{index}].value", value
+                yield from emit(f"{list_source}[{index}].value", value)
 
     for source, value in (
         ("root.answerText", root_response.get("answerText")),
-        ("root.responseData.answerText", response_data.get("answerText")),
-        ("root.responseData.responseText", response_data.get("responseText")),
+        ("root.responseData.answerText", response_data_dict.get("answerText")),
+        ("root.responseData.responseText", response_data_dict.get("responseText")),
     ):
-        if value not in (None, "", [], {}):
-            yield source, value
+        yield from emit(source, value)
 
     for index, choice in enumerate(root_response.get("choices") or []):
         if not isinstance(choice, dict):
@@ -1276,29 +1319,125 @@ def _iter_response_candidates(
         if not isinstance(message, dict):
             continue
         content = message.get("content")
-        if content not in (None, "", [], {}):
-            yield f"choices[{index}].message.content", content
+        yield from emit(f"choices[{index}].message.content", content)
+
+    yield from emit("root_fallback", root_response)
+    if response_json is not root_response:
+        yield from emit("raw_response_fallback", response_json)
+
+
+def _response_data_items(response_data: Any) -> list[tuple[int, dict[str, Any]]]:
+    if isinstance(response_data, list):
+        return [(index, item) for index, item in enumerate(response_data) if isinstance(item, dict)]
+    if isinstance(response_data, dict):
+        return [(0, response_data)]
+    return []
+
+
+def _iter_text_fields(node: dict[str, Any]):
+    for field in ("answerText", "responseText", "text", "content"):
+        value = node.get(field)
+        if value not in (None, "", [], {}):
+            yield field, value
+    outputs = node.get("outputs")
+    if isinstance(outputs, dict):
+        for field in ("answerText", "responseText", "text", "content"):
+            value = outputs.get(field)
+            if value not in (None, "", [], {}):
+                yield f"outputs.{field}", value
+    answer_node = node.get("answerNode")
+    if isinstance(answer_node, dict):
+        for field in ("answerText", "responseText", "text", "content"):
+            value = answer_node.get(field)
+            if value not in (None, "", [], {}):
+                yield f"answerNode.{field}", value
+
+
+def _candidate_has_required_output_key(
+    definition: FrameworkPlannerStageDefinition,
+    candidate: Any,
+) -> bool:
+    parsed = _parse_candidate_value(candidate)
+    if not isinstance(parsed, dict):
+        return False
+    return _dict_contains_output_aliases(definition, parsed, definition.output_aliases)
+
+
+def _candidate_keys(candidate: Any) -> list[str]:
+    try:
+        parsed = _parse_candidate_value(candidate)
+    except Exception:
+        parsed = None
+    if isinstance(parsed, dict):
+        return sorted(str(key) for key in parsed.keys())
+    return []
+
+
+def _candidate_summary(candidate: Any, *, limit: int = 300) -> str:
+    if isinstance(candidate, str):
+        return _truncate_text(candidate.strip(), limit=limit)
+    return _preview_return_object(candidate, limit=limit)
+
+
+def _candidate_diagnostics(
+    definition: FrameworkPlannerStageDefinition,
+    response_candidates: list[tuple[str, Any]],
+    output_aliases: dict[str, tuple[str, ...]],
+) -> list[str]:
+    diagnostics = [f"checked_candidate_count={len(response_candidates)}"]
+    for source, candidate in response_candidates:
+        parsed = _parse_candidate_value(candidate)
+        parse_success = isinstance(parsed, (dict, list))
+        keys = sorted(str(key) for key in parsed.keys()) if isinstance(parsed, dict) else []
+        if isinstance(parsed, dict):
+            missing = []
+            for field in definition.output_fields:
+                aliases = output_aliases.get(field, (field,))
+                if _find_value_by_aliases(parsed, aliases) is None:
+                    missing.append(field)
+            reason = "required_key_hit=True" if not missing else f"missing_required_keys={missing}"
+        else:
+            reason = f"parsed_type={type(parsed).__name__}"
+        diagnostics.append(
+            f"candidate_source={source} candidate_type={type(candidate).__name__} "
+            f"json_parse_success={parse_success} candidate_keys={keys} reason={reason}"
+        )
+    return diagnostics
 
 
 def _coerce_candidate_to_stage_output(
     definition: FrameworkPlannerStageDefinition,
     candidate: Any,
     output_aliases: dict[str, tuple[str, ...]],
+    *,
+    allow_dict_as_field: bool = False,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     parsed = _parse_candidate_value(candidate)
     if parsed is None:
         return None, []
 
     if isinstance(parsed, list):
-        return _coerce_list_candidate_to_stage_output(definition, parsed, output_aliases)
+        return _coerce_list_candidate_to_stage_output(
+            definition,
+            parsed,
+            output_aliases,
+            allow_dict_as_field=allow_dict_as_field,
+        )
 
-    return _coerce_non_list_candidate_to_stage_output(definition, parsed, output_aliases)
+    return _coerce_non_list_candidate_to_stage_output(
+        definition,
+        parsed,
+        output_aliases,
+        allow_dict_as_field=allow_dict_as_field,
+    )
 
 
 def _coerce_list_candidate_to_stage_output(
     definition: FrameworkPlannerStageDefinition,
     parsed: list[Any],
     output_aliases: dict[str, tuple[str, ...]],
+    *,
+    allow_dict_as_field: bool = False,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     warnings: list[str] = []
     first_item = _first_non_empty_list_item(parsed)
@@ -1310,6 +1449,7 @@ def _coerce_list_candidate_to_stage_output(
                 definition,
                 first_parsed,
                 output_aliases,
+                allow_dict_as_field=allow_dict_as_field,
             )
             return mapped, warnings + nested_warnings
         if definition.stage not in {"05", "06"}:
@@ -1318,6 +1458,7 @@ def _coerce_list_candidate_to_stage_output(
                 definition,
                 first_parsed,
                 output_aliases,
+                allow_dict_as_field=allow_dict_as_field,
             )
             if mapped is not None:
                 return mapped, warnings + nested_warnings
@@ -1341,6 +1482,8 @@ def _coerce_non_list_candidate_to_stage_output(
     definition: FrameworkPlannerStageDefinition,
     parsed: Any,
     output_aliases: dict[str, tuple[str, ...]],
+    *,
+    allow_dict_as_field: bool = False,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     warnings: list[str] = []
     if len(definition.output_fields) == 1:
@@ -1355,8 +1498,11 @@ def _coerce_non_list_candidate_to_stage_output(
                     return _with_optional_display_text({field: nested}, parsed, parsed["data"]), warnings
             if field in parsed:
                 return _with_optional_display_text({field: parsed[field]}, parsed), warnings
-            warnings.append(f"未找到 {field} 对应键，已将整个 dict 作为 {field} 的解析对象")
-            return _with_optional_display_text({field: parsed}, parsed), warnings
+            if allow_dict_as_field:
+                warnings.append(f"未找到 {field} 对应键，已将整个 dict 作为 {field} 的解析对象")
+                return _with_optional_display_text({field: parsed}, parsed), warnings
+            warnings.append(f"未找到 {field} 对应键，已跳过该 dict 候选")
+            return None, warnings
         return {field: parsed}, warnings
 
     if not isinstance(parsed, dict):

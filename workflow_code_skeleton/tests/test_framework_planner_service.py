@@ -629,6 +629,98 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertIsInstance(payload["data"]["character_storylines"], list)
         self.assertEqual(payload["data"]["character_storylines"][0]["id"], "main")
 
+    def test_stage_05_prefers_fastgpt_response_data_answer_text_business_json(self) -> None:
+        answer_payload = {
+            "character_storylines": [
+                {
+                    "id": "main",
+                    "title": "主角成长线",
+                    "summary": "律师回乡追查旧案真相。",
+                    "detailed_storyline": "主角在父亲旧案与现实阴谋之间不断做出艰难抉择。",
+                    "linked_beats": [1, 4, 9, 15],
+                    "episode_distribution": [{"episode_range": "第1-10集", "focus": "回乡调查"}],
+                    "edit_notes": "保持情绪递进",
+                    "decision": "keep",
+                }
+            ],
+            "display_text": "人物故事线已生成",
+        }
+        fastgpt_root = {
+            "responseData": [
+                {"moduleName": "workflowStart", "moduleType": "workflowStart"},
+                {
+                    "moduleName": "05 人物故事线生成更新",
+                    "moduleType": "chatNode",
+                    "answerText": service.json.dumps(answer_payload, ensure_ascii=False),
+                },
+                {
+                    "moduleName": "输出05 人物故事线生成更新",
+                    "moduleType": "answerNode",
+                    "text": "answer node fallback text",
+                },
+            ],
+            "answerText": "root fallback should not win",
+        }
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json, timeout
+            return _FakeResponse(payload=fastgpt_root)
+
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_API_KEY": "fastgpt-global-key",
+                "FASTGPT_CHAT_COMPLETIONS_URL": "https://api.fastgpt.in/api/v1/chat/completions",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                payload = service.run_framework_planner_stage("05", _stage_05_payload())
+
+        self.assertTrue(payload["ok"])
+        self.assertIsInstance(payload["data"]["character_storylines"], list)
+        self.assertTrue(payload["data"]["character_storylines"])
+        self.assertEqual(payload["data"]["character_storylines"][0]["id"], "main")
+        self.assertEqual(payload["display_text"], "人物故事线已生成")
+        self.assertNotIn(
+            "character_storylines 不是 list，已回退为空数组",
+            " | ".join(payload["raw"]["parse_warning"]),
+        )
+
+    def test_stage_05_request_variables_exclude_raw_fastgpt_debug_payloads(self) -> None:
+        definition = service.stage_definition("05")
+        workflow_spec = service.load_stage_workflow_spec("05")
+        payload = {
+            **_stage_05_payload(),
+            "previous_character_storylines": [{"id": "old", "title": "旧线"}],
+            "current_storyline_decisions": [{"storyline_id": "old", "decision": "keep"}],
+            "user_feedback": "保留主线",
+            "raw": {"responseData": [{"answerText": "huge"}]},
+            "responseData": [{"answerText": "huge"}],
+            "reasoningText": "hidden reasoning",
+            "historyPreview": "long history",
+            "display_text": "previous display text",
+        }
+
+        variables = service._build_stage_request_variables(definition, payload, workflow_spec)
+
+        self.assertIn("source_brief", variables)
+        self.assertIn("basic_config", variables)
+        self.assertIn("worldview_plan", variables)
+        self.assertIn("character_plan", variables)
+        self.assertIn("beat_checkpoint_timeline", variables)
+        self.assertIn("previous_character_storylines", variables)
+        self.assertIn("current_storyline_decisions", variables)
+        self.assertIn("user_feedback", variables)
+        self.assertIn("adaptation_direction", variables)
+        self.assertIn("user_requirements", variables)
+        self.assertNotIn("raw", variables)
+        self.assertNotIn("responseData", variables)
+        self.assertNotIn("reasoningText", variables)
+        self.assertNotIn("historyPreview", variables)
+        self.assertNotIn("display_text", variables)
+
     def test_stage_06_accepts_string_root_response_and_keeps_adaptation_guide_dict(self) -> None:
         raw_text = service.json.dumps(
             {
