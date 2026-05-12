@@ -188,6 +188,8 @@ http://127.0.0.1:5000
 
 普通用户只会看到最终可见结果，不会看到 FastGPT 原始壳字段、reasoning 或内部变量。
 
+腾讯视频平台数据反馈模块使用说明：[docs/tencent_video_data.md](docs/tencent_video_data.md)
+
 ## FastGPT 环境变量
 
 至少需要配置：
