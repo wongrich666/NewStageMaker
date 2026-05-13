@@ -22,6 +22,7 @@ from .services.framework_planner_service import (
     FRAMEWORK_PLANNER_STORAGE_KEY,
     FrameworkPlannerStageError,
     framework_planner_backend_ready,
+    framework_planner_fastgpt_diagnostics,
     run_framework_planner_score,
     run_framework_planner_stage,
 )
@@ -389,6 +390,21 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 "detail": detail or {},
             }
         ), status
+
+    @app.get("/api/framework-planner/diagnostics/fastgpt")
+    @_login_required
+    def framework_planner_fastgpt_diagnostics_api():
+        stage = str(request.args.get("stage") or "05").zfill(2)
+        try:
+            payload = framework_planner_fastgpt_diagnostics(stage)
+        except FrameworkPlannerStageError as exc:
+            return _framework_planner_error(
+                exc.stage,
+                str(exc),
+                status=exc.status_code,
+                detail=exc.detail,
+            )
+        return jsonify(payload)
 
     @app.post("/api/framework-planner/stage/04/score")
     @_login_required

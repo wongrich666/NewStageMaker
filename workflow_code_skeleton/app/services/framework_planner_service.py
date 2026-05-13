@@ -420,6 +420,25 @@ def framework_planner_backend_ready() -> bool:
     return any(stage_has_real_backend(stage) for stage in STAGE_DEFINITIONS)
 
 
+def framework_planner_fastgpt_diagnostics(stage: str = "05") -> dict[str, Any]:
+    definition = stage_definition(stage)
+    diagnostics = _stage_runtime_diagnostics(definition, {})
+    endpoint = str(diagnostics.get("resolved_url") or DEFAULT_FASTGPT_URL)
+    host, port = _endpoint_host_port(endpoint)
+    return {
+        "ok": True,
+        "stage": definition.stage,
+        "endpoint": endpoint,
+        "host": host,
+        "port": port,
+        "has_api_key": bool(diagnostics.get("has_api_key")),
+        "api_key_config_name": diagnostics.get("api_key_source") or "",
+        "mock_enabled": bool(diagnostics.get("mock_enabled")),
+        "url_config_name": diagnostics.get("url_source") or "default",
+        "timeout_seconds": diagnostics.get("timeout_seconds") or 0,
+    }
+
+
 def stage_has_real_backend(stage: str) -> bool:
     definition = stage_definition(stage)
     for env_name in _stage_api_key_env_names(definition):
@@ -2003,13 +2022,18 @@ def _log_fastgpt_pre_request(
     attempt_index: int,
     attempts: int,
 ) -> None:
+    host, port = _endpoint_host_port(endpoint.url)
     logger.info(
-        "即将请求 FastGPT：stage=%s attempt=%s/%s url=%s timeout_seconds=%s has_authorization=%s workflow_id_missing_but_api_key_mode_enabled=%s payload_keys=%s payload_lengths=%s",
+        "即将请求 FastGPT：stage=%s attempt=%s/%s endpoint=%s host=%s port=%s timeout_seconds=%s url_config_name=%s current_env_FASTGPT_CHAT_COMPLETIONS_URL=%s has_authorization=%s workflow_id_missing_but_api_key_mode_enabled=%s payload_keys=%s payload_lengths=%s",
         definition.stage,
         attempt_index,
         attempts,
         endpoint.url,
+        host,
+        port,
         endpoint.timeout,
+        endpoint.url_source or "default",
+        "FASTGPT_CHAT_COMPLETIONS_URL",
         bool(str(headers.get("Authorization") or "").strip()),
         not bool(endpoint.workflow_id) and bool(endpoint.api_key),
         sorted(body.keys()),
@@ -2104,8 +2128,14 @@ def _build_fastgpt_stage_error(
     attempts: int = 0,
     extra_detail: dict[str, Any] | None = None,
 ) -> FrameworkPlannerStageError:
+    is_connect_timeout = isinstance(exc, requests.ConnectTimeout)
+    message = (
+        f"阶段 {definition.stage} 无法连接 FastGPT 服务"
+        if is_connect_timeout
+        else f"阶段 {definition.stage} 请求 FastGPT 失败"
+    )
     return FrameworkPlannerStageError(
-        f"阶段 {definition.stage} 请求 FastGPT 失败",
+        message,
         stage=definition.stage,
         status_code=status_code,
         detail=_fastgpt_failure_detail(
@@ -2132,6 +2162,9 @@ def _fastgpt_failure_detail(
     attempts: int = 0,
     extra_detail: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    endpoint_url = str((endpoint.url if endpoint else diagnostics.get("resolved_url")) or "")
+    host, port = _endpoint_host_port(endpoint_url)
+    is_connect_timeout = isinstance(exc, requests.ConnectTimeout)
     detail: dict[str, Any] = {
         "reason": str(reason or "").strip() or "阶段未成功请求 FastGPT",
         "has_api_key": bool((endpoint.api_key if endpoint else None) or diagnostics.get("has_api_key")),
@@ -2145,14 +2178,19 @@ def _fastgpt_failure_detail(
         "api_key_source": diagnostics.get("api_key_source") or "",
         "workflow_id_source": (endpoint.workflow_id_source if endpoint else "") or diagnostics.get("workflow_id_source") or "",
         "url_source": (endpoint.url_source if endpoint else "") or diagnostics.get("url_source") or "",
-        "url": (endpoint.url if endpoint else diagnostics.get("resolved_url")) or "",
-        "endpoint_url": (endpoint.url if endpoint else diagnostics.get("resolved_url")) or "",
+        "url": endpoint_url,
+        "endpoint_url": endpoint_url,
+        "endpoint": endpoint_url,
+        "host": host,
+        "port": port,
         "timeout_seconds": (endpoint.timeout if endpoint else diagnostics.get("timeout_seconds")) or 0,
         "attempts": attempts or int(getattr(settings, "fastgpt_http_retries", 2) or 0) + 1,
         "payload_keys": diagnostics.get("payload_keys", []),
         "source_text_length": diagnostics.get("source_text_length", 0),
         "workflow_id_missing_but_api_key_mode_enabled": diagnostics.get("workflow_id_missing_but_api_key_mode_enabled", False),
     }
+    if is_connect_timeout:
+        detail["suggestion"] = "请检查 FASTGPT_CHAT_COMPLETIONS_URL、FastGPT 服务是否启动、3000 端口是否开放、当前机器是否能访问该 IP。"
     if response is not None:
         detail.update(
             {
@@ -2389,6 +2427,21 @@ def _safe_response_text(response: requests.Response) -> str:
         return response.text
     except Exception:
         return ""
+
+
+def _endpoint_host_port(endpoint: str) -> tuple[str, int | None]:
+    try:
+        parsed = urlsplit(str(endpoint or ""))
+        host = parsed.hostname or ""
+        port = parsed.port
+        if port is None:
+            if parsed.scheme == "https":
+                port = 443
+            elif parsed.scheme == "http":
+                port = 80
+        return host, port
+    except Exception:
+        return "", None
 
 
 def _safe_header_lookup(response: requests.Response, key: str) -> str:

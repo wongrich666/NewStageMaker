@@ -860,6 +860,48 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertEqual(exc.detail["last_exception_type"], "Timeout")
         self.assertIn("upstream timeout", exc.detail["last_exception_message"])
 
+    def test_stage_05_connect_timeout_returns_connection_diagnostics(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_API_KEY": "fastgpt-global-key",
+                "FASTGPT_CHAT_COMPLETIONS_URL": "http://192.168.2.203:3000/api/v1/chat/completions",
+            },
+            clear=True,
+        ):
+            with patch.object(service.requests, "post", side_effect=requests.ConnectTimeout("connect timed out")):
+                with self.assertRaises(service.FrameworkPlannerStageError) as ctx:
+                    service.run_framework_planner_stage("05", _stage_05_payload())
+
+        exc = ctx.exception
+        self.assertEqual(str(exc), "阶段 05 无法连接 FastGPT 服务")
+        self.assertEqual(exc.status_code, 504)
+        self.assertEqual(exc.detail["exception_type"], "ConnectTimeout")
+        self.assertEqual(exc.detail["endpoint"], "http://192.168.2.203:3000/api/v1/chat/completions")
+        self.assertEqual(exc.detail["host"], "192.168.2.203")
+        self.assertEqual(exc.detail["port"], 3000)
+        self.assertIn("FASTGPT_CHAT_COMPLETIONS_URL", exc.detail["suggestion"])
+
+    def test_fastgpt_diagnostics_do_not_expose_api_key(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_API_KEY": "fastgpt-global-key",
+                "FASTGPT_CHAT_COMPLETIONS_URL": "http://192.168.2.203:3000/api/v1/chat/completions",
+            },
+            clear=True,
+        ):
+            diagnostics = service.framework_planner_fastgpt_diagnostics("05")
+
+        self.assertEqual(diagnostics["endpoint"], "http://192.168.2.203:3000/api/v1/chat/completions")
+        self.assertEqual(diagnostics["host"], "192.168.2.203")
+        self.assertEqual(diagnostics["port"], 3000)
+        self.assertTrue(diagnostics["has_api_key"])
+        self.assertEqual(diagnostics["api_key_config_name"], "FASTGPT_API_KEY")
+        self.assertNotIn("fastgpt-global-key", str(diagnostics))
+
     def test_score_endpoint_returns_stable_framework_score_report_string(self) -> None:
         payload = service.run_framework_planner_score(
             {

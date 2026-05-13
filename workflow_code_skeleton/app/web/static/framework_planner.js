@@ -1515,9 +1515,21 @@
     if (!error) return `${label} 执行失败`;
     const message = error.message || `${label} 执行失败`;
     const reason = error.reason || (error.detail && typeof error.detail.reason === "string" ? error.detail.reason.trim() : "");
+    const endpoint = error.detail && typeof error.detail.endpoint === "string"
+      ? error.detail.endpoint.trim()
+      : "";
+    const suggestion = error.detail && typeof error.detail.suggestion === "string"
+      ? error.detail.suggestion.trim()
+      : "";
     const lastExceptionMessage = error.lastExceptionMessage
       || (error.detail && typeof error.detail.last_exception_message === "string" ? error.detail.last_exception_message.trim() : "");
     if (/格式异常/.test(message)) return `${label} 返回格式异常，请重试或查看日志。`;
+    if (/无法连接 FastGPT 服务/.test(message)) {
+      const parts = [`${label} 无法连接 FastGPT 服务`];
+      if (endpoint) parts.push(`当前 endpoint：${endpoint}`);
+      parts.push(suggestion || "建议检查 IP、端口、防火墙、FastGPT 服务状态。");
+      return parts.join("\n");
+    }
     if (lastExceptionMessage && lastExceptionMessage !== message && lastExceptionMessage !== reason) {
       return `${label}：${message}（${lastExceptionMessage}）`;
     }

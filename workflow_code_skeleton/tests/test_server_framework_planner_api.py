@@ -197,6 +197,65 @@ class ServerFrameworkPlannerApiTests(unittest.TestCase):
         self.assertEqual(data["detail"]["last_exception_type"], "Timeout")
         self.assertIn("upstream timeout", data["detail"]["last_exception_message"])
 
+    def test_stage_05_connect_timeout_returns_actionable_connection_error(self) -> None:
+        payload = _planner_payload()
+        payload["beat_checkpoint_timeline"] = [{"beat_no": 1, "beat_name": "开场"}] * 15
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_API_KEY": "fastgpt-global-key",
+                "FASTGPT_CHAT_COMPLETIONS_URL": "http://192.168.2.203:3000/api/v1/chat/completions",
+            },
+            clear=True,
+        ):
+            with patch(
+                "workflow_code_skeleton.app.services.framework_planner_service.requests.post",
+                side_effect=requests.ConnectTimeout("connect timed out"),
+            ):
+                response = self.client.post(
+                    "/api/framework-planner/stage/05",
+                    headers=self.headers,
+                    json=payload,
+                )
+
+        self.assertEqual(response.status_code, 504)
+        data = response.get_json()
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["stage"], "05")
+        self.assertEqual(data["error"], "阶段 05 无法连接 FastGPT 服务")
+        self.assertEqual(data["detail"]["exception_type"], "ConnectTimeout")
+        self.assertEqual(data["detail"]["endpoint"], "http://192.168.2.203:3000/api/v1/chat/completions")
+        self.assertEqual(data["detail"]["host"], "192.168.2.203")
+        self.assertEqual(data["detail"]["port"], 3000)
+        self.assertIn("3000", data["detail"]["suggestion"])
+
+    def test_fastgpt_diagnostics_endpoint_returns_safe_config(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_API_KEY": "fastgpt-global-key",
+                "FASTGPT_CHAT_COMPLETIONS_URL": "http://192.168.2.203:3000/api/v1/chat/completions",
+            },
+            clear=True,
+        ):
+            response = self.client.get(
+                "/api/framework-planner/diagnostics/fastgpt",
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["endpoint"], "http://192.168.2.203:3000/api/v1/chat/completions")
+        self.assertEqual(data["host"], "192.168.2.203")
+        self.assertEqual(data["port"], 3000)
+        self.assertTrue(data["has_api_key"])
+        self.assertEqual(data["api_key_config_name"], "FASTGPT_API_KEY")
+        self.assertFalse(data["mock_enabled"])
+        self.assertNotIn("fastgpt-global-key", str(data))
+
 
 if __name__ == "__main__":
     unittest.main()
