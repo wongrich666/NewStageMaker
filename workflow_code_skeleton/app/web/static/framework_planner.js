@@ -103,6 +103,8 @@
     },
   };
 
+  const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "display_text", "choices", "usage"];
+
   let state = loadState();
   const ui = {
     toast: "",
@@ -208,8 +210,6 @@
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
   }
-
-  const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "display_text", "choices", "usage"];
 
   function extractBusinessField(value, fieldName) {
     if (value === null || value === undefined || value === "") return value;
