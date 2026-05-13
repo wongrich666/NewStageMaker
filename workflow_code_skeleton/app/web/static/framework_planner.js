@@ -2,6 +2,7 @@
   const config = window.frameworkPlannerConfig || {};
   const STORAGE_KEY = config.storageKey || "frameworkPlannerState.v2";
   const LEGACY_STORAGE_KEY = "new_stage_maker_framework_planner_v2";
+  const PREFERENCE_STORAGE_KEY = config.preferenceStorageKey || "frameworkPlannerPromptPreferences.v1";
   const API_BASE = config.apiBase || "/api/framework-planner";
   const authToken = String(config.authToken || "").trim();
 
@@ -41,6 +42,28 @@
     ["simplify", "精简"],
     ["delete", "删除"],
   ];
+  const DEFAULT_PROMPT_TEMPLATES = [
+    {
+      id: "custom",
+      name: "自定义偏好",
+      prompt: "",
+    },
+    {
+      id: "short_drama_hook",
+      name: "短剧强钩子",
+      prompt: "请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。",
+    },
+    {
+      id: "character_emotion",
+      name: "人物情绪线",
+      prompt: "请优先保证人物动机清晰，情绪转折有铺垫；每条人物线都要能对应关键节拍，避免只写事件不写人物选择。",
+    },
+    {
+      id: "adaptation_control",
+      name: "改编约束优先",
+      prompt: "请保留原作核心设定和主线关系，只调整节奏、结构和可视化表达；删除或合并支线前要说明理由，并避免破坏主角成长逻辑。",
+    },
+  ];
   const app = document.getElementById("frameworkPlannerApp");
   if (!app) {
     console.error("[framework_planner] root element #frameworkPlannerApp not found");
@@ -77,6 +100,40 @@
     beat_revision_round: 0,
     display_texts: {},
     raw_stage_responses: {},
+    prompt_preferences: {
+      active_template_id: "custom",
+      script_preference: "",
+      stage_prompts: {
+        worldview: "",
+        character: "",
+        beat: "",
+        storylines: "",
+        guide: "",
+        package: "",
+      },
+      basic_prompt_fields: {
+        adaptation_direction: "",
+        user_constraints: "",
+        user_requirements: "",
+      },
+      templates: DEFAULT_PROMPT_TEMPLATES,
+      source_context: {},
+      updated_at: "",
+    },
+    asset_state: {
+      asset_kind: "framework_planner",
+      status: "draft",
+      current_stage: "basic",
+      confirmed_stages: [],
+      locked_stages: ["worldview", "character", "beat", "storylines", "guide", "package"],
+      stage_outputs: {
+        beat_checkpoint_timeline_count: 0,
+        checkpoint_explanation_count: 0,
+        character_storylines_count: 0,
+      },
+      last_action: "init",
+      updated_at: "",
+    },
     feedback: {
       worldview: "",
       character: "",
@@ -103,12 +160,18 @@
     },
   };
 
+  const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "display_text", "choices", "usage"];
+
   let state = loadState();
   const ui = {
     toast: "",
     loading: {},
     stageErrors: {},
     modalStorylineId: null,
+    expandedBeats: {},
+    expandedStorylines: {},
+    loadingStartedAt: {},
+    loadingTicker: null,
     editMode: {
       worldview: false,
       character: false,
@@ -208,8 +271,6 @@
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
   }
-
-  const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "display_text", "choices", "usage"];
 
   function extractBusinessField(value, fieldName) {
     if (value === null || value === undefined || value === "") return value;
@@ -402,17 +463,64 @@
 
   function normalizeState(saved) {
     const next = clone(initialState);
-    if (!saved || typeof saved !== "object") return next;
+    const storedPreferences = loadPromptPreferences();
+    if (!saved || typeof saved !== "object") {
+      next.prompt_preferences = normalizePromptPreferences(storedPreferences);
+      applyPromptPreferencesToBasicConfig(next, true);
+      return syncStageFlow(next);
+    }
     mergeInto(next, saved);
     next.basic_config = Object.assign(clone(initialState.basic_config), saved.basic_config || {});
     next.feedback = Object.assign(clone(initialState.feedback), saved.feedback || {});
     next.editors = Object.assign(clone(initialState.editors), saved.editors || {});
     next.stage_state = Object.assign(clone(initialState.stage_state), saved.stage_state || {});
+    next.asset_state = Object.assign(clone(initialState.asset_state), saved.asset_state || {});
+    next.prompt_preferences = normalizePromptPreferences(Object.assign({}, storedPreferences || {}, saved.prompt_preferences || {}));
     STAGE_SEQUENCE.forEach((stageKey) => {
       next.stage_state[stageKey] = Object.assign(clone(initialState.stage_state[stageKey]), next.stage_state[stageKey] || {});
     });
     cleanSavedBusinessFields(next);
     return syncStageFlow(next);
+  }
+
+  function loadPromptPreferences() {
+    return readStorage(PREFERENCE_STORAGE_KEY);
+  }
+
+  function normalizePromptPreferences(value) {
+    const source = value && typeof value === "object" ? value : {};
+    const defaults = clone(initialState.prompt_preferences);
+    const next = Object.assign(defaults, source);
+    next.stage_prompts = Object.assign(clone(initialState.prompt_preferences.stage_prompts), source.stage_prompts || {});
+    next.basic_prompt_fields = Object.assign(clone(initialState.prompt_preferences.basic_prompt_fields), source.basic_prompt_fields || {});
+    const customTemplates = Array.isArray(source.templates) ? source.templates : [];
+    const templatesById = new Map();
+    DEFAULT_PROMPT_TEMPLATES.concat(customTemplates).forEach((item) => {
+      if (item && item.id) templatesById.set(String(item.id), {
+        id: String(item.id),
+        name: String(item.name || item.id),
+        prompt: String(item.prompt || ""),
+      });
+    });
+    next.templates = Array.from(templatesById.values());
+    if (!next.templates.some((item) => item.id === next.active_template_id)) {
+      next.active_template_id = "custom";
+    }
+    next.script_preference = String(next.script_preference || "");
+    next.source_context = source.source_context && typeof source.source_context === "object" ? source.source_context : {};
+    next.updated_at = String(next.updated_at || "");
+    return next;
+  }
+
+  function applyPromptPreferencesToBasicConfig(targetState, fillExisting) {
+    const fields = (targetState.prompt_preferences || {}).basic_prompt_fields || {};
+    ["adaptation_direction", "user_constraints", "user_requirements"].forEach((key) => {
+      const value = String(fields[key] || "").trim();
+      if (!value) return;
+      if (fillExisting || !String(targetState.basic_config[key] || "").trim()) {
+        targetState.basic_config[key] = value;
+      }
+    });
   }
 
   function mergeInto(target, source) {
@@ -439,6 +547,37 @@
     } catch (error) {
       // ignore storage write errors
     }
+  }
+
+  function savePromptPreferences(reason) {
+    if (!state.prompt_preferences) return;
+    state.prompt_preferences.updated_at = new Date().toISOString();
+    state.prompt_preferences.basic_prompt_fields = {
+      adaptation_direction: state.basic_config.adaptation_direction || "",
+      user_constraints: state.basic_config.user_constraints || "",
+      user_requirements: state.basic_config.user_requirements || "",
+    };
+    state.prompt_preferences.source_context = {
+      project_title: state.basic_config.project_title || "",
+      source_title: state.basic_config.source_title || "",
+      target_format: state.basic_config.target_format || "",
+      source_hash: simpleHash(state.basic_config.source_text || ""),
+      reason: reason || "update",
+    };
+    try {
+      window.localStorage.setItem(PREFERENCE_STORAGE_KEY, JSON.stringify(state.prompt_preferences));
+    } catch (error) {
+      // ignore storage write errors
+    }
+  }
+
+  function simpleHash(value) {
+    const text = String(value || "");
+    let hash = 0;
+    for (let index = 0; index < text.length; index += 1) {
+      hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+    }
+    return String(hash);
   }
 
   function showToast(message) {
@@ -490,6 +629,7 @@
     const stageState = targetState && targetState.stage_state ? targetState.stage_state : {};
     const stageKey = stageKeyForView(viewId);
     if (stageKey === "basic") return true;
+    if (hasStageDataFor(targetState, stageKey)) return true;
     if (stageKey === "worldview") return Boolean((stageState.basic || {}).confirmed);
     if (stageKey === "character") return Boolean((stageState.worldview || {}).confirmed);
     if (stageKey === "beat") return Boolean((stageState.character || {}).confirmed);
@@ -514,18 +654,60 @@
 
   function setStageLoading(stageKey, loading) {
     ui.loading[stageKey] = Boolean(loading);
+    if (loading) {
+      ui.loadingStartedAt[stageKey] = Date.now();
+      startLoadingTicker();
+    } else {
+      delete ui.loadingStartedAt[stageKey];
+      stopLoadingTickerIfIdle();
+    }
   }
 
   function isStageLoading(stageKey) {
     return Boolean(ui.loading[stageKey]);
   }
 
+  function runningStageKey() {
+    return STAGE_SEQUENCE.find((stageKey) => isStageLoading(stageKey) || (state.stage_state[stageKey] || {}).status === "running") || "";
+  }
+
+  function processingElapsedLabel(stageKey) {
+    const startedAt = ui.loadingStartedAt[stageKey];
+    if (!startedAt) return "刚刚开始";
+    const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    if (seconds < 60) return `${seconds} 秒`;
+    return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+  }
+
+  function waitForPaint() {
+    return new Promise((resolve) => {
+      window.requestAnimationFrame(() => window.setTimeout(resolve, 0));
+    });
+  }
+
+  function startLoadingTicker() {
+    if (ui.loadingTicker) return;
+    ui.loadingTicker = window.setInterval(() => {
+      if (runningStageKey()) {
+        render();
+      } else {
+        stopLoadingTickerIfIdle();
+      }
+    }, 5000);
+  }
+
+  function stopLoadingTickerIfIdle() {
+    if (runningStageKey() || !ui.loadingTicker) return;
+    window.clearInterval(ui.loadingTicker);
+    ui.loadingTicker = null;
+  }
+
   function stageStatusTag(stageKey) {
     const stage = state.stage_state[stageKey];
     if (!stage) return `<span class="fp-tag">未知</span>`;
+    if (isStageLoading(stageKey) || stage.status === "running") return `<span class="fp-tag blue fp-processing-dot">处理中</span>`;
     if (stage.confirmed) return `<span class="fp-tag ok">已确认并锁定</span>`;
     if (stage.locked) return `<span class="fp-tag lock">待上游确认</span>`;
-    if (stage.status === "running") return `<span class="fp-tag blue">处理中</span>`;
     if (stage.status === "generated") return `<span class="fp-tag blue">已生成，待确认</span>`;
     if (stage.status === "updated") return `<span class="fp-tag warn">已更新，待确认</span>`;
     if (stage.status === "error") return `<span class="fp-tag red">执行异常</span>`;
@@ -549,10 +731,13 @@
       state.checkpoint_explanation = {};
       state.framework_score_report = "";
       state.beat_revision_round = 0;
+      ui.expandedBeats = {};
     }
     if (stageKey === "storylines") {
       state.character_storylines = [];
       state.storyline_decisions = [];
+      ui.modalStorylineId = null;
+      ui.expandedStorylines = {};
     }
     if (stageKey === "guide") state.adaptation_guide = {};
     if (stageKey === "package") {
@@ -591,6 +776,22 @@
   function firstViewForStage(stageKey) {
     const item = VIEW_DEFS.find((view) => view.stageKey === stageKey);
     return item ? item.id : "basic";
+  }
+
+  function upstreamStageKey(stageKey) {
+    const index = STAGE_SEQUENCE.indexOf(stageKey);
+    return index > 0 ? STAGE_SEQUENCE[index - 1] : "";
+  }
+
+  function stageDisplayTitle(stageKey) {
+    return viewDef(firstViewForStage(stageKey)).label.replace(/^\d+\.\s*/, "");
+  }
+
+  function renderUpstreamRollbackButton(stageKey) {
+    const upstream = upstreamStageKey(stageKey);
+    if (!upstream) return "";
+    if (!hasStageData(upstream)) return "";
+    return `<button class="fp-btn danger subtle" data-action="rollback-stage" data-stage-key="${upstream}">回退到上游：${escapeHtml(stageDisplayTitle(upstream))}</button>`;
   }
 
   function firstAccessibleView(targetState) {
@@ -655,7 +856,62 @@
 
   function syncStageFlow(targetState) {
     syncStorylineDecisions(targetState);
-    return reconcileStageState(targetState);
+    syncStorylineExpansionState(targetState);
+    const reconciled = reconcileStageState(targetState);
+    syncFrameworkAssetState(reconciled, "sync");
+    return reconciled;
+  }
+
+  function syncStorylineExpansionState(targetState) {
+    if (!targetState || !Array.isArray(targetState.character_storylines)) {
+      ui.expandedStorylines = {};
+      return;
+    }
+    const validIds = new Set(
+      targetState.character_storylines
+        .map((item) => String((item && (item.id || item.title)) || "").trim())
+        .filter(Boolean)
+    );
+    Object.keys(ui.expandedStorylines).forEach((id) => {
+      if (!validIds.has(id)) delete ui.expandedStorylines[id];
+    });
+  }
+
+  function syncFrameworkAssetState(targetState, action) {
+    if (!targetState || typeof targetState !== "object") return targetState;
+    const stageState = targetState.stage_state || {};
+    const currentStage = stageKeyForView(targetState.current_view || "basic");
+    const confirmedStages = STAGE_SEQUENCE.filter((stageKey) => Boolean((stageState[stageKey] || {}).confirmed));
+    const lockedStages = STAGE_SEQUENCE.filter((stageKey) => Boolean((stageState[stageKey] || {}).locked));
+    const runningStage = STAGE_SEQUENCE.find((stageKey) => (stageState[stageKey] || {}).status === "running");
+    const hasFinalPackage = !isEmptyValue(targetState.framework_plan_package);
+    const status = runningStage
+      ? "running"
+      : hasFinalPackage && Boolean((stageState.package || {}).confirmed)
+        ? "completed"
+        : confirmedStages.length
+          ? "in_progress"
+          : "draft";
+    targetState.asset_state = Object.assign(clone(initialState.asset_state), targetState.asset_state || {}, {
+      asset_kind: "framework_planner",
+      status,
+      current_stage: runningStage || currentStage,
+      confirmed_stages: confirmedStages,
+      locked_stages: lockedStages,
+      stage_outputs: {
+        beat_checkpoint_timeline_count: Array.isArray(targetState.beat_checkpoint_timeline) ? targetState.beat_checkpoint_timeline.length : 0,
+        checkpoint_explanation_count: checkpointExplanationCount(targetState.checkpoint_explanation),
+        character_storylines_count: Array.isArray(targetState.character_storylines) ? targetState.character_storylines.length : 0,
+      },
+      last_action: action && action !== "sync" ? action : (targetState.asset_state || {}).last_action || "sync",
+      updated_at: new Date().toISOString(),
+    });
+    return targetState;
+  }
+
+  function checkpointExplanationCount(explanation) {
+    if (!explanation || typeof explanation !== "object" || Array.isArray(explanation)) return 0;
+    return Array.isArray(explanation.beat_notes) ? explanation.beat_notes.length : 0;
   }
 
   function rollbackStage(stageKey) {
@@ -696,6 +952,7 @@
     ui.editMode.guide = false;
     state.current_view = firstViewForStage(stageKey);
     syncStageFlow(state);
+    syncFrameworkAssetState(state, `rollback:${stageKey}`);
     recordHistory("rollback", { stageKey });
     showToast("已回退并清空下游确认状态");
     render();
@@ -724,6 +981,12 @@
 
   function prettyJson(value) {
     return JSON.stringify(value == null ? {} : value, null, 2);
+  }
+
+  function truncateText(value, limit) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    const max = Number(limit || 80);
+    return text.length > max ? `${text.slice(0, max)}...` : text;
   }
 
   function editorValueFor(key) {
@@ -835,6 +1098,26 @@
         </div>
       </div>
       <div class="fp-card fp-steps">${renderStepRail()}</div>
+      ${renderRunningStageStatus()}
+    `;
+  }
+
+  function renderRunningStageStatus() {
+    const stageKey = runningStageKey();
+    if (!stageKey) return "";
+    const stageNo = stageNoForKey(stageKey);
+    const title = stageDisplayTitle(stageKey);
+    return `
+      <div class="fp-running-card" role="status" aria-live="polite">
+        <div class="fp-running-main">
+          <span class="fp-running-spinner" aria-hidden="true"></span>
+          <div>
+            <strong>阶段 ${escapeHtml(stageNo)} 正在处理：${escapeHtml(title)}</strong>
+            <p>已运行 ${escapeHtml(processingElapsedLabel(stageKey))}。你仍可以查看已生成内容，完成后页面会自动刷新结果。</p>
+          </div>
+        </div>
+        <span class="fp-running-badge">处理中</span>
+      </div>
     `;
   }
 
@@ -955,12 +1238,14 @@
           <label>限制条件 user_constraints</label>
           <textarea data-config-key="user_constraints" placeholder="例如：不能改世界观底层逻辑，不能删除某角色。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.user_constraints)}</textarea>
         </div>
+        ${renderScriptPreferencePanel(locked)}
         ${!isEmptyValue(state.source_brief) ? `
           <div class="fp-stage-note">
             <strong>01 阶段 source_brief 预览：</strong>
             <pre class="fp-json-inline">${escapeHtml(prettyJson(state.source_brief))}</pre>
           </div>
         ` : ""}
+        ${isStageLoading("basic") ? renderProcessingBanner("正在提取原文信息，请稍候。页面没有锁死，可以继续查看当前配置。") : ""}
         <div class="fp-actions">
           ${locked ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="basic">回退到此阶段并清空下游</button>` : ""}
           <button class="fp-btn primary" data-action="confirm-basic" ${isStageLoading("basic") ? "disabled" : ""}>
@@ -971,13 +1256,55 @@
     `;
   }
 
+  function renderScriptPreferencePanel(disabled) {
+    const preferences = state.prompt_preferences || initialState.prompt_preferences;
+    const templates = Array.isArray(preferences.templates) ? preferences.templates : DEFAULT_PROMPT_TEMPLATES;
+    return `
+      <div class="fp-preference-panel">
+        <div class="fp-preference-head">
+          <div>
+            <strong>本剧本偏好提示</strong>
+            <p>这里会自动保存到本地，下次生成时自动带入；选择模板后仍可继续手动微调。</p>
+          </div>
+          <select data-preference-template ${disabled ? "disabled" : ""}>
+            ${templates.map((item) => `<option value="${escapeHtml(item.id)}" ${preferences.active_template_id === item.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}
+          </select>
+        </div>
+        <textarea data-script-preference placeholder="例如：强化短剧钩子、保留原作核心关系、减少支线、人物情绪必须可拍。" ${disabled ? "disabled" : ""}>${escapeHtml(preferences.script_preference || "")}</textarea>
+        <div class="fp-preference-meta">
+          ${preferences.updated_at ? `上次保存：${escapeHtml(formatDateTime(preferences.updated_at))}` : "尚未保存偏好提示"}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderStagePreferenceField(stageKey, disabled) {
+    const preferences = state.prompt_preferences || initialState.prompt_preferences;
+    const value = (preferences.stage_prompts || {})[stageKey] || "";
+    return `
+      <div class="fp-preference-panel compact">
+        <div class="fp-preference-head">
+          <div>
+            <strong>本阶段偏好提示</strong>
+            <p>保存后会在下次生成本阶段时自动作为 user_feedback 带入。</p>
+          </div>
+        </div>
+        <textarea data-stage-preference-key="${escapeHtml(stageKey)}" placeholder="补充本阶段偏好，例如希望强化/避免/保留的内容。" ${disabled ? "disabled" : ""}>${escapeHtml(value)}</textarea>
+      </div>
+    `;
+  }
+
+  function formatDateTime(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value || "");
+    return date.toLocaleString();
+  }
+
   function renderPlanStageView(options) {
     const stage = state.stage_state[options.stageKey];
     const data = state[options.dataKey];
     const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
-    const editing = ui.editMode[options.stageKey];
-    const feedback = state.feedback[options.stageKey] || "";
     return `
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
@@ -988,26 +1315,15 @@
           ${stageStatusTag(options.stageKey)}
         </div>
         ${confirmed ? `<div class="fp-inline-warning">${escapeHtml(options.title)}已确认并锁定。下游内容已基于当前版本生成，如需改动请显式回退。</div>` : ""}
-        ${blocked ? `<div class="fp-empty">请先确认上游阶段。</div>` : editing ? renderEditorBlock(options.dataKey, options.title) : renderDataBlock(data)}
+        ${isStageLoading(options.stageKey) ? renderProcessingBanner(`正在生成${options.title}，请稍候...`) : ""}
+        ${blocked && isEmptyValue(data) ? `<div class="fp-empty">请先确认上游阶段。</div>` : renderDataBlock(data)}
+        ${renderStagePreferenceField(options.stageKey, blocked || confirmed || isStageLoading(options.stageKey))}
         ${renderStageError(options.stageKey)}
-        ${!blocked && !confirmed ? `
-          <div class="fp-field" style="margin-top:14px">
-            <label>用户修改意见 / AI 更新反馈</label>
-            <textarea data-feedback-key="${options.stageKey}" placeholder="这里的内容会作为 user_feedback 传给后端 revise 接口。">${escapeHtml(feedback)}</textarea>
-          </div>
-        ` : ""}
-        <div class="fp-lock-note">所有编辑必须先“更新”再“确认”。确认后解锁下游，并禁止继续直接修改上游。</div>
+        <div class="fp-lock-note">本阶段由上游确认或底部“下一阶段”自动生成。人工操作只保留确认与显式回退。</div>
         <div class="fp-actions">
+          ${renderUpstreamRollbackButton(options.stageKey)}
           ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="${options.stageKey}">回退到此阶段并清空下游</button>` : ""}
-          ${editing ? `
-            <button class="fp-btn" data-action="cancel-editor" data-editor-stage="${options.stageKey}">取消</button>
-            <button class="fp-btn primary" data-action="save-editor" data-editor-key="${options.dataKey}" data-stage-key="${options.stageKey}">更新${escapeHtml(options.title)}</button>
-          ` : `
-            <button class="fp-btn" data-action="run-stage-generate" data-stage-key="${options.stageKey}" ${blocked || confirmed || isStageLoading(options.stageKey) ? "disabled" : ""}>生成${escapeHtml(options.title)}</button>
-            <button class="fp-btn" data-action="run-stage-revise" data-stage-key="${options.stageKey}" ${blocked || confirmed || isStageLoading(options.stageKey) || isEmptyValue(data) ? "disabled" : ""}>基于意见更新</button>
-            <button class="fp-btn" data-action="open-editor" data-editor-stage="${options.stageKey}" data-editor-key="${options.dataKey}" ${blocked || confirmed || isEmptyValue(data) ? "disabled" : ""}>编辑</button>
-            <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="${options.stageKey}" ${blocked || confirmed || isEmptyValue(data) ? "disabled" : ""}>确认并进入${escapeHtml(options.nextTitle)}</button>
-          `}
+          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="${options.stageKey}" ${blocked || confirmed || isEmptyValue(data) ? "disabled" : ""}>确认并进入${escapeHtml(options.nextTitle)}</button>
         </div>
       </section>
     `;
@@ -1017,8 +1333,8 @@
     const stage = state.stage_state.beat;
     const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
-    const editing = ui.editMode.beatTimeline;
     const canConfirm = state.beat_checkpoint_timeline.length === 15 && !isEmptyValue(state.checkpoint_explanation);
+    const hasTimeline = Array.isArray(state.beat_checkpoint_timeline) && state.beat_checkpoint_timeline.length > 0;
     return `
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
@@ -1029,62 +1345,63 @@
           ${stageStatusTag("beat")}
         </div>
         ${confirmed ? `<div class="fp-inline-warning">04 阶段已确认并锁定，05 人物故事线会严格基于这 15 个节拍继续拆解。</div>` : ""}
-        ${blocked ? `<div class="fp-empty">请先确认人设方案。</div>` : editing ? renderEditorBlock("beat_checkpoint_timeline", "三幕十五节拍卡点时间轴") : renderBeatTimeline(state.beat_checkpoint_timeline)}
+        ${isStageLoading("beat") ? renderProcessingBanner("正在生成三幕十五节拍时间轴，请稍候...") : ""}
+        ${blocked && !hasTimeline ? `<div class="fp-empty">请先确认人设方案。</div>` : renderBeatTimeline(state.beat_checkpoint_timeline, { editable: !blocked && !confirmed })}
+        ${renderStagePreferenceField("beat", blocked || confirmed || isStageLoading("beat"))}
         ${renderStageError("beat")}
-        ${!blocked && !confirmed ? `
-          <div class="fp-field" style="margin-top:14px">
-            <label>04 用户反馈 / 修改意见</label>
-            <textarea data-feedback-key="beat" placeholder="这里会作为 user_feedback 传给 04 revise；framework_score_report 会自动从评分接口读取。">${escapeHtml(state.feedback.beat || "")}</textarea>
-          </div>
-          ${state.framework_score_report ? `
-            <div class="fp-stage-note">
-              <strong>最近一次 framework_score_report：</strong>
-              <pre class="fp-json-inline">${escapeHtml(state.framework_score_report)}</pre>
-            </div>
-          ` : ""}
-        ` : ""}
-        <div class="fp-lock-note">后续评分循环只通过 <code>framework_score_report</code> 这一个输入口回流给 04 阶段。</div>
+        <div class="fp-lock-note">时间轴可直接编辑；修改节拍后会同步卡点说明，并清空已失效的 05 人物故事线。</div>
         <div class="fp-actions">
+          ${renderUpstreamRollbackButton("beat")}
           ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="beat">回退到此阶段并清空下游</button>` : ""}
-          ${editing ? `
-            <button class="fp-btn" data-action="cancel-editor" data-editor-stage="beatTimeline">取消</button>
-            <button class="fp-btn primary" data-action="save-editor" data-editor-key="beat_checkpoint_timeline" data-stage-key="beat">更新时间轴</button>
-          ` : `
-            <button class="fp-btn" data-action="run-stage-generate" data-stage-key="beat" ${blocked || confirmed || isStageLoading("beat") ? "disabled" : ""}>生成时间轴</button>
-            <button class="fp-btn" data-action="run-stage-revise" data-stage-key="beat" ${blocked || confirmed || isStageLoading("beat") || !state.beat_checkpoint_timeline.length ? "disabled" : ""}>基于意见更新</button>
-            <button class="fp-btn" data-action="run-score-loop" ${blocked || confirmed || isStageLoading("beat") ? "disabled" : ""}>运行评分循环（最多 3 轮）</button>
-            <button class="fp-btn" data-action="open-editor" data-editor-stage="beatTimeline" data-editor-key="beat_checkpoint_timeline" ${blocked || confirmed || !state.beat_checkpoint_timeline.length ? "disabled" : ""}>编辑时间轴</button>
-            <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="beat" ${blocked || confirmed || !canConfirm ? "disabled" : ""}>确认并进入人物故事线</button>
-          `}
+          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="beat" ${blocked || confirmed || !canConfirm ? "disabled" : ""}>确认并进入人物故事线</button>
         </div>
       </section>
     `;
   }
 
-  function renderBeatTimeline(items) {
+  function renderBeatTimeline(items, options) {
     if (!Array.isArray(items) || !items.length) {
       return `<div class="fp-empty">尚未生成 04 阶段时间轴。确认 03 后，才能生成 15 条固定顺序的 beat_checkpoint_timeline。</div>`;
     }
-    const nodes = items.map((item) => `
+    const editable = Boolean(options && options.editable);
+    const nodes = items.map((item) => {
+      const explanation = beatExplanationFor(item.beat_no);
+      return `
       <article class="fp-beat-node">
         <div class="fp-beat-act">${escapeHtml(item.act || "")}</div>
         <div class="fp-beat-title">${escapeHtml(`${item.beat_no}. ${item.beat_name}`)}</div>
         <div class="fp-beat-dot"></div>
         <div class="fp-beat-range">${escapeHtml(item.episode_range || "")}</div>
+        ${explanation ? `<div class="fp-beat-node-summary">${escapeHtml(explanation)}</div>` : ""}
       </article>
-    `).join("");
-    const cards = items.map((item) => `
-      <article class="fp-beat-card">
-        <h3>${escapeHtml(`${item.beat_no}. ${item.beat_name}`)}</h3>
-        <div class="fp-beat-meta">${escapeHtml(item.act || "")} · ${escapeHtml(item.episode_range || "")} · ${escapeHtml(item.checkpoint_title || "")}</div>
-        <p><strong>叙事功能：</strong>${escapeHtml(item.narrative_function || "")}</p>
-        <p><strong>剧情内容：</strong>${escapeHtml(item.plot_content || "")}</p>
-        <p><strong>人物变化：</strong>${escapeHtml(item.character_change || "")}</p>
-        <p><strong>冲突升级：</strong>${escapeHtml(item.conflict_upgrade || "")}</p>
-        <p><strong>钩子 / 反转：</strong>${escapeHtml(item.hook_or_reversal || "")}</p>
-        <p><strong>关联故事线：</strong>${escapeHtml((item.linked_storylines || []).join("、"))}</p>
-      </article>
-    `).join("");
+    `}).join("");
+    const cards = items.map((item, index) => {
+      const explanation = beatExplanationFor(item.beat_no);
+      const summary = beatSummaryText(item, explanation);
+      const isOpen = Boolean(ui.expandedBeats[String(item.beat_no || index + 1)]);
+      return `
+      <details class="fp-beat-card fp-beat-detail" data-beat-detail="${escapeHtml(item.beat_no || index + 1)}" ${isOpen ? "open" : ""}>
+        <summary>
+          <span>
+            <strong>${escapeHtml(`${item.beat_no}. ${item.beat_name}`)}</strong>
+            <em>${escapeHtml(item.act || "")} · ${escapeHtml(item.episode_range || "")}</em>
+          </span>
+          <small>${escapeHtml(summary)}</small>
+        </summary>
+        <div class="fp-beat-detail-body">
+          <div class="fp-beat-meta">${escapeHtml(item.checkpoint_title || "")}</div>
+          ${explanation ? `<div class="fp-beat-explain"><strong>卡点说明：</strong>${escapeHtml(explanation)}</div>` : ""}
+          ${renderBeatField(index, "episode_range", "集数范围", item.episode_range, editable)}
+          ${renderBeatField(index, "checkpoint_title", "卡点标题", item.checkpoint_title, editable)}
+          ${renderBeatField(index, "narrative_function", "叙事功能", item.narrative_function, editable)}
+          ${renderBeatField(index, "plot_content", "剧情内容", item.plot_content, editable)}
+          ${renderBeatField(index, "character_change", "人物变化", item.character_change, editable)}
+          ${renderBeatField(index, "conflict_upgrade", "冲突升级", item.conflict_upgrade, editable)}
+          ${renderBeatField(index, "hook_or_reversal", "钩子 / 反转", item.hook_or_reversal, editable)}
+          ${renderBeatField(index, "linked_storylines", "关联故事线", (item.linked_storylines || []).join("、"), editable)}
+        </div>
+      </details>
+    `}).join("");
     return `
       <div class="fp-timeline-wrap"><div class="fp-timeline">${nodes}</div></div>
       <div class="fp-json-meta">当前共 ${items.length} 条节拍，确认按钮要求固定为 15 条。</div>
@@ -1092,11 +1409,84 @@
     `;
   }
 
+  function beatSummaryText(item, explanation) {
+    const text = explanation || item.hook_or_reversal || item.plot_content || item.narrative_function || item.checkpoint_title || "";
+    return truncateText(text, 72);
+  }
+
+  function renderBeatField(index, field, label, value, editable) {
+    const text = value == null ? "" : String(value);
+    if (!editable) {
+      return `<p><strong>${escapeHtml(label)}：</strong>${formatText(text)}</p>`;
+    }
+    const isShort = ["episode_range", "checkpoint_title", "linked_storylines"].includes(field);
+    if (isShort) {
+      return `
+        <label class="fp-beat-edit-field">
+          <span>${escapeHtml(label)}</span>
+          <input data-beat-index="${index}" data-beat-field="${escapeHtml(field)}" value="${escapeHtml(text)}" />
+        </label>
+      `;
+    }
+    return `
+      <label class="fp-beat-edit-field">
+        <span>${escapeHtml(label)}</span>
+        <textarea data-beat-index="${index}" data-beat-field="${escapeHtml(field)}">${escapeHtml(text)}</textarea>
+      </label>
+    `;
+  }
+
+  function beatExplanationFor(beatNo) {
+    const explanation = state.checkpoint_explanation;
+    if (!explanation || typeof explanation !== "object" || Array.isArray(explanation)) return "";
+    const notes = Array.isArray(explanation.beat_notes) ? explanation.beat_notes : [];
+    const note = notes.find((item) => Number(item && item.beat_no) === Number(beatNo));
+    if (!note || typeof note !== "object") return "";
+    return note.explanation || note.summary || note.note || note.content || "";
+  }
+
+  function renderCheckpointExplanation(data, options) {
+    if (isEmptyValue(data)) {
+      return `<div class="fp-empty">尚未生成卡点说明。生成 04 阶段后，这里会展示每个节拍的解释摘要。</div>`;
+    }
+    const editable = Boolean(options && options.editable);
+    const overview = data && typeof data === "object" && !Array.isArray(data) ? (data.overview || data.summary || "") : String(data || "");
+    const notes = data && typeof data === "object" && Array.isArray(data.beat_notes) ? data.beat_notes : [];
+    return `
+      <div class="fp-stage-note">
+        <strong>整体说明</strong>
+        ${editable ? `<textarea class="fp-checkpoint-overview" data-checkpoint-overview>${escapeHtml(overview)}</textarea>` : `<div class="fp-text">${formatText(overview)}</div>`}
+      </div>
+      <div class="fp-beat-card-grid">
+        ${notes.map((note, index) => `
+          <article class="fp-beat-card">
+            <h3>${escapeHtml(`${note.beat_no || index + 1}. ${BEAT_NAMES[(Number(note.beat_no) || index + 1) - 1] || "卡点说明"}`)}</h3>
+            ${editable ? `
+              <label class="fp-beat-edit-field">
+                <span>说明摘要</span>
+                <textarea data-beat-note-index="${index}">${escapeHtml(note.explanation || note.summary || note.note || note.content || "")}</textarea>
+              </label>
+            ` : `<p>${formatText(note.explanation || note.summary || note.note || note.content || "")}</p>`}
+          </article>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function renderProcessingBanner(message) {
+    return `
+      <div class="fp-processing-banner">
+        <span class="fp-spinner" aria-hidden="true"></span>
+        <span>${escapeHtml(message)}</span>
+      </div>
+    `;
+  }
+
   function renderBeatExplanationView() {
     const stage = state.stage_state.beat;
     const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
-    const editing = ui.editMode.beatExplanation;
+    const hasExplanation = !isEmptyValue(state.checkpoint_explanation);
     return `
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
@@ -1106,15 +1496,12 @@
           </div>
           ${stageStatusTag("beat")}
         </div>
-        ${blocked ? `<div class="fp-empty">请先确认人设方案。</div>` : editing ? renderEditorBlock("checkpoint_explanation", "卡点说明") : renderDataBlock(state.checkpoint_explanation)}
+        ${isStageLoading("beat") ? renderProcessingBanner("正在生成卡点说明，请稍候...") : ""}
+        ${blocked && !hasExplanation ? `<div class="fp-empty">请先确认人设方案。</div>` : renderCheckpointExplanation(state.checkpoint_explanation, { editable: !blocked && !confirmed })}
+        ${renderStagePreferenceField("beat", blocked || confirmed || isStageLoading("beat"))}
         <div class="fp-actions">
-          ${editing ? `
-            <button class="fp-btn" data-action="cancel-editor" data-editor-stage="beatExplanation">取消</button>
-            <button class="fp-btn primary" data-action="save-editor" data-editor-key="checkpoint_explanation" data-stage-key="beat">更新卡点说明</button>
-          ` : `
-            <button class="fp-btn" data-action="open-editor" data-editor-stage="beatExplanation" data-editor-key="checkpoint_explanation" ${blocked || confirmed || isEmptyValue(state.checkpoint_explanation) ? "disabled" : ""}>编辑说明</button>
-            <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="beat" ${blocked || confirmed || state.beat_checkpoint_timeline.length !== 15 || isEmptyValue(state.checkpoint_explanation) ? "disabled" : ""}>确认 04 并进入人物故事线</button>
-          `}
+          ${renderUpstreamRollbackButton("beat")}
+          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="beat" ${blocked || confirmed || state.beat_checkpoint_timeline.length !== 15 || isEmptyValue(state.checkpoint_explanation) ? "disabled" : ""}>确认 04 并进入人物故事线</button>
         </div>
       </section>
     `;
@@ -1124,6 +1511,7 @@
     const stage = state.stage_state.storylines;
     const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
+    const hasStorylines = Array.isArray(state.character_storylines) && state.character_storylines.length > 0;
     return `
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
@@ -1134,21 +1522,16 @@
           ${stageStatusTag("storylines")}
         </div>
         ${confirmed ? `<div class="fp-inline-warning">人物故事线已确认并锁定。06 阶段的整体改编指引会以当前故事线取舍为准。</div>` : ""}
-        ${blocked ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineCards(state.character_storylines, { concise: true })}
+        ${isStageLoading("storylines") ? renderProcessingBanner("正在生成人物故事线，请稍候...") : ""}
+        ${blocked && !hasStorylines ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineCards(state.character_storylines, { concise: true })}
+        ${renderStagePreferenceField("storylines", blocked || confirmed || isStageLoading("storylines"))}
         ${renderStageError("storylines")}
-        ${!blocked && !confirmed ? `
-          <div class="fp-field" style="margin-top:14px">
-            <label>05 用户反馈 / 修改意见</label>
-            <textarea data-feedback-key="storylines" placeholder="会作为 user_feedback 传入 stage 05 revise。">${escapeHtml(state.feedback.storylines || "")}</textarea>
-          </div>
-        ` : ""}
-        <div class="fp-lock-note">故事线处理支持 keep / simplify / delete。只有先更新，再确认，06 才会解锁。</div>
+        <div class="fp-lock-note">05 阶段由 04 确认后自动生成；如回退 04，人物故事线会同步清空，避免旧故事线引用旧节拍。</div>
         <div class="fp-actions">
+          ${renderUpstreamRollbackButton("storylines")}
           ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="storylines">回退到此阶段并清空下游</button>` : ""}
-          <button class="fp-btn" data-action="run-stage-generate" data-stage-key="storylines" ${blocked || confirmed || isStageLoading("storylines") ? "disabled" : ""}>生成人物故事线</button>
-          <button class="fp-btn" data-action="run-stage-revise" data-stage-key="storylines" ${blocked || confirmed || isStageLoading("storylines") || !state.character_storylines.length ? "disabled" : ""}>基于意见更新</button>
-          <button class="fp-btn" data-action="go-view" data-view="storyline_details" ${blocked || !state.character_storylines.length ? "disabled" : ""}>查看详细故事线</button>
-          <button class="fp-btn primary" data-action="go-view" data-view="storyline_decisions" ${blocked || !state.character_storylines.length ? "disabled" : ""}>进入故事线处理</button>
+          <button class="fp-btn" data-action="go-view" data-view="storyline_details" ${!state.character_storylines.length ? "disabled" : ""}>查看详细故事线</button>
+          <button class="fp-btn primary" data-action="go-view" data-view="storyline_decisions" ${!state.character_storylines.length ? "disabled" : ""}>进入故事线处理</button>
         </div>
       </section>
     `;
@@ -1157,6 +1540,7 @@
   function renderStorylineDetailsView() {
     const stage = state.stage_state.storylines;
     const blocked = stageBlockedByUpstream(stage);
+    const hasStorylines = Array.isArray(state.character_storylines) && state.character_storylines.length > 0;
     return `
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
@@ -1166,10 +1550,12 @@
           </div>
           ${stageStatusTag("storylines")}
         </div>
-        ${blocked ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineCards(state.character_storylines, { detailed: true })}
+        ${blocked && !hasStorylines ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineCards(state.character_storylines, { detailed: true })}
+        ${renderStagePreferenceField("storylines", blocked || stage.confirmed || isStageLoading("storylines"))}
         <div class="fp-actions">
-          <button class="fp-btn" data-action="go-view" data-view="storylines" ${blocked ? "disabled" : ""}>返回故事线总览</button>
-          <button class="fp-btn primary" data-action="go-view" data-view="storyline_decisions" ${blocked || !state.character_storylines.length ? "disabled" : ""}>去处理保留 / 精简 / 删除</button>
+          ${renderUpstreamRollbackButton("storylines")}
+          <button class="fp-btn" data-action="go-view" data-view="storylines">返回故事线总览</button>
+          <button class="fp-btn primary" data-action="go-view" data-view="storyline_decisions" ${!state.character_storylines.length ? "disabled" : ""}>去处理保留 / 精简 / 删除</button>
         </div>
       </section>
     `;
@@ -1180,6 +1566,7 @@
     const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
     const canConfirm = state.character_storylines.length > 0;
+    const hasStorylines = Array.isArray(state.character_storylines) && state.character_storylines.length > 0;
     return `
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
@@ -1189,10 +1576,12 @@
           </div>
           ${stageStatusTag("storylines")}
         </div>
-        ${blocked ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineDecisionGrid()}
+        ${blocked && !hasStorylines ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineDecisionGrid()}
+        ${renderStagePreferenceField("storylines", blocked || confirmed || isStageLoading("storylines"))}
         <div class="fp-actions">
+          ${renderUpstreamRollbackButton("storylines")}
           ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="storylines">回退到此阶段并清空下游</button>` : ""}
-          <button class="fp-btn" data-action="go-view" data-view="storyline_details" ${blocked ? "disabled" : ""}>返回详情查看</button>
+          <button class="fp-btn" data-action="go-view" data-view="storyline_details" ${!state.character_storylines.length ? "disabled" : ""}>返回详情查看</button>
           <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="storylines" ${blocked || confirmed || !canConfirm ? "disabled" : ""}>确认并进入整体改编指引</button>
         </div>
       </section>
@@ -1203,7 +1592,7 @@
     const stage = state.stage_state.guide;
     const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
-    const editing = ui.editMode.guide;
+    const hasGuide = !isEmptyValue(state.adaptation_guide);
     return `
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
@@ -1214,25 +1603,14 @@
           ${stageStatusTag("guide")}
         </div>
         ${confirmed ? `<div class="fp-inline-warning">整体改编指引已确认并锁定。现在可以生成最终 JSON 策划包。</div>` : ""}
-        ${blocked ? `<div class="fp-empty">请先确认 05 阶段。</div>` : editing ? renderEditorBlock("adaptation_guide", "整体改编指引") : renderGuideCards(state.adaptation_guide)}
+        ${isStageLoading("guide") ? renderProcessingBanner("正在生成整体改编指引，请稍候...") : ""}
+        ${blocked && !hasGuide ? `<div class="fp-empty">请先确认 05 阶段。</div>` : renderGuideCards(state.adaptation_guide)}
+        ${renderStagePreferenceField("guide", blocked || confirmed || isStageLoading("guide"))}
         ${renderStageError("guide")}
-        ${!blocked && !confirmed ? `
-          <div class="fp-field" style="margin-top:14px">
-            <label>06 用户反馈 / 修改意见</label>
-            <textarea data-feedback-key="guide" placeholder="会作为 user_feedback 传入 stage 06 revise。">${escapeHtml(state.feedback.guide || "")}</textarea>
-          </div>
-        ` : ""}
         <div class="fp-actions">
+          ${renderUpstreamRollbackButton("guide")}
           ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="guide">回退到此阶段并清空下游</button>` : ""}
-          ${editing ? `
-            <button class="fp-btn" data-action="cancel-editor" data-editor-stage="guide">取消</button>
-            <button class="fp-btn primary" data-action="save-editor" data-editor-key="adaptation_guide" data-stage-key="guide">更新改编指引</button>
-          ` : `
-            <button class="fp-btn" data-action="run-stage-generate" data-stage-key="guide" ${blocked || confirmed || isStageLoading("guide") ? "disabled" : ""}>生成改编指引</button>
-            <button class="fp-btn" data-action="run-stage-revise" data-stage-key="guide" ${blocked || confirmed || isStageLoading("guide") || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>基于意见更新</button>
-            <button class="fp-btn" data-action="open-editor" data-editor-stage="guide" data-editor-key="adaptation_guide" ${blocked || confirmed || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>编辑</button>
-            <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="guide" ${blocked || confirmed || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>确认并进入最终 JSON 输出</button>
-          `}
+          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="guide" ${blocked || confirmed || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>确认并进入最终 JSON 输出</button>
         </div>
       </section>
     `;
@@ -1250,16 +1628,13 @@
           </div>
           ${locked ? `<span class="fp-tag lock">待上游确认</span>` : hasOutput ? `<span class="fp-tag ok">07 输出已生成</span>` : `<span class="fp-tag blue">等待生成</span>`}
         </div>
-        ${locked ? `<div class="fp-empty">请先确认 06 阶段。</div>` : `
-          <div class="fp-field" style="margin-bottom:14px">
-            <label>07 用户反馈 / 修改意见</label>
-            <textarea data-feedback-key="package" placeholder="会作为 user_feedback 传入 stage 07 revise。">${escapeHtml(state.feedback.package || "")}</textarea>
-          </div>
+        ${isStageLoading("package") ? renderProcessingBanner("正在生成最终策划包，请稍候...") : ""}
+        ${locked && !hasOutput ? `<div class="fp-empty">请先确认 06 阶段。</div>` : `
           ${renderPackageBlocks()}
         `}
+        ${renderStagePreferenceField("package", locked || isStageLoading("package"))}
         <div class="fp-actions">
-          <button class="fp-btn" data-action="run-stage-generate" data-stage-key="package" ${locked || isStageLoading("package") ? "disabled" : ""}>生成最终策划包</button>
-          <button class="fp-btn" data-action="run-stage-revise" data-stage-key="package" ${locked || isStageLoading("package") || !hasOutput ? "disabled" : ""}>基于意见重新校验</button>
+          ${renderUpstreamRollbackButton("package")}
           <button class="fp-btn primary" data-action="copy-final-package" ${locked || !hasOutput ? "disabled" : ""}>复制 07 输出 JSON</button>
         </div>
       </section>
@@ -1324,28 +1699,48 @@
           ${escapeHtml(segment.focus || "")}
         </div>
       `).join("");
+      const linkedBeats = Array.isArray(item.linked_beats) ? item.linked_beats : [];
+      const storylineId = String(item.id || item.title || "");
+      const isOpen = Boolean(ui.expandedStorylines[storylineId]);
+      const summary = storylineSummaryText(item);
+      const meta = [
+        item.character_name || item.title || "",
+        item.line_type || "",
+        item.importance ? `重要性：${item.importance}` : "",
+      ].filter(Boolean).join(" · ");
       return `
-        <article class="fp-story-card">
-          <div class="fp-story-head">
-            <h3>${escapeHtml(item.title || "")}</h3>
-            <span class="fp-tag ${decisionTagClass(item.decision)}">${escapeHtml(decisionLabel(item.decision))}</span>
-          </div>
-          <p>${escapeHtml(item.summary || "")}</p>
-          ${options && options.detailed ? `
+        <details class="fp-story-card fp-story-detail" data-storyline-detail="${escapeHtml(storylineId)}" ${isOpen || (options && options.detailed) ? "open" : ""}>
+          <summary>
+            <div class="fp-story-head">
+              <div>
+                <h3>${escapeHtml(item.title || item.character_name || "未命名人物线")}</h3>
+                ${meta ? `<em>${escapeHtml(meta)}</em>` : ""}
+              </div>
+              <span class="fp-tag ${decisionTagClass(item.decision)}">${escapeHtml(decisionLabel(item.decision))}</span>
+            </div>
+            <p><strong>summary：</strong>${escapeHtml(summary)}</p>
+            ${linkedBeats.length ? `<div class="fp-story-beats">${linkedBeats.map((beat) => `<span>Beat ${escapeHtml(beat)}</span>`).join("")}</div>` : `<div class="fp-story-beats muted"><span>未链接节拍</span></div>`}
+          </summary>
+          <div class="fp-story-detail-body">
             <div class="fp-detail-list">
-              <div class="fp-detail-item"><strong>detailed_storyline</strong>${escapeHtml(item.detailed_storyline || "")}</div>
-              <div class="fp-detail-item"><strong>linked_beats</strong>${escapeHtml((item.linked_beats || []).join(", "))}</div>
+              <div class="fp-detail-item"><strong>重要决策</strong>${escapeHtml(decisionLabel(item.decision))}</div>
+              <div class="fp-detail-item"><strong>detailed_storyline</strong>${formatText(item.detailed_storyline || "尚未补充详细人物线。")}</div>
+              <div class="fp-detail-item"><strong>linked_beats</strong>${escapeHtml(linkedBeats.length ? linkedBeats.join(", ") : "尚未链接")}</div>
               <div class="fp-detail-item"><strong>edit_notes</strong>${escapeHtml(item.edit_notes || "")}</div>
             </div>
             ${distribution ? `<div class="fp-detail-list" style="margin-top:12px">${distribution}</div>` : ""}
-          ` : ""}
-          <div class="fp-actions" style="margin-top:12px">
-            <button class="fp-btn small" data-action="open-storyline-modal" data-storyline-id="${escapeHtml(item.id)}">查看详细故事线</button>
-            ${options && options.concise ? `<button class="fp-btn small" data-action="go-view" data-view="storyline_decisions">去做处理决策</button>` : ""}
+            <div class="fp-actions" style="margin-top:12px">
+              <button class="fp-btn small" data-action="open-storyline-modal" data-storyline-id="${escapeHtml(item.id)}">编辑 / 补充</button>
+              ${options && options.concise ? `<button class="fp-btn small" data-action="go-view" data-view="storyline_decisions">去做处理决策</button>` : ""}
+            </div>
           </div>
-        </article>
+        </details>
       `;
     }).join("")}</div>`;
+  }
+
+  function storylineSummaryText(item) {
+    return item.summary || item.detailed_storyline || item.edit_notes || "尚未补充摘要。";
   }
 
   function renderStorylineDecisionGrid() {
@@ -1355,12 +1750,19 @@
     return `
       <div class="fp-story-grid">
         ${state.character_storylines.map((item) => `
-          <article class="fp-story-card">
+          <details class="fp-story-card fp-story-detail" data-storyline-detail="${escapeHtml(item.id || item.title || "")}" ${ui.expandedStorylines[String(item.id || item.title || "")] ? "open" : ""}>
+            <summary>
             <div class="fp-story-head">
-              <h3>${escapeHtml(item.title || "")}</h3>
+              <div>
+                <h3>${escapeHtml(item.title || item.character_name || "未命名人物线")}</h3>
+                <em>${escapeHtml([item.line_type || "", item.importance ? `重要性：${item.importance}` : ""].filter(Boolean).join(" · "))}</em>
+              </div>
               <span class="fp-tag ${decisionTagClass(item.decision)}">${escapeHtml(decisionLabel(item.decision))}</span>
             </div>
-            <p>${escapeHtml(item.summary || "")}</p>
+            <p><strong>summary：</strong>${escapeHtml(storylineSummaryText(item))}</p>
+            ${Array.isArray(item.linked_beats) && item.linked_beats.length ? `<div class="fp-story-beats">${item.linked_beats.map((beat) => `<span>Beat ${escapeHtml(beat)}</span>`).join("")}</div>` : ""}
+            </summary>
+            <div class="fp-story-detail-body">
             <div class="fp-radio-row">
               ${STORYLINE_DECISIONS.map(([value, label]) => `
                 <label>
@@ -1372,7 +1774,8 @@
             <div class="fp-actions" style="margin-top:0">
               <button class="fp-btn small" data-action="open-storyline-modal" data-storyline-id="${escapeHtml(item.id)}">查看并编辑细节</button>
             </div>
-          </article>
+            </div>
+          </details>
         `).join("")}
       </div>
     `;
@@ -1390,6 +1793,10 @@
               <p class="fp-modal-sub">支持查看并更新 <code>detailed_storyline</code>、<code>linked_beats</code>、<code>episode_distribution</code>、<code>edit_notes</code>。</p>
             </div>
             <button class="fp-btn small" data-action="close-storyline-modal">关闭</button>
+          </div>
+          <div class="fp-field">
+            <label>title</label>
+            <input data-modal-field="title" value="${escapeHtml(storyline.title || "")}" />
           </div>
           <div class="fp-field">
             <label>summary</label>
@@ -1459,10 +1866,39 @@
         <div class="fp-footer-note">localStorage 自动保存已开启。上游确认后不能直接改；如需修改，请使用显式回退。</div>
         <div class="fp-top-actions">
           <button class="fp-btn" data-action="go-view" data-view="${previous ? previous.id : ""}" ${previous && viewUnlocked(previous.id) ? "" : "disabled"}>上一步</button>
-          <button class="fp-btn primary" data-action="go-view" data-view="${next ? next.id : ""}" ${next && viewUnlocked(next.id) ? "" : "disabled"}>下一步</button>
+          <button class="fp-btn primary" data-action="go-next-stage" data-view="${next ? next.id : ""}" ${next && viewUnlocked(next.id) ? "" : "disabled"}>下一步</button>
         </div>
       </div>
     `;
+  }
+
+  async function goNextStage(nextViewId) {
+    const currentStageKey = stageKeyForView(state.current_view);
+    const nextView = viewDef(nextViewId);
+    if (!nextView || !viewUnlocked(nextView.id)) {
+      showToast("请先确认上游阶段");
+      return;
+    }
+    state.current_view = nextView.id;
+    render();
+    const nextStageKey = nextView.stageKey;
+    if (nextStageKey !== currentStageKey) {
+      await autoGenerateCurrentStage();
+    }
+  }
+
+  async function autoGenerateCurrentStage() {
+    const stageKey = stageKeyForView(state.current_view);
+    const stage = state.stage_state[stageKey];
+    if (!stage || stageKey === "basic" || stage.confirmed || stage.locked || hasStageData(stageKey) || isStageLoading(stageKey)) {
+      return;
+    }
+    try {
+      await runStage(stageKey, { revise: false });
+      showToast("已进入下一阶段并开始生成");
+    } catch (error) {
+      showToast(formatStageError(error, stageNoForKey(stageKey)));
+    }
   }
 
   function decisionLabel(value) {
@@ -1503,6 +1939,24 @@
     };
   }
 
+  function payloadUserRequirements() {
+    const parts = [];
+    const base = String(state.basic_config.user_requirements || "").trim();
+    const preference = String((state.prompt_preferences || {}).script_preference || "").trim();
+    if (base) parts.push(base);
+    if (preference && preference !== base) parts.push(`本剧本偏好提示：${preference}`);
+    return parts.join("\n\n");
+  }
+
+  function stageFeedbackPayload(stageKey) {
+    const parts = [];
+    const explicit = String((state.feedback || {})[stageKey] || "").trim();
+    const preference = String(((state.prompt_preferences || {}).stage_prompts || {})[stageKey] || "").trim();
+    if (explicit) parts.push(explicit);
+    if (preference && preference !== explicit) parts.push(`本阶段偏好提示：${preference}`);
+    return parts.join("\n\n");
+  }
+
   function buildStagePayload(stageKey, options) {
     const revise = options && options.revise;
     if (stageKey === "basic") {
@@ -1516,7 +1970,7 @@
         minutes_per_episode: state.basic_config.minutes_per_episode,
         adaptation_direction: state.basic_config.adaptation_direction,
         user_constraints: state.basic_config.user_constraints,
-        user_requirements: state.basic_config.user_requirements,
+        user_requirements: payloadUserRequirements(),
       };
     }
     if (stageKey === "worldview") {
@@ -1526,9 +1980,9 @@
         locked_basic_config: state.basic_config,
         basic_config: state.basic_config,
         previous_worldview_plan: revise ? state.worldview_plan : {},
-        user_feedback: state.feedback.worldview,
+        user_feedback: stageFeedbackPayload("worldview"),
         adaptation_direction: state.basic_config.adaptation_direction,
-        user_requirements: state.basic_config.user_requirements,
+        user_requirements: payloadUserRequirements(),
       };
     }
     if (stageKey === "character") {
@@ -1539,9 +1993,9 @@
         basic_config: state.basic_config,
         worldview_plan: state.worldview_plan,
         previous_character_plan: revise ? state.character_plan : {},
-        user_feedback: state.feedback.character,
+        user_feedback: stageFeedbackPayload("character"),
         adaptation_direction: state.basic_config.adaptation_direction,
-        user_requirements: state.basic_config.user_requirements,
+        user_requirements: payloadUserRequirements(),
       };
     }
     if (stageKey === "beat") {
@@ -1552,10 +2006,10 @@
         worldview_plan: state.worldview_plan,
         character_plan: state.character_plan,
         previous_beat_checkpoint_timeline: revise ? state.beat_checkpoint_timeline : [],
-        user_feedback: state.feedback.beat,
+        user_feedback: stageFeedbackPayload("beat"),
         framework_score_report: state.framework_score_report,
         adaptation_direction: state.basic_config.adaptation_direction,
-        user_requirements: state.basic_config.user_requirements,
+        user_requirements: payloadUserRequirements(),
       };
     }
     if (stageKey === "storylines") {
@@ -1568,9 +2022,9 @@
         beat_checkpoint_timeline: state.beat_checkpoint_timeline,
         previous_character_storylines: revise ? state.character_storylines : [],
         current_storyline_decisions: state.storyline_decisions,
-        user_feedback: state.feedback.storylines,
+        user_feedback: stageFeedbackPayload("storylines"),
         adaptation_direction: state.basic_config.adaptation_direction,
-        user_requirements: state.basic_config.user_requirements,
+        user_requirements: payloadUserRequirements(),
       });
     }
     if (stageKey === "guide") {
@@ -1584,9 +2038,9 @@
         character_storylines: state.character_storylines,
         storyline_decisions: state.storyline_decisions,
         previous_adaptation_guide: revise ? state.adaptation_guide : {},
-        user_feedback: state.feedback.guide,
+        user_feedback: stageFeedbackPayload("guide"),
         adaptation_direction: state.basic_config.adaptation_direction,
-        user_requirements: state.basic_config.user_requirements,
+        user_requirements: payloadUserRequirements(),
       };
     }
     if (stageKey === "package") {
@@ -1603,9 +2057,9 @@
         adaptation_guide: state.adaptation_guide,
         user_edit_history: state.user_edit_history,
         previous_framework_plan_package: revise ? state.framework_plan_package : {},
-        user_feedback: state.feedback.package,
+        user_feedback: stageFeedbackPayload("package"),
         adaptation_direction: state.basic_config.adaptation_direction,
-        user_requirements: state.basic_config.user_requirements,
+        user_requirements: payloadUserRequirements(),
       };
     }
     return {};
@@ -1638,11 +2092,13 @@
       state.checkpoint_explanation = safeData.checkpoint_explanation && typeof safeData.checkpoint_explanation === "object" && !Array.isArray(safeData.checkpoint_explanation)
         ? safeData.checkpoint_explanation
         : {};
+      syncBeatCheckpointData({ clearStorylines: true });
     }
     if (stageNo === "05") {
       state.character_storylines = Array.isArray(safeData.character_storylines)
         ? safeData.character_storylines
         : [];
+      normalizeStorylinesForCurrentBeats();
     }
     if (stageNo === "06") {
       state.adaptation_guide = safeData.adaptation_guide && typeof safeData.adaptation_guide === "object" && !Array.isArray(safeData.adaptation_guide)
@@ -1665,6 +2121,7 @@
     targetState.storyline_decisions = storylines.map((item) => ({
       storyline_id: item.id,
       title: item.title,
+      linked_beats: Array.isArray(item.linked_beats) ? item.linked_beats : [],
       decision: item.decision || "keep",
     }));
   }
@@ -1676,6 +2133,7 @@
     state.stage_state[stageKey].status = "running";
     render();
     try {
+      await waitForPaint();
       const response = await planningApi.runStage(stageNo, buildStagePayload(stageKey, options || {}));
       applyStageResponse(stageNo, response);
       state.stage_state[stageKey].status = options && options.revise ? "updated" : "generated";
@@ -1736,20 +2194,25 @@
       unlockStage("worldview");
       state.current_view = "worldview";
       syncStageFlow(state);
+      syncFrameworkAssetState(state, "confirm:basic");
       recordHistory("confirm_stage", { stageKey: "basic", stageNo: "01", sourceBrief: !isEmptyValue(state.source_brief) });
       showToast("基础配置已确认，并已生成 source_brief");
       render();
+      await autoGenerateCurrentStage();
     } catch (error) {
       showToast(formatStageError(error, "01"));
     }
   }
 
-  function confirmStage(stageKey) {
+  async function confirmStage(stageKey) {
     if (stageKey === "worldview" && isEmptyValue(state.worldview_plan)) return;
     if (stageKey === "character" && isEmptyValue(state.character_plan)) return;
     if (stageKey === "beat" && (state.beat_checkpoint_timeline.length !== 15 || isEmptyValue(state.checkpoint_explanation))) {
       showToast("04 阶段必须同时具备 15 条时间轴和卡点说明后才能确认");
       return;
+    }
+    if (stageKey === "storylines") {
+      normalizeStorylinesForCurrentBeats();
     }
     if (stageKey === "storylines" && !state.character_storylines.length) return;
     if (stageKey === "guide" && isEmptyValue(state.adaptation_guide)) return;
@@ -1778,9 +2241,11 @@
       state.current_view = "package";
     }
     syncStageFlow(state);
+    syncFrameworkAssetState(state, `confirm:${stageKey}`);
     recordHistory("confirm_stage", { stageKey, stageNo: stageNoForKey(stageKey) });
     showToast("已确认并锁定，已解锁下游阶段");
     render();
+    await autoGenerateCurrentStage();
   }
 
   function openEditor(editorStage, editorKey) {
@@ -1852,6 +2317,7 @@
   function saveStorylineModal(storylineId) {
     const storyline = state.character_storylines.find((item) => item.id === storylineId);
     if (!storyline) return;
+    const title = document.querySelector('[data-modal-field="title"]');
     const summary = document.querySelector('[data-modal-field="summary"]');
     const detailed = document.querySelector('[data-modal-field="detailed_storyline"]');
     const linkedBeats = document.querySelector('[data-modal-field="linked_beats"]');
@@ -1859,6 +2325,7 @@
     const editNotes = document.querySelector('[data-modal-field="edit_notes"]');
     const decision = document.querySelector('[data-modal-field="decision"]');
 
+    storyline.title = title ? title.value.trim() || storyline.title : storyline.title;
     storyline.summary = summary ? summary.value.trim() : storyline.summary;
     storyline.detailed_storyline = detailed ? detailed.value.trim() : storyline.detailed_storyline;
     storyline.linked_beats = parseLinkedBeats(linkedBeats ? linkedBeats.value : "");
@@ -1883,11 +2350,151 @@
     render();
   }
 
+  function addManualStoryline() {
+    if (state.stage_state.storylines.confirmed) return;
+    const id = `manual_storyline_${Date.now()}`;
+    state.character_storylines.push({
+      id,
+      title: "人工补充故事线",
+      summary: "",
+      detailed_storyline: "",
+      linked_beats: [],
+      episode_distribution: [],
+      edit_notes: "人工补充",
+      decision: "keep",
+    });
+    syncStorylineDecisions(state);
+    state.stage_state.storylines.status = "updated";
+    state.stage_state.storylines.confirmed = false;
+    syncStageFlow(state);
+    recordHistory("add_storyline", { storylineId: id });
+    ui.modalStorylineId = id;
+    render();
+  }
+
   function parseLinkedBeats(text) {
     return String(text || "")
-      .split(",")
+      .split(/[,，、]/)
       .map((item) => Number(item.trim()))
       .filter((item) => Number.isFinite(item) && item > 0);
+  }
+
+  function updateBeatTimelineField(indexValue, field, rawValue) {
+    if (state.stage_state.beat.confirmed) return;
+    const index = Number(indexValue);
+    if (!Number.isInteger(index) || index < 0 || index >= state.beat_checkpoint_timeline.length) return;
+    const beat = state.beat_checkpoint_timeline[index];
+    if (!beat || typeof beat !== "object") return;
+    if (field === "linked_storylines") {
+      beat[field] = String(rawValue || "")
+        .split(/[,，、]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    } else {
+      beat[field] = rawValue;
+    }
+    state.stage_state.beat.status = "updated";
+    state.stage_state.beat.confirmed = false;
+    syncBeatCheckpointData({ clearStorylines: true });
+    syncStageFlow(state);
+    saveState();
+  }
+
+  function ensureCheckpointExplanationObject() {
+    if (!state.checkpoint_explanation || typeof state.checkpoint_explanation !== "object" || Array.isArray(state.checkpoint_explanation)) {
+      state.checkpoint_explanation = { overview: "", beat_notes: [] };
+    }
+    if (!Array.isArray(state.checkpoint_explanation.beat_notes)) {
+      state.checkpoint_explanation.beat_notes = [];
+    }
+    return state.checkpoint_explanation;
+  }
+
+  function updateCheckpointOverview(value) {
+    if (state.stage_state.beat.confirmed) return;
+    const explanation = ensureCheckpointExplanationObject();
+    explanation.overview = value;
+    state.stage_state.beat.status = "updated";
+    state.stage_state.beat.confirmed = false;
+    syncBeatCheckpointData({ clearStorylines: false });
+    syncStageFlow(state);
+    saveState();
+  }
+
+  function updateCheckpointBeatNote(indexValue, value) {
+    if (state.stage_state.beat.confirmed) return;
+    const index = Number(indexValue);
+    const explanation = ensureCheckpointExplanationObject();
+    if (!Number.isInteger(index) || index < 0) return;
+    while (explanation.beat_notes.length <= index) {
+      const beatNo = explanation.beat_notes.length + 1;
+      explanation.beat_notes.push({ beat_no: beatNo, explanation: "" });
+    }
+    const note = explanation.beat_notes[index];
+    note.explanation = value;
+    state.stage_state.beat.status = "updated";
+    state.stage_state.beat.confirmed = false;
+    syncBeatCheckpointData({ clearStorylines: false });
+    syncStageFlow(state);
+    saveState();
+  }
+
+  function syncBeatCheckpointData(options) {
+    const clearStorylines = Boolean(options && options.clearStorylines);
+    const beats = Array.isArray(state.beat_checkpoint_timeline) ? state.beat_checkpoint_timeline : [];
+    const explanation = ensureCheckpointExplanationObject();
+    const notesByBeat = new Map(
+      (Array.isArray(explanation.beat_notes) ? explanation.beat_notes : [])
+        .filter((note) => note && typeof note === "object")
+        .map((note) => [Number(note.beat_no), note])
+    );
+    explanation.beat_notes = beats.map((beat, index) => {
+      const beatNo = Number(beat && beat.beat_no) || index + 1;
+      const existing = notesByBeat.get(beatNo) || {};
+      return {
+        beat_no: beatNo,
+        explanation: existing.explanation || existing.summary || existing.note || beatSummaryText(beat || {}, ""),
+      };
+    });
+    if (!explanation.overview) {
+      explanation.overview = "该卡点说明与同一条十五节拍时间轴一一对应。";
+    }
+    if (clearStorylines && state.character_storylines.length) {
+      state.character_storylines = [];
+      state.storyline_decisions = [];
+      state.stage_state.storylines.confirmed = false;
+      state.stage_state.storylines.locked = true;
+      state.stage_state.storylines.status = "locked";
+      downstreamStages("storylines").forEach((stageKey) => {
+        clearStageData(stageKey);
+        state.stage_state[stageKey].confirmed = false;
+        state.stage_state[stageKey].locked = true;
+        state.stage_state[stageKey].status = "locked";
+      });
+    }
+  }
+
+  function normalizeStorylinesForCurrentBeats() {
+    const validBeats = new Set((state.beat_checkpoint_timeline || []).map((beat, index) => Number(beat && beat.beat_no) || index + 1));
+    state.character_storylines = (Array.isArray(state.character_storylines) ? state.character_storylines : []).map((item, index) => {
+      const next = Object.assign({
+        id: `storyline_${index + 1}`,
+        title: `故事线 ${index + 1}`,
+        summary: "",
+        detailed_storyline: "",
+        linked_beats: [],
+        episode_distribution: [],
+        edit_notes: "",
+        decision: "keep",
+      }, item || {});
+      next.summary = String(next.summary || "");
+      next.detailed_storyline = String(next.detailed_storyline || "");
+      next.linked_beats = (Array.isArray(next.linked_beats) ? next.linked_beats : parseLinkedBeats(next.linked_beats))
+        .filter((beatNo) => validBeats.has(Number(beatNo)));
+      next.decision = next.decision || "keep";
+      return next;
+    });
+    syncStorylineDecisions(state);
   }
 
   async function runBeatScoreLoop(maxRounds) {
@@ -1909,10 +2516,10 @@
           worldview_plan: state.worldview_plan,
           character_plan: state.character_plan,
           previous_beat_checkpoint_timeline: current || [],
-          user_feedback: state.feedback.beat,
+          user_feedback: stageFeedbackPayload("beat"),
           framework_score_report: lastScoreReport,
           adaptation_direction: state.basic_config.adaptation_direction,
-          user_requirements: state.basic_config.user_requirements,
+          user_requirements: payloadUserRequirements(),
         };
         const beatResponse = await planningApi.runStage("04", payload);
         applyStageResponse("04", beatResponse);
@@ -1968,9 +2575,16 @@
       // ignore
     }
     state = clone(initialState);
+    state.prompt_preferences = normalizePromptPreferences(loadPromptPreferences());
+    applyPromptPreferencesToBasicConfig(state, true);
     syncStageFlow(state);
     ui.toast = "";
     ui.loading = {};
+    ui.loadingStartedAt = {};
+    if (ui.loadingTicker) {
+      window.clearInterval(ui.loadingTicker);
+      ui.loadingTicker = null;
+    }
     ui.stageErrors = {};
     ui.modalStorylineId = null;
     ui.editMode = {
@@ -2137,19 +2751,75 @@
     if (target.matches("[data-config-key]")) {
       const key = target.dataset.configKey;
       state.basic_config[key] = target.type === "number" ? Number(target.value) : target.value;
+      savePromptPreferences(`basic_config:${key}`);
+      saveState();
+      return;
+    }
+    if (target.matches("[data-script-preference]")) {
+      state.prompt_preferences.script_preference = target.value;
+      state.prompt_preferences.active_template_id = "custom";
+      savePromptPreferences("script_preference");
+      saveState();
+      return;
+    }
+    if (target.matches("[data-stage-preference-key]")) {
+      const stageKey = target.dataset.stagePreferenceKey;
+      state.prompt_preferences.stage_prompts[stageKey] = target.value;
+      savePromptPreferences(`stage_preference:${stageKey}`);
       saveState();
       return;
     }
     if (target.matches("[data-feedback-key]")) {
       state.feedback[target.dataset.feedbackKey] = target.value;
+      savePromptPreferences(`feedback:${target.dataset.feedbackKey}`);
       saveState();
       return;
     }
     if (target.matches("[data-editor-key]")) {
       state.editors[target.dataset.editorKey] = target.value;
+      savePromptPreferences(`editor:${target.dataset.editorKey}`);
+      saveState();
+      return;
+    }
+    if (target.matches("[data-beat-index][data-beat-field]")) {
+      updateBeatTimelineField(target.dataset.beatIndex, target.dataset.beatField, target.value);
+      return;
+    }
+    if (target.matches("[data-checkpoint-overview]")) {
+      updateCheckpointOverview(target.value);
+      return;
+    }
+    if (target.matches("[data-beat-note-index]")) {
+      updateCheckpointBeatNote(target.dataset.beatNoteIndex, target.value);
       return;
     }
   });
+
+  app.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!target.matches("[data-preference-template]")) return;
+    const templateId = target.value || "custom";
+    const templates = ((state.prompt_preferences || {}).templates || DEFAULT_PROMPT_TEMPLATES);
+    const template = templates.find((item) => item.id === templateId);
+    state.prompt_preferences.active_template_id = templateId;
+    if (template && templateId !== "custom") {
+      state.prompt_preferences.script_preference = template.prompt || "";
+    }
+    savePromptPreferences(`template:${templateId}`);
+    saveState();
+    render();
+  });
+
+  app.addEventListener("toggle", (event) => {
+    const detail = event.target;
+    if (!detail || !detail.matches || !detail.matches("[data-beat-detail]")) return;
+    ui.expandedBeats[String(detail.dataset.beatDetail || "")] = Boolean(detail.open);
+  }, true);
+  app.addEventListener("toggle", (event) => {
+    const detail = event.target;
+    if (!detail || !detail.matches || !detail.matches("[data-storyline-detail]")) return;
+    ui.expandedStorylines[String(detail.dataset.storylineDetail || "")] = Boolean(detail.open);
+  }, true);
 
   app.addEventListener("click", async (event) => {
     const actionElement = event.target.closest("[data-action]");
@@ -2158,6 +2828,10 @@
 
     if (action === "go-view") {
       setCurrentView(actionElement.dataset.view);
+      return;
+    }
+    if (action === "go-next-stage") {
+      await goNextStage(actionElement.dataset.view);
       return;
     }
     if (action === "reset-state") {
@@ -2204,7 +2878,7 @@
       return;
     }
     if (action === "confirm-stage") {
-      confirmStage(actionElement.dataset.stageKey);
+      await confirmStage(actionElement.dataset.stageKey);
       return;
     }
     if (action === "rollback-stage") {
@@ -2221,10 +2895,6 @@
     }
     if (action === "save-editor") {
       saveEditor(actionElement.dataset.editorKey, actionElement.dataset.stageKey);
-      return;
-    }
-    if (action === "run-score-loop") {
-      await runBeatScoreLoop(3);
       return;
     }
     if (action === "change-storyline-decision") {

@@ -981,6 +981,27 @@ a {
   margin-top: 12px;
 }
 
+.asset-action-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.task-action-group {
+  background: rgba(238, 244, 255, 0.7);
+}
+
+.asset-action-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .community-actions {
   margin-top: 14px;
 }

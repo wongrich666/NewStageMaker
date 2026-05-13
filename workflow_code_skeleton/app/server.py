@@ -664,6 +664,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=400)
         return _json_ok(task=snapshot)
 
+    @app.delete("/api/tasks/<task_id>")
+    @_login_required
+    def delete_task(task_id: str):
+        try:
+            task_manager.delete_task(task_id, user_id=_require_user_id())
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        return _json_ok(task_id=task_id)
+
     @app.delete("/api/projects/<int:project_id>")
     @_login_required
     def clear_project(project_id: int):

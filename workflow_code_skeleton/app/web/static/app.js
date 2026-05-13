@@ -63,6 +63,7 @@
     closeProfileBtn: $("closeProfileBtn"),
     closeProfileBackdrop: $("closeProfileBackdrop"),
     profilePanel: $("profilePanel"),
+    newAssetBtn: $("newAssetBtn"),
     newScriptBtn: $("newScriptBtn"),
     viewAssetsBtn: $("viewAssetsBtn"),
     refreshAssetsBtn: $("refreshAssetsBtn"),
@@ -2567,11 +2568,15 @@
             : `${item.generated_episodes || 0} / ${item.total_episodes || 0}`)}</span>
         </div>
         <div class="asset-actions">
-          ${isToolAsset(item) ? "" : `<button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>`}
-          ${isToolAsset(item) ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">新页面打开</button>`}
-          ${item.completion_confirmed && !isToolAsset(item) ? "" : `<button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">${isToolAsset(item) ? "查看结果" : "修改"}</button>`}
-          <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : (isToolAsset(item) ? "公开结果" : "公开成品")}</button>
-          <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除</button>
+          <div class="asset-action-group">
+            <span class="asset-action-label">资产操作</span>
+            ${isToolAsset(item) ? "" : `<button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>`}
+            ${isToolAsset(item) ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">新页面打开</button>`}
+            ${item.completion_confirmed && !isToolAsset(item) ? "" : `<button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">${isToolAsset(item) ? "查看结果" : "修改资产"}</button>`}
+            <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : (isToolAsset(item) ? "公开结果" : "公开成品")}</button>
+            <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除资产</button>
+          </div>
+          ${renderAssetTaskActions(item)}
         </div>
       </article>
     `).join("") + (hasMore ? `
@@ -2579,6 +2584,23 @@
         <button class="btn btn-secondary" type="button" data-action="load-more-assets">加载更多资产</button>
       </div>
     ` : "");
+  }
+
+  function renderAssetTaskActions(item) {
+    if (isToolAsset(item)) return "";
+    const taskId = String(item.task_id || "").trim();
+    if (!taskId) return "";
+    const status = String(item.status || "");
+    const canContinue = RESUMABLE_STATUSES.has(status);
+    const canStop = TERMINATABLE_STATUSES.has(status);
+    return `
+      <div class="asset-action-group task-action-group">
+        <span class="asset-action-label">任务操作</span>
+        ${canContinue ? `<button class="btn btn-secondary" data-action="continue-task" data-task-id="${escapeHtml(taskId)}" data-project-id="${escapeHtml(item.project_id)}">继续任务</button>` : ""}
+        ${canStop ? `<button class="btn btn-danger" data-action="stop-task" data-task-id="${escapeHtml(taskId)}" data-project-id="${escapeHtml(item.project_id)}">停止任务</button>` : ""}
+        <button class="btn btn-ghost" data-action="delete-task" data-task-id="${escapeHtml(taskId)}" data-project-id="${escapeHtml(item.project_id)}">删除任务</button>
+      </div>
+    `;
   }
 
   function renderCommunity(assets) {
@@ -2722,6 +2744,55 @@
       await loadAssets();
       await loadCommunity();
       showToast("资产已删除", "该用户资产已从当前账号移除。");
+    });
+  }
+
+  async function continueAssetTask(taskId, projectId, button = null) {
+    if (!requireLogin() || !taskId) return;
+    await withActionLoading(`continueTask:${taskId}`, button, "继续中...", async () => {
+      const item = state.assets.find((asset) => String(asset.task_id || "") === String(taskId));
+      const endpoint = item && ["failed", "terminated"].includes(String(item.status || ""))
+        ? `/api/tasks/${taskId}/retry`
+        : `/api/tasks/${taskId}/resume`;
+      const data = await requestJson(endpoint, { method: "POST" });
+      if (Number(projectId) === Number(state.projectId) || Number(data.task?.project_id) === Number(state.projectId)) {
+        renderSnapshot(data.task);
+        startPolling();
+      }
+      await loadProjects({ restoreSelection: true, restoreInputs: false });
+      await loadAssets();
+      showToast("任务已继续", "已从保留进度继续推进。");
+    });
+  }
+
+  async function stopAssetTask(taskId, projectId, button = null) {
+    if (!requireLogin() || !taskId) return;
+    const ok = window.confirm("确认停止这个任务吗？已生成的阶段和资产内容会保留。");
+    if (!ok) return;
+    await withActionLoading(`stopTask:${taskId}`, button, "停止中...", async () => {
+      const data = await requestJson(`/api/tasks/${taskId}/terminate`, { method: "POST" });
+      if (Number(projectId) === Number(state.projectId) || Number(data.task?.project_id) === Number(state.projectId)) {
+        renderSnapshot(data.task);
+      }
+      await loadProjects({ restoreSelection: true, restoreInputs: false });
+      await loadAssets();
+      showToast("任务已停止", "当前任务已停止，资产内容已保留。");
+    });
+  }
+
+  async function deleteTask(taskId, projectId, button = null) {
+    if (!requireLogin() || !taskId) return;
+    const ok = window.confirm("确认删除这个任务及其资产记录吗？此操作不可恢复。");
+    if (!ok) return;
+    await withActionLoading(`deleteTask:${taskId}`, button, "删除中...", async () => {
+      await requestJson(`/api/tasks/${taskId}`, { method: "DELETE" });
+      if (Number(projectId) === Number(state.projectId)) {
+        switchToFreshWorkspace();
+      }
+      await loadProjects({ restoreSelection: Number(projectId) !== Number(state.projectId), restoreInputs: false });
+      await loadAssets();
+      await loadCommunity();
+      showToast("任务已删除", "任务和对应资产记录已移除。");
     });
   }
 
@@ -2951,6 +3022,12 @@
       openProfilePanel();
     });
 
+    els.newAssetBtn?.addEventListener("click", () => {
+      if (!requireLogin()) return;
+      closeProfilePanel();
+      openWorkspaceInNewPage({ fresh: true });
+    });
+
     els.workspaceCard?.addEventListener("mouseenter", cancelWorkspaceAutoCollapse);
     els.workspaceCard?.addEventListener("mouseleave", scheduleWorkspaceAutoCollapse);
     els.workspaceCard?.addEventListener("focusin", cancelWorkspaceAutoCollapse);
@@ -3037,6 +3114,12 @@
           await openAssetEditor(projectId);
         } else if (button.dataset.action === "toggle-privacy") {
           await toggleAssetPrivacy(projectId, button.dataset.visibility);
+        } else if (button.dataset.action === "continue-task") {
+          await continueAssetTask(button.dataset.taskId, projectId, button);
+        } else if (button.dataset.action === "stop-task") {
+          await stopAssetTask(button.dataset.taskId, projectId, button);
+        } else if (button.dataset.action === "delete-task") {
+          await deleteTask(button.dataset.taskId, projectId, button);
         } else if (button.dataset.action === "delete-asset") {
           await deleteAsset(projectId, button);
         }

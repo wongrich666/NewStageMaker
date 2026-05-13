@@ -1122,6 +1122,15 @@ class TaskLifecycleMixin:
         )
         return self._public_snapshot(record.clone_snapshot())
 
+    def delete_task(self, task_id: str, user_id: int | None = None) -> None:
+        snapshot = self.get_task_snapshot(task_id, user_id=user_id, public_view=False)
+        if not snapshot:
+            raise ValueError("任务不存在")
+        project_id = int(snapshot.get("project_id") or 0)
+        if project_id <= 0:
+            raise ValueError("任务缺少关联资产，无法删除")
+        self.clear_project(project_id, user_id=user_id)
+
     def clear_project(self, project_id: int, user_id: int | None = None) -> None:
         record = self._projects.get(project_id)
         owner_user_id: int | None = None

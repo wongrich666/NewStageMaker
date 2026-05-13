@@ -543,7 +543,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             exc=exc,
             raw_return_object=response_text,
         )
-        if definition.stage == "01":
+        if definition.stage in {"01", "02", "03", "04", "05"}:
             response_json = response_text
         else:
             debug_detail = _write_debug_artifact(
@@ -580,13 +580,13 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             exc=exc,
             raw_return_object=response_json,
         )
-        if definition.stage == "01":
+        if definition.stage in {"01", "02", "03", "04", "05"}:
             parse_warnings = [
-                f"阶段 01 输出解析异常，已回退到安全解析：{type(exc).__name__}: {exc}"
+                f"阶段 {definition.stage} 输出解析异常，已回退到安全解析：{type(exc).__name__}: {exc}"
             ]
             safe_output, safe_warnings = safe_parse_stage_output(
                 response_json,
-                ("source_brief", "display_text"),
+                (*definition.output_fields, "display_text"),
             )
             parse_warnings.extend(safe_warnings)
             data = _normalize_stage_output(
@@ -1828,24 +1828,31 @@ def _normalize_stage_output(
         if not isinstance(normalized.get("source_brief"), dict):
             warnings.append("source_brief 不是 dict，已回退为对象占位")
         normalized["source_brief"] = _normalize_object_like(normalized.get("source_brief"), key_name="content")
-        if not normalized["source_brief"]:
-            warnings.append("source_brief 缺少有效内容，已填充占位文本")
-            normalized["source_brief"] = {"content": _stage_text_placeholder()}
+        normalized["source_brief"] = _ensure_source_brief_core_fields(normalized["source_brief"])
         return normalized
     if stage == "02":
         if not isinstance(normalized.get("worldview_plan"), dict):
             warnings.append("worldview_plan 不是 dict，已回退为对象占位")
         normalized["worldview_plan"] = _normalize_object_like(normalized.get("worldview_plan"), key_name="content")
+        normalized["worldview_plan"] = _ensure_worldview_core_fields(normalized["worldview_plan"])
         return normalized
     if stage == "03":
         if not isinstance(normalized.get("character_plan"), dict):
             warnings.append("character_plan 不是 dict，已回退为对象占位")
         normalized["character_plan"] = _normalize_object_like(normalized.get("character_plan"), key_name="content")
+        normalized["character_plan"] = _ensure_character_core_fields(normalized["character_plan"])
         return normalized
     if stage == "04":
+        checkpoint_missing = normalized.get("checkpoint_explanation") in (None, "", [], {})
         if not isinstance(normalized.get("beat_checkpoint_timeline"), list):
             warnings.append("beat_checkpoint_timeline 不是 list，已回退为 15 条占位节拍")
-        if not isinstance(normalized.get("checkpoint_explanation"), (dict, str)):
+        if checkpoint_missing:
+            warnings.append("checkpoint_explanation 缺失，已填充说明占位")
+            logger.warning(
+                "框架策划阶段 04 checkpoint_explanation 缺失，已填充占位说明；raw_output=%s",
+                _preview_return_object(data),
+            )
+        elif not isinstance(normalized.get("checkpoint_explanation"), (dict, str)):
             warnings.append("checkpoint_explanation 不是 dict/str，已回退为说明占位")
         normalized["beat_checkpoint_timeline"] = _normalize_beat_timeline(
             normalized.get("beat_checkpoint_timeline")
@@ -1857,7 +1864,12 @@ def _normalize_stage_output(
         return normalized
     if stage == "05":
         if not isinstance(normalized.get("character_storylines"), list):
-            warnings.append("character_storylines 不是 list，已回退为空数组")
+            warnings.append("character_storylines 不是 list，已回退为空数组的旧逻辑已替换为自动归一化为数组")
+            logger.warning(
+                "框架策划阶段 05 character_storylines 类型不一致，已自动归一化为 list；actual_type=%s raw_object=%s",
+                type(normalized.get("character_storylines")).__name__,
+                _preview_return_object(normalized.get("character_storylines")),
+            )
         normalized["character_storylines"] = _normalize_character_storylines(
             normalized.get("character_storylines")
         )
@@ -1870,9 +1882,17 @@ def _normalize_stage_output(
         )
         return normalized
     if stage == "07":
+        validation_missing = normalized.get("validation_report") in (None, "", [], {})
         if not isinstance(normalized.get("framework_plan_package"), dict):
             warnings.append("framework_plan_package 不是 dict，已回退为对象占位")
-        if not isinstance(normalized.get("validation_report"), (dict, list, str)):
+        if validation_missing:
+            warnings.append("validation_report 缺失，已保留校验报告占位")
+            logger.warning(
+                "框架策划阶段 07 validation_report 缺失，已保留占位；raw_output=%s",
+                _preview_return_object(data),
+            )
+            normalized["validation_report"] = _stage_output_placeholder("validation_report")
+        elif not isinstance(normalized.get("validation_report"), (dict, list, str)):
             warnings.append("validation_report 类型异常，已回退为对象占位")
         normalized["framework_plan_package"] = _normalize_object_like(
             normalized.get("framework_plan_package"),
@@ -2677,6 +2697,57 @@ def _normalize_object_like(value: Any, *, key_name: str = "content") -> dict[str
     return {key_name: text} if text else {}
 
 
+def _ensure_source_brief_core_fields(value: dict[str, Any]) -> dict[str, Any]:
+    result = dict(value if isinstance(value, dict) else {})
+    content = str(result.get("content") or result.get("summary") or result.get("core_premise") or "").strip()
+    result.setdefault("source_title", result.get("title") or result.get("project_title") or "未命名项目")
+    result.setdefault("target_format", result.get("format") or "短剧")
+    result.setdefault("season_count", 1)
+    result.setdefault("episodes_per_season", result.get("total_episodes") or 60)
+    result.setdefault("minutes_per_episode", 2)
+    result.setdefault("core_premise", content or "核心故事信息待人工补充")
+    result.setdefault("story_outline", result.get("outline") or result["core_premise"])
+    result.setdefault("adaptation_direction", result.get("direction") or "保持强钩子、强反转、强情绪推进")
+    result["ready_for_script_workflow"] = True
+    return result
+
+
+def _ensure_worldview_core_fields(value: dict[str, Any]) -> dict[str, Any]:
+    result = dict(value if isinstance(value, dict) else {})
+    content = str(result.get("content") or result.get("summary") or result.get("core_setting") or "").strip()
+    result.setdefault("world_type", result.get("type") or "现实/类型化世界")
+    result.setdefault("core_setting", content or result.get("setting") or "核心世界设定待人工补充")
+    result.setdefault("main_conflict", result.get("conflict") or "主角目标与外部阻力形成持续对抗")
+    result.setdefault("rules", result.get("world_rules") or [])
+    result.setdefault("tone", result.get("style") or "强情绪、强节奏、强反转")
+    result["ready_for_script_workflow"] = True
+    return result
+
+
+def _ensure_character_core_fields(value: dict[str, Any]) -> dict[str, Any]:
+    result = dict(value if isinstance(value, dict) else {})
+    protagonist = result.get("protagonist")
+    if not isinstance(protagonist, dict):
+        protagonist = {
+            "name": str(result.get("protagonist_name") or "主角"),
+            "goal": str(result.get("protagonist_goal") or "完成核心目标并推动主线"),
+            "flaw": str(result.get("protagonist_flaw") or "关键弱点待人工补充"),
+            "arc": str(result.get("protagonist_arc") or "从被动承压转向主动破局"),
+        }
+    result["protagonist"] = protagonist
+    main_characters = result.get("main_characters")
+    if not isinstance(main_characters, list) or not main_characters:
+        main_characters = [protagonist]
+        antagonist = result.get("antagonist")
+        if isinstance(antagonist, dict):
+            main_characters.append(antagonist)
+    result["main_characters"] = main_characters
+    result.setdefault("character_relationships", result.get("relationships") or [])
+    result.setdefault("emotion_engine", result.get("emotional_core") or "围绕目标、阻力、关系变化持续推进情绪")
+    result["ready_for_script_workflow"] = True
+    return result
+
+
 def _normalize_beat_timeline(value: Any) -> list[dict[str, Any]]:
     items = value if isinstance(value, list) else []
     ranges = _split_episode_ranges(_episodes_per_season_from_basic_config(None))
@@ -2703,49 +2774,103 @@ def _normalize_beat_timeline(value: Any) -> list[dict[str, Any]]:
 
 
 def _normalize_checkpoint_explanation(value: Any, timeline: list[dict[str, Any]]) -> dict[str, Any]:
+    def _as_int(raw: Any, default: int = 0) -> int:
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return default
+
+    def _aligned_notes(raw_notes: Any) -> list[dict[str, Any]]:
+        source_notes = raw_notes if isinstance(raw_notes, list) else []
+        by_beat: dict[int, dict[str, Any]] = {}
+        for item in source_notes:
+            if not isinstance(item, dict):
+                continue
+            beat_no = _as_int(item.get("beat_no"), 0)
+            if beat_no > 0:
+                by_beat[beat_no] = item
+        notes: list[dict[str, Any]] = []
+        for item in timeline:
+            beat_no = _as_int(item.get("beat_no"), 0) or len(notes) + 1
+            raw = by_beat.get(beat_no) or {}
+            explanation = str(
+                raw.get("explanation")
+                or raw.get("summary")
+                or raw.get("note")
+                or raw.get("content")
+                or item.get("plot_content")
+                or item.get("narrative_function")
+                or ""
+            )
+            notes.append({"beat_no": beat_no, "explanation": explanation})
+        return notes
+
     if isinstance(value, dict):
         overview = str(value.get("overview") or value.get("summary") or "").strip()
         beat_notes = value.get("beat_notes")
-        if not isinstance(beat_notes, list):
-            beat_notes = []
         if beat_notes or overview:
             return {
                 "overview": overview or "该卡点说明与同一条十五节拍时间轴一一对应，用于解释各节拍的叙事功能与阶段作用。",
-                "beat_notes": beat_notes or [
-                    {"beat_no": item["beat_no"], "explanation": item["plot_content"]}
-                    for item in timeline
-                ],
+                "beat_notes": _aligned_notes(beat_notes),
             }
     elif isinstance(value, str) and value.strip():
         return {
             "overview": value.strip(),
-            "beat_notes": [
-                {"beat_no": item["beat_no"], "explanation": item["plot_content"]}
-                for item in timeline
-            ],
+            "beat_notes": _aligned_notes([]),
         }
     return {
         "overview": "该卡点说明与同一条十五节拍时间轴一一对应，用于解释各节拍的叙事功能与阶段作用。",
-        "beat_notes": [
-            {
-                "beat_no": item["beat_no"],
-                "explanation": f"{item['beat_name']}：{item['narrative_function'] or item['plot_content']}",
-            }
-            for item in timeline
-        ],
+        "beat_notes": _aligned_notes([]),
     }
 
 
 def _normalize_character_storylines(value: Any) -> list[dict[str, Any]]:
-    items = value if isinstance(value, list) else []
+    if isinstance(value, str):
+        parsed = _parse_candidate_value(value)
+        if isinstance(parsed, (dict, list)):
+            return _normalize_character_storylines(parsed)
+        text = value.strip()
+        items = [{"summary": text, "detailed_storyline": text}] if text else []
+    elif isinstance(value, dict):
+        nested = value.get("character_storylines")
+        if nested is None and isinstance(value.get("data"), dict):
+            nested = value["data"].get("character_storylines")
+        if nested is not None:
+            return _normalize_character_storylines(nested)
+        storyline_keys = {
+            "id",
+            "title",
+            "character_name",
+            "summary",
+            "content",
+            "detailed_storyline",
+            "linked_beats",
+            "episode_distribution",
+            "edit_notes",
+            "decision",
+        }
+        if storyline_keys.intersection(value.keys()):
+            items = [value]
+        else:
+            items = []
+            for key, item in value.items():
+                if isinstance(item, dict):
+                    merged = dict(item)
+                    merged.setdefault("id", str(key))
+                    items.append(merged)
+                elif isinstance(item, str) and item.strip():
+                    items.append({"id": str(key), "title": str(key), "summary": item.strip()})
+    else:
+        items = value if isinstance(value, list) else []
     normalized: list[dict[str, Any]] = []
     for index, raw in enumerate(items, start=1):
         if not isinstance(raw, dict):
             continue
+        title = raw.get("title") or raw.get("character_name") or raw.get("name") or f"故事线 {index}"
         normalized.append(
             {
                 "id": str(raw.get("id") or f"storyline_{index}"),
-                "title": str(raw.get("title") or f"故事线 {index}"),
+                "title": str(title),
                 "summary": str(raw.get("summary") or raw.get("content") or ""),
                 "detailed_storyline": str(raw.get("detailed_storyline") or raw.get("detail") or raw.get("summary") or ""),
                 "linked_beats": _normalize_int_list(raw.get("linked_beats") or raw.get("linked_storylines")),
