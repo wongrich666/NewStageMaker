@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -24,6 +25,23 @@ DEFAULT_FASTGPT_URL = "https://api.fastgpt.in/api/v1/chat/completions"
 FRAMEWORK_PLANNER_STORAGE_KEY = "frameworkPlannerState.v2"
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 FRAMEWORK_CONTRACT_GLOB = "00_*.md"
+FASTGPT_RAW_RESPONSE_KEYS = (
+    "responseData",
+    "reasoningText",
+    "historyPreview",
+    "raw",
+    "answerText",
+    "display_text",
+    "choices",
+    "usage",
+)
+STAGE_05_INPUT_LENGTH_LIMITS = {
+    "source_brief": 30000,
+    "basic_config": 10000,
+    "worldview_plan": 50000,
+    "character_plan": 80000,
+    "beat_checkpoint_timeline": 80000,
+}
 REQUIRED_BEAT_FIELDS = (
     "beat_no",
     "beat_name",
@@ -476,6 +494,8 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         }
 
     request_variables = _build_stage_request_variables(definition, normalized_payload, workflow_spec)
+    if definition.stage == "05":
+        _log_stage_05_input_diagnostics(normalized_payload, request_variables)
     try:
         endpoint = _resolve_stage_endpoint(definition)
     except FrameworkPlannerStageError as exc:
@@ -603,6 +623,16 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 detail=debug_detail,
             ) from exc
 
+    stage_detail = {}
+    if definition.stage == "05":
+        stage_detail = _stage_05_output_detail(
+            response_json=response_json,
+            workflow_spec=workflow_spec,
+            diagnostics=diagnostics,
+            data=data,
+            parse_warnings=parse_warnings,
+        )
+
     return {
         "ok": True,
         "stage": definition.stage,
@@ -618,6 +648,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 "diagnostics": diagnostics,
             },
             "display_text": display_text,
+            **({"error": "阶段 05 未解析到有效人物故事线", "detail": stage_detail} if stage_detail else {}),
         }
 
 
@@ -796,6 +827,24 @@ def _build_stage_request_variables(
             missing_fields.append(field)
             continue
         if _is_blank(value):
+            continue
+        cleaned_value = (
+            _sanitize_stage_05_input_value(field, value)
+            if definition.stage == "05"
+            else extract_business_field(value, field)
+        )
+        if cleaned_value is not value:
+            if definition.stage == "05":
+                logger.warning(
+                    "stage=05 payload field cleaned before FastGPT request: field=%s from raw response to business object original_type=%s cleaned_type=%s original_preview=%s",
+                    field,
+                    type(value).__name__,
+                    type(cleaned_value).__name__,
+                    _preview_return_object(value, limit=300),
+                )
+            value = cleaned_value
+        if field in definition.required_fields and _is_blank(value):
+            missing_fields.append(field)
             continue
         wire_value = _wire_value(value)
         variables[field] = wire_value
@@ -1167,13 +1216,38 @@ def _extract_stage_output(
         )
         response_candidates = [("safe_root_fallback", root_response or response_json)]
 
+    if definition.stage == "05":
+        _log_stage_05_candidate_diagnostics(response_candidates, root_response)
+
     for source, candidate in response_candidates:
+        if definition.stage == "05":
+            selected = _select_stage_05_candidate(candidate)
+            if selected is not None:
+                normalized = _normalize_stage_output(
+                    definition.stage,
+                    selected,
+                    parse_warnings=parse_warnings,
+                )
+                logger.info(
+                    "stage=05 selected_candidate_source=%s selected_candidate_keys=%s character_storylines_length=%s fallback_used=%s",
+                    source,
+                    sorted(selected.keys()),
+                    len(selected.get("character_storylines") or []),
+                    source in {"root_fallback", "raw_response_fallback", "safe_root_fallback"},
+                )
+                display_text = _extract_display_text(
+                    response_json,
+                    normalized,
+                    stage=definition.stage,
+                    payload_keys=stage_payload_keys,
+                )
+                return normalized, display_text, parse_warnings
         try:
             mapped, candidate_warnings = _coerce_candidate_to_stage_output(
                 definition,
                 candidate,
                 output_aliases,
-                allow_dict_as_field=source in {"root_fallback", "raw_response_fallback", "safe_root_fallback"},
+                allow_dict_as_field=False,
             )
         except Exception as exc:
             _log_stage_output_parse_exception(
@@ -1198,6 +1272,8 @@ def _extract_stage_output(
                 safe_output,
                 parse_warnings=parse_warnings,
             )
+            if definition.stage == "05" and not normalized.get("character_storylines"):
+                continue
             _log_stage_parse_warnings(definition.stage, parse_warnings)
             display_text = _extract_display_text(
                 response_json,
@@ -1210,6 +1286,12 @@ def _extract_stage_output(
     parse_warnings.append(
         f"未能提取阶段 {definition.stage} 约定输出字段 {definition.output_fields}，已回退到安全解析占位"
     )
+    if definition.stage == "05":
+        logger.warning(
+            "stage=05 no_valid_candidate_found checked_candidate_count=%s required_keys=%s",
+            len(response_candidates),
+            ["character_storylines", "display_text"],
+        )
     parse_warnings.extend(_candidate_diagnostics(definition, response_candidates, output_aliases))
     safe_output, safe_warnings = safe_parse_stage_output(
         root_response or response_json or _empty_stage_output(definition.stage),
@@ -1239,9 +1321,6 @@ def _iter_response_candidates(
     stage: str = "",
     payload_keys: list[str] | None = None,
 ):
-    if response_json not in (None, "", [], {}):
-        yield "raw_response", response_json
-
     stage_payload_keys = sorted(set(payload_keys or []))
     root_response = normalize_stage_response(
         root_response if root_response is not None else response_json,
@@ -1422,6 +1501,130 @@ def _candidate_diagnostics(
             f"json_parse_success={parse_success} candidate_keys={keys} reason={reason}"
         )
     return diagnostics
+
+
+def _log_stage_05_candidate_diagnostics(
+    response_candidates: list[tuple[str, Any]],
+    root_response: dict[str, Any],
+) -> None:
+    for index, (source, candidate) in enumerate(response_candidates, start=1):
+        module_name, module_type = _candidate_module_info(source, root_response)
+        diagnostic = _stage_05_candidate_diagnostic(source, candidate)
+        logger.info(
+            "stage=05 candidate_diagnostic index=%s source=%s moduleName=%s moduleType=%s raw_type=%s raw_length=%s json_parse_success=%s parsed_type=%s parsed_keys=%s required_key_hit=%s character_storylines_type=%s character_storylines_length=%s",
+            index,
+            source,
+            module_name,
+            module_type,
+            diagnostic["raw_type"],
+            diagnostic["raw_length"],
+            diagnostic["json_parse_success"],
+            diagnostic["parsed_type"],
+            diagnostic["parsed_keys"],
+            diagnostic["required_key_hit"],
+            diagnostic["character_storylines_type"],
+            diagnostic["character_storylines_length"],
+        )
+
+
+def _select_stage_05_candidate(candidate: Any) -> dict[str, Any] | None:
+    parsed = _parse_candidate_value(candidate)
+    if isinstance(parsed, list):
+        if parsed and all(isinstance(item, dict) for item in parsed):
+            return {"character_storylines": parsed}
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    storylines = parsed.get("character_storylines")
+    if storylines is None and isinstance(parsed.get("data"), dict):
+        storylines = parsed["data"].get("character_storylines")
+    if isinstance(storylines, list) and storylines:
+        result = {"character_storylines": storylines}
+        display_text = parsed.get("display_text") or parsed.get("displayText")
+        if not display_text and isinstance(parsed.get("data"), dict):
+            display_text = parsed["data"].get("display_text") or parsed["data"].get("displayText")
+        if isinstance(display_text, str) and display_text.strip():
+            result["display_text"] = display_text.strip()
+        return result
+    return None
+
+
+def _stage_05_candidate_diagnostic(source: str, candidate: Any) -> dict[str, Any]:
+    del source
+    parsed = _parse_candidate_value(candidate)
+    json_parse_success = isinstance(parsed, (dict, list))
+    storylines = parsed.get("character_storylines") if isinstance(parsed, dict) else None
+    return {
+        "raw_type": type(candidate).__name__,
+        "raw_length": len(candidate) if isinstance(candidate, str) else len(_preview_return_object(candidate, limit=1000000)),
+        "json_parse_success": json_parse_success,
+        "parsed_type": type(parsed).__name__,
+        "parsed_keys": sorted(str(key) for key in parsed.keys()) if isinstance(parsed, dict) else [],
+        "required_key_hit": isinstance(parsed, dict) and "character_storylines" in parsed,
+        "character_storylines_type": type(storylines).__name__ if storylines is not None else "none",
+        "character_storylines_length": len(storylines) if isinstance(storylines, (list, dict, str)) else 0,
+    }
+
+
+def _candidate_module_info(source: str, root_response: dict[str, Any]) -> tuple[str, str]:
+    match = re.search(r"responseData\[(\d+)\]", source)
+    if not match:
+        return "", ""
+    response_data = root_response.get("responseData") if isinstance(root_response, dict) else None
+    if not isinstance(response_data, list):
+        return "", ""
+    index = int(match.group(1))
+    if index < 0 or index >= len(response_data) or not isinstance(response_data[index], dict):
+        return "", ""
+    node = response_data[index]
+    return (
+        str(node.get("moduleName") or node.get("name") or "").strip(),
+        str(node.get("moduleType") or node.get("flowNodeType") or "").strip(),
+    )
+
+
+def _stage_05_output_detail(
+    *,
+    response_json: Any,
+    workflow_spec: FrameworkPlannerWorkflowSpec,
+    diagnostics: dict[str, Any],
+    data: dict[str, Any],
+    parse_warnings: list[str],
+) -> dict[str, Any]:
+    storylines = data.get("character_storylines") if isinstance(data, dict) else None
+    warning_text = " | ".join(str(item) for item in parse_warnings)
+    if isinstance(storylines, list) and storylines and "character_storylines 不是 list" not in warning_text:
+        return {}
+    root_response = normalize_stage_response(response_json, stage="05", payload_keys=diagnostics.get("payload_keys", []))
+    candidates = list(_iter_response_candidates(response_json, workflow_spec, root_response=root_response, stage="05"))
+    best_source = ""
+    best_keys: list[str] = []
+    actual_type = "none"
+    for source, candidate in candidates:
+        parsed = _parse_candidate_value(candidate)
+        if isinstance(parsed, dict):
+            keys = sorted(str(key) for key in parsed.keys())
+            if not best_source:
+                best_source = source
+                best_keys = keys
+            if "character_storylines" in parsed:
+                best_source = source
+                best_keys = keys
+                value = parsed.get("character_storylines")
+                actual_type = type(value).__name__ if value is not None else "none"
+                break
+    reason = "character_storylines_not_list"
+    if actual_type == "none":
+        reason = "character_storylines_missing"
+    return {
+        "reason": reason,
+        "checked_candidate_count": len(candidates),
+        "best_candidate_source": best_source,
+        "best_candidate_keys": best_keys,
+        "character_storylines_actual_type": actual_type,
+        "input_pollution_detected": bool(diagnostics.get("input_pollution_detected")),
+        "polluted_fields": diagnostics.get("polluted_fields", []),
+    }
 
 
 def _coerce_candidate_to_stage_output(
@@ -1849,6 +2052,139 @@ def _safe_root_mapping(value: Any) -> dict[str, Any]:
     return normalize_stage_response(value)
 
 
+def extract_business_field(value: Any, field_name: str) -> Any:
+    if value in (None, ""):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return value
+        parsed = _parse_candidate_value(text)
+        if parsed is text or parsed == text:
+            return value
+        extracted = extract_business_field(parsed, field_name)
+        return extracted if extracted is not parsed else value
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, dict):
+        return value
+
+    direct = _find_value_by_aliases(value, (field_name,))
+    if direct is not None:
+        return direct
+    data = value.get("data")
+    if isinstance(data, dict):
+        nested = _find_value_by_aliases(data, (field_name,))
+        if nested is not None:
+            return nested
+
+    for container_name in ("newVariables", "variables"):
+        container = value.get(container_name)
+        if isinstance(container, dict):
+            nested = _find_value_by_aliases(container, (field_name,))
+            if nested is not None:
+                return extract_business_field(nested, field_name)
+        if isinstance(container, list):
+            for item in container:
+                if not isinstance(item, dict):
+                    continue
+                variable = item.get("variable")
+                if isinstance(variable, list):
+                    variable_key = str(variable[-1] or "").strip()
+                else:
+                    variable_key = str(variable or item.get("key") or item.get("name") or "").strip()
+                if variable_key == field_name:
+                    return extract_business_field(item.get("value"), field_name)
+
+    response_data = value.get("responseData")
+    for _, node in reversed(_response_data_items(response_data)):
+        for _, text_value in _iter_text_fields(node):
+            parsed = _parse_candidate_value(text_value)
+            if isinstance(parsed, dict):
+                nested = _find_value_by_aliases(parsed, (field_name,))
+                if nested is not None:
+                    return nested
+                data = parsed.get("data")
+                if isinstance(data, dict):
+                    nested = _find_value_by_aliases(data, (field_name,))
+                    if nested is not None:
+                        return nested
+
+    for text_key in ("answerText", "responseText", "text", "content"):
+        text_value = value.get(text_key)
+        if text_value in (None, "", [], {}):
+            continue
+        parsed = _parse_candidate_value(text_value)
+        if isinstance(parsed, dict):
+            nested = _find_value_by_aliases(parsed, (field_name,))
+            if nested is not None:
+                return nested
+    return value
+
+
+def _sanitize_stage_05_input_value(field_name: str, value: Any) -> Any:
+    if field_name == "basic_config":
+        return _compact_stage_05_basic_config(value)
+    if field_name in {"source_brief", "worldview_plan", "character_plan"}:
+        cleaned = extract_business_field(value, field_name)
+        if _pollution_keys_in_value(cleaned):
+            logger.warning(
+                "stage=05 sanitized_input_rejected field=%s reason=raw_response_keys_still_present original_type=%s preview=%s",
+                field_name,
+                type(value).__name__,
+                _preview_return_object(value, limit=300),
+            )
+            return {}
+        return cleaned
+    if field_name == "beat_checkpoint_timeline":
+        cleaned = extract_business_field(value, field_name)
+        if _pollution_keys_in_value(cleaned):
+            logger.warning(
+                "stage=05 sanitized_input_rejected field=%s reason=raw_response_keys_still_present original_type=%s preview=%s",
+                field_name,
+                type(value).__name__,
+                _preview_return_object(value, limit=300),
+            )
+            return []
+        return cleaned if isinstance(cleaned, list) else []
+    return extract_business_field(value, field_name)
+
+
+def _compact_stage_05_basic_config(value: Any) -> dict[str, Any]:
+    parsed = extract_business_field(value, "basic_config")
+    if isinstance(parsed, str):
+        reparsed = _parse_candidate_value(parsed)
+        parsed = reparsed if isinstance(reparsed, dict) else {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    allowed = (
+        "project_title",
+        "source_title",
+        "mode",
+        "target_format",
+        "season_count",
+        "episodes_per_season",
+        "minutes_per_episode",
+        "adaptation_direction",
+        "user_constraints",
+        "user_requirements",
+    )
+    compact: dict[str, Any] = {}
+    for key in allowed:
+        value_item = parsed.get(key)
+        if value_item in (None, "", [], {}):
+            continue
+        if key in {"user_constraints", "user_requirements", "adaptation_direction"}:
+            compact[key] = _truncate_text(str(value_item), limit=1200)
+        else:
+            compact[key] = value_item
+    if "source_title" not in compact and compact.get("project_title"):
+        compact["source_title"] = compact["project_title"]
+    if "project_title" not in compact and compact.get("source_title"):
+        compact["project_title"] = compact["source_title"]
+    return compact
+
+
 def _first_non_empty_list_item(items: list[Any]) -> Any:
     for item in items:
         if item not in (None, "", [], {}):
@@ -1950,6 +2286,10 @@ def _stage_runtime_diagnostics(
     except Exception as exc:
         url_error = f"{type(exc).__name__}: {exc}"
         resolved_url = str(configured_url or DEFAULT_FASTGPT_URL).strip()
+    input_pollution = _stage_05_input_pollution(payload) if definition.stage == "05" else {
+        "input_pollution_detected": False,
+        "polluted_fields": [],
+    }
     return {
         "payload_keys": sorted(payload.keys()),
         "source_text_length": _source_text_length_from_payload(payload),
@@ -1967,6 +2307,7 @@ def _stage_runtime_diagnostics(
         "url_normalize_error": url_error,
         "timeout_seconds": max(1, timeout_seconds),
         "workflow_id_missing_but_api_key_mode_enabled": bool(api_key) and not bool(workflow_id),
+        **input_pollution,
     }
 
 
@@ -1988,6 +2329,125 @@ def _log_stage_entry(
         diagnostics.get("resolved_url") or DEFAULT_FASTGPT_URL,
         diagnostics.get("workflow_id_missing_but_api_key_mode_enabled", False),
     )
+
+
+def _stage_05_input_pollution(payload: dict[str, Any]) -> dict[str, Any]:
+    polluted_fields: list[str] = []
+    for field in (
+        "source_brief",
+        "basic_config",
+        "worldview_plan",
+        "character_plan",
+        "beat_checkpoint_timeline",
+        "previous_character_storylines",
+        "current_storyline_decisions",
+    ):
+        if _pollution_keys_in_value(payload.get(field)):
+            polluted_fields.append(field)
+    return {
+        "input_pollution_detected": bool(polluted_fields),
+        "polluted_fields": polluted_fields,
+    }
+
+
+def _log_stage_05_input_diagnostics(
+    payload: dict[str, Any],
+    request_variables: dict[str, Any],
+) -> None:
+    logger.info("stage=05 input_payload_keys=%s", sorted(payload.keys()))
+    for field in (
+        "source_brief",
+        "basic_config",
+        "worldview_plan",
+        "character_plan",
+        "beat_checkpoint_timeline",
+        "previous_character_storylines",
+        "current_storyline_decisions",
+    ):
+        original_value = payload.get(field)
+        sent_value = request_variables.get(field, original_value)
+        pollution_keys = _pollution_keys_in_value(original_value)
+        summary = _value_diagnostic_summary(sent_value)
+        suspected = bool(pollution_keys)
+        logger.info(
+            "stage=05 input_field_diagnostic field=%s type=%s length=%s dict_keys=%s list_length=%s first_item_type=%s suspected_raw_response=%s contains_keys=%s preview=%s",
+            field,
+            summary["type"],
+            summary["length"],
+            summary["dict_keys"],
+            summary["list_length"],
+            summary["first_item_type"],
+            suspected,
+            ",".join(pollution_keys),
+            summary["preview"],
+        )
+        if suspected:
+            logger.warning(
+                "stage=05 输入疑似污染：field=%s 包含 FastGPT raw response，请检查前端 state 保存逻辑或后端业务字段提取逻辑",
+                field,
+            )
+        limit = STAGE_05_INPUT_LENGTH_LIMITS.get(field)
+        if limit is not None and int(summary["length"] or 0) > limit:
+            logger.warning(
+                "stage=05 input_field_length_warning field=%s length=%s threshold=%s possible_raw_response=True message=可能传入了完整 raw response，而不是业务字段。",
+                field,
+                summary["length"],
+                limit,
+            )
+
+
+def _value_diagnostic_summary(value: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "type": type(value).__name__,
+        "length": 0,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": _preview_return_object(value, limit=300),
+    }
+    if isinstance(value, str):
+        result["length"] = len(value)
+    elif isinstance(value, dict):
+        result["length"] = len(json.dumps(value, ensure_ascii=False, default=str))
+        result["dict_keys"] = sorted(str(key) for key in value.keys())
+    elif isinstance(value, list):
+        result["length"] = len(json.dumps(value, ensure_ascii=False, default=str))
+        result["list_length"] = len(value)
+        if value:
+            result["first_item_type"] = type(value[0]).__name__
+    else:
+        result["length"] = len(str(value or ""))
+    return result
+
+
+def _pollution_keys_in_value(value: Any) -> list[str]:
+    found: set[str] = set()
+
+    def visit(item: Any, depth: int = 0) -> None:
+        if depth > 4 or len(found) == len(FASTGPT_RAW_RESPONSE_KEYS):
+            return
+        if isinstance(item, str):
+            for key in FASTGPT_RAW_RESPONSE_KEYS:
+                if key in item:
+                    found.add(key)
+            if len(item) > 2 and ("{" in item or "[" in item):
+                parsed = _parse_candidate_value(item)
+                if parsed is not item:
+                    visit(parsed, depth + 1)
+            return
+        if isinstance(item, dict):
+            for key, nested in item.items():
+                key_text = str(key)
+                if key_text in FASTGPT_RAW_RESPONSE_KEYS:
+                    found.add(key_text)
+                visit(nested, depth + 1)
+            return
+        if isinstance(item, list):
+            for nested in item[:8]:
+                visit(nested, depth + 1)
+
+    visit(value)
+    return [key for key in FASTGPT_RAW_RESPONSE_KEYS if key in found]
 
 
 def _log_stage_not_entering_fastgpt(

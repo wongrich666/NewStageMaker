@@ -633,14 +633,23 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         answer_payload = {
             "character_storylines": [
                 {
-                    "id": "main",
-                    "title": "主角成长线",
-                    "summary": "律师回乡追查旧案真相。",
-                    "detailed_storyline": "主角在父亲旧案与现实阴谋之间不断做出艰难抉择。",
-                    "linked_beats": [1, 4, 9, 15],
-                    "episode_distribution": [{"episode_range": "第1-10集", "focus": "回乡调查"}],
-                    "edit_notes": "保持情绪递进",
+                    "id": "protagonist_main_line",
+                    "character_name": "A",
+                    "line_type": "主角线",
+                    "importance": "main",
                     "decision": "keep",
+                    "summary": "...",
+                    "linked_beats": [1],
+                    "episode_distribution": [
+                        {
+                            "episode_range": "1-3",
+                            "function": "...",
+                            "event": "...",
+                            "relation_to_beat": "对应第1节拍：开场",
+                        }
+                    ],
+                    "detailed_storyline": "...",
+                    "edit_notes": "...",
                 }
             ],
             "display_text": "人物故事线已生成",
@@ -681,12 +690,78 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertIsInstance(payload["data"]["character_storylines"], list)
         self.assertTrue(payload["data"]["character_storylines"])
-        self.assertEqual(payload["data"]["character_storylines"][0]["id"], "main")
+        self.assertEqual(payload["data"]["character_storylines"][0]["id"], "protagonist_main_line")
         self.assertEqual(payload["display_text"], "人物故事线已生成")
         self.assertNotIn(
             "character_storylines 不是 list，已回退为空数组",
             " | ".join(payload["raw"]["parse_warning"]),
         )
+
+    def test_stage_05_request_variables_clean_polluted_character_plan(self) -> None:
+        definition = service.stage_definition("05")
+        workflow_spec = service.load_stage_workflow_spec("05")
+        polluted_source_brief = {
+            "responseData": [
+                {
+                    "moduleName": "01 原文信息提取",
+                    "moduleType": "chatNode",
+                    "answerText": service.json.dumps(
+                        {"source_brief": {"source_title": "夜行审判"}},
+                        ensure_ascii=False,
+                    ),
+                }
+            ],
+            "choices": [{"message": {"content": "raw"}}],
+            "usage": {"inputTokens": 1000},
+            "historyPreview": "历史预览",
+        }
+        polluted_worldview_plan = {
+            "responseData": [
+                {
+                    "moduleName": "02 世界观",
+                    "moduleType": "chatNode",
+                    "answerText": service.json.dumps(
+                        {"worldview_plan": {"world_type": "近未来都市"}},
+                        ensure_ascii=False,
+                    ),
+                }
+            ],
+            "reasoningText": "不要传给 FastGPT",
+        }
+        polluted_character_plan = {
+            "responseData": [
+                {"moduleName": "start", "moduleType": "workflowStart"},
+                {
+                    "moduleName": "03 人物设定",
+                    "moduleType": "chatNode",
+                    "answerText": service.json.dumps(
+                        {"character_plan": {"protagonist": {"name": "林渡"}}},
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            "reasoningText": "不要传给 FastGPT",
+            "historyPreview": "历史预览",
+        }
+        payload = {
+            **_stage_05_payload(),
+            "source_brief": polluted_source_brief,
+            "worldview_plan": polluted_worldview_plan,
+            "character_plan": polluted_character_plan,
+        }
+
+        variables = service._build_stage_request_variables(definition, payload, workflow_spec)
+
+        for key in ("source_brief", "worldview_plan", "character_plan"):
+            self.assertNotIn("responseData", variables[key])
+            self.assertNotIn("reasoningText", variables[key])
+            self.assertNotIn("historyPreview", variables[key])
+            self.assertNotIn("choices", variables[key])
+            self.assertNotIn("usage", variables[key])
+        self.assertIn("夜行审判", variables["source_brief"])
+        self.assertIn("近未来都市", variables["worldview_plan"])
+        self.assertIn("character_plan", variables)
+        self.assertIn("林渡", variables["character_plan"])
 
     def test_stage_05_request_variables_exclude_raw_fastgpt_debug_payloads(self) -> None:
         definition = service.stage_definition("05")
@@ -696,6 +771,7 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
             "previous_character_storylines": [{"id": "old", "title": "旧线"}],
             "current_storyline_decisions": [{"storyline_id": "old", "decision": "keep"}],
             "user_feedback": "保留主线",
+            "basic_config": {**_basic_config(), "source_text": "很长原文" * 5000},
             "raw": {"responseData": [{"answerText": "huge"}]},
             "responseData": [{"answerText": "huge"}],
             "reasoningText": "hidden reasoning",
@@ -715,11 +791,107 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertIn("user_feedback", variables)
         self.assertIn("adaptation_direction", variables)
         self.assertIn("user_requirements", variables)
+        self.assertIn("basic_config", variables)
+        self.assertNotIn("source_text", variables["basic_config"])
+        self.assertIn("project_title", variables["basic_config"])
         self.assertNotIn("raw", variables)
         self.assertNotIn("responseData", variables)
         self.assertNotIn("reasoningText", variables)
         self.assertNotIn("historyPreview", variables)
         self.assertNotIn("display_text", variables)
+
+    def test_stage_05_character_storylines_wrong_type_returns_detail(self) -> None:
+        fastgpt_root = {
+            "responseData": [
+                {
+                    "moduleName": "05 人物故事线生成更新",
+                    "moduleType": "chatNode",
+                    "answerText": service.json.dumps(
+                        {
+                            "character_storylines": {"id": "not-a-list"},
+                            "display_text": "类型错误",
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            ]
+        }
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json, timeout
+            return _FakeResponse(payload=fastgpt_root)
+
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_API_KEY": "fastgpt-global-key",
+                "FASTGPT_CHAT_COMPLETIONS_URL": "https://api.fastgpt.in/api/v1/chat/completions",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                payload = service.run_framework_planner_stage("05", _stage_05_payload())
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["error"], "阶段 05 未解析到有效人物故事线")
+        self.assertEqual(payload["detail"]["reason"], "character_storylines_not_list")
+        self.assertEqual(payload["detail"]["best_candidate_source"], "responseData[0].answerText")
+        self.assertEqual(payload["detail"]["character_storylines_actual_type"], "dict")
+        self.assertIn("character_storylines 不是 list，已回退为空数组", " | ".join(payload["raw"]["parse_warning"]))
+
+    def test_stage_05_valid_new_variables_candidate_is_not_overridden_by_root_fallback(self) -> None:
+        fastgpt_root = {
+            "responseData": [
+                {"moduleName": "workflowStart", "moduleType": "workflowStart"},
+                {
+                    "moduleName": "05 chat invalid",
+                    "moduleType": "chatNode",
+                    "answerText": service.json.dumps({"foo": "bar"}, ensure_ascii=False),
+                },
+            ],
+            "newVariables": {
+                "d3ixvj8d": {
+                    "character_storylines": [
+                        {
+                            "id": "main",
+                            "title": "主角成长线",
+                            "summary": "有效候选",
+                            "detailed_storyline": "有效候选详情",
+                            "linked_beats": [1],
+                            "episode_distribution": [{"episode_range": "1-3", "focus": "开场"}],
+                            "edit_notes": "保留",
+                            "decision": "keep",
+                        }
+                    ],
+                    "display_text": "来自变量",
+                }
+            },
+            "answerText": "root fallback should not win",
+            "usage": {"inputTokens": 1},
+        }
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json, timeout
+            return _FakeResponse(payload=fastgpt_root)
+
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_API_KEY": "fastgpt-global-key",
+                "FASTGPT_CHAT_COMPLETIONS_URL": "https://api.fastgpt.in/api/v1/chat/completions",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                payload = service.run_framework_planner_stage("05", _stage_05_payload())
+
+        self.assertTrue(payload["ok"])
+        self.assertNotIn("error", payload)
+        self.assertEqual(payload["data"]["character_storylines"][0]["id"], "main")
+        self.assertEqual(payload["display_text"], "来自变量")
+        self.assertNotIn("character_storylines 不是 list，已回退为空数组", " | ".join(payload["raw"]["parse_warning"]))
 
     def test_stage_06_accepts_string_root_response_and_keeps_adaptation_guide_dict(self) -> None:
         raw_text = service.json.dumps(

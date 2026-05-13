@@ -205,6 +205,183 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "display_text", "choices", "usage"];
+
+  function extractBusinessField(value, fieldName) {
+    if (value === null || value === undefined || value === "") return value;
+    if (typeof value === "string") {
+      const text = value.trim();
+      if (!text) return value;
+      try {
+        return extractBusinessField(JSON.parse(text), fieldName);
+      } catch (error) {
+        return value;
+      }
+    }
+    if (Array.isArray(value)) return value;
+    if (typeof value !== "object") return value;
+    if (value[fieldName] !== undefined && value[fieldName] !== null) return value[fieldName];
+    if (value.data && typeof value.data === "object" && value.data[fieldName] !== undefined && value.data[fieldName] !== null) {
+      return value.data[fieldName];
+    }
+    for (const containerName of ["newVariables", "variables"]) {
+      const container = value[containerName];
+      if (container && typeof container === "object" && !Array.isArray(container) && container[fieldName] !== undefined && container[fieldName] !== null) {
+        return extractBusinessField(container[fieldName], fieldName);
+      }
+      if (Array.isArray(container)) {
+        for (const item of container) {
+          if (!item || typeof item !== "object") continue;
+          const variable = Array.isArray(item.variable) ? item.variable[item.variable.length - 1] : (item.variable || item.key || item.name);
+          if (String(variable || "").trim() === fieldName) {
+            return extractBusinessField(item.value, fieldName);
+          }
+        }
+      }
+    }
+    const responseData = Array.isArray(value.responseData)
+      ? value.responseData
+      : value.responseData && typeof value.responseData === "object"
+        ? [value.responseData]
+        : [];
+    for (let index = responseData.length - 1; index >= 0; index -= 1) {
+      const node = responseData[index];
+      if (!node || typeof node !== "object") continue;
+      for (const key of ["answerText", "responseText", "text", "content"]) {
+        const raw = node[key] || (node.outputs && node.outputs[key]) || (node.answerNode && node.answerNode[key]);
+        if (!raw || typeof raw !== "string") continue;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object" && parsed[fieldName] !== undefined && parsed[fieldName] !== null) {
+            return parsed[fieldName];
+          }
+          if (parsed && parsed.data && typeof parsed.data === "object" && parsed.data[fieldName] !== undefined && parsed.data[fieldName] !== null) {
+            return parsed.data[fieldName];
+          }
+        } catch (error) {
+          // Ignore non-JSON answer text.
+        }
+      }
+    }
+    for (const key of ["answerText", "responseText", "text", "content"]) {
+      if (!value[key] || typeof value[key] !== "string") continue;
+      try {
+        const parsed = JSON.parse(value[key]);
+        if (parsed && typeof parsed === "object" && parsed[fieldName] !== undefined && parsed[fieldName] !== null) {
+          return parsed[fieldName];
+        }
+      } catch (error) {
+        // Ignore non-JSON text.
+      }
+    }
+    return value;
+  }
+
+  function hasRawResponseKeys(value, depth = 0) {
+    if (depth > 4 || value === null || value === undefined) return false;
+    if (typeof value === "string") return RAW_RESPONSE_KEYS.some((key) => value.includes(key));
+    if (Array.isArray(value)) return value.slice(0, 8).some((item) => hasRawResponseKeys(item, depth + 1));
+    if (typeof value === "object") {
+      return Object.keys(value).some((key) => RAW_RESPONSE_KEYS.includes(key) || hasRawResponseKeys(value[key], depth + 1));
+    }
+    return false;
+  }
+
+  function fieldSummary(value) {
+    if (Array.isArray(value)) {
+      return { type: "array", isArray: true, length: value.length, firstItemType: value.length ? typeof value[0] : "" };
+    }
+    if (value && typeof value === "object") {
+      return { type: "object", keys: Object.keys(value).slice(0, 20), polluted: hasRawResponseKeys(value) };
+    }
+    if (typeof value === "string") {
+      return { type: "string", length: value.length, polluted: hasRawResponseKeys(value) };
+    }
+    return { type: typeof value, polluted: false };
+  }
+
+  function cleanStage05Payload(payload) {
+    const fields = ["source_brief", "worldview_plan", "character_plan", "beat_checkpoint_timeline"];
+    console.warn("[framework_planner] stage05 payload diagnostic", {
+      source_brief: fieldSummary(payload.source_brief),
+      basic_config: fieldSummary(payload.basic_config),
+      worldview_plan: fieldSummary(payload.worldview_plan),
+      character_plan: fieldSummary(payload.character_plan),
+      beat_checkpoint_timeline: fieldSummary(payload.beat_checkpoint_timeline),
+    });
+    payload.basic_config = compactStage05BasicConfig(payload.basic_config);
+    fields.forEach((field) => {
+      const before = payload[field];
+      if (!hasRawResponseKeys(before)) return;
+      const after = extractBusinessField(before, field);
+      if (after !== before) {
+        payload[field] = after;
+        console.warn(`[framework_planner] stage05 payload cleaned: field=${field} from raw response to business object`, fieldSummary(after));
+      }
+      if (hasRawResponseKeys(payload[field])) {
+        payload[field] = field === "beat_checkpoint_timeline" ? [] : {};
+        console.warn(`[framework_planner] stage05 payload rejected polluted field=${field}; 检测到旧缓存数据异常，请重新生成上游阶段`);
+      }
+    });
+    return payload;
+  }
+
+  function compactStage05BasicConfig(value) {
+    const source = value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : {};
+    const allowed = [
+      "project_title",
+      "source_title",
+      "mode",
+      "target_format",
+      "season_count",
+      "episodes_per_season",
+      "minutes_per_episode",
+      "adaptation_direction",
+      "user_constraints",
+      "user_requirements",
+    ];
+    const result = {};
+    allowed.forEach((key) => {
+      const item = source[key];
+      if (item === undefined || item === null || item === "") return;
+      result[key] = typeof item === "string" && ["adaptation_direction", "user_constraints", "user_requirements"].includes(key)
+        ? item.slice(0, 1200)
+        : item;
+    });
+    if (!result.source_title && result.project_title) result.source_title = result.project_title;
+    if (!result.project_title && result.source_title) result.project_title = result.source_title;
+    return result;
+  }
+
+  function cleanSavedBusinessFields(targetState) {
+    const fields = ["source_brief", "worldview_plan", "character_plan", "beat_checkpoint_timeline"];
+    fields.forEach((field) => {
+      const before = targetState[field];
+      if (!hasRawResponseKeys(before)) return;
+      const after = extractBusinessField(before, field);
+      if (after !== before && !hasRawResponseKeys(after)) {
+        targetState[field] = after;
+        console.warn(`[framework_planner] localStorage business field cleaned: field=${field} from raw response to business object`, fieldSummary(after));
+        return;
+      }
+      targetState[field] = field === "beat_checkpoint_timeline" ? [] : {};
+      targetState.stage_state[stageKeyForBusinessField(field)].status = "error";
+      console.warn(`[framework_planner] 检测到旧缓存数据异常，请重新生成上游阶段: field=${field}`, fieldSummary(before));
+    });
+    return targetState;
+  }
+
+  function stageKeyForBusinessField(field) {
+    return {
+      source_brief: "basic",
+      worldview_plan: "worldview",
+      character_plan: "character",
+      beat_checkpoint_timeline: "beat",
+    }[field] || "basic";
+  }
+
   function loadState() {
     const saved = readStorage(STORAGE_KEY) || readStorage(LEGACY_STORAGE_KEY);
     return normalizeState(saved);
@@ -230,6 +407,7 @@
     STAGE_SEQUENCE.forEach((stageKey) => {
       next.stage_state[stageKey] = Object.assign(clone(initialState.stage_state[stageKey]), next.stage_state[stageKey] || {});
     });
+    cleanSavedBusinessFields(next);
     return syncStageFlow(next);
   }
 
@@ -1377,7 +1555,7 @@
       };
     }
     if (stageKey === "storylines") {
-      return {
+      return cleanStage05Payload({
         mode: revise ? "改写" : "创作",
         source_brief: state.source_brief,
         basic_config: state.basic_config,
@@ -1389,7 +1567,7 @@
         user_feedback: state.feedback.storylines,
         adaptation_direction: state.basic_config.adaptation_direction,
         user_requirements: state.basic_config.user_requirements,
-      };
+      });
     }
     if (stageKey === "guide") {
       return {
