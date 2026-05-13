@@ -42,6 +42,10 @@
     ["delete", "删除"],
   ];
   const app = document.getElementById("frameworkPlannerApp");
+  if (!app) {
+    console.error("[framework_planner] root element #frameworkPlannerApp not found");
+    return;
+  }
 
   const initialState = {
     current_view: "basic",
@@ -711,7 +715,7 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+      .replace(/'/g, "&#39;");
   }
 
   function formatText(value) {
