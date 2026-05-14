@@ -193,7 +193,7 @@ class WorkflowRuntime:
             final_output_text=state.final_output_text,
         )
         if not final_script_text:
-            final_script_text = clean_user_visible_text(
+            final_script_text = clean_multiline_user_visible_text(
                 state.final_output_text
                 or state.get_var(FINAL_SCRIPT, "")
                 or state.get_var(SCRIPT_FINAL_VAR, "")
@@ -214,7 +214,16 @@ class WorkflowRuntime:
                 _truncate_log_text(raw_character_natural_language, max_chars=240),
             )
         structured_scenes = state.get_var(SCENE_VAR, "")
-        framework_natural_language = build_user_visible_section(
+        def _preserve_stage_paragraphs(value: Any) -> str:
+            # 阶段自然语言说明要原样保留段落，避免后续前端展示时被压成一整段。
+            return clean_multiline_user_visible_text(
+                value,
+                preserve_blank_lines=True,
+            ).strip()
+
+        framework_natural_language = _preserve_stage_paragraphs(
+            state.get_var(FRAMEWORK_NATURAL_LANGUAGE, "")
+        ) or build_user_visible_section(
             "剧本框架",
             {
                 "故事梗概": state.get_var(STORY_OUTLINE_VAR, ""),
@@ -224,17 +233,23 @@ class WorkflowRuntime:
             },
             state.get_var(FRAMEWORK_NATURAL_LANGUAGE, ""),
         )
-        worldview_natural_language = build_user_visible_section(
+        worldview_natural_language = _preserve_stage_paragraphs(
+            state.get_var(WORLDVIEW_NATURAL_LANGUAGE, "")
+        ) or build_user_visible_section(
             "世界观设定",
             state.get_var(WORLDVIEW_VAR, ""),
             state.get_var(WORLDVIEW_NATURAL_LANGUAGE, ""),
         )
-        appearance_natural_language = build_user_visible_section(
+        appearance_natural_language = _preserve_stage_paragraphs(
+            state.get_var(APPEARANCE_NATURAL_LANGUAGE_VAR, "")
+        ) or build_user_visible_section(
             "人物服饰说明",
             state.get_var(APPEARANCE_MAPPING, ""),
             state.get_var(APPEARANCE_NATURAL_LANGUAGE_VAR, ""),
         )
-        scene_natural_language = build_user_visible_section(
+        scene_natural_language = _preserve_stage_paragraphs(
+            state.get_var(SCENE_NATURAL_LANGUAGE_VAR, "")
+        ) or build_user_visible_section(
             "核心场景",
             structured_scenes,
             state.get_var(SCENE_NATURAL_LANGUAGE_VAR, ""),

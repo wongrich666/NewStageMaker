@@ -12,6 +12,17 @@ from .task_state import TaskRecord
 
 
 class StageCacheMixin:
+    def _first_multiline_stage_text(self, *values: Any) -> str:
+        # 前端阶段输出和完成后快照都依赖这里的文本，统一保留段落空行避免黏连。
+        for value in values:
+            text = clean_multiline_user_visible_text(
+                value,
+                preserve_blank_lines=True,
+            ).strip()
+            if text:
+                return text
+        return ""
+
     def _is_auxiliary_tool_asset(self, snapshot: dict[str, Any] | None) -> bool:
         return str((snapshot or {}).get("asset_kind") or "").strip() == AUXILIARY_TOOL_ASSET_KIND
 
@@ -65,7 +76,10 @@ class StageCacheMixin:
                 artifacts.pop(key, None)
         if is_tool_asset:
             for key in ("final_output_text", "final_script"):
-                text = clean_multiline_user_visible_text(raw_artifacts.get(key))
+                text = clean_multiline_user_visible_text(
+                    raw_artifacts.get(key),
+                    preserve_blank_lines=True,
+                )
                 if text:
                     artifacts[key] = text
                 else:
@@ -200,7 +214,7 @@ class StageCacheMixin:
             EPISODE_PLAN_DISPLAY_ARTIFACT: display_text,
             EPISODE_PLAN_DISPLAY_SOURCE_HASH_ARTIFACT: text_hash,
         }
-        record = self._projects.get(project_id)
+        record = self._project_record_get(project_id)
         if record is not None:
             self._update_snapshot(record, artifacts=artifacts_update)
             snapshot.setdefault("artifacts", {}).update(artifacts_update)
@@ -286,6 +300,10 @@ class StageCacheMixin:
         variables: dict[str, Any],
     ) -> str:
         """把运行时阶段名映射成回退阶段名，保证前后端对阶段理解一致。"""
+        # 新任务刚创建时 debug_state 里可能还没有初始化 variables；
+        # 这里先兜底成空字典，避免启动响应在返回前被 None.get 打断。
+        if not isinstance(variables, dict):
+            variables = {}
         batch_stage = _normalize_rollback_stage_key(variables.get(LOCAL_CURRENT_BATCH_STAGE))
         rewrite_stage = _normalize_rollback_stage_key(variables.get(LOCAL_REWRITE_FROM_STAGE))
         for candidate in (batch_stage, rewrite_stage):
@@ -359,9 +377,10 @@ class StageCacheMixin:
     ) -> dict[str, str]:
         """只挑用户需要看的正式阶段内容，并补一段自然语言版摘要减轻等待焦虑。"""
         raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
-        partial_script_output = clean_user_visible_text(
+        partial_script_output = clean_multiline_user_visible_text(
             artifacts.get(PARTIAL_SCRIPT_ARTIFACT)
-            or raw_artifacts.get(PARTIAL_SCRIPT_ARTIFACT)
+            or raw_artifacts.get(PARTIAL_SCRIPT_ARTIFACT),
+            preserve_blank_lines=True,
         )
         if self._is_auxiliary_tool_asset(snapshot):
             final_stage_output = clean_multiline_user_visible_text(
@@ -369,10 +388,11 @@ class StageCacheMixin:
                 or artifacts.get("final_script")
                 or raw_artifacts.get("final_output_text")
                 or raw_artifacts.get("final_script")
-                or ""
+                or "",
+                preserve_blank_lines=True,
             )
         else:
-            final_stage_output = pick_best_user_visible_value(
+            final_stage_output = self._first_multiline_stage_text(
                 artifacts.get("final_output_text")
                 or artifacts.get("final_script")
                 or raw_artifacts.get("final_output_text")
@@ -449,10 +469,10 @@ class StageCacheMixin:
         }
 
     def _framework_stage_output_text(self, artifacts: dict[str, Any]) -> str:
-        return pick_best_user_visible_value(artifacts.get("framework_natural_language"))
+        return self._first_multiline_stage_text(artifacts.get("framework_natural_language"))
 
     def _worldview_stage_output_text(self, artifacts: dict[str, Any]) -> str:
-        return pick_best_user_visible_value(artifacts.get("worldview_natural_language"))
+        return self._first_multiline_stage_text(artifacts.get("worldview_natural_language"))
 
     def _character_stage_output_text(
         self,
@@ -472,7 +492,7 @@ class StageCacheMixin:
             or raw_artifacts.get("character_summary"),
             structured,
         )
-        return pick_best_user_visible_value(natural)
+        return self._first_multiline_stage_text(natural)
 
     def _scene_stage_output_text(
         self,
@@ -480,7 +500,7 @@ class StageCacheMixin:
         artifacts: dict[str, Any],
     ) -> str:
         raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
-        natural = pick_best_user_visible_value(
+        natural = self._first_multiline_stage_text(
             artifacts.get("scene_natural_language")
             or artifacts.get("core_scene_summary")
             or raw_artifacts.get("scene_natural_language")
@@ -497,7 +517,10 @@ class StageCacheMixin:
         raw_output: str,
     ) -> str:
         """阶段展示只走本地格式化，不再额外触发展示摘要调用。"""
-        text = clean_user_visible_text(raw_output).strip()
+        text = clean_multiline_user_visible_text(
+            raw_output,
+            preserve_blank_lines=True,
+        ).strip()
         if not text:
             return ""
         return self._fallback_stage_preview(stage_title, text)
@@ -545,7 +568,7 @@ class StageCacheMixin:
             STAGE_PREVIEW_STAGE_ARTIFACT: stage_key,
             STAGE_PREVIEW_SOURCE_HASH_ARTIFACT: text_hash,
         }
-        record = self._projects.get(project_id)
+        record = self._project_record_get(project_id)
         if record is not None:
             self._update_snapshot(record, artifacts=artifacts_update)
             snapshot.setdefault("artifacts", {}).update(artifacts_update)
@@ -1169,10 +1192,11 @@ class StageCacheMixin:
             or input_payload.get("title")
             or ""
         ).strip()
-        story_outline = clean_user_visible_text(
+        story_outline = clean_multiline_user_visible_text(
             artifacts.get("story_outline")
             or input_payload.get("story_outline")
-            or ""
+            or "",
+            preserve_blank_lines=True,
         ).strip()
         total_episodes = snapshot.get("total_episodes") or input_payload.get("total_episodes")
         if title:
@@ -1192,13 +1216,19 @@ class StageCacheMixin:
             )
             artifacts = compacted.get("artifacts") if isinstance(compacted.get("artifacts"), dict) else {}
             if isinstance(artifacts, dict):
-                story_outline = clean_user_visible_text(artifacts.get("story_outline")).strip()
+                story_outline = clean_multiline_user_visible_text(
+                    artifacts.get("story_outline"),
+                    preserve_blank_lines=True,
+                ).strip()
                 if story_outline:
                     artifacts["story_outline"] = story_outline
                 else:
                     artifacts.pop("story_outline", None)
                 for key in ("final_script", "final_output_text"):
-                    text = clean_multiline_user_visible_text(artifacts.get(key))
+                    text = clean_multiline_user_visible_text(
+                        artifacts.get(key),
+                        preserve_blank_lines=True,
+                    )
                     if text:
                         artifacts[key] = text
                     else:
@@ -1232,8 +1262,14 @@ class StageCacheMixin:
         )
         artifacts = compacted.get("artifacts") if isinstance(compacted.get("artifacts"), dict) else {}
         if isinstance(artifacts, dict):
+            single_line_keys = ("script_title_content",)
+            for key in single_line_keys:
+                text = clean_user_visible_text(artifacts.get(key))
+                if text:
+                    artifacts[key] = text
+                else:
+                    artifacts.pop(key, None)
             for key in (
-                "script_title_content",
                 "framework_natural_language",
                 "story_outline",
                 "character_natural_language",
@@ -1245,7 +1281,10 @@ class StageCacheMixin:
                 "final_script",
                 "final_output_text",
             ):
-                text = clean_user_visible_text(artifacts.get(key))
+                text = clean_multiline_user_visible_text(
+                    artifacts.get(key),
+                    preserve_blank_lines=True,
+                )
                 if text:
                     artifacts[key] = text
                 else:
@@ -1379,7 +1418,7 @@ class StageCacheMixin:
             STORY_TEASER_ARTIFACT: teaser,
             STORY_TEASER_SOURCE_ARTIFACT: story_outline,
         }
-        record = self._projects.get(project_id)
+        record = self._project_record_get(project_id)
         if record is not None:
             self._update_snapshot(record, artifacts=artifacts_update)
             snapshot.setdefault("artifacts", {}).update(artifacts_update)

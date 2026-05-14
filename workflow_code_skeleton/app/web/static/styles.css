@@ -2833,7 +2833,8 @@ a {
 
 .chat-composer-shell {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 76px;
+  /* 左侧 “+” 已删除，这里不再保留空列，避免创作需求输入框被白白挤瘦。 */
+  grid-template-columns: minmax(0, 1fr) 76px;
   align-items: stretch;
   gap: 10px;
   padding: 8px 10px;
@@ -2842,18 +2843,11 @@ a {
   background: #2a2a2a;
 }
 
-.chat-composer-plus {
-  display: grid;
-  place-items: center;
-  color: #c8cfd8;
-  font-size: 22px;
-  line-height: 1;
-}
-
 .chat-composer-main {
   display: grid;
   gap: 8px;
   min-width: 0;
+  align-content: start;
 }
 
 .composer-grid-inline {
@@ -3041,7 +3035,7 @@ a {
   }
 
   .chat-composer-shell {
-    grid-template-columns: 34px minmax(0, 1fr) 68px;
+    grid-template-columns: minmax(0, 1fr) 68px;
   }
 }
 
@@ -3070,7 +3064,7 @@ a {
   }
 
   .chat-composer-shell {
-    grid-template-columns: 32px minmax(0, 1fr) 60px;
+    grid-template-columns: minmax(0, 1fr) 60px;
   }
 
   .composer-grid-inline {

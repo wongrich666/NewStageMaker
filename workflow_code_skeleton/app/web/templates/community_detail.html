@@ -34,7 +34,8 @@
               <span class="status-pill status-pill-public">公开成品</span>
             </div>
             <h1>{{ asset.title }}</h1>
-            <p class="community-detail-summary">{{ asset.summary }}</p>
+            <!-- 详情页摘要同样保留换行，避免故事摘要/人物说明在浏览器里被折叠。 -->
+            <p class="community-detail-summary">{{ asset.summary | e | replace('\r\n', '\n') | replace('\r', '\n') | replace('\n', '<br>\n') | safe }}</p>
           </div>
           <a class="btn btn-secondary" href="{{ url_for('index', auth_token=current_auth_token) }}#community">返回社区</a>
         </div>

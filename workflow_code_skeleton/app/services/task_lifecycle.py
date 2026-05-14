@@ -74,8 +74,9 @@ class TaskLifecycleMixin:
             model_option=model_option,
             snapshot=snapshot,
         )
-        self._tasks[task_id] = record
-        self._projects[project_id] = record
+        with self._lock:
+            self._tasks[task_id] = record
+        self._project_record_set(project_id, record)
         self._save_resume_checkpoint(record)
         self._persist_snapshot(record)
 
@@ -238,7 +239,7 @@ class TaskLifecycleMixin:
         user_id: int,
         changes: dict[str, Any],
     ) -> dict[str, Any]:
-        record = self._projects.get(project_id)
+        record = self._project_record_get(project_id)
         if record:
             snapshot = record.clone_snapshot()
         else:
@@ -269,7 +270,7 @@ class TaskLifecycleMixin:
             artifacts.pop(STORY_TEASER_SOURCE_ARTIFACT, None)
             snapshot["artifacts"] = artifacts
         if final_script is not None:
-            text = clean_multiline_user_visible_text(final_script) if is_tool_asset else clean_user_visible_text(final_script).strip()
+            text = clean_multiline_user_visible_text(final_script).strip()
             artifacts = dict(snapshot.get("artifacts") or {})
             artifacts["final_script"] = text
             artifacts["final_output_text"] = text
@@ -302,7 +303,7 @@ class TaskLifecycleMixin:
         if _completion_confirmed(snapshot):
             return self._public_snapshot(snapshot)
 
-        record = self._projects.get(project_id)
+        record = self._project_record_get(project_id)
         if record:
             self._update_snapshot(
                 record,
@@ -381,7 +382,7 @@ class TaskLifecycleMixin:
                 raise ValueError(rewrite_start_validation_message(batch_size))
 
         old_task_id = str(snapshot.get("task_id") or "").strip()
-        old_record = self._projects.get(project_id)
+        old_record = self._project_record_get(project_id)
         if old_record and status in {"paused", "pausing", "terminated"}:
             self._prepare_record_for_replacement(old_record)
 
@@ -452,8 +453,8 @@ class TaskLifecycleMixin:
             if old_task_id and old_task_id != task_id:
                 self._tasks.pop(old_task_id, None)
             self._tasks[task_id] = record
-            self._projects[int(project_id)] = record
-            self._remember_latest_project(int(user_id), int(project_id))
+        self._project_record_set(int(project_id), record)
+        self._remember_latest_project(int(user_id), int(project_id))
         self._append_log(
             record,
             title="控制动作：阶段回退重写",
@@ -976,8 +977,8 @@ class TaskLifecycleMixin:
         with self._lock:
             self._tasks.pop(old_task_id, None)
             self._tasks[new_task_id] = record
-            self._projects[project_id] = record
-            self._remember_latest_project(record.user_id, project_id)
+        self._project_record_set(project_id, record)
+        self._remember_latest_project(record.user_id, project_id)
         self._append_log(
             record,
             title="控制动作：继续失败任务",
@@ -1074,8 +1075,8 @@ class TaskLifecycleMixin:
             if old_task_id:
                 self._tasks.pop(old_task_id, None)
             self._tasks[new_task_id] = record
-            self._projects[int(project_id)] = record
-            self._remember_latest_project(int(user_id), int(project_id))
+        self._project_record_set(int(project_id), record)
+        self._remember_latest_project(int(user_id), int(project_id))
 
         self._save_resume_checkpoint(record)
         self._persist_snapshot(record)
@@ -1123,7 +1124,7 @@ class TaskLifecycleMixin:
         return self._public_snapshot(record.clone_snapshot())
 
     def clear_project(self, project_id: int, user_id: int | None = None) -> None:
-        record = self._projects.get(project_id)
+        record = self._project_record_get(project_id)
         owner_user_id: int | None = None
         if record:
             if user_id is not None and int(record.user_id) != int(user_id):
@@ -1133,8 +1134,9 @@ class TaskLifecycleMixin:
             record.control.request_terminate()
             with record.lock:
                 record.snapshot["_deleted"] = True
-            self._tasks.pop(record.task_id, None)
-            self._projects.pop(project_id, None)
+            with self._lock:
+                self._tasks.pop(record.task_id, None)
+            self._project_record_pop(project_id)
 
         path = self._project_path(project_id)
         if path.exists():

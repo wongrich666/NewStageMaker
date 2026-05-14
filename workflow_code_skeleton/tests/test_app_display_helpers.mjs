@@ -12,7 +12,10 @@ const source = fs.readFileSync(appJsPath, "utf8");
 function extractBetween(startToken, endToken) {
   const start = source.indexOf(startToken);
   assert.notEqual(start, -1, `missing token: ${startToken}`);
-  const end = source.indexOf(endToken, start);
+  let end = source.indexOf(endToken, start);
+  if (end === -1) {
+    end = source.indexOf(endToken.trimStart(), start);
+  }
   assert.notEqual(end, -1, `missing token: ${endToken}`);
   return source.slice(start, end).trim();
 }
@@ -47,7 +50,7 @@ const bootstrap = [
   extractBetween("function renderAssistantStageBubble(message) {", "\n\n  function renderThinkingBubble(thinkingState) {"),
   extractBetween("function renderThinkingBubble(thinkingState) {", "\n\n  function transcriptSignature(snapshot) {"),
   extractBetween("function flashCopyButton(button, label) {", "\n\n  function projectTooltip(item) {"),
-  "module.exports = { buildWorkspaceUrl, normalizeScriptFormatMode, scriptFormatModeLabel, formatDisplayValue, normalizeStageKey, compactMessageText, partialScriptOutput, statusNoteFrom, frameworkStageOutput, worldviewStageOutput, visibleStageMessages, thinkingStateFrom, thinkingMessageCopyText, renderCopyButton, renderUserPromptBubble, renderAssistantStageBubble, renderThinkingBubble, flashCopyButton };",
+  "module.exports = { buildWorkspaceUrl, normalizeScriptFormatMode, scriptFormatModeLabel, formatDisplayValue, normalizeStageKey, compactMessageText, partialScriptOutput, statusNoteFrom, frameworkStageOutput, worldviewStageOutput, visibleStageMessages, thinkingStateFrom, thinkingMessageCopyText, renderCopyButton, renderUserPromptBubble, renderAssistantStageBubble, renderThinkingBubble, renderTextWithLineBreaks, flashCopyButton };",
 ].join("\n\n");
 
 const context = {
@@ -75,6 +78,7 @@ vm.runInNewContext(bootstrap, context, { filename: appJsPath });
 const {
   statusNoteFrom,
   partialScriptOutput,
+  formatDisplayValue,
   frameworkStageOutput,
   worldviewStageOutput,
   visibleStageMessages,
@@ -84,6 +88,7 @@ const {
   renderUserPromptBubble,
   renderAssistantStageBubble,
   renderThinkingBubble,
+  renderTextWithLineBreaks,
   flashCopyButton,
   buildWorkspaceUrl,
   normalizeScriptFormatMode,
@@ -234,6 +239,27 @@ test("partial script output formats approved batches before final completion", (
   assert.equal(output.includes("[object Object]"), false);
 });
 
+test("format display value unwraps wrapped multiline script text", () => {
+  assert.equal(
+    formatDisplayValue({
+      content: "第1集\n场景1：旧码头\n林夏：先查人。\n\n场景2：会议室",
+    }),
+    "第1集\n场景1：旧码头\n林夏：先查人。\n\n场景2：会议室",
+  );
+});
+
+test("partial script output preserves wrapped final script line breaks", () => {
+  const output = partialScriptOutput({
+    artifacts: {
+      final_output_text: {
+        content: "第1集\n场景1：旧码头\n林夏：先查人。\n\n场景2：会议室",
+      },
+    },
+  });
+
+  assert.equal(output, "第1集\n场景1：旧码头\n林夏：先查人。\n\n场景2：会议室");
+});
+
 test("status note falls back to runtime stage message with loading dots", () => {
   const note = statusNoteFrom({
     status: "running",
@@ -330,6 +356,13 @@ test("assistant stage bubble renders copy in footer instead of header", () => {
   assert.doesNotMatch(head, /chat-bubble-head-actions/);
 });
 
+test("render text helper preserves paragraph gaps with html line breaks", () => {
+  assert.equal(
+    renderTextWithLineBreaks("第一段\n\n第二段"),
+    "第一段<br><br>第二段",
+  );
+});
+
 test("thinking bubble renders current stage label and copy in footer", () => {
   const html = renderThinkingBubble({
     stageLabel: "剧本正文审核：第 6-10 集",
@@ -358,4 +391,9 @@ test("flash copy button restores the default Chinese label", () => {
   assert.equal(button.dataset.originalLabel, "复制");
   assert.equal(button.textContent, "复制");
   assert.equal(button.disabled, false);
+});
+
+test("asset cards no longer expose the removed new-page action", () => {
+  assert.equal(source.includes('data-action="open-project-page"'), false);
+  assert.equal(source.includes("新页面打开"), false);
 });

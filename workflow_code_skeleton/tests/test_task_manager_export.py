@@ -321,6 +321,66 @@ class TaskManagerExportTests(unittest.TestCase):
         self.assertNotIn("character_design_principle", content)
         self.assertNotIn("```json", content)
 
+    def test_build_docx_export_source_preserves_multiline_sections_and_script(self) -> None:
+        snapshot = _snapshot_with_export_artifacts()
+
+        content = self.manager._build_docx_export_source_text(snapshot)
+
+        self.assertIn(
+            "人物服饰说明\n【角色】林夏\n默认称呼：林夏【日常】\n固定识别锚点：深色风衣与冷色系妆发",
+            content,
+        )
+        self.assertIn(
+            "剧本正文\n第1集：风起\n场景1：旧码头\n林夏：先查人，再查船。",
+            content,
+        )
+
+    def test_build_docx_export_source_preserves_blank_lines_between_preface_blocks(self) -> None:
+        snapshot = _snapshot_with_export_artifacts()
+        snapshot["artifacts"][APPEARANCE_NATURAL_LANGUAGE_ARTIFACT] = (
+            "【角色】林夏\n"
+            "默认称呼：林夏【日常】\n"
+            "\n"
+            "【角色】顾川\n"
+            "默认称呼：顾川【会议室交锋态】"
+        )
+
+        content = self.manager._build_docx_export_source_text(snapshot)
+
+        self.assertIn(
+            "人物服饰说明\n【角色】林夏\n默认称呼：林夏【日常】\n\n【角色】顾川\n默认称呼：顾川【会议室交锋态】",
+            content,
+        )
+
+    def test_build_docx_export_source_preserves_wrapped_appearance_text_paragraphs(self) -> None:
+        snapshot = _snapshot_with_export_artifacts()
+        snapshot["artifacts"][APPEARANCE_NATURAL_LANGUAGE_ARTIFACT] = {
+            "content": (
+                "【角色】林夏\n"
+                "默认称呼：林夏【日常】\n"
+                "\n"
+                "【角色】顾川\n"
+                "默认称呼：顾川【会议室交锋态】"
+            )
+        }
+
+        content = self.manager._build_docx_export_source_text(snapshot)
+
+        self.assertIn(
+            "人物服饰说明\n【角色】林夏\n默认称呼：林夏【日常】\n\n【角色】顾川\n默认称呼：顾川【会议室交锋态】",
+            content,
+        )
+
+    def test_best_final_script_text_preserves_script_line_breaks(self) -> None:
+        snapshot = _snapshot_with_export_artifacts()
+
+        content = self.manager._best_final_script_text(snapshot)
+
+        self.assertEqual(
+            content,
+            "第1集：风起\n场景1：旧码头\n林夏：先查人，再查船。",
+        )
+
     def test_build_docx_export_source_falls_back_to_readable_text_without_raw_json(self) -> None:
         snapshot = _snapshot_with_export_artifacts()
         snapshot["artifacts"].pop("framework_natural_language", None)
@@ -549,6 +609,10 @@ class TaskManagerExportTests(unittest.TestCase):
         self.assertNotIn("分集计划", text)
         self.assertNotIn("character_design_principle", text)
         self.assertNotIn("opening", text)
+
+        txt_text = docx_path.with_suffix(".txt").read_text(encoding="utf-8")
+        self.assertIn("【角色】林夏\n默认称呼：林夏【日常】", txt_text)
+        self.assertIn("剧本正文\n第1集：风起\n场景1：旧码头\n林夏：先查人，再查船。", txt_text)
 
     def test_save_final_script_hydrates_character_natural_language_before_export(self) -> None:
         snapshot = _snapshot_with_export_artifacts()
