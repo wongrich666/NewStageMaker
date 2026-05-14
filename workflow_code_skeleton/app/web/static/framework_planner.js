@@ -1458,7 +1458,7 @@
           <span class="fp-running-spinner" aria-hidden="true"></span>
           <div>
             <strong>阶段 ${escapeHtml(stageNo)} 正在处理：${escapeHtml(title)}</strong>
-            <p>已运行 ${escapeHtml(processingElapsedLabel(stageKey))}。你仍可以查看已生成内容，完成后页面会自动刷新结果。</p>
+            <p>已运行 ${escapeHtml(processingElapsedLabel(stageKey))}。</p>
           </div>
         </div>
         <span class="fp-running-badge">处理中</span>
