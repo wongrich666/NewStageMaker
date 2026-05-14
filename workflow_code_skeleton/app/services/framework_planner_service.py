@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+import traceback
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -47,6 +48,7 @@ FRAMEWORK_BUSINESS_FIELDS = {
     "framework_plan_package",
     "validation_report",
 }
+STAGE_DEBUG_PREVIEW_LIMIT = 200
 FRAMEWORK_BUSINESS_LIST_FIELDS = {
     "beat_checkpoint_timeline",
     "character_storylines",
@@ -95,11 +97,37 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _project_history_id(project_id: Any) -> str:
+def _safe_project_history_name(value: Any) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", text)
+    text = re.sub(r"\s+", "_", text).strip("._ ")
+    return text[:80] or "未命名项目"
+
+
+def _payload_project_name(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    for key in ("project_title", "title", "source_title"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    basic_config = payload.get("basic_config")
+    if isinstance(basic_config, dict):
+        for key in ("project_title", "title", "source_title"):
+            value = basic_config.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+    return ""
+
+
+def _project_history_id(project_id: Any, project_name: Any = "") -> str:
+    name = str(project_name or "").strip()
+    if name:
+        return _safe_project_history_name(name)
     text = str(project_id or "").strip()
-    if text.isdigit() and int(text) > 0:
-        return text
-    return "unsaved"
+    if text and not text.isdigit():
+        return _safe_project_history_name(text)
+    return "未命名项目"
 
 
 def _history_timestamp() -> str:
@@ -120,14 +148,14 @@ def _history_stage_slug(stage_or_module: Any) -> str:
     return text or "module"
 
 
-def _history_project_dir(project_id: Any) -> Path:
-    path = _repo_root() / "cache" / _project_history_id(project_id)
+def _history_project_dir(project_id: Any, project_name: Any = "") -> Path:
+    path = _repo_root() / "cache" / _project_history_id(project_id, project_name)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def _history_log_dir(project_id: Any) -> Path:
-    path = _repo_root() / "logs" / _project_history_id(project_id)
+def _history_log_dir(project_id: Any, project_name: Any = "") -> Path:
+    path = _repo_root() / "logs" / _project_history_id(project_id, project_name)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -136,6 +164,170 @@ def _history_payload_keys(payload: Any) -> list[str]:
     if not isinstance(payload, dict):
         return []
     return sorted(str(key) for key in payload.keys() if not str(key).startswith("_"))
+
+
+def _raw_payload_summary(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {"type": type(payload).__name__, "preview": _preview_return_object(payload, limit=300)}
+    summary: dict[str, Any] = {
+        "type": "dict",
+        "payload_keys": _history_payload_keys(payload),
+        "field_summary": {},
+        "suspected_raw_response_fields": [],
+    }
+    field_summary: dict[str, Any] = {}
+    polluted_fields: list[str] = []
+    for key, value in payload.items():
+        if str(key).startswith("_"):
+            continue
+        value_summary = _value_diagnostic_summary(value)
+        field_summary[str(key)] = {
+            "type": value_summary["type"],
+            "length": value_summary["length"],
+            "dict_keys": value_summary["dict_keys"][:12],
+            "list_length": value_summary["list_length"],
+            "first_item_type": value_summary["first_item_type"],
+            "preview": value_summary["preview"],
+        }
+        if _pollution_keys_in_value(value):
+            polluted_fields.append(str(key))
+    summary["field_summary"] = field_summary
+    summary["suspected_raw_response_fields"] = polluted_fields
+    return summary
+
+
+def _debug_project_dir(payload: Any) -> Path:
+    project_name = _payload_project_name(payload) or (
+        payload.get("project_id") if isinstance(payload, dict) else ""
+    )
+    path = _repo_root() / "debug" / _project_history_id(project_name, project_name)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _debug_value_summary(value: Any, *, limit: int = STAGE_DEBUG_PREVIEW_LIMIT) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        text = value
+        prefix = f"str(len={len(value)}) "
+    elif isinstance(value, dict):
+        keys = [str(key) for key in value.keys()]
+        preview_keys = ", ".join(keys[:12])
+        text = json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
+        prefix = f"dict(keys=[{preview_keys}], size={len(value)}) "
+    elif isinstance(value, list):
+        text = json.dumps(value[:3], ensure_ascii=False, default=str, separators=(",", ":"))
+        prefix = f"list(len={len(value)}) "
+    else:
+        text = str(value)
+        prefix = f"{type(value).__name__} "
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > limit:
+        text = f"{text[:limit]}..."
+    return f"{prefix}{text}".strip()
+
+
+def _debug_response_status(response_json: Any) -> str:
+    if not isinstance(response_json, dict):
+        return "unknown"
+    if response_json.get("ok") is False:
+        return "failed"
+    if response_json.get("status") in {"failed", "error"}:
+        return str(response_json.get("status"))
+    if response_json.get("error") or response_json.get("exception_type"):
+        return "failed"
+    return "success"
+
+
+def _debug_error_summary(response_json: Any) -> list[str]:
+    if not isinstance(response_json, dict):
+        return []
+    lines: list[str] = []
+    detail = response_json.get("detail") if isinstance(response_json.get("detail"), dict) else {}
+    for key in (
+        "reason",
+        "error",
+        "message",
+        "exception_type",
+        "exception_message",
+        "status_code",
+        "response_status",
+        "response_error",
+        "traceback",
+    ):
+        value = response_json.get(key)
+        if value in (None, "", [], {}):
+            value = detail.get(key)
+        if value not in (None, "", [], {}):
+            lines.append(f"{key}: {_debug_value_summary(value)}")
+    return lines
+
+
+def _debug_collect_response_variables(response_json: Any) -> dict[str, Any]:
+    if not isinstance(response_json, dict):
+        return {"response": response_json}
+    variables: dict[str, Any] = {}
+    for container_key in ("data", "output", "raw", "response"):
+        container = response_json.get(container_key)
+        if isinstance(container, dict):
+            for key, value in container.items():
+                if key not in variables:
+                    variables[str(key)] = value
+    for key, value in response_json.items():
+        if key in {"data", "output", "raw", "response", "detail"}:
+            continue
+        if key not in variables and key not in {"ok", "stage", "status"}:
+            variables[str(key)] = value
+    return variables
+
+
+def print_stage_debug(stage_number: Any, response_json: Any, payload: Any) -> None:
+    stage = str(stage_number or "").zfill(2)
+    definition = STAGE_DEFINITIONS.get(stage)
+    stage_name = definition.label if definition else "未知阶段"
+    status = _debug_response_status(response_json)
+    response_variables = _debug_collect_response_variables(response_json)
+    payload_variables = payload if isinstance(payload, dict) else {}
+    key_order: list[str] = []
+    if definition is not None:
+        key_order.extend(definition.input_fields)
+        key_order.extend(definition.output_fields)
+    key_order.extend(sorted(FRAMEWORK_BUSINESS_FIELDS))
+    key_order.extend(str(key) for key in payload_variables.keys() if not str(key).startswith("_"))
+    key_order.extend(response_variables.keys())
+
+    seen: set[str] = set()
+    ordered_keys = [key for key in key_order if not (key in seen or seen.add(key))]
+    lines = [
+        "=== Framework Planner Stage Debug ===",
+        f"timestamp: {_history_iso_timestamp()}",
+        f"stage: {stage} - {stage_name}",
+        f"status: {status}",
+    ]
+    error_lines = _debug_error_summary(response_json)
+    if error_lines:
+        lines.append("-- failure --")
+        lines.extend(error_lines)
+    lines.append("-- variables --")
+    for key in ordered_keys:
+        if key in response_variables:
+            value = response_variables[key]
+        elif key in payload_variables:
+            value = payload_variables[key]
+        else:
+            continue
+        lines.append(f"{key}: {_debug_value_summary(value)}")
+    if not ordered_keys:
+        lines.append("empty: no payload or response variables")
+
+    debug_text = "\n".join(lines)
+    print(f"\n{debug_text}\n", flush=True)
+    try:
+        debug_dir = _debug_project_dir(payload)
+        (debug_dir / f"stage{stage}_debug.txt").write_text(debug_text + "\n", encoding="utf-8")
+    except Exception as exc:
+        logger.warning("写入阶段调试文件失败：stage=%s error=%s", stage, exc)
 
 
 def save_framework_stage_history(
@@ -147,7 +339,8 @@ def save_framework_stage_history(
     status: str,
     error: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    project_dir = _history_project_dir(project_id)
+    project_name = _payload_project_name(payload)
+    project_dir = _history_project_dir(project_id, project_name)
     slug = _history_stage_slug(stage)
     timestamp = _history_timestamp()
     record = {
@@ -166,7 +359,8 @@ def save_framework_stage_history(
     if status == "success":
         latest_path.write_text(json.dumps(record, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     return {
-        "project_id": _project_history_id(project_id),
+        "project_id": _project_history_id(project_id, project_name),
+        "project_name": _project_history_id(project_id, project_name),
         "stage": slug,
         "filename": filename,
         "latest_filename": latest_path.name if status == "success" else "",
@@ -185,7 +379,8 @@ def write_framework_stage_exception_log(
     message: str,
     status_code: int | None = None,
 ) -> dict[str, Any]:
-    log_dir = _history_log_dir(project_id)
+    project_name = _payload_project_name(payload)
+    log_dir = _history_log_dir(project_id, project_name)
     timestamp = _history_timestamp()
     entry = {
         "stage": _history_stage_slug(stage),
@@ -193,12 +388,36 @@ def write_framework_stage_exception_log(
         "status": "failed",
         "payload_keys": _history_payload_keys(payload),
         "exception_type": exc_type,
-        "message": str(message or ""),
+        "exception_message": str(message or ""),
         "status_code": status_code,
+        "raw_payload_summary": _raw_payload_summary(payload),
     }
-    filename = f"{entry['stage']}_{timestamp}_error.json"
+    logger.error(
+        "framework planner stage exception timestamp=%s stage=%s payload_keys=%s exception_type=%s exception_message=%s status_code=%s",
+        timestamp,
+        entry["stage"],
+        entry["payload_keys"],
+        exc_type,
+        message,
+        status_code,
+    )
+    print_stage_debug(
+        stage,
+        {
+            "ok": False,
+            "stage": _history_stage_slug(stage),
+            "status": "failed",
+            "reason": str(message or ""),
+            "exception_type": exc_type,
+            "exception_message": str(message or ""),
+            "status_code": status_code,
+            "detail": entry,
+        },
+        payload,
+    )
+    filename = f"{entry['stage']}_{timestamp}.json"
     (log_dir / filename).write_text(json.dumps(entry, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-    return {"filename": filename, **entry}
+    return {"filename": filename, "project_name": _project_history_id(project_id, project_name), **entry}
 
 
 def list_framework_stage_history(project_id: Any, stage: str | None = None) -> dict[str, Any]:
@@ -221,7 +440,7 @@ def list_framework_stage_history(project_id: Any, stage: str | None = None) -> d
             "status": data.get("status") or "success",
             "payload_keys": data.get("payload_keys") or [],
         })
-    return {"project_id": _project_history_id(project_id), "stage": slug, "entries": entries}
+    return {"project_id": _project_history_id(project_id), "project_name": _project_history_id(project_id), "stage": slug, "entries": entries}
 
 
 def load_framework_stage_history(project_id: Any, filename: str) -> dict[str, Any]:
@@ -644,6 +863,11 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         )
         _log_stage_not_entering_fastgpt(definition, diagnostics, reason=reason)
         data, display_text = _build_mock_stage_output(definition.stage, normalized_payload)
+        print_stage_debug(
+            definition.stage,
+            {"ok": True, "stage": definition.stage, "status": "success", "data": data, "display_text": display_text},
+            normalized_payload,
+        )
         return {
             "ok": True,
             "stage": definition.stage,
@@ -669,7 +893,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             diagnostics,
             reason=exc.detail.get("reason") or str(exc),
         )
-        raise _build_fastgpt_stage_error(
+        stage_error = _build_fastgpt_stage_error(
             definition=definition,
             diagnostics=diagnostics,
             reason=exc.detail.get("reason") or str(exc),
@@ -677,7 +901,22 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             entered_fastgpt_request=False,
             exc=exc,
             extra_detail=exc.detail,
-        ) from exc
+        )
+        print_stage_debug(
+            definition.stage,
+            {
+                "ok": False,
+                "stage": definition.stage,
+                "status": "failed",
+                "reason": stage_error.detail.get("reason") or str(stage_error),
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "detail": stage_error.detail,
+                "traceback": traceback.format_exc(),
+            },
+            normalized_payload,
+        )
+        raise stage_error from exc
 
     logger.info(
         "FastGPT endpoint resolved: stage=%s url_source=%s endpoint=%s workflow_id_missing_but_api_key_mode_enabled=%s",
@@ -691,13 +930,30 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         "Authorization": f"Bearer {endpoint.api_key}",
         "Content-Type": "application/json",
     }
-    response = _post_with_retries(
-        definition,
-        endpoint,
-        headers,
-        body,
-        diagnostics=diagnostics,
-    )
+    try:
+        response = _post_with_retries(
+            definition,
+            endpoint,
+            headers,
+            body,
+            diagnostics=diagnostics,
+        )
+    except FrameworkPlannerStageError as exc:
+        print_stage_debug(
+            definition.stage,
+            {
+                "ok": False,
+                "stage": definition.stage,
+                "status": "failed",
+                "reason": exc.detail.get("reason") or str(exc),
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "detail": exc.detail,
+                "traceback": traceback.format_exc(),
+            },
+            normalized_payload,
+        )
+        raise
     response_text = _safe_response_text(response)
     try:
         response_json = response.json()
@@ -723,6 +979,21 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 "框架策划阶段 %s 返回非法 JSON 响应，payload_keys=%s",
                 definition.stage,
                 sorted(normalized_payload.keys()),
+            )
+            print_stage_debug(
+                definition.stage,
+                {
+                    "ok": False,
+                    "stage": definition.stage,
+                    "status": "failed",
+                    "reason": "FastGPT 返回非法 JSON 响应",
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc),
+                    "response": response_text,
+                    "detail": debug_detail,
+                    "traceback": traceback.format_exc(),
+                },
+                normalized_payload,
             )
             raise FrameworkPlannerStageError(
                 "当前阶段返回格式异常，请重试或查看日志",
@@ -781,6 +1052,21 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 sorted(normalized_payload.keys()),
                 exc,
             )
+            print_stage_debug(
+                definition.stage,
+                {
+                    "ok": False,
+                    "stage": definition.stage,
+                    "status": "failed",
+                    "reason": "阶段输出解析失败",
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc),
+                    "response": response_json,
+                    "detail": debug_detail,
+                    "traceback": traceback.format_exc(),
+                },
+                normalized_payload,
+            )
             raise FrameworkPlannerStageError(
                 "当前阶段返回格式异常，请重试或查看日志",
                 stage=definition.stage,
@@ -798,6 +1084,19 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             parse_warnings=parse_warnings,
         )
 
+    print_stage_debug(
+        definition.stage,
+        {
+            "ok": not bool(stage_detail),
+            "stage": definition.stage,
+            "status": "failed" if stage_detail else "success",
+            "data": data,
+            "display_text": display_text,
+            "parse_warnings": parse_warnings,
+            **({"error": "阶段 05 未解析到有效人物故事线", "detail": stage_detail} if stage_detail else {}),
+        },
+        normalized_payload,
+    )
     return {
         "ok": True,
         "stage": definition.stage,
@@ -1015,10 +1314,26 @@ def _build_stage_request_variables(
 
     if missing_fields:
         logger.error(
-            "framework planner payload missing required fields: stage=%s missing_fields=%s payload_keys=%s; request not sent",
+            "framework planner payload missing required fields timestamp=%s stage=%s payload_keys=%s exception_type=%s exception_message=%s missing_fields=%s; request not sent",
+            _history_iso_timestamp(),
             definition.stage,
-            missing_fields,
             sorted(payload.keys()),
+            "MissingRequiredFields",
+            f"missing required fields: {', '.join(missing_fields)}",
+            missing_fields,
+        )
+        print_stage_debug(
+            definition.stage,
+            {
+                "ok": False,
+                "stage": definition.stage,
+                "status": "failed",
+                "reason": f"payload 缺少必填字段：{', '.join(missing_fields)}",
+                "exception_type": "MissingRequiredFields",
+                "exception_message": f"missing required fields: {', '.join(missing_fields)}",
+                "missing_fields": missing_fields,
+            },
+            payload,
         )
         raise FrameworkPlannerStageError(
             f"阶段 {definition.stage} 缺少必填项：{', '.join(missing_fields)}",
@@ -1983,6 +2298,18 @@ def safe_parse_stage_output(
     return safe_output, warnings
 
 
+def _log_field_type_mismatch(stage: str, field: str, expected: str, value: Any) -> None:
+    logger.warning(
+        "字段类型不符 timestamp=%s stage=%s field=%s expected_type=%s actual_type=%s value_preview=%s",
+        _history_iso_timestamp(),
+        stage,
+        field,
+        expected,
+        type(value).__name__ if value is not None else "none",
+        _preview_return_object(value, limit=300),
+    )
+
+
 def _normalize_stage_output(
     stage: str,
     data: dict[str, Any],
@@ -1994,18 +2321,21 @@ def _normalize_stage_output(
     if stage == "01":
         if not isinstance(normalized.get("source_brief"), dict):
             warnings.append("source_brief 不是 dict，已回退为对象占位")
+            _log_field_type_mismatch(stage, "source_brief", "dict", normalized.get("source_brief"))
         normalized["source_brief"] = _normalize_object_like(normalized.get("source_brief"), key_name="content")
         normalized["source_brief"] = _ensure_source_brief_core_fields(normalized["source_brief"])
         return normalized
     if stage == "02":
         if not isinstance(normalized.get("worldview_plan"), dict):
             warnings.append("worldview_plan 不是 dict，已回退为对象占位")
+            _log_field_type_mismatch(stage, "worldview_plan", "dict", normalized.get("worldview_plan"))
         normalized["worldview_plan"] = _normalize_object_like(normalized.get("worldview_plan"), key_name="content")
         normalized["worldview_plan"] = _ensure_worldview_core_fields(normalized["worldview_plan"])
         return normalized
     if stage == "03":
         if not isinstance(normalized.get("character_plan"), dict):
             warnings.append("character_plan 不是 dict，已回退为对象占位")
+            _log_field_type_mismatch(stage, "character_plan", "dict", normalized.get("character_plan"))
         normalized["character_plan"] = _normalize_object_like(normalized.get("character_plan"), key_name="content")
         normalized["character_plan"] = _ensure_character_core_fields(normalized["character_plan"])
         return normalized
@@ -2013,6 +2343,7 @@ def _normalize_stage_output(
         checkpoint_missing = normalized.get("checkpoint_explanation") in (None, "", [], {})
         if not isinstance(normalized.get("beat_checkpoint_timeline"), list):
             warnings.append("beat_checkpoint_timeline 不是 list，已回退为 15 条占位节拍")
+            _log_field_type_mismatch(stage, "beat_checkpoint_timeline", "list", normalized.get("beat_checkpoint_timeline"))
         if checkpoint_missing:
             warnings.append("checkpoint_explanation 缺失，已填充说明占位")
             logger.warning(
@@ -2021,6 +2352,7 @@ def _normalize_stage_output(
             )
         elif not isinstance(normalized.get("checkpoint_explanation"), (dict, str)):
             warnings.append("checkpoint_explanation 不是 dict/str，已回退为说明占位")
+            _log_field_type_mismatch(stage, "checkpoint_explanation", "dict/str", normalized.get("checkpoint_explanation"))
         normalized["beat_checkpoint_timeline"] = _normalize_beat_timeline(
             normalized.get("beat_checkpoint_timeline")
         )
@@ -2032,6 +2364,7 @@ def _normalize_stage_output(
     if stage == "05":
         if not isinstance(normalized.get("character_storylines"), list):
             warnings.append("character_storylines 不是 list，已回退为空数组的旧逻辑已替换为自动归一化为数组")
+            _log_field_type_mismatch(stage, "character_storylines", "list", normalized.get("character_storylines"))
             logger.warning(
                 "框架策划阶段 05 character_storylines 类型不一致，已自动归一化为 list；actual_type=%s raw_object=%s",
                 type(normalized.get("character_storylines")).__name__,
@@ -2044,6 +2377,7 @@ def _normalize_stage_output(
     if stage == "06":
         if not isinstance(normalized.get("adaptation_guide"), (dict, list, str)):
             warnings.append("adaptation_guide 类型异常，已回退为空对象")
+            _log_field_type_mismatch(stage, "adaptation_guide", "dict/list/str", normalized.get("adaptation_guide"))
         normalized["adaptation_guide"] = _normalize_adaptation_guide(
             normalized.get("adaptation_guide")
         )
@@ -2052,6 +2386,7 @@ def _normalize_stage_output(
         validation_missing = normalized.get("validation_report") in (None, "", [], {})
         if not isinstance(normalized.get("framework_plan_package"), dict):
             warnings.append("framework_plan_package 不是 dict，已回退为对象占位")
+            _log_field_type_mismatch(stage, "framework_plan_package", "dict", normalized.get("framework_plan_package"))
         if validation_missing:
             warnings.append("validation_report 缺失，已保留校验报告占位")
             logger.warning(
@@ -2061,6 +2396,7 @@ def _normalize_stage_output(
             normalized["validation_report"] = _stage_output_placeholder("validation_report")
         elif not isinstance(normalized.get("validation_report"), (dict, list, str)):
             warnings.append("validation_report 类型异常，已回退为对象占位")
+            _log_field_type_mismatch(stage, "validation_report", "dict/list/str", normalized.get("validation_report"))
         normalized["framework_plan_package"] = _normalize_object_like(
             normalized.get("framework_plan_package"),
             key_name="content",
@@ -2435,8 +2771,9 @@ def _log_stage_output_parse_exception(
     raw_return_object: Any,
 ) -> None:
     logger.exception(
-        "框架策划阶段 %s 输出解析异常，payload_keys=%s，exception_type=%s，exception=%s，raw_return_object=%s",
+        "框架策划阶段 %s 输出解析异常 timestamp=%s payload_keys=%s exception_type=%s exception_message=%s raw_return_object=%s",
         stage,
+        _history_iso_timestamp(),
         payload_keys,
         type(exc).__name__,
         str(exc),

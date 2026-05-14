@@ -11,6 +11,8 @@ __pycache__/
 .coverage
 .coverage.*
 htmlcov/
+cache/
+
 
 # OS / editor noise
 .DS_Store
@@ -33,6 +35,7 @@ cache/
 generated/
 intermediate/
 .tmp_test_workspaces/
+_merge_audit/
 
 # Runtime-generated data and archives
 runtime_data/

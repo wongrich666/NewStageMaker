@@ -305,6 +305,11 @@
     return numeric > 0 ? numeric : "unsaved";
   }
 
+  function currentProjectCacheName() {
+    const configState = state && state.basic_config ? state.basic_config : {};
+    return String(configState.project_title || configState.source_title || "未命名项目").trim() || "未命名项目";
+  }
+
   function toStageError(data, fallbackStage, status) {
     const error = new Error(data && data.error ? data.error : `阶段 ${fallbackStage} 执行失败`);
     error.stage = (data && data.stage) || fallbackStage;
@@ -2692,7 +2697,7 @@
     render();
     try {
       const params = new URLSearchParams({
-        project_id: String(currentProjectId()),
+        project_id: currentProjectCacheName(),
         stage: stageNo,
       });
       const data = await requestJson(`/api/framework-planner/history?${params.toString()}`);
@@ -2708,7 +2713,7 @@
   async function loadHistoryVersion(stageKey, filename) {
     if (!filename) return;
     try {
-      const projectId = encodeURIComponent(String(currentProjectId()));
+      const projectId = encodeURIComponent(currentProjectCacheName());
       const data = await requestJson(`/api/framework-planner/history/${projectId}/${encodeURIComponent(filename)}`);
       const record = data.record || {};
       const output = record.output || {};
