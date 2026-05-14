@@ -105,19 +105,26 @@ def _safe_project_history_name(value: Any) -> str:
 
 
 def _payload_project_name(payload: Any) -> str:
+    """
+    提取 payload 中可用的项目名，确保不会返回空。
+    """
     if not isinstance(payload, dict):
-        return ""
+        return "未命名项目"
     for key in ("project_title", "title", "source_title"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
-            return value
+            return value.strip()
     basic_config = payload.get("basic_config")
     if isinstance(basic_config, dict):
         for key in ("project_title", "title", "source_title"):
             value = basic_config.get(key)
             if isinstance(value, str) and value.strip():
-                return value
-    return ""
+                return value.strip()
+    # fallback 使用 project_id
+    project_id = payload.get("project_id")
+    if isinstance(project_id, str) and project_id.strip():
+        return project_id.strip()
+    return "未命名项目"
 
 
 def _project_history_id(project_id: Any, project_name: Any = "") -> str:
@@ -149,7 +156,9 @@ def _history_stage_slug(stage_or_module: Any) -> str:
 
 
 def _history_project_dir(project_id: Any, project_name: Any = "") -> Path:
-    path = _repo_root() / "cache" / _project_history_id(project_id, project_name)
+    # 如果 project_name 空则 fallback
+    safe_name = _project_history_id(project_id, project_name)
+    path = _repo_root() / "cache" / safe_name
     path.mkdir(parents=True, exist_ok=True)
     return path
 
