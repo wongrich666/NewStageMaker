@@ -8,6 +8,7 @@ from docx import Document
 from workflow_code_skeleton.app.utils.txt_to_docx import (
     convert,
     render_character,
+    render_plain_section,
     render_script,
 )
 from workflow_code_skeleton.tests.test_support import workspace_tempdir
@@ -57,6 +58,22 @@ class TxtToDocxCompatibilityTests(unittest.TestCase):
         text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
         self.assertIn("第1集：风起", text)
         self.assertIn("林夏：", text)
+
+    def test_render_plain_section_preserves_multiline_preface_as_separate_paragraphs(self) -> None:
+        doc = Document()
+        render_plain_section(
+            doc,
+            "人物服饰说明",
+            "【角色】林夏\n默认称呼：林夏【日常】\n\n【角色】顾川\n默认称呼：顾川【会议室交锋态】",
+        )
+
+        texts = [paragraph.text for paragraph in doc.paragraphs]
+        self.assertEqual(texts[0], "人物服饰说明")
+        self.assertIn("【角色】林夏", texts)
+        self.assertIn("默认称呼：林夏【日常】", texts)
+        self.assertIn("【角色】顾川", texts)
+        self.assertIn("默认称呼：顾川【会议室交锋态】", texts)
+        self.assertIn("", texts[2:6])
 
     def test_convert_succeeds_with_legacy_character_shapes(self) -> None:
         source = """测试短剧

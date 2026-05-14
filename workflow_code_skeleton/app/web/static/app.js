@@ -843,10 +843,48 @@
     return mapping[String(stageKey || "").trim().toLowerCase()] || "";
   }
 
+  function extractWrappedDisplayText(value, depth = 0) {
+    if (depth > 6 || value === null || value === undefined || value === "") return "";
+    if (typeof value === "string") return value.trim();
+    if (Array.isArray(value)) {
+      const parts = value.map((item) => extractWrappedDisplayText(item, depth + 1)).filter(Boolean);
+      return parts.length ? parts.join("\n\n").trim() : "";
+    }
+    if (typeof value === "object") {
+      const preferredKeys = [
+        "final_output_text",
+        "final_script",
+        "partial_script",
+        "content",
+        "text",
+        "body",
+        "message",
+        "output",
+        "answer",
+        "summary",
+        "description",
+        "value",
+      ];
+      // 老快照里的正文有时会包在 content/text 等外壳里，先拆壳再显示，避免正文换行被一起丢掉。
+      for (const key of preferredKeys) {
+        if (!(key in value)) continue;
+        const text = extractWrappedDisplayText(value[key], depth + 1);
+        if (text) return text;
+      }
+      const values = Object.values(value);
+      if (values.length === 1) {
+        return extractWrappedDisplayText(values[0], depth + 1);
+      }
+    }
+    return "";
+  }
+
   function formatDisplayValue(value) {
     if (value === null || value === undefined || value === "") return "";
     if (typeof value === "string") return value.trim();
     if (Array.isArray(value) || typeof value === "object") {
+      const extracted = extractWrappedDisplayText(value);
+      if (extracted) return extracted;
       try {
         return JSON.stringify(value, null, 2).trim();
       } catch (_) {
@@ -1064,7 +1102,7 @@
             ${message.natural ? `
               <div class="chat-bubble-preview">
                 <span class="chat-bubble-preview-label">阶段说明</span>
-                <p class="chat-bubble-preview-text">${escapeHtml(message.natural)}</p>
+                <p class="chat-bubble-preview-text">${renderTextWithLineBreaks(message.natural)}</p>
               </div>
             ` : ""}
             <div class="chat-bubble-foot">
@@ -1101,7 +1139,7 @@
             ${thinkingState.note ? `
               <div class="chat-bubble-preview">
                 <span class="chat-bubble-preview-label">状态说明</span>
-                <p class="chat-bubble-preview-text">${escapeHtml(thinkingState.note)}</p>
+                <p class="chat-bubble-preview-text">${renderTextWithLineBreaks(thinkingState.note)}</p>
               </div>
             ` : ""}
             <div class="chat-bubble-foot">
@@ -1444,6 +1482,12 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  function renderTextWithLineBreaks(text) {
+    // 这些内容之前直接放进 <p>，浏览器会把换行折叠掉；显式转成 <br> 后就能保留原格式。
+    const normalized = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    return escapeHtml(normalized).replace(/\n/g, "<br>");
   }
 
   // 优先使用后端返回的辅助工具定义，拿不到时退回本地默认配置，保证主页面不会被工具区拖垮。
@@ -2558,7 +2602,7 @@
           <span class="status-pill ${item.visibility === "public" ? "status-pill-public" : "status-pill-private"}">${escapeHtml(visibilityLabel(item.visibility))}</span>
         </div>
         <h3>${escapeHtml(projectDisplayTitle(item))}</h3>
-        <p>${escapeHtml(item.summary)}</p>
+        <p>${renderTextWithLineBreaks(item.summary)}</p>
         <div class="asset-meta">
           <span>项目 ${escapeHtml(item.project_id)}</span>
           <span>${escapeHtml(isToolAsset(item) ? assetWorkflowLabel(item) : (item.current_stage_label || "待开始"))}</span>
@@ -2567,8 +2611,8 @@
             : `${item.generated_episodes || 0} / ${item.total_episodes || 0}`)}</span>
         </div>
         <div class="asset-actions">
+          <!-- 资产切换直接复用当前工作台，避免为每个项目额外打开一个新页面。 -->
           ${isToolAsset(item) ? "" : `<button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>`}
-          ${isToolAsset(item) ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">新页面打开</button>`}
           ${item.completion_confirmed && !isToolAsset(item) ? "" : `<button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">${isToolAsset(item) ? "查看结果" : "修改"}</button>`}
           <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : (isToolAsset(item) ? "公开结果" : "公开成品")}</button>
           <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除</button>
@@ -2600,7 +2644,7 @@
       <article class="community-tile">
         <span class="community-tag status-pill-public">公开成品</span>
         <h3>${escapeHtml(item.title)}</h3>
-        <p>${escapeHtml(item.summary)}</p>
+        <p>${renderTextWithLineBreaks(item.summary)}</p>
         <div class="community-actions">
           <a class="btn btn-secondary" href="${escapeHtml(communityDetailUrl(item.project_id))}" target="_blank" rel="noopener">查看全文</a>
         </div>
@@ -3031,8 +3075,6 @@
         } else if (button.dataset.action === "open-project") {
           closeProfilePanel();
           await loadProjectDetail(projectId, { restoreInputs: true, scroll: false });
-        } else if (button.dataset.action === "open-project-page") {
-          openWorkspaceInNewPage({ projectId });
         } else if (button.dataset.action === "edit-asset") {
           await openAssetEditor(projectId);
         } else if (button.dataset.action === "toggle-privacy") {

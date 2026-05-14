@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import copy
 import json
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from workflow_code_skeleton.app.services.fastgpt_contracts import (
     CHARACTERS,
     EPISODE_PLAN,
+    FRAMEWORK_NATURAL_LANGUAGE,
     SCENES,
     STORY_OUTLINE,
     USER_CHARACTERS,
     USER_SCENES,
     WORLDVIEW,
+    WORLDVIEW_NATURAL_LANGUAGE,
 )
 from workflow_code_skeleton.app.services.task_manager import (
     EPISODE_PLAN_DISPLAY_ARTIFACT,
@@ -136,6 +141,34 @@ def _snapshot(*, current_stage: str = "framework", framework_natural: str = "框
     }
 
 
+class _DummyThread:
+    def __init__(self, *args, **kwargs) -> None:
+        self.args = args
+        self.kwargs = kwargs
+        self.started = False
+
+    def start(self) -> None:
+        self.started = True
+
+
+class _BlockingSnapshotRecord:
+    def __init__(
+        self,
+        snapshot: dict[str, object],
+        *,
+        iteration_started: threading.Event,
+        allow_continue: threading.Event,
+    ) -> None:
+        self._snapshot = copy.deepcopy(snapshot)
+        self._iteration_started = iteration_started
+        self._allow_continue = allow_continue
+
+    def clone_snapshot(self) -> dict[str, object]:
+        self._iteration_started.set()
+        self._allow_continue.wait(timeout=2.0)
+        return copy.deepcopy(self._snapshot)
+
+
 class TaskManagerPublicSnapshotTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = WorkspaceTempDir(prefix="task-manager-public-")
@@ -156,6 +189,17 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
         self.manager._project_path(project_id).write_text(
             json.dumps(snapshot, ensure_ascii=False, indent=2),
             encoding="utf-8",
+        )
+
+    def _task_record(self, snapshot: dict[str, object]) -> TaskRecord:
+        return TaskRecord(
+            user_id=int(snapshot["user_id"]),
+            project_id=int(snapshot["project_id"]),
+            task_id=str(snapshot["task_id"]),
+            workflow_spec_path=str(snapshot["workflow_spec_path"]),
+            input_payload=copy.deepcopy(snapshot.get("input_payload") or {}),
+            model_option=None,
+            snapshot=copy.deepcopy(snapshot),
         )
 
     def test_framework_public_snapshot_prefers_natural_language_and_hides_structured_objects(self) -> None:
@@ -231,6 +275,92 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
         self.assertEqual(public["message"], "正在生成剧本框架")
         self.assertEqual(public["artifacts"], {})
 
+    def test_start_task_returns_pending_snapshot_before_debug_variables_are_initialized(self) -> None:
+        payload = {
+            "title": "外包专属格式测试",
+            "user_expectation": "写一个外包专属格式的都市短剧",
+            "character_count": 6,
+            "total_episodes": 15,
+            "episode_word_count": 600,
+            "script_format_mode": "waibao",
+        }
+
+        with patch("workflow_code_skeleton.app.services.task_lifecycle.use_fastgpt_backend", return_value=True), patch(
+            "workflow_code_skeleton.app.services.task_lifecycle.threading.Thread",
+            _DummyThread,
+        ):
+            public = self.manager.start_task(
+                user_id=1,
+                input_payload=payload,
+                workflow_spec_path="spec.json",
+                model_selection_id=None,
+            )
+
+        self.assertEqual(public["status"], "pending")
+        self.assertEqual(public["display_stage_key"], "")
+        self.assertEqual(public["display_stage_output"], "")
+        self.assertEqual(public["message"], "任务已创建，准备开始生成。")
+        self.assertEqual(public["input_payload"]["script_format_mode"], "waibao")
+
+    def test_list_user_projects_tolerates_concurrent_project_store_mutation(self) -> None:
+        first_snapshot = _snapshot(current_stage="framework")
+        first_snapshot["project_id"] = 1
+        first_snapshot["task_id"] = "task-blocking"
+        first_snapshot["title"] = "项目 1"
+        first_snapshot["updated_at"] = "2026-04-28T12:00:01+08:00"
+        second_snapshot = _snapshot(current_stage="worldview")
+        second_snapshot["project_id"] = 2
+        second_snapshot["task_id"] = "task-normal"
+        second_snapshot["title"] = "项目 2"
+        second_snapshot["updated_at"] = "2026-04-28T12:00:02+08:00"
+        third_snapshot = _snapshot(current_stage="script")
+        third_snapshot["project_id"] = 3
+        third_snapshot["task_id"] = "task-added"
+        third_snapshot["title"] = "项目 3"
+        third_snapshot["updated_at"] = "2026-04-28T12:00:03+08:00"
+
+        iteration_started = threading.Event()
+        allow_continue = threading.Event()
+        mutation_done = threading.Event()
+        mutation_errors: list[Exception] = []
+
+        self.manager._project_record_set(
+            1,
+            _BlockingSnapshotRecord(
+                first_snapshot,
+                iteration_started=iteration_started,
+                allow_continue=allow_continue,
+            ),
+        )
+        self.manager._project_record_set(2, self._task_record(second_snapshot))
+
+        def mutate_project_store() -> None:
+            try:
+                if not iteration_started.wait(timeout=2.0):
+                    mutation_errors.append(AssertionError("项目遍历没有按预期开始"))
+                    return
+                self.manager._project_record_set(3, self._task_record(third_snapshot))
+            except Exception as exc:  # pragma: no cover - failure path captured by assertion
+                mutation_errors.append(exc)
+            finally:
+                mutation_done.set()
+                allow_continue.set()
+
+        modifier = threading.Thread(target=mutate_project_store, name="project-store-mutation")
+        modifier.start()
+        try:
+            projects = self.manager.list_user_projects(user_id=1)
+        finally:
+            allow_continue.set()
+            modifier.join(timeout=2.0)
+
+        self.assertFalse(modifier.is_alive(), "并发修改线程未能按预期结束")
+        self.assertFalse(mutation_errors, f"并发修改线程出现异常：{mutation_errors}")
+        self.assertTrue(mutation_done.is_set())
+        project_ids = {item["project_id"] for item in projects}
+        self.assertIn(1, project_ids)
+        self.assertIn(2, project_ids)
+
     def test_placeholder_stage_texts_are_not_exposed_in_public_artifacts(self) -> None:
         snapshot = _snapshot(current_stage="characters")
         snapshot["artifacts"]["character_summary"] = "人物设定自然语言说明暂未生成。"
@@ -301,6 +431,48 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
         self.assertNotIn("scene_natural_language", public["artifacts"])
         self.assertNotIn("characters", public["artifacts"])
         self.assertNotIn("scene_json", public["artifacts"])
+
+    def test_runtime_sync_preserves_framework_and_worldview_paragraph_breaks(self) -> None:
+        record = TaskRecord(
+            user_id=1,
+            project_id=1,
+            task_id="task-runtime-paragraphs",
+            workflow_spec_path="spec.json",
+            input_payload={"title": "测试项目"},
+            model_option=None,
+            snapshot=_snapshot(current_stage="framework", framework_natural="", worldview_natural=""),
+        )
+        runtime = WorkflowRuntime(manager=self.manager, record=record, spec=None)
+        state = WorkflowState(
+            WorkflowInput(
+                title="测试项目",
+                episode_word_count=1200,
+                total_episodes=10,
+                user_expectation="需求",
+                character_count=3,
+                character_appearance_requirements="",
+                character_alias_naming_rules="",
+                outfit_switch_rules="",
+                story_outline="",
+                core_scene_input="",
+                character_bios="",
+                episode_plan="",
+            )
+        )
+        framework_text = "框架第一段\n\n框架第二段"
+        worldview_text = "世界观第一段\n\n世界观第二段"
+        state.set_var(FRAMEWORK_NATURAL_LANGUAGE, framework_text)
+        state.set_var(WORLDVIEW_NATURAL_LANGUAGE, worldview_text)
+
+        runtime.sync_from_state(state)
+        snapshot = record.clone_snapshot()
+        public = self.manager._public_snapshot(snapshot)
+
+        self.assertEqual(snapshot["artifacts"]["framework_natural_language"], framework_text)
+        self.assertEqual(snapshot["artifacts"]["worldview_natural_language"], worldview_text)
+        self.assertEqual(public["display_stage_output"], framework_text)
+        self.assertEqual(public["artifacts"]["framework_natural_language"], framework_text)
+        self.assertEqual(public["artifacts"]["worldview_natural_language"], worldview_text)
 
     def test_character_public_snapshot_does_not_promote_character_stage_for_public_view(self) -> None:
         snapshot = _snapshot(current_stage="characters")
@@ -390,5 +562,47 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
             list(range(1, 11)),
         )
         self.assertEqual(len(artifacts[SCRIPT_BATCHES_DISPLAY_ARTIFACT]), 2)
+        self.assertIn("\n\n", public["display_stage_output"])
         self.assertIn("第1集", artifacts[PARTIAL_SCRIPT_ARTIFACT])
         self.assertIn("第10集", artifacts[PARTIAL_SCRIPT_ARTIFACT])
+        self.assertIn("\n\n", artifacts[PARTIAL_SCRIPT_ARTIFACT])
+
+    def test_compact_completed_snapshot_preserves_multiline_story_outline_and_stage_outputs(self) -> None:
+        snapshot = _snapshot(current_stage="final", framework_natural="", worldview_natural="")
+        snapshot["status"] = "completed"
+        snapshot["completion_confirmed"] = True
+        snapshot["awaiting_user_confirmation"] = False
+        snapshot["cache_retained"] = False
+        snapshot["input_payload"]["story_outline"] = "输入第一段\n\n输入第二段"
+        snapshot["artifacts"].update(
+            {
+                "story_outline": "梗概第一段\n\n梗概第二段",
+                "framework_natural_language": "框架第一段\n\n框架第二段",
+                "final_script": "第1集\n场景1\n\n场景2",
+                "final_output_text": "第1集\n场景1\n\n场景2",
+            }
+        )
+
+        compacted = self.manager._compact_completed_snapshot(snapshot)
+
+        self.assertEqual(compacted["input_payload"]["story_outline"], "梗概第一段\n\n梗概第二段")
+        self.assertEqual(compacted["artifacts"]["framework_natural_language"], "框架第一段\n\n框架第二段")
+        self.assertEqual(compacted["artifacts"]["final_script"], "第1集\n场景1\n\n场景2")
+        self.assertEqual(compacted["artifacts"]["final_output_text"], "第1集\n场景1\n\n场景2")
+
+    def test_public_snapshot_preserves_wrapped_final_script_line_breaks(self) -> None:
+        snapshot = _snapshot(current_stage="script", framework_natural="", worldview_natural="")
+        snapshot["status"] = "running"
+        snapshot["current_stage_label"] = "剧本正文"
+        snapshot["artifacts"]["final_output_text"] = {
+            "content": "第1集\n场景1：旧码头\n林夏：先查人。\n\n场景2：会议室\n顾川：你查得太深了。"
+        }
+
+        public = self.manager._public_snapshot(snapshot)
+
+        self.assertEqual(public["display_stage_key"], "final")
+        self.assertEqual(
+            public["display_stage_output"],
+            "第1集\n场景1：旧码头\n林夏：先查人。\n\n场景2：会议室\n顾川：你查得太深了。",
+        )
+        self.assertNotIn("final_output_text", public["artifacts"])

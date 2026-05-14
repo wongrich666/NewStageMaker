@@ -95,8 +95,37 @@ class RuntimeExportStoreMixin:
         *,
         banned_prefixes: tuple[str, ...] = (),
     ) -> str:
+        if isinstance(value, str) and not is_machine_structured_content(value):
+            # DOCX 前置章节需要保留用户原本的换行和空行，避免人物/服饰块在导出前被压成一大段。
+            raw = (_strip_trailing_structured_dump_text(value) or value).replace("\r\n", "\n").replace("\r", "\n")
+            cleaned_lines: list[str] = []
+            previous_blank = True
+            for raw_line in raw.split("\n"):
+                line = clean_user_visible_text(
+                    raw_line,
+                    banned_prefixes=banned_prefixes,
+                ).strip()
+                if line:
+                    cleaned_lines.append(line)
+                    previous_blank = False
+                    continue
+                if not previous_blank:
+                    cleaned_lines.append("")
+                previous_blank = True
+            while cleaned_lines and cleaned_lines[0] == "":
+                cleaned_lines.pop(0)
+            while cleaned_lines and cleaned_lines[-1] == "":
+                cleaned_lines.pop()
+            text = "\n".join(cleaned_lines).strip()
+            if not text or is_placeholder_text(text):
+                return ""
+            return text
         readable = clean_export_readable_text(value)
-        return clean_user_visible_text(readable, banned_prefixes=banned_prefixes)
+        return clean_multiline_user_visible_text(
+            readable,
+            banned_prefixes=banned_prefixes,
+            preserve_blank_lines=True,
+        )
 
     def _validated_export_natural_text(
         self,
@@ -106,9 +135,10 @@ class RuntimeExportStoreMixin:
     ) -> str:
         if is_machine_structured_content(value):
             return ""
-        text = _meaningful_stage_output_text(
-            self._sanitize_export_section_text(value, banned_prefixes=banned_prefixes)
-        )
+        text = self._sanitize_export_section_text(
+            value,
+            banned_prefixes=banned_prefixes,
+        ).strip()
         if not text:
             return ""
         if _export_text_has_placeholder_leaks(text):
@@ -123,7 +153,7 @@ class RuntimeExportStoreMixin:
         project_id: int,
         snapshot: dict[str, Any],
     ) -> TaskRecord:
-        existing = self._projects.get(project_id)
+        existing = self._project_record_get(project_id)
         if existing is not None:
             return existing
         return TaskRecord(
@@ -673,7 +703,7 @@ class RuntimeExportStoreMixin:
         ):
             raw_text = clean_export_readable_text(candidate).strip()
             sanitized = self._sanitize_export_section_text(raw_text, banned_prefixes=banned)
-            text = _meaningful_stage_output_text(sanitized)
+            text = sanitized.strip()
             issues = _character_natural_text_quality_issues(raw_text, structured) if raw_text else []
             if text and not issues:
                 return text
@@ -691,7 +721,7 @@ class RuntimeExportStoreMixin:
             self._snapshot_export_value(snapshot, variable_keys=(APPEARANCE_NATURAL_LANGUAGE_VAR, "c7VnQ4eX")),
             self._snapshot_export_value(snapshot, artifact_keys=(APPEARANCE_NATURAL_LANGUAGE_ARTIFACT,)),
         ):
-            text = _meaningful_stage_output_text(self._sanitize_export_section_text(candidate))
+            text = self._sanitize_export_section_text(candidate).strip()
             if text:
                 return text
 
@@ -753,7 +783,7 @@ class RuntimeExportStoreMixin:
         ):
             if is_machine_structured_content(candidate):
                 continue
-            text = _meaningful_stage_output_text(self._sanitize_export_section_text(candidate))
+            text = self._sanitize_export_section_text(candidate).strip()
             if text and _export_text_has_placeholder_leaks(text):
                 continue
             if text:
@@ -1319,8 +1349,9 @@ class RuntimeExportStoreMixin:
             if stale_path.exists():
                 stale_path.unlink()
 
+        existing_record = self._project_record_get(project_id)
         self._update_snapshot(
-            self._projects.get(project_id) or TaskRecord(
+            existing_record or TaskRecord(
                 user_id=int(snapshot.get("user_id") or 0),
                 project_id=project_id,
                 task_id=str(snapshot.get("task_id", "")),

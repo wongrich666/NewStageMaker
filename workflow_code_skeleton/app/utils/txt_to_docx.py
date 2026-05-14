@@ -180,15 +180,26 @@ def _section_is_code_fence(text: str) -> bool:
 
 
 def render_plain_section(doc: Document, title: str, text: Any):
-    content = normalize_text(text)
+    content = (
+        str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+        if isinstance(text, str)
+        else normalize_text(text)
+    )
     if not content:
         return
     add_heading(doc, title, level=1)
-    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", content) if part.strip()]
-    if not paragraphs:
-        paragraphs = [line.strip() for line in str(content).splitlines() if line.strip()]
-    for paragraph in paragraphs:
-        add_para(doc, paragraph)
+    # 前置章节改为逐行写入段落，保证导出时保留原始换行，不把人物/服饰说明挤成一大段。
+    lines = str(content).replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    previous_blank = True
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            if not previous_blank:
+                doc.add_paragraph()
+            previous_blank = True
+            continue
+        add_para(doc, line)
+        previous_blank = False
     add_divider(doc)
 
 

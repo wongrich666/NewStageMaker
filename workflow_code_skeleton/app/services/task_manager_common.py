@@ -947,19 +947,155 @@ def _display_text(value: Any) -> str:
     return normalize_user_visible_text(value).strip()
 
 
+MULTILINE_WRAPPER_KEYS = (
+    "final_output_text",
+    "final_script",
+    "partial_script",
+    "content",
+    "text",
+    "body",
+    "message",
+    "output",
+    "answer",
+    "summary",
+    "description",
+    "value",
+)
+
+
+def _extract_wrapped_multiline_text(
+    value: Any,
+    *,
+    _depth: int = 0,
+) -> str:
+    if _depth > 6 or value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        # 有些阶段结果会被包在 content/text/final_output_text 之类的外壳里，
+        # 这里优先拆壳拿到原始多行文本，避免后续被通用可见文本清洗压平成一段。
+        for key in MULTILINE_WRAPPER_KEYS:
+            if key not in value:
+                continue
+            text = _extract_wrapped_multiline_text(
+                value.get(key),
+                _depth=_depth + 1,
+            )
+            if text:
+                return text
+        if len(value) == 1:
+            only_value = next(iter(value.values()))
+            return _extract_wrapped_multiline_text(
+                only_value,
+                _depth=_depth + 1,
+            )
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        parts = [
+            _extract_wrapped_multiline_text(item, _depth=_depth + 1).strip()
+            for item in value
+        ]
+        meaningful_parts = [part for part in parts if part]
+        if meaningful_parts:
+            return "\n\n".join(meaningful_parts).strip()
+    return ""
+
+
 def _meaningful_stage_output_text(value: Any) -> str:
-    return clean_user_visible_text(value).strip()
+    return clean_multiline_user_visible_text(value, preserve_blank_lines=True).strip()
 
 
-def clean_multiline_user_visible_text(value: Any) -> str:
+def clean_multiline_user_visible_text(
+    value: Any,
+    *,
+    banned_prefixes: tuple[str, ...] = (),
+    fallback_text: str = "",
+    preserve_blank_lines: bool = False,
+) -> str:
     if not isinstance(value, str):
-        return clean_user_visible_text(value).strip()
+        extracted = _extract_wrapped_multiline_text(value).strip()
+        if extracted:
+            return clean_multiline_user_visible_text(
+                extracted,
+                banned_prefixes=banned_prefixes,
+                fallback_text=fallback_text,
+                preserve_blank_lines=preserve_blank_lines,
+            )
+        return clean_user_visible_text(
+            value,
+            banned_prefixes=banned_prefixes,
+            fallback_text=fallback_text,
+        ).strip()
     raw = value.replace("\r\n", "\n").replace("\r", "\n")
-    lines = [clean_user_visible_text(line).strip() for line in raw.split("\n")]
+    lines: list[str] = []
+    previous_blank = True
+    for raw_line in raw.split("\n"):
+        cleaned_line = clean_user_visible_text(
+            raw_line,
+            banned_prefixes=banned_prefixes,
+        ).strip()
+        if cleaned_line:
+            lines.append(cleaned_line)
+            previous_blank = False
+            continue
+        if preserve_blank_lines and not previous_blank and lines:
+            # 展示类文本需要保留原始段落分隔，避免前端/导出时又黏成一整块。
+            lines.append("")
+            previous_blank = True
+    while preserve_blank_lines and lines and lines[-1] == "":
+        lines.pop()
+    if preserve_blank_lines:
+        text = "\n".join(lines).strip()
+        if text and not is_placeholder_text(text):
+            return text
+        return str(fallback_text or "").strip()
+    non_empty_lines = [line for line in lines if line]
+    if len(non_empty_lines) > 1:
+        text = "\n".join(non_empty_lines).strip()
+        if text and not is_placeholder_text(text):
+            return text
+        return str(fallback_text or "").strip()
+    return clean_user_visible_text(
+        value,
+        banned_prefixes=banned_prefixes,
+        fallback_text=fallback_text,
+    ).strip()
+
+
+def normalize_multiline_user_visible_text(
+    value: Any,
+    *,
+    preserve_blank_lines: bool = False,
+) -> str:
+    if not isinstance(value, str):
+        extracted = _extract_wrapped_multiline_text(value).strip()
+        if extracted:
+            return normalize_multiline_user_visible_text(
+                extracted,
+                preserve_blank_lines=preserve_blank_lines,
+            )
+        return normalize_user_visible_text(value).strip()
+    raw = str(value).replace("\r\n", "\n").replace("\r", "\n")
+    lines: list[str] = []
+    previous_blank = True
+    for raw_line in raw.split("\n"):
+        cleaned_line = normalize_user_visible_text(raw_line).strip()
+        if cleaned_line:
+            lines.append(cleaned_line)
+            previous_blank = False
+            continue
+        if preserve_blank_lines and not previous_blank and lines:
+            lines.append("")
+            previous_blank = True
+    while preserve_blank_lines and lines and lines[-1] == "":
+        lines.pop()
+    if preserve_blank_lines:
+        return "\n".join(lines).strip()
     non_empty_lines = [line for line in lines if line]
     if len(non_empty_lines) > 1:
         return "\n".join(non_empty_lines).strip()
-    return clean_user_visible_text(value).strip()
+    return normalize_user_visible_text(value).strip()
 
 
 EXPORT_TECHNICAL_KEY_PATTERN = re.compile(r'^\s*"?[A-Za-z_][A-Za-z0-9_]*"?\s*:\s*(.*)$')
@@ -1045,7 +1181,16 @@ def clean_export_readable_text(value: Any) -> str:
     if isinstance(value, str):
         stripped = _strip_trailing_structured_dump_text(value)
         if stripped:
-            return normalize_user_visible_text(stripped).strip()
+            return normalize_multiline_user_visible_text(
+                stripped,
+                preserve_blank_lines=True,
+            ).strip()
+    extracted = _extract_wrapped_multiline_text(value).strip()
+    if extracted:
+        return normalize_multiline_user_visible_text(
+            extracted,
+            preserve_blank_lines=True,
+        ).strip()
     return normalize_user_visible_text(value).strip()
 
 
@@ -1507,7 +1652,7 @@ def _best_script_text_candidate(
     best_score = (-1, -1, -1)
     seen: set[str] = set()
     for candidate in candidates:
-        text = clean_user_visible_text(candidate).strip()
+        text = clean_multiline_user_visible_text(candidate).strip()
         if not text or text in seen:
             continue
         if not is_meaningful_text(text):

@@ -18,6 +18,10 @@ class ProjectSnapshotStoreMixin:
         *,
         runtime_archive_dir: Path | None = None,
     ) -> None:
+        if getattr(self, "_project_store_lock", None) is None:
+            # _projects 会被请求线程和后台任务并发访问；
+            # 这里单独维护一把锁，只保护字典浅拷贝和增删改，不把 I/O 放进锁里。
+            self._project_store_lock = threading.RLock()
         self.base_dir = Path(runtime_data_dir).resolve()
         self.runtime_root = (
             self.base_dir.parent
@@ -35,6 +39,29 @@ class ProjectSnapshotStoreMixin:
         self.index_path = self.base_dir / "index.json"
         self.projects_dir.mkdir(parents=True, exist_ok=True)
         self.exports_dir.mkdir(parents=True, exist_ok=True)
+
+    def _ensure_project_store_lock(self) -> threading.RLock:
+        lock = getattr(self, "_project_store_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._project_store_lock = lock
+        return lock
+
+    def _project_record_get(self, project_id: int) -> TaskRecord | None:
+        with self._ensure_project_store_lock():
+            return self._projects.get(project_id)
+
+    def _project_record_set(self, project_id: int, record: TaskRecord) -> None:
+        with self._ensure_project_store_lock():
+            self._projects[project_id] = record
+
+    def _project_record_pop(self, project_id: int) -> TaskRecord | None:
+        with self._ensure_project_store_lock():
+            return self._projects.pop(project_id, None)
+
+    def _project_record_items_snapshot(self) -> list[tuple[int, TaskRecord]]:
+        with self._ensure_project_store_lock():
+            return list(self._projects.items())
 
     def _load_index(self) -> dict[str, Any]:
         if self.index_path.exists():
@@ -258,7 +285,7 @@ class ProjectSnapshotStoreMixin:
             self._save_index()
 
     def _load_project_snapshot_raw(self, project_id: int) -> dict[str, Any] | None:
-        record = self._projects.get(project_id)
+        record = self._project_record_get(project_id)
         if record:
             return record.clone_snapshot()
         path = resolve_project_snapshot_path(
@@ -464,7 +491,9 @@ class ProjectSnapshotStoreMixin:
 
     def _all_project_snapshots(self) -> list[dict[str, Any]]:
         snapshots: dict[int, dict[str, Any]] = {}
-        for project_id, record in self._projects.items():
+        # 先在锁内复制当前项目记录引用，再在锁外逐个 clone snapshot，
+        # 避免 /api/projects 遍历时被并发增删项目打断。
+        for project_id, record in self._project_record_items_snapshot():
             snapshots[int(project_id)] = record.clone_snapshot()
         for path in self._iter_project_snapshot_paths():
             try:
