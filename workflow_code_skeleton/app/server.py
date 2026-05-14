@@ -23,8 +23,12 @@ from .services.framework_planner_service import (
     FrameworkPlannerStageError,
     framework_planner_backend_ready,
     framework_planner_fastgpt_diagnostics,
+    list_framework_stage_history,
+    load_framework_stage_history,
     run_framework_planner_score,
     run_framework_planner_stage,
+    save_framework_stage_history,
+    write_framework_stage_exception_log,
 )
 from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
 from .services.task_manager import task_manager
@@ -410,9 +414,33 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @_login_required
     def run_framework_planner_stage_score():
         data = request.get_json(silent=True) or {}
+        project_id = data.get("project_id") if isinstance(data, dict) else None
         try:
             payload = run_framework_planner_score(data)
+            payload["history"] = save_framework_stage_history(
+                project_id=project_id,
+                stage="stage04_score",
+                payload=data,
+                output=payload.get("data") or {},
+                status="success",
+            )
         except FrameworkPlannerStageError as exc:
+            write_framework_stage_exception_log(
+                project_id=project_id,
+                stage=exc.stage or "stage04_score",
+                payload=data,
+                exc_type=type(exc).__name__,
+                message=str(exc),
+                status_code=exc.status_code,
+            )
+            save_framework_stage_history(
+                project_id=project_id,
+                stage=exc.stage or "stage04_score",
+                payload=data,
+                output={},
+                status="failed",
+                error={"type": type(exc).__name__, "message": str(exc)},
+            )
             return _framework_planner_error(
                 exc.stage,
                 str(exc),
@@ -420,6 +448,22 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 detail=exc.detail,
             )
         except Exception as exc:
+            write_framework_stage_exception_log(
+                project_id=project_id,
+                stage="stage04_score",
+                payload=data,
+                exc_type=type(exc).__name__,
+                message=str(exc),
+                status_code=500,
+            )
+            save_framework_stage_history(
+                project_id=project_id,
+                stage="stage04_score",
+                payload=data,
+                output={},
+                status="failed",
+                error={"type": type(exc).__name__, "message": str(exc)},
+            )
             return _framework_planner_error(
                 "04",
                 "评分接口执行失败，请稍后重试。",
@@ -432,6 +476,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @_login_required
     def run_framework_planner_stage_api(stage: str):
         data = request.get_json(silent=True) or {}
+        project_id = data.get("project_id") if isinstance(data, dict) else None
         source_text = ""
         if isinstance(data, dict):
             source_text = str(data.get("source_text") or "")
@@ -445,7 +490,30 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
         try:
             payload = run_framework_planner_stage(stage, data)
+            payload["history"] = save_framework_stage_history(
+                project_id=project_id,
+                stage=str(stage).zfill(2),
+                payload=data,
+                output=payload.get("data") or {},
+                status="success",
+            )
         except FrameworkPlannerStageError as exc:
+            write_framework_stage_exception_log(
+                project_id=project_id,
+                stage=exc.stage or str(stage).zfill(2),
+                payload=data,
+                exc_type=type(exc).__name__,
+                message=str(exc),
+                status_code=exc.status_code,
+            )
+            save_framework_stage_history(
+                project_id=project_id,
+                stage=exc.stage or str(stage).zfill(2),
+                payload=data,
+                output={},
+                status="failed",
+                error={"type": type(exc).__name__, "message": str(exc)},
+            )
             return _framework_planner_error(
                 exc.stage,
                 str(exc),
@@ -458,13 +526,49 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 str(stage).zfill(2),
                 sorted(data.keys()) if isinstance(data, dict) else [],
             )
+            write_framework_stage_exception_log(
+                project_id=project_id,
+                stage=str(stage).zfill(2),
+                payload=data,
+                exc_type=type(exc).__name__,
+                message=str(exc),
+                status_code=500,
+            )
+            save_framework_stage_history(
+                project_id=project_id,
+                stage=str(stage).zfill(2),
+                payload=data,
+                output={},
+                status="failed",
+                error={"type": type(exc).__name__, "message": str(exc)},
+            )
             return _framework_planner_error(
                 str(stage).zfill(2),
-                "框架策划阶段执行失败，请稍后重试。",
+                "模型暂时不可用，请稍后重试。",
                 status=500,
                 detail={"message": str(exc)},
             )
         return jsonify(payload)
+
+    @app.get("/api/framework-planner/history")
+    @_login_required
+    def list_framework_planner_history_api():
+        project_id = request.args.get("project_id") or "unsaved"
+        stage = request.args.get("stage") or ""
+        return jsonify(list_framework_stage_history(project_id, stage or None))
+
+    @app.get("/api/framework-planner/history/<project_id>/<filename>")
+    @_login_required
+    def load_framework_planner_history_api(project_id: str, filename: str):
+        try:
+            return jsonify(load_framework_stage_history(project_id, filename))
+        except FrameworkPlannerStageError as exc:
+            return _framework_planner_error(
+                exc.stage,
+                str(exc),
+                status=exc.status_code,
+                detail=exc.detail,
+            )
 
     @app.get("/api/projects/latest")
     @_login_required

@@ -1,0 +1,14 @@
+{
+  "stage": "stage03",
+  "timestamp": "20260514-145301-689",
+  "status": "failed",
+  "payload_keys": [
+    "project_id",
+    "source_brief"
+  ],
+  "output": {},
+  "error": {
+    "type": "FrameworkPlannerStageError",
+    "message": "阶段 03 缺少必填项：source_brief, locked_basic_config, worldview_plan"
+  }
+}

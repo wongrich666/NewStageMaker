@@ -6,7 +6,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -89,6 +89,154 @@ FIFTEEN_BEAT_NAMES = (
     "结局",
     "终场画面",
 )
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _project_history_id(project_id: Any) -> str:
+    text = str(project_id or "").strip()
+    if text.isdigit() and int(text) > 0:
+        return text
+    return "unsaved"
+
+
+def _history_timestamp() -> str:
+    return datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+
+
+def _history_iso_timestamp() -> str:
+    return datetime.now(timezone.utc).astimezone().isoformat()
+
+
+def _history_stage_slug(stage_or_module: Any) -> str:
+    text = str(stage_or_module or "module").strip().lower()
+    text = re.sub(r"[^a-z0-9_\-]+", "_", text)
+    if text.isdigit():
+        return f"stage{text.zfill(2)}"
+    if re.fullmatch(r"stage\d+", text):
+        return f"stage{text.removeprefix('stage').zfill(2)}"
+    return text or "module"
+
+
+def _history_project_dir(project_id: Any) -> Path:
+    path = _repo_root() / "cache" / _project_history_id(project_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _history_log_dir(project_id: Any) -> Path:
+    path = _repo_root() / "logs" / _project_history_id(project_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _history_payload_keys(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    return sorted(str(key) for key in payload.keys() if not str(key).startswith("_"))
+
+
+def save_framework_stage_history(
+    *,
+    project_id: Any,
+    stage: str,
+    payload: dict[str, Any] | None,
+    output: Any,
+    status: str,
+    error: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    project_dir = _history_project_dir(project_id)
+    slug = _history_stage_slug(stage)
+    timestamp = _history_timestamp()
+    record = {
+        "stage": slug,
+        "timestamp": timestamp,
+        "status": "success" if status == "success" else "failed",
+        "payload_keys": _history_payload_keys(payload),
+        "output": output if status == "success" else {},
+    }
+    if error:
+        record["error"] = error
+    filename = f"{slug}_{timestamp}.json"
+    path = project_dir / filename
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    latest_path = project_dir / f"latest_{slug}.json"
+    if status == "success":
+        latest_path.write_text(json.dumps(record, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    return {
+        "project_id": _project_history_id(project_id),
+        "stage": slug,
+        "filename": filename,
+        "latest_filename": latest_path.name if status == "success" else "",
+        "timestamp": timestamp,
+        "status": record["status"],
+        "payload_keys": record["payload_keys"],
+    }
+
+
+def write_framework_stage_exception_log(
+    *,
+    project_id: Any,
+    stage: str,
+    payload: dict[str, Any] | None,
+    exc_type: str,
+    message: str,
+    status_code: int | None = None,
+) -> dict[str, Any]:
+    log_dir = _history_log_dir(project_id)
+    timestamp = _history_timestamp()
+    entry = {
+        "stage": _history_stage_slug(stage),
+        "timestamp": timestamp,
+        "status": "failed",
+        "payload_keys": _history_payload_keys(payload),
+        "exception_type": exc_type,
+        "message": str(message or ""),
+        "status_code": status_code,
+    }
+    filename = f"{entry['stage']}_{timestamp}_error.json"
+    (log_dir / filename).write_text(json.dumps(entry, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    return {"filename": filename, **entry}
+
+
+def list_framework_stage_history(project_id: Any, stage: str | None = None) -> dict[str, Any]:
+    project_dir = _history_project_dir(project_id)
+    slug = _history_stage_slug(stage) if stage else ""
+    entries: list[dict[str, Any]] = []
+    for path in sorted(project_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        if path.name.startswith("latest_"):
+            continue
+        if slug and not path.name.startswith(f"{slug}_"):
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        entries.append({
+            "filename": path.name,
+            "stage": data.get("stage") or _history_stage_slug(path.stem),
+            "timestamp": data.get("timestamp") or "",
+            "status": data.get("status") or "success",
+            "payload_keys": data.get("payload_keys") or [],
+        })
+    return {"project_id": _project_history_id(project_id), "stage": slug, "entries": entries}
+
+
+def load_framework_stage_history(project_id: Any, filename: str) -> dict[str, Any]:
+    project_dir = _history_project_dir(project_id)
+    safe_name = Path(str(filename or "")).name
+    path = (project_dir / safe_name).resolve()
+    if project_dir.resolve() not in path.parents and path != project_dir.resolve():
+        raise FrameworkPlannerStageError("历史版本路径无效", stage="history", status_code=400)
+    if not path.exists() or not path.is_file():
+        raise FrameworkPlannerStageError("历史版本不存在", stage="history", status_code=404)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise FrameworkPlannerStageError("历史版本读取失败", stage="history", status_code=500) from exc
+    return {"filename": safe_name, "record": data}
 
 
 @dataclass(frozen=True, slots=True)

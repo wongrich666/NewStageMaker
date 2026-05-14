@@ -186,6 +186,8 @@
     expandedStorylines: {},
     expandedBusinessPanels: {},
     lastStagePayloadPreview: {},
+    stageHistory: {},
+    stageHistoryLoading: {},
     assetsOpen: false,
     showNewScriptModal: false,
     assets: [],
@@ -295,6 +297,12 @@
     const headers = { "Content-Type": "application/json" };
     if (authToken) headers.Authorization = `Bearer ${authToken}`;
     return headers;
+  }
+
+  function currentProjectId() {
+    const assetId = state && state.asset_state ? state.asset_state.asset_id : null;
+    const numeric = Number(assetId || 0);
+    return numeric > 0 ? numeric : "unsaved";
   }
 
   function toStageError(data, fallbackStage, status) {
@@ -781,6 +789,7 @@
     }
     state.current_view = viewId;
     render();
+    loadStageHistory(stageKeyForView(viewId)).catch(() => {});
   }
 
   function setStageLoading(stageKey, loading) {
@@ -1458,7 +1467,7 @@
           <span class="fp-running-spinner" aria-hidden="true"></span>
           <div>
             <strong>阶段 ${escapeHtml(stageNo)} 正在处理：${escapeHtml(title)}</strong>
-            <p>已运行 ${escapeHtml(processingElapsedLabel(stageKey))}。你仍可以查看已生成内容，完成后页面会自动刷新结果。</p>
+            <p>已运行 ${escapeHtml(processingElapsedLabel(stageKey))}。</p>
           </div>
         </div>
         <span class="fp-running-badge">处理中</span>
@@ -1589,6 +1598,7 @@
             ${renderDataBlock(state.source_brief, { dataKey: "source_brief", stageKey: "basic", editable: false })}
           </div>
         ` : ""}
+        ${renderStageHistoryPanel("basic")}
         ${isStageLoading("basic") ? renderProcessingBanner("正在提取原文信息，请稍候。") : ""}
         <div class="fp-actions">
           ${locked ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="basic">回退到此阶段并清空下游</button>` : ""}
@@ -1645,6 +1655,46 @@
     `;
   }
 
+  function renderStageHistoryPanel(stageKey) {
+    const stageNo = stageNoForKey(stageKey);
+    if (!stageNo) return "";
+    const entries = ui.stageHistory[stageKey] || [];
+    const loading = ui.stageHistoryLoading[stageKey];
+    return `
+      <div class="fp-history-panel">
+        <div class="fp-preference-head">
+          <div>
+            <strong>历史版本</strong>
+            <p>每次生成都会保留独立版本，成功版本会同步为本阶段最新有效版本。</p>
+          </div>
+          <button class="fp-btn small" data-action="refresh-stage-history" data-stage-key="${escapeHtml(stageKey)}" ${loading ? "disabled" : ""}>${loading ? "刷新中..." : "刷新历史"}</button>
+        </div>
+        <div class="fp-history-list">
+          ${entries.length ? entries.map((entry) => `
+            <div class="fp-history-item">
+              <div>
+                <strong>${escapeHtml(stageDisplayTitle(stageKey))}</strong>
+                <span>${escapeHtml(formatHistoryTimestamp(entry.timestamp))}</span>
+                <small>${escapeHtml((entry.payload_keys || []).map(fieldLabel).join("、") || "无入参摘要")}</small>
+              </div>
+              <div class="fp-history-actions">
+                <span class="fp-tag ${entry.status === "success" ? "ok" : "red"}">${entry.status === "success" ? "成功" : "失败"}</span>
+                <button class="fp-btn small" data-action="load-stage-history" data-stage-key="${escapeHtml(stageKey)}" data-history-file="${escapeHtml(entry.filename)}" ${entry.status !== "success" ? "disabled" : ""}>加载</button>
+              </div>
+            </div>
+          `).join("") : `<div class="fp-empty small">暂无历史版本。生成本阶段后会自动保存。</div>`}
+        </div>
+      </div>
+    `;
+  }
+
+  function formatHistoryTimestamp(value) {
+    const text = String(value || "");
+    const match = text.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/);
+    if (!match) return text || "未知时间";
+    return `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}:${match[6]}`;
+  }
+
   function formatDateTime(value) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return String(value || "");
@@ -1669,6 +1719,7 @@
         ${isStageLoading(options.stageKey) ? renderProcessingBanner(`正在生成${options.title}，请稍候...`) : ""}
         ${blocked && isEmptyValue(data) ? `<div class="fp-empty">请先确认上游阶段。</div>` : renderDataBlock(data, { dataKey: options.dataKey, stageKey: options.stageKey, editable: !blocked && !confirmed })}
         ${renderStagePreferenceField(options.stageKey, blocked || confirmed || isStageLoading(options.stageKey))}
+        ${renderStageHistoryPanel(options.stageKey)}
         ${renderStageError(options.stageKey)}
         <div class="fp-lock-note">本阶段由上游确认或底部“下一阶段”自动生成。人工操作只保留确认与显式回退。</div>
         <div class="fp-actions">
@@ -1699,6 +1750,7 @@
         ${isStageLoading("beat") ? renderProcessingBanner("正在生成三幕十五节拍时间轴，请稍候...") : ""}
         ${blocked && !hasTimeline ? `<div class="fp-empty">请先确认人设方案。</div>` : renderBeatTimeline(state.beat_checkpoint_timeline, { editable: !blocked && !confirmed })}
         ${renderStagePreferenceField("beat", blocked || confirmed || isStageLoading("beat"))}
+        ${renderStageHistoryPanel("beat")}
         ${renderStageError("beat")}
         <div class="fp-lock-note">时间轴可直接编辑；修改节拍后会同步卡点说明，并清空已失效的 05 人物故事线。</div>
         <div class="fp-actions">
@@ -1849,6 +1901,7 @@
         ${isStageLoading("beat") ? renderProcessingBanner("正在生成卡点说明，请稍候...") : ""}
         ${blocked && !hasExplanation ? `<div class="fp-empty">请先确认人设方案。</div>` : renderCheckpointExplanation(state.checkpoint_explanation, { editable: !blocked && !confirmed })}
         ${renderStagePreferenceField("beat", blocked || confirmed || isStageLoading("beat"))}
+        ${renderStageHistoryPanel("beat")}
         <div class="fp-actions">
           ${renderUpstreamRollbackButton("beat")}
           <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="beat" ${blocked || confirmed || state.beat_checkpoint_timeline.length !== 15 || isEmptyValue(state.checkpoint_explanation) ? "disabled" : ""}>确认 04 并进入人物故事线</button>
@@ -1875,6 +1928,7 @@
         ${isStageLoading("storylines") ? renderProcessingBanner("正在生成人物故事线，请稍候...") : ""}
         ${blocked && !hasStorylines ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineCards(state.character_storylines, { concise: true })}
         ${renderStagePreferenceField("storylines", blocked || confirmed || isStageLoading("storylines"))}
+        ${renderStageHistoryPanel("storylines")}
         ${renderStageError("storylines")}
         <div class="fp-lock-note">05 阶段由 04 确认后自动生成；如回退 04，人物故事线会同步清空，避免旧故事线引用旧节拍。</div>
         <div class="fp-actions">
@@ -1902,6 +1956,7 @@
         </div>
         ${blocked && !hasStorylines ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineCards(state.character_storylines, { detailed: true })}
         ${renderStagePreferenceField("storylines", blocked || stage.confirmed || isStageLoading("storylines"))}
+        ${renderStageHistoryPanel("storylines")}
         <div class="fp-actions">
           ${renderUpstreamRollbackButton("storylines")}
           <button class="fp-btn" data-action="go-view" data-view="storylines">返回故事线总览</button>
@@ -1927,6 +1982,7 @@
         </div>
         ${blocked && !hasStorylines ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineDecisionGrid()}
         ${renderStagePreferenceField("storylines", blocked || confirmed || isStageLoading("storylines"))}
+        ${renderStageHistoryPanel("storylines")}
         <div class="fp-actions">
           ${renderUpstreamRollbackButton("storylines")}
           ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="storylines">回退到此阶段并清空下游</button>` : ""}
@@ -1954,6 +2010,7 @@
         ${isStageLoading("guide") ? renderProcessingBanner("正在生成整体改编指引，请稍候...") : ""}
         ${blocked && !hasGuide ? `<div class="fp-empty">请先确认 05 阶段。</div>` : renderGuideCards(state.adaptation_guide)}
         ${renderStagePreferenceField("guide", blocked || confirmed || isStageLoading("guide"))}
+        ${renderStageHistoryPanel("guide")}
         ${renderStageError("guide")}
         <div class="fp-actions">
           ${renderUpstreamRollbackButton("guide")}
@@ -1980,6 +2037,7 @@
           ${renderPackageBlocks()}
         `}
         ${renderStagePreferenceField("package", locked || isStageLoading("package"))}
+        ${renderStageHistoryPanel("package")}
         <div class="fp-actions">
           ${renderUpstreamRollbackButton("package")}
           <button class="fp-btn primary" data-action="copy-final-package" ${locked || !hasOutput ? "disabled" : ""}>复制最终策划包</button>
@@ -2436,6 +2494,7 @@
     }
     state.current_view = nextView.id;
     render();
+    loadStageHistory(nextView.stageKey).catch(() => {});
     const nextStageKey = nextView.stageKey;
     if (nextStageKey !== currentStageKey) {
       await autoGenerateCurrentStage();
@@ -2620,6 +2679,55 @@
     return {};
   }
 
+  function attachProjectContext(payload) {
+    const next = Object.assign({}, payload || {});
+    next.project_id = currentProjectId();
+    return next;
+  }
+
+  async function loadStageHistory(stageKey) {
+    const stageNo = stageNoForKey(stageKey);
+    if (!stageNo) return;
+    ui.stageHistoryLoading[stageKey] = true;
+    render();
+    try {
+      const params = new URLSearchParams({
+        project_id: String(currentProjectId()),
+        stage: stageNo,
+      });
+      const data = await requestJson(`/api/framework-planner/history?${params.toString()}`);
+      ui.stageHistory[stageKey] = Array.isArray(data.entries) ? data.entries : [];
+    } catch (error) {
+      showToast(error.message || "历史版本刷新失败");
+    } finally {
+      ui.stageHistoryLoading[stageKey] = false;
+      render();
+    }
+  }
+
+  async function loadHistoryVersion(stageKey, filename) {
+    if (!filename) return;
+    try {
+      const projectId = encodeURIComponent(String(currentProjectId()));
+      const data = await requestJson(`/api/framework-planner/history/${projectId}/${encodeURIComponent(filename)}`);
+      const record = data.record || {};
+      const output = record.output || {};
+      if (record.status !== "success") {
+        showToast("失败版本不能加载到当前界面");
+        return;
+      }
+      applyStageResponse(stageNoForKey(stageKey), { data: output, display_text: "" });
+      state.stage_state[stageKey].status = "loaded_history";
+      state.stage_state[stageKey].confirmed = false;
+      recordHistory("load_stage_history", { stageKey, filename });
+      saveState();
+      showToast("已加载历史版本到当前界面，请确认后再进入下游阶段");
+      render();
+    } catch (error) {
+      showToast(error.message || "历史版本加载失败");
+    }
+  }
+
   function applyStageResponse(stageNo, response) {
     const safeResponse = response && typeof response === "object" ? response : {};
     const safeData = safeResponse.data && typeof safeResponse.data === "object" ? safeResponse.data : {};
@@ -2689,9 +2797,14 @@
     render();
     try {
       await waitForPaint();
-      const payload = cleanOutgoingPayload(buildStagePayload(stageKey, options || {}), `stage${stageNo} payload`);
+      const payload = cleanOutgoingPayload(attachProjectContext(buildStagePayload(stageKey, options || {})), `stage${stageNo} payload`);
       const response = await planningApi.runStage(stageNo, payload);
       applyStageResponse(stageNo, response);
+      if (response.history) {
+        ui.stageHistory[stageKey] = [response.history].concat(ui.stageHistory[stageKey] || []).slice(0, 50);
+      } else {
+        loadStageHistory(stageKey).catch(() => {});
+      }
       state.stage_state[stageKey].status = options && options.revise ? "updated" : "generated";
       state.stage_state[stageKey].confirmed = false;
       recordHistory(options && options.revise ? "revise_stage" : "generate_stage", { stageKey, stageNo });
@@ -2719,6 +2832,9 @@
       : "";
     const lastExceptionMessage = error.lastExceptionMessage
       || (error.detail && typeof error.detail.last_exception_message === "string" ? error.detail.last_exception_message.trim() : "");
+    if (Number(error.status || 0) >= 500) {
+      return `${label}：模型暂时不可用，请稍后重试。`;
+    }
     if (/格式异常/.test(message)) return `${label} 返回格式异常，请重试或查看日志。`;
     if (/无法连接 FastGPT 服务/.test(message)) {
       const parts = [`${label} 无法连接 FastGPT 服务`];
@@ -2898,7 +3014,7 @@
     }
     state.feedback[stageKey] = prompt;
     savePromptPreferences(`apply_stage_preference:${stageKey}`);
-    const payload = cleanOutgoingPayload(buildStagePayload(stageKey, { revise: hasStageData(stageKey) }), `stage${stageNoForKey(stageKey)} applied-preference payload`);
+    const payload = cleanOutgoingPayload(attachProjectContext(buildStagePayload(stageKey, { revise: hasStageData(stageKey) })), `stage${stageNoForKey(stageKey)} applied-preference payload`);
     ui.lastStagePayloadPreview[stageKey] = {
       stageNo: stageNoForKey(stageKey),
       keys: Object.keys(payload).filter((key) => !key.startsWith("_")).slice(0, 12),
@@ -3136,6 +3252,7 @@
       while (round <= rounds) {
         const payload = cleanOutgoingPayload({
           mode: current ? "改写" : "创作",
+          project_id: currentProjectId(),
           source_brief: state.source_brief,
           basic_config: state.basic_config,
           worldview_plan: state.worldview_plan,
@@ -3152,6 +3269,7 @@
         state.stage_state.beat.status = "updated";
         state.stage_state.beat.confirmed = false;
         const scoreResponse = await planningApi.runBeatScore({
+          project_id: currentProjectId(),
           beat_checkpoint_timeline: state.beat_checkpoint_timeline,
           checkpoint_explanation: state.checkpoint_explanation,
           basic_config: state.basic_config,
@@ -3206,6 +3324,8 @@
     ui.toast = "";
     ui.loading = {};
     ui.loadingStartedAt = {};
+    ui.stageHistory = {};
+    ui.stageHistoryLoading = {};
     if (ui.loadingTicker) {
       window.clearInterval(ui.loadingTicker);
       ui.loadingTicker = null;
@@ -3271,6 +3391,7 @@
     syncStageFlow(state);
     saveState();
     await loadAssets();
+    await loadStageHistory("basic");
     showToast("新剧本已创建，已进入第一阶段");
   }
 
@@ -3311,8 +3432,11 @@
     state.asset_state.asset_id = project.project_id || null;
     state.asset_state.status = project.status || "draft";
     state.current_view = "basic";
+    ui.stageHistory = {};
+    ui.stageHistoryLoading = {};
     syncStageFlow(state);
     saveState();
+    await loadStageHistory("basic");
     showToast("已打开资产，可从第一阶段查看和继续策划");
     render();
   }
@@ -3653,6 +3777,14 @@
       await controlAssetTask(actionElement.dataset.taskId, "continue");
       return;
     }
+    if (action === "refresh-stage-history") {
+      await loadStageHistory(actionElement.dataset.stageKey);
+      return;
+    }
+    if (action === "load-stage-history") {
+      await loadHistoryVersion(actionElement.dataset.stageKey, actionElement.dataset.historyFile);
+      return;
+    }
     if (action === "go-next-stage") {
       await goNextStage(actionElement.dataset.view);
       return;
@@ -3766,4 +3898,5 @@
 
   render();
   loadAssets().catch(() => {});
+  loadStageHistory(stageKeyForView(state.current_view || "basic")).catch(() => {});
 })();

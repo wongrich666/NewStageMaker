@@ -1,0 +1,33 @@
+{
+  "stage": "stage01",
+  "timestamp": "20260514-145301-680",
+  "status": "success",
+  "payload_keys": [
+    "adaptation_direction",
+    "episodes_per_season",
+    "minutes_per_episode",
+    "mode",
+    "project_id",
+    "season_count",
+    "source_text",
+    "source_title",
+    "target_format",
+    "user_constraints",
+    "user_requirements"
+  ],
+  "output": {
+    "source_brief": {
+      "content": "一个律师重返故乡，调查父亲之死与地方财团的关系。",
+      "source_title": "未命名项目",
+      "target_format": "短剧",
+      "season_count": 1,
+      "episodes_per_season": 60,
+      "minutes_per_episode": 2,
+      "core_premise": "一个律师重返故乡，调查父亲之死与地方财团的关系。",
+      "story_outline": "一个律师重返故乡，调查父亲之死与地方财团的关系。",
+      "adaptation_direction": "保持强钩子、强反转、强情绪推进",
+      "ready_for_script_workflow": true
+    },
+    "display_text": ""
+  }
+}
