@@ -5,6 +5,23 @@
   const PREFERENCE_STORAGE_KEY = config.preferenceStorageKey || "frameworkPlannerPromptPreferences.v1";
   const API_BASE = config.apiBase || "/api/framework-planner";
   const authToken = String(config.authToken || "").trim();
+  const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "display_text", "choices", "usage"];
+  const BUSINESS_FIELD_KEYS = [
+    "source_brief",
+    "worldview_plan",
+    "character_plan",
+    "beat_checkpoint_timeline",
+    "checkpoint_explanation",
+    "character_storylines",
+  ];
+  const ARRAY_BUSINESS_FIELDS = new Set(["beat_checkpoint_timeline", "character_storylines"]);
+  const DEV_LOG_ENABLED = Boolean(
+    config.debug ||
+    config.dev ||
+    config.development ||
+    config.debugMode ||
+    (window.location && ["localhost", "127.0.0.1"].includes(window.location.hostname))
+  );
 
   const VIEW_DEFS = [
     { id: "basic", label: "1. 基础配置", stageKey: "basic" },
@@ -16,7 +33,7 @@
     { id: "storyline_details", label: "7. 查看详细不同人物故事线", stageKey: "storylines" },
     { id: "storyline_decisions", label: "8. 故事线处理", stageKey: "storylines" },
     { id: "guide", label: "9. 整体改编指引四项", stageKey: "guide" },
-    { id: "package", label: "10. 最终 JSON 策划包输出", stageKey: "package" },
+    { id: "package", label: "10. 最终策划包输出", stageKey: "package" },
   ];
 
   const STAGE_SEQUENCE = ["basic", "worldview", "character", "beat", "storylines", "guide", "package"];
@@ -73,7 +90,7 @@
   const initialState = {
     current_view: "basic",
     basic_config: {
-      project_title: "未命名框架策划",
+      project_title: "",
       mode: "创作",
       source_text: "",
       source_title: "",
@@ -160,9 +177,6 @@
     },
   };
 
-  const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "display_text", "choices", "usage"];
-
-  let state = loadState();
   const ui = {
     toast: "",
     loading: {},
@@ -170,6 +184,23 @@
     modalStorylineId: null,
     expandedBeats: {},
     expandedStorylines: {},
+    expandedBusinessPanels: {},
+    lastStagePayloadPreview: {},
+    assetsOpen: false,
+    showNewScriptModal: false,
+    assets: [],
+    assetsLoading: false,
+    assetSearch: "",
+    assetStatusFilter: "all",
+    assetSort: "updated_desc",
+    newScriptForm: {
+      title: "",
+      season_count: 1,
+      episodes_per_season: 60,
+      target_format: "短剧",
+      style: "",
+      description: "",
+    },
     loadingStartedAt: {},
     loadingTicker: null,
     editMode: {
@@ -180,6 +211,7 @@
       guide: false,
     },
   };
+  let state = loadState();
 
   const realApi = {
     async runStage(stage, payload) {
@@ -247,6 +279,17 @@
       }
     },
   };
+
+  async function requestJson(url, options) {
+    const response = await fetch(url, Object.assign({
+      headers: buildHeaders(),
+    }, options || {}));
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false || data.ok === false) {
+      throw new Error(data.error || data.message || "请求失败，请稍后重试。");
+    }
+    return data;
+  }
 
   function buildHeaders() {
     const headers = { "Content-Type": "application/json" };
@@ -365,30 +408,75 @@
     return { type: typeof value, polluted: false };
   }
 
-  function cleanStage05Payload(payload) {
-    const fields = ["source_brief", "worldview_plan", "character_plan", "beat_checkpoint_timeline"];
-    console.warn("[framework_planner] stage05 payload diagnostic", {
-      source_brief: fieldSummary(payload.source_brief),
-      basic_config: fieldSummary(payload.basic_config),
-      worldview_plan: fieldSummary(payload.worldview_plan),
-      character_plan: fieldSummary(payload.character_plan),
-      beat_checkpoint_timeline: fieldSummary(payload.beat_checkpoint_timeline),
+  function debugCleanSummary(label, before, after) {
+    if (!DEV_LOG_ENABLED || typeof console === "undefined" || !console.debug) return;
+    console.debug(`[framework_planner] ${label}`, {
+      before: before || {},
+      after: after || {},
     });
-    payload.basic_config = compactStage05BasicConfig(payload.basic_config);
-    fields.forEach((field) => {
-      const before = payload[field];
-      if (!hasRawResponseKeys(before)) return;
-      const after = extractBusinessField(before, field);
-      if (after !== before) {
-        payload[field] = after;
-        console.warn(`[framework_planner] stage05 payload cleaned: field=${field} from raw response to business object`, fieldSummary(after));
-      }
-      if (hasRawResponseKeys(payload[field])) {
-        payload[field] = field === "beat_checkpoint_timeline" ? [] : {};
-        console.warn(`[framework_planner] stage05 payload rejected polluted field=${field}; 检测到旧缓存数据异常，请重新生成上游阶段`);
-      }
+  }
+
+  function debugStageSummary(label, detail) {
+    if (!DEV_LOG_ENABLED || typeof console === "undefined" || !console.debug) return;
+    console.debug(`[framework_planner] ${label}`, detail || {});
+  }
+
+  function defaultBusinessValue(field) {
+    return ARRAY_BUSINESS_FIELDS.has(field) ? [] : {};
+  }
+
+  function cleanBusinessFieldValue(value, field) {
+    const extracted = extractBusinessField(value, field);
+    if (!hasRawResponseKeys(extracted)) return extracted;
+    return defaultBusinessValue(field);
+  }
+
+  function stripRawResponseKeys(value, depth = 0) {
+    if (depth > 12 || value === null || value === undefined) return value;
+    if (Array.isArray(value)) {
+      return value.map((item) => stripRawResponseKeys(item, depth + 1));
+    }
+    if (typeof value !== "object") return value;
+    const result = {};
+    Object.keys(value).forEach((key) => {
+      if (RAW_RESPONSE_KEYS.includes(key)) return;
+      result[key] = stripRawResponseKeys(value[key], depth + 1);
     });
+    return result;
+  }
+
+  function businessFieldSummary(source) {
+    const summary = {};
+    BUSINESS_FIELD_KEYS.forEach((field) => {
+      summary[field] = fieldSummary(source ? source[field] : undefined);
+    });
+    return summary;
+  }
+
+  function cleanBusinessPayloadFields(payload, label, fields) {
+    const beforeSummary = businessFieldSummary(payload);
+    (fields || BUSINESS_FIELD_KEYS).forEach((field) => {
+      if (!(field in payload)) return;
+      payload[field] = cleanBusinessFieldValue(payload[field], field);
+    });
+    debugCleanSummary(`${label} business fields cleaned`, beforeSummary, businessFieldSummary(payload));
     return payload;
+  }
+
+  function cleanOutgoingPayload(payload, label) {
+    const stripped = stripRawResponseKeys(payload || {});
+    return cleanBusinessPayloadFields(stripped, label || "outgoing payload");
+  }
+
+  function cleanStage05Payload(payload) {
+    debugCleanSummary("stage05 payload diagnostic", businessFieldSummary(payload), null);
+    payload.basic_config = compactStage05BasicConfig(payload.basic_config);
+    return cleanBusinessPayloadFields(payload, "stage05 payload", [
+      "source_brief",
+      "worldview_plan",
+      "character_plan",
+      "beat_checkpoint_timeline",
+    ]);
   }
 
   function compactStage05BasicConfig(value) {
@@ -421,20 +509,20 @@
   }
 
   function cleanSavedBusinessFields(targetState) {
-    const fields = ["source_brief", "worldview_plan", "character_plan", "beat_checkpoint_timeline"];
-    fields.forEach((field) => {
+    const beforeSummary = businessFieldSummary(targetState);
+    BUSINESS_FIELD_KEYS.forEach((field) => {
       const before = targetState[field];
       if (!hasRawResponseKeys(before)) return;
-      const after = extractBusinessField(before, field);
-      if (after !== before && !hasRawResponseKeys(after)) {
-        targetState[field] = after;
-        console.warn(`[framework_planner] localStorage business field cleaned: field=${field} from raw response to business object`, fieldSummary(after));
-        return;
+      targetState[field] = cleanBusinessFieldValue(before, field);
+      if (hasRawResponseKeys(targetState[field])) {
+        targetState[field] = defaultBusinessValue(field);
+        const stageKey = stageKeyForBusinessField(field);
+        if (targetState.stage_state && targetState.stage_state[stageKey]) {
+          targetState.stage_state[stageKey].status = "error";
+        }
       }
-      targetState[field] = field === "beat_checkpoint_timeline" ? [] : {};
-      targetState.stage_state[stageKeyForBusinessField(field)].status = "error";
-      console.warn(`[framework_planner] 检测到旧缓存数据异常，请重新生成上游阶段: field=${field}`, fieldSummary(before));
     });
+    debugCleanSummary("localStorage business fields cleaned", beforeSummary, businessFieldSummary(targetState));
     return targetState;
   }
 
@@ -444,12 +532,16 @@
       worldview_plan: "worldview",
       character_plan: "character",
       beat_checkpoint_timeline: "beat",
+      checkpoint_explanation: "beat",
+      character_storylines: "storylines",
     }[field] || "basic";
   }
 
   function loadState() {
     const saved = readStorage(STORAGE_KEY) || readStorage(LEGACY_STORAGE_KEY);
-    return normalizeState(saved);
+    const normalized = normalizeState(sanitizeLoadedState(saved));
+    persistLoadedState(normalized);
+    return normalized;
   }
 
   function readStorage(key) {
@@ -459,6 +551,29 @@
     } catch (error) {
       return null;
     }
+  }
+
+  function persistLoadedState(nextState) {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+      window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+    } catch (error) {
+      // ignore storage write errors
+    }
+  }
+
+  function sanitizeLoadedState(saved) {
+    if (!saved || typeof saved !== "object") return saved;
+    const sanitized = stripRawResponseKeys(saved);
+    BUSINESS_FIELD_KEYS.forEach((field) => {
+      if (saved[field] !== undefined) {
+        sanitized[field] = cleanBusinessFieldValue(saved[field], field);
+      }
+    });
+    sanitized.raw_stage_responses = {};
+    debugCleanSummary("localStorage root sanitized", fieldSummary(saved), fieldSummary(sanitized));
+    debugCleanSummary("localStorage retained business fields", businessFieldSummary(saved), businessFieldSummary(sanitized));
+    return sanitized;
   }
 
   function normalizeState(saved) {
@@ -472,10 +587,26 @@
     mergeInto(next, saved);
     next.basic_config = Object.assign(clone(initialState.basic_config), saved.basic_config || {});
     next.feedback = Object.assign(clone(initialState.feedback), saved.feedback || {});
-    next.editors = Object.assign(clone(initialState.editors), saved.editors || {});
-    next.stage_state = Object.assign(clone(initialState.stage_state), saved.stage_state || {});
-    next.asset_state = Object.assign(clone(initialState.asset_state), saved.asset_state || {});
+    next.editors = Object.assign(
+      clone(initialState.editors),
+      saved.editors && typeof saved.editors === "object" && !Array.isArray(saved.editors) ? saved.editors : {}
+    );
+    next.stage_state = Object.assign(
+      clone(initialState.stage_state),
+      saved.stage_state && typeof saved.stage_state === "object" && !Array.isArray(saved.stage_state) ? saved.stage_state : {}
+    );
+    next.asset_state = Object.assign(
+      clone(initialState.asset_state),
+      saved.asset_state && typeof saved.asset_state === "object" && !Array.isArray(saved.asset_state) ? saved.asset_state : {}
+    );
     next.prompt_preferences = normalizePromptPreferences(Object.assign({}, storedPreferences || {}, saved.prompt_preferences || {}));
+    next.source_brief = next.source_brief && typeof next.source_brief === "object" && !Array.isArray(next.source_brief) ? next.source_brief : {};
+    next.worldview_plan = next.worldview_plan && typeof next.worldview_plan === "object" && !Array.isArray(next.worldview_plan) ? next.worldview_plan : {};
+    next.character_plan = next.character_plan && typeof next.character_plan === "object" && !Array.isArray(next.character_plan) ? next.character_plan : {};
+    next.beat_checkpoint_timeline = Array.isArray(next.beat_checkpoint_timeline) ? next.beat_checkpoint_timeline : [];
+    next.checkpoint_explanation = next.checkpoint_explanation && typeof next.checkpoint_explanation === "object" && !Array.isArray(next.checkpoint_explanation) ? next.checkpoint_explanation : {};
+    next.character_storylines = Array.isArray(next.character_storylines) ? next.character_storylines : [];
+    next.storyline_decisions = Array.isArray(next.storyline_decisions) ? next.storyline_decisions : [];
     STAGE_SEQUENCE.forEach((stageKey) => {
       next.stage_state[stageKey] = Object.assign(clone(initialState.stage_state[stageKey]), next.stage_state[stageKey] || {});
     });
@@ -989,6 +1120,84 @@
     return text.length > max ? `${text.slice(0, max)}...` : text;
   }
 
+  const FIELD_LABELS = {
+    source_brief: "原文摘要",
+    worldview_plan: "世界观方案",
+    character_plan: "人设方案",
+    beat_checkpoint_timeline: "三幕十五节拍时间轴",
+    checkpoint_explanation: "卡点说明",
+    character_storylines: "人物故事线",
+    character_relationships: "人物关系",
+    main_characters: "主要角色",
+    protagonist: "主角",
+    antagonist: "反派",
+    supporting_characters: "配角",
+    goal: "目标",
+    flaw: "缺陷",
+    name: "姓名",
+    title: "标题",
+    role: "角色定位",
+    summary: "摘要",
+    overview: "整体说明",
+    motivation: "动机",
+    conflict: "冲突",
+    relationship: "关系",
+    personality: "性格",
+    background: "背景",
+    arc: "成长弧",
+    act: "幕",
+    beat_no: "节拍序号",
+    beat_name: "节拍名称",
+    episode_range: "集数范围",
+    checkpoint_title: "卡点标题",
+    narrative_function: "叙事功能",
+    plot_content: "剧情内容",
+    character_change: "人物变化",
+    conflict_upgrade: "冲突升级",
+    hook_or_reversal: "钩子 / 反转",
+    linked_storylines: "关联故事线",
+    beat_notes: "节拍说明",
+    explanation: "说明",
+    core_premise: "核心前提",
+    theme: "主题",
+    tone: "风格",
+    setting: "设定",
+    rules: "规则",
+    timeline: "时间线",
+    factions: "阵营",
+    locations: "场景地点",
+    detailed_storyline: "详细剧情",
+    linked_beats: "关联节拍",
+    episode_distribution: "分集安排",
+    edit_notes: "编辑备注",
+    framework_plan_package: "最终策划包",
+    validation_report: "校验报告",
+    user_requirements: "用户偏好",
+    basic_config: "基础配置",
+    project_title: "剧本名称",
+    source_title: "原作名称",
+    target_format: "类型 / 形式",
+    season_count: "季数",
+    episodes_per_season: "每季集数",
+    minutes_per_episode: "每集分钟数",
+    adaptation_direction: "改编方向",
+    user_constraints: "限制条件",
+    story_outline: "故事描述",
+    status: "状态",
+    issues: "问题",
+    warnings: "提醒",
+    passed: "是否通过",
+    source_text: "原文材料",
+    style: "风格",
+    focus: "重点",
+  };
+
+  function fieldLabel(key) {
+    const normalized = String(key || "");
+    if (FIELD_LABELS[normalized]) return FIELD_LABELS[normalized];
+    return "补充信息";
+  }
+
   function editorValueFor(key) {
     if (state.editors[key]) return state.editors[key];
     if (key === "worldview_plan") return prettyJson(state.worldview_plan);
@@ -1041,7 +1250,39 @@
         </main>
         ${renderFooter()}
         ${ui.toast ? `<div class="fp-toast">${escapeHtml(ui.toast)}</div>` : ""}
+        ${ui.showNewScriptModal ? renderNewScriptModal() : ""}
         ${ui.modalStorylineId ? renderStorylineModal(ui.modalStorylineId) : ""}
+      </div>
+    `;
+  }
+
+  function renderNewScriptModal() {
+    const form = ui.newScriptForm;
+    return `
+      <div class="fp-modal-mask" data-action="close-new-script">
+        <div class="fp-modal" data-modal-content="new-script">
+          <div class="fp-card-title-row">
+            <div>
+              <h2 class="fp-card-title">新建剧本</h2>
+              <p class="fp-card-sub">填写基础信息后会创建资产，并自动回到第一阶段。</p>
+            </div>
+            <button class="fp-btn small" data-action="close-new-script">关闭</button>
+          </div>
+          <div class="fp-grid two">
+            <label class="fp-field"><span>剧本名称</span><input data-new-script-field="title" value="${escapeHtml(form.title)}" /></label>
+            <label class="fp-field"><span>类型 / 风格</span><input data-new-script-field="target_format" value="${escapeHtml(form.target_format)}" /></label>
+          </div>
+          <div class="fp-grid two" style="margin-top:12px">
+            <label class="fp-field"><span>季数</span><input type="number" min="1" data-new-script-field="season_count" value="${escapeHtml(form.season_count)}" /></label>
+            <label class="fp-field"><span>每季集数</span><input type="number" min="1" data-new-script-field="episodes_per_season" value="${escapeHtml(form.episodes_per_season)}" /></label>
+          </div>
+          <label class="fp-field" style="margin-top:12px"><span>细分风格</span><input data-new-script-field="style" value="${escapeHtml(form.style)}" placeholder="例如：短剧强反转、悬疑、都市情感" /></label>
+          <label class="fp-field" style="margin-top:12px"><span>简短描述</span><textarea data-new-script-field="description" placeholder="一句话写清故事方向、主角或核心冲突。">${escapeHtml(form.description)}</textarea></label>
+          <div class="fp-actions">
+            <button class="fp-btn" data-action="close-new-script">取消</button>
+            <button class="fp-btn primary" data-action="submit-new-script">创建并进入第一阶段</button>
+          </div>
+        </div>
       </div>
     `;
   }
@@ -1068,15 +1309,15 @@
           <div class="fp-logo-mark">FP</div>
           <div>
             剧本框架策划工作台
-            <small>独立于主剧本生成链路</small>
           </div>
         </div>
         <div class="fp-side-note">
           <div class="fp-side-line"><span class="fp-tag ${modeClass}">${escapeHtml(modeLabel)}</span></div>
-          <div>上游确认后锁定，进入下游后不可直接改动；如需修改，必须显式回退并清空下游确认状态。</div>
+          <div>上游阶段确认并锁定后，下游阶段内容不能直接修改。
+如需更改上游内容，必须先点击“回退”按钮，这会自动清空下游阶段的确认状态，再进行修改。</div>
         </div>
         <div class="fp-side-note">
-          <strong>本地保存：</strong>状态会自动写入 <code>${escapeHtml(STORAGE_KEY)}</code>，刷新页面后仍保留。
+          <strong>本地保存：</strong>状态会自动保存
         </div>
         <nav class="fp-nav">${navItems}</nav>
       </aside>
@@ -1087,19 +1328,123 @@
     return `
       <div class="fp-top">
         <div>
-          <div class="fp-kicker">Framework Planner / BETTER_FRAMEWORK_JSONS 01-07</div>
+          <div class="fp-kicker">7 STAGES Framework Planner</div>
           <h1 class="fp-title">${escapeHtml(state.basic_config.project_title || "未命名框架策划")}</h1>
-          <p class="fp-top-sub">04 阶段只维护一条 <code>beat_checkpoint_timeline</code>，<code>checkpoint_explanation</code> 只负责解释同一条时间轴。</p>
         </div>
         <div class="fp-top-actions">
+          <button class="fp-btn small primary" data-action="open-new-script">新建剧本</button>
+          <button class="fp-btn small" data-action="toggle-assets">${ui.assetsOpen ? "收起资产" : "查看和管理资产"}</button>
           <a class="fp-btn small ghost" href="${escapeHtml(config.workspaceUrl || "/workspace")}">返回主工作台</a>
-          <button class="fp-btn small" data-action="copy-working-payload">复制当前状态 JSON</button>
+          <button class="fp-btn small" data-action="copy-working-payload">复制当前策划数据</button>
           <button class="fp-btn small danger" data-action="reset-state">重置本地状态</button>
         </div>
       </div>
+      ${ui.assetsOpen ? renderAssetManager() : ""}
       <div class="fp-card fp-steps">${renderStepRail()}</div>
       ${renderRunningStageStatus()}
     `;
+  }
+
+  function renderAssetManager() {
+    const assets = filteredAssets();
+    return `
+      <section class="fp-card fp-asset-manager">
+        <div class="fp-card-title-row">
+          <div>
+            <h2 class="fp-card-title">剧本资产</h2>
+            <p class="fp-card-sub">管理已创建和生成中的剧本。操作后列表会自动刷新。</p>
+          </div>
+          <button class="fp-btn small" data-action="refresh-assets" ${ui.assetsLoading ? "disabled" : ""}>${ui.assetsLoading ? "刷新中..." : "刷新"}</button>
+        </div>
+        <div class="fp-asset-toolbar">
+          <input data-asset-search placeholder="搜索剧本名称或描述" value="${escapeHtml(ui.assetSearch)}" />
+          <select data-asset-status-filter>
+            ${[
+              ["all", "全部状态"],
+              ["draft", "草稿"],
+              ["running", "处理中"],
+              ["completed", "完成"],
+              ["failed", "失败"],
+              ["terminated", "已停止"],
+            ].map(([value, label]) => `<option value="${value}" ${ui.assetStatusFilter === value ? "selected" : ""}>${label}</option>`).join("")}
+          </select>
+          <select data-asset-sort>
+            <option value="updated_desc" ${ui.assetSort === "updated_desc" ? "selected" : ""}>最近修改优先</option>
+            <option value="created_desc" ${ui.assetSort === "created_desc" ? "selected" : ""}>最近创建优先</option>
+            <option value="title_asc" ${ui.assetSort === "title_asc" ? "selected" : ""}>名称 A-Z</option>
+          </select>
+        </div>
+        ${ui.assetsLoading ? renderProcessingBanner("正在刷新资产列表...") : ""}
+        <div class="fp-asset-list">
+          ${assets.length ? assets.map(renderAssetItem).join("") : `<div class="fp-empty">暂无匹配资产。可以点击“新建剧本”开始一个新的框架策划。</div>`}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderAssetItem(item) {
+    const projectId = item.project_id;
+    const taskId = String(item.task_id || "");
+    const status = String(item.status || "draft");
+    const canStop = taskId && ["pending", "running", "pausing", "paused"].includes(status);
+    const canContinue = taskId && ["paused", "failed", "terminated"].includes(status);
+    return `
+      <article class="fp-asset-item">
+        <div>
+          <div class="fp-asset-title">${escapeHtml(item.title || "未命名剧本")}</div>
+          <div class="fp-asset-meta">
+            <span class="fp-tag ${assetStatusClass(status)}">${escapeHtml(assetStatusLabel(status))}</span>
+            <span>上次修改：${escapeHtml(formatDateTime(item.updated_at || item.created_at || ""))}</span>
+            <span>${escapeHtml(item.current_stage_label || "待开始")}</span>
+          </div>
+          <p>${escapeHtml(item.summary || "这个剧本还没有简短描述。")}</p>
+        </div>
+        <div class="fp-asset-actions">
+          <button class="fp-btn small primary" data-action="open-asset" data-project-id="${escapeHtml(projectId)}">打开查看</button>
+          <button class="fp-btn small" data-action="duplicate-asset" data-project-id="${escapeHtml(projectId)}">复制</button>
+          ${canStop ? `<button class="fp-btn small danger" data-action="stop-asset-task" data-task-id="${escapeHtml(taskId)}">停止</button>` : ""}
+          ${canContinue ? `<button class="fp-btn small" data-action="continue-asset-task" data-task-id="${escapeHtml(taskId)}">继续</button>` : ""}
+          <button class="fp-btn small danger subtle" data-action="delete-asset" data-project-id="${escapeHtml(projectId)}">删除</button>
+        </div>
+      </article>
+    `;
+  }
+
+  function filteredAssets() {
+    const query = ui.assetSearch.trim().toLowerCase();
+    let items = ui.assets.slice();
+    if (query) {
+      items = items.filter((item) => `${item.title || ""} ${item.summary || ""}`.toLowerCase().includes(query));
+    }
+    if (ui.assetStatusFilter !== "all") {
+      items = items.filter((item) => String(item.status || "draft") === ui.assetStatusFilter);
+    }
+    items.sort((a, b) => {
+      if (ui.assetSort === "title_asc") return String(a.title || "").localeCompare(String(b.title || ""), "zh-Hans-CN");
+      const key = ui.assetSort === "created_desc" ? "created_at" : "updated_at";
+      return String(b[key] || "").localeCompare(String(a[key] || ""));
+    });
+    return items;
+  }
+
+  function assetStatusLabel(status) {
+    return {
+      draft: "草稿",
+      pending: "等待中",
+      running: "处理中",
+      pausing: "暂停中",
+      paused: "已暂停",
+      completed: "完成",
+      failed: "失败",
+      terminated: "已停止",
+    }[status] || "已生成";
+  }
+
+  function assetStatusClass(status) {
+    if (["running", "pending", "pausing"].includes(status)) return "blue";
+    if (status === "completed") return "ok";
+    if (["failed", "terminated"].includes(status)) return "red";
+    return "warn";
   }
 
   function renderRunningStageStatus() {
@@ -1178,7 +1523,6 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">基础配置</h2>
-            <p class="fp-card-sub">这里会同时准备 01 阶段所需输入。点击确认时，会先调用 <code>/api/framework-planner/stage/01</code> 提取 <code>source_brief</code>，成功后才正式锁定基础配置。</p>
           </div>
           ${stageStatusTag("basic")}
         </div>
@@ -1198,11 +1542,11 @@
         </div>
         <div class="fp-grid two" style="margin-top:14px">
           <div class="fp-field">
-            <label>作品标题 / source_title</label>
+            <label>作品标题</label>
             <input data-config-key="source_title" placeholder="例如：机甲纪元，拳爆天星" value="${escapeHtml(state.basic_config.source_title)}" ${locked ? "disabled" : ""} />
           </div>
           <div class="fp-field">
-            <label>目标形式 / target_format</label>
+            <label>目标形式</label>
             <input data-config-key="target_format" placeholder="例如：短剧、长剧、网文剧本" value="${escapeHtml(state.basic_config.target_format)}" ${locked ? "disabled" : ""} />
           </div>
         </div>
@@ -1221,31 +1565,31 @@
           </div>
         </div>
         <div class="fp-field" style="margin-top:14px">
-          <label>原文 / 故事材料 source_text</label>
+          <label>原文材料</label>
           <textarea data-config-key="source_text" placeholder="可直接粘贴原文、梗概、旧策划、分集等材料。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.source_text)}</textarea>
         </div>
         <div class="fp-grid two" style="margin-top:14px">
           <div class="fp-field">
-            <label>改编方向 adaptation_direction</label>
+            <label>改编方向</label>
             <textarea data-config-key="adaptation_direction" placeholder="例如：压缩支线，强化中点反转，偏短剧强情绪推进。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.adaptation_direction)}</textarea>
           </div>
           <div class="fp-field">
-            <label>用户要求 user_requirements</label>
+            <label>用户提示词</label>
             <textarea data-config-key="user_requirements" placeholder="补充平台风格、人物偏好、节奏要求等。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.user_requirements)}</textarea>
           </div>
         </div>
         <div class="fp-field" style="margin-top:14px">
-          <label>限制条件 user_constraints</label>
+          <label>限制条件</label>
           <textarea data-config-key="user_constraints" placeholder="例如：不能改世界观底层逻辑，不能删除某角色。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.user_constraints)}</textarea>
         </div>
         ${renderScriptPreferencePanel(locked)}
         ${!isEmptyValue(state.source_brief) ? `
           <div class="fp-stage-note">
-            <strong>01 阶段 source_brief 预览：</strong>
-            <pre class="fp-json-inline">${escapeHtml(prettyJson(state.source_brief))}</pre>
+            <strong>01 阶段：用户原始输入</strong>
+            ${renderDataBlock(state.source_brief, { dataKey: "source_brief", stageKey: "basic", editable: false })}
           </div>
         ` : ""}
-        ${isStageLoading("basic") ? renderProcessingBanner("正在提取原文信息，请稍候。页面没有锁死，可以继续查看当前配置。") : ""}
+        ${isStageLoading("basic") ? renderProcessingBanner("正在提取原文信息，请稍候。") : ""}
         <div class="fp-actions">
           ${locked ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="basic">回退到此阶段并清空下游</button>` : ""}
           <button class="fp-btn primary" data-action="confirm-basic" ${isStageLoading("basic") ? "disabled" : ""}>
@@ -1263,7 +1607,7 @@
       <div class="fp-preference-panel">
         <div class="fp-preference-head">
           <div>
-            <strong>本剧本偏好提示</strong>
+            <strong>用户偏好提示</strong>
             <p>这里会自动保存到本地，下次生成时自动带入；选择模板后仍可继续手动微调。</p>
           </div>
           <select data-preference-template ${disabled ? "disabled" : ""}>
@@ -1281,15 +1625,22 @@
   function renderStagePreferenceField(stageKey, disabled) {
     const preferences = state.prompt_preferences || initialState.prompt_preferences;
     const value = (preferences.stage_prompts || {})[stageKey] || "";
+    const preview = ui.lastStagePayloadPreview[stageKey];
     return `
       <div class="fp-preference-panel compact">
         <div class="fp-preference-head">
           <div>
-            <strong>本阶段偏好提示</strong>
-            <p>保存后会在下次生成本阶段时自动作为 user_feedback 带入。</p>
+            <strong>用户偏好提示</strong>
+            <p>保存后，下次打开同一剧本会自动填入</p>
           </div>
+          <button class="fp-btn small" data-action="apply-stage-preference" data-stage-key="${escapeHtml(stageKey)}" ${disabled || !String(value).trim() ? "disabled" : ""}>应用偏好</button>
         </div>
         <textarea data-stage-preference-key="${escapeHtml(stageKey)}" placeholder="补充本阶段偏好，例如希望强化/避免/保留的内容。" ${disabled ? "disabled" : ""}>${escapeHtml(value)}</textarea>
+        ${preview ? `
+          <div class="fp-preference-meta">
+            已生成本阶段入参：阶段 ${escapeHtml(preview.stageNo)} · 字段 ${escapeHtml((preview.keys || []).map(fieldLabel).join("、"))} · ${escapeHtml(preview.updated_at || "")}
+          </div>
+        ` : ""}
       </div>
     `;
   }
@@ -1316,7 +1667,7 @@
         </div>
         ${confirmed ? `<div class="fp-inline-warning">${escapeHtml(options.title)}已确认并锁定。下游内容已基于当前版本生成，如需改动请显式回退。</div>` : ""}
         ${isStageLoading(options.stageKey) ? renderProcessingBanner(`正在生成${options.title}，请稍候...`) : ""}
-        ${blocked && isEmptyValue(data) ? `<div class="fp-empty">请先确认上游阶段。</div>` : renderDataBlock(data)}
+        ${blocked && isEmptyValue(data) ? `<div class="fp-empty">请先确认上游阶段。</div>` : renderDataBlock(data, { dataKey: options.dataKey, stageKey: options.stageKey, editable: !blocked && !confirmed })}
         ${renderStagePreferenceField(options.stageKey, blocked || confirmed || isStageLoading(options.stageKey))}
         ${renderStageError(options.stageKey)}
         <div class="fp-lock-note">本阶段由上游确认或底部“下一阶段”自动生成。人工操作只保留确认与显式回退。</div>
@@ -1340,7 +1691,7 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">三幕十五节拍卡点规划时间轴</h2>
-            <p class="fp-card-sub">04 阶段只维护一条 <code>beat_checkpoint_timeline</code>。不要再额外造一套 <code>checkpointPlan</code>。</p>
+
           </div>
           ${stageStatusTag("beat")}
         </div>
@@ -1492,7 +1843,6 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">三幕十五节拍卡点说明</h2>
-            <p class="fp-card-sub"><code>checkpoint_explanation</code> 只解释同一条 beat 时间轴，不再复制第二套卡点结构。</p>
           </div>
           ${stageStatusTag("beat")}
         </div>
@@ -1517,7 +1867,7 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">不同人物故事线</h2>
-            <p class="fp-card-sub">05 阶段负责生成 <code>character_storylines</code>。故事线详情与处理决策分别放在后两个视图中查看和修改。</p>
+            <p class="fp-card-sub">05 阶段：人物故事线。故事线详情与处理决策分别放在后两个视图中查看和修改。</p>
           </div>
           ${stageStatusTag("storylines")}
         </div>
@@ -1546,7 +1896,7 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">查看详细不同人物故事线</h2>
-            <p class="fp-card-sub">这里必须能看到 <code>detailed_storyline</code>、<code>linked_beats</code>、<code>episode_distribution</code>、<code>edit_notes</code>。</p>
+            <p class="fp-card-sub">可查看每条人物线的摘要、详细剧情、关联节拍、分集安排和编辑备注。</p>
           </div>
           ${stageStatusTag("storylines")}
         </div>
@@ -1572,7 +1922,6 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">故事线处理：保留 / 精简 / 删除</h2>
-            <p class="fp-card-sub">这里统一修改 <code>storyline_decisions</code>，并回写到每条故事线的 <code>decision</code> 字段。</p>
           </div>
           ${stageStatusTag("storylines")}
         </div>
@@ -1598,11 +1947,10 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">整体改编指引四项</h2>
-            <p class="fp-card-sub">06 阶段建议输出四个稳定字段：<code>core_setting_adjustments</code>、<code>structure_and_rhythm</code>、<code>visualization_strategy</code>、<code>character_emotion_strategy</code>。</p>
           </div>
           ${stageStatusTag("guide")}
         </div>
-        ${confirmed ? `<div class="fp-inline-warning">整体改编指引已确认并锁定。现在可以生成最终 JSON 策划包。</div>` : ""}
+        ${confirmed ? `<div class="fp-inline-warning">整体改编指引已确认并锁定。现在可以生成最终策划包。</div>` : ""}
         ${isStageLoading("guide") ? renderProcessingBanner("正在生成整体改编指引，请稍候...") : ""}
         ${blocked && !hasGuide ? `<div class="fp-empty">请先确认 05 阶段。</div>` : renderGuideCards(state.adaptation_guide)}
         ${renderStagePreferenceField("guide", blocked || confirmed || isStageLoading("guide"))}
@@ -1610,7 +1958,7 @@
         <div class="fp-actions">
           ${renderUpstreamRollbackButton("guide")}
           ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="guide">回退到此阶段并清空下游</button>` : ""}
-          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="guide" ${blocked || confirmed || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>确认并进入最终 JSON 输出</button>
+          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="guide" ${blocked || confirmed || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>确认并进入最终输出</button>
         </div>
       </section>
     `;
@@ -1623,8 +1971,7 @@
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
           <div>
-            <h2 class="fp-card-title">最终 JSON 策划包输出</h2>
-            <p class="fp-card-sub">这里展示的最终内容必须来自 07 阶段返回的 <code>framework_plan_package</code> 和 <code>validation_report</code>，而不是前端自行拼接的 mock 数据。</p>
+            <h2 class="fp-card-title">最终策划包输出</h2>
           </div>
           ${locked ? `<span class="fp-tag lock">待上游确认</span>` : hasOutput ? `<span class="fp-tag ok">07 输出已生成</span>` : `<span class="fp-tag blue">等待生成</span>`}
         </div>
@@ -1635,7 +1982,7 @@
         ${renderStagePreferenceField("package", locked || isStageLoading("package"))}
         <div class="fp-actions">
           ${renderUpstreamRollbackButton("package")}
-          <button class="fp-btn primary" data-action="copy-final-package" ${locked || !hasOutput ? "disabled" : ""}>复制 07 输出 JSON</button>
+          <button class="fp-btn primary" data-action="copy-final-package" ${locked || !hasOutput ? "disabled" : ""}>复制最终策划包</button>
         </div>
       </section>
     `;
@@ -1643,31 +1990,240 @@
 
   function renderPackageBlocks() {
     if (isEmptyValue(state.framework_plan_package)) {
-      return `<div class="fp-empty">07 阶段尚未执行。确认 06 后，再生成最终 JSON 策划包。</div>`;
+      return `<div class="fp-empty">07 阶段尚未执行。确认 06 后，再生成最终策划包。</div>`;
     }
     return `
       <div class="fp-grid two">
         <div class="fp-panel-card">
-          <h3 class="fp-panel-title">framework_plan_package</h3>
-          <pre class="fp-json">${escapeHtml(prettyJson(state.framework_plan_package))}</pre>
+          <h3 class="fp-panel-title">最终策划包</h3>
+          ${renderDataBlock(state.framework_plan_package, { dataKey: "framework_plan_package", stageKey: "package", editable: false })}
         </div>
         <div class="fp-panel-card">
-          <h3 class="fp-panel-title">validation_report</h3>
-          <pre class="fp-json">${escapeHtml(prettyJson(state.validation_report))}</pre>
+          <h3 class="fp-panel-title">校验报告</h3>
+          ${renderDataBlock(state.validation_report, { dataKey: "validation_report", stageKey: "package", editable: false })}
         </div>
       </div>
       <div class="fp-stage-note">
-        <strong>当前工作台 payload（用于 07 入参）：</strong>
-        <pre class="fp-json-inline">${escapeHtml(prettyJson(buildWorkingPayload()))}</pre>
+        <strong>当前工作台入参摘要</strong>
+        ${renderPayloadSummary(buildWorkingPayload())}
       </div>
     `;
   }
 
-  function renderDataBlock(data) {
+  function renderDataBlock(data, options) {
     if (isEmptyValue(data)) {
       return `<div class="fp-empty">当前阶段还没有可展示结果。请先生成，或基于上一版执行更新。</div>`;
     }
-    return `<pre class="fp-json">${escapeHtml(prettyJson(data))}</pre>`;
+    const form = renderBusinessValue(data, {
+      rootKey: options && options.dataKey,
+      stageKey: options && options.stageKey,
+      path: [],
+      keyName: options && options.dataKey,
+      depth: 0,
+      editable: Boolean(options && options.editable),
+      forceOpen: true,
+    });
+    return `
+      <div class="fp-business-form" data-business-form="${escapeHtml((options && options.dataKey) || "")}">
+        ${form}
+      </div>
+    `;
+  }
+
+  function renderPayloadSummary(payload) {
+    const cleaned = cleanOutgoingPayload(payload || {});
+    const entries = Object.keys(cleaned);
+    if (!entries.length) return `<div class="fp-empty small">当前没有可发送的业务字段。</div>`;
+    return `
+      <div class="fp-business-form compact">
+        ${entries.map((key) => `
+          <div class="fp-detail-item">
+            <strong>${escapeHtml(fieldLabel(key))}</strong>
+            ${escapeHtml(fieldSummary(cleaned[key]))}
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function renderBusinessValue(value, context) {
+    const path = Array.isArray(context.path) ? context.path : [];
+    const depth = Number(context.depth || 0);
+    if (Array.isArray(value)) {
+      return renderBusinessArray(value, context, path, depth);
+    }
+    if (value && typeof value === "object") {
+      return renderBusinessObject(value, context, path, depth);
+    }
+    return renderBusinessPrimitive(value, context, path);
+  }
+
+  function renderBusinessObject(value, context, path, depth) {
+    const entries = Object.keys(value || {});
+    if (!entries.length) return `<div class="fp-empty small">暂无内容</div>`;
+    const title = fieldLabel(context.keyName || path[path.length - 1] || "内容");
+    const panelKey = businessPanelKey(context.rootKey, path);
+    const open = context.forceOpen || depth === 0 || isCoreBusinessKey(context.keyName) || ui.expandedBusinessPanels[panelKey] === true;
+    const content = entries.map((key) => {
+      const nextValue = value[key];
+      const nextPath = path.concat(key);
+      return renderBusinessValue(nextValue, Object.assign({}, context, {
+        path: nextPath,
+        keyName: key,
+        depth: depth + 1,
+        forceOpen: false,
+      }));
+    }).join("");
+    if (depth === 0) {
+      return `<div class="fp-business-root">${content}</div>`;
+    }
+    return `
+      <details class="fp-business-panel" data-business-panel="${escapeHtml(panelKey)}" ${open ? "open" : ""}>
+        <summary>
+          <strong>${escapeHtml(title)}</strong>
+          <small>${escapeHtml(summarizeBusinessValue(value))}</small>
+        </summary>
+        <div class="fp-business-panel-body">${content}</div>
+      </details>
+    `;
+  }
+
+  function renderBusinessArray(value, context, path, depth) {
+    const title = fieldLabel(context.keyName || path[path.length - 1] || "列表");
+    const panelKey = businessPanelKey(context.rootKey, path);
+    const open = context.forceOpen || isCoreBusinessKey(context.keyName) || ui.expandedBusinessPanels[panelKey] === true;
+    const items = value.map((item, index) => {
+      const itemPath = path.concat(index);
+      const itemKey = businessPanelKey(context.rootKey, itemPath);
+      const itemOpen = index === 0 || ui.expandedBusinessPanels[itemKey] === true;
+      const itemTitle = businessItemTitle(item, index, title);
+      if (item && typeof item === "object") {
+        return `
+          <details class="fp-business-panel fp-business-item" data-business-panel="${escapeHtml(itemKey)}" ${itemOpen ? "open" : ""}>
+            <summary>
+              <strong>${escapeHtml(itemTitle)}</strong>
+              <small>${escapeHtml(summarizeBusinessValue(item))}</small>
+            </summary>
+            <div class="fp-business-panel-body">
+              ${renderBusinessValue(item, Object.assign({}, context, {
+                path: itemPath,
+                keyName: `${title} ${index + 1}`,
+                depth: depth + 1,
+                forceOpen: true,
+              }))}
+            </div>
+          </details>
+        `;
+      }
+      return renderBusinessPrimitive(item, Object.assign({}, context, { keyName: `${title} ${index + 1}` }), itemPath);
+    }).join("");
+    return `
+      <details class="fp-business-panel" data-business-panel="${escapeHtml(panelKey)}" ${open ? "open" : ""}>
+        <summary>
+          <strong>${escapeHtml(title)}</strong>
+          <small>${escapeHtml(`${value.length} 条 · ${summarizeBusinessValue(value)}`)}</small>
+        </summary>
+        <div class="fp-business-panel-body">${items || `<div class="fp-empty small">暂无条目</div>`}</div>
+      </details>
+    `;
+  }
+
+  function renderBusinessPrimitive(value, context, path) {
+    const label = fieldLabel(context.keyName || path[path.length - 1] || "内容");
+    const encodedPath = encodeBusinessPath(path);
+    const disabled = context.editable ? "" : "disabled";
+    const type = typeof value;
+    const stringValue = value == null ? "" : String(value);
+    if (type === "boolean") {
+      return `
+        <label class="fp-business-field">
+          <span>${escapeHtml(label)}</span>
+          <select data-business-root="${escapeHtml(context.rootKey)}" data-business-stage="${escapeHtml(context.stageKey)}" data-business-path="${escapeHtml(encodedPath)}" ${disabled}>
+            <option value="true" ${value ? "selected" : ""}>是</option>
+            <option value="false" ${!value ? "selected" : ""}>否</option>
+          </select>
+        </label>
+      `;
+    }
+    const numeric = type === "number";
+    const multiline = stringValue.length > 80 || /\n/.test(stringValue);
+    return `
+      <label class="fp-business-field">
+        <span>${escapeHtml(label)}</span>
+        ${multiline ? `
+          <textarea data-business-root="${escapeHtml(context.rootKey)}" data-business-stage="${escapeHtml(context.stageKey)}" data-business-path="${escapeHtml(encodedPath)}" data-business-type="${numeric ? "number" : "string"}" ${disabled}>${escapeHtml(stringValue)}</textarea>
+        ` : `
+          <input type="${numeric ? "number" : "text"}" data-business-root="${escapeHtml(context.rootKey)}" data-business-stage="${escapeHtml(context.stageKey)}" data-business-path="${escapeHtml(encodedPath)}" data-business-type="${numeric ? "number" : "string"}" value="${escapeHtml(stringValue)}" ${disabled} />
+        `}
+      </label>
+    `;
+  }
+
+  function businessPanelKey(rootKey, path) {
+    return `${rootKey || "root"}:${(path || []).join(".")}`;
+  }
+
+  function isCoreBusinessKey(key) {
+    return ["protagonist", "main_characters", "beat_checkpoint_timeline", "checkpoint_explanation"].includes(String(key || ""));
+  }
+
+  function encodeBusinessPath(path) {
+    return encodeURIComponent(JSON.stringify(path || []));
+  }
+
+  function decodeBusinessPath(value) {
+    try {
+      const parsed = JSON.parse(decodeURIComponent(String(value || "%5B%5D")));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function summarizeBusinessValue(value) {
+    if (Array.isArray(value)) return value.slice(0, 3).map((item, index) => businessItemTitle(item, index, "条目")).join(" / ");
+    if (value && typeof value === "object") {
+      const preferred = ["summary", "overview", "goal", "motivation", "plot_content", "core_premise", "title", "name"];
+      for (const key of preferred) {
+        if (value[key]) return truncateText(value[key], 96);
+      }
+      return Object.keys(value).slice(0, 5).map(fieldLabel).join("、");
+    }
+    return truncateText(value, 96);
+  }
+
+  function businessItemTitle(item, index, fallback) {
+    if (item && typeof item === "object") {
+      return item.name || item.title || item.beat_name || item.role || `${fallback || "条目"} ${index + 1}`;
+    }
+    return `${fallback || "条目"} ${index + 1}`;
+  }
+
+  function formatEpisodeDistributionLines(value) {
+    if (!Array.isArray(value) || !value.length) return "";
+    return value.map((segment) => {
+      if (segment && typeof segment === "object") {
+        return `${segment.episode_range || ""} | ${segment.focus || segment.summary || segment.note || ""}`.trim();
+      }
+      return String(segment || "");
+    }).filter(Boolean).join("\n");
+  }
+
+  function parseEpisodeDistributionLines(text) {
+    return String(text || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const parts = line.split("|");
+        if (parts.length > 1) {
+          return {
+            episode_range: parts.shift().trim(),
+            focus: parts.join("|").trim(),
+          };
+        }
+        return { episode_range: "", focus: line };
+      });
   }
 
   function renderEditorBlock(editorKey, title) {
@@ -1718,15 +2274,15 @@
               </div>
               <span class="fp-tag ${decisionTagClass(item.decision)}">${escapeHtml(decisionLabel(item.decision))}</span>
             </div>
-            <p><strong>summary：</strong>${escapeHtml(summary)}</p>
+            <p><strong>摘要：</strong>${escapeHtml(summary)}</p>
             ${linkedBeats.length ? `<div class="fp-story-beats">${linkedBeats.map((beat) => `<span>Beat ${escapeHtml(beat)}</span>`).join("")}</div>` : `<div class="fp-story-beats muted"><span>未链接节拍</span></div>`}
           </summary>
           <div class="fp-story-detail-body">
             <div class="fp-detail-list">
               <div class="fp-detail-item"><strong>重要决策</strong>${escapeHtml(decisionLabel(item.decision))}</div>
-              <div class="fp-detail-item"><strong>detailed_storyline</strong>${formatText(item.detailed_storyline || "尚未补充详细人物线。")}</div>
-              <div class="fp-detail-item"><strong>linked_beats</strong>${escapeHtml(linkedBeats.length ? linkedBeats.join(", ") : "尚未链接")}</div>
-              <div class="fp-detail-item"><strong>edit_notes</strong>${escapeHtml(item.edit_notes || "")}</div>
+              <div class="fp-detail-item"><strong>详细剧情</strong>${formatText(item.detailed_storyline || "尚未补充详细人物线。")}</div>
+              <div class="fp-detail-item"><strong>关联节拍</strong>${escapeHtml(linkedBeats.length ? linkedBeats.join("、") : "尚未链接")}</div>
+              <div class="fp-detail-item"><strong>编辑备注</strong>${escapeHtml(item.edit_notes || "暂无备注")}</div>
             </div>
             ${distribution ? `<div class="fp-detail-list" style="margin-top:12px">${distribution}</div>` : ""}
             <div class="fp-actions" style="margin-top:12px">
@@ -1759,7 +2315,7 @@
               </div>
               <span class="fp-tag ${decisionTagClass(item.decision)}">${escapeHtml(decisionLabel(item.decision))}</span>
             </div>
-            <p><strong>summary：</strong>${escapeHtml(storylineSummaryText(item))}</p>
+            <p><strong>摘要：</strong>${escapeHtml(storylineSummaryText(item))}</p>
             ${Array.isArray(item.linked_beats) && item.linked_beats.length ? `<div class="fp-story-beats">${item.linked_beats.map((beat) => `<span>Beat ${escapeHtml(beat)}</span>`).join("")}</div>` : ""}
             </summary>
             <div class="fp-story-detail-body">
@@ -1790,40 +2346,39 @@
           <div class="fp-modal-head">
             <div>
               <h2>${escapeHtml(storyline.title || "")}</h2>
-              <p class="fp-modal-sub">支持查看并更新 <code>detailed_storyline</code>、<code>linked_beats</code>、<code>episode_distribution</code>、<code>edit_notes</code>。</p>
             </div>
             <button class="fp-btn small" data-action="close-storyline-modal">关闭</button>
           </div>
           <div class="fp-field">
-            <label>title</label>
+            <label>标题</label>
             <input data-modal-field="title" value="${escapeHtml(storyline.title || "")}" />
           </div>
           <div class="fp-field">
-            <label>summary</label>
+            <label>摘要</label>
             <textarea data-modal-field="summary">${escapeHtml(storyline.summary || "")}</textarea>
           </div>
           <div class="fp-field" style="margin-top:12px">
-            <label>detailed_storyline</label>
+            <label>详细剧情</label>
             <textarea data-modal-field="detailed_storyline">${escapeHtml(storyline.detailed_storyline || "")}</textarea>
           </div>
           <div class="fp-grid two" style="margin-top:12px">
             <div class="fp-field">
-              <label>linked_beats（逗号分隔）</label>
+              <label>关联节拍（逗号分隔）</label>
               <input data-modal-field="linked_beats" value="${escapeHtml((storyline.linked_beats || []).join(", "))}" />
             </div>
             <div class="fp-field">
-              <label>decision</label>
+              <label>处理决策</label>
               <select data-modal-field="decision">
                 ${STORYLINE_DECISIONS.map(([value, label]) => `<option value="${value}" ${storyline.decision === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
               </select>
             </div>
           </div>
           <div class="fp-field" style="margin-top:12px">
-            <label>episode_distribution（JSON 数组）</label>
-            <textarea data-modal-field="episode_distribution">${escapeHtml(prettyJson(storyline.episode_distribution || []))}</textarea>
+            <label>分集安排（每行一条：集数 | 重点）</label>
+            <textarea data-modal-field="episode_distribution">${escapeHtml(formatEpisodeDistributionLines(storyline.episode_distribution || []))}</textarea>
           </div>
           <div class="fp-field" style="margin-top:12px">
-            <label>edit_notes</label>
+            <label>编辑备注</label>
             <textarea data-modal-field="edit_notes">${escapeHtml(storyline.edit_notes || "")}</textarea>
           </div>
           <div class="fp-actions">
@@ -1944,7 +2499,7 @@
     const base = String(state.basic_config.user_requirements || "").trim();
     const preference = String((state.prompt_preferences || {}).script_preference || "").trim();
     if (base) parts.push(base);
-    if (preference && preference !== base) parts.push(`本剧本偏好提示：${preference}`);
+    if (preference && preference !== base) parts.push(`用户偏好提示：${preference}`);
     return parts.join("\n\n");
   }
 
@@ -1953,7 +2508,7 @@
     const explicit = String((state.feedback || {})[stageKey] || "").trim();
     const preference = String(((state.prompt_preferences || {}).stage_prompts || {})[stageKey] || "").trim();
     if (explicit) parts.push(explicit);
-    if (preference && preference !== explicit) parts.push(`本阶段偏好提示：${preference}`);
+    if (preference && preference !== explicit) parts.push(`用户偏好提示：${preference}`);
     return parts.join("\n\n");
   }
 
@@ -2134,7 +2689,8 @@
     render();
     try {
       await waitForPaint();
-      const response = await planningApi.runStage(stageNo, buildStagePayload(stageKey, options || {}));
+      const payload = cleanOutgoingPayload(buildStagePayload(stageKey, options || {}), `stage${stageNo} payload`);
+      const response = await planningApi.runStage(stageNo, payload);
       applyStageResponse(stageNo, response);
       state.stage_state[stageKey].status = options && options.revise ? "updated" : "generated";
       state.stage_state[stageKey].confirmed = false;
@@ -2291,6 +2847,81 @@
     }
   }
 
+  function updateBusinessField(rootKey, stageKey, path, rawValue, rawType) {
+    if (!rootKey || !Array.isArray(path)) return;
+    if (!Object.prototype.hasOwnProperty.call(state, rootKey)) return;
+    const stage = state.stage_state[stageKey];
+    if (stage && stage.confirmed) return;
+    let value = rawValue;
+    if (rawType === "number") {
+      value = rawValue === "" ? "" : Number(rawValue);
+    }
+    if (rawValue === "true" || rawValue === "false") {
+      value = rawValue === "true";
+    }
+    setNestedValue(state[rootKey], path, value);
+    if (stage) {
+      stage.status = "updated";
+      stage.confirmed = false;
+    }
+    if (stageKey === "beat") {
+      syncBeatCheckpointData({ clearStorylines: true });
+    }
+    syncStageFlow(state);
+    saveState();
+    debugStageSummary("business form updated", {
+      rootKey,
+      stageKey,
+      path: path.join("."),
+      value: fieldSummary(value),
+    });
+  }
+
+  function setNestedValue(root, path, value) {
+    if (!root || typeof root !== "object" || !path.length) return;
+    let cursor = root;
+    for (let index = 0; index < path.length - 1; index += 1) {
+      const key = path[index];
+      if (cursor[key] === null || typeof cursor[key] !== "object") {
+        cursor[key] = typeof path[index + 1] === "number" ? [] : {};
+      }
+      cursor = cursor[key];
+    }
+    cursor[path[path.length - 1]] = value;
+  }
+
+  function applyStagePreference(stageKey) {
+    const prompt = String((((state.prompt_preferences || {}).stage_prompts || {})[stageKey]) || "").trim();
+    if (!prompt) {
+      showToast("本阶段还没有可应用的偏好提示");
+      return;
+    }
+    state.feedback[stageKey] = prompt;
+    savePromptPreferences(`apply_stage_preference:${stageKey}`);
+    const payload = cleanOutgoingPayload(buildStagePayload(stageKey, { revise: hasStageData(stageKey) }), `stage${stageNoForKey(stageKey)} applied-preference payload`);
+    ui.lastStagePayloadPreview[stageKey] = {
+      stageNo: stageNoForKey(stageKey),
+      keys: Object.keys(payload).filter((key) => !key.startsWith("_")).slice(0, 12),
+      updated_at: formatDateTime(new Date().toISOString()),
+      payload,
+    };
+    debugStageSummary("stage preference applied", {
+      stageKey,
+      payload: payloadSummary(payload),
+    });
+    saveState();
+    showToast("已应用本阶段偏好，并生成干净阶段入参");
+    render();
+  }
+
+  function payloadSummary(payload) {
+    const summary = {};
+    Object.keys(payload || {}).forEach((key) => {
+      summary[key] = fieldSummary(payload[key]);
+    });
+    return summary;
+  }
+
   function applyStorylineDecision(storylineId, decision) {
     const storyline = state.character_storylines.find((item) => item.id === storylineId);
     if (!storyline || state.stage_state.storylines.confirmed) return;
@@ -2332,13 +2963,7 @@
     storyline.edit_notes = editNotes ? editNotes.value.trim() : storyline.edit_notes;
     storyline.decision = decision ? decision.value : storyline.decision;
     if (episodeDistribution) {
-      try {
-        const parsed = JSON.parse(episodeDistribution.value || "[]");
-        storyline.episode_distribution = Array.isArray(parsed) ? parsed : [];
-      } catch (error) {
-        showToast("episode_distribution 必须是合法 JSON 数组");
-        return;
-      }
+      storyline.episode_distribution = parseEpisodeDistributionLines(episodeDistribution.value);
     }
     syncStorylineDecisions(state);
     state.stage_state.storylines.status = "updated";
@@ -2509,7 +3134,7 @@
     render();
     try {
       while (round <= rounds) {
-        const payload = {
+        const payload = cleanOutgoingPayload({
           mode: current ? "改写" : "创作",
           source_brief: state.source_brief,
           basic_config: state.basic_config,
@@ -2520,7 +3145,7 @@
           framework_score_report: lastScoreReport,
           adaptation_direction: state.basic_config.adaptation_direction,
           user_requirements: payloadUserRequirements(),
-        };
+        }, "stage04 score-loop payload");
         const beatResponse = await planningApi.runStage("04", payload);
         applyStageResponse("04", beatResponse);
         state.beat_revision_round = round;
@@ -2595,6 +3220,111 @@
       guide: false,
     };
     render();
+  }
+
+  async function loadAssets() {
+    ui.assetsLoading = true;
+    render();
+    try {
+      const data = await requestJson("/api/assets");
+      ui.assets = Array.isArray(data.assets) ? data.assets : [];
+    } catch (error) {
+      showToast(error.message || "资产列表加载失败");
+    } finally {
+      ui.assetsLoading = false;
+      render();
+    }
+  }
+
+  async function createNewScript() {
+    const form = ui.newScriptForm;
+    if (!String(form.title || "").trim()) {
+      showToast("请填写剧本名称");
+      return;
+    }
+    const data = await requestJson("/api/framework-planner/assets", {
+      method: "POST",
+      body: JSON.stringify(form),
+    });
+    const asset = data.asset || {};
+    state = clone(initialState);
+    state.basic_config.project_title = asset.title || form.title || "未命名剧本";
+    state.basic_config.source_title = asset.title || form.title || "";
+    state.basic_config.target_format = form.target_format || "短剧";
+    state.basic_config.season_count = Number(form.season_count || 1);
+    state.basic_config.episodes_per_season = Number(form.episodes_per_season || 60);
+    state.basic_config.user_requirements = form.style || "";
+    state.basic_config.source_text = form.description || "";
+    state.asset_state.asset_id = asset.project_id || null;
+    state.asset_state.status = "draft";
+    state.current_view = "basic";
+    ui.showNewScriptModal = false;
+    ui.assetsOpen = true;
+    ui.newScriptForm = {
+      title: "",
+      season_count: 1,
+      episodes_per_season: 60,
+      target_format: "短剧",
+      style: "",
+      description: "",
+    };
+    syncStageFlow(state);
+    saveState();
+    await loadAssets();
+    showToast("新剧本已创建，已进入第一阶段");
+  }
+
+  async function deleteAsset(projectId) {
+    if (!projectId) return;
+    if (!window.confirm("确认删除这个剧本资产吗？")) return;
+    await requestJson(`/api/projects/${projectId}`, { method: "DELETE" });
+    await loadAssets();
+    showToast("资产已删除");
+  }
+
+  async function duplicateAsset(projectId) {
+    const data = await requestJson(`/api/projects/${projectId}`);
+    const project = data.project || {};
+    const input = project.input_payload || {};
+    ui.newScriptForm = {
+      title: `${project.title || input.title || "未命名剧本"} 副本`,
+      season_count: input.season_count || 1,
+      episodes_per_season: input.episodes_per_season || project.total_episodes || 60,
+      target_format: input.target_format || "短剧",
+      style: input.style || "",
+      description: input.story_outline || "",
+    };
+    await createNewScript();
+  }
+
+  async function openAsset(projectId) {
+    const data = await requestJson(`/api/projects/${projectId}`);
+    const project = data.project || {};
+    const input = project.input_payload || {};
+    state.basic_config.project_title = project.title || input.title || state.basic_config.project_title;
+    state.basic_config.source_title = project.title || input.title || state.basic_config.source_title;
+    state.basic_config.target_format = input.target_format || state.basic_config.target_format;
+    state.basic_config.season_count = Number(input.season_count || state.basic_config.season_count || 1);
+    state.basic_config.episodes_per_season = Number(input.episodes_per_season || state.basic_config.episodes_per_season || 60);
+    state.basic_config.user_requirements = input.style || state.basic_config.user_requirements || "";
+    state.basic_config.source_text = input.story_outline || state.basic_config.source_text || "";
+    state.asset_state.asset_id = project.project_id || null;
+    state.asset_state.status = project.status || "draft";
+    state.current_view = "basic";
+    syncStageFlow(state);
+    saveState();
+    showToast("已打开资产，可从第一阶段查看和继续策划");
+    render();
+  }
+
+  async function controlAssetTask(taskId, action) {
+    if (!taskId) return;
+    const asset = ui.assets.find((item) => String(item.task_id || "") === String(taskId));
+    const status = String(asset?.status || "");
+    const endpoint = action === "stop" ? "terminate" : (["failed", "terminated"].includes(status) ? "retry" : "resume");
+    await requestJson(`/api/tasks/${taskId}/${endpoint}`, { method: "POST" });
+    await loadAssets();
+    showToast(action === "stop" ? "任务已停止" : "任务已继续");
   }
 
   function copyText(text, successText) {
@@ -2769,6 +3499,16 @@
       saveState();
       return;
     }
+    if (target.matches("[data-new-script-field]")) {
+      const key = target.dataset.newScriptField;
+      ui.newScriptForm[key] = target.type === "number" ? Number(target.value) : target.value;
+      return;
+    }
+    if (target.matches("[data-asset-search]")) {
+      ui.assetSearch = target.value;
+      render();
+      return;
+    }
     if (target.matches("[data-feedback-key]")) {
       state.feedback[target.dataset.feedbackKey] = target.value;
       savePromptPreferences(`feedback:${target.dataset.feedbackKey}`);
@@ -2779,6 +3519,16 @@
       state.editors[target.dataset.editorKey] = target.value;
       savePromptPreferences(`editor:${target.dataset.editorKey}`);
       saveState();
+      return;
+    }
+    if (target.matches("[data-business-root][data-business-path]")) {
+      updateBusinessField(
+        target.dataset.businessRoot,
+        target.dataset.businessStage,
+        decodeBusinessPath(target.dataset.businessPath),
+        target.value,
+        target.dataset.businessType
+      );
       return;
     }
     if (target.matches("[data-beat-index][data-beat-field]")) {
@@ -2797,6 +3547,26 @@
 
   app.addEventListener("change", (event) => {
     const target = event.target;
+    if (target.matches("[data-business-root][data-business-path]")) {
+      updateBusinessField(
+        target.dataset.businessRoot,
+        target.dataset.businessStage,
+        decodeBusinessPath(target.dataset.businessPath),
+        target.value,
+        target.dataset.businessType
+      );
+      return;
+    }
+    if (target.matches("[data-asset-status-filter]")) {
+      ui.assetStatusFilter = target.value || "all";
+      render();
+      return;
+    }
+    if (target.matches("[data-asset-sort]")) {
+      ui.assetSort = target.value || "updated_desc";
+      render();
+      return;
+    }
     if (!target.matches("[data-preference-template]")) return;
     const templateId = target.value || "custom";
     const templates = ((state.prompt_preferences || {}).templates || DEFAULT_PROMPT_TEMPLATES);
@@ -2820,6 +3590,11 @@
     if (!detail || !detail.matches || !detail.matches("[data-storyline-detail]")) return;
     ui.expandedStorylines[String(detail.dataset.storylineDetail || "")] = Boolean(detail.open);
   }, true);
+  app.addEventListener("toggle", (event) => {
+    const detail = event.target;
+    if (!detail || !detail.matches || !detail.matches("[data-business-panel]")) return;
+    ui.expandedBusinessPanels[String(detail.dataset.businessPanel || "")] = Boolean(detail.open);
+  }, true);
 
   app.addEventListener("click", async (event) => {
     const actionElement = event.target.closest("[data-action]");
@@ -2828,6 +3603,54 @@
 
     if (action === "go-view") {
       setCurrentView(actionElement.dataset.view);
+      return;
+    }
+    if (action === "open-new-script") {
+      ui.showNewScriptModal = true;
+      render();
+      return;
+    }
+    if (action === "close-new-script") {
+      ui.showNewScriptModal = false;
+      render();
+      return;
+    }
+    if (action === "submit-new-script") {
+      try {
+        await createNewScript();
+      } catch (error) {
+        showToast(error.message || "新建剧本失败");
+      }
+      return;
+    }
+    if (action === "toggle-assets") {
+      ui.assetsOpen = !ui.assetsOpen;
+      render();
+      if (ui.assetsOpen && !ui.assets.length) await loadAssets();
+      return;
+    }
+    if (action === "refresh-assets") {
+      await loadAssets();
+      return;
+    }
+    if (action === "open-asset") {
+      await openAsset(actionElement.dataset.projectId);
+      return;
+    }
+    if (action === "delete-asset") {
+      await deleteAsset(actionElement.dataset.projectId);
+      return;
+    }
+    if (action === "duplicate-asset") {
+      await duplicateAsset(actionElement.dataset.projectId);
+      return;
+    }
+    if (action === "stop-asset-task") {
+      await controlAssetTask(actionElement.dataset.taskId, "stop");
+      return;
+    }
+    if (action === "continue-asset-task") {
+      await controlAssetTask(actionElement.dataset.taskId, "continue");
       return;
     }
     if (action === "go-next-stage") {
@@ -2839,14 +3662,14 @@
       return;
     }
     if (action === "copy-working-payload") {
-      copyText(prettyJson(buildWorkingPayload()), "已复制当前状态 JSON");
+      copyText(prettyJson(buildWorkingPayload()), "已复制当前策划数据");
       return;
     }
     if (action === "copy-final-package") {
       copyText(prettyJson({
         framework_plan_package: state.framework_plan_package,
         validation_report: state.validation_report,
-      }), "已复制 07 输出 JSON");
+      }), "已复制最终策划包");
       return;
     }
     if (action === "confirm-basic") {
@@ -2875,6 +3698,10 @@
       } catch (error) {
         showToast(formatStageError(error, stageNoForKey(stageKey)));
       }
+      return;
+    }
+    if (action === "apply-stage-preference") {
+      applyStagePreference(actionElement.dataset.stageKey);
       return;
     }
     if (action === "confirm-stage") {
@@ -2923,13 +3750,20 @@
     if (event.target && event.target.matches(".fp-modal-mask[data-action='close-storyline-modal']")) {
       closeStorylineModal();
     }
+    if (event.target && event.target.matches(".fp-modal-mask[data-action='close-new-script']")) {
+      ui.showNewScriptModal = false;
+      render();
+    }
   });
 
   window.frameworkPlannerDebug = {
     getState: () => clone(state),
     buildWorkingPayload,
+    buildStagePayload: (stageKey, options) => cleanOutgoingPayload(buildStagePayload(stageKey, options || {}), `debug stage ${stageKey} payload`),
+    getLastStagePayloadPreview: () => clone(ui.lastStagePayloadPreview),
     runBeatScoreLoop,
   };
 
   render();
+  loadAssets().catch(() => {});
 })();

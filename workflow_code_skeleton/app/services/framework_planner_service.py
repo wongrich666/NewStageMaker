@@ -35,6 +35,23 @@ FASTGPT_RAW_RESPONSE_KEYS = (
     "choices",
     "usage",
 )
+FRAMEWORK_BUSINESS_FIELDS = {
+    "source_brief",
+    "worldview_plan",
+    "character_plan",
+    "beat_checkpoint_timeline",
+    "checkpoint_explanation",
+    "character_storylines",
+    "storyline_decisions",
+    "adaptation_guide",
+    "framework_plan_package",
+    "validation_report",
+}
+FRAMEWORK_BUSINESS_LIST_FIELDS = {
+    "beat_checkpoint_timeline",
+    "character_storylines",
+    "storyline_decisions",
+}
 STAGE_05_INPUT_LENGTH_LIMITS = {
     "source_brief": 30000,
     "basic_config": 10000,
@@ -828,20 +845,16 @@ def _build_stage_request_variables(
             continue
         if _is_blank(value):
             continue
-        cleaned_value = (
-            _sanitize_stage_05_input_value(field, value)
-            if definition.stage == "05"
-            else extract_business_field(value, field)
-        )
+        cleaned_value = _sanitize_stage_input_value(definition.stage, field, value)
         if cleaned_value is not value:
-            if definition.stage == "05":
-                logger.warning(
-                    "stage=05 payload field cleaned before FastGPT request: field=%s from raw response to business object original_type=%s cleaned_type=%s original_preview=%s",
-                    field,
-                    type(value).__name__,
-                    type(cleaned_value).__name__,
-                    _preview_return_object(value, limit=300),
-                )
+            logger.warning(
+                "framework planner payload field cleaned before FastGPT request: stage=%s field=%s original_type=%s cleaned_type=%s original_preview=%s",
+                definition.stage,
+                field,
+                type(value).__name__,
+                type(cleaned_value).__name__,
+                _preview_return_object(value, limit=300),
+            )
             value = cleaned_value
         if field in definition.required_fields and _is_blank(value):
             missing_fields.append(field)
@@ -853,6 +866,12 @@ def _build_stage_request_variables(
                 variables[alias] = wire_value
 
     if missing_fields:
+        logger.error(
+            "framework planner payload missing required fields: stage=%s missing_fields=%s payload_keys=%s; request not sent",
+            definition.stage,
+            missing_fields,
+            sorted(payload.keys()),
+        )
         raise FrameworkPlannerStageError(
             f"阶段 {definition.stage} 缺少必填项：{', '.join(missing_fields)}",
             stage=definition.stage,
@@ -2142,32 +2161,30 @@ def extract_business_field(value: Any, field_name: str) -> Any:
     return value
 
 
-def _sanitize_stage_05_input_value(field_name: str, value: Any) -> Any:
+def _sanitize_stage_input_value(stage: str, field_name: str, value: Any) -> Any:
     if field_name == "basic_config":
         return _compact_stage_05_basic_config(value)
-    if field_name in {"source_brief", "worldview_plan", "character_plan"}:
+    if field_name in FRAMEWORK_BUSINESS_FIELDS:
         cleaned = extract_business_field(value, field_name)
         if _pollution_keys_in_value(cleaned):
             logger.warning(
-                "stage=05 sanitized_input_rejected field=%s reason=raw_response_keys_still_present original_type=%s preview=%s",
+                "framework planner sanitized_input_rejected stage=%s field=%s reason=raw_response_keys_still_present original_type=%s preview=%s",
+                stage,
                 field_name,
                 type(value).__name__,
                 _preview_return_object(value, limit=300),
             )
-            return {}
+            return [] if field_name in FRAMEWORK_BUSINESS_LIST_FIELDS else {}
+        if field_name in FRAMEWORK_BUSINESS_LIST_FIELDS:
+            return cleaned if isinstance(cleaned, list) else []
+        if field_name in {"source_brief", "worldview_plan", "character_plan", "checkpoint_explanation", "adaptation_guide", "framework_plan_package", "validation_report"}:
+            return cleaned if isinstance(cleaned, dict) else {}
         return cleaned
-    if field_name == "beat_checkpoint_timeline":
-        cleaned = extract_business_field(value, field_name)
-        if _pollution_keys_in_value(cleaned):
-            logger.warning(
-                "stage=05 sanitized_input_rejected field=%s reason=raw_response_keys_still_present original_type=%s preview=%s",
-                field_name,
-                type(value).__name__,
-                _preview_return_object(value, limit=300),
-            )
-            return []
-        return cleaned if isinstance(cleaned, list) else []
     return extract_business_field(value, field_name)
+
+
+def _sanitize_stage_05_input_value(field_name: str, value: Any) -> Any:
+    return _sanitize_stage_input_value("05", field_name, value)
 
 
 def _compact_stage_05_basic_config(value: Any) -> dict[str, Any]:

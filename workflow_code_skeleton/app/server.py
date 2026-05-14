@@ -484,6 +484,27 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         assets = task_manager.list_user_assets(user_id=_require_user_id())
         return _json_ok(assets=assets)
 
+    @app.post("/api/framework-planner/assets")
+    @_login_required
+    def create_framework_planner_asset_api():
+        data = request.get_json(silent=True) or {}
+        try:
+            asset = task_manager.create_framework_planner_asset(
+                user_id=_require_user_id(),
+                title=str(data.get("title") or data.get("project_title") or ""),
+                season_count=int(data.get("season_count") or 1),
+                episodes_per_season=int(data.get("episodes_per_season") or data.get("total_episodes") or 60),
+                target_format=str(data.get("target_format") or data.get("genre") or "短剧"),
+                style=str(data.get("style") or ""),
+                description=str(data.get("description") or data.get("story_outline") or ""),
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except Exception as exc:
+            logger.exception("framework planner asset create failed")
+            return _json_error(str(exc), status=500, fallback="新建剧本失败，请稍后重试。")
+        return _json_ok(asset=asset)
+
     @app.get("/api/community")
     def community_assets():
         assets = task_manager.list_public_assets()

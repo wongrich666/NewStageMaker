@@ -231,6 +231,76 @@ class TaskLifecycleMixin:
         )
         return self._public_snapshot(compacted)
 
+    def create_framework_planner_asset(
+        self,
+        *,
+        user_id: int,
+        title: str,
+        season_count: int = 1,
+        episodes_per_season: int = 60,
+        target_format: str = "短剧",
+        style: str = "",
+        description: str = "",
+    ) -> dict[str, Any]:
+        clean_title = clean_user_visible_text(title).strip() or "未命名剧本"
+        clean_description = clean_multiline_user_visible_text(description).strip()
+        clean_format = clean_user_visible_text(target_format).strip() or "短剧"
+        clean_style = clean_user_visible_text(style).strip()
+        project_id = self._next_project_id()
+        timestamp = now_iso()
+        input_payload = {
+            "title": clean_title,
+            "project_title": clean_title,
+            "story_outline": clean_description,
+            "target_format": clean_format,
+            "style": clean_style,
+            "season_count": max(1, int(season_count or 1)),
+            "episodes_per_season": max(1, int(episodes_per_season or 1)),
+            "total_episodes": max(1, int(season_count or 1)) * max(1, int(episodes_per_season or 1)),
+        }
+        snapshot = {
+            "user_id": int(user_id),
+            "project_id": project_id,
+            "task_id": f"framework-planner-{uuid.uuid4().hex[:10]}",
+            "status": "draft",
+            "title": clean_title,
+            "message": "框架策划资产已创建，可从第一阶段开始填写。",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "finished_at": None,
+            "workflow_spec_path": "",
+            "visibility": "private",
+            "model_option": None,
+            "asset_kind": "framework_planner",
+            "input_payload": input_payload,
+            "artifacts": {
+                "story_outline": clean_description,
+                "target_format": clean_format,
+                "style": clean_style,
+            },
+            "logs": [],
+            "progress_percent": 0,
+            "generated_episodes": 0,
+            "total_episodes": input_payload["total_episodes"],
+            "current_stage": "framework_planner",
+            "current_stage_label": "剧本框架策划",
+            "current_node_id": None,
+            "current_node_name": None,
+            "current_batch": None,
+            "completion_confirmed": False,
+            "awaiting_user_confirmation": False,
+            "cache_retained": False,
+            "debug_state": {"variables": {}},
+            "wait_elapsed_ms": 0,
+            "wait_started_at": None,
+        }
+        self._project_path(project_id).write_text(
+            json.dumps(snapshot, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        self._remember_latest_project(int(user_id), project_id)
+        return self._public_snapshot(snapshot)
+
     def update_project_asset(
         self,
         project_id: int,

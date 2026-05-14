@@ -2280,6 +2280,161 @@ a {
   }
 }
 
+/* Framework planner visual alignment for the main script workspace. */
+.workspace-body {
+  --mono-bg: #f4f6fb;
+  --mono-surface: #ffffff;
+  --mono-surface-soft: #f8fafc;
+  --mono-border: #d8deea;
+  --mono-text: #172033;
+  --mono-muted: #667085;
+  --mono-accent: #3f5fe3;
+  --mono-accent-strong: #2747cc;
+  --mono-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+  color: var(--mono-text);
+  background: #f4f6fb;
+}
+
+.workspace-body .workspace-sidebar {
+  background: #ffffff;
+  border-right: 1px solid var(--mono-border);
+  box-shadow: 8px 0 24px rgba(15, 23, 42, 0.04);
+}
+
+.workspace-body .sidebar-brand,
+.workspace-body .sidebar-group-label,
+.workspace-body .sidebar-section-head,
+.workspace-body .sidebar-folder-link,
+.workspace-body .sidebar-text-link,
+.workspace-body .sidebar-footer-text,
+.workspace-body .sidebar-logout-link,
+.workspace-body .workspace-folder summary {
+  color: var(--mono-text);
+}
+
+.workspace-body .sidebar-brand small,
+.workspace-body .sidebar-brand-text em,
+.workspace-body .workspace-pick-meta,
+.workspace-body .workspace-pick-state,
+.workspace-body .runtime-note,
+.workspace-body .composer-hint,
+.workspace-body .composer-mode-note,
+.workspace-body .asset-meta,
+.workspace-body .tool-panel-kicker {
+  color: var(--mono-muted);
+}
+
+.workspace-body .sidebar-brand-mark,
+.workspace-body .sidebar-profile-avatar,
+.workspace-body .runtime-kicker {
+  color: #ffffff;
+  background: var(--mono-accent);
+}
+
+.workspace-body .sidebar-toggle,
+.workspace-body .sidebar-create-btn,
+.workspace-body .sidebar-refresh-btn,
+.workspace-body .sidebar-profile-btn,
+.workspace-body .tool-shortcut,
+.workspace-body .workspace-folder,
+.workspace-body .workspace-pick,
+.workspace-body .workspace-empty,
+.workspace-body .workspace-runtime,
+.workspace-body .tool-panel,
+.workspace-body .community-panel,
+.workspace-body .composer-card,
+.workspace-body .chat-composer-shell,
+.workspace-body .asset-tile,
+.workspace-body .asset-editor,
+.workspace-body .profile-drawer,
+.workspace-body .toast-card {
+  color: var(--mono-text);
+  background: var(--mono-surface);
+  border-color: var(--mono-border);
+  box-shadow: var(--mono-shadow);
+}
+
+.workspace-body .sidebar-create-btn,
+.workspace-body .btn-primary,
+.workspace-body .composer-send-btn {
+  color: #ffffff;
+  background: var(--mono-accent);
+  border-color: var(--mono-accent);
+}
+
+.workspace-body .sidebar-create-btn:hover,
+.workspace-body .btn-primary:hover:not(:disabled),
+.workspace-body .composer-send-btn:hover:not(:disabled) {
+  color: #ffffff;
+  background: var(--mono-accent-strong);
+  border-color: var(--mono-accent-strong);
+}
+
+.workspace-body .btn-secondary,
+.workspace-body .btn-ghost,
+.workspace-body .sidebar-refresh-btn,
+.workspace-body .sidebar-profile-btn,
+.workspace-body .tool-shortcut,
+.workspace-body .workspace-pick-delete {
+  color: var(--mono-text);
+  background: #ffffff;
+  border-color: var(--mono-border);
+}
+
+.workspace-body .btn-danger {
+  color: #b42318;
+  background: #fff4f2;
+  border-color: #fecdca;
+}
+
+.workspace-body .runtime-pill,
+.workspace-body .status-pill,
+.workspace-body .completion-panel,
+.workspace-body .advanced-inputs,
+.workspace-body .output-box,
+.workspace-body .field input,
+.workspace-body .field textarea,
+.workspace-body .field select,
+.workspace-body .tool-field input,
+.workspace-body .tool-field textarea,
+.workspace-body .compact-select {
+  color: var(--mono-text);
+  background: var(--mono-surface-soft);
+  border-color: var(--mono-border);
+}
+
+.workspace-body .field input:focus,
+.workspace-body .field textarea:focus,
+.workspace-body .field select:focus,
+.workspace-body .tool-field input:focus,
+.workspace-body .tool-field textarea:focus,
+.workspace-body .compact-select:focus {
+  border-color: var(--mono-accent);
+  box-shadow: 0 0 0 3px rgba(63, 95, 227, 0.12);
+  background: #ffffff;
+}
+
+.workspace-body .progress-fill {
+  background: var(--mono-accent);
+  box-shadow: 0 0 16px rgba(63, 95, 227, 0.22);
+}
+
+.workspace-body .chat-view {
+  background: #eef2f7;
+}
+
+.workspace-body .chat-message.user .chat-bubble {
+  color: #ffffff;
+  background: var(--mono-accent);
+}
+
+.workspace-body .chat-message.system .chat-bubble,
+.workspace-body .chat-message.assistant .chat-bubble {
+  color: var(--mono-text);
+  background: #ffffff;
+  border-color: var(--mono-border);
+}
+
 @media (max-width: 760px) {
   .chat-main {
     padding: 12px;
