@@ -575,6 +575,14 @@
     }
   }
 
+  function storageRemove(key) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch (error) {
+      // ignore storage write errors
+    }
+  }
+
   function sanitizeLoadedState(saved) {
     if (!saved || typeof saved !== "object") return saved;
     const sanitized = stripRawResponseKeys(saved);
@@ -693,6 +701,75 @@
     }
   }
 
+  function selectorValue(value) {
+    const text = String(value || "");
+    if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(text);
+    return text.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  }
+
+  function focusSelectorFor(element) {
+    if (!element || !element.matches) return "";
+    const attributeSelectors = [
+      "data-config-key",
+      "data-script-preference",
+      "data-stage-preference-key",
+      "data-new-script-field",
+      "data-asset-search",
+      "data-feedback-key",
+      "data-editor-key",
+      "data-modal-field",
+      "data-beat-index",
+      "data-checkpoint-overview",
+      "data-beat-note-index",
+    ];
+    for (const name of attributeSelectors) {
+      if (element.hasAttribute(name)) {
+        return `[${name}="${selectorValue(element.getAttribute(name))}"]`;
+      }
+    }
+    if (element.hasAttribute("data-business-root") && element.hasAttribute("data-business-path")) {
+      return `[data-business-root="${selectorValue(element.getAttribute("data-business-root"))}"][data-business-path="${selectorValue(element.getAttribute("data-business-path"))}"]`;
+    }
+    if (element.hasAttribute("data-beat-index") && element.hasAttribute("data-beat-field")) {
+      return `[data-beat-index="${selectorValue(element.getAttribute("data-beat-index"))}"][data-beat-field="${selectorValue(element.getAttribute("data-beat-field"))}"]`;
+    }
+    return "";
+  }
+
+  function captureFocusedControl() {
+    const active = document.activeElement;
+    if (!active || !app.contains(active) || !active.matches || !active.matches("input, textarea, select")) return null;
+    const selector = focusSelectorFor(active);
+    if (!selector) return null;
+    return {
+      selector,
+      value: "value" in active ? active.value : "",
+      selectionStart: typeof active.selectionStart === "number" ? active.selectionStart : null,
+      selectionEnd: typeof active.selectionEnd === "number" ? active.selectionEnd : null,
+    };
+  }
+
+  function restoreFocusedControl(snapshot) {
+    if (!snapshot || !snapshot.selector) return;
+    const target = app.querySelector(snapshot.selector);
+    if (!target || !target.focus) return;
+    if ("value" in target && document.activeElement !== target && target.value !== snapshot.value) {
+      target.value = snapshot.value;
+    }
+    target.focus({ preventScroll: true });
+    if (
+      snapshot.selectionStart !== null &&
+      snapshot.selectionEnd !== null &&
+      typeof target.setSelectionRange === "function"
+    ) {
+      try {
+        target.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+      } catch (error) {
+        // Some input types do not support selection ranges.
+      }
+    }
+  }
+
   function savePromptPreferences(reason) {
     if (!state.prompt_preferences) return;
     state.prompt_preferences.updated_at = new Date().toISOString();
@@ -769,18 +846,26 @@
     return Boolean(stage && stage.locked && !stage.confirmed);
   }
 
+  function prerequisiteStageKey(stageKey) {
+    const index = STAGE_SEQUENCE.indexOf(stageKey);
+    return index > 0 ? STAGE_SEQUENCE[index - 1] : "";
+  }
+
+  function prerequisiteConfirmedFor(targetState, stageKey) {
+    if (stageKey === "basic") return true;
+    const prerequisite = prerequisiteStageKey(stageKey);
+    if (!prerequisite) return true;
+    const stageState = targetState && targetState.stage_state ? targetState.stage_state : {};
+    return Boolean((stageState[prerequisite] || {}).confirmed);
+  }
+
   function viewUnlockedFor(targetState, viewId) {
     const stageState = targetState && targetState.stage_state ? targetState.stage_state : {};
     const stageKey = stageKeyForView(viewId);
     if (stageKey === "basic") return true;
-    if (hasStageDataFor(targetState, stageKey)) return true;
-    if (stageKey === "worldview") return Boolean((stageState.basic || {}).confirmed);
-    if (stageKey === "character") return Boolean((stageState.worldview || {}).confirmed);
-    if (stageKey === "beat") return Boolean((stageState.character || {}).confirmed);
-    if (stageKey === "storylines") return Boolean((stageState.beat || {}).confirmed);
-    if (stageKey === "guide") return Boolean((stageState.storylines || {}).confirmed);
-    if (stageKey === "package") return Boolean((stageState.guide || {}).confirmed);
-    return false;
+    if (!prerequisiteConfirmedFor(targetState, stageKey)) return false;
+    if ((stageState[stageKey] || {}).confirmed) return true;
+    return prerequisiteConfirmedFor(targetState, stageKey);
   }
 
   function viewUnlocked(viewId) {
@@ -968,17 +1053,27 @@
         return;
       }
 
-      stage.locked = !unlocked;
+      if (!prerequisiteConfirmedFor(targetState, stageKey)) {
+        stage.confirmed = false;
+        stage.locked = true;
+        stage.status = "locked";
+        return;
+      }
 
       if (stage.confirmed) {
+        stage.locked = true;
         stage.status = "confirmed";
         return;
       }
 
       if (!unlocked) {
+        stage.confirmed = false;
+        stage.locked = true;
         stage.status = "locked";
         return;
       }
+
+      stage.locked = false;
 
       if (stage.status === "running" || stage.status === "error") {
         return;
@@ -1253,6 +1348,7 @@
   }
 
   function render() {
+    const focusedControl = captureFocusedControl();
     syncStageFlow(state);
     saveState();
     app.innerHTML = `
@@ -1268,6 +1364,7 @@
         ${ui.modalStorylineId ? renderStorylineModal(ui.modalStorylineId) : ""}
       </div>
     `;
+    restoreFocusedControl(focusedControl);
   }
 
   function renderNewScriptModal() {
@@ -2567,6 +2664,26 @@
     return parts.join("\n\n");
   }
 
+  function syncBasicConfigFromDom() {
+    if (!app || !state || !state.basic_config) return;
+    app.querySelectorAll("[data-config-key]").forEach((field) => {
+      const key = field.dataset.configKey;
+      if (!key || field.disabled) return;
+      state.basic_config[key] = field.type === "number" ? Number(field.value) : field.value;
+    });
+  }
+
+  function collectNewScriptFormFromDom() {
+    const next = Object.assign({}, ui.newScriptForm || {});
+    app.querySelectorAll("[data-new-script-field]").forEach((field) => {
+      const key = field.dataset.newScriptField;
+      if (!key) return;
+      next[key] = field.type === "number" ? Number(field.value) : field.value;
+    });
+    ui.newScriptForm = next;
+    return next;
+  }
+
   function stageFeedbackPayload(stageKey) {
     const parts = [];
     const explicit = String((state.feedback || {})[stageKey] || "").trim();
@@ -2577,9 +2694,11 @@
   }
 
   function buildStagePayload(stageKey, options) {
+    syncBasicConfigFromDom();
     const revise = options && options.revise;
     if (stageKey === "basic") {
       return {
+        project_title: state.basic_config.project_title,
         mode: state.basic_config.mode,
         source_text: state.basic_config.source_text,
         source_title: state.basic_config.source_title || state.basic_config.project_title,
@@ -2687,6 +2806,7 @@
   function attachProjectContext(payload) {
     const next = Object.assign({}, payload || {});
     next.project_id = currentProjectId();
+    next.project_title = state.basic_config.project_title || state.basic_config.source_title || "";
     return next;
   }
 
@@ -2855,6 +2975,7 @@
   }
 
   async function confirmBasic() {
+    syncBasicConfigFromDom();
     if (!state.basic_config.source_title && !state.basic_config.project_title) {
       showToast("请至少填写作品标题或项目标题");
       return;
@@ -3313,30 +3434,32 @@
     return /pass|通过|无需修改|可进入下一阶段/.test(text);
   }
 
-  function resetState() {
-    const proceed = window.confirm("确认重置当前框架策划工作台的本地状态吗？");
-    if (!proceed) return;
-    try {
-      window.localStorage.removeItem(STORAGE_KEY);
-      window.localStorage.removeItem(LEGACY_STORAGE_KEY);
-    } catch (error) {
-      // ignore
-    }
-    state = clone(initialState);
-    state.prompt_preferences = normalizePromptPreferences(loadPromptPreferences());
-    applyPromptPreferencesToBasicConfig(state, true);
-    syncStageFlow(state);
+  function resetTransientUi() {
     ui.toast = "";
     ui.loading = {};
     ui.loadingStartedAt = {};
-    ui.stageHistory = {};
-    ui.stageHistoryLoading = {};
-    if (ui.loadingTicker) {
-      window.clearInterval(ui.loadingTicker);
-      ui.loadingTicker = null;
-    }
     ui.stageErrors = {};
     ui.modalStorylineId = null;
+    ui.expandedBeats = {};
+    ui.expandedStorylines = {};
+    ui.expandedBusinessPanels = {};
+    ui.lastStagePayloadPreview = {};
+    ui.stageHistory = {};
+    ui.stageHistoryLoading = {};
+    ui.assetsOpen = false;
+    ui.showNewScriptModal = false;
+    ui.assetsLoading = false;
+    ui.assetSearch = "";
+    ui.assetStatusFilter = "all";
+    ui.assetSort = "updated_desc";
+    ui.newScriptForm = {
+      title: "",
+      season_count: 1,
+      episodes_per_season: 60,
+      target_format: "短剧",
+      style: "",
+      description: "",
+    };
     ui.editMode = {
       worldview: false,
       character: false,
@@ -3344,12 +3467,27 @@
       beatExplanation: false,
       guide: false,
     };
+    if (ui.loadingTicker) {
+      window.clearInterval(ui.loadingTicker);
+      ui.loadingTicker = null;
+    }
+  }
+
+  function resetState() {
+    const proceed = window.confirm("确认重置当前框架策划工作台的本地状态吗？这会清空本页缓存、阶段数据、偏好提示和临时错误状态。");
+    if (!proceed) return;
+    storageRemove(STORAGE_KEY);
+    storageRemove(LEGACY_STORAGE_KEY);
+    storageRemove(PREFERENCE_STORAGE_KEY);
+    state = clone(initialState);
+    syncStageFlow(state);
+    resetTransientUi();
     render();
   }
 
   async function loadAssets() {
     ui.assetsLoading = true;
-    render();
+    if (ui.assetsOpen) render();
     try {
       const data = await requestJson("/api/assets");
       ui.assets = Array.isArray(data.assets) ? data.assets : [];
@@ -3357,12 +3495,12 @@
       showToast(error.message || "资产列表加载失败");
     } finally {
       ui.assetsLoading = false;
-      render();
+      if (ui.assetsOpen) render();
     }
   }
 
   async function createNewScript() {
-    const form = ui.newScriptForm;
+    const form = clone(collectNewScriptFormFromDom());
     if (!String(form.title || "").trim()) {
       showToast("请填写剧本名称");
       return;
@@ -3372,6 +3510,7 @@
       body: JSON.stringify(form),
     });
     const asset = data.asset || {};
+    resetTransientUi();
     state = clone(initialState);
     state.basic_config.project_title = asset.title || form.title || "未命名剧本";
     state.basic_config.source_title = asset.title || form.title || "";
@@ -3383,16 +3522,7 @@
     state.asset_state.asset_id = asset.project_id || null;
     state.asset_state.status = "draft";
     state.current_view = "basic";
-    ui.showNewScriptModal = false;
     ui.assetsOpen = true;
-    ui.newScriptForm = {
-      title: "",
-      season_count: 1,
-      episodes_per_season: 60,
-      target_format: "短剧",
-      style: "",
-      description: "",
-    };
     syncStageFlow(state);
     saveState();
     await loadAssets();
@@ -3427,6 +3557,8 @@
     const data = await requestJson(`/api/projects/${projectId}`);
     const project = data.project || {};
     const input = project.input_payload || {};
+    resetTransientUi();
+    state = clone(initialState);
     state.basic_config.project_title = project.title || input.title || state.basic_config.project_title;
     state.basic_config.source_title = project.title || input.title || state.basic_config.source_title;
     state.basic_config.target_format = input.target_format || state.basic_config.target_format;
@@ -3676,6 +3808,18 @@
 
   app.addEventListener("change", (event) => {
     const target = event.target;
+    if (target.matches("[data-config-key]")) {
+      const key = target.dataset.configKey;
+      state.basic_config[key] = target.type === "number" ? Number(target.value) : target.value;
+      savePromptPreferences(`basic_config:${key}`);
+      saveState();
+      return;
+    }
+    if (target.matches("[data-new-script-field]")) {
+      const key = target.dataset.newScriptField;
+      ui.newScriptForm[key] = target.type === "number" ? Number(target.value) : target.value;
+      return;
+    }
     if (target.matches("[data-business-root][data-business-path]")) {
       updateBusinessField(
         target.dataset.businessRoot,
