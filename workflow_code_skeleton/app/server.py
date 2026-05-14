@@ -28,6 +28,7 @@ from .services.framework_planner_service import (
     run_framework_planner_score,
     run_framework_planner_stage,
     save_framework_stage_history,
+    write_framework_frontend_debug_event,
     write_framework_stage_exception_log,
 )
 from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
@@ -569,6 +570,26 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 status=exc.status_code,
                 detail=exc.detail,
             )
+
+    @app.post("/api/framework-planner/debug/frontend")
+    @_login_required
+    def framework_planner_frontend_debug_api():
+        data = request.get_json(silent=True) or {}
+        project_id = data.get("project_id") if isinstance(data, dict) else None
+        event = str(data.get("event") or "frontend_event") if isinstance(data, dict) else "frontend_event"
+        payload = data.get("payload") if isinstance(data, dict) and isinstance(data.get("payload"), dict) else {}
+        detail = data.get("detail") if isinstance(data, dict) and isinstance(data.get("detail"), dict) else {}
+        try:
+            result = write_framework_frontend_debug_event(
+                project_id=project_id,
+                event=event,
+                payload=payload,
+                detail=detail,
+            )
+            return jsonify(result)
+        except Exception as exc:
+            logger.exception("framework planner frontend debug write failed")
+            return _json_error(str(exc), status=500, fallback="前端调试日志写入失败")
 
     @app.get("/api/projects/latest")
     @_login_required

@@ -205,6 +205,15 @@ def _debug_project_dir(payload: Any) -> Path:
     return path
 
 
+def _debug_cache_project_dir(payload: Any) -> Path:
+    project_name = _payload_project_name(payload) or (
+        payload.get("project_id") if isinstance(payload, dict) else ""
+    )
+    path = _repo_root() / "cache" / _project_history_id(project_name, project_name)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _debug_value_summary(value: Any, *, limit: int = STAGE_DEBUG_PREVIEW_LIMIT) -> str:
     if value is None:
         return "null"
@@ -226,6 +235,15 @@ def _debug_value_summary(value: Any, *, limit: int = STAGE_DEBUG_PREVIEW_LIMIT) 
     if len(text) > limit:
         text = f"{text[:limit]}..."
     return f"{prefix}{text}".strip()
+
+
+def _debug_payload_lines(payload: Any, *, prefix: str = "payload") -> list[str]:
+    if not isinstance(payload, dict):
+        return [f"{prefix}: {_debug_value_summary(payload)}"]
+    lines: list[str] = []
+    for key in sorted(str(item) for item in payload.keys() if not str(item).startswith("_")):
+        lines.append(f"{prefix}.{key}: {_debug_value_summary(payload.get(key))}")
+    return lines or [f"{prefix}: dict(empty)"]
 
 
 def _debug_response_status(response_json: Any) -> str:
@@ -326,8 +344,59 @@ def print_stage_debug(stage_number: Any, response_json: Any, payload: Any) -> No
     try:
         debug_dir = _debug_project_dir(payload)
         (debug_dir / f"stage{stage}_debug.txt").write_text(debug_text + "\n", encoding="utf-8")
+        cache_dir = _debug_cache_project_dir(payload)
+        cache_path = cache_dir / f"stage{stage}_debug.txt"
+        cache_path.write_text(debug_text + "\n", encoding="utf-8")
+        print(f"[framework_planner_cache_debug] wrote {cache_path}", flush=True)
     except Exception as exc:
         logger.warning("写入阶段调试文件失败：stage=%s error=%s", stage, exc)
+
+
+def write_framework_frontend_debug_event(
+    *,
+    project_id: Any,
+    event: str,
+    payload: dict[str, Any] | None,
+    detail: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    safe_payload = payload if isinstance(payload, dict) else {}
+    safe_detail = detail if isinstance(detail, dict) else {}
+    project_name = _payload_project_name(safe_payload) or _payload_project_name(safe_detail) or project_id
+    debug_payload = {
+        **safe_payload,
+        "project_id": project_id,
+        "project_title": _payload_project_name(safe_payload) or _payload_project_name(safe_detail) or "",
+    }
+    timestamp = _history_iso_timestamp()
+    lines = [
+        "=== Framework Planner Frontend Debug ===",
+        f"timestamp: {timestamp}",
+        f"event: {str(event or '').strip() or 'unknown'}",
+        f"project: {_project_history_id(project_id, project_name)}",
+        "-- payload --",
+        *_debug_payload_lines(safe_payload, prefix="payload"),
+        "-- detail --",
+        *_debug_payload_lines(safe_detail, prefix="detail"),
+        "",
+    ]
+    text = "\n".join(lines)
+    cache_dir = _debug_cache_project_dir(debug_payload)
+    debug_dir = _debug_project_dir(debug_payload)
+    cache_path = cache_dir / "frontend_debug.txt"
+    debug_path = debug_dir / "frontend_debug.txt"
+    with cache_path.open("a", encoding="utf-8") as file:
+        file.write(text)
+    with debug_path.open("a", encoding="utf-8") as file:
+        file.write(text)
+    print(text, flush=True)
+    print(f"[framework_planner_cache_debug] wrote {cache_path}", flush=True)
+    return {
+        "ok": True,
+        "event": str(event or "").strip() or "unknown",
+        "cache_path": str(cache_path),
+        "debug_path": str(debug_path),
+        "project_name": _project_history_id(project_id, project_name),
+    }
 
 
 def save_framework_stage_history(
@@ -348,6 +417,7 @@ def save_framework_stage_history(
         "timestamp": timestamp,
         "status": "success" if status == "success" else "failed",
         "payload_keys": _history_payload_keys(payload),
+        "payload_debug_summary": _raw_payload_summary(payload),
         "output": output if status == "success" else {},
     }
     if error:
@@ -358,6 +428,10 @@ def save_framework_stage_history(
     latest_path = project_dir / f"latest_{slug}.json"
     if status == "success":
         latest_path.write_text(json.dumps(record, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    print(
+        f"[framework_planner_cache] stage={slug} status={record['status']} path={path} latest={latest_path if status == 'success' else ''}",
+        flush=True,
+    )
     return {
         "project_id": _project_history_id(project_id, project_name),
         "project_name": _project_history_id(project_id, project_name),

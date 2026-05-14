@@ -430,8 +430,39 @@
   }
 
   function debugStageSummary(label, detail) {
-    if (!DEV_LOG_ENABLED || typeof console === "undefined" || !console.debug) return;
-    console.debug(`[framework_planner] ${label}`, detail || {});
+    if (!DEV_LOG_ENABLED || typeof console === "undefined") return;
+    const payload = detail || {};
+    if (console.info) {
+      console.info(`[framework_planner_debug] ${label}`, payload);
+    } else if (console.debug) {
+      console.debug(`[framework_planner_debug] ${label}`, payload);
+    }
+  }
+
+  function debugFrontendEvent(event, payload, detail) {
+    const safePayload = payload && typeof payload === "object" ? payload : {};
+    const safeDetail = detail && typeof detail === "object" ? detail : {};
+    debugStageSummary(event, {
+      project_id: currentProjectId(),
+      project_cache_name: currentProjectCacheName(),
+      payload_keys: Object.keys(safePayload),
+      payload_summary: payloadSummary(safePayload),
+      detail: safeDetail,
+    });
+    fetch(`${API_BASE}/debug/frontend`, {
+      method: "POST",
+      headers: buildHeaders(),
+      body: JSON.stringify({
+        project_id: currentProjectId(),
+        event,
+        payload: safePayload,
+        detail: safeDetail,
+      }),
+    }).catch((error) => {
+      if (DEV_LOG_ENABLED && typeof console !== "undefined" && console.warn) {
+        console.warn("[framework_planner_debug] frontend debug write failed", error);
+      }
+    });
   }
 
   function defaultBusinessValue(field) {
@@ -2923,7 +2954,21 @@
     try {
       await waitForPaint();
       const payload = cleanOutgoingPayload(attachProjectContext(buildStagePayload(stageKey, options || {})), `stage${stageNo} payload`);
+      debugFrontendEvent(`stage${stageNo}_request`, payload, {
+        stageKey,
+        stageNo,
+        revise: Boolean(options && options.revise),
+        current_view: state.current_view,
+      });
       const response = await planningApi.runStage(stageNo, payload);
+      debugFrontendEvent(`stage${stageNo}_response`, payload, {
+        stageKey,
+        stageNo,
+        ok: Boolean(response && response.ok),
+        response_keys: response && typeof response === "object" ? Object.keys(response) : [],
+        data_summary: payloadSummary((response && response.data) || {}),
+        history: response && response.history ? response.history : {},
+      });
       applyStageResponse(stageNo, response);
       if (response.history) {
         ui.stageHistory[stageKey] = [response.history].concat(ui.stageHistory[stageKey] || []).slice(0, 50);
@@ -2937,6 +2982,13 @@
     } catch (error) {
       state.stage_state[stageKey].status = "error";
       ui.stageErrors[stageKey] = formatStageError(error, stageNo);
+      debugFrontendEvent(`stage${stageNo}_error`, attachProjectContext(buildStagePayload(stageKey, options || {})), {
+        stageKey,
+        stageNo,
+        message: error && error.message ? error.message : String(error || ""),
+        status: error && error.status ? error.status : 0,
+        detail: error && error.detail ? error.detail : {},
+      });
       throw error;
     } finally {
       setStageLoading(stageKey, false);
@@ -3501,10 +3553,26 @@
 
   async function createNewScript() {
     const form = clone(collectNewScriptFormFromDom());
+    debugStageSummary("new_script_submit_collected", {
+      form,
+      dom_field_count: app.querySelectorAll("[data-new-script-field]").length,
+    });
     if (!String(form.title || "").trim()) {
       showToast("请填写剧本名称");
       return;
     }
+    debugFrontendEvent("new_script_submit", {
+      project_title: form.title || "",
+      source_title: form.title || "",
+      target_format: form.target_format || "",
+      season_count: form.season_count,
+      episodes_per_season: form.episodes_per_season,
+      source_text: form.description || "",
+      user_requirements: form.style || "",
+    }, {
+      form,
+      note: "新建剧本提交时从当前 DOM 重新收集的表单值",
+    });
     const data = await requestJson("/api/framework-planner/assets", {
       method: "POST",
       body: JSON.stringify(form),
@@ -3525,6 +3593,19 @@
     ui.assetsOpen = true;
     syncStageFlow(state);
     saveState();
+    debugFrontendEvent("new_script_created", {
+      project_id: state.asset_state.asset_id,
+      project_title: state.basic_config.project_title,
+      source_title: state.basic_config.source_title,
+      target_format: state.basic_config.target_format,
+      season_count: state.basic_config.season_count,
+      episodes_per_season: state.basic_config.episodes_per_season,
+      source_text: state.basic_config.source_text,
+      user_requirements: state.basic_config.user_requirements,
+    }, {
+      asset,
+      cache_hint: `cache/${currentProjectCacheName()}/frontend_debug.txt`,
+    });
     await loadAssets();
     await loadStageHistory("basic");
     showToast("新剧本已创建，已进入第一阶段");
@@ -3742,6 +3823,11 @@
     if (target.matches("[data-config-key]")) {
       const key = target.dataset.configKey;
       state.basic_config[key] = target.type === "number" ? Number(target.value) : target.value;
+      debugStageSummary("basic_config_input", {
+        key,
+        value_length: String(target.value || "").length,
+        current_value: target.type === "number" ? Number(target.value) : target.value,
+      });
       savePromptPreferences(`basic_config:${key}`);
       saveState();
       return;
@@ -3763,6 +3849,11 @@
     if (target.matches("[data-new-script-field]")) {
       const key = target.dataset.newScriptField;
       ui.newScriptForm[key] = target.type === "number" ? Number(target.value) : target.value;
+      debugStageSummary("new_script_input", {
+        key,
+        value_length: String(target.value || "").length,
+        current_value: target.type === "number" ? Number(target.value) : target.value,
+      });
       return;
     }
     if (target.matches("[data-asset-search]")) {
@@ -3811,6 +3902,11 @@
     if (target.matches("[data-config-key]")) {
       const key = target.dataset.configKey;
       state.basic_config[key] = target.type === "number" ? Number(target.value) : target.value;
+      debugStageSummary("basic_config_change", {
+        key,
+        value_length: String(target.value || "").length,
+        current_value: target.type === "number" ? Number(target.value) : target.value,
+      });
       savePromptPreferences(`basic_config:${key}`);
       saveState();
       return;
@@ -3818,6 +3914,11 @@
     if (target.matches("[data-new-script-field]")) {
       const key = target.dataset.newScriptField;
       ui.newScriptForm[key] = target.type === "number" ? Number(target.value) : target.value;
+      debugStageSummary("new_script_change", {
+        key,
+        value_length: String(target.value || "").length,
+        current_value: target.type === "number" ? Number(target.value) : target.value,
+      });
       return;
     }
     if (target.matches("[data-business-root][data-business-path]")) {
