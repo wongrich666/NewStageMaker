@@ -331,6 +331,261 @@ ROLLBACK_STAGE_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "script": ("script",),
 }
 ROLLBACK_RANGE_STAGE_KEYS = frozenset(ROLLBACK_STAGE_DEPENDENCIES)
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        fallback = int(default or 0)
+    except Exception:
+        fallback = 0
+
+    if value is None:
+        return fallback
+
+    try:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+        text = str(value).strip()
+        if not text:
+            return fallback
+        return int(float(text))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _completion_confirmed(snapshot: Any) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    return bool(snapshot.get("completion_confirmed")) and not bool(
+        snapshot.get("awaiting_user_confirmation")
+    )
+
+
+def _awaiting_completion_confirmation(snapshot: Any) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    if bool(snapshot.get("awaiting_user_confirmation")):
+        return True
+    return (
+        str(snapshot.get("status") or "").strip() == "completed"
+        and not _completion_confirmed(snapshot)
+    )
+
+
+def _normalize_rollback_stage_key(stage_key: Any) -> str:
+    text = str(stage_key or "").strip()
+    normalized = text.lower().replace("-", "_").replace(" ", "_")
+
+    for key, label in ROLLBACK_STAGE_LABELS.items():
+        if normalized == str(key).strip().lower() or text == str(label).strip():
+            return str(key)
+
+    aliases = {
+        "hook": "hooks",
+        "hooks": "hooks",
+        "dialogue": "dialogues",
+        "dialogues": "dialogues",
+        "dialog": "dialogues",
+        "script": "script",
+        "final": "final",
+        "正文": "script",
+        "剧本正文": "script",
+        "对白": "dialogues",
+        "钩子": "hooks",
+        "最终": "final",
+        "成稿": "final",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _batch_end_episode(total_episodes: Any, start_episode: Any) -> int:
+    total = max(0, _safe_int(total_episodes, 0))
+    start = max(1, _safe_int(start_episode, 1))
+    batch_size = max(1, int(settings.batch_size or 5))
+    return min(total, start + batch_size - 1) if total else start + batch_size - 1
+
+
+def _episode_number_from_key(key: Any) -> int | None:
+    if isinstance(key, bool):
+        return None
+    if isinstance(key, int):
+        return key if key > 0 else None
+    if isinstance(key, float) and key.is_integer():
+        value = int(key)
+        return value if value > 0 else None
+
+    text = str(key or "").strip()
+    if not text:
+        return None
+
+    try:
+        value = int(text)
+        return value if value > 0 else None
+    except ValueError:
+        pass
+
+    match = re.search(r"\d+", text)
+    if not match:
+        return None
+
+    value = int(match.group(0))
+    return value if value > 0 else None
+
+
+def _first_text_value(item: Any, keys: tuple[str, ...]) -> str:
+    if isinstance(item, str):
+        return item.strip()
+    if isinstance(item, dict):
+        for key in keys:
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
+
+
+def _normalize_batch_text_map(value: Any) -> dict[int, str]:
+    result: dict[int, str] = {}
+    text_keys = (
+        "text",
+        "content",
+        "summary",
+        "script",
+        "batch_script",
+        "batch_hooks",
+        "batch_dialogues",
+        "dialogues",
+        "hooks",
+    )
+
+    if isinstance(value, dict):
+        for key, item in value.items():
+            episode = _episode_number_from_key(key)
+            text = _first_text_value(item, text_keys)
+            if episode and text:
+                result[episode] = text
+
+    elif isinstance(value, list):
+        for index, item in enumerate(value, start=1):
+            episode = None
+            if isinstance(item, dict):
+                for key in ("start_episode", "batch_start_episode", "episode", "episode_number"):
+                    episode = _episode_number_from_key(item.get(key))
+                    if episode:
+                        break
+            episode = episode or index
+            text = _first_text_value(item, text_keys)
+            if episode and text:
+                result[episode] = text
+
+    return dict(sorted(result.items()))
+
+
+def _normalize_episode_script_map(value: Any) -> dict[int, str]:
+    return _normalize_batch_text_map(value)
+
+
+def _normalize_batch_object_map(value: Any) -> dict[int, object]:
+    result: dict[int, object] = {}
+
+    if isinstance(value, dict):
+        for key, item in value.items():
+            episode = _episode_number_from_key(key)
+            if episode:
+                result[episode] = item
+
+    elif isinstance(value, list):
+        for index, item in enumerate(value, start=1):
+            episode = None
+            if isinstance(item, dict):
+                for key in ("start_episode", "batch_start_episode", "episode", "episode_number"):
+                    episode = _episode_number_from_key(item.get(key))
+                    if episode:
+                        break
+            result[episode or index] = item
+
+    return dict(sorted(result.items()))
+
+
+def _slice_episode_object_before(value: Any, start_episode: int) -> dict[str, object]:
+    start = max(1, _safe_int(start_episode, 1))
+    result: dict[str, object] = {}
+
+    if not isinstance(value, dict):
+        return result
+
+    for key, item in value.items():
+        episode = _episode_number_from_key(key)
+        if episode and episode < start:
+            result[str(episode)] = item
+
+    return result
+
+
+def _string_keyed_batch_map(value: Any) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+
+    items: list[tuple[int, object]] = []
+    for key, item in value.items():
+        episode = _episode_number_from_key(key)
+        if episode:
+            items.append((episode, item))
+
+    return {str(episode): item for episode, item in sorted(items)}
+
+
+def _join_script_parts(*parts: Any) -> str:
+    return "\n\n".join(
+        str(part).strip()
+        for part in parts
+        if str(part or "").strip()
+    ).strip()
+
+
+def _join_script_episode_map(episode_map: Any) -> str:
+    normalized = _normalize_episode_script_map(episode_map)
+    return _join_script_parts(*(normalized[episode] for episode in sorted(normalized)))
+
+
+def _variable_value(variables: dict[str, Any], *constant_names: str) -> Any:
+    for constant_name in constant_names:
+        key = globals().get(constant_name)
+        if isinstance(key, str) and key in variables:
+            return variables.get(key)
+    return None
+
+
+def _partial_script_artifacts_from_variables(
+    *,
+    total_episodes: int,
+    variables: Any,
+) -> dict[str, object]:
+    if not isinstance(variables, dict):
+        return {}
+
+    script = _variable_value(variables, "ALL_SCRIPT", "LOCAL_COMMITTED_SCRIPT")
+
+    if not isinstance(script, str) or not script.strip():
+        episode_map = _normalize_episode_script_map(
+            _variable_value(variables, "LOCAL_SCRIPT_EPISODES")
+        )
+        script = _join_script_episode_map(episode_map)
+
+    if not isinstance(script, str) or not script.strip():
+        batch_map = _normalize_batch_text_map(
+            _variable_value(variables, "LOCAL_SCRIPT_BATCHES")
+        )
+        script = _join_script_parts(*(batch_map[start] for start in sorted(batch_map)))
+
+    script = str(script or "").strip()
+    if not script:
+        return {}
+
+    return {
+        "final_script": script,
+        "final_output_text": script,
+        "partial_script": script,
+    }
 
 
 def _rollback_stage_index(stage_key: Any) -> int:

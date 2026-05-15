@@ -8,6 +8,11 @@ globals().update(
     {name: getattr(_task_manager_common, name) for name in dir(_task_manager_common) if name.startswith("_")}
 )
 from .task_state import TaskRecord
+from .task_manager_common import (
+    _awaiting_completion_confirmation,
+    _completion_confirmed,
+    _safe_int,
+)
 
 SNAPSHOT_LOG_LIMIT = 200
 

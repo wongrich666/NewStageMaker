@@ -9,6 +9,21 @@ globals().update(
     {name: getattr(_task_manager_common, name) for name in dir(_task_manager_common) if name.startswith("_")}
 )
 from .task_state import TaskControl, TaskRecord, TaskTerminated, WorkflowRuntime
+from .task_manager_common import (
+    _batch_end_episode,
+    _completion_confirmed,
+    _join_script_episode_map,
+    _join_script_parts,
+    _normalize_batch_object_map,
+    _normalize_batch_text_map,
+    _normalize_episode_script_map,
+    _normalize_rollback_stage_key,
+    _partial_script_artifacts_from_variables,
+    _rollback_stage_requires_episode_range,
+    _safe_int,
+    _slice_episode_object_before,
+    _string_keyed_batch_map,
+)
 
 class TaskLifecycleMixin:
     def start_task(
