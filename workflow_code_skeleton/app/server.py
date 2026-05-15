@@ -554,6 +554,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @app.get("/api/framework-planner/history")
     @_login_required
     def list_framework_planner_history_api():
+        # print("[framework-planner-history] route hit", flush=True)
         project_id = request.args.get("project_id") or "unsaved"
         stage = request.args.get("stage") or ""
         return jsonify(list_framework_stage_history(project_id, stage or None))
@@ -887,5 +888,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             download_name=path.name,
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
+
+    print(
+        "[route-probe] framework history route registered =",
+        any(str(rule) == "/api/framework-planner/history" for rule in app.url_map.iter_rules()),
+        flush=True,
+    )
 
     return app

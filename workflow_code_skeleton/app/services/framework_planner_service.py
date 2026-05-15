@@ -537,43 +537,101 @@ def write_framework_stage_exception_log(
     return {"filename": filename, "project_name": _project_history_id(safe_payload.get("project_id"), project_name), **entry}
 
 
+def _history_project_candidate_dirs(project_id: Any, project_name: Any = "") -> list[Path]:
+    """返回兼容旧版/新版命名的历史目录候选。
+
+    目前前端可能传 project_id=1，保存阶段可能落到 cache/1；
+    但 _project_history_id(1) 会读 cache/project_1。
+    这里同时兼容 cache/1、cache/project_1 和项目名目录。
+    """
+    root = _repo_root() / "cache"
+    candidates: list[Path] = []
+
+    def add_candidate(value: Any) -> None:
+        text = str(value or "").strip()
+        if not text:
+            return
+        safe = _safe_project_history_name(text)
+        path = root / safe
+        if path not in candidates:
+            candidates.append(path)
+
+    # 1. 原始 project_name 优先，兼容 save_framework_stage_history 传入项目名的情况。
+    add_candidate(project_name)
+
+    # 2. 原始 project_id，兼容当前实际落盘的 cache/1。
+    add_candidate(project_id)
+
+    # 3. 标准化后的 project_id，兼容历史接口当前返回的 cache/project_1。
+    add_candidate(_project_history_id(project_id, project_name))
+
+    text = str(project_id or "").strip()
+    if text.isdigit():
+        add_candidate(f"project_{text}")
+
+    return candidates
+
+
 def list_framework_stage_history(project_id: Any, stage: str | None = None) -> dict[str, Any]:
-    project_dir = _history_project_dir(project_id)
     slug = _history_stage_slug(stage) if stage else ""
     entries: list[dict[str, Any]] = []
-    for path in sorted(project_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
-        if path.name.startswith("latest_"):
+    seen_files: set[str] = set()
+
+    for project_dir in _history_project_candidate_dirs(project_id):
+        if not project_dir.exists():
             continue
-        if slug and not path.name.startswith(f"{slug}_"):
-            continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        entries.append({
-            "filename": path.name,
-            "stage": data.get("stage") or _history_stage_slug(path.stem),
-            "timestamp": data.get("timestamp") or "",
-            "status": data.get("status") or "success",
-            "payload_keys": data.get("payload_keys") or [],
-        })
-    return {"project_id": _project_history_id(project_id), "project_name": _project_history_id(project_id), "stage": slug, "entries": entries}
+
+        for path in sorted(project_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+            if path.name.startswith("latest_"):
+                continue
+            if slug and not path.name.startswith(f"{slug}_"):
+                continue
+
+            file_key = str(path.resolve())
+            if file_key in seen_files:
+                continue
+            seen_files.add(file_key)
+
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+            entries.append(
+                {
+                    "filename": path.name,
+                    "stage": data.get("stage") or _history_stage_slug(path.stem),
+                    "status": data.get("status") or "unknown",
+                    "created_at": data.get("created_at") or data.get("timestamp") or "",
+                    "summary": data.get("summary") or "",
+                    "payload_keys": data.get("payload_keys") or [],
+                    "project_name": data.get("project_name") or project_dir.name,
+                }
+            )
+
+    return {
+        "project_id": str(project_id or "").strip() or _project_history_id(project_id),
+        "project_name": str(project_id or "").strip() or _project_history_id(project_id),
+        "stage": slug,
+        "entries": entries,
+    }
 
 
 def load_framework_stage_history(project_id: Any, filename: str) -> dict[str, Any]:
-    project_dir = _history_project_dir(project_id)
-    safe_name = Path(str(filename or "")).name
-    path = (project_dir / safe_name).resolve()
-    if project_dir.resolve() not in path.parents and path != project_dir.resolve():
+    safe_filename = Path(str(filename or "")).name
+    if not safe_filename or safe_filename != str(filename or "").strip():
         raise FrameworkPlannerStageError("历史版本路径无效", stage="history", status_code=400)
-    if not path.exists() or not path.is_file():
-        raise FrameworkPlannerStageError("历史版本不存在", stage="history", status_code=404)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        raise FrameworkPlannerStageError("历史版本读取失败", stage="history", status_code=500) from exc
-    return {"filename": safe_name, "record": data}
 
+    for project_dir in _history_project_candidate_dirs(project_id):
+        path = project_dir / safe_filename
+        if not path.exists():
+            continue
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise FrameworkPlannerStageError("历史版本读取失败", stage="history", status_code=500) from exc
+
+    raise FrameworkPlannerStageError("历史版本不存在", stage="history", status_code=404)
 
 @dataclass(frozen=True, slots=True)
 class FrameworkPlannerStageDefinition:
