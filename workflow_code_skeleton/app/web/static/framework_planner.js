@@ -3680,12 +3680,65 @@
   }
 
   function copyText(text, successText) {
-    navigator.clipboard.writeText(text).then(() => {
-      showToast(successText || "已复制");
-    }).catch(() => {
-      showToast("复制失败，请检查浏览器权限");
-    });
+  const value = typeof text === "string" ? text : JSON.stringify(text ?? "", null, 2);
+
+  const notifyCopied = () => {
+    if (!successText) return true;
+
+    if (typeof showToast === "function") {
+      showToast(successText);
+    } else if (typeof toast === "function") {
+      toast(successText);
+    } else if (typeof setStatus === "function") {
+      setStatus(successText);
+    } else {
+      console.log(successText);
+    }
+
+    return true;
+  };
+
+  const fallbackCopy = () => {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "readonly");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    textarea.style.opacity = "0";
+
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    try {
+      const ok = document.execCommand("copy");
+      if (ok) {
+        notifyCopied();
+        return true;
+      }
+    } catch (error) {
+      console.warn("[framework-planner] document.execCommand('copy') failed", error);
+    } finally {
+      document.body.removeChild(textarea);
+    }
+
+    window.prompt("浏览器禁止自动复制，请手动复制以下内容：", value);
+    return false;
+  };
+
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    navigator.clipboard.writeText(value)
+      .then(() => notifyCopied())
+      .catch((error) => {
+        console.warn("[framework-planner] navigator.clipboard.writeText failed, fallback to textarea copy", error);
+        fallbackCopy();
+      });
+    return true;
   }
+
+  return fallbackCopy();
+}
 
   function buildMockStageResponse(stageNo, payload) {
     const response = {
