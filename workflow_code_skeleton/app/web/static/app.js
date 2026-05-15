@@ -117,6 +117,7 @@
     pollTimer: null,
     debugPollTimer: null,
     lastConsoleLogIndex: 0,
+    lastDebugTaskId: "",
     lastDebugError: "",
     availableModels: [],
     latestSnapshot: null,
@@ -710,6 +711,12 @@ function ensureRuntimeDebugPanel() {
 function renderRuntimeDebug(debug) {
   if (!debug || typeof debug !== "object") {
     return;
+  }
+  const debugTaskId = String(debug.task_id || "").trim();
+  if (debugTaskId && debugTaskId !== state.lastDebugTaskId) {
+    state.lastDebugTaskId = debugTaskId;
+    state.lastConsoleLogIndex = 0;
+    state.lastDebugError = "";
   }
 
   const panel = ensureRuntimeDebugPanel();
@@ -1504,6 +1511,17 @@ startRuntimeDebugPolling();
     state.projectId = snapshot.project_id || null;
     state.taskId = snapshot.task_id || null;
     state.status = snapshot.status || "idle";
+
+    if (state.taskId && String(state.taskId) !== state.lastDebugTaskId) {
+      state.lastConsoleLogIndex = 0;
+      state.lastDebugError = "";
+      fetchRuntimeDebug().catch((error) => {
+        if (error?.message && error.message !== state.lastDebugError) {
+          console.error("[runtime-debug-fetch-error]", error);
+          state.lastDebugError = error.message;
+        }
+      });
+    }
 
     const progress = Number(snapshot.progress_percent || 0);
     const displayPayload = stageDisplayPayload(snapshot);

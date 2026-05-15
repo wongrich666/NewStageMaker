@@ -91,6 +91,11 @@ class TaskLifecycleMixin:
         )
         self._tasks[task_id] = record
         self._projects[project_id] = record
+        self._append_log(
+            record,
+            title="任务创建",
+            message="任务已创建，准备开始生成。",
+        )
         self._save_resume_checkpoint(record)
         self._persist_snapshot(record)
 
@@ -870,6 +875,11 @@ class TaskLifecycleMixin:
 
     def _run_task(self, record: TaskRecord) -> None:
         self._update_snapshot(record, status="running", message="开始执行工作流。")
+        self._append_log(
+            record,
+            title="任务启动",
+            message="开始执行工作流。",
+        )
         runtime: WorkflowRuntime | None = None
         try:
             from .fastgpt_client import FastGPTClient
