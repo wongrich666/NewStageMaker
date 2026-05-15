@@ -13,7 +13,6 @@ __pycache__/
 htmlcov/
 cache/
 
-
 # OS / editor noise
 .DS_Store
 Thumbs.db
@@ -31,7 +30,6 @@ output/
 logs/
 tmp/
 temp/
-cache/
 generated/
 intermediate/
 .tmp_test_workspaces/

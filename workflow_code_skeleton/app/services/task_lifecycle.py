@@ -10,7 +10,6 @@ globals().update(
 )
 from .task_state import TaskControl, TaskRecord, TaskTerminated, WorkflowRuntime
 
-
 class TaskLifecycleMixin:
     def start_task(
         self,

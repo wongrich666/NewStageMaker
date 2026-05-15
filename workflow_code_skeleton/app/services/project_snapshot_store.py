@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 """Extracted TaskManager mixin for ProjectSnapshotStoreMixin."""
