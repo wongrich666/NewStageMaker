@@ -1185,6 +1185,22 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             ) from exc
 
     try:
+        raw_debug_dir = _repo_root() / "cache" / "raw_fastgpt_debug"
+        raw_debug_dir.mkdir(parents=True, exist_ok=True)
+        raw_debug_path = raw_debug_dir / f"stage{definition.stage}_raw_response.json"
+        raw_debug_path.write_text(
+            json.dumps(response_json, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        logger.warning(
+            "[framework_planner_raw_debug] wrote raw FastGPT response stage=%s path=%s",
+            definition.stage,
+            raw_debug_path,
+        )
+    except Exception:
+        logger.exception("[framework_planner_raw_debug] failed to write raw response")
+
+    try:
         data, display_text, parse_warnings = _extract_stage_output(
             definition=definition,
             workflow_spec=workflow_spec,
@@ -1234,6 +1250,27 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 sorted(normalized_payload.keys()),
                 exc,
             )
+            data, display_text, parse_warnings = _force_repair_stage_output_from_raw_fastgpt(
+                definition=definition,
+                response_json=response_json,
+                data=data,
+                display_text=display_text,
+                parse_warnings=parse_warnings,
+            )
+
+            data = _repair_stage_output_with_payload(
+                definition.stage,
+                data,
+                normalized_payload,
+            )
+            if not display_text:
+                display_text = _extract_display_text(
+                    response_json,
+                    data,
+                    stage=definition.stage,
+                    payload_keys=sorted(normalized_payload.keys()),
+                )
+
             print_stage_debug(
                 definition.stage,
                 {
@@ -1255,6 +1292,37 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 status_code=502,
                 detail=debug_detail,
             ) from exc
+
+    # FastGPT raw response repair must run on the normal success path.
+    # _extract_stage_output may return a safe placeholder without raising,
+    # so relying on the except branch is not enough.
+    data, display_text, parse_warnings = _force_repair_stage_output_from_raw_fastgpt(
+        definition=definition,
+        response_json=response_json,
+        data=data,
+        display_text=display_text,
+        parse_warnings=parse_warnings,
+    )
+
+    data = _normalize_stage_output(
+        definition.stage,
+        data,
+        parse_warnings=parse_warnings,
+    )
+
+    data = _repair_stage_output_with_payload(
+        definition.stage,
+        data,
+        normalized_payload,
+    )
+
+    if not display_text:
+        display_text = _extract_display_text(
+            response_json,
+            data,
+            stage=definition.stage,
+            payload_keys=sorted(normalized_payload.keys()),
+        )
 
     stage_detail = {}
     if definition.stage == "05":
@@ -1829,6 +1897,284 @@ def _post_with_retries(
     raise final_error
 
 
+def _json_objects_from_text(text: Any) -> list[Any]:
+    """从字符串中提取一个或多个 JSON 对象。
+
+    FastGPT 某些 answerText/text.content 会出现：
+    1. 单个 JSON 字符串；
+    2. 两个 JSON 对象连续拼接；
+    3. 前后带空白或非 JSON 文本。
+    这里不能只用 json.loads()，需要 raw_decode 扫描。
+    """
+    if not isinstance(text, str):
+        return []
+    raw = text.strip()
+    if not raw:
+        return []
+
+    try:
+        return [json.loads(raw)]
+    except Exception:
+        pass
+
+    decoder = json.JSONDecoder()
+    results: list[Any] = []
+    index = 0
+    length = len(raw)
+
+    while index < length:
+        next_object = raw.find("{", index)
+        next_array = raw.find("[", index)
+        starts = [pos for pos in (next_object, next_array) if pos >= 0]
+        if not starts:
+            break
+
+        index = min(starts)
+        try:
+            value, end = decoder.raw_decode(raw[index:])
+        except Exception:
+            index += 1
+            continue
+
+        results.append(value)
+        index += max(end, 1)
+
+    return results
+
+
+def _candidate_has_stage_output_field(candidate: Any, output_fields: tuple[str, ...]) -> bool:
+    """判断候选对象是否包含当前阶段约定输出字段。"""
+    if not isinstance(candidate, dict):
+        return False
+
+    for field in output_fields:
+        value = candidate.get(field)
+        if value not in (None, "", [], {}):
+            return True
+
+    data = candidate.get("data")
+    if isinstance(data, dict):
+        for field in output_fields:
+            value = data.get(field)
+            if value not in (None, "", [], {}):
+                return True
+
+    output = candidate.get("output")
+    if isinstance(output, dict):
+        for field in output_fields:
+            value = output.get(field)
+            if value not in (None, "", [], {}):
+                return True
+
+    return False
+
+
+def _iter_choice_message_texts(response_json: Any) -> list[str]:
+    """兼容 FastGPT/OpenAI 风格 choices[].message.content。
+
+    当前 FastGPT 返回里 content 可能不是 str，而是 list：
+    [
+      {"type": "reasoning", ...},
+      {"type": "text", "text": {"content": "..."}}
+    ]
+    """
+    if not isinstance(response_json, dict):
+        return []
+
+    texts: list[str] = []
+    choices = response_json.get("choices")
+    if not isinstance(choices, list):
+        return texts
+
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            continue
+
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            texts.append(content)
+            continue
+
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+
+                text_block = block.get("text")
+                if isinstance(text_block, dict):
+                    text_content = text_block.get("content")
+                    if isinstance(text_content, str) and text_content.strip():
+                        texts.append(text_content)
+
+                direct_content = block.get("content")
+                if isinstance(direct_content, str) and direct_content.strip():
+                    texts.append(direct_content)
+
+                # 工具调用返回里有时也会包一层 response 字符串。
+                tools = block.get("tools")
+                if isinstance(tools, list):
+                    for tool in tools:
+                        if isinstance(tool, dict):
+                            response_text = tool.get("response")
+                            if isinstance(response_text, str) and response_text.strip():
+                                texts.append(response_text)
+
+    return texts
+
+
+def _iter_fastgpt_structured_output_candidates(
+    response_json: Any,
+    output_fields: tuple[str, ...],
+) -> list[tuple[str, Any]]:
+    """从 FastGPT 原始返回中优先提取真正的阶段业务 JSON。
+
+    优先级：
+    1. responseData[].textOutput
+    2. responseData[].updateVarResult[]
+    3. newVariables 中所有字符串变量
+    4. choices[].message.content 的 text 块
+    """
+    candidates: list[tuple[str, Any]] = []
+    seen: set[str] = set()
+
+    def add_candidate(source: str, value: Any) -> None:
+        parsed_values: list[Any]
+
+        if isinstance(value, str):
+            parsed_values = _json_objects_from_text(value)
+        else:
+            parsed_values = [value]
+
+        for parsed in parsed_values:
+            if not _candidate_has_stage_output_field(parsed, output_fields):
+                continue
+            try:
+                key = json.dumps(parsed, ensure_ascii=False, sort_keys=True, default=str)
+            except Exception:
+                key = repr(parsed)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append((source, parsed))
+
+    if not isinstance(response_json, dict):
+        return candidates
+
+    response_data = response_json.get("responseData")
+    if isinstance(response_data, list):
+        for index, item in enumerate(response_data):
+            if not isinstance(item, dict):
+                continue
+
+            add_candidate(f"responseData[{index}].textOutput", item.get("textOutput"))
+            add_candidate(f"responseData[{index}].answerText", item.get("answerText"))
+
+            update_results = item.get("updateVarResult")
+            if isinstance(update_results, list):
+                for sub_index, value in enumerate(update_results):
+                    add_candidate(f"responseData[{index}].updateVarResult[{sub_index}]", value)
+
+            tool_detail = item.get("toolDetail")
+            if isinstance(tool_detail, list):
+                for sub_index, detail in enumerate(tool_detail):
+                    if not isinstance(detail, dict):
+                        continue
+                    add_candidate(f"responseData[{index}].toolDetail[{sub_index}].response", detail.get("response"))
+                    add_candidate(
+                        f"responseData[{index}].toolDetail[{sub_index}].toolParamsResult",
+                        detail.get("toolParamsResult"),
+                    )
+
+    new_variables = response_json.get("newVariables")
+    if isinstance(new_variables, dict):
+        for key, value in new_variables.items():
+            add_candidate(f"newVariables.{key}", value)
+
+    for index, text in enumerate(_iter_choice_message_texts(response_json)):
+        add_candidate(f"choices.message.content[{index}]", text)
+
+    return candidates
+
+
+def _stage_payload_object_from_candidate(candidate: Any, output_fields: tuple[str, ...]) -> dict[str, Any]:
+    """从候选对象中取出真正包含阶段输出字段的 dict。"""
+    if not isinstance(candidate, dict):
+        return {}
+
+    for wrapper_key in ("output", "data"):
+        wrapped = candidate.get(wrapper_key)
+        if isinstance(wrapped, dict):
+            for field in output_fields:
+                value = wrapped.get(field)
+                if value not in (None, "", [], {}):
+                    return wrapped
+
+    for field in output_fields:
+        value = candidate.get(field)
+        if value not in (None, "", [], {}):
+            return candidate
+
+    return {}
+
+
+def _force_repair_stage_output_from_raw_fastgpt(
+    *,
+    definition: Any,
+    response_json: Any,
+    data: Any,
+    display_text: str,
+    parse_warnings: list[str],
+) -> tuple[dict[str, Any], str, list[str]]:
+    """用 FastGPT 原始返回里的有效业务 JSON 覆盖兜底结果。"""
+    output_fields = tuple(getattr(definition, "output_fields", ()) or ())
+    if not output_fields:
+        return dict(data if isinstance(data, dict) else {}), display_text, parse_warnings
+
+    repaired = dict(data if isinstance(data, dict) else {})
+    warnings = list(parse_warnings or [])
+
+    candidates = _iter_fastgpt_structured_output_candidates(response_json, output_fields)
+    if not candidates:
+        return repaired, display_text, warnings
+
+    for source, candidate in candidates:
+        stage_object = _stage_payload_object_from_candidate(candidate, output_fields)
+        if not stage_object:
+            continue
+
+        copied_fields: list[str] = []
+        for field in output_fields:
+            value = stage_object.get(field)
+            if value not in (None, "", [], {}):
+                repaired[field] = value
+                copied_fields.append(field)
+
+        raw_display_text = stage_object.get("display_text")
+        if isinstance(raw_display_text, str) and raw_display_text.strip():
+            display_text = raw_display_text.strip()
+            repaired["display_text"] = display_text
+
+        if copied_fields:
+            warnings.append(
+                f"已从 FastGPT 原始返回修复阶段输出 source={source} fields={','.join(copied_fields)}"
+            )
+            try:
+                logger.warning(
+                    "[framework_planner_parser_repair] stage=%s source=%s fields=%s",
+                    getattr(definition, "stage", ""),
+                    source,
+                    copied_fields,
+                )
+            except Exception:
+                pass
+            return repaired, display_text, warnings
+
+    return repaired, display_text, warnings
+
+
 def _extract_stage_output(
     *,
     definition: FrameworkPlannerStageDefinition,
@@ -1868,6 +2214,12 @@ def _extract_stage_output(
                 payload_keys=stage_payload_keys,
             )
         )
+        structured_candidates = _iter_fastgpt_structured_output_candidates(
+            response_json,
+            definition.output_fields,
+        )
+        if structured_candidates:
+            response_candidates = structured_candidates + response_candidates
     except Exception as exc:
         _log_stage_output_parse_exception(
             stage=definition.stage,
@@ -2579,13 +2931,25 @@ def _normalize_stage_output(
         elif not isinstance(normalized.get("validation_report"), (dict, list, str)):
             warnings.append("validation_report 类型异常，已回退为对象占位")
             _log_field_type_mismatch(stage, "validation_report", "dict/list/str", normalized.get("validation_report"))
-        normalized["framework_plan_package"] = _normalize_object_like(
-            normalized.get("framework_plan_package"),
-            key_name="content",
+        normalized["framework_plan_package"] = _sanitize_framework_plan_package(
+            normalized.get("framework_plan_package")
         )
-        normalized["validation_report"] = _normalize_validation_report(
-            normalized.get("validation_report")
-        )
+
+        validation_report = _normalize_validation_report(normalized.get("validation_report"))
+
+        # 如果 FastGPT 没给 validation_report，或者只剩默认占位，则用 package 自动生成一个可用校验报告。
+        summary_text = str(validation_report.get("summary") or "").strip() if isinstance(validation_report,
+                                                                                         dict) else ""
+        is_placeholder_validation = summary_text in {"", "未明确，需后续确认……"}
+
+        if validation_missing or is_placeholder_validation:
+            validation_report = _build_validation_report_from_package(
+                normalized["framework_plan_package"],
+                parse_warnings=warnings,
+            )
+
+        normalized["validation_report"] = validation_report
+
         if warnings:
             normalized["validation_report"] = _attach_parse_warnings_to_validation_report(
                 normalized["validation_report"],
@@ -3398,36 +3762,93 @@ def _ensure_source_brief_core_fields(value: dict[str, Any]) -> dict[str, Any]:
 
 def _ensure_worldview_core_fields(value: dict[str, Any]) -> dict[str, Any]:
     result = dict(value if isinstance(value, dict) else {})
-    content = str(result.get("content") or result.get("summary") or result.get("core_setting") or "").strip()
+
+    summary = str(result.get("summary") or result.get("content") or result.get("core_setting") or "").strip()
+
     result.setdefault("world_type", result.get("type") or "现实/类型化世界")
-    result.setdefault("core_setting", content or result.get("setting") or "核心世界设定待人工补充")
-    result.setdefault("main_conflict", result.get("conflict") or "主角目标与外部阻力形成持续对抗")
-    result.setdefault("rules", result.get("world_rules") or [])
-    result.setdefault("tone", result.get("style") or "强情绪、强节奏、强反转")
+
+    if "core_setting" not in result or result.get("core_setting") in (None, "", [], {}):
+        result["core_setting"] = summary or result.get("setting") or "核心世界设定待人工补充"
+
+    if "main_conflict" not in result or result.get("main_conflict") in (None, "", [], {}):
+        conflict_engine = result.get("conflict_engine")
+        if isinstance(conflict_engine, list) and conflict_engine:
+            result["main_conflict"] = str(conflict_engine[0])
+        else:
+            result["main_conflict"] = result.get("conflict") or "主角目标与外部阻力形成持续对抗"
+
+    if "rules" not in result or result.get("rules") in (None, "", [], {}):
+        core_rules = result.get("core_rules")
+        world_rules = result.get("world_rules")
+        if isinstance(core_rules, list) and core_rules:
+            result["rules"] = core_rules
+        elif isinstance(world_rules, list) and world_rules:
+            result["rules"] = world_rules
+        else:
+            result["rules"] = []
+
+    if "tone" not in result or result.get("tone") in (None, "", [], {}):
+        visual_style = result.get("visual_style")
+        if isinstance(visual_style, list) and visual_style:
+            result["tone"] = str(visual_style[0])
+        else:
+            result["tone"] = result.get("style") or "强情绪、强节奏、强反转"
+
     result["ready_for_script_workflow"] = True
     return result
 
 
 def _ensure_character_core_fields(value: dict[str, Any]) -> dict[str, Any]:
     result = dict(value if isinstance(value, dict) else {})
+
+    characters = result.get("characters")
+    if isinstance(characters, list) and characters:
+        normalized_characters = [item for item in characters if isinstance(item, dict)]
+    else:
+        normalized_characters = []
+
     protagonist = result.get("protagonist")
     if not isinstance(protagonist, dict):
+        protagonist = {}
+
+    if not protagonist and normalized_characters:
+        for item in normalized_characters:
+            role_text = str(item.get("role") or item.get("id") or "").lower()
+            if "protagonist" in role_text or "主角" in str(item.get("role") or ""):
+                protagonist = item
+                break
+        if not protagonist:
+            protagonist = normalized_characters[0]
+
+    if not protagonist:
         protagonist = {
-            "name": str(result.get("protagonist_name") or "主角"),
-            "goal": str(result.get("protagonist_goal") or "完成核心目标并推动主线"),
-            "flaw": str(result.get("protagonist_flaw") or "关键弱点待人工补充"),
-            "arc": str(result.get("protagonist_arc") or "从被动承压转向主动破局"),
+            "name": "主角",
+            "goal": "完成核心目标并推动主线",
+            "flaw": "关键弱点待人工补充",
+            "arc": "从被动承压转向主动破局",
         }
+
     result["protagonist"] = protagonist
+
     main_characters = result.get("main_characters")
     if not isinstance(main_characters, list) or not main_characters:
-        main_characters = [protagonist]
-        antagonist = result.get("antagonist")
-        if isinstance(antagonist, dict):
-            main_characters.append(antagonist)
+        main_characters = normalized_characters or [protagonist]
     result["main_characters"] = main_characters
-    result.setdefault("character_relationships", result.get("relationships") or [])
-    result.setdefault("emotion_engine", result.get("emotional_core") or "围绕目标、阻力、关系变化持续推进情绪")
+
+    if "character_relationships" not in result or result.get("character_relationships") in (None, "", [], {}):
+        relationship_map = result.get("relationship_map")
+        if isinstance(relationship_map, list) and relationship_map:
+            result["character_relationships"] = relationship_map
+        else:
+            result["character_relationships"] = result.get("relationships") or []
+
+    if "emotion_engine" not in result or result.get("emotion_engine") in (None, "", [], {}):
+        result["emotion_engine"] = (
+            result.get("character_system_summary")
+            or result.get("emotional_core")
+            or "围绕目标、阻力、关系变化持续推进情绪"
+        )
+
     result["ready_for_script_workflow"] = True
     return result
 
@@ -3567,27 +3988,105 @@ def _normalize_character_storylines(value: Any) -> list[dict[str, Any]]:
 
 
 def _normalize_adaptation_guide(value: Any) -> dict[str, Any]:
+    def first_text(source: dict[str, Any], keys: tuple[str, ...]) -> str:
+        for key in keys:
+            item = source.get(key)
+            if item in (None, "", [], {}):
+                continue
+            if isinstance(item, (dict, list)):
+                return json.dumps(item, ensure_ascii=False, indent=2)
+            return str(item)
+        return ""
+
+    if isinstance(value, str):
+        parsed = _parse_candidate_value(value)
+        if isinstance(parsed, (dict, list)) and parsed is not value:
+            return _normalize_adaptation_guide(parsed)
+        text = str(value or "").strip()
+        return {
+            "core_setting_adjustments": text,
+            "structure_and_rhythm": "",
+            "visualization_strategy": "",
+            "character_emotion_strategy": "",
+        }
+
     if isinstance(value, dict):
-        if {
-            "core_setting_adjustments",
-            "structure_and_rhythm",
-            "visualization_strategy",
-            "character_emotion_strategy",
-        }.intersection(value.keys()):
-            return {
-                "core_setting_adjustments": str(value.get("core_setting_adjustments") or ""),
-                "structure_and_rhythm": str(value.get("structure_and_rhythm") or ""),
-                "visualization_strategy": str(value.get("visualization_strategy") or ""),
-                "character_emotion_strategy": str(value.get("character_emotion_strategy") or ""),
-            }
+        nested = value.get("adaptation_guide")
+        if isinstance(nested, (dict, list, str)) and nested is not value:
+            return _normalize_adaptation_guide(nested)
+
+        data = value.get("data")
+        if isinstance(data, dict) and data.get("adaptation_guide") not in (None, "", [], {}):
+            return _normalize_adaptation_guide(data.get("adaptation_guide"))
+
+        # 兼容已经被错误塞进 core_setting_adjustments 的 JSON 字符串。
+        packed = value.get("core_setting_adjustments")
+        if isinstance(packed, str):
+            parsed_packed = _parse_candidate_value(packed)
+            if isinstance(parsed_packed, dict):
+                unpacked = _normalize_adaptation_guide(parsed_packed)
+                if unpacked.get("structure_and_rhythm") or unpacked.get("visualization_strategy") or unpacked.get("character_emotion_strategy"):
+                    return unpacked
+
+        result = {
+            "core_setting_adjustments": first_text(
+                value,
+                (
+                    "core_setting_adjustments",
+                    "core_setting_adjustment",
+                    "core_setting",
+                    "setting_adjustments",
+                    "worldview_adjustments",
+                ),
+            ),
+            "structure_and_rhythm": first_text(
+                value,
+                (
+                    "structure_and_rhythm",
+                    "narrative_rhythm_structure",
+                    "rhythm_structure",
+                    "structure_rhythm",
+                    "narrative_structure",
+                ),
+            ),
+            "visualization_strategy": first_text(
+                value,
+                (
+                    "visualization_strategy",
+                    "visualization",
+                    "visual_strategy",
+                    "visual_design",
+                ),
+            ),
+            "character_emotion_strategy": first_text(
+                value,
+                (
+                    "character_emotion_strategy",
+                    "character_emotion_shaping",
+                    "emotion_strategy",
+                    "emotional_strategy",
+                ),
+            ),
+        }
+
+        constraints = value.get("hard_constraints_for_script_workflow") or value.get("hard_constraints")
+        if constraints not in (None, "", [], {}):
+            result["hard_constraints_for_script_workflow"] = constraints
+
+        if any(result.get(key) for key in ("core_setting_adjustments", "structure_and_rhythm", "visualization_strategy", "character_emotion_strategy")):
+            return result
+
         return {
             "core_setting_adjustments": json.dumps(value, ensure_ascii=False, indent=2),
             "structure_and_rhythm": "",
             "visualization_strategy": "",
             "character_emotion_strategy": "",
         }
+
     if isinstance(value, list):
         items = [item for item in value if isinstance(item, dict)]
+        if len(items) == 1:
+            return _normalize_adaptation_guide(items[0])
         texts = [str(item.get("content") or item.get("summary") or "") for item in items]
         while len(texts) < 4:
             texts.append("")
@@ -3597,12 +4096,97 @@ def _normalize_adaptation_guide(value: Any) -> dict[str, Any]:
             "visualization_strategy": texts[2],
             "character_emotion_strategy": texts[3],
         }
+
     text = str(value or "").strip()
     return {
         "core_setting_adjustments": text,
         "structure_and_rhythm": "",
         "visualization_strategy": "",
         "character_emotion_strategy": "",
+    }
+
+
+def _sanitize_framework_plan_package(value: Any) -> dict[str, Any]:
+    package = _normalize_object_like(value, key_name="content")
+
+    # 如果 FastGPT 变量名里包了一层真正的 package，则优先拆出来。
+    for nested_key in tuple(package.keys()):
+        nested = package.get(nested_key)
+        if not isinstance(nested, dict):
+            continue
+        if isinstance(nested.get("framework_plan_package"), dict):
+            package = dict(nested["framework_plan_package"])
+            break
+
+    allowed_keys = {
+        "mode",
+        "basic_config",
+        "source_brief",
+        "worldview_plan",
+        "character_plan",
+        "beat_checkpoint_timeline",
+        "checkpoint_explanation",
+        "character_storylines",
+        "storyline_decisions",
+        "adaptation_guide",
+        "user_edit_history",
+        "adaptation_direction",
+        "handoff_notes",
+        "storage_key",
+    }
+
+    return {
+        key: value
+        for key, value in package.items()
+        if key in allowed_keys
+    }
+
+
+def _build_validation_report_from_package(
+    package: dict[str, Any],
+    *,
+    parse_warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    beat_count = len(package.get("beat_checkpoint_timeline") or [])
+    storyline_count = len(package.get("character_storylines") or [])
+
+    missing: list[str] = []
+    for key in (
+        "basic_config",
+        "source_brief",
+        "worldview_plan",
+        "character_plan",
+        "beat_checkpoint_timeline",
+        "character_storylines",
+        "adaptation_guide",
+    ):
+        if package.get(key) in (None, "", [], {}):
+            missing.append(key)
+
+    checks = {
+        "beat_count": beat_count,
+        "storyline_count": storyline_count,
+        "has_source_brief": bool(package.get("source_brief")),
+        "has_worldview_plan": bool(package.get("worldview_plan")),
+        "has_character_plan": bool(package.get("character_plan")),
+        "has_adaptation_guide": bool(package.get("adaptation_guide")),
+        "missing_fields": missing,
+        "missing_fields": missing,
+    }
+
+    warnings = list(parse_warnings or [])
+    if beat_count != 15:
+        warnings.append(f"beat_checkpoint_timeline 数量不是 15：当前 {beat_count}")
+    if missing:
+        warnings.append(f"框架策划包缺少字段：{', '.join(missing)}")
+
+    passed = not missing and beat_count == 15
+
+    return {
+        "passed": passed,
+        "summary": "框架策划包结构完整，可交付后续正式剧本生成链路。" if passed else "框架策划包仍有缺口，需要修订后再交付。",
+        "checks": checks,
+        "warnings": warnings,
     }
 
 
@@ -4224,3 +4808,71 @@ def _preview_return_object(value: Any, *, limit: int = 2400) -> str:
             )
         except Exception:
             return "<unprintable>"
+
+
+def _payload_config_value(payload: dict[str, Any], key: str) -> Any:
+    """按优先级从 payload/basic_config/locked_basic_config 读取用户锁定配置。"""
+    if not isinstance(payload, dict):
+        return None
+
+    value = payload.get(key)
+    if value not in (None, "", [], {}):
+        return value
+
+    for container_name in ("locked_basic_config", "basic_config"):
+        container = payload.get(container_name)
+        if isinstance(container, dict):
+            value = container.get(key)
+            if value not in (None, "", [], {}):
+                return value
+
+    return None
+
+
+def _overlay_source_brief_locked_fields(
+    source_brief: Any,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """stage01 输出必须继承用户明确填写的基础配置。"""
+    result = dict(source_brief if isinstance(source_brief, dict) else {})
+
+    for key in (
+        "source_title",
+        "target_format",
+        "season_count",
+        "episodes_per_season",
+        "minutes_per_episode",
+        "adaptation_direction",
+    ):
+        value = _payload_config_value(payload, key)
+        if value not in (None, "", [], {}):
+            result[key] = value
+
+    project_title = _payload_config_value(payload, "project_title") or _payload_config_value(payload, "title")
+    if result.get("source_title") in (None, "", "未命名项目") and project_title not in (None, "", [], {}):
+        result["source_title"] = project_title
+
+    source_title = str(result.get("source_title") or "").strip()
+    if source_title:
+        if str(result.get("title") or "").strip() in {"", "未命名项目"}:
+            result["title"] = source_title
+        if str(result.get("project_title") or "").strip() in {"", "未命名项目"}:
+            result["project_title"] = source_title
+
+    return result
+
+
+def _repair_stage_output_with_payload(
+    stage: str,
+    data: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """用用户锁定输入修复阶段输出中的关键继承字段。"""
+    result = dict(data if isinstance(data, dict) else {})
+
+    if stage == "01":
+        source_brief = result.get("source_brief")
+        source_brief = _overlay_source_brief_locked_fields(source_brief, payload)
+        result["source_brief"] = _ensure_source_brief_core_fields(source_brief)
+
+    return result
