@@ -115,6 +115,9 @@
     taskId: null,
     status: "idle",
     pollTimer: null,
+    debugPollTimer: null,
+    lastConsoleLogIndex: 0,
+    lastDebugError: "",
     availableModels: [],
     latestSnapshot: null,
     projects: [],
@@ -643,6 +646,210 @@
     if (!els.toolOutputBox) return;
     els.toolOutputBox.textContent = friendlyErrorText(error, fallback);
   }
+
+  function runtimeDebugUrl(taskId) {
+  const base = `/api/tasks/${encodeURIComponent(taskId)}/debug`;
+  const token = currentAuthToken();
+  if (!token) {
+    return base;
+  }
+  return `${base}?auth_token=${encodeURIComponent(token)}`;
+}
+
+function ensureRuntimeDebugPanel() {
+  let panel = document.getElementById("runtime-debug-panel");
+  if (panel) {
+    return panel;
+  }
+
+  panel = document.createElement("section");
+  panel.id = "runtime-debug-panel";
+  panel.style.cssText = [
+    "position:fixed",
+    "right:16px",
+    "bottom:16px",
+    "z-index:9999",
+    "width:min(520px, calc(100vw - 32px))",
+    "max-height:70vh",
+    "overflow:auto",
+    "background:#111827",
+    "color:#e5e7eb",
+    "border:1px solid rgba(255,255,255,0.16)",
+    "border-radius:12px",
+    "box-shadow:0 18px 45px rgba(0,0,0,0.35)",
+    "padding:12px",
+    "font-size:12px",
+    "line-height:1.5",
+  ].join(";");
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+      <strong>运行 cache / logs</strong>
+      <button type="button" data-role="close-debug-panel" style="border:0;border-radius:8px;padding:4px 8px;cursor:pointer;">隐藏</button>
+    </div>
+    <div data-role="summary" style="margin-bottom:8px;color:#cbd5e1;"></div>
+    <details open style="margin-bottom:8px;">
+      <summary style="cursor:pointer;color:#f9fafb;">Cache snapshot</summary>
+      <pre data-role="cache" style="white-space:pre-wrap;word-break:break-word;background:#020617;border-radius:8px;padding:8px;margin:8px 0 0;max-height:260px;overflow:auto;"></pre>
+    </details>
+    <details open>
+      <summary style="cursor:pointer;color:#f9fafb;">Runtime logs</summary>
+      <div data-role="logs" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
+    </details>
+  `;
+
+  const closeButton = panel.querySelector("[data-role='close-debug-panel']");
+  closeButton?.addEventListener("click", () => {
+    panel.style.display = "none";
+  });
+
+  document.body.appendChild(panel);
+  return panel;
+}
+
+function renderRuntimeDebug(debug) {
+  if (!debug || typeof debug !== "object") {
+    return;
+  }
+
+  const panel = ensureRuntimeDebugPanel();
+  panel.style.display = "";
+
+  const summary = panel.querySelector("[data-role='summary']");
+  const cacheBox = panel.querySelector("[data-role='cache']");
+  const logsBox = panel.querySelector("[data-role='logs']");
+
+  const logs = Array.isArray(debug.logs) ? debug.logs : [];
+  const cacheSnapshot = {
+    task_id: debug.task_id,
+    project_id: debug.project_id,
+    status: debug.status,
+    message: debug.message,
+    error: debug.error,
+    current_stage: debug.current_stage,
+    current_stage_label: debug.current_stage_label,
+    current_node_id: debug.current_node_id,
+    current_node_name: debug.current_node_name,
+    current_batch: debug.current_batch,
+    progress_percent: debug.progress_percent,
+    generated_episodes: debug.generated_episodes,
+    cache_retained: debug.cache_retained,
+    awaiting_user_confirmation: debug.awaiting_user_confirmation,
+    runtime_cache_notice: debug.runtime_cache_notice,
+    resume_checkpoint_exists: debug.resume_checkpoint_exists,
+    resume_checkpoint: debug.resume_checkpoint,
+    debug_state: debug.debug_state,
+    prompt_fixes: debug.prompt_fixes,
+  };
+
+  if (summary) {
+    summary.textContent = [
+      `status=${debug.status || "-"}`,
+      `stage=${debug.current_stage || "-"}`,
+      `node=${debug.current_node_name || debug.current_node_id || "-"}`,
+      `logs=${logs.length}`,
+      `checkpoint=${debug.resume_checkpoint_exists ? "yes" : "no"}`,
+    ].join(" | ");
+  }
+
+  if (cacheBox) {
+    cacheBox.textContent = JSON.stringify(cacheSnapshot, null, 2);
+  }
+
+  if (logsBox) {
+    if (!logs.length) {
+      logsBox.innerHTML = `<div style="color:#94a3b8;">暂无运行日志。</div>`;
+    } else {
+      logsBox.innerHTML = logs
+        .slice(-80)
+        .map((item) => {
+          const level = escapeHtml(String(item.level || "info"));
+          const time = escapeHtml(String(item.time || ""));
+          const title = escapeHtml(String(item.title || ""));
+          const message = escapeHtml(String(item.message || ""));
+          const nodeId = item.node_id ? ` <span style="color:#94a3b8;">${escapeHtml(String(item.node_id))}</span>` : "";
+          return `
+            <div style="border:1px solid rgba(255,255,255,0.10);border-radius:8px;padding:6px;background:rgba(255,255,255,0.04);">
+              <div style="color:#93c5fd;">[${level}] ${time}${nodeId}</div>
+              <div style="font-weight:600;color:#f9fafb;">${title}</div>
+              <div style="color:#d1d5db;">${message}</div>
+            </div>
+          `;
+        })
+        .join("");
+    }
+  }
+
+  for (const item of logs) {
+    const index = Number(item.index || 0);
+    if (!index || index <= state.lastConsoleLogIndex) {
+      continue;
+    }
+
+    const line = [
+      "[runtime-log]",
+      item.time || "",
+      item.level || "info",
+      item.title || "",
+      item.message || "",
+    ].join(" ");
+
+    if (String(item.level || "").toLowerCase() === "error") {
+      console.error(line, item);
+    } else {
+      console.log(line, item);
+    }
+
+    state.lastConsoleLogIndex = Math.max(state.lastConsoleLogIndex, index);
+  }
+
+  if (debug.error && debug.error !== state.lastDebugError) {
+    console.error("[runtime-error]", debug.error);
+    state.lastDebugError = debug.error;
+  }
+}
+
+async function fetchRuntimeDebug() {
+  const taskId = String(state.taskId || state.latestSnapshot?.task_id || "").trim();
+  if (!taskId) {
+    return;
+  }
+
+  state.taskId = taskId;
+
+  const response = await fetch(runtimeDebugUrl(taskId), {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload || payload.ok === false) {
+    const message = payload?.error || payload?.message || `debug 请求失败：${response.status}`;
+    throw new Error(message);
+  }
+
+  renderRuntimeDebug(payload.debug || {});
+}
+
+function startRuntimeDebugPolling() {
+  if (state.debugPollTimer) {
+    return;
+  }
+
+  state.debugPollTimer = window.setInterval(() => {
+    fetchRuntimeDebug().catch((error) => {
+      if (error?.message && error.message !== state.lastDebugError) {
+        console.error("[runtime-debug-fetch-error]", error);
+        state.lastDebugError = error.message;
+      }
+    });
+  }, 2000);
+
+  fetchRuntimeDebug().catch(() => {});
+}
+
+startRuntimeDebugPolling();
 
   function compactMessageText(value) {
     return String(value || "").trim();

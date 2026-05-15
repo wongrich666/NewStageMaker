@@ -10,6 +10,108 @@ globals().update(
 )
 from .task_state import TaskRecord
 
+SNAPSHOT_LOG_LIMIT = 200
+
+
+def _read_json_object(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        try:
+            _task_manager_common.logger.warning("读取项目快照失败：path=%s error=%s", path, exc)
+        except Exception:
+            pass
+        return None
+    if not isinstance(data, dict):
+        try:
+            _task_manager_common.logger.warning("项目快照不是 JSON object：path=%s type=%s", path, type(data).__name__)
+        except Exception:
+            pass
+        return None
+    return data
+
+
+def _write_json_object(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.tmp")
+    temp_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temp_path.replace(path)
+
+
+def _normalized_log_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    logs: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict):
+            logs.append(dict(item))
+    return logs[-SNAPSHOT_LOG_LIMIT:]
+
+
+def _next_log_index(logs: list[dict[str, Any]]) -> int:
+    if not logs:
+        return 1
+    last = logs[-1]
+    return max(1, _safe_int(last.get("index"), len(logs))) + 1
+
+
+def _sync_wait_tracking(
+    snapshot: dict[str, Any],
+    *,
+    previous_status: Any,
+    current_status: Any,
+    current_time_iso: str,
+) -> None:
+    """同步任务等待/运行耗时字段。
+
+    wait_started_at 表示当前 running/pending/pausing 区间的开始时间。
+    wait_elapsed_ms 表示已经累计完成的等待/运行毫秒数。
+    """
+
+    from datetime import datetime, timezone
+
+    running_statuses = set(WAITING_STATUSES)
+    previous = str(previous_status or "").strip().lower()
+    current = str(current_status or "").strip().lower()
+
+    def _parse_iso(value: Any) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            if text.endswith("Z"):
+                text = f"{text[:-1]}+00:00"
+            parsed = datetime.fromisoformat(text)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed
+        except Exception:
+            return None
+
+    current_dt = _parse_iso(current_time_iso) or datetime.now(timezone.utc)
+    elapsed_ms = max(0, _safe_int(snapshot.get("wait_elapsed_ms"), 0))
+
+    was_running = previous in running_statuses
+    is_running = current in running_statuses
+
+    if is_running:
+        if not was_running or not snapshot.get("wait_started_at"):
+            snapshot["wait_started_at"] = current_time_iso
+        snapshot["wait_elapsed_ms"] = max(0, elapsed_ms)
+        return
+
+    if was_running:
+        started_at = _parse_iso(snapshot.get("wait_started_at"))
+        if started_at is not None:
+            delta_ms = int(max(0, (current_dt - started_at).total_seconds() * 1000))
+            elapsed_ms += delta_ms
+
+    snapshot["wait_elapsed_ms"] = max(0, elapsed_ms)
+    snapshot["wait_started_at"] = None
+
 
 class ProjectSnapshotStoreMixin:
     def set_storage_root(
@@ -38,26 +140,37 @@ class ProjectSnapshotStoreMixin:
 
     def _load_index(self) -> dict[str, Any]:
         if self.index_path.exists():
-            try:
-                return json.loads(self.index_path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+            data = _read_json_object(self.index_path)
+            if data is not None:
+                changed = False
+                next_project_id = max(1, _safe_int(data.get("next_project_id"), 1))
+                if data.get("next_project_id") != next_project_id:
+                    data["next_project_id"] = next_project_id
+                    changed = True
+                latest_project_id = data.get("latest_project_id")
+                if latest_project_id is not None:
+                    normalized_latest = _safe_int(latest_project_id, 0)
+                    data["latest_project_id"] = normalized_latest or None
+                    changed = changed or data["latest_project_id"] != latest_project_id
+                latest_by_user = data.get("latest_project_by_user")
+                if not isinstance(latest_by_user, dict):
+                    data["latest_project_by_user"] = {}
+                    changed = True
+                if changed:
+                    self._save_index(data)
+                return data
         data = {"next_project_id": 1, "latest_project_id": None}
         self._save_index(data)
         return data
 
     def _save_index(self, data: dict[str, Any] | None = None) -> None:
         payload = data or self._index
-        self.index_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        _write_json_object(self.index_path, payload)
 
     def _repair_persisted_snapshots(self) -> None:
         for path in self.projects_dir.glob("*.json"):
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
+            data = _read_json_object(path)
+            if data is None:
                 continue
             changed = False
             if data.get("status") in PROJECT_RUNNING_STATUSES:
@@ -97,10 +210,7 @@ class ProjectSnapshotStoreMixin:
                         data["message"] = COMPLETION_PENDING_MESSAGE
                         changed = True
             if changed:
-                path.write_text(
-                    json.dumps(data, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
+                _write_json_object(path, data)
 
     def _project_path(self, project_id: int) -> Path:
         return self.projects_dir / f"{project_id}.json"
@@ -149,17 +259,12 @@ class ProjectSnapshotStoreMixin:
         with record.lock:
             if bool(record.snapshot.get("_deleted")):
                 return
-            path.write_text(
-                json.dumps(record.snapshot, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            snapshot = copy.deepcopy(record.snapshot)
+        _write_json_object(path, snapshot)
 
     def _build_resume_checkpoint(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         checkpoint = copy.deepcopy(snapshot)
-        # 恢复快照只保留“可继续执行所需的稳定状态”；
-        # 错误文案、结束时间和滚动日志属于一次性运行痕迹，不应污染下一次继续生成。
         checkpoint.pop("_resume_checkpoint", None)
-        checkpoint.pop("logs", None)
         checkpoint.pop("error", None)
         checkpoint.pop("finished_at", None)
         return checkpoint
@@ -173,72 +278,133 @@ class ProjectSnapshotStoreMixin:
         checkpoint = record.clone_snapshot().get("_resume_checkpoint")
         if not isinstance(checkpoint, dict):
             return
+
         fields_to_restore = (
-            "title",
             "artifacts",
-            "debug_state",
-            "prompt_fixes",
-            "input_payload",
-            "workflow_spec_path",
-            "model_option",
-            "total_episodes",
-            "progress_percent",
-            "generated_episodes",
+            "display_stage",
+            "display_payload",
+            "display_history",
+            "stage_summaries",
+            "stage_inputs",
+            "stage_outputs",
+            "stage_errors",
+            "stage_statuses",
+            "stage_payloads",
+            "stage_artifacts",
+            "stage_cache",
+            "runtime_state",
+            "runtime_cache_notice",
+            "cache_retained",
             "current_stage",
             "current_stage_label",
             "current_node_id",
             "current_node_name",
             "current_batch",
+            "progress_percent",
+            "generated_episodes",
+            "approved_batches",
+            "latest_batch_preview",
+            "final_output_text",
+            "final_docx_path",
+            "final_txt_path",
+            "awaiting_user_confirmation",
+            "needs_user_intervention",
+            "intervention_reason",
+            "debug_state",
+            "prompt_fixes",
         )
+
         restored = self._build_resume_checkpoint(checkpoint)
+
         with record.lock:
+            existing_logs = copy.deepcopy(record.snapshot.get("logs", []))
+            existing_last_log = copy.deepcopy(record.snapshot.get("last_log"))
+
             for key in fields_to_restore:
                 if key in restored:
                     record.snapshot[key] = copy.deepcopy(restored[key])
+
+            if existing_logs:
+                record.snapshot["logs"] = existing_logs[-200:]
+            elif isinstance(restored.get("logs"), list):
+                record.snapshot["logs"] = copy.deepcopy(restored["logs"][-200:])
+            else:
+                record.snapshot.setdefault("logs", [])
+
+            if existing_last_log:
+                record.snapshot["last_log"] = existing_last_log
+            elif record.snapshot.get("logs"):
+                record.snapshot["last_log"] = record.snapshot["logs"][-1]
+            else:
+                record.snapshot.pop("last_log", None)
+
             record.snapshot["_resume_checkpoint"] = restored
             record.snapshot["updated_at"] = now_iso()
+
         self._persist_snapshot(record)
 
     def _append_log(
-        self,
-        record: TaskRecord,
-        *,
-        title: str,
-        message: str,
-        node_id: str | None = None,
+            self,
+            record: TaskRecord,
+            *,
+            title: str,
+            message: str,
+            node_id: str | None = None,
+            level: str = "info",
     ) -> None:
+        entry = {
+            "time": now_iso(),
+            "level": str(level or "info").lower(),
+            "title": str(title or "").strip(),
+            "message": str(message or "").strip(),
+            "node_id": node_id,
+        }
+
+        try:
+            _task_manager_common.logger.info(
+                "[task:%s project:%s] %s%s%s",
+                record.task_id,
+                record.project_id,
+                entry["title"],
+                f" node={node_id}" if node_id else "",
+                f" - {entry['message']}" if entry["message"] else "",
+            )
+        except Exception:
+            pass
+
         with record.lock:
             logs = list(record.snapshot.get("logs", []))
-            logs.append(
-                {
-                    "time": now_iso(),
-                    "title": title,
-                    "message": message,
-                    "node_id": node_id,
-                }
-            )
+            entry["index"] = len(logs) + 1
+            logs.append(entry)
             record.snapshot["logs"] = logs[-200:]
+            record.snapshot["last_log"] = entry
             record.snapshot["updated_at"] = now_iso()
+
         self._persist_snapshot(record)
 
     def _update_snapshot(self, record: TaskRecord, **changes: Any) -> None:
         with record.lock:
             previous_status = record.snapshot.get("status")
+
             if "artifacts" in changes and isinstance(changes["artifacts"], dict):
                 merged_artifacts = dict(record.snapshot.get("artifacts", {}))
                 merged_artifacts.update(changes.pop("artifacts"))
                 record.snapshot["artifacts"] = merged_artifacts
 
             record.snapshot.update(changes)
+
             current_time = now_iso()
             current_status = record.snapshot.get("status", previous_status)
+
             _sync_wait_tracking(
                 record.snapshot,
                 previous_status=previous_status,
                 current_status=current_status,
                 current_time_iso=current_time,
             )
+
             record.snapshot["updated_at"] = current_time
+
         self._persist_snapshot(record)
 
     def _next_project_id(self) -> int:

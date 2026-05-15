@@ -110,21 +110,53 @@ def _payload_project_name(payload: Any) -> str:
     """
     if not isinstance(payload, dict):
         return "未命名项目"
-    for key in ("project_title", "title", "source_title"):
+    for key in ("project_title", "project_name", "title", "source_title", "script_title", "name"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
-    basic_config = payload.get("basic_config")
-    if isinstance(basic_config, dict):
-        for key in ("project_title", "title", "source_title"):
-            value = basic_config.get(key)
+    for container_name in ("basic_config", "input_payload", "asset", "project", "source_brief"):
+        container = payload.get(container_name)
+        if isinstance(container, dict):
+            for key in ("project_title", "project_name", "title", "source_title", "script_title", "name"):
+                value = container.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    asset_state = payload.get("asset_state")
+    if isinstance(asset_state, dict):
+        for key in ("project_title", "title", "source_title", "name"):
+            value = asset_state.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
-    # fallback 使用 project_id
     project_id = payload.get("project_id")
-    if isinstance(project_id, str) and project_id.strip():
-        return project_id.strip()
+    if project_id not in (None, "", 0, "0"):
+        text = str(project_id).strip()
+        if text and text.lower() != "unsaved":
+            return f"project_{text}" if text.isdigit() else text
     return "未命名项目"
+
+
+def _ensure_payload_project_title(payload: Any, project_id: Any = None) -> dict[str, Any]:
+    source = dict(payload) if isinstance(payload, dict) else {}
+    if project_id not in (None, "") and source.get("project_id") in (None, ""):
+        source["project_id"] = project_id
+    project_name = _payload_project_name(source)
+    if not str(source.get("project_title") or "").strip():
+        source["project_title"] = project_name
+    if not str(source.get("title") or "").strip():
+        source["title"] = project_name
+    if not str(source.get("source_title") or "").strip():
+        source["source_title"] = project_name
+    basic_config = source.get("basic_config")
+    if isinstance(basic_config, dict):
+        basic = dict(basic_config)
+        if not str(basic.get("project_title") or "").strip():
+            basic["project_title"] = project_name
+        if not str(basic.get("title") or "").strip():
+            basic["title"] = project_name
+        if not str(basic.get("source_title") or "").strip():
+            basic["source_title"] = project_name
+        source["basic_config"] = basic
+    return source
 
 
 def _project_history_id(project_id: Any, project_name: Any = "") -> str:
@@ -132,8 +164,8 @@ def _project_history_id(project_id: Any, project_name: Any = "") -> str:
     if name:
         return _safe_project_history_name(name)
     text = str(project_id or "").strip()
-    if text and not text.isdigit():
-        return _safe_project_history_name(text)
+    if text and text.lower() != "unsaved":
+        return _safe_project_history_name(f"project_{text}" if text.isdigit() else text)
     return "未命名项目"
 
 
@@ -206,19 +238,17 @@ def _raw_payload_summary(payload: Any) -> dict[str, Any]:
 
 
 def _debug_project_dir(payload: Any) -> Path:
-    project_name = _payload_project_name(payload) or (
-        payload.get("project_id") if isinstance(payload, dict) else ""
-    )
-    path = _repo_root() / "debug" / _project_history_id(project_name, project_name)
+    safe_payload = _ensure_payload_project_title(payload)
+    project_name = _payload_project_name(safe_payload)
+    path = _repo_root() / "debug" / _project_history_id(safe_payload.get("project_id"), project_name)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def _debug_cache_project_dir(payload: Any) -> Path:
-    project_name = _payload_project_name(payload) or (
-        payload.get("project_id") if isinstance(payload, dict) else ""
-    )
-    path = _repo_root() / "cache" / _project_history_id(project_name, project_name)
+    safe_payload = _ensure_payload_project_title(payload)
+    project_name = _payload_project_name(safe_payload)
+    path = _repo_root() / "cache" / _project_history_id(safe_payload.get("project_id"), project_name)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -315,7 +345,7 @@ def print_stage_debug(stage_number: Any, response_json: Any, payload: Any) -> No
     stage_name = definition.label if definition else "未知阶段"
     status = _debug_response_status(response_json)
     response_variables = _debug_collect_response_variables(response_json)
-    payload_variables = payload if isinstance(payload, dict) else {}
+    payload_variables = _ensure_payload_project_title(payload)
     key_order: list[str] = []
     if definition is not None:
         key_order.extend(definition.input_fields)
@@ -368,7 +398,7 @@ def write_framework_frontend_debug_event(
     payload: dict[str, Any] | None,
     detail: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    safe_payload = payload if isinstance(payload, dict) else {}
+    safe_payload = _ensure_payload_project_title(payload, project_id=project_id)
     safe_detail = detail if isinstance(detail, dict) else {}
     project_name = _payload_project_name(safe_payload) or _payload_project_name(safe_detail) or project_id
     debug_payload = {
@@ -417,16 +447,18 @@ def save_framework_stage_history(
     status: str,
     error: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    project_name = _payload_project_name(payload)
-    project_dir = _history_project_dir(project_id, project_name)
+    safe_payload = _ensure_payload_project_title(payload, project_id=project_id)
+    project_name = _payload_project_name(safe_payload)
+    project_dir = _history_project_dir(safe_payload.get("project_id"), project_name)
     slug = _history_stage_slug(stage)
     timestamp = _history_timestamp()
     record = {
         "stage": slug,
         "timestamp": timestamp,
         "status": "success" if status == "success" else "failed",
-        "payload_keys": _history_payload_keys(payload),
-        "payload_debug_summary": _raw_payload_summary(payload),
+        "payload_project_name": project_name,
+        "payload_keys": _history_payload_keys(safe_payload),
+        "payload_debug_summary": _raw_payload_summary(safe_payload),
         "output": output if status == "success" else {},
     }
     if error:
@@ -442,8 +474,8 @@ def save_framework_stage_history(
         flush=True,
     )
     return {
-        "project_id": _project_history_id(project_id, project_name),
-        "project_name": _project_history_id(project_id, project_name),
+        "project_id": _project_history_id(safe_payload.get("project_id"), project_name),
+        "project_name": _project_history_id(safe_payload.get("project_id"), project_name),
         "stage": slug,
         "filename": filename,
         "latest_filename": latest_path.name if status == "success" else "",
@@ -462,18 +494,20 @@ def write_framework_stage_exception_log(
     message: str,
     status_code: int | None = None,
 ) -> dict[str, Any]:
-    project_name = _payload_project_name(payload)
-    log_dir = _history_log_dir(project_id, project_name)
+    safe_payload = _ensure_payload_project_title(payload, project_id=project_id)
+    project_name = _payload_project_name(safe_payload)
+    log_dir = _history_log_dir(safe_payload.get("project_id"), project_name)
     timestamp = _history_timestamp()
     entry = {
         "stage": _history_stage_slug(stage),
         "timestamp": timestamp,
         "status": "failed",
-        "payload_keys": _history_payload_keys(payload),
+        "payload_project_name": project_name,
+        "payload_keys": _history_payload_keys(safe_payload),
         "exception_type": exc_type,
         "exception_message": str(message or ""),
         "status_code": status_code,
-        "raw_payload_summary": _raw_payload_summary(payload),
+        "raw_payload_summary": _raw_payload_summary(safe_payload),
     }
     logger.error(
         "framework planner stage exception timestamp=%s stage=%s payload_keys=%s exception_type=%s exception_message=%s status_code=%s",
@@ -496,11 +530,11 @@ def write_framework_stage_exception_log(
             "status_code": status_code,
             "detail": entry,
         },
-        payload,
+        safe_payload,
     )
     filename = f"{entry['stage']}_{timestamp}.json"
     (log_dir / filename).write_text(json.dumps(entry, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-    return {"filename": filename, "project_name": _project_history_id(project_id, project_name), **entry}
+    return {"filename": filename, "project_name": _project_history_id(safe_payload.get("project_id"), project_name), **entry}
 
 
 def list_framework_stage_history(project_id: Any, stage: str | None = None) -> dict[str, Any]:
@@ -934,7 +968,14 @@ def stage_has_real_backend(stage: str) -> bool:
 
 def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> dict[str, Any]:
     definition = stage_definition(stage)
-    normalized_payload = _normalize_payload(payload)
+    normalized_payload = _ensure_payload_project_title(_normalize_payload(payload))
+    print(
+        "[framework_planner_entry] "
+        f"stage={definition.stage} project_name={_payload_project_name(normalized_payload)} "
+        f"project_id={normalized_payload.get('project_id', '')} "
+        f"payload_keys={_history_payload_keys(normalized_payload)}",
+        flush=True,
+    )
     workflow_spec = load_stage_workflow_spec(definition.stage)
     diagnostics = _stage_runtime_diagnostics(definition, normalized_payload)
     _log_stage_entry(definition, diagnostics)

@@ -774,6 +774,43 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error("任务不存在", status=404)
         return _json_ok(task=snapshot)
 
+    @app.get("/api/tasks/<task_id>/debug")
+    @_login_required
+    def get_task_debug(task_id: str):
+        snapshot = task_manager.get_task_snapshot(
+            task_id,
+            user_id=_require_user_id(),
+            public_view=False,
+        )
+        if not snapshot:
+            return _json_error("任务不存在", status=404)
+
+        return _json_ok(
+            debug={
+                "task_id": snapshot.get("task_id"),
+                "project_id": snapshot.get("project_id"),
+                "status": snapshot.get("status"),
+                "message": snapshot.get("message"),
+                "error": snapshot.get("error"),
+                "current_stage": snapshot.get("current_stage"),
+                "current_stage_label": snapshot.get("current_stage_label"),
+                "current_node_id": snapshot.get("current_node_id"),
+                "current_node_name": snapshot.get("current_node_name"),
+                "current_batch": snapshot.get("current_batch"),
+                "progress_percent": snapshot.get("progress_percent"),
+                "generated_episodes": snapshot.get("generated_episodes"),
+                "cache_retained": snapshot.get("cache_retained"),
+                "awaiting_user_confirmation": snapshot.get("awaiting_user_confirmation"),
+                "runtime_cache_notice": snapshot.get("runtime_cache_notice"),
+                "logs": snapshot.get("logs", []),
+                "last_log": snapshot.get("last_log"),
+                "resume_checkpoint_exists": isinstance(snapshot.get("_resume_checkpoint"), dict),
+                "resume_checkpoint": snapshot.get("_resume_checkpoint"),
+                "debug_state": snapshot.get("debug_state", {}),
+                "prompt_fixes": snapshot.get("prompt_fixes", []),
+            }
+        )
+
     @app.post("/api/tasks/<task_id>/pause")
     @_login_required
     def pause_task(task_id: str):

@@ -307,7 +307,17 @@
 
   function currentProjectCacheName() {
     const configState = state && state.basic_config ? state.basic_config : {};
-    return String(configState.project_title || configState.source_title || "未命名项目").trim() || "未命名项目";
+    const rawName = String(configState.project_title || configState.source_title || "未命名项目").trim() || "未命名项目";
+    return safeProjectCacheName(rawName);
+  }
+
+  function safeProjectCacheName(value) {
+    const text = String(value || "").trim()
+      .replace(/[<>:"/\\|?*\x00-\x1f]+/g, "_")
+      .replace(/\s+/g, "_")
+      .replace(/^[._\s]+|[._\s]+$/g, "")
+      .slice(0, 80);
+    return text || "未命名项目";
   }
 
   function toStageError(data, fallbackStage, status) {

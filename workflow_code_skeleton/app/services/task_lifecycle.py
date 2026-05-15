@@ -923,23 +923,27 @@ class TaskLifecycleMixin:
                 error=str(exc),
                 finished_at=now_iso(),
             )
+
         except Exception as exc:
             logger.exception("任务执行失败: %s", record.task_id)
-            if runtime is not None:
-                self._append_log(
-                    record,
-                    title="任务失败",
-                    message=f"已保留失败前的阶段、进度和中间产物。错误：{exc}",
-                )
+
             # 失败时先退回最近一次稳定 checkpoint，再对外标记 failed。
             # 这样 retry/继续生成看到的是“上一个成功步骤”的缓存，而不是半写入状态。
             self._restore_from_resume_checkpoint(record)
+
             self._update_snapshot(
                 record,
                 status="failed",
                 message=FAILED_PUBLIC_MESSAGE,
                 error=str(exc),
                 finished_at=now_iso(),
+            )
+
+            self._append_log(
+                record,
+                title="任务失败",
+                message=f"已回退到上一个成功步骤并保留可继续生成的缓存。错误：{type(exc).__name__}: {exc}",
+                level="error",
             )
 
     def _get_task_record_for_user(self, task_id: str, user_id: int | None) -> TaskRecord:
