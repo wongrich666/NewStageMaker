@@ -2917,44 +2917,51 @@ def _normalize_stage_output(
         )
         return normalized
     if stage == "07":
-        validation_missing = normalized.get("validation_report") in (None, "", [], {})
+        raw_validation_missing = normalized.get("validation_report") in (None, "", [], {})
+
         if not isinstance(normalized.get("framework_plan_package"), dict):
-            warnings.append("framework_plan_package 不是 dict，已回退为对象占位")
+            warnings.append("framework_plan_package 不是 dict，已尝试清洗为对象")
             _log_field_type_mismatch(stage, "framework_plan_package", "dict", normalized.get("framework_plan_package"))
-        if validation_missing:
-            warnings.append("validation_report 缺失，已保留校验报告占位")
-            logger.warning(
-                "框架策划阶段 07 validation_report 缺失，已保留占位；raw_output=%s",
-                _preview_return_object(data),
-            )
-            normalized["validation_report"] = _stage_output_placeholder("validation_report")
-        elif not isinstance(normalized.get("validation_report"), (dict, list, str)):
+
+        if (not raw_validation_missing) and not isinstance(normalized.get("validation_report"), (dict, list, str)):
             warnings.append("validation_report 类型异常，已回退为对象占位")
             _log_field_type_mismatch(stage, "validation_report", "dict/list/str", normalized.get("validation_report"))
+            normalized["validation_report"] = _stage_output_placeholder("validation_report")
+
         normalized["framework_plan_package"] = _sanitize_framework_plan_package(
             normalized.get("framework_plan_package")
         )
 
         validation_report = _normalize_validation_report(normalized.get("validation_report"))
+        summary_text = str(validation_report.get("summary") or "").strip() if isinstance(validation_report, dict) else ""
+        warning_text = json.dumps(validation_report, ensure_ascii=False, default=str) if isinstance(validation_report, dict) else ""
 
-        # 如果 FastGPT 没给 validation_report，或者只剩默认占位，则用 package 自动生成一个可用校验报告。
-        summary_text = str(validation_report.get("summary") or "").strip() if isinstance(validation_report,
-                                                                                         dict) else ""
-        is_placeholder_validation = summary_text in {"", "未明确，需后续确认……"}
+        is_placeholder_validation = (
+            raw_validation_missing
+            or summary_text in {"", "未明确，需后续确认……"}
+            or "缺少关键字段 validation_report" in warning_text
+            or "缺少输出字段 ['validation_report']" in warning_text
+            or "缺少输出字段 [\\u0027validation_report\\u0027]" in warning_text
+        )
 
-        if validation_missing or is_placeholder_validation:
+        used_local_validation_report = False
+        if is_placeholder_validation:
             validation_report = _build_validation_report_from_package(
                 normalized["framework_plan_package"],
-                parse_warnings=warnings,
+                parse_warnings=[],
             )
+            used_local_validation_report = True
 
         normalized["validation_report"] = validation_report
 
-        if warnings:
+        # 如果 stage07 已经基于清洗后的 framework_plan_package 生成本地校验报告，
+        # 不再把“缺少 validation_report”的旧解析警告附回最终报告。
+        if warnings and not used_local_validation_report:
             normalized["validation_report"] = _attach_parse_warnings_to_validation_report(
                 normalized["validation_report"],
                 warnings,
             )
+
         return normalized
     return normalized
 
@@ -3295,19 +3302,74 @@ def _attach_parse_warnings_to_validation_report(
     parse_warnings: list[str],
 ) -> dict[str, Any]:
     normalized = dict(report if isinstance(report, dict) else {})
+
+    def is_stale_validation_missing_warning(text: str) -> bool:
+        return (
+            "validation_report" in text
+            and (
+                "缺少输出字段" in text
+                or "缺少关键字段" in text
+                or "已使用阶段默认占位补齐" in text
+                or "已填充占位结构" in text
+            )
+        )
+
+    def clean_warning_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        result: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            text = str(item).strip()
+            if not text:
+                continue
+            if normalized.get("passed") is True and is_stale_validation_missing_warning(text):
+                continue
+            if text in seen:
+                continue
+            seen.add(text)
+            result.append(text)
+        return result
+
+    if normalized.get("passed") is True:
+        existing_warnings = clean_warning_list(normalized.get("warnings"))
+        existing_parse_warnings = clean_warning_list(normalized.get("parse_warning"))
+
+        if existing_warnings:
+            normalized["warnings"] = existing_warnings
+        else:
+            normalized.pop("warnings", None)
+
+        if existing_parse_warnings:
+            normalized["parse_warning"] = existing_parse_warnings
+        else:
+            normalized.pop("parse_warning", None)
+
     if not parse_warnings:
         return normalized
+
     warning_list = [str(item).strip() for item in parse_warnings if str(item).strip()]
+    if normalized.get("passed") is True:
+        warning_list = [
+            item for item in warning_list
+            if not is_stale_validation_missing_warning(item)
+        ]
+
     if not warning_list:
         return normalized
-    existing_warnings = normalized.get("warnings")
-    if isinstance(existing_warnings, list):
-        existing_warnings.extend(warning_list)
-    else:
-        normalized["warnings"] = warning_list
+
+    existing_warnings = clean_warning_list(normalized.get("warnings"))
+    merged: list[str] = []
+    seen: set[str] = set()
+    for item in [*existing_warnings, *warning_list]:
+        if item in seen:
+            continue
+        seen.add(item)
+        merged.append(item)
+
+    normalized["warnings"] = merged
     normalized["parse_warning"] = warning_list
     return normalized
-
 
 def _log_stage_output_parse_exception(
     *,
@@ -3987,6 +4049,61 @@ def _normalize_character_storylines(value: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+def _decode_jsonish_value(value: Any, *, max_depth: int = 8) -> Any:
+    """递归解开被字符串化的 JSON object / array。
+
+    只解析以 { 或 [ 开头的字符串，避免把普通字符串如 "3" 误转成数字。
+    """
+    if max_depth <= 0:
+        return value
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return value
+
+        if text.startswith("{") or text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                parsed_values = _json_objects_from_text(text)
+                if len(parsed_values) == 1:
+                    return _decode_jsonish_value(parsed_values[0], max_depth=max_depth - 1)
+                return value
+
+            return _decode_jsonish_value(parsed, max_depth=max_depth - 1)
+
+        return value
+
+    if isinstance(value, dict):
+        return {
+            str(key): _decode_jsonish_value(item, max_depth=max_depth - 1)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, list):
+        return [
+            _decode_jsonish_value(item, max_depth=max_depth - 1)
+            for item in value
+        ]
+
+    return value
+
+
+def _ensure_object_value(value: Any) -> dict[str, Any]:
+    value = _decode_jsonish_value(value)
+    return value if isinstance(value, dict) else {}
+
+
+def _ensure_list_value(value: Any) -> list[Any]:
+    value = _decode_jsonish_value(value)
+    if isinstance(value, list):
+        return value
+    if value in (None, "", {}, []):
+        return []
+    return [value]
+
+
 def _normalize_adaptation_guide(value: Any) -> dict[str, Any]:
     def first_text(source: dict[str, Any], keys: tuple[str, ...]) -> str:
         for key in keys:
@@ -3998,35 +4115,20 @@ def _normalize_adaptation_guide(value: Any) -> dict[str, Any]:
             return str(item)
         return ""
 
-    if isinstance(value, str):
-        parsed = _parse_candidate_value(value)
-        if isinstance(parsed, (dict, list)) and parsed is not value:
-            return _normalize_adaptation_guide(parsed)
-        text = str(value or "").strip()
-        return {
-            "core_setting_adjustments": text,
-            "structure_and_rhythm": "",
-            "visualization_strategy": "",
-            "character_emotion_strategy": "",
-        }
+    value = _decode_jsonish_value(value)
 
     if isinstance(value, dict):
         nested = value.get("adaptation_guide")
-        if isinstance(nested, (dict, list, str)) and nested is not value:
+        if nested not in (None, "", [], {}) and nested is not value:
             return _normalize_adaptation_guide(nested)
 
-        data = value.get("data")
-        if isinstance(data, dict) and data.get("adaptation_guide") not in (None, "", [], {}):
-            return _normalize_adaptation_guide(data.get("adaptation_guide"))
-
-        # 兼容已经被错误塞进 core_setting_adjustments 的 JSON 字符串。
         packed = value.get("core_setting_adjustments")
-        if isinstance(packed, str):
-            parsed_packed = _parse_candidate_value(packed)
-            if isinstance(parsed_packed, dict):
-                unpacked = _normalize_adaptation_guide(parsed_packed)
-                if unpacked.get("structure_and_rhythm") or unpacked.get("visualization_strategy") or unpacked.get("character_emotion_strategy"):
-                    return unpacked
+        if isinstance(packed, dict):
+            merged = dict(packed)
+            for key, item in value.items():
+                if key != "core_setting_adjustments" and item not in (None, "", [], {}):
+                    merged.setdefault(key, item)
+            return _normalize_adaptation_guide(merged)
 
         result = {
             "core_setting_adjustments": first_text(
@@ -4073,29 +4175,12 @@ def _normalize_adaptation_guide(value: Any) -> dict[str, Any]:
         if constraints not in (None, "", [], {}):
             result["hard_constraints_for_script_workflow"] = constraints
 
-        if any(result.get(key) for key in ("core_setting_adjustments", "structure_and_rhythm", "visualization_strategy", "character_emotion_strategy")):
-            return result
-
-        return {
-            "core_setting_adjustments": json.dumps(value, ensure_ascii=False, indent=2),
-            "structure_and_rhythm": "",
-            "visualization_strategy": "",
-            "character_emotion_strategy": "",
-        }
+        return result
 
     if isinstance(value, list):
         items = [item for item in value if isinstance(item, dict)]
         if len(items) == 1:
             return _normalize_adaptation_guide(items[0])
-        texts = [str(item.get("content") or item.get("summary") or "") for item in items]
-        while len(texts) < 4:
-            texts.append("")
-        return {
-            "core_setting_adjustments": texts[0],
-            "structure_and_rhythm": texts[1],
-            "visualization_strategy": texts[2],
-            "character_emotion_strategy": texts[3],
-        }
 
     text = str(value or "").strip()
     return {
@@ -4107,39 +4192,57 @@ def _normalize_adaptation_guide(value: Any) -> dict[str, Any]:
 
 
 def _sanitize_framework_plan_package(value: Any) -> dict[str, Any]:
-    package = _normalize_object_like(value, key_name="content")
+    """清洗 stage07 最终策划包。
 
-    # 如果 FastGPT 变量名里包了一层真正的 package，则优先拆出来。
-    for nested_key in tuple(package.keys()):
-        nested = package.get(nested_key)
-        if not isinstance(nested, dict):
-            continue
-        if isinstance(nested.get("framework_plan_package"), dict):
-            package = dict(nested["framework_plan_package"])
-            break
+    目标：
+    1. JSON 字符串转回 object / array；
+    2. 移除 d3ixvj8d 这类 FastGPT 内部变量名；
+    3. 保留后续剧本链路所需的稳定字段。
+    """
+    package = _decode_jsonish_value(value)
 
-    allowed_keys = {
-        "mode",
-        "basic_config",
-        "source_brief",
-        "worldview_plan",
-        "character_plan",
-        "beat_checkpoint_timeline",
-        "checkpoint_explanation",
-        "character_storylines",
-        "storyline_decisions",
-        "adaptation_guide",
-        "user_edit_history",
-        "adaptation_direction",
-        "handoff_notes",
-        "storage_key",
+    if isinstance(package, dict) and isinstance(package.get("framework_plan_package"), dict):
+        package = package["framework_plan_package"]
+
+    if not isinstance(package, dict):
+        package = {}
+
+    cleaned: dict[str, Any] = {
+        "mode": package.get("mode") or "创作",
+        "basic_config": _ensure_object_value(package.get("basic_config")),
+        "source_brief": _ensure_object_value(package.get("source_brief")),
+        "worldview_plan": _ensure_object_value(package.get("worldview_plan")),
+        "character_plan": _ensure_object_value(package.get("character_plan")),
+        "beat_checkpoint_timeline": _ensure_list_value(package.get("beat_checkpoint_timeline")),
+        "checkpoint_explanation": _ensure_object_value(package.get("checkpoint_explanation")),
+        "character_storylines": _ensure_list_value(package.get("character_storylines")),
+        "storyline_decisions": _ensure_list_value(package.get("storyline_decisions")),
+        "adaptation_guide": _normalize_adaptation_guide(package.get("adaptation_guide")),
+        "user_edit_history": _ensure_list_value(package.get("user_edit_history")),
     }
 
-    return {
-        key: value
-        for key, value in package.items()
-        if key in allowed_keys
-    }
+    adaptation_direction = package.get("adaptation_direction")
+    if adaptation_direction not in (None, "", [], {}):
+        cleaned["adaptation_direction"] = str(adaptation_direction)
+
+    handoff_notes = package.get("handoff_notes")
+    if handoff_notes not in (None, "", [], {}):
+        cleaned["handoff_notes"] = str(handoff_notes)
+
+    storage_key = package.get("storage_key")
+    if storage_key not in (None, "", [], {}):
+        cleaned["storage_key"] = str(storage_key)
+
+    source_brief = cleaned.get("source_brief")
+    if isinstance(source_brief, dict):
+        source_title = str(source_brief.get("source_title") or "").strip()
+        if source_title:
+            if str(source_brief.get("title") or "").strip() in {"", "未命名项目"}:
+                source_brief["title"] = source_title
+            if str(source_brief.get("project_title") or "").strip() in {"", "未命名项目"}:
+                source_brief["project_title"] = source_title
+
+    return cleaned
 
 
 def _build_validation_report_from_package(
@@ -4163,32 +4266,44 @@ def _build_validation_report_from_package(
         if package.get(key) in (None, "", [], {}):
             missing.append(key)
 
-    checks = {
-        "beat_count": beat_count,
-        "storyline_count": storyline_count,
-        "has_source_brief": bool(package.get("source_brief")),
-        "has_worldview_plan": bool(package.get("worldview_plan")),
-        "has_character_plan": bool(package.get("character_plan")),
-        "has_adaptation_guide": bool(package.get("adaptation_guide")),
-        "missing_fields": missing,
-        "missing_fields": missing,
-    }
+    adaptation_guide = package.get("adaptation_guide") or {}
+    guide_empty_fields: list[str] = []
+    if isinstance(adaptation_guide, dict):
+        for key in (
+            "core_setting_adjustments",
+            "structure_and_rhythm",
+            "visualization_strategy",
+            "character_emotion_strategy",
+        ):
+            if adaptation_guide.get(key) in (None, "", [], {}):
+                guide_empty_fields.append(key)
 
     warnings = list(parse_warnings or [])
     if beat_count != 15:
         warnings.append(f"beat_checkpoint_timeline 数量不是 15：当前 {beat_count}")
     if missing:
         warnings.append(f"框架策划包缺少字段：{', '.join(missing)}")
+    if guide_empty_fields:
+        warnings.append(f"adaptation_guide 存在空字段：{', '.join(guide_empty_fields)}")
 
-    passed = not missing and beat_count == 15
+    passed = not missing and beat_count == 15 and not guide_empty_fields
 
     return {
         "passed": passed,
         "summary": "框架策划包结构完整，可交付后续正式剧本生成链路。" if passed else "框架策划包仍有缺口，需要修订后再交付。",
-        "checks": checks,
+        "checks": {
+            "beat_count": beat_count,
+            "storyline_count": storyline_count,
+            "has_basic_config": bool(package.get("basic_config")),
+            "has_source_brief": bool(package.get("source_brief")),
+            "has_worldview_plan": bool(package.get("worldview_plan")),
+            "has_character_plan": bool(package.get("character_plan")),
+            "has_adaptation_guide": bool(package.get("adaptation_guide")),
+            "missing_fields": missing,
+            "adaptation_guide_empty_fields": guide_empty_fields,
+        },
         "warnings": warnings,
     }
-
 
 def _normalize_validation_report(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):

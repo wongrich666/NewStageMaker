@@ -2133,6 +2133,130 @@ a {
   gap: 10px;
 }
 
+.user-knowledge-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.user-knowledge-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.user-knowledge-head h3 {
+  margin: 2px 0 0;
+  color: #f5f8fc;
+  font-size: 16px;
+}
+
+.user-knowledge-status,
+.selected-knowledge-tags {
+  color: #9eacbc;
+  font-size: 12px;
+}
+
+.knowledge-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.knowledge-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #dfe7f0;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+}
+
+.knowledge-tag-pill input {
+  width: 14px;
+  height: 14px;
+}
+
+.knowledge-tag-pill.is-selected {
+  border-color: rgba(49, 227, 115, 0.5);
+  background: rgba(49, 227, 115, 0.12);
+}
+
+.knowledge-delete-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #ffd7ca;
+  background: rgba(198, 86, 40, 0.28);
+  cursor: pointer;
+}
+
+.knowledge-pin-btn {
+  min-height: 20px;
+  padding: 1px 6px;
+  border: 1px solid rgba(49, 227, 115, 0.28);
+  border-radius: 8px;
+  color: #c7f6d7;
+  background: rgba(49, 227, 115, 0.1);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.user-preference-field textarea {
+  min-height: 76px;
+}
+
+.knowledge-create summary {
+  cursor: pointer;
+  color: #dfe7f0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.knowledge-create-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 150px);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.knowledge-create-grid input,
+.knowledge-create-grid textarea {
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #f5f8fc;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.knowledge-create-grid textarea {
+  grid-column: 1 / -1;
+  min-height: 66px;
+  resize: vertical;
+}
+
+.knowledge-preview {
+  max-height: 150px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border-radius: 8px;
+  color: #dfe7f0;
+  background: rgba(0, 0, 0, 0.18);
+  white-space: pre-wrap;
+}
+
 .workspace-body .btn {
   box-shadow: none;
   padding: 9px 13px;

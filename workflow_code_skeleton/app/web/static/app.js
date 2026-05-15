@@ -8,7 +8,8 @@
     draft: `scriptmaker.web.${userKey}.draft`,
     selectedProjectId: `scriptmaker.web.${userKey}.selectedProjectId`,
     modelId: `scriptmaker.web.${userKey}.modelId`,
-    sidebarCollapsed: `scriptmaker.web.${userKey}.sidebarCollapsed`
+    sidebarCollapsed: `scriptmaker.web.${userKey}.sidebarCollapsed`,
+    userKnowledge: `scriptmaker.web.${userKey}.userKnowledge`
   };
 
   const POLL_INTERVAL = 1500;
@@ -34,6 +35,18 @@
     closeCommunityPanelBtn: $("closeCommunityPanelBtn"),
     modelSelect: $("modelSelect"),
     expectationInput: $("expectationInput"),
+    userKnowledgePanel: $("userKnowledgePanel"),
+    knowledgeTagList: $("knowledgeTagList"),
+    knowledgeTagStatus: $("knowledgeTagStatus"),
+    selectedKnowledgeTags: $("selectedKnowledgeTags"),
+    applyKnowledgeTagsBtn: $("applyKnowledgeTagsBtn"),
+    userPreferenceInput: $("userPreferenceInput"),
+    knowledgePreferencePreview: $("knowledgePreferencePreview"),
+    knowledgeTagNameInput: $("knowledgeTagNameInput"),
+    knowledgeTagCategoryInput: $("knowledgeTagCategoryInput"),
+    knowledgeTagDescriptionInput: $("knowledgeTagDescriptionInput"),
+    knowledgeTagPromptInput: $("knowledgeTagPromptInput"),
+    createKnowledgeTagBtn: $("createKnowledgeTagBtn"),
     characterCountInput: $("characterCountInput"),
     episodeCountInput: $("episodeCountInput"),
     formHint: $("formHint"),
@@ -136,6 +149,10 @@
     activeTool: "character_reskin",
     toolDrafts: {},
     toolResults: {},
+    knowledgeTags: [],
+    selectedKnowledgeTagIds: [],
+    userKnowledgeTagPrompt: "",
+    userKnowledgeError: "",
     loadingActions: {},
     assetsStatus: "idle",
     assetsError: "",
@@ -484,9 +501,17 @@
       user_expectation: els.expectationInput.value.trim(),
       character_count: Number(els.characterCountInput.value || 0),
       total_episodes: Number(els.episodeCountInput.value || 0),
+      selected_preference_tag_ids: [...state.selectedKnowledgeTagIds],
+      user_preference_prompt: String(els.userPreferenceInput?.value || ""),
+      user_knowledge_tag_prompt: String(state.userKnowledgeTagPrompt || "")
     };
     draftStorage.setItem(STORAGE.draft, JSON.stringify(draft));
     draftStorage.setItem(STORAGE.modelId, els.modelSelect.value || "");
+    draftStorage.setItem(STORAGE.userKnowledge, JSON.stringify({
+      selected_preference_tag_ids: draft.selected_preference_tag_ids,
+      user_preference_prompt: draft.user_preference_prompt,
+      user_knowledge_tag_prompt: draft.user_knowledge_tag_prompt
+    }));
   }
 
   function restoreDraft() {
@@ -497,12 +522,32 @@
       els.expectationInput.value = draft.user_expectation || "";
       els.characterCountInput.value = draft.character_count || 5;
       els.episodeCountInput.value = draft.total_episodes || 10;
+      restoreKnowledgeDraft(draft);
       syncExpectationInputHeight();
     } catch (_) {}
   }
 
+  function restoreKnowledgeDraft(draft = null) {
+    let data = draft;
+    if (!data) {
+      try {
+        data = JSON.parse(draftStorage.getItem(STORAGE.userKnowledge) || "{}");
+      } catch (_) {
+        data = {};
+      }
+    }
+    state.selectedKnowledgeTagIds = Array.isArray(data?.selected_preference_tag_ids)
+      ? data.selected_preference_tag_ids.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    state.userKnowledgeTagPrompt = String(data?.user_knowledge_tag_prompt || "");
+    if (els.userPreferenceInput) {
+      els.userPreferenceInput.value = String(data?.user_preference_prompt || "");
+    }
+  }
+
   function clearDraft() {
     draftStorage.removeItem(STORAGE.draft);
+    draftStorage.removeItem(STORAGE.userKnowledge);
   }
 
   // 记住侧边栏折叠状态，让用户切页面回来后仍保持同一工作台布局。
@@ -593,6 +638,14 @@
     els.expectationInput.value = "";
     els.characterCountInput.value = inputPayload.character_count || 5;
     els.episodeCountInput.value = inputPayload.total_episodes || 10;
+    state.selectedKnowledgeTagIds = Array.isArray(inputPayload.selected_preference_tag_ids)
+      ? inputPayload.selected_preference_tag_ids.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    state.userKnowledgeTagPrompt = String(inputPayload.user_knowledge_tag_prompt || "");
+    if (els.userPreferenceInput) {
+      els.userPreferenceInput.value = String(inputPayload.user_preference_prompt || "");
+    }
+    renderUserKnowledgePanel();
     syncExpectationInputHeight();
     saveDraft();
   }
@@ -2178,6 +2231,188 @@ startRuntimeDebugPolling();
     return data;
   }
 
+  function selectedKnowledgeTags() {
+    const selected = new Set(state.selectedKnowledgeTagIds);
+    return state.knowledgeTags.filter((tag) => selected.has(String(tag.id || "")));
+  }
+
+  function userKnowledgePayload() {
+    const tags = selectedKnowledgeTags().map((tag) => ({
+      id: String(tag.id || ""),
+      name: String(tag.name || ""),
+      category: String(tag.category || ""),
+      builtin: Boolean(tag.builtin),
+      pinned: Boolean(tag.pinned),
+      description: String(tag.description || ""),
+      prompt_text: String(tag.prompt_text || "")
+    }));
+    return {
+      selected_preference_tag_ids: [...state.selectedKnowledgeTagIds],
+      selected_preference_tags: tags,
+      user_preference_prompt: String(els.userPreferenceInput?.value || ""),
+      user_knowledge_tag_prompt: String(state.userKnowledgeTagPrompt || "")
+    };
+  }
+
+  function attachUserKnowledgePayload(payload) {
+    Object.assign(payload, userKnowledgePayload());
+    console.debug(`[user-knowledge] selected tags count=${state.selectedKnowledgeTagIds.length}`);
+    return payload;
+  }
+
+  function renderUserKnowledgePanel() {
+    if (!els.userKnowledgePanel) return;
+    const selected = new Set(state.selectedKnowledgeTagIds);
+    const tags = Array.isArray(state.knowledgeTags) ? state.knowledgeTags : [];
+    if (els.knowledgeTagStatus) {
+      els.knowledgeTagStatus.textContent = state.userKnowledgeError
+        ? state.userKnowledgeError
+        : (tags.length ? `已加载 ${tags.length} 个标签，可不选择。` : "暂无可用标签，可直接创作。");
+    }
+    if (els.knowledgeTagList) {
+      els.knowledgeTagList.innerHTML = tags.map((tag) => {
+        const id = String(tag.id || "");
+        const checked = selected.has(id);
+        const customActions = tag.builtin ? "" : `
+          <button class="knowledge-pin-btn" type="button" data-action="pin-knowledge-tag" data-tag-id="${escapeHtml(id)}" title="${tag.pinned ? "取消置顶" : "置顶自定义标签"}">${tag.pinned ? "已置顶" : "置顶"}</button>
+          <button class="knowledge-delete-btn" type="button" data-action="delete-knowledge-tag" data-tag-id="${escapeHtml(id)}" title="删除自定义标签">×</button>
+        `;
+        return `
+          <label class="knowledge-tag-pill${checked ? " is-selected" : ""}" title="${escapeHtml(tag.description || tag.prompt_text || "")}">
+            <input type="checkbox" data-knowledge-tag-id="${escapeHtml(id)}" ${checked ? "checked" : ""}>
+            <span>${escapeHtml(tag.name || id)}</span>
+            <small>${escapeHtml(tag.category || "")}</small>
+            ${customActions}
+          </label>
+        `;
+      }).join("");
+    }
+    const selectedNames = selectedKnowledgeTags().map((tag) => tag.name || tag.id).filter(Boolean);
+    if (els.selectedKnowledgeTags) {
+      els.selectedKnowledgeTags.textContent = selectedNames.length
+        ? `当前已选择：${selectedNames.join("、")}`
+        : "当前未选择标签";
+    }
+    if (els.knowledgePreferencePreview) {
+      const preview = String(els.userPreferenceInput?.value || "").trim();
+      els.knowledgePreferencePreview.textContent = preview;
+      els.knowledgePreferencePreview.classList.toggle("hidden", !preview);
+    }
+  }
+
+  async function loadUserKnowledgeTags() {
+    if (!isAuthenticated()) {
+      state.knowledgeTags = [];
+      renderUserKnowledgePanel();
+      return;
+    }
+    try {
+      const data = await requestJson("/api/user-knowledge/tags");
+      state.knowledgeTags = Array.isArray(data.tags) ? data.tags : [];
+      state.userKnowledgeError = "";
+    } catch (error) {
+      state.knowledgeTags = [];
+      state.userKnowledgeError = "智慧库标签加载失败，不影响本次创作。";
+      showStatusError(error, "智慧库标签加载失败，不影响本次创作。");
+    }
+    renderUserKnowledgePanel();
+  }
+
+  async function applyUserKnowledgeTags() {
+    const existingPreference = String(els.userPreferenceInput?.value || "");
+    try {
+      const data = await requestJson("/api/user-knowledge/apply-tags", {
+        method: "POST",
+        body: JSON.stringify({
+          selected_tag_ids: [...state.selectedKnowledgeTagIds],
+          existing_user_preference: existingPreference
+        })
+      });
+      if (els.userPreferenceInput) {
+        els.userPreferenceInput.value = String(data.merged_preference_prompt || "");
+      }
+      state.userKnowledgeTagPrompt = String(data.tag_prompt_text || "");
+      saveDraft();
+      renderUserKnowledgePanel();
+      showToast("智慧库标签已应用", "本次用户偏好已更新。");
+    } catch (error) {
+      if (els.userPreferenceInput) {
+        els.userPreferenceInput.value = existingPreference;
+      }
+      showToast("智慧库标签应用失败", friendlyErrorText(error, "已保留原用户偏好。"));
+      showStatusError(error, "智慧库标签应用失败，已保留原用户偏好。");
+    }
+  }
+
+  async function createUserKnowledgeTag() {
+    const payload = {
+      name: els.knowledgeTagNameInput?.value || "",
+      category: els.knowledgeTagCategoryInput?.value || "",
+      description: els.knowledgeTagDescriptionInput?.value || "",
+      prompt_text: els.knowledgeTagPromptInput?.value || ""
+    };
+    if (!String(payload.name || "").trim()) {
+      showToast("无法新增标签", "请填写标签名称。");
+      return;
+    }
+    try {
+      const data = await requestJson("/api/user-knowledge/tags", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      const tag = data.tag;
+      if (tag?.id) {
+        state.knowledgeTags.push(tag);
+        state.selectedKnowledgeTagIds = [...new Set([...state.selectedKnowledgeTagIds, String(tag.id)])];
+      }
+      [els.knowledgeTagNameInput, els.knowledgeTagCategoryInput, els.knowledgeTagDescriptionInput, els.knowledgeTagPromptInput]
+        .filter(Boolean)
+        .forEach((input) => {
+          input.value = "";
+        });
+      saveDraft();
+      renderUserKnowledgePanel();
+      showToast("标签已新增", "自定义标签已保存。");
+    } catch (error) {
+      showToast("新增标签失败", friendlyErrorText(error, "请稍后重试。"));
+      showStatusError(error, "新增标签失败，请稍后重试。");
+    }
+  }
+
+  async function deleteUserKnowledgeTag(tagId) {
+    if (!tagId) return;
+    try {
+      await requestJson(`/api/user-knowledge/tags/${encodeURIComponent(tagId)}`, { method: "DELETE" });
+      state.knowledgeTags = state.knowledgeTags.filter((tag) => String(tag.id || "") !== String(tagId));
+      state.selectedKnowledgeTagIds = state.selectedKnowledgeTagIds.filter((id) => id !== String(tagId));
+      saveDraft();
+      renderUserKnowledgePanel();
+      showToast("标签已删除", "自定义标签已移除。");
+    } catch (error) {
+      showToast("删除标签失败", friendlyErrorText(error, "请稍后重试。"));
+      showStatusError(error, "删除标签失败，请稍后重试。");
+    }
+  }
+
+  async function toggleUserKnowledgeTagPinned(tagId) {
+    if (!tagId) return;
+    const tag = state.knowledgeTags.find((item) => String(item.id || "") === String(tagId));
+    if (!tag || tag.builtin) return;
+    try {
+      const data = await requestJson(`/api/user-knowledge/tags/${encodeURIComponent(tagId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ pinned: !Boolean(tag.pinned) })
+      });
+      state.knowledgeTags = state.knowledgeTags
+        .map((item) => String(item.id || "") === String(tagId) ? data.tag : item)
+        .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
+      renderUserKnowledgePanel();
+    } catch (error) {
+      showToast("置顶标签失败", friendlyErrorText(error, "请稍后重试。"));
+      showStatusError(error, "置顶标签失败，请稍后重试。");
+    }
+  }
+
   async function loadModels() {
     if (!isAuthenticated()) {
       state.availableModels = [];
@@ -2230,6 +2465,7 @@ startRuntimeDebugPolling();
     if (scriptFormatMode) {
       payload.script_format_mode = scriptFormatMode;
     }
+    attachUserKnowledgePayload(payload);
     return payload;
   }
 
@@ -2524,6 +2760,12 @@ startRuntimeDebugPolling();
     els.expectationInput.value = "";
     els.characterCountInput.value = 5;
     els.episodeCountInput.value = 10;
+    state.selectedKnowledgeTagIds = [];
+    state.userKnowledgeTagPrompt = "";
+    if (els.userPreferenceInput) {
+      els.userPreferenceInput.value = "";
+    }
+    renderUserKnowledgePanel();
     syncExpectationInputHeight();
     syncButtons();
     els.formHint.textContent = "输入已清空。";
@@ -3202,6 +3444,14 @@ startRuntimeDebugPolling();
         syncButtons();
       });
     });
+    els.userPreferenceInput?.addEventListener("input", () => {
+      saveDraft();
+      renderUserKnowledgePanel();
+    });
+    els.userPreferenceInput?.addEventListener("change", () => {
+      saveDraft();
+      renderUserKnowledgePanel();
+    });
     els.toolForms?.addEventListener("input", () => {
       rememberCurrentToolDraft();
       syncButtons();
@@ -3280,6 +3530,37 @@ startRuntimeDebugPolling();
         showStatusError(error, "任务列表刷新失败，请稍后重试。");
       }
     });
+
+    els.knowledgeTagList?.addEventListener("change", (event) => {
+      const checkbox = event.target.closest("input[data-knowledge-tag-id]");
+      if (!checkbox) return;
+      const tagId = String(checkbox.dataset.knowledgeTagId || "").trim();
+      if (!tagId) return;
+      if (checkbox.checked) {
+        state.selectedKnowledgeTagIds = [...new Set([...state.selectedKnowledgeTagIds, tagId])];
+      } else {
+        state.selectedKnowledgeTagIds = state.selectedKnowledgeTagIds.filter((id) => id !== tagId);
+      }
+      saveDraft();
+      renderUserKnowledgePanel();
+    });
+
+    els.knowledgeTagList?.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-action]");
+      if (!button) return;
+      if (button.dataset.action === "delete-knowledge-tag") {
+        event.preventDefault();
+        event.stopPropagation();
+        await deleteUserKnowledgeTag(button.dataset.tagId || "");
+      } else if (button.dataset.action === "pin-knowledge-tag") {
+        event.preventDefault();
+        event.stopPropagation();
+        await toggleUserKnowledgeTagPinned(button.dataset.tagId || "");
+      }
+    });
+
+    els.applyKnowledgeTagsBtn?.addEventListener("click", applyUserKnowledgeTags);
+    els.createKnowledgeTagBtn?.addEventListener("click", createUserKnowledgeTag);
 
     els.refreshAssetsBtn?.addEventListener("click", async () => {
       try {
@@ -3563,6 +3844,7 @@ startRuntimeDebugPolling();
 
   async function init() {
     restoreDraft();
+    restoreKnowledgeDraft();
     syncExpectationInputHeight();
     restoreSidebarCollapsed();
     state.toolDefinitions = { ...DEFAULT_TOOL_DEFINITIONS };
@@ -3575,6 +3857,7 @@ startRuntimeDebugPolling();
     try {
       await loadModels();
       await loadTools();
+      await loadUserKnowledgeTags();
       await restoreWorkspace();
       await loadAssets();
       await loadCommunity();

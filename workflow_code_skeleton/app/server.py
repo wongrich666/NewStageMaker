@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from functools import wraps
 import os
 from pathlib import Path
@@ -33,6 +34,7 @@ from .services.framework_planner_service import (
 )
 from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
 from .services.task_manager import task_manager
+from .services.user_knowledge_store import user_knowledge_store
 from .utils.logger import get_logger
 
 
@@ -147,6 +149,67 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def _resolve_spec_path(data: dict) -> str:
         custom = str(data.get("workflow_spec_path") or "").strip()
         return custom or str(app.config["WORKFLOW_SPEC_PATH"])
+
+    def _coerce_string_list(value) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value] if value.strip() else []
+        if not isinstance(value, list):
+            return []
+        result: list[str] = []
+        for item in value:
+            text = str(item.get("id") if isinstance(item, dict) else item or "").strip()
+            if text and text not in result:
+                result.append(text)
+        return result
+
+    def _coerce_tag_list(value) -> list[dict]:
+        if not isinstance(value, list):
+            return []
+        result: list[dict] = []
+        for item in value:
+            if isinstance(item, dict):
+                tag = {
+                    "id": str(item.get("id") or "").strip(),
+                    "name": str(item.get("name") or "").strip(),
+                    "category": str(item.get("category") or "").strip(),
+                    "builtin": bool(item.get("builtin")),
+                    "description": str(item.get("description") or "").strip(),
+                    "prompt_text": str(item.get("prompt_text") or "").strip(),
+                }
+                if tag["id"] or tag["name"]:
+                    result.append(tag)
+            else:
+                text = str(item or "").strip()
+                if text:
+                    result.append({"id": text, "name": text, "category": "", "builtin": False, "description": "", "prompt_text": ""})
+        return result
+
+    def _coerce_prompt_text(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value).strip()
+
+    def _attach_user_knowledge_payload(payload: dict, data: dict) -> None:
+        selected_tags = _coerce_tag_list(data.get("selected_preference_tags"))
+        selected_ids = _coerce_string_list(data.get("selected_preference_tag_ids"))
+        if not selected_ids and selected_tags:
+            selected_ids = [tag["id"] for tag in selected_tags if tag.get("id")]
+        payload["selected_preference_tags"] = selected_tags
+        payload["selected_preference_tag_ids"] = selected_ids
+        payload["user_preference_prompt"] = _coerce_prompt_text(data.get("user_preference_prompt"))
+        payload["user_knowledge_tag_prompt"] = _coerce_prompt_text(data.get("user_knowledge_tag_prompt"))
+        if any(key in data for key in ("selected_preference_tags", "selected_preference_tag_ids", "user_preference_prompt", "user_knowledge_tag_prompt")):
+            logger.info(
+                "workflow user knowledge fields: selected_preference_tags_count=%s user_preference_prompt_length=%s",
+                len(selected_tags),
+                len(payload["user_preference_prompt"]),
+            )
 
     @app.get("/")
     def index():
@@ -379,6 +442,89 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def run_new_framework_tool():
         data = request.get_json(silent=True) or {}
         return _run_tool_request("new_framework", data)
+
+    @app.get("/api/user-knowledge/tags")
+    @_login_required
+    def list_user_knowledge_tags_api():
+        try:
+            return _json_ok(tags=user_knowledge_store.list_tags(enabled_only=True))
+        except Exception as exc:
+            logger.exception("user knowledge tags list failed")
+            return _json_error(str(exc), status=500, fallback="智慧库标签加载失败，请稍后重试。")
+
+    @app.post("/api/user-knowledge/tags")
+    @_login_required
+    def create_user_knowledge_tag_api():
+        data = request.get_json(silent=True) or {}
+        try:
+            tag = user_knowledge_store.create_tag(data if isinstance(data, dict) else {})
+            return _json_ok(tag=tag)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except Exception as exc:
+            logger.exception("user knowledge tag create failed")
+            return _json_error(str(exc), status=500, fallback="智慧库标签创建失败，请稍后重试。")
+
+    @app.patch("/api/user-knowledge/tags/<tag_id>")
+    @_login_required
+    def update_user_knowledge_tag_api(tag_id: str):
+        data = request.get_json(silent=True) or {}
+        try:
+            tag = user_knowledge_store.update_tag(tag_id, data if isinstance(data, dict) else {})
+            return _json_ok(tag=tag)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except Exception as exc:
+            logger.exception("user knowledge tag update failed")
+            return _json_error(str(exc), status=500, fallback="智慧库标签更新失败，请稍后重试。")
+
+    @app.delete("/api/user-knowledge/tags/<tag_id>")
+    @_login_required
+    def delete_user_knowledge_tag_api(tag_id: str):
+        try:
+            tag = user_knowledge_store.delete_tag(tag_id)
+            return _json_ok(tag=tag)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except Exception as exc:
+            logger.exception("user knowledge tag delete failed")
+            return _json_error(str(exc), status=500, fallback="智慧库标签删除失败，请稍后重试。")
+
+    @app.get("/api/user-knowledge/preferences")
+    @_login_required
+    def get_user_knowledge_preferences_api():
+        try:
+            return _json_ok(preferences=user_knowledge_store.get_preferences(_require_user_id()))
+        except Exception as exc:
+            logger.exception("user knowledge preferences get failed")
+            return _json_error(str(exc), status=500, fallback="用户偏好加载失败，请稍后重试。")
+
+    @app.put("/api/user-knowledge/preferences")
+    @_login_required
+    def save_user_knowledge_preferences_api():
+        data = request.get_json(silent=True) or {}
+        try:
+            preferences = user_knowledge_store.save_preferences(_require_user_id(), data if isinstance(data, dict) else {})
+            return _json_ok(preferences=preferences)
+        except Exception as exc:
+            logger.exception("user knowledge preferences save failed")
+            return _json_error(str(exc), status=500, fallback="用户偏好保存失败，请稍后重试。")
+
+    @app.post("/api/user-knowledge/apply-tags")
+    @_login_required
+    def apply_user_knowledge_tags_api():
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            data = {}
+        try:
+            result = user_knowledge_store.apply_tags(
+                data.get("selected_tag_ids") if "selected_tag_ids" in data else data.get("selected_preference_tag_ids"),
+                existing_user_preference=data.get("existing_user_preference") or data.get("user_preference_prompt") or "",
+            )
+            return _json_ok(**result)
+        except Exception as exc:
+            logger.exception("user knowledge apply tags failed")
+            return _json_error(str(exc), status=500, fallback="智慧库标签应用失败，请稍后重试。")
 
     def _framework_planner_error(
         stage: str,
@@ -718,6 +864,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             value = data.get(optional_key)
             if value not in (None, "", [], {}):
                 payload[optional_key] = value
+        _attach_user_knowledge_payload(payload, data)
         try:
             snapshot = task_manager.start_task(
                 user_id=_require_user_id(),
@@ -755,6 +902,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             value = data.get(optional_key)
             if value not in (None, "", [], {}):
                 payload[optional_key] = value
+        _attach_user_knowledge_payload(payload, data)
         try:
             snapshot = task_manager.restart_project(
                 project_id,
