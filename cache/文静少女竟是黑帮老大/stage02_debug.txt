@@ -1,0 +1,27 @@
+=== Framework Planner Stage Debug ===
+timestamp: 2026-05-21T18:29:25.146651+08:00
+stage: 02 - 世界观方案生成更新
+status: success
+-- variables --
+mode: str(len=2) 创作
+source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=22) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。","core_conflict":"主角维护双重身份的秘密与各方势...
+locked_basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements], size=11) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+previous_worldview_plan: dict(keys=[], size=0) {}
+user_feedback: str(len=76) 用户偏好提示：【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+worldview_plan: dict(keys=[summary, world_type, core_rules, core_resource, social_order, power_structure, conflict_engine, space_logic, visual_style, must_keep, forbidden_deviations, core_setting], size=16) {"summary":"一个表面平静的现代都市，实际暗藏严格规则的地下黑帮秩序。主人公作为文静少女黑帮老大，必须在校园与黑帮双重身份间游走，遵守黑帮内部的怪谈级禁忌规则，同时应对现实情感冲突和身份暴露危机，推动反转与爽感剧情。","world_type":"现代都市+地下黑帮秩序，叠加规则怪谈元素","core_rules":["黑帮内部存在不可违背的禁忌规则，如'不得在夜晚21点后单独会见外人'...
+selected_preference_tag_ids: list(len=0) []
+selected_preference_tags: list(len=0) []
+user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+user_knowledge_tag_prompt: str(len=0)
+user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+project_id: str(len=7) unsaved
+project_title: str(len=10) 文静少女竟是黑帮老大
+title: str(len=10) 文静少女竟是黑帮老大
+source_title: str(len=10) 文静少女竟是黑帮老大
+display_text: str(len=129) 世界观融合规则怪谈与都市情感：黑帮内部有不可违背的禁忌规则（如时间限制、仪式处罚），违反即引发代价；校园线强化身份伪装造成的误会与情感压力。通过鲜明对比的视觉风格（明亮校园 vs 阴暗地下）和紧凑的冲突引擎（身份暴露、规则破坏、情感误会），支撑6集反转爽剧。
+parse_warnings: list(len=1) ["已从 FastGPT 原始返回修复阶段输出 source=responseData[2].updateVarResult[0] fields=worldview_plan"]

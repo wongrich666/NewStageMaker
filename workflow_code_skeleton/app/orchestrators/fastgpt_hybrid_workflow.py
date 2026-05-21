@@ -938,6 +938,119 @@ def _is_framework_to_script_payload(payload: WorkflowInput, variables: dict[str,
     return mode in {"framework_to_script", "better_framework_script"}
 
 
+
+def _framework_to_script_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return {}
+        for _ in range(2):
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                return {}
+            if isinstance(parsed, dict):
+                return parsed
+            if isinstance(parsed, str):
+                raw = parsed.strip()
+                continue
+            return {}
+    return {}
+
+
+def _framework_to_script_json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    obj = _framework_to_script_json_object(value)
+    if isinstance(obj.get(ALL_ENRICHED_EPISODE_PLAN), list):
+        return list(obj.get(ALL_ENRICHED_EPISODE_PLAN) or [])
+    if isinstance(obj.get("allEnrichedEpisodePlan"), list):
+        return list(obj.get("allEnrichedEpisodePlan") or [])
+    return []
+
+
+def _normalize_framework_to_script_asset_variables(variables: dict[str, Any]) -> None:
+    """Normalize 08/09/10 workflow outputs.
+
+    FastGPT variableUpdate often stores a full answerText JSON string into an
+    internal variable. The framework-to-script chain needs actual subfields:
+    sceneDictionary, scriptWorldRulesDigest, appearanceMapping,
+    allEnrichedEpisodePlan and allEnrichedEpisodePlanText.
+    """
+
+    # 08 sceneDictionary + scriptWorldRulesDigest
+    for raw in (
+        variables.get(SCENE_DICTIONARY),
+        variables.get("sceneDictionaryResult"),
+        variables.get("answerText"),
+    ):
+        obj = _framework_to_script_json_object(raw)
+        if not obj:
+            continue
+        scene_value = obj.get(SCENE_DICTIONARY) or obj.get("sceneDictionary")
+        rules_value = obj.get(SCRIPT_WORLD_RULES_DIGEST) or obj.get("scriptWorldRulesDigest")
+        if _has_value(scene_value):
+            variables[SCENE_DICTIONARY] = scene_value
+            variables["sceneDictionary"] = scene_value
+        if _has_value(rules_value):
+            variables[SCRIPT_WORLD_RULES_DIGEST] = rules_value
+            variables["scriptWorldRulesDigest"] = rules_value
+
+    nested_scene = _framework_to_script_json_object(variables.get(SCENE_DICTIONARY))
+    if _has_value(nested_scene.get(SCENE_DICTIONARY) or nested_scene.get("sceneDictionary")):
+        variables[SCENE_DICTIONARY] = nested_scene.get(SCENE_DICTIONARY) or nested_scene.get("sceneDictionary")
+        variables["sceneDictionary"] = variables[SCENE_DICTIONARY]
+    if _has_value(nested_scene.get(SCRIPT_WORLD_RULES_DIGEST) or nested_scene.get("scriptWorldRulesDigest")):
+        variables[SCRIPT_WORLD_RULES_DIGEST] = (
+            nested_scene.get(SCRIPT_WORLD_RULES_DIGEST) or nested_scene.get("scriptWorldRulesDigest")
+        )
+        variables["scriptWorldRulesDigest"] = variables[SCRIPT_WORLD_RULES_DIGEST]
+
+    # 09 appearanceMapping
+    for raw in (
+        variables.get(APPEARANCE_MAPPING),
+        variables.get("appearanceMappingResult"),
+        variables.get("answerText"),
+    ):
+        obj = _framework_to_script_json_object(raw)
+        if not obj:
+            continue
+        appearance_value = obj.get(APPEARANCE_MAPPING) or obj.get("appearanceMapping")
+        if _has_value(appearance_value):
+            variables[APPEARANCE_MAPPING] = appearance_value
+            variables["appearanceMapping"] = appearance_value
+
+    nested_appearance = _framework_to_script_json_object(variables.get(APPEARANCE_MAPPING))
+    if _has_value(nested_appearance.get(APPEARANCE_MAPPING) or nested_appearance.get("appearanceMapping")):
+        variables[APPEARANCE_MAPPING] = nested_appearance.get(APPEARANCE_MAPPING) or nested_appearance.get("appearanceMapping")
+        variables["appearanceMapping"] = variables[APPEARANCE_MAPPING]
+
+    # 10 allEnrichedEpisodePlan + allEnrichedEpisodePlanText
+    for raw in (
+        variables.get("enrichedEpisodePlanResult"),
+        variables.get(ALL_ENRICHED_EPISODE_PLAN),
+        variables.get("allEnrichedEpisodePlan"),
+        variables.get("answerText"),
+    ):
+        obj = _framework_to_script_json_object(raw)
+        if not obj:
+            continue
+        plan_value = obj.get(ALL_ENRICHED_EPISODE_PLAN) or obj.get("allEnrichedEpisodePlan")
+        text_value = obj.get("allEnrichedEpisodePlanText")
+        if isinstance(plan_value, list) and plan_value:
+            variables[ALL_ENRICHED_EPISODE_PLAN] = plan_value
+            variables["allEnrichedEpisodePlan"] = plan_value
+        if _has_value(text_value):
+            variables["allEnrichedEpisodePlanText"] = text_value
+
+    plan_items = _framework_to_script_json_list(variables.get(ALL_ENRICHED_EPISODE_PLAN))
+    if plan_items:
+        variables[ALL_ENRICHED_EPISODE_PLAN] = plan_items
+        variables["allEnrichedEpisodePlan"] = plan_items
+
+
 def _run_framework_to_script_workflow(
     state: WorkflowState,
     runner: FastGPTRunner,
@@ -951,6 +1064,7 @@ def _run_framework_to_script_workflow(
     正文对白融合稿，刻意不进入旧 all_hooks/all_dialogues/all_script 三段式。
     """
     _ensure_framework_to_script_seed_variables(payload, variables)
+    _normalize_framework_to_script_asset_variables(variables)
     _sync_state_variables(state, variables)
 
     scene_dictionary = variables.get(SCENE_DICTIONARY)
@@ -974,6 +1088,7 @@ def _run_framework_to_script_workflow(
             progress_percent=18,
         )
         variables.update(output)
+        _normalize_framework_to_script_asset_variables(variables)
         _sync_state_variables(state, variables)
 
     if _has_value(variables.get(APPEARANCE_MAPPING)):
@@ -995,6 +1110,7 @@ def _run_framework_to_script_workflow(
             progress_percent=30,
         )
         variables.update(output)
+        _normalize_framework_to_script_asset_variables(variables)
         _sync_state_variables(state, variables)
 
     if _has_value(variables.get(ALL_ENRICHED_EPISODE_PLAN)):
@@ -1016,6 +1132,7 @@ def _run_framework_to_script_workflow(
             progress_percent=42,
         )
         variables.update(output)
+        _normalize_framework_to_script_asset_variables(variables)
         _sync_state_variables(state, variables)
 
     total_episodes = int(variables[TOTAL_EPISODES])
@@ -1040,6 +1157,10 @@ def _run_framework_to_script_workflow(
             {
                 CONFLICT_START_EPISODE: batch.start_episode,
                 CONFLICT_MEMORY: conflict_memory,
+                BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+                SCENE_DICTIONARY: variables.get(SCENE_DICTIONARY),
+                SCRIPT_WORLD_RULES_DIGEST: variables.get(SCRIPT_WORLD_RULES_DIGEST),
+                APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
             }
         )
         conflict_plan, conflict_review = _run_batch_write_review_revise_loop(
@@ -1062,6 +1183,8 @@ def _run_framework_to_script_workflow(
                 **_stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW, variables),
                 CONFLICT_START_EPISODE: batch.start_episode,
                 BATCH_CAUSAL_CONFLICT_PLAN: current,
+                BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+                APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
             },
             rewrite_context_builder=lambda current, review: {
                 **_stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE, variables),
@@ -1069,6 +1192,8 @@ def _run_framework_to_script_workflow(
                 BATCH_CAUSAL_CONFLICT_PLAN: current,
                 BATCH_CAUSAL_CONFLICT_REVIEW: json.dumps(review, ensure_ascii=False),
                 CONFLICT_MEMORY: conflict_memory,
+                BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+                APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
             },
             progress_percent=min(78, 44 + index * 18 // max(1, len(batches))),
             generated_episodes=max(0, batch.start_episode - 1),
@@ -1105,6 +1230,9 @@ def _run_framework_to_script_workflow(
                 SCRIPT_START_EPISODE: batch.start_episode,
                 SCRIPT_MEMORY: script_memory,
                 BATCH_CAUSAL_CONFLICT_PLAN: conflict_plan,
+                BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+                SCRIPT_WORLD_RULES_DIGEST: variables.get(SCRIPT_WORLD_RULES_DIGEST),
+                APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
             }
         )
         batch_script, script_review = _run_batch_write_review_revise_loop(
@@ -1127,12 +1255,17 @@ def _run_framework_to_script_workflow(
                 **_stage_input_context(STAGE_FRAMEWORK_SCRIPT_REVIEW, variables),
                 SCRIPT_START_EPISODE: batch.start_episode,
                 BATCH_CAUSAL_CONFLICT_PLAN: conflict_plan,
+                BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+                APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
                 BATCH_SCRIPT_TEXT: current,
             },
             rewrite_context_builder=lambda current, review: {
                 **_stage_input_context(STAGE_FRAMEWORK_SCRIPT_REWRITE, variables),
                 SCRIPT_START_EPISODE: batch.start_episode,
                 BATCH_CAUSAL_CONFLICT_PLAN: conflict_plan,
+                BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+                SCRIPT_WORLD_RULES_DIGEST: variables.get(SCRIPT_WORLD_RULES_DIGEST),
+                APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
                 BATCH_SCRIPT_TEXT: current,
                 BATCH_SCRIPT_REVIEW: json.dumps(review, ensure_ascii=False),
                 SCRIPT_MEMORY: script_memory,
@@ -1237,10 +1370,29 @@ def _framework_enriched_plan_for_batch(
     variables: dict[str, Any],
     batch: BatchWindow,
 ) -> Any:
+    _normalize_framework_to_script_asset_variables(variables)
+
+    plan_items = _framework_to_script_json_list(variables.get(ALL_ENRICHED_EPISODE_PLAN))
+    if plan_items:
+        batch_items: list[Any] = []
+        for item in plan_items:
+            if not isinstance(item, dict):
+                continue
+            episode_no = _safe_int(item.get("episode"), 0)
+            if batch.start_episode <= episode_no <= batch.end_episode:
+                batch_items.append(item)
+        if batch_items:
+            return json.dumps(batch_items, ensure_ascii=False)
+
     cached = slice_object_episodes_for_batch(variables.get(ALL_ENRICHED_EPISODE_PLAN), batch)
     if _has_value(cached):
         return cached
-    return variables.get(BATCH_ENRICHED_EPISODE_PLAN)
+
+    fallback = variables.get(BATCH_ENRICHED_EPISODE_PLAN)
+    fallback_items = _framework_to_script_json_list(fallback)
+    if fallback_items:
+        return json.dumps(fallback_items, ensure_ascii=False)
+    return fallback
 
 
 def _validate_framework_batch_object(

@@ -1,0 +1,28 @@
+=== Framework Planner Stage Debug ===
+timestamp: 2026-05-21T18:28:41.359127+08:00
+stage: 01 - 原文信息提取
+status: success
+-- variables --
+mode: str(len=2) 创作
+source_text: str(len=0)
+source_title: str(len=10) 文静少女竟是黑帮老大
+target_format: str(len=2) 短剧
+season_count: int 1
+episodes_per_season: int 6
+minutes_per_episode: int 2
+adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+user_constraints: str(len=41) 不要有爱情线，可以有暧昧但是女主必须要有主体性，保持大女主形象，禁止让女主坠入爱河
+user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+source_brief: dict(keys=[title, source_type, genre, tone, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, core_logline, protagonist, main_opposition], size=22) {"title":"文静少女竟是黑帮老大","source_type":"未明确来源类型，暂按用户提供的故事材料处理","genre":"都市逆袭，黑帮题材","tone":"高爽强反转","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_directi...
+project_title: str(len=10) 文静少女竟是黑帮老大
+selected_preference_tag_ids: list(len=0) []
+selected_preference_tags: list(len=0) []
+user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+user_knowledge_tag_prompt: str(len=0)
+user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+project_id: str(len=7) unsaved
+title: str(len=10) 文静少女竟是黑帮老大
+display_text: str(len=142) 故事核心为一名文静少女实则黑帮老大，在校园与黑帮双重身份间周旋，追求掌控与平衡。题材为都市黑帮爽剧，基调高爽强反转。主角为文静少女（姓名未明确），主要阻力来自敌对势力和身份暴露风险。必须保留核心设定、大女主主体性、无完整爱情线。目前材料仅标题，大量信息缺失，需后续补充具体人物和剧情。
+parse_warnings: list(len=1) ["已从 FastGPT 原始返回修复阶段输出 source=responseData[2].updateVarResult[0] fields=source_brief"]

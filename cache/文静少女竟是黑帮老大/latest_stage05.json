@@ -1,0 +1,480 @@
+{
+  "stage": "stage05",
+  "timestamp": "20260521-183705-526",
+  "status": "success",
+  "payload_project_name": "文静少女竟是黑帮老大",
+  "payload_keys": [
+    "adaptation_direction",
+    "basic_config",
+    "beat_checkpoint_timeline",
+    "character_plan",
+    "current_storyline_decisions",
+    "mode",
+    "previous_character_storylines",
+    "project_id",
+    "project_title",
+    "prompt_preferences",
+    "selected_preference_tag_ids",
+    "selected_preference_tags",
+    "source_brief",
+    "source_title",
+    "title",
+    "user_feedback",
+    "user_knowledge_stage_prompt",
+    "user_knowledge_stage_prompts",
+    "user_knowledge_tag_prompt",
+    "user_preference_prompt",
+    "user_requirements",
+    "worldview_plan"
+  ],
+  "payload_debug_summary": {
+    "type": "dict",
+    "payload_keys": [
+      "adaptation_direction",
+      "basic_config",
+      "beat_checkpoint_timeline",
+      "character_plan",
+      "current_storyline_decisions",
+      "mode",
+      "previous_character_storylines",
+      "project_id",
+      "project_title",
+      "prompt_preferences",
+      "selected_preference_tag_ids",
+      "selected_preference_tags",
+      "source_brief",
+      "source_title",
+      "title",
+      "user_feedback",
+      "user_knowledge_stage_prompt",
+      "user_knowledge_stage_prompts",
+      "user_knowledge_tag_prompt",
+      "user_preference_prompt",
+      "user_requirements",
+      "worldview_plan"
+    ],
+    "field_summary": {
+      "mode": {
+        "type": "str",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'创作'"
+      },
+      "source_brief": {
+        "type": "dict",
+        "length": 1166,
+        "dict_keys": [
+          "adaptation_direction",
+          "available_material_summary",
+          "core_conflict",
+          "core_logline",
+          "core_premise",
+          "episodes_per_season",
+          "forbidden_deviations",
+          "genre",
+          "main_opposition",
+          "minutes_per_episode",
+          "missing_information_risks",
+          "must_keep_elements"
+        ],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "{'adaptation_direction': '请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。', 'available_material_summary': '目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。', 'core_conflict': '主角维护双重身份的秘密与各方势力威胁秘密暴露之间的矛盾，以及作为黑帮老大必须面对的残酷竞争与内心道德挣扎。', 'core_logline': '一个看似文静的高中女生实际上是黑帮老大，她必须在维护日常伪装的同时掌控地下..."
+      },
+      "basic_config": {
+        "type": "dict",
+        "length": 361,
+        "dict_keys": [
+          "adaptation_direction",
+          "episodes_per_season",
+          "minutes_per_episode",
+          "mode",
+          "project_title",
+          "season_count",
+          "source_title",
+          "target_format",
+          "title",
+          "user_constraints",
+          "user_requirements"
+        ],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "{'project_title': '文静少女竟是黑帮老大', 'source_title': '文静少女竟是黑帮老大', 'mode': '创作', 'target_format': '短剧', 'season_count': 1, 'episodes_per_season': 6, 'minutes_per_episode': 2, 'adaptation_direction': '请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。', 'user_constraints': '不要有爱情线，可以有暧昧但是女主必须要有主体性，保持大女主形象，禁止让女主坠入爱河', 'use..."
+      },
+      "worldview_plan": {
+        "type": "dict",
+        "length": 1747,
+        "dict_keys": [
+          "conflict_engine",
+          "core_resource",
+          "core_rules",
+          "core_setting",
+          "forbidden_deviations",
+          "main_conflict",
+          "must_keep",
+          "power_structure",
+          "ready_for_script_workflow",
+          "rules",
+          "social_order",
+          "space_logic"
+        ],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "{'conflict_engine': ['身份暴露危机：校园日常中偶然的破绽（如被同学目击处理黑帮事务）引发连锁反应，需用谎言或非常手段掩盖。', '规则破坏代价：反派故意诱导主角违反黑帮禁忌规则，从而启动异常惩罚机制，迫使主角应对超常事件。', '情感误会冲突：闺蜜或老师对主角的双面行为产生怀疑，引发都市情感式误解，主角必须在保护秘密与维系关系间抉择。'], 'core_resource': '情报网络、地盘掌控权、帮派成员的忠诚度、以及主角的伪装能力', 'core_rules': [\"黑帮内部存在不可违背的禁忌规则，如'不得在夜晚21点后单独会见外人'，违者将遭受异常惩罚（如被帮派标记..."
+      },
+      "character_plan": {
+        "type": "dict",
+        "length": 6551,
+        "dict_keys": [
+          "character_relationships",
+          "character_rules",
+          "character_system_summary",
+          "characters",
+          "emotion_engine",
+          "main_characters",
+          "protagonist",
+          "ready_for_script_workflow",
+          "relationship_map"
+        ],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "{'character_relationships': ['苏晴与林瑶：闺蜜兼同桌，苏晴因身份多次深夜或异常行为引起林瑶怀疑，林瑶试图调查，引发情感误会与冲突。后期林瑶知情后成为唯一灵魂伴侣（非爱情），支持苏晴。', '苏晴与陈锋：敌对帮派头目，陈锋设计规则陷阱试图逼迫苏晴身份暴露，两人多次智斗，苏晴利用规则漏洞反制。', '苏晴与刘伯：上下级但存在权力制衡，刘伯对苏晴的能力保持观望，暗中收集情报。苏晴需用实力赢得他的忠诚。', '林瑶与陈锋：陈锋利用林瑶对苏晴的关心，故意提供假线索让林瑶怀疑苏晴，制造校园事件。林瑶一度被误导，后期认清真相。', '陈锋与刘伯：暗中接触，陈锋试图拉拢刘伯，但刘..."
+      },
+      "beat_checkpoint_timeline": {
+        "type": "list",
+        "length": 9398,
+        "dict_keys": [],
+        "list_length": 15,
+        "first_item_type": "dict",
+        "preview": "[{'act': '第一幕', 'beat_name': '开场', 'beat_no': 1, 'character_change': '苏晴展现出无缝切换的双面能力，但林瑶的怀疑开始积累。', 'checkpoint_title': '双面少女的清晨', 'conflict_upgrade': '身份暴露的种子被埋下，日常与黑帮世界的界限出现第一次裂痕。', 'episode_range': '1', 'hook_or_reversal': '反转：苏晴装傻化解危机，但观众已知她黑帮老大身份，形成信息差悬念。', 'linked_storylines': ['苏晴-身份暴露线', '苏晴-..."
+      },
+      "previous_character_storylines": {
+        "type": "list",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "[]"
+      },
+      "current_storyline_decisions": {
+        "type": "list",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "[]"
+      },
+      "user_feedback": {
+        "type": "str",
+        "length": 76,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'用户偏好提示：【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\\n\\n【都市情感】\\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。'"
+      },
+      "adaptation_direction": {
+        "type": "str",
+        "length": 33,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。'"
+      },
+      "user_requirements": {
+        "type": "str",
+        "length": 87,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'幽默搞笑热血新奇复仇互撕女性向大女主\\n\\n用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。'"
+      },
+      "selected_preference_tag_ids": {
+        "type": "list",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "[]"
+      },
+      "selected_preference_tags": {
+        "type": "list",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "[]"
+      },
+      "user_preference_prompt": {
+        "type": "str",
+        "length": 60,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。'"
+      },
+      "user_knowledge_tag_prompt": {
+        "type": "str",
+        "length": 0,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "''"
+      },
+      "user_knowledge_stage_prompts": {
+        "type": "dict",
+        "length": 616,
+        "dict_keys": [
+          "basic",
+          "beat",
+          "character",
+          "guide",
+          "package",
+          "storylines",
+          "worldview"
+        ],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "{'basic': '【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\\n\\n【都市情感】\\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。', 'worldview': '【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\\n\\n【都市情感】\\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。', 'character': '【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\\n\\n【都市情感】\\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。', 'beat': '【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价..."
+      },
+      "prompt_preferences": {
+        "type": "dict",
+        "length": 720,
+        "dict_keys": [
+          "script_preference",
+          "stage_prompts"
+        ],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "{'script_preference': '请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。', 'stage_prompts': {'basic': '【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\\n\\n【都市情感】\\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。', 'worldview': '【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\\n\\n【都市情感】\\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。', 'character': '【规则怪谈】..."
+      },
+      "user_knowledge_stage_prompt": {
+        "type": "str",
+        "length": 69,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\\n\\n【都市情感】\\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。'"
+      },
+      "project_id": {
+        "type": "str",
+        "length": 7,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'unsaved'"
+      },
+      "project_title": {
+        "type": "str",
+        "length": 10,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'文静少女竟是黑帮老大'"
+      },
+      "title": {
+        "type": "str",
+        "length": 10,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'文静少女竟是黑帮老大'"
+      },
+      "source_title": {
+        "type": "str",
+        "length": 10,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'文静少女竟是黑帮老大'"
+      }
+    },
+    "suspected_raw_response_fields": []
+  },
+  "output": {
+    "character_storylines": [
+      {
+        "id": "protagonist_main_line",
+        "title": "苏晴",
+        "summary": "苏晴从独自承受双重身份压力的文静学霸，经历身份暴露危机、规则博弈、内部权力斗争、闺蜜误会与背叛打击，最终在最低谷后重整旗鼓，用智慧与勇气击败陈锋、收服刘伯、赢得林瑶信任，完成从规则遵守者到规则制定者的蜕变，建立新帮规，获得内心和解。",
+        "detailed_storyline": "苏晴的故事线从日常伪装开始，她同时是学霸和黑帮老大，但林瑶的怀疑、刘伯的试探、陈锋的规则陷阱层层加压。第一幕她被动防守，利用规则漏洞挽回局面但埋下隐患。第二幕她主动进攻，在舞会上以超高智勇反击陈锋，却因违反帮规被刘伯借口夺权，同时林瑶被绑，陷入众叛亲离的绝境。灵魂黑夜中她反思为何而战，林瑶的信任让她重新振作。第三幕她跳出旧规则，用录音证据联合警方，一举端掉陈锋，并迫使刘伯臣服。最终她成为新帮规的创立者，获得内心和解与林瑶的忠诚伙伴。",
+        "linked_beats": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        "episode_distribution": [
+          {
+            "episode_range": "1",
+            "focus": ""
+          },
+          {
+            "episode_range": "2",
+            "focus": ""
+          },
+          {
+            "episode_range": "3",
+            "focus": ""
+          },
+          {
+            "episode_range": "4",
+            "focus": ""
+          },
+          {
+            "episode_range": "5",
+            "focus": ""
+          },
+          {
+            "episode_range": "6",
+            "focus": ""
+          }
+        ],
+        "edit_notes": "这条线保留完整，是剧本核心。需注意每集苏晴必须有高光反转，确保大女主主导性。与陈锋的规则博弈要体现层层升级的异常感，满足用户对规则怪谈的偏好。林瑶误会与修复需贯穿始终，强化都市情感冲突。节拍14中苏晴洗白自己的手法需谨慎处理，避免法律逻辑漏洞。",
+        "decision": "keep"
+      },
+      {
+        "id": "antagonist_pressure_line",
+        "title": "陈锋",
+        "summary": "陈锋作为赤蛇会头目，从设计规则陷阱迫使苏晴身份暴露，到利用林瑶离间、设狙击埋伏、舞会逼宫，逐步升级压迫手段，最终因自负而被苏晴反制，证据入狱，体现规则反噬。",
+        "detailed_storyline": "陈锋代表外部压迫与规则怪谈的制造者。他从第一幕开始设置规则陷阱，逐步升级：从绑架手下、设狙击圈套、到在校园舞会公开逼宫。每次陷阱都被苏晴利用规则漏洞或更高智慧破解，但他不屈不挠，甚至利用林瑶离间。第二幕后半他看似占上风（抓住苏晴违规把柄，联合刘伯夺权，并绑架林瑶），但最终因自负和轻视女性而被苏晴用录音证据和警方联合反杀，自己投入监狱。他的失败体现了规则反噬的主题。",
+        "linked_beats": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          8,
+          9,
+          10,
+          13,
+          14
+        ],
+        "episode_distribution": [
+          {
+            "episode_range": "1",
+            "focus": ""
+          },
+          {
+            "episode_range": "2",
+            "focus": ""
+          },
+          {
+            "episode_range": "3",
+            "focus": ""
+          },
+          {
+            "episode_range": "4",
+            "focus": ""
+          },
+          {
+            "episode_range": "5-6",
+            "focus": ""
+          }
+        ],
+        "edit_notes": "反派线保留，需保持其智力与压迫感，避免被智商碾压太快。规则陷阱应逐级升级，体现用户偏好的规则怪谈异常感。注意不要在最后越狱环节显得突兀，需给出合理铺垫（如警局内应）。",
+        "decision": "keep"
+      },
+      {
+        "id": "b_story_lin_yao_line",
+        "title": "林瑶",
+        "summary": "林瑶从信任苏晴到因异常行为产生怀疑，再到被陈锋利用而误会加深，最终在舞会上收到U盘证据后觉醒，主动相信并协助苏晴，成为她唯一知晓秘密的忠诚伙伴，完成从单纯闺蜜到守护者的蜕变。",
+        "detailed_storyline": "林瑶的故事线是典型的都市情感误会与修复。她因苏晴的异常行为产生怀疑，并被反派利用加深误会，但关键节点上始终心向苏晴。舞会上收到U盘后她选择相信并报警，被绑架后仍发定位求援，最终成为苏晴唯一知情且支持的人。她的成长从冲动易怒到冷静信任，完成了B故事的主题：真正的友谊经得起秘密与考验。",
+        "linked_beats": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          7,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        "episode_distribution": [
+          {
+            "episode_range": "1",
+            "focus": ""
+          },
+          {
+            "episode_range": "2",
+            "focus": ""
+          },
+          {
+            "episode_range": "3",
+            "focus": ""
+          },
+          {
+            "episode_range": "4",
+            "focus": ""
+          },
+          {
+            "episode_range": "5",
+            "focus": ""
+          },
+          {
+            "episode_range": "6",
+            "focus": ""
+          }
+        ],
+        "edit_notes": "这条线保留，是情感冲突核心，满足都市情感偏好。注意不要让她成为工具人，保持主动性。她的怀疑与苏晴的误会需在每集结尾适当化解或升级形成钩子。禁写关系彻底破裂，最后应修复并升华。",
+        "decision": "keep"
+      },
+      {
+        "id": "liu_bo_power_balance_line",
+        "title": "刘伯",
+        "summary": "刘伯作为青帮元老，从暗中观察苏晴、设局试探，到与陈锋勾结挑战权威，最终被苏晴用录音证据反制，被迫臣服并成为副手，体现内部权力更迭。",
+        "detailed_storyline": "刘伯的职业故事线是传统黑帮元老面对年轻女性统治者的权力博弈。前期他保持观望，中期与陈锋联手试图夺权，在苏晴最落魄时逼迫退位。但苏晴早已掌握他勾结的证据，在最终局以更高维度（警方合规）威胁他屈服，他因而成为新帮规的执行者。这条线较短，重点在权力转移和规则更新。",
+        "linked_beats": [
+          2,
+          6,
+          9,
+          10,
+          11,
+          13,
+          14
+        ],
+        "episode_distribution": [
+          {
+            "episode_range": "1",
+            "focus": ""
+          },
+          {
+            "episode_range": "2",
+            "focus": ""
+          },
+          {
+            "episode_range": "4",
+            "focus": ""
+          },
+          {
+            "episode_range": "5",
+            "focus": ""
+          },
+          {
+            "episode_range": "6",
+            "focus": ""
+          }
+        ],
+        "edit_notes": "精简处理，只保留关键节拍：试探、观察、夺权、臣服。可删去中间一些细节（如舞会前的小动作）。不影响主线，因为苏晴的反制手段（录音）已经在主角线中体现。后续剧本生成时只需确保刘伯的动机和转变合理，不必过多展现他的内部活动。",
+        "decision": "simplify"
+      }
+    ],
+    "display_text": "本次人物故事线生成基于已有的三幕十五节拍卡点，拆解出四条人物故事线：苏晴主角成长线（main-keep）、陈锋反派压迫线（strong_support-keep）、林瑶B故事情感线（strong_support-keep）、刘伯元老权力制衡线（weak_support-simplify）。主角线贯穿第一幕至第三幕，重点展示身份危机、规则博弈、内心挣扎和最终蜕变；反派线体现规则陷阱逐步升级的压迫感，满足用户对规则怪谈的偏好；林瑶线聚焦都市情感误会与修复，强化共情；刘伯线压缩要点，服务于权力更迭主题。所有故事线均基于上游已确认的 character_plan 和 beat_checkpoint_timeline，未新增人物或事件，一致性良好。建议后续剧本生成时优先保障主角每集高光反转，反派智力不降级，林瑶的情感变化与主线紧密交织，刘伯线则用简洁镜头带过即可。"
+  }
+}

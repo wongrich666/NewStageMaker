@@ -1,0 +1,456 @@
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:28:24.664027+08:00
+event: stage01_request
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.episodes_per_season: int 6
+payload.minutes_per_episode: int 2
+payload.mode: str(len=2) 创作
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.season_count: int 1
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_text: str(len=0)
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.target_format: str(len=2) 短剧
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_constraints: str(len=41) 不要有爱情线，可以有暧昧但是女主必须要有主体性，保持大女主形象，禁止让女主坠入爱河
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+-- detail --
+detail.current_view: str(len=5) basic
+detail.revise: bool False
+detail.stageKey: str(len=5) basic
+detail.stageNo: str(len=2) 01
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:28:41.370908+08:00
+event: stage01_response
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.episodes_per_season: int 6
+payload.minutes_per_episode: int 2
+payload.mode: str(len=2) 创作
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.season_count: int 1
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_text: str(len=0)
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.target_format: str(len=2) 短剧
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_constraints: str(len=41) 不要有爱情线，可以有暧昧但是女主必须要有主体性，保持大女主形象，禁止让女主坠入爱河
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+-- detail --
+detail.data_summary: dict(keys=[display_text, source_brief], size=2) {"display_text":{"type":"string","length":142,"polluted":false},"source_brief":{"type":"object","keys":["adaptation_direction","available_material_summary","core_conflict","core_logline","core_premise...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage01_20260521-182841-363.json","latest_filename":"latest_stage01.json","payload_keys":["adaptation_direction","episodes_per_season","minutes_per_episode","mode","project_id","project_t...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=5) basic
+detail.stageNo: str(len=2) 01
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:28:41.388216+08:00
+event: stage02_request
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.locked_basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements], size=11) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.mode: str(len=2) 创作
+payload.previous_worldview_plan: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=22) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。","core_conflict":"主角维护双重身份的秘密与各方势...
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_feedback: str(len=76) 用户偏好提示：【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+-- detail --
+detail.current_view: str(len=9) worldview
+detail.revise: bool False
+detail.stageKey: str(len=9) worldview
+detail.stageNo: str(len=2) 02
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:29:25.159527+08:00
+event: stage02_response
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.locked_basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements], size=11) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.mode: str(len=2) 创作
+payload.previous_worldview_plan: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=22) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。","core_conflict":"主角维护双重身份的秘密与各方势...
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_feedback: str(len=76) 用户偏好提示：【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+-- detail --
+detail.data_summary: dict(keys=[display_text, worldview_plan], size=2) {"display_text":{"type":"string","length":129,"polluted":false},"worldview_plan":{"type":"object","keys":["conflict_engine","core_resource","core_rules","core_setting","forbidden_deviations","main_con...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage02_20260521-182925-151.json","latest_filename":"latest_stage02.json","payload_keys":["adaptation_direction","basic_config","locked_basic_config","mode","previous_worldview_plan","pro...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=9) worldview
+detail.stageNo: str(len=2) 02
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:31:03.099749+08:00
+event: stage03_request
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.locked_basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements], size=11) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.mode: str(len=2) 创作
+payload.previous_character_plan: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=22) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。","core_conflict":"主角维护双重身份的秘密与各方势...
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_feedback: str(len=76) 用户偏好提示：【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["身份暴露危机：校园日常中偶然的破绽（如被同学目击处理黑帮事务）引发连锁反应，需用谎言或非常手段掩盖。","规则破坏代价：反派故意诱导主角违反黑帮禁忌规则，从而启动异常惩罚机制，迫使主角应对超常事件。","情感误会冲突：闺蜜或老师对主角的双面行为产生怀疑，引发都市情感式误解，主角必须在保护秘密与维系关系间抉择。"],"core_resource":"情报网络...
+-- detail --
+detail.current_view: str(len=9) character
+detail.revise: bool False
+detail.stageKey: str(len=9) character
+detail.stageNo: str(len=2) 03
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:31:57.137370+08:00
+event: stage03_response
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.locked_basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements], size=11) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.mode: str(len=2) 创作
+payload.previous_character_plan: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=22) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。","core_conflict":"主角维护双重身份的秘密与各方势...
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_feedback: str(len=76) 用户偏好提示：【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["身份暴露危机：校园日常中偶然的破绽（如被同学目击处理黑帮事务）引发连锁反应，需用谎言或非常手段掩盖。","规则破坏代价：反派故意诱导主角违反黑帮禁忌规则，从而启动异常惩罚机制，迫使主角应对超常事件。","情感误会冲突：闺蜜或老师对主角的双面行为产生怀疑，引发都市情感式误解，主角必须在保护秘密与维系关系间抉择。"],"core_resource":"情报网络...
+-- detail --
+detail.data_summary: dict(keys=[character_plan, display_text], size=2) {"character_plan":{"type":"object","keys":["character_relationships","character_rules","character_system_summary","characters","emotion_engine","main_characters","protagonist","ready_for_script_workfl...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage03_20260521-183157-127.json","latest_filename":"latest_stage03.json","payload_keys":["adaptation_direction","basic_config","locked_basic_config","mode","previous_character_plan","pro...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=9) character
+detail.stageNo: str(len=2) 03
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:32:08.898173+08:00
+event: stage04_request
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["苏晴与林瑶：闺蜜兼同桌，苏晴因身份多次深夜或异常行为引起林瑶怀疑，林瑶试图调查，引发情感误会与冲突。后期林瑶知情后成为唯一灵魂伴侣（非爱情），支持苏晴。","苏晴与陈锋：敌对帮派头目，陈锋设计规则陷阱试图逼迫苏晴身份暴露，两人多次智斗，苏晴利用规则漏洞反制。","苏晴与刘伯：上下级但存在权力制衡，刘伯对苏晴的能力保持观望，暗中收集情报。苏晴...
+payload.framework_score_report: str(len=0)
+payload.mode: str(len=2) 创作
+payload.previous_beat_checkpoint_timeline: list(len=0) []
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=22) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。","core_conflict":"主角维护双重身份的秘密与各方势...
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_feedback: str(len=76) 用户偏好提示：【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["身份暴露危机：校园日常中偶然的破绽（如被同学目击处理黑帮事务）引发连锁反应，需用谎言或非常手段掩盖。","规则破坏代价：反派故意诱导主角违反黑帮禁忌规则，从而启动异常惩罚机制，迫使主角应对超常事件。","情感误会冲突：闺蜜或老师对主角的双面行为产生怀疑，引发都市情感式误解，主角必须在保护秘密与维系关系间抉择。"],"core_resource":"情报网络...
+-- detail --
+detail.current_view: str(len=13) beat_timeline
+detail.revise: bool False
+detail.stageKey: str(len=4) beat
+detail.stageNo: str(len=2) 04
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:34:44.501049+08:00
+event: stage04_response
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["苏晴与林瑶：闺蜜兼同桌，苏晴因身份多次深夜或异常行为引起林瑶怀疑，林瑶试图调查，引发情感误会与冲突。后期林瑶知情后成为唯一灵魂伴侣（非爱情），支持苏晴。","苏晴与陈锋：敌对帮派头目，陈锋设计规则陷阱试图逼迫苏晴身份暴露，两人多次智斗，苏晴利用规则漏洞反制。","苏晴与刘伯：上下级但存在权力制衡，刘伯对苏晴的能力保持观望，暗中收集情报。苏晴...
+payload.framework_score_report: str(len=0)
+payload.mode: str(len=2) 创作
+payload.previous_beat_checkpoint_timeline: list(len=0) []
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=22) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。","core_conflict":"主角维护双重身份的秘密与各方势...
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_feedback: str(len=76) 用户偏好提示：【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["身份暴露危机：校园日常中偶然的破绽（如被同学目击处理黑帮事务）引发连锁反应，需用谎言或非常手段掩盖。","规则破坏代价：反派故意诱导主角违反黑帮禁忌规则，从而启动异常惩罚机制，迫使主角应对超常事件。","情感误会冲突：闺蜜或老师对主角的双面行为产生怀疑，引发都市情感式误解，主角必须在保护秘密与维系关系间抉择。"],"core_resource":"情报网络...
+-- detail --
+detail.data_summary: dict(keys=[beat_checkpoint_timeline, checkpoint_explanation, display_text], size=3) {"beat_checkpoint_timeline":{"type":"array","isArray":true,"length":15,"firstItemType":"object"},"checkpoint_explanation":{"type":"object","keys":["beat_notes","overview"],"polluted":false},"display_t...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage04_20260521-183444-488.json","latest_filename":"latest_stage04.json","payload_keys":["adaptation_direction","basic_config","character_plan","framework_score_report","mode","previous_...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=4) beat
+detail.stageNo: str(len=2) 04
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:36:14.620275+08:00
+event: stage05_request
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, source_title, mode, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=11) {"project_title":"文静少女竟是黑帮老大","source_title":"文静少女竟是黑帮老大","mode":"创作","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"苏晴展现出无缝切换的双面能力，但林瑶的怀疑开始积累。","checkpoint_title":"双面少女的清晨","conflict_upgrade":"身份暴露的种子被埋下，日常与黑帮世界的界限出现第一次裂痕。","episode_range":"1","hook_or_...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["苏晴与林瑶：闺蜜兼同桌，苏晴因身份多次深夜或异常行为引起林瑶怀疑，林瑶试图调查，引发情感误会与冲突。后期林瑶知情后成为唯一灵魂伴侣（非爱情），支持苏晴。","苏晴与陈锋：敌对帮派头目，陈锋设计规则陷阱试图逼迫苏晴身份暴露，两人多次智斗，苏晴利用规则漏洞反制。","苏晴与刘伯：上下级但存在权力制衡，刘伯对苏晴的能力保持观望，暗中收集情报。苏晴...
+payload.current_storyline_decisions: list(len=0) []
+payload.mode: str(len=2) 创作
+payload.previous_character_storylines: list(len=0) []
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=22) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。","core_conflict":"主角维护双重身份的秘密与各方势...
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_feedback: str(len=76) 用户偏好提示：【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["身份暴露危机：校园日常中偶然的破绽（如被同学目击处理黑帮事务）引发连锁反应，需用谎言或非常手段掩盖。","规则破坏代价：反派故意诱导主角违反黑帮禁忌规则，从而启动异常惩罚机制，迫使主角应对超常事件。","情感误会冲突：闺蜜或老师对主角的双面行为产生怀疑，引发都市情感式误解，主角必须在保护秘密与维系关系间抉择。"],"core_resource":"情报网络...
+-- detail --
+detail.current_view: str(len=10) storylines
+detail.revise: bool False
+detail.stageKey: str(len=10) storylines
+detail.stageNo: str(len=2) 05
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:37:05.538785+08:00
+event: stage05_response
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, source_title, mode, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=11) {"project_title":"文静少女竟是黑帮老大","source_title":"文静少女竟是黑帮老大","mode":"创作","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"苏晴展现出无缝切换的双面能力，但林瑶的怀疑开始积累。","checkpoint_title":"双面少女的清晨","conflict_upgrade":"身份暴露的种子被埋下，日常与黑帮世界的界限出现第一次裂痕。","episode_range":"1","hook_or_...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["苏晴与林瑶：闺蜜兼同桌，苏晴因身份多次深夜或异常行为引起林瑶怀疑，林瑶试图调查，引发情感误会与冲突。后期林瑶知情后成为唯一灵魂伴侣（非爱情），支持苏晴。","苏晴与陈锋：敌对帮派头目，陈锋设计规则陷阱试图逼迫苏晴身份暴露，两人多次智斗，苏晴利用规则漏洞反制。","苏晴与刘伯：上下级但存在权力制衡，刘伯对苏晴的能力保持观望，暗中收集情报。苏晴...
+payload.current_storyline_decisions: list(len=0) []
+payload.mode: str(len=2) 创作
+payload.previous_character_storylines: list(len=0) []
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=22) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。","core_conflict":"主角维护双重身份的秘密与各方势...
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_feedback: str(len=76) 用户偏好提示：【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["身份暴露危机：校园日常中偶然的破绽（如被同学目击处理黑帮事务）引发连锁反应，需用谎言或非常手段掩盖。","规则破坏代价：反派故意诱导主角违反黑帮禁忌规则，从而启动异常惩罚机制，迫使主角应对超常事件。","情感误会冲突：闺蜜或老师对主角的双面行为产生怀疑，引发都市情感式误解，主角必须在保护秘密与维系关系间抉择。"],"core_resource":"情报网络...
+-- detail --
+detail.data_summary: dict(keys=[character_storylines, display_text], size=2) {"character_storylines":{"type":"array","isArray":true,"length":4,"firstItemType":"object"},"display_text":{"type":"string","length":382,"polluted":false}}
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage05_20260521-183705-526.json","latest_filename":"latest_stage05.json","payload_keys":["adaptation_direction","basic_config","beat_checkpoint_timeline","character_plan","current_storyl...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=10) storylines
+detail.stageNo: str(len=2) 05
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:38:22.558348+08:00
+event: stage06_request
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"苏晴展现出无缝切换的双面能力，但林瑶的怀疑开始积累。","checkpoint_title":"双面少女的清晨","conflict_upgrade":"身份暴露的种子被埋下，日常与黑帮世界的界限出现第一次裂痕。","episode_range":"1","hook_or_...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["苏晴与林瑶：闺蜜兼同桌，苏晴因身份多次深夜或异常行为引起林瑶怀疑，林瑶试图调查，引发情感误会与冲突。后期林瑶知情后成为唯一灵魂伴侣（非爱情），支持苏晴。","苏晴与陈锋：敌对帮派头目，陈锋设计规则陷阱试图逼迫苏晴身份暴露，两人多次智斗，苏晴利用规则漏洞反制。","苏晴与刘伯：上下级但存在权力制衡，刘伯对苏晴的能力保持观望，暗中收集情报。苏晴...
+payload.character_storylines: list(len=4) [{"id":"protagonist_main_line","title":"苏晴","summary":"苏晴从独自承受双重身份压力的文静学霸，经历身份暴露危机、规则博弈、内部权力斗争、闺蜜误会与背叛打击，最终在最低谷后重整旗鼓，用智慧与勇气击败陈锋、收服刘伯、赢得林瑶信任，完成从规则遵守者到规则制定者的蜕变，建立新帮规，获得内心和解。","detailed_storyline":"苏晴的故事...
+payload.mode: str(len=2) 创作
+payload.previous_adaptation_guide: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=22) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。","core_conflict":"主角维护双重身份的秘密与各方势...
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.storyline_decisions: list(len=4) [{"storyline_id":"protagonist_main_line","title":"苏晴","linked_beats":[1,2,3,4,5,6,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"陈锋","linked_beats":[2,3,...
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_feedback: str(len=76) 用户偏好提示：【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["身份暴露危机：校园日常中偶然的破绽（如被同学目击处理黑帮事务）引发连锁反应，需用谎言或非常手段掩盖。","规则破坏代价：反派故意诱导主角违反黑帮禁忌规则，从而启动异常惩罚机制，迫使主角应对超常事件。","情感误会冲突：闺蜜或老师对主角的双面行为产生怀疑，引发都市情感式误解，主角必须在保护秘密与维系关系间抉择。"],"core_resource":"情报网络...
+-- detail --
+detail.current_view: str(len=5) guide
+detail.revise: bool False
+detail.stageKey: str(len=5) guide
+detail.stageNo: str(len=2) 06
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:38:50.089805+08:00
+event: stage06_response
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"苏晴展现出无缝切换的双面能力，但林瑶的怀疑开始积累。","checkpoint_title":"双面少女的清晨","conflict_upgrade":"身份暴露的种子被埋下，日常与黑帮世界的界限出现第一次裂痕。","episode_range":"1","hook_or_...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["苏晴与林瑶：闺蜜兼同桌，苏晴因身份多次深夜或异常行为引起林瑶怀疑，林瑶试图调查，引发情感误会与冲突。后期林瑶知情后成为唯一灵魂伴侣（非爱情），支持苏晴。","苏晴与陈锋：敌对帮派头目，陈锋设计规则陷阱试图逼迫苏晴身份暴露，两人多次智斗，苏晴利用规则漏洞反制。","苏晴与刘伯：上下级但存在权力制衡，刘伯对苏晴的能力保持观望，暗中收集情报。苏晴...
+payload.character_storylines: list(len=4) [{"id":"protagonist_main_line","title":"苏晴","summary":"苏晴从独自承受双重身份压力的文静学霸，经历身份暴露危机、规则博弈、内部权力斗争、闺蜜误会与背叛打击，最终在最低谷后重整旗鼓，用智慧与勇气击败陈锋、收服刘伯、赢得林瑶信任，完成从规则遵守者到规则制定者的蜕变，建立新帮规，获得内心和解。","detailed_storyline":"苏晴的故事...
+payload.mode: str(len=2) 创作
+payload.previous_adaptation_guide: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=22) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。","core_conflict":"主角维护双重身份的秘密与各方势...
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.storyline_decisions: list(len=4) [{"storyline_id":"protagonist_main_line","title":"苏晴","linked_beats":[1,2,3,4,5,6,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"陈锋","linked_beats":[2,3,...
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_feedback: str(len=76) 用户偏好提示：【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["身份暴露危机：校园日常中偶然的破绽（如被同学目击处理黑帮事务）引发连锁反应，需用谎言或非常手段掩盖。","规则破坏代价：反派故意诱导主角违反黑帮禁忌规则，从而启动异常惩罚机制，迫使主角应对超常事件。","情感误会冲突：闺蜜或老师对主角的双面行为产生怀疑，引发都市情感式误解，主角必须在保护秘密与维系关系间抉择。"],"core_resource":"情报网络...
+-- detail --
+detail.data_summary: dict(keys=[adaptation_guide, display_text], size=2) {"adaptation_guide":{"type":"object","keys":["character_emotion_strategy","core_setting_adjustments","hard_constraints_for_script_workflow","structure_and_rhythm","visualization_strategy"],"polluted":...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage06_20260521-183850-078.json","latest_filename":"latest_stage06.json","payload_keys":["adaptation_direction","basic_config","beat_checkpoint_timeline","character_plan","character_stor...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=5) guide
+detail.stageNo: str(len=2) 06
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:39:37.034508+08:00
+event: stage07_request
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.adaptation_guide: dict(keys=[character_emotion_strategy, core_setting_adjustments, hard_constraints_for_script_workflow, structure_and_rhythm, visualization_strategy], size=5) {"character_emotion_strategy":"主角苏晴情绪曲线：从被动伪装到主动反击，经历众叛亲离后反思，最终成长为新规则制定者。观众情绪引导：第1-2集通过信息差悬念（观众已知主角黑帮身份）产生代入感，林瑶的怀疑制造紧张；第3-4集规则博弈与舞会反转带来爽感；第5集最低谷引发共情；第6集联手反击和友谊修复实现情绪释放。反派陈锋保持高智商压迫感，规则陷阱逐级升级，让观众既恨又认可其...
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"苏晴展现出无缝切换的双面能力，但林瑶的怀疑开始积累。","checkpoint_title":"双面少女的清晨","conflict_upgrade":"身份暴露的种子被埋下，日常与黑帮世界的界限出现第一次裂痕。","episode_range":"1","hook_or_...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["苏晴与林瑶：闺蜜兼同桌，苏晴因身份多次深夜或异常行为引起林瑶怀疑，林瑶试图调查，引发情感误会与冲突。后期林瑶知情后成为唯一灵魂伴侣（非爱情），支持苏晴。","苏晴与陈锋：敌对帮派头目，陈锋设计规则陷阱试图逼迫苏晴身份暴露，两人多次智斗，苏晴利用规则漏洞反制。","苏晴与刘伯：上下级但存在权力制衡，刘伯对苏晴的能力保持观望，暗中收集情报。苏晴...
+payload.character_storylines: list(len=4) [{"id":"protagonist_main_line","title":"苏晴","summary":"苏晴从独自承受双重身份压力的文静学霸，经历身份暴露危机、规则博弈、内部权力斗争、闺蜜误会与背叛打击，最终在最低谷后重整旗鼓，用智慧与勇气击败陈锋、收服刘伯、赢得林瑶信任，完成从规则遵守者到规则制定者的蜕变，建立新帮规，获得内心和解。","detailed_storyline":"苏晴的故事...
+payload.checkpoint_explanation: dict(keys=[beat_notes, overview], size=2) {"beat_notes":[{"beat_no":1,"explanation":"清晨，苏晴在学校图书馆安静看书，眼镜反射柔和光线。突然手机震动，她查看一条加密消息：“码头仓库出事，需老大亲自处理。”她若无其事离开，在无人角落戴上耳机，用冷静语气远程下达指令：“按B方案，等我。”同时，闺蜜林瑶匆匆跑来：“苏晴，昨晚怎么没回我消息？我好像看到你在东街打架？”苏晴微笑：“你看错人了吧？我昨晚一直在...
+payload.mode: str(len=2) 创作
+payload.previous_framework_plan_package: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=22) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。","core_conflict":"主角维护双重身份的秘密与各方势...
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.storyline_decisions: list(len=4) [{"storyline_id":"protagonist_main_line","title":"苏晴","linked_beats":[1,2,3,4,5,6,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"陈锋","linked_beats":[2,3,...
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_edit_history: list(len=12) [{"at":"2026-05-21T10:28:41.368Z","action":"generate_stage","detail":{"stageKey":"basic","stageNo":"01"}},{"at":"2026-05-21T10:28:41.370Z","action":"confirm_stage","detail":{"stageKey":"basic","stageN...
+payload.user_feedback: str(len=76) 用户偏好提示：【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["身份暴露危机：校园日常中偶然的破绽（如被同学目击处理黑帮事务）引发连锁反应，需用谎言或非常手段掩盖。","规则破坏代价：反派故意诱导主角违反黑帮禁忌规则，从而启动异常惩罚机制，迫使主角应对超常事件。","情感误会冲突：闺蜜或老师对主角的双面行为产生怀疑，引发都市情感式误解，主角必须在保护秘密与维系关系间抉择。"],"core_resource":"情报网络...
+-- detail --
+detail.current_view: str(len=7) package
+detail.revise: bool False
+detail.stageKey: str(len=7) package
+detail.stageNo: str(len=2) 07
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-21T18:41:02.140638+08:00
+event: stage07_response
+project: 文静少女竟是黑帮老大
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.adaptation_guide: dict(keys=[character_emotion_strategy, core_setting_adjustments, hard_constraints_for_script_workflow, structure_and_rhythm, visualization_strategy], size=5) {"character_emotion_strategy":"主角苏晴情绪曲线：从被动伪装到主动反击，经历众叛亲离后反思，最终成长为新规则制定者。观众情绪引导：第1-2集通过信息差悬念（观众已知主角黑帮身份）产生代入感，林瑶的怀疑制造紧张；第3-4集规则博弈与舞会反转带来爽感；第5集最低谷引发共情；第6集联手反击和友谊修复实现情绪释放。反派陈锋保持高智商压迫感，规则陷阱逐级升级，让观众既恨又认可其...
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"文静少女竟是黑帮老大","mode":"创作","source_text":"","source_title":"文静少女竟是黑帮老大","target_format":"短剧","season_count":1,"episodes_per_season":6,"minutes_per_episode":2,"adaptation_direction":"请保持...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"苏晴展现出无缝切换的双面能力，但林瑶的怀疑开始积累。","checkpoint_title":"双面少女的清晨","conflict_upgrade":"身份暴露的种子被埋下，日常与黑帮世界的界限出现第一次裂痕。","episode_range":"1","hook_or_...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["苏晴与林瑶：闺蜜兼同桌，苏晴因身份多次深夜或异常行为引起林瑶怀疑，林瑶试图调查，引发情感误会与冲突。后期林瑶知情后成为唯一灵魂伴侣（非爱情），支持苏晴。","苏晴与陈锋：敌对帮派头目，陈锋设计规则陷阱试图逼迫苏晴身份暴露，两人多次智斗，苏晴利用规则漏洞反制。","苏晴与刘伯：上下级但存在权力制衡，刘伯对苏晴的能力保持观望，暗中收集情报。苏晴...
+payload.character_storylines: list(len=4) [{"id":"protagonist_main_line","title":"苏晴","summary":"苏晴从独自承受双重身份压力的文静学霸，经历身份暴露危机、规则博弈、内部权力斗争、闺蜜误会与背叛打击，最终在最低谷后重整旗鼓，用智慧与勇气击败陈锋、收服刘伯、赢得林瑶信任，完成从规则遵守者到规则制定者的蜕变，建立新帮规，获得内心和解。","detailed_storyline":"苏晴的故事...
+payload.checkpoint_explanation: dict(keys=[beat_notes, overview], size=2) {"beat_notes":[{"beat_no":1,"explanation":"清晨，苏晴在学校图书馆安静看书，眼镜反射柔和光线。突然手机震动，她查看一条加密消息：“码头仓库出事，需老大亲自处理。”她若无其事离开，在无人角落戴上耳机，用冷静语气远程下达指令：“按B方案，等我。”同时，闺蜜林瑶匆匆跑来：“苏晴，昨晚怎么没回我消息？我好像看到你在东街打架？”苏晴微笑：“你看错人了吧？我昨晚一直在...
+payload.mode: str(len=2) 创作
+payload.previous_framework_plan_package: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=10) 文静少女竟是黑帮老大
+payload.prompt_preferences: dict(keys=[script_preference, stage_prompts], size=2) {"script_preference":"请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。","stage_prompts":{"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规...
+payload.selected_preference_tag_ids: list(len=0) []
+payload.selected_preference_tags: list(len=0) []
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=22) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。","core_conflict":"主角维护双重身份的秘密与各方势...
+payload.source_title: str(len=10) 文静少女竟是黑帮老大
+payload.storyline_decisions: list(len=4) [{"storyline_id":"protagonist_main_line","title":"苏晴","linked_beats":[1,2,3,4,5,6,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"陈锋","linked_beats":[2,3,...
+payload.title: str(len=10) 文静少女竟是黑帮老大
+payload.user_edit_history: list(len=12) [{"at":"2026-05-21T10:28:41.368Z","action":"generate_stage","detail":{"stageKey":"basic","stageNo":"01"}},{"at":"2026-05-21T10:28:41.370Z","action":"confirm_stage","detail":{"stageKey":"basic","stageN...
+payload.user_feedback: str(len=76) 用户偏好提示：【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompt: str(len=69) 【规则怪谈】 建立清晰禁忌规则、违背规则的代价和层层升级的异常感。 【都市情感】 强化现实情感冲突、亲密关系误会和可共情的都市生活压力。
+payload.user_knowledge_stage_prompts: dict(keys=[basic, worldview, character, beat, storylines, guide, package], size=7) {"basic":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","worldview":"【规则怪谈】\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\n\n【都市情感】\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。","character":"【规则怪谈】\n建立清晰禁忌...
+payload.user_knowledge_tag_prompt: str(len=0)
+payload.user_preference_prompt: str(len=60) 请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.user_requirements: str(len=87) 幽默搞笑热血新奇复仇互撕女性向大女主 用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["身份暴露危机：校园日常中偶然的破绽（如被同学目击处理黑帮事务）引发连锁反应，需用谎言或非常手段掩盖。","规则破坏代价：反派故意诱导主角违反黑帮禁忌规则，从而启动异常惩罚机制，迫使主角应对超常事件。","情感误会冲突：闺蜜或老师对主角的双面行为产生怀疑，引发都市情感式误解，主角必须在保护秘密与维系关系间抉择。"],"core_resource":"情报网络...
+-- detail --
+detail.data_summary: dict(keys=[display_text, framework_plan_package, validation_report], size=3) {"display_text":{"type":"string","length":0,"polluted":false},"framework_plan_package":{"type":"object","keys":["adaptation_direction","adaptation_guide","basic_config","beat_checkpoint_timeline","cha...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage07_20260521-184102-117.json","latest_filename":"latest_stage07.json","payload_keys":["adaptation_direction","adaptation_guide","basic_config","beat_checkpoint_timeline","character_pl...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=7) package
+detail.stageNo: str(len=2) 07

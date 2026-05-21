@@ -1,0 +1,270 @@
+{
+  "stage": "stage01",
+  "timestamp": "20260521-182841-363",
+  "status": "success",
+  "payload_project_name": "文静少女竟是黑帮老大",
+  "payload_keys": [
+    "adaptation_direction",
+    "episodes_per_season",
+    "minutes_per_episode",
+    "mode",
+    "project_id",
+    "project_title",
+    "prompt_preferences",
+    "season_count",
+    "selected_preference_tag_ids",
+    "selected_preference_tags",
+    "source_text",
+    "source_title",
+    "target_format",
+    "title",
+    "user_constraints",
+    "user_knowledge_stage_prompt",
+    "user_knowledge_stage_prompts",
+    "user_knowledge_tag_prompt",
+    "user_preference_prompt",
+    "user_requirements"
+  ],
+  "payload_debug_summary": {
+    "type": "dict",
+    "payload_keys": [
+      "adaptation_direction",
+      "episodes_per_season",
+      "minutes_per_episode",
+      "mode",
+      "project_id",
+      "project_title",
+      "prompt_preferences",
+      "season_count",
+      "selected_preference_tag_ids",
+      "selected_preference_tags",
+      "source_text",
+      "source_title",
+      "target_format",
+      "title",
+      "user_constraints",
+      "user_knowledge_stage_prompt",
+      "user_knowledge_stage_prompts",
+      "user_knowledge_tag_prompt",
+      "user_preference_prompt",
+      "user_requirements"
+    ],
+    "field_summary": {
+      "project_title": {
+        "type": "str",
+        "length": 10,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'文静少女竟是黑帮老大'"
+      },
+      "mode": {
+        "type": "str",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'创作'"
+      },
+      "source_text": {
+        "type": "str",
+        "length": 0,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "''"
+      },
+      "source_title": {
+        "type": "str",
+        "length": 10,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'文静少女竟是黑帮老大'"
+      },
+      "target_format": {
+        "type": "str",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'短剧'"
+      },
+      "season_count": {
+        "type": "int",
+        "length": 1,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "1"
+      },
+      "episodes_per_season": {
+        "type": "int",
+        "length": 1,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "6"
+      },
+      "minutes_per_episode": {
+        "type": "int",
+        "length": 1,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "2"
+      },
+      "adaptation_direction": {
+        "type": "str",
+        "length": 33,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。'"
+      },
+      "user_constraints": {
+        "type": "str",
+        "length": 41,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'不要有爱情线，可以有暧昧但是女主必须要有主体性，保持大女主形象，禁止让女主坠入爱河'"
+      },
+      "user_requirements": {
+        "type": "str",
+        "length": 87,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'幽默搞笑热血新奇复仇互撕女性向大女主\\n\\n用户偏好提示：请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。'"
+      },
+      "selected_preference_tag_ids": {
+        "type": "list",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "[]"
+      },
+      "selected_preference_tags": {
+        "type": "list",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "[]"
+      },
+      "user_preference_prompt": {
+        "type": "str",
+        "length": 60,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。'"
+      },
+      "user_knowledge_tag_prompt": {
+        "type": "str",
+        "length": 0,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "''"
+      },
+      "user_knowledge_stage_prompts": {
+        "type": "dict",
+        "length": 616,
+        "dict_keys": [
+          "basic",
+          "beat",
+          "character",
+          "guide",
+          "package",
+          "storylines",
+          "worldview"
+        ],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "{'basic': '【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\\n\\n【都市情感】\\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。', 'worldview': '【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\\n\\n【都市情感】\\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。', 'character': '【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\\n\\n【都市情感】\\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。', 'beat': '【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价..."
+      },
+      "prompt_preferences": {
+        "type": "dict",
+        "length": 720,
+        "dict_keys": [
+          "script_preference",
+          "stage_prompts"
+        ],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "{'script_preference': '请优先强化短剧节奏：前 30 秒明确冲突和爽点，每集结尾保留强钩子，中点加入明显反转，人物情绪推进要直接、可拍、可视化。', 'stage_prompts': {'basic': '【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\\n\\n【都市情感】\\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。', 'worldview': '【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\\n\\n【都市情感】\\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。', 'character': '【规则怪谈】..."
+      },
+      "user_knowledge_stage_prompt": {
+        "type": "str",
+        "length": 69,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'【规则怪谈】\\n建立清晰禁忌规则、违背规则的代价和层层升级的异常感。\\n\\n【都市情感】\\n强化现实情感冲突、亲密关系误会和可共情的都市生活压力。'"
+      },
+      "project_id": {
+        "type": "str",
+        "length": 7,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'unsaved'"
+      },
+      "title": {
+        "type": "str",
+        "length": 10,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'文静少女竟是黑帮老大'"
+      }
+    },
+    "suspected_raw_response_fields": []
+  },
+  "output": {
+    "source_brief": {
+      "title": "文静少女竟是黑帮老大",
+      "source_type": "未明确来源类型，暂按用户提供的故事材料处理",
+      "genre": "都市逆袭，黑帮题材",
+      "tone": "高爽强反转",
+      "target_format": "短剧",
+      "season_count": 1,
+      "episodes_per_season": 6,
+      "minutes_per_episode": 2,
+      "adaptation_direction": "请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。",
+      "core_logline": "一个看似文静的高中女生实际上是黑帮老大，她必须在维护日常伪装的同时掌控地下世界，面对各方势力的挑战和身份暴露的危机。",
+      "protagonist": "文静少女（姓名未明确），表面为普通学生，实为黑帮老大，核心欲望是维护双重身份的平衡并掌控帮派。",
+      "main_opposition": "黑帮敌对势力、警方调查、以及可能来自朋友或家人的质疑；主要阻力在于身份随时可能暴露。",
+      "core_conflict": "主角维护双重身份的秘密与各方势力威胁秘密暴露之间的矛盾，以及作为黑帮老大必须面对的残酷竞争与内心道德挣扎。",
+      "must_keep_elements": [
+        "核心设定：文静少女是黑帮老大",
+        "大女主主体性，无爱情线或仅暧昧但女主不坠入爱河",
+        "强反转、强情绪推进的爽剧风格",
+        "校园与黑帮双重场景"
+      ],
+      "forbidden_deviations": [
+        "不得加入女主坠入爱河的完整爱情线",
+        "不得弱化女主的独立性和主导权",
+        "不得将黑帮题材改为其他类型（如科幻）",
+        "不得偏离高爽强反转的改编方向"
+      ],
+      "available_material_summary": "目前仅有标题“文静少女竟是黑帮老大”和用户提供的改编约束。无具体原文故事材料，缺乏人物姓名、具体帮派设定、剧情细节等信息。可用材料非常有限，需后续补充。",
+      "missing_information_risks": [
+        "缺乏具体人物姓名、身份细节和背景故事",
+        "黑帮势力的具体设定、矛盾冲突点不明确",
+        "原故事中是否存在其他重要角色或关系未知",
+        "集数较短（6集×2分钟），材料体量是否匹配未知",
+        "用户约束与可能的原有设定（如有）是否存在冲突未知"
+      ],
+      "source_title": "文静少女竟是黑帮老大",
+      "core_premise": "核心故事信息待人工补充",
+      "story_outline": "核心故事信息待人工补充",
+      "ready_for_script_workflow": true,
+      "project_title": "文静少女竟是黑帮老大"
+    },
+    "display_text": "故事核心为一名文静少女实则黑帮老大，在校园与黑帮双重身份间周旋，追求掌控与平衡。题材为都市黑帮爽剧，基调高爽强反转。主角为文静少女（姓名未明确），主要阻力来自敌对势力和身份暴露风险。必须保留核心设定、大女主主体性、无完整爱情线。目前材料仅标题，大量信息缺失，需后续补充具体人物和剧情。"
+  }
+}

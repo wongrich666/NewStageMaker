@@ -1,0 +1,907 @@
+﻿{
+  "nodes": [
+    {
+      "nodeId": "userGuide",
+      "name": "common:core.module.template.system_config",
+      "intro": "common:core.module.template.system_config_info",
+      "avatar": "core/workflow/template/systemConfig",
+      "flowNodeType": "userGuide",
+      "position": {
+        "x": -1605,
+        "y": -5280
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "welcomeText",
+          "label": "core.app.Welcome Text",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": ""
+        },
+        {
+          "key": "variables",
+          "label": "core.app.Chat Variable",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": []
+        },
+        {
+          "key": "questionGuide",
+          "label": "core.app.Question Guide",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false
+          }
+        },
+        {
+          "key": "tts",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "type": "web"
+          }
+        },
+        {
+          "key": "whisper",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false,
+            "autoSend": false,
+            "autoTTSResponse": false
+          }
+        },
+        {
+          "key": "scheduleTrigger",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": null
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "start027692d9",
+      "name": "common:core.module.template.work_start",
+      "intro": "",
+      "avatar": "core/workflow/template/workflowStart",
+      "flowNodeType": "workflowStart",
+      "position": {
+        "x": -570,
+        "y": -5280
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "userChatInput",
+          "key": "userChatInput",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.input.label.user question",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "tools02a4b9c1",
+      "name": "02 世界观工具调度器",
+      "intro": "由 AI 自主决定是否搜索、搜索哪些维度、何时调用世界观创作工具，并最终输出 worldview_plan。",
+      "avatar": "core/workflow/template/toolCall",
+      "flowNodeType": "tools",
+      "showStatus": true,
+      "position": {
+        "x": -90,
+        "y": -5280
+      },
+      "version": "4.9.2",
+      "inputs": [
+        {
+          "key": "model",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "value": "deepseek-v4-flash",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "number",
+          "value": 0.2,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "number",
+          "value": 12000,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "value": true,
+          "valueType": "boolean",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "boolean",
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "boolean",
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "number",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "string",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "string",
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": "json_object"
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "string",
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"worldview_plan\",\"display_text\"],\"properties\":{\"worldview_plan\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"summary\",\"world_type\",\"core_rules\",\"core_resource\",\"social_order\",\"power_structure\",\"conflict_engine\",\"space_logic\",\"visual_style\",\"must_keep\",\"forbidden_deviations\"],\"properties\":{\"summary\":{\"type\":\"string\",\"minLength\":1},\"world_type\":{\"type\":\"string\",\"minLength\":1},\"core_rules\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}},\"core_resource\":{\"type\":\"string\",\"minLength\":1},\"social_order\":{\"type\":\"string\",\"minLength\":1},\"power_structure\":{\"type\":\"string\",\"minLength\":1},\"conflict_engine\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}},\"space_logic\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}},\"visual_style\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}},\"must_keep\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}},\"forbidden_deviations\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}}}},\"display_text\":{\"type\":\"string\",\"minLength\":1}}}"
+        },
+        {
+          "key": "useAgentSandbox",
+          "renderTypeList": [
+            "switch"
+          ],
+          "label": "app:use_agent_sandbox",
+          "description": "app:use_computer_desc",
+          "valueType": "boolean",
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "maxLength": 100000,
+          "isRichText": true,
+          "valueType": "string",
+          "label": "common:core.ai.Prompt",
+          "description": "common:core.app.tip.systemPromptTip",
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "value": "你是“世界观方案工具调度器”。\n你的任务不是直接无脑生成，而是根据输入判断：需要搜索哪些维度、是否已经足够、何时调用世界观创作工具，最后统一输出一个合法 JSON 世界观方案。\n\n可用工具：\n1）世界观市场搜索工具：用于联网搜索，可以多次调用，每次通过 search_dimension、search_query、search_purpose、expected_extract 传入不同搜索意图；\n2）世界观创作工具：用于基于已确认上游事实、用户要求、搜索结果和改写反馈生成 worldview_plan。\n\n输入变量：\nuser_requirements={{$start027692d9.userChatInput$}}；\nmode={{$VARIABLE_NODE_ID.mode$}}；\nsource_brief={{$VARIABLE_NODE_ID.source_brief$}}；\nlocked_basic_config={{$VARIABLE_NODE_ID.locked_basic_config$}}；\nprevious_worldview_plan={{$VARIABLE_NODE_ID.previous_worldview_plan$}}；\nuser_feedback={{$VARIABLE_NODE_ID.user_feedback$}}；\nadaptation_direction={{$VARIABLE_NODE_ID.adaptation_direction$}}。\n\n调度规则：\n你必须高度重视 user_requirements，这是用户显式输入，权重仅低于 JSON 输出结构和已确认上游事实；\n如果用户要求市场化、短剧化、微短剧化、强爽点、强反转、可拍性、视觉化、特定题材或受众方向，应优先围绕这些要求组织搜索和创作。\n\n一般情况下，先调用世界观市场搜索工具 2-5 次，按需要覆盖以下维度：\nmarket_trend=短剧/微短剧题材趋势；\nworldview_setting=世界观设定与规则系统；\nconflict_engine=冲突引擎与权力结构；\nselling_point_structure=爽点结构与节奏；\nvisual_expression=视觉化呈现与可拍场景。\n你可以根据项目实际情况减少或增加搜索次数，但不得进行无意义重复搜索。\n如果 adaptation_direction 或 user_requirements 已经非常明确，至少搜索最关键的 1-2 个维度；\n如果搜索工具失败、返回为空或噪声很大，可以转为主要依据 source_brief 和用户要求创作。\n\n搜索要求：\nsearch_query 必须是中文，建议 30-90 个中文字符，不要把完整 source_brief JSON 塞进搜索词，不要搜索具体可照搬剧情，不要搜索具体作品复刻，要搜索类型规律、市场趋势、世界观机制、冲突结构、爽点表达和视觉化呈现。\n调用世界观创作工具前，你需要在自己的上下文中综合搜索结果，去掉无关网页、广告、榜单噪声、具体作品复刻内容，只保留可抽象使用的类型规律。\n\n最终输出规则：\n最终回复只能输出一个合法 JSON 对象，必须符合\n{\n\"worldview_plan\":\n{\n\"summary\":\"string\",\n\"world_type\":\"string\",\n\"core_rules[\"string\"],\n\"core_resource\":\"string\",\n\"social_order\":\"string\",\n\"power_structure\":\"string\",\n\"conflict_engine\":[\"string\"],\n\"space_logic\":[\"string\"],\n\"visual_style\":[\"string\"],\n\"must_keep\":[\"string\"],\n\"forbidden_deviations\":[\"string\"]\n},\n\"display_text\":\"string\"\n}\n\n禁止输出 Markdown，禁止输出代码块，禁止输出解释性前缀，禁止输出 JSON 之外的任何文本。\n最终 JSON 中不得新增字段、不得删除字段、不得翻译字段名、不得输出空字符串、数组不得为空。\n如果信息缺失，用“未明确，需后续确认……”填充。\n\n已确认上游锁定规则：\nsource_brief 与 locked_basic_config 不能被推翻；\n如果 user_feedback 要求修改已确认上游，只能在 display_text 中提示应回到上游重新确认，不得直接改写核心事实。\n\n搜索结果使用规则：\n搜索结果只能作为参考，不能覆盖 source_brief、locked_basic_config、user_requirements 和 user_feedback；\n不得照搬搜索结果中的具体作品剧情、人物名、专有设定、营销文案或榜单表述；\n搜索结果可以影响 visual_style、conflict_engine、space_logic、forbidden_deviations，但不能改写主角、核心矛盾、目标形式、季数、集数等已确认事实。",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "valueType": "chatHistory",
+          "label": "common:core.module.input.label.chat history",
+          "description": "workflow:max_dialog_rounds",
+          "required": true,
+          "min": 0,
+          "max": 50,
+          "value": 0,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "label": "app:workflow.user_file_input",
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "valueType": "arrayString",
+          "value": [],
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "valueType": "string",
+          "label": "workflow:user_question",
+          "toolDescription": "user question",
+          "required": true,
+          "value": [
+            "start027692d9",
+            "userChatInput"
+          ],
+          "debugLabel": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "valueType": "string",
+          "type": "static",
+          "valueDesc": ""
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "label": "workflow:error_text",
+          "valueDesc": "",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "toolparams02b6d3",
+      "name": "世界观市场搜索工具",
+      "intro": "由工具调度器传入搜索维度、搜索语和提取目标，再调用联网搜索。",
+      "avatar": "core/workflow/template/toolParams",
+      "flowNodeType": "toolParams",
+      "position": {
+        "x": 495,
+        "y": -3840
+      },
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "search_dimension",
+          "key": "search_dimension",
+          "type": "static",
+          "valueType": "string",
+          "label": "搜索维度",
+          "description": "搜索维度。建议值：market_trend=短剧/微短剧题材趋势；worldview_setting=世界观设定与规则系统；conflict_engine=冲突引擎与权力结构；selling_point_structure=爽点结构与节奏；visual_expression=视觉化呈现与可拍场景；integrated=综合搜索。",
+          "required": true
+        },
+        {
+          "id": "search_query",
+          "key": "search_query",
+          "type": "static",
+          "valueType": "string",
+          "label": "搜索查询语",
+          "description": "用于 web_search 的中文搜索查询。必须结合 user_requirements、adaptation_direction、source_brief 的题材、基调、目标形式和核心矛盾。建议 30-90 个中文字符。不要塞入完整 JSON，不要搜索可照搬剧情，不要搜索具体作品复刻。",
+          "required": true
+        },
+        {
+          "id": "search_purpose",
+          "key": "search_purpose",
+          "type": "static",
+          "valueType": "string",
+          "label": "搜索目的",
+          "description": "说明本次搜索要解决什么问题，例如判断市场趋势、补充世界观规则设计、提炼冲突引擎、寻找爽点表达、寻找视觉化呈现方式。",
+          "required": true
+        },
+        {
+          "id": "expected_extract",
+          "key": "expected_extract",
+          "type": "static",
+          "valueType": "string",
+          "label": "预期提取内容",
+          "description": "说明希望从搜索结果中提取什么，必须是抽象规律，不得要求复制具体作品剧情。可写：类型规律、常见冲突、视觉元素、可拍场景、风险和俗套等。",
+          "required": true
+        }
+      ]
+    },
+    {
+      "nodeId": "tool02a9c8f1",
+      "name": "web_search",
+      "intro": "执行联网搜索，返回原始搜索结果。",
+      "avatar": "core/app/type/httpPluginFill",
+      "flowNodeType": "tool",
+      "showStatus": true,
+      "position": {
+        "x": 495,
+        "y": -3495
+      },
+      "version": "",
+      "inputs": [
+        {
+          "key": "query",
+          "label": "query",
+          "valueType": "string",
+          "description": "查询内容",
+          "toolDescription": "查询内容",
+          "required": true,
+          "renderTypeList": [
+            "input",
+            "reference"
+          ],
+          "value": [
+            "toolparams02b6d3",
+            "search_query"
+          ],
+          "selectedTypeIndex": 1
+        }
+      ],
+      "outputs": [
+        {
+          "id": "system_rawResponse",
+          "key": "system_rawResponse",
+          "required": true,
+          "label": "workflow:raw_response",
+          "description": "workflow:tool_raw_response_description",
+          "valueType": "any",
+          "type": "static"
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "label": "workflow:error_text"
+        }
+      ],
+      "pluginId": "http-69f170167846cab59f7c6064/web_search",
+      "toolConfig": {
+        "httpTool": {
+          "toolId": "http-69f170167846cab59f7c6064/web_search"
+        }
+      },
+      "catchError": false
+    },
+    {
+      "nodeId": "ai02creator9f3",
+      "name": "世界观创作工具",
+      "intro": "由工具调度器在完成必要搜索后调用，生成 worldview_plan 草案。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": -720,
+        "y": -3825
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 0.45,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 12000,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "json_object",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"worldview_plan\",\"display_text\"],\"properties\":{\"worldview_plan\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"summary\",\"world_type\",\"core_rules\",\"core_resource\",\"social_order\",\"power_structure\",\"conflict_engine\",\"space_logic\",\"visual_style\",\"must_keep\",\"forbidden_deviations\"],\"properties\":{\"summary\":{\"type\":\"string\",\"minLength\":1},\"world_type\":{\"type\":\"string\",\"minLength\":1},\"core_rules\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}},\"core_resource\":{\"type\":\"string\",\"minLength\":1},\"social_order\":{\"type\":\"string\",\"minLength\":1},\"power_structure\":{\"type\":\"string\",\"minLength\":1},\"conflict_engine\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}},\"space_logic\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}},\"visual_style\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}},\"must_keep\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}},\"forbidden_deviations\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}}}},\"display_text\":{\"type\":\"string\",\"minLength\":1}}}",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“世界观创作工具”。\n\n你是被上层工具调度器调用的创作工具，不负责联网搜索，也不负责解释流程。\n\n你的任务是根据已确认的 source_brief、已确认基础配置、用户自定义要求、改编方向、上一版世界观和用户反馈，生成或更新 worldview_plan。\n\n上层工具调度器可能已经完成了联网搜索，并会在工具调用上下文中保留搜索结果；你必须服从上层上下文，但搜索结果只能作为低优先级参考。\n\n【输入变量】\n\nuser_requirements={{$start027692d9.userChatInput$}}\n\nmode={{$VARIABLE_NODE_ID.mode$}}\n\nsource_brief={{$VARIABLE_NODE_ID.source_brief$}}\n\nlocked_basic_config={{$VARIABLE_NODE_ID.locked_basic_config$}}\n\nprevious_worldview_plan={{$VARIABLE_NODE_ID.previous_worldview_plan$}}\n\nuser_feedback={{$VARIABLE_NODE_ID.user_feedback$}}\n\nadaptation_direction={{$VARIABLE_NODE_ID.adaptation_direction$}}\n\n【工作模式】\n\nmode=“创作”：\n表示首次生成 worldview_plan。\n\nmode=“改写”：\n表示用户已经看过上一版世界观并提出修改意见。\n你必须以 previous_worldview_plan 为基础，根据 user_feedback 有针对性更新。\n不能无理由重写全部内容。\n\n【输入优先级】\n\n你必须按照以下优先级处理信息：\n\n1. 输出格式、字段结构、JSON 规则\n2. 已确认上游事实 source_brief 与 locked_basic_config\n3. previous_worldview_plan 与 user_feedback\n4. user_requirements，必须高度重视\n5. adaptation_direction\n6. 工具调用上下文中的搜索结果\n7. 合理推断\n\n【上游锁定规则】\n\nsource_brief 和 locked_basic_config 已确认，不能被推翻。\n\n如果 user_feedback 要求改变已确认上游事实，只能在 display_text 中提示：\n\n“该修改涉及已确认上游内容，建议返回上游重新确认。”\n\n不得直接改写、推翻或覆盖 source_brief 与 locked_basic_config。\n\n【生成目标】\n\n世界观必须是“剧情运行系统”，不是氛围介绍。\n\nworldview_plan 必须回答以下问题：\n\n1. 世界类型是什么\n2. 核心规则是什么\n3. 核心资源是什么\n4. 社会秩序如何运行\n5. 权力结构如何压迫或分配资源\n6. 冲突引擎如何持续推动剧情\n7. 空间逻辑如何支持拍摄和调度\n8. 视觉风格如何服务故事表达\n9. 哪些内容必须保留\n10. 哪些方向禁止偏离\n\n【质量要求】\n\n1. 每条 core_rules 都必须能产生以下至少一种效果：\n   - 行动限制\n   - 冲突代价\n   - 剧情机会\n\n2. core_resource 必须与以下至少一种内容有关：\n   - 主角目标\n   - 反派压迫\n   - 爽点兑现\n   - 悬念推进\n\n3. conflict_engine 必须能支撑多集连续推进。\n\n4. space_logic 必须可拍、可调度，不能只写抽象概念。\n\n5. visual_style 必须具体到以下至少一种维度：\n   - 影像质感\n   - 空间气质\n   - 道具符号\n   - 光影色彩\n   - 动作呈现方式\n\n6. 不要提前生成以下内容：\n   - 完整人设\n   - 完整分集\n   - 十五节拍\n   - 人物故事线\n\n【输出格式】\n\n最终必须严格输出以下 JSON 对象：\n\n{\n  \"worldview_plan\": {\n    \"summary\": \"string\",\n    \"world_type\": \"string\",\n    \"core_rules\": [\"string\"],\n    \"core_resource\": \"string\",\n    \"social_order\": \"string\",\n    \"power_structure\": \"string\",\n    \"conflict_engine\": [\"string\"],\n    \"space_logic\": [\"string\"],\n    \"visual_style\": [\"string\"],\n    \"must_keep\": [\"string\"],\n    \"forbidden_deviations\": [\"string\"]\n  },\n  \"display_text\": \"string\"\n}\n\n【强制规则】\n\n1. 最终回复只能是 JSON 对象。\n2. 禁止输出 Markdown。\n3. 禁止输出代码块。\n4. 禁止输出解释性前缀。\n5. 禁止输出 JSON 之外的任何文本。\n6. 禁止新增字段。\n7. 禁止删除字段。\n8. 禁止翻译字段名。\n9. 禁止输出空字符串。\n10. 数组不得为空。\n11. 如果信息缺失，用“未明确，需后续确认……”填充。\n12. 输出必须能被 JSON.parse 直接解析。",
+          "description": "common:core.app.tip.systemPromptTip",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "description": "workflow:max_dialog_rounds",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "label": "app:workflow.user_file_input",
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "valueType": "arrayString",
+          "value": [],
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 0,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": [
+            "start027692d9",
+            "userChatInput"
+          ],
+          "toolDescription": "用户问题",
+          "debugLabel": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "label": "workflow:reasoning_content",
+          "required": false,
+          "invalid": false,
+          "description": ""
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "var02e5a91c",
+      "name": "保存世界观结果",
+      "intro": "将工具调度器最终输出写入内部变量。",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 750,
+        "y": -5280
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "valueType": "any",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "d3ixvj8d"
+              ],
+              "value": [
+                "tools02a4b9c1",
+                "answerText"
+              ],
+              "valueType": "string",
+              "renderType": "reference"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "ans021722b8",
+      "name": "输出02 世界观方案生成更新",
+      "intro": "最终只输出工具调度器生成的唯一 JSON 结果。",
+      "avatar": "core/workflow/template/reply",
+      "flowNodeType": "answerNode",
+      "position": {
+        "x": 1380,
+        "y": -5280
+      },
+      "inputs": [
+        {
+          "key": "text",
+          "label": "common:core.module.input.label.Response content",
+          "valueType": "any",
+          "required": true,
+          "isRichText": false,
+          "placeholder": "common:core.module.input.description.Response content",
+          "maxLength": 100000,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": [
+            "VARIABLE_NODE_ID",
+            "d3ixvj8d"
+          ],
+          "description": "common:core.module.input.description.Response content",
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "start027692d9",
+      "target": "tools02a4b9c1",
+      "sourceHandle": "start027692d9-source-right",
+      "targetHandle": "tools02a4b9c1-target-left"
+    },
+    {
+      "source": "tools02a4b9c1",
+      "target": "toolparams02b6d3",
+      "sourceHandle": "selectedTools",
+      "targetHandle": "selectedTools"
+    },
+    {
+      "source": "toolparams02b6d3",
+      "target": "tool02a9c8f1",
+      "sourceHandle": "toolparams02b6d3-source-right",
+      "targetHandle": "tool02a9c8f1-target-left"
+    },
+    {
+      "source": "tools02a4b9c1",
+      "target": "ai02creator9f3",
+      "sourceHandle": "selectedTools",
+      "targetHandle": "selectedTools"
+    },
+    {
+      "source": "tools02a4b9c1",
+      "target": "var02e5a91c",
+      "sourceHandle": "tools02a4b9c1-source-right",
+      "targetHandle": "var02e5a91c-target-left"
+    },
+    {
+      "source": "var02e5a91c",
+      "target": "ans021722b8",
+      "sourceHandle": "var02e5a91c-source-right",
+      "targetHandle": "ans021722b8-target-left"
+    }
+  ],
+  "chatConfig": {
+    "variables": [
+      {
+        "key": "source_brief",
+        "label": "原文信息提取结果",
+        "valueType": "string",
+        "required": true,
+        "type": "input",
+        "description": "01 原文信息提取工作流输出的完整 JSON 或 source_brief JSON 字符串。必须是已确认上游事实。",
+        "maxLength": 200000,
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "type": "select",
+        "key": "mode",
+        "label": "写作模式",
+        "valueType": "string",
+        "description": "填“创作”或者“改写”。创作用于首次生成；改写用于根据上一版世界观和用户反馈更新。",
+        "required": true,
+        "defaultValue": "创作",
+        "list": [
+          {
+            "label": "创作",
+            "value": "创作"
+          },
+          {
+            "label": "改写",
+            "value": "改写"
+          }
+        ]
+      },
+      {
+        "type": "input",
+        "key": "locked_basic_config",
+        "label": "已确认基础配置",
+        "valueType": "string",
+        "description": "前端锁定后的基础配置 JSON。",
+        "required": true,
+        "maxLength": 50000
+      },
+      {
+        "type": "input",
+        "key": "previous_worldview_plan",
+        "label": "上一版世界观方案",
+        "valueType": "string",
+        "description": "改写时传入上一版 worldview_plan JSON 字符串；创作时可留空。",
+        "required": false,
+        "maxLength": 50000
+      },
+      {
+        "key": "user_feedback",
+        "label": "用户修改反馈",
+        "valueType": "string",
+        "required": false,
+        "type": "input",
+        "description": "改写时传入用户对世界观的修改反馈；创作时可作为额外偏好。",
+        "maxLength": 200000,
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "type": "input",
+        "key": "adaptation_direction",
+        "label": "创作方向",
+        "valueType": "string",
+        "description": "用户希望的创作方向。用于搜索查询和世界观生成。",
+        "required": false,
+        "maxLength": 50000,
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "type": "internal",
+        "key": "d3ixvj8d",
+        "label": "新生成的世界观",
+        "valueType": "string",
+        "description": "工具调度器最终输出的 worldview_plan JSON 字符串。",
+        "required": false
+      }
+    ],
+    "scheduledTriggerConfig": {
+      "cronString": "",
+      "timezone": "Asia/Shanghai",
+      "defaultPrompt": ""
+    },
+    "_id": "8263af6a9755786c334a4414"
+  }
+}

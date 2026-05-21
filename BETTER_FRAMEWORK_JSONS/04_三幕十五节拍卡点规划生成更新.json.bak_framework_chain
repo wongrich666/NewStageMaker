@@ -1,0 +1,923 @@
+﻿{
+  "nodes": [
+    {
+      "nodeId": "userGuide",
+      "name": "common:core.module.template.system_config",
+      "intro": "common:core.module.template.system_config_info",
+      "avatar": "core/workflow/template/systemConfig",
+      "flowNodeType": "userGuide",
+      "position": {
+        "x": -1605,
+        "y": -5280
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "welcomeText",
+          "label": "core.app.Welcome Text",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": ""
+        },
+        {
+          "key": "variables",
+          "label": "core.app.Chat Variable",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": []
+        },
+        {
+          "key": "questionGuide",
+          "label": "core.app.Question Guide",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false
+          }
+        },
+        {
+          "key": "tts",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "type": "web"
+          }
+        },
+        {
+          "key": "whisper",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false,
+            "autoSend": false,
+            "autoTTSResponse": false
+          }
+        },
+        {
+          "key": "scheduleTrigger",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": null
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "start04aad36b",
+      "name": "common:core.module.template.work_start",
+      "intro": "",
+      "avatar": "core/workflow/template/workflowStart",
+      "flowNodeType": "workflowStart",
+      "position": {
+        "x": -570,
+        "y": -5280
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "userChatInput",
+          "key": "userChatInput",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.input.label.user question",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "tools04a4b9c1",
+      "name": "04 框架卡点工具调度器",
+      "intro": "由 AI 自主决定是否搜索、搜索哪些剧本框架维度、何时调用三幕十五节拍卡点创作工具，并最终输出 beat_checkpoint_timeline。",
+      "avatar": "core/workflow/template/toolCall",
+      "flowNodeType": "tools",
+      "showStatus": true,
+      "position": {
+        "x": -90,
+        "y": -5280
+      },
+      "version": "4.9.2",
+      "inputs": [
+        {
+          "key": "model",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "value": "deepseek-v4-flash",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "number",
+          "value": 0.2,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "number",
+          "value": 12000,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "value": true,
+          "valueType": "boolean",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "boolean",
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "boolean",
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "number",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "string",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "string",
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": "json_object"
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "label": "",
+          "valueType": "string",
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"beat_checkpoint_timeline\",\"checkpoint_explanation\",\"display_text\"],\"properties\":{\"beat_checkpoint_timeline\":{\"type\":\"array\",\"minItems\":15,\"maxItems\":15,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"beat_no\",\"act\",\"beat_name\",\"episode_range\",\"checkpoint_title\",\"narrative_function\",\"plot_content\",\"character_change\",\"conflict_upgrade\",\"hook_or_reversal\",\"linked_storylines\"],\"properties\":{\"beat_no\":{\"type\":\"integer\"},\"act\":{\"type\":\"string\",\"minLength\":1},\"beat_name\":{\"type\":\"string\",\"minLength\":1},\"episode_range\":{\"type\":\"string\",\"minLength\":1},\"checkpoint_title\":{\"type\":\"string\",\"minLength\":1},\"narrative_function\":{\"type\":\"string\",\"minLength\":1},\"plot_content\":{\"type\":\"string\",\"minLength\":1},\"character_change\":{\"type\":\"string\",\"minLength\":1},\"conflict_upgrade\":{\"type\":\"string\",\"minLength\":1},\"hook_or_reversal\":{\"type\":\"string\",\"minLength\":1},\"linked_storylines\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}}}}},\"checkpoint_explanation\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"act_one_logic\",\"act_two_logic\",\"act_three_logic\",\"opening_hook\",\"first_three_episodes\",\"midpoint\",\"dark_night_and_turn\",\"ending_closure\"],\"properties\":{\"act_one_logic\":{\"type\":\"string\",\"minLength\":1},\"act_two_logic\":{\"type\":\"string\",\"minLength\":1},\"act_three_logic\":{\"type\":\"string\",\"minLength\":1},\"opening_hook\":{\"type\":\"string\",\"minLength\":1},\"first_three_episodes\":{\"type\":\"string\",\"minLength\":1},\"midpoint\":{\"type\":\"string\",\"minLength\":1},\"dark_night_and_turn\":{\"type\":\"string\",\"minLength\":1},\"ending_closure\":{\"type\":\"string\",\"minLength\":1}}},\"display_text\":{\"type\":\"string\",\"minLength\":1}}}"
+        },
+        {
+          "key": "useAgentSandbox",
+          "renderTypeList": [
+            "switch"
+          ],
+          "label": "app:use_agent_sandbox",
+          "description": "app:use_computer_desc",
+          "valueType": "boolean",
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "maxLength": 100000,
+          "isRichText": true,
+          "valueType": "string",
+          "label": "common:core.ai.Prompt",
+          "description": "common:core.app.tip.systemPromptTip",
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "value": "你是“三幕十五节拍卡点规划工具调度器”。\n你的任务不是直接生成，而是根据输入判断：需要搜索哪些剧本框架写法维度、搜索是否足够、何时调用三幕十五节拍卡点创作工具，最后统一输出一个合法 JSON 的十五节拍卡点规划。\n\n可用工具：\n1）剧本框架方法搜索工具：用于联网搜索。你可以多次调用，每次通过 search_dimension、search_query、search_purpose、expected_extract 传入不同搜索意图。\n2）三幕十五节拍卡点创作工具：用于基于已确认上游事实、用户要求、搜索结果、上一版卡点规划、用户反馈和评分系统结果，生成 beat_checkpoint_timeline。\n\n输入变量：\nuser_requirements={{$start04aad36b.userChatInput$}}；\nmode={{$VARIABLE_NODE_ID.mode$}}；\nsource_brief={{$VARIABLE_NODE_ID.source_brief$}}；\nbasic_config={{$VARIABLE_NODE_ID.basic_config$}}；\nworldview_plan={{$VARIABLE_NODE_ID.worldview_plan$}}；\ncharacter_plan={{$VARIABLE_NODE_ID.character_plan$}}；\nprevious_beat_checkpoint_timeline={{$VARIABLE_NODE_ID.previous_beat_checkpoint_timeline$}}；\nuser_feedback={{$VARIABLE_NODE_ID.user_feedback$}}；\nframework_score_report={{$VARIABLE_NODE_ID.framework_score_report$}}；\nadaptation_direction={{$VARIABLE_NODE_ID.adaptation_direction$}}。\n\n调度原则：\n你必须高度重视 user_requirements。用户输入的题材、风格、平台、受众、节奏偏好、框架偏好、禁忌和修改要求，权重仅低于 JSON schema 与已确认上游事实。\nsource_brief、basic_config、worldview_plan、character_plan 是已确认上游，不能推翻。十五节拍卡点必须服从已确认世界观和人设，不能新增与上游冲突的核心规则、身份关系或人物能力。\nframework_score_report 是外部评分系统返回的统一 JSON 字符串或自然语言字符串。它用于“写--打分--修改”的优化循环。若该字段非空，必须把其中的低分项、问题定位、修改建议、结构缺陷、节奏缺陷、人物弧缺陷、卡点缺陷、钩子缺陷，转化为本轮修订依据。它不能覆盖已确认上游事实，但可以强烈影响节拍重排、冲突升级、钩子强化和说明文本优化。\n\n搜索策略：\n一般情况下，先调用剧本框架方法搜索工具 2-5 次，再调用三幕十五节拍卡点创作工具。根据项目需要覆盖以下维度：\nframework_method=三幕式、十五节拍、Save the Cat、短剧框架写法和剧情规划方法；\nepisode_rhythm=短剧/微短剧集数节奏、前3集留存、阶段卡点、小高潮与大高潮安排；\nplot_arrangement=剧情安排、冲突递进、反转布局、伏笔回收和信息释放；\ncharacter_arc_structure=主角成长弧、B故事线、中点转折、灵魂黑夜、第三幕整合；\nscoring_revision=剧本框架评分标准、结构诊断、修改意见、迭代优化方法；\nintegrated=综合搜索。\n如果用户输入、上游材料和评分报告已经非常明确，至少搜索最关键的 1-2 个维度；如果搜索工具失败、返回为空或噪声很大，可以主要依据上游材料、用户要求和评分报告创作。\n不得进行无意义重复搜索。\n\n搜索要求：\nsearch_query 必须是中文，建议 30-90 个中文字符。\n不要把完整 source_brief、worldview_plan、character_plan 或 framework_score_report JSON 塞进搜索词。\n不要搜索具体可照搬剧情。\n不要复刻具体作品框架。\n要搜索剧本框架方法、三幕十五节拍讲解、剧情节奏安排、卡点设计、短剧留存、冲突升级、反转布局、评分与修改方法。\nsearch_dimension 必须填入本次搜索所属维度。\nsearch_purpose 必须说明本次搜索要解决什么框架规划问题。\nexpected_extract 必须说明希望提取的抽象方法，不能要求复制具体作品剧情。\n\n创作要求：\n当搜索信息足够，或者搜索失败但上游材料足够时，必须调用“三幕十五节拍卡点创作工具”生成 beat_checkpoint_timeline。\n调用创作工具前，你需要在上下文中综合搜索结果，剔除广告、课程营销、榜单噪声、具体作品复刻内容，只保留可抽象使用的框架写法、节奏规律、诊断标准和优化原则。\n\n改写与评分循环：\n如果 mode=“revise” 或 mode=“改写”，必须优先参考 previous_beat_checkpoint_timeline、user_feedback 和 framework_score_report。\n如果 framework_score_report 非空，你必须先识别评分系统指出的问题，再针对性强化本轮输出。常见修改方向包括：前3集钩子不够、第二幕中段拖沓、中点不够强、危险逼近缺少压迫感、灵魂黑夜没有人物内在转折、结局没有回收伏笔、节拍与人物弧脱节、集数区间分配不合理。\n未被反馈否定且合理的内容应尽量保留。若用户反馈或评分报告要求推翻 source_brief、basic_config、worldview_plan 或 character_plan，只能在 display_text 中提示需要回到上游重新确认，不得直接篡改上游事实。\n\n固定十五节拍：\nbeat_checkpoint_timeline 必须且只能有 15 条，顺序固定：\n1 开场；\n2 主体呈现；\n3 铺垫；\n4 推动催化剂；\n5 争执；\n6 第二幕衔接点；\n7 B故事线；\n8 游戏及斗争；\n9 中点；\n10 危险逼近；\n11 一败涂地；\n12 灵魂黑夜；\n13 第三幕衔接点；\n14 结局；\n15 终场画面。\n每个节拍必须绑定 episode_range、checkpoint_title、narrative_function、plot_content、character_change、conflict_upgrade、hook_or_reversal、linked_storylines。\n\n最终输出规则：\n最终回复只能输出一个合法 JSON 对象，必须符合：\n{\"beat_checkpoint_timeline\":[{\"beat_no\":1,\"act\":\"string\",\"beat_name\":\"string\",\"episode_range\":\"string\",\"checkpoint_title\":\"string\",\"narrative_function\":\"string\",\"plot_content\":\"string\",\"character_change\":\"string\",\"conflict_upgrade\":\"string\",\"hook_or_reversal\":\"string\",\"linked_storylines\":[\"string\"]}],\"checkpoint_explanation\":{\"act_one_logic\":\"string\",\"act_two_logic\":\"string\",\"act_three_logic\":\"string\",\"opening_hook\":\"string\",\"first_three_episodes\":\"string\",\"midpoint\":\"string\",\"dark_night_and_turn\":\"string\",\"ending_closure\":\"string\"},\"display_text\":\"string\"}\n\n禁止输出 Markdown，禁止输出代码块，禁止输出解释性前缀，禁止输出 JSON 之外的任何文本。最终 JSON 不得新增字段、不得删除字段、不得翻译字段名、不得输出空字符串，数组不得为空。如果信息缺失，用“未明确，需后续确认……”填充。\n",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "valueType": "chatHistory",
+          "label": "common:core.module.input.label.chat history",
+          "description": "workflow:max_dialog_rounds",
+          "required": true,
+          "min": 0,
+          "max": 50,
+          "value": 0,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "label": "app:workflow.user_file_input",
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "valueType": "arrayString",
+          "value": [],
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "valueType": "string",
+          "label": "workflow:user_question",
+          "toolDescription": "user question",
+          "required": true,
+          "value": [
+            "start04aad36b",
+            "userChatInput"
+          ],
+          "debugLabel": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "valueType": "string",
+          "type": "static",
+          "valueDesc": ""
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "label": "workflow:error_text",
+          "valueDesc": "",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "toolparams04b6d3",
+      "name": "剧本框架方法搜索工具",
+      "intro": "由工具调度器传入搜索维度、搜索语和提取目标，再调用联网搜索。",
+      "avatar": "core/workflow/template/toolParams",
+      "flowNodeType": "toolParams",
+      "position": {
+        "x": 495,
+        "y": -3840
+      },
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "search_dimension",
+          "key": "search_dimension",
+          "type": "static",
+          "valueType": "string",
+          "label": "搜索维度",
+          "description": "搜索维度。建议值：framework_method=三幕式/十五节拍/Save the Cat/短剧框架写法；episode_rhythm=短剧集数节奏、前3集留存、阶段卡点；plot_arrangement=剧情安排、冲突递进、反转布局、伏笔回收；character_arc_structure=主角成长弧、B故事线、中点转折、灵魂黑夜、第三幕整合；scoring_revision=剧本框架评分标准、结构诊断和修改方法；integrated=综合搜索。",
+          "required": true
+        },
+        {
+          "id": "search_query",
+          "key": "search_query",
+          "type": "static",
+          "valueType": "string",
+          "label": "搜索查询语",
+          "description": "用于 web_search 的中文搜索查询。必须结合 user_requirements、adaptation_direction、source_brief、worldview_plan、character_plan、basic_config 或评分报告中的问题。建议 30-90 个中文字符。不要塞入完整 JSON，不要搜索可照搬剧情，不要复刻具体作品框架。",
+          "required": true
+        },
+        {
+          "id": "search_purpose",
+          "key": "search_purpose",
+          "type": "static",
+          "valueType": "string",
+          "label": "搜索目的",
+          "description": "说明本次搜索要解决什么框架规划问题，例如三幕十五节拍写法、剧情节奏安排、前3集留存、中点设计、灵魂黑夜、结局闭环、评分修改方法。",
+          "required": true
+        },
+        {
+          "id": "expected_extract",
+          "key": "expected_extract",
+          "type": "static",
+          "valueType": "string",
+          "label": "预期提取内容",
+          "description": "说明希望从搜索结果中提取什么，必须是抽象方法，不得要求复制具体作品剧情。可写：框架方法、节奏规律、卡点设置、冲突递进、反转布局、评分标准、修改策略、风险和俗套等。",
+          "required": true
+        }
+      ]
+    },
+    {
+      "nodeId": "tool04a9c8f1",
+      "name": "web_search",
+      "intro": "执行联网搜索，返回原始搜索结果。",
+      "avatar": "core/app/type/httpPluginFill",
+      "flowNodeType": "tool",
+      "showStatus": true,
+      "position": {
+        "x": 495,
+        "y": -3495
+      },
+      "version": "",
+      "inputs": [
+        {
+          "key": "query",
+          "label": "query",
+          "valueType": "string",
+          "description": "查询内容",
+          "toolDescription": "查询内容",
+          "required": true,
+          "renderTypeList": [
+            "input",
+            "reference"
+          ],
+          "value": [
+            "toolparams04b6d3",
+            "search_query"
+          ],
+          "selectedTypeIndex": 1
+        }
+      ],
+      "outputs": [
+        {
+          "id": "system_rawResponse",
+          "key": "system_rawResponse",
+          "required": true,
+          "label": "workflow:raw_response",
+          "description": "workflow:tool_raw_response_description",
+          "valueType": "any",
+          "type": "static"
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "label": "workflow:error_text"
+        }
+      ],
+      "pluginId": "http-69f170167846cab59f7c6064/web_search",
+      "toolConfig": {
+        "httpTool": {
+          "toolId": "http-69f170167846cab59f7c6064/web_search"
+        }
+      },
+      "catchError": false
+    },
+    {
+      "nodeId": "ai04creator9f3",
+      "name": "三幕十五节拍卡点创作工具",
+      "intro": "由工具调度器在完成必要搜索后调用，生成 beat_checkpoint_timeline 草案。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": -720,
+        "y": -3825
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 0.45,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 12000,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "json_object",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"beat_checkpoint_timeline\",\"checkpoint_explanation\",\"display_text\"],\"properties\":{\"beat_checkpoint_timeline\":{\"type\":\"array\",\"minItems\":15,\"maxItems\":15,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"beat_no\",\"act\",\"beat_name\",\"episode_range\",\"checkpoint_title\",\"narrative_function\",\"plot_content\",\"character_change\",\"conflict_upgrade\",\"hook_or_reversal\",\"linked_storylines\"],\"properties\":{\"beat_no\":{\"type\":\"integer\"},\"act\":{\"type\":\"string\",\"minLength\":1},\"beat_name\":{\"type\":\"string\",\"minLength\":1},\"episode_range\":{\"type\":\"string\",\"minLength\":1},\"checkpoint_title\":{\"type\":\"string\",\"minLength\":1},\"narrative_function\":{\"type\":\"string\",\"minLength\":1},\"plot_content\":{\"type\":\"string\",\"minLength\":1},\"character_change\":{\"type\":\"string\",\"minLength\":1},\"conflict_upgrade\":{\"type\":\"string\",\"minLength\":1},\"hook_or_reversal\":{\"type\":\"string\",\"minLength\":1},\"linked_storylines\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"string\",\"minLength\":1}}}}},\"checkpoint_explanation\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"act_one_logic\",\"act_two_logic\",\"act_three_logic\",\"opening_hook\",\"first_three_episodes\",\"midpoint\",\"dark_night_and_turn\",\"ending_closure\"],\"properties\":{\"act_one_logic\":{\"type\":\"string\",\"minLength\":1},\"act_two_logic\":{\"type\":\"string\",\"minLength\":1},\"act_three_logic\":{\"type\":\"string\",\"minLength\":1},\"opening_hook\":{\"type\":\"string\",\"minLength\":1},\"first_three_episodes\":{\"type\":\"string\",\"minLength\":1},\"midpoint\":{\"type\":\"string\",\"minLength\":1},\"dark_night_and_turn\":{\"type\":\"string\",\"minLength\":1},\"ending_closure\":{\"type\":\"string\",\"minLength\":1}}},\"display_text\":{\"type\":\"string\",\"minLength\":1}}}",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“三幕十五节拍卡点创作工具”。你是被上层工具调度器调用的创作工具，不负责联网搜索，也不负责解释流程。你的任务是根据已确认 source_brief、basic_config、worldview_plan、character_plan、用户自定义要求、上一版十五节拍卡点、用户反馈和评分系统结果，生成或更新 beat_checkpoint_timeline。\n\n输入变量：\nuser_requirements={{$start04aad36b.userChatInput$}}；\nmode={{$VARIABLE_NODE_ID.mode$}}；\nsource_brief={{$VARIABLE_NODE_ID.source_brief$}}；\nbasic_config={{$VARIABLE_NODE_ID.basic_config$}}；\nworldview_plan={{$VARIABLE_NODE_ID.worldview_plan$}}；\ncharacter_plan={{$VARIABLE_NODE_ID.character_plan$}}；\nprevious_beat_checkpoint_timeline={{$VARIABLE_NODE_ID.previous_beat_checkpoint_timeline$}}；\nuser_feedback={{$VARIABLE_NODE_ID.user_feedback$}}；\nframework_score_report={{$VARIABLE_NODE_ID.framework_score_report$}}；\nadaptation_direction={{$VARIABLE_NODE_ID.adaptation_direction$}}。\n\n上层工具调度器可能已经完成联网搜索，并在工具调用上下文中保留搜索结果；你必须服从上层上下文，但搜索结果只能作为低优先级参考，不得覆盖已确认 source_brief、basic_config、worldview_plan、character_plan 和 user_requirements。\n\n工作模式：\n- mode=create 或 “创作”：首次生成十五节拍卡点规划。\n- mode=revise 或 “改写”：根据 previous_beat_checkpoint_timeline、user_feedback、framework_score_report 更新。必须保留未被反馈否定且合理的结构基础，只对反馈和评分指出的问题做定向更新。\n- 如果 mode 为空或无法识别，默认按 create 处理。\n\n评分系统输入使用规则：\nframework_score_report 是后续“写--打分--修改”循环的统一入口。它可能是 JSON 字符串，也可能是自然语言。你不需要假设具体字段名，但必须尽量识别其中的评分维度、低分原因、修改建议和优先级。\n如果 framework_score_report 为空，按首次生成或普通用户反馈处理。\n如果 framework_score_report 非空，必须把其中的主要问题反映到本轮输出，尤其是节奏、冲突、人物弧、钩子、反转、集数区间、三幕衔接、前3集留存、中点强度、结局闭环等方面。\nframework_score_report 不能覆盖已确认上游事实；如果它要求推翻上游，只能在 display_text 中提示需要回到上游重新确认。\n\n输入优先级：\n1. 输出格式、字段结构、JSON 规则。\n2. 已确认上游事实：source_brief、basic_config、worldview_plan、character_plan。\n3. previous_beat_checkpoint_timeline、user_feedback、framework_score_report。\n4. user_requirements，必须高度重视。\n5. adaptation_direction。\n6. 工具调用上下文中的搜索结果。\n7. 合理推断。\n\n生成目标：\n你要生成的是“三幕十五节拍卡点时间轴”，十五节拍和卡点时间轴是同一个结构。每个节拍都必须绑定集数范围、卡点标题、叙事功能、剧情内容、人物变化、冲突升级、钩子或反转、关联故事线。\n这不是普通大纲，不是分集正文，也不是人物小传。它是后续人物故事线和正式剧本框架生成的核心结构。\n\n固定十五节拍：\n1 开场；\n2 主体呈现；\n3 铺垫；\n4 推动催化剂；\n5 争执；\n6 第二幕衔接点；\n7 B故事线；\n8 游戏及斗争；\n9 中点；\n10 危险逼近；\n11 一败涂地；\n12 灵魂黑夜；\n13 第三幕衔接点；\n14 结局；\n15 终场画面。\n\n质量要求：\n- beat_checkpoint_timeline 必须且只能有 15 条，beat_no 必须从 1 到 15 严格递增。\n- act 必须标明第一幕、第二幕或第三幕。第1-6为第一幕，第7-12为第二幕，第13-15为第三幕。\n- episode_range 必须根据 basic_config 的季数、每季集数、每集分钟数合理分配。若集数不明确，必须写“未明确，需后续确认集数后重排”。\n- 短剧/微短剧必须强化前3集留存，开场、主体呈现、推动催化剂需要尽早给出强钩子、强冲突或强悬念。\n- 中点必须是第二幕高潮，不能只是普通事件。\n- 一败涂地与灵魂黑夜必须形成真正的外部失败和内部低谷。\n- 第三幕衔接点必须把A故事行动线和B故事情感/主题线合并成新解法。\n- 结局必须解决核心冲突，终场画面必须与开场形成对照。\n- linked_storylines 必须引用 character_plan 中可识别的人物线、关系线或冲突线；如果未明确，写“主角主线”等可用占位。\n- 不要提前生成完整分集大纲或剧本正文。\n- 不得新增与 worldview_plan、character_plan 冲突的核心设定。\n\n字段要求：\nbeat_checkpoint_timeline：15条节拍卡点。\ncheckpoint_explanation：解释三幕逻辑、首集钩子、前三集留存、中点、灵魂黑夜与第三幕转向、结局闭环。\ndisplay_text：给前端展示给用户看的自然语言总结，400-800字，说明整体结构、三幕推进、关键卡点、评分/反馈吸收情况和需要确认的风险。\n\n输出格式必须为：\n{\"beat_checkpoint_timeline\":[{\"beat_no\":1,\"act\":\"string\",\"beat_name\":\"string\",\"episode_range\":\"string\",\"checkpoint_title\":\"string\",\"narrative_function\":\"string\",\"plot_content\":\"string\",\"character_change\":\"string\",\"conflict_upgrade\":\"string\",\"hook_or_reversal\":\"string\",\"linked_storylines\":[\"string\"]}],\"checkpoint_explanation\":{\"act_one_logic\":\"string\",\"act_two_logic\":\"string\",\"act_three_logic\":\"string\",\"opening_hook\":\"string\",\"first_three_episodes\":\"string\",\"midpoint\":\"string\",\"dark_night_and_turn\":\"string\",\"ending_closure\":\"string\"},\"display_text\":\"string\"}\n\n强制规则：\n最终回复只能是 JSON 对象；禁止输出 Markdown；禁止输出代码块；禁止输出解释性前缀；禁止输出 JSON 之外的任何文本；禁止新增字段；禁止删除字段；禁止翻译字段名；禁止输出空字符串；数组不得为空；输出必须能被 JSON.parse 直接解析。\n",
+          "description": "common:core.app.tip.systemPromptTip",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "description": "workflow:max_dialog_rounds",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "label": "app:workflow.user_file_input",
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "valueType": "arrayString",
+          "value": [],
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 0,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": [
+            "start04aad36b",
+            "userChatInput"
+          ],
+          "toolDescription": "用户问题",
+          "debugLabel": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "label": "workflow:reasoning_content",
+          "required": false,
+          "invalid": false,
+          "description": ""
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "var04e5a91c",
+      "name": "保存十五节拍卡点结果",
+      "intro": "将工具调度器最终输出写入内部变量。",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 810,
+        "y": -5280
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "valueType": "any",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "d3ixvj8d"
+              ],
+              "value": [
+                "tools04a4b9c1",
+                "answerText"
+              ],
+              "valueType": "string",
+              "renderType": "reference"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "ans04e90c4c",
+      "name": "输出04 三幕十五节拍卡点规划生成更新",
+      "intro": "最终只输出工具调度器生成的唯一 JSON 结果。",
+      "avatar": "core/workflow/template/reply",
+      "flowNodeType": "answerNode",
+      "position": {
+        "x": 1455,
+        "y": -5280
+      },
+      "inputs": [
+        {
+          "key": "text",
+          "label": "common:core.module.input.label.Response content",
+          "valueType": "any",
+          "required": true,
+          "isRichText": false,
+          "placeholder": "common:core.module.input.description.Response content",
+          "maxLength": 100000,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": [
+            "VARIABLE_NODE_ID",
+            "d3ixvj8d"
+          ],
+          "description": "common:core.module.input.description.Response content",
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "start04aad36b",
+      "target": "tools04a4b9c1",
+      "sourceHandle": "start04aad36b-source-right",
+      "targetHandle": "tools04a4b9c1-target-left"
+    },
+    {
+      "source": "tools04a4b9c1",
+      "target": "toolparams04b6d3",
+      "sourceHandle": "selectedTools",
+      "targetHandle": "selectedTools"
+    },
+    {
+      "source": "toolparams04b6d3",
+      "target": "tool04a9c8f1",
+      "sourceHandle": "toolparams04b6d3-source-right",
+      "targetHandle": "tool04a9c8f1-target-left"
+    },
+    {
+      "source": "tools04a4b9c1",
+      "target": "ai04creator9f3",
+      "sourceHandle": "selectedTools",
+      "targetHandle": "selectedTools"
+    },
+    {
+      "source": "tools04a4b9c1",
+      "target": "var04e5a91c",
+      "sourceHandle": "tools04a4b9c1-source-right",
+      "targetHandle": "var04e5a91c-target-left"
+    },
+    {
+      "source": "var04e5a91c",
+      "target": "ans04e90c4c",
+      "sourceHandle": "var04e5a91c-source-right",
+      "targetHandle": "ans04e90c4c-target-left"
+    }
+  ],
+  "chatConfig": {
+    "variables": [
+      {
+        "type": "input",
+        "key": "mode",
+        "label": "生成模式",
+        "valueType": "string",
+        "description": "创作/改写。",
+        "required": false,
+        "defaultValue": "",
+        "maxLength": 50000
+      },
+      {
+        "type": "input",
+        "key": "source_brief",
+        "label": "原文信息提取结果",
+        "valueType": "string",
+        "description": "01 原文信息提取工作流输出的完整 JSON 或 source_brief JSON 字符串。必须是已确认上游事实。",
+        "required": true,
+        "maxLength": 50000
+      },
+      {
+        "type": "input",
+        "key": "basic_config",
+        "label": "已确认基础配置",
+        "valueType": "string",
+        "description": "季数、每季集数、每集分钟数、目标格式等前端锁定后的基础配置 JSON。",
+        "required": true,
+        "maxLength": 50000
+      },
+      {
+        "type": "input",
+        "key": "worldview_plan",
+        "label": "已确认世界观方案",
+        "valueType": "string",
+        "description": "02 阶段确认后的 worldview_plan JSON 字符串。",
+        "required": true,
+        "maxLength": 50000
+      },
+      {
+        "type": "input",
+        "key": "character_plan",
+        "label": "已确认人设方案",
+        "valueType": "string",
+        "description": "03 阶段确认后的 character_plan JSON 字符串。",
+        "required": true,
+        "maxLength": 50000
+      },
+      {
+        "type": "input",
+        "key": "previous_beat_checkpoint_timeline",
+        "label": "上一版十五节拍卡点",
+        "valueType": "string",
+        "description": "revise/改写时传入上一版完整输出 JSON 或 beat_checkpoint_timeline JSON 字符串；首次生成可留空。",
+        "required": false,
+        "maxLength": 50000
+      },
+      {
+        "type": "input",
+        "key": "user_feedback",
+        "label": "用户修改反馈",
+        "valueType": "string",
+        "description": "用户对十五节拍卡点规划的修改反馈。",
+        "required": false,
+        "maxLength": 50000
+      },
+      {
+        "type": "input",
+        "key": "framework_score_report",
+        "label": "框架评分系统结果",
+        "valueType": "string",
+        "description": "外部评分系统输出的统一 JSON 字符串或自然语言字符串。用于写--打分--修改循环，可包含多维度评分、问题定位、修改建议。",
+        "required": false,
+        "maxLength": 50000
+      },
+      {
+        "key": "adaptation_direction",
+        "label": "创作方向",
+        "valueType": "string",
+        "required": false,
+        "type": "input",
+        "description": "用户希望的创作方向。用于搜索查询和十五节拍卡点生成。",
+        "maxLength": 50000,
+        "icon": "core/workflow/inputType/input"
+      },
+      {
+        "type": "internal",
+        "key": "d3ixvj8d",
+        "label": "新生成的十五节拍卡点",
+        "valueType": "string",
+        "description": "工具调度器最终输出的 beat_checkpoint_timeline JSON 字符串。",
+        "required": false
+      }
+    ],
+    "scheduledTriggerConfig": {
+      "cronString": "",
+      "timezone": "Asia/Shanghai",
+      "defaultPrompt": ""
+    },
+    "_id": "30548d600c5ed937301fe6ef"
+  }
+}

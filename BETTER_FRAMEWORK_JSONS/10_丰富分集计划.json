@@ -404,7 +404,7 @@
             {
               "variable": [
                 "VARIABLE_NODE_ID",
-                "allEnrichedEpisodePlan"
+                "enrichedEpisodePlanResult"
               ],
               "value": [
                 "ai10EnrichedEpisodePlan",
@@ -446,7 +446,7 @@
           ],
           "value": [
             "VARIABLE_NODE_ID",
-            "allEnrichedEpisodePlan"
+            "enrichedEpisodePlanResult"
           ],
           "debugLabel": "",
           "description": "common:core.module.input.description.Response content",
@@ -549,6 +549,16 @@
         "label": "全量丰富分集计划文本",
         "valueType": "string",
         "description": "10 阶段生成的人类可读文本版本。若工作流不能拆分字段，后端从 allEnrichedEpisodePlan JSON 中解析。",
+        "required": false,
+        "defaultValue": "",
+        "icon": "core/workflow/inputType/internal"
+      },
+      {
+        "type": "internal",
+        "key": "enrichedEpisodePlanResult",
+        "label": "10阶段完整丰富分集计划结果",
+        "valueType": "string",
+        "description": "10 阶段完整 JSON 字符串，顶层包含 allEnrichedEpisodePlan 和 allEnrichedEpisodePlanText。",
         "required": false,
         "defaultValue": "",
         "icon": "core/workflow/inputType/internal"
