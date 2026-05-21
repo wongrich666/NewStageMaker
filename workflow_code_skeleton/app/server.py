@@ -881,6 +881,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "character_bios",
             "episode_plan",
             "script_format_mode",
+            "framework_plan_package",
+            "worldview_plan",
+            "beat_checkpoint_timeline",
+            "character_storylines",
+            "character_plan",
         ):
             value = data.get(optional_key)
             if value not in (None, "", [], {}):
@@ -919,6 +924,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "character_bios",
             "episode_plan",
             "script_format_mode",
+            "framework_plan_package",
+            "worldview_plan",
+            "beat_checkpoint_timeline",
+            "character_storylines",
+            "character_plan",
         ):
             value = data.get(optional_key)
             if value not in (None, "", [], {}):

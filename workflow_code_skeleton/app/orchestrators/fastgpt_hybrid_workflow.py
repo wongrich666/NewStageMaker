@@ -35,24 +35,33 @@ from ..services.fastgpt_client import (
 )
 from ..services.fastgpt_contracts import (
     ALL_DIALOGUES,
+    ALL_ENRICHED_EPISODE_PLAN,
     ALL_HOOKS,
     ALL_SCRIPT,
     APPEARANCE_CONTINUITY_MEMORY,
     APPEARANCE_MAPPING,
-    BATCH_START_EPISODE,
+    BATCH_CAUSAL_CONFLICT_PLAN,
+    BATCH_CAUSAL_CONFLICT_REVIEW,
     BATCH_DIALOGUES,
+    BATCH_ENRICHED_EPISODE_PLAN,
     BATCH_HOOKS,
     BATCH_SCRIPT,
+    BATCH_SCRIPT_REVIEW,
+    BATCH_SCRIPT_TEXT,
+    BATCH_START_EPISODE,
     CHARACTERS,
     CHARACTER_ALIAS_NAMING_RULES,
     CHARACTER_ALIAS_REGISTRY,
     CHARACTER_APPEARANCE_REQUIREMENTS,
     CHARACTER_REGISTRY,
+    CONFLICT_MEMORY,
+    CONFLICT_START_EPISODE,
     EPISODE_WORD_COUNT,
     EPISODE_PLAN,
     EPISODE_ALIAS_PLAN,
     FINAL_SCRIPT,
     FRAMEWORK_NATURAL_LANGUAGE,
+    FRAMEWORK_PLAN_PACKAGE,
     HOOK_MEMORY,
     HOOK_REVIEW_RESULT,
     IS_CONSISTENT,
@@ -67,11 +76,14 @@ from ..services.fastgpt_contracts import (
     CHARACTER_COUNT,
     OUTFIT_SWITCH_RULES,
     SCENES,
+    SCENE_DICTIONARY,
     SCENE_APPEARANCE_REQUIREMENTS,
     DIALOGUE_MEMORY,
     DIALOGUE_REVIEW_RESULT,
     SCRIPT_TITLE,
     SCRIPT_MEMORY,
+    SCRIPT_START_EPISODE,
+    SCRIPT_WORLD_RULES_DIGEST,
     SCRIPT_REVIEW_RESULT,
     STAGE_APPEARANCE_ALIAS_GENERATION,
     STAGE_APPEARANCE_ALIAS_REVIEW,
@@ -81,6 +93,17 @@ from ..services.fastgpt_contracts import (
     STAGE_APPEARANCE_PRE_STRATEGY,
     STAGE_FRAMEWORK,
     STAGE_FRAMEWORK_NATURALIZE,
+    STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE,
+    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+    STAGE_FRAMEWORK_SCENE_DICTIONARY,
+    STAGE_FRAMEWORK_SCRIPT_MEMORY,
+    STAGE_FRAMEWORK_SCRIPT_REVIEW,
+    STAGE_FRAMEWORK_SCRIPT_REWRITE,
+    STAGE_FRAMEWORK_SCRIPT_WRITE,
     STAGE_CHARACTERS_NATURALIZE,
     STAGE_CHARACTERS,
     STAGE_CONSISTENCY,
@@ -436,6 +459,9 @@ def run_fastgpt_hybrid_workflow(
 
     variables = _initial_fastgpt_variables(payload)
     _restore_resume_state(state, variables, resume_snapshot)
+    if _is_framework_to_script_payload(payload, variables):
+        _run_framework_to_script_workflow(state, runner, payload, variables)
+        return state
     # 先把“前置静态设定”跑稳，再进入批处理阶段。
     # 这样后面的 worldview/characters/scenes/hooks/dialogues/script 才能统一读取
     # 同一份框架、服装策略和一致性校验结果。
@@ -603,6 +629,13 @@ def _initial_fastgpt_variables(payload: WorkflowInput) -> dict[str, Any]:
         "selected_preference_tag_ids": payload.selected_preference_tag_ids,
         "user_preference_prompt": payload.user_preference_prompt,
         "user_knowledge_tag_prompt": payload.user_knowledge_tag_prompt,
+        "script_format_mode": payload.script_format_mode,
+        FRAMEWORK_PLAN_PACKAGE: copy.deepcopy(payload.framework_plan_package),
+        WORLDVIEW: copy.deepcopy(payload.worldview_plan),
+        "worldview_plan": copy.deepcopy(payload.worldview_plan),
+        "beat_checkpoint_timeline": copy.deepcopy(payload.beat_checkpoint_timeline),
+        "character_storylines": copy.deepcopy(payload.character_storylines),
+        "character_plan": copy.deepcopy(payload.character_plan),
         USER_SCENES: payload.core_scene_input,
         USER_CHARACTERS: payload.character_bios,
         APPEARANCE_MAPPING: {},
@@ -864,6 +897,329 @@ def _run_batched_generation(
         generated_episodes=total_episodes,
     )
     sync_runtime_state(state)
+
+
+def _is_framework_to_script_payload(payload: WorkflowInput, variables: dict[str, Any]) -> bool:
+    mode = str(
+        getattr(payload, "script_format_mode", "")
+        or variables.get("script_format_mode")
+        or ""
+    ).strip()
+    return mode in {"framework_to_script", "better_framework_script"}
+
+
+def _run_framework_to_script_workflow(
+    state: WorkflowState,
+    runner: FastGPTRunner,
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+) -> None:
+    """三幕十五节拍框架转剧本专用链路。
+
+    这条链路从 stage07 的 framework_plan_package 起步，独立生成
+    sceneDictionary / appearanceMapping / enrichedEpisodePlan / 因果冲突计划 /
+    正文对白融合稿，刻意不进入旧 all_hooks/all_dialogues/all_script 三段式。
+    """
+    _ensure_framework_to_script_seed_variables(payload, variables)
+    _sync_state_variables(state, variables)
+
+    scene_dictionary = variables.get(SCENE_DICTIONARY)
+    rules_digest = variables.get(SCRIPT_WORLD_RULES_DIGEST)
+    if _has_value(scene_dictionary) and _has_value(rules_digest):
+        set_runtime_stage(
+            state,
+            STAGE_FRAMEWORK_SCENE_DICTIONARY,
+            "已从缓存恢复框架转剧本场景字典。",
+            progress_percent=18,
+        )
+        sync_runtime_state(state)
+    else:
+        output = _run_fastgpt_stage(
+            state,
+            runner,
+            STAGE_FRAMEWORK_SCENE_DICTIONARY,
+            variables,
+            stage_key=STAGE_FRAMEWORK_SCENE_DICTIONARY,
+            message="正在生成框架转剧本场景字典。",
+            progress_percent=18,
+        )
+        variables.update(output)
+        _sync_state_variables(state, variables)
+
+    if _has_value(variables.get(APPEARANCE_MAPPING)):
+        set_runtime_stage(
+            state,
+            STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+            "已从缓存恢复框架转剧本外观映射。",
+            progress_percent=30,
+        )
+        sync_runtime_state(state)
+    else:
+        output = _run_fastgpt_stage(
+            state,
+            runner,
+            STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+            variables,
+            stage_key=STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+            message="正在生成框架转剧本外观映射。",
+            progress_percent=30,
+        )
+        variables.update(output)
+        _sync_state_variables(state, variables)
+
+    if _has_value(variables.get(ALL_ENRICHED_EPISODE_PLAN)):
+        set_runtime_stage(
+            state,
+            STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+            "已从缓存恢复框架转剧本增强分集计划。",
+            progress_percent=42,
+        )
+        sync_runtime_state(state)
+    else:
+        output = _run_fastgpt_stage(
+            state,
+            runner,
+            STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+            variables,
+            stage_key=STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+            message="正在生成框架转剧本增强分集计划。",
+            progress_percent=42,
+        )
+        variables.update(output)
+        _sync_state_variables(state, variables)
+
+    total_episodes = int(variables[TOTAL_EPISODES])
+    batch_size = max(1, int(settings.batch_size or 5))
+    batches = list(iter_episode_batches(total_episodes, batch_size=batch_size))
+    all_script = str(variables.get(ALL_SCRIPT) or "").strip()
+    conflict_memory = str(variables.get(CONFLICT_MEMORY) or "").strip()
+    script_memory = str(variables.get(SCRIPT_MEMORY) or "").strip()
+
+    for index, batch in enumerate(batches, start=1):
+        batch_label = batch.label
+        batch_enriched = _framework_enriched_plan_for_batch(variables, batch)
+        if not _has_value(batch_enriched):
+            raise ValueError(
+                f"框架转剧本增强分集计划缺少第 {batch.label} 集切片，"
+                "已停止继续生成，避免把空计划送入正文链路。"
+            )
+        variables[BATCH_ENRICHED_EPISODE_PLAN] = batch_enriched
+
+        conflict_context = _stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE, variables)
+        conflict_context.update(
+            {
+                CONFLICT_START_EPISODE: batch.start_episode,
+                CONFLICT_MEMORY: conflict_memory,
+            }
+        )
+        conflict_plan, conflict_review = _run_batch_write_review_revise_loop(
+            state,
+            runner,
+            variables=variables,
+            batch=batch,
+            stage_key="framework_causal_conflict",
+            stage_label="框架转剧本因果冲突推进计划",
+            output_field=BATCH_CAUSAL_CONFLICT_PLAN,
+            current_output_var=BATCH_CAUSAL_CONFLICT_PLAN,
+            review_output_var=BATCH_CAUSAL_CONFLICT_REVIEW,
+            retry_var="_framework_causal_conflict_retry",
+            max_retry_var="_framework_causal_conflict_max_retry",
+            writing_stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE,
+            review_stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+            rewrite_stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
+            writing_context=conflict_context,
+            review_context_builder=lambda current: {
+                **_stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW, variables),
+                CONFLICT_START_EPISODE: batch.start_episode,
+                BATCH_CAUSAL_CONFLICT_PLAN: current,
+            },
+            rewrite_context_builder=lambda current, review: {
+                **_stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE, variables),
+                CONFLICT_START_EPISODE: batch.start_episode,
+                BATCH_CAUSAL_CONFLICT_PLAN: current,
+                BATCH_CAUSAL_CONFLICT_REVIEW: json.dumps(review, ensure_ascii=False),
+                CONFLICT_MEMORY: conflict_memory,
+            },
+            progress_percent=min(78, 44 + index * 18 // max(1, len(batches))),
+            generated_episodes=max(0, batch.start_episode - 1),
+            approved_output_validator=lambda candidate: _validate_framework_batch_object(
+                candidate,
+                batch=batch,
+                label="batchCausalConflictPlan",
+            ),
+        )
+        variables[BATCH_CAUSAL_CONFLICT_PLAN] = conflict_plan
+        variables[BATCH_CAUSAL_CONFLICT_REVIEW] = json.dumps(conflict_review, ensure_ascii=False)
+        memory_output = _run_fastgpt_stage(
+            state,
+            runner,
+            STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
+            {
+                **_stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY, variables),
+                BATCH_CAUSAL_CONFLICT_PLAN: conflict_plan,
+                CONFLICT_MEMORY: conflict_memory,
+                CONFLICT_START_EPISODE: batch.start_episode,
+            },
+            stage_key=STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
+            message=f"正在写入框架转剧本因果冲突记忆：第 {batch_label} 集",
+            batch_label=batch_label,
+            progress_percent=min(82, 48 + index * 18 // max(1, len(batches))),
+            generated_episodes=max(0, batch.start_episode - 1),
+        )
+        conflict_memory = str(memory_output.get(CONFLICT_MEMORY) or "").strip()
+        variables[CONFLICT_MEMORY] = conflict_memory
+
+        script_context = _stage_input_context(STAGE_FRAMEWORK_SCRIPT_WRITE, variables)
+        script_context.update(
+            {
+                SCRIPT_START_EPISODE: batch.start_episode,
+                SCRIPT_MEMORY: script_memory,
+                BATCH_CAUSAL_CONFLICT_PLAN: conflict_plan,
+            }
+        )
+        batch_script, script_review = _run_batch_write_review_revise_loop(
+            state,
+            runner,
+            variables=variables,
+            batch=batch,
+            stage_key="framework_script",
+            stage_label="框架转剧本正文对白融合稿",
+            output_field=BATCH_SCRIPT_TEXT,
+            current_output_var=BATCH_SCRIPT_TEXT,
+            review_output_var=BATCH_SCRIPT_REVIEW,
+            retry_var="_framework_script_retry",
+            max_retry_var="_framework_script_max_retry",
+            writing_stage_name=STAGE_FRAMEWORK_SCRIPT_WRITE,
+            review_stage_name=STAGE_FRAMEWORK_SCRIPT_REVIEW,
+            rewrite_stage_name=STAGE_FRAMEWORK_SCRIPT_REWRITE,
+            writing_context=script_context,
+            review_context_builder=lambda current: {
+                **_stage_input_context(STAGE_FRAMEWORK_SCRIPT_REVIEW, variables),
+                SCRIPT_START_EPISODE: batch.start_episode,
+                BATCH_CAUSAL_CONFLICT_PLAN: conflict_plan,
+                BATCH_SCRIPT_TEXT: current,
+            },
+            rewrite_context_builder=lambda current, review: {
+                **_stage_input_context(STAGE_FRAMEWORK_SCRIPT_REWRITE, variables),
+                SCRIPT_START_EPISODE: batch.start_episode,
+                BATCH_CAUSAL_CONFLICT_PLAN: conflict_plan,
+                BATCH_SCRIPT_TEXT: current,
+                BATCH_SCRIPT_REVIEW: json.dumps(review, ensure_ascii=False),
+                SCRIPT_MEMORY: script_memory,
+            },
+            progress_percent=min(96, 62 + index * 24 // max(1, len(batches))),
+            generated_episodes=max(0, batch.start_episode - 1),
+            approved_output_validator=lambda candidate: _validate_script_batch_output(
+                candidate,
+                batch=batch,
+            ),
+        )
+        variables[BATCH_SCRIPT_TEXT] = batch_script
+        variables[BATCH_SCRIPT_REVIEW] = json.dumps(script_review, ensure_ascii=False)
+        all_script = merge_batch_script(all_script, batch_script, batch)
+        variables[ALL_SCRIPT] = all_script
+        state.set_output(STAGE_FRAMEWORK_SCRIPT_WRITE, f"batch_{batch.start_episode}", batch_script)
+        _sync_state_variables(state, variables)
+
+        script_memory_output = _run_fastgpt_stage(
+            state,
+            runner,
+            STAGE_FRAMEWORK_SCRIPT_MEMORY,
+            {
+                **_stage_input_context(STAGE_FRAMEWORK_SCRIPT_MEMORY, variables),
+                BATCH_SCRIPT_TEXT: batch_script,
+                SCRIPT_MEMORY: script_memory,
+                SCRIPT_START_EPISODE: batch.start_episode,
+            },
+            stage_key=STAGE_FRAMEWORK_SCRIPT_MEMORY,
+            message=f"正在写入框架转剧本正文记忆：第 {batch_label} 集",
+            batch_label=batch_label,
+            progress_percent=min(98, 66 + index * 24 // max(1, len(batches))),
+            generated_episodes=batch.end_episode,
+        )
+        script_memory = str(script_memory_output.get(SCRIPT_MEMORY) or "").strip()
+        variables[SCRIPT_MEMORY] = script_memory
+        _sync_state_variables(state, variables)
+
+    variables[FINAL_SCRIPT] = str(variables.get(ALL_SCRIPT) or "").strip()
+    state.final_output_text = variables[FINAL_SCRIPT]
+    _sync_state_variables(state, variables)
+    set_runtime_stage(
+        state,
+        "finalize",
+        "三幕十五节拍框架转剧本专用链路已生成最终剧本。",
+        progress_percent=100,
+        generated_episodes=payload.total_episodes,
+    )
+    sync_runtime_state(state)
+
+
+def _ensure_framework_to_script_seed_variables(
+    payload: WorkflowInput,
+    variables: dict[str, Any],
+) -> None:
+    package = variables.get(FRAMEWORK_PLAN_PACKAGE) or getattr(payload, "framework_plan_package", {})
+    if not _has_value(package):
+        raise ValueError("framework_to_script 新链路缺少 framework_plan_package。")
+    variables[FRAMEWORK_PLAN_PACKAGE] = copy.deepcopy(package)
+    variables.setdefault("worldview_plan", copy.deepcopy(getattr(payload, "worldview_plan", {})))
+    variables.setdefault("character_plan", copy.deepcopy(getattr(payload, "character_plan", {})))
+    variables.setdefault(
+        "beat_checkpoint_timeline",
+        copy.deepcopy(getattr(payload, "beat_checkpoint_timeline", [])),
+    )
+    variables.setdefault(
+        "character_storylines",
+        copy.deepcopy(getattr(payload, "character_storylines", [])),
+    )
+    if not _has_value(variables.get(WORLDVIEW)):
+        variables[WORLDVIEW] = copy.deepcopy(variables.get("worldview_plan") or {})
+    if not _has_value(variables.get("worldview_plan")) and isinstance(package, dict):
+        variables["worldview_plan"] = copy.deepcopy(package.get("worldview_plan") or {})
+        variables[WORLDVIEW] = copy.deepcopy(variables["worldview_plan"])
+    if not _has_value(variables.get("character_plan")) and isinstance(package, dict):
+        variables["character_plan"] = copy.deepcopy(package.get("character_plan") or {})
+    if not _has_value(variables.get("beat_checkpoint_timeline")) and isinstance(package, dict):
+        variables["beat_checkpoint_timeline"] = copy.deepcopy(package.get("beat_checkpoint_timeline") or [])
+    if not _has_value(variables.get("character_storylines")) and isinstance(package, dict):
+        variables["character_storylines"] = copy.deepcopy(package.get("character_storylines") or [])
+    variables.setdefault(CONFLICT_MEMORY, "")
+    variables.setdefault(SCRIPT_MEMORY, "")
+    variables.setdefault(ALL_SCRIPT, "")
+
+
+def _framework_enriched_plan_for_batch(
+    variables: dict[str, Any],
+    batch: BatchWindow,
+) -> Any:
+    cached = slice_object_episodes_for_batch(variables.get(ALL_ENRICHED_EPISODE_PLAN), batch)
+    if _has_value(cached):
+        return cached
+    return variables.get(BATCH_ENRICHED_EPISODE_PLAN)
+
+
+def _validate_framework_batch_object(
+    value: Any,
+    *,
+    batch: BatchWindow,
+    label: str,
+) -> list[str]:
+    payload = _dict_or_empty(value)
+    if not payload:
+        return [f"{label} 第 {batch.label} 集输出必须是非空 JSON object"]
+    list_key = _batch_object_episode_list_key(payload)
+    if not list_key:
+        return []
+    actual = {
+        _safe_int(item.get("episode"), 0)
+        for item in payload.get(list_key) or []
+        if isinstance(item, dict)
+    }
+    expected = set(range(batch.start_episode, batch.end_episode + 1))
+    missing = sorted(expected - actual)
+    if missing:
+        return [f"{label} 缺少集数：{missing}"]
+    return []
 
 
 def _run_all_hook_batches(
@@ -6326,7 +6682,12 @@ def _is_non_retryable(exc: Exception) -> bool:
     if isinstance(exc, FastGPTPayloadTooLargeError):
         return True
     text = str(exc)
-    return "缺少 FastGPT API Key" in text or "401" in text or "403" in text
+    return (
+        "缺少 FastGPT API Key" in text
+        or "缺少三幕十五节拍框架转剧本专用 FastGPT API Key" in text
+        or "401" in text
+        or "403" in text
+    )
 
 
 def _run_optional_memory_stage(
@@ -6524,6 +6885,22 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
             state.set_var(alias, variables[SCRIPT_MEMORY])
     if LAST_SUMMARY in variables:
         state.set_var(MEMORY_VAR, variables[LAST_SUMMARY])
+    for key in (
+        FRAMEWORK_PLAN_PACKAGE,
+        SCENE_DICTIONARY,
+        SCRIPT_WORLD_RULES_DIGEST,
+        ALL_ENRICHED_EPISODE_PLAN,
+        BATCH_ENRICHED_EPISODE_PLAN,
+        CONFLICT_START_EPISODE,
+        BATCH_CAUSAL_CONFLICT_PLAN,
+        BATCH_CAUSAL_CONFLICT_REVIEW,
+        CONFLICT_MEMORY,
+        SCRIPT_START_EPISODE,
+        BATCH_SCRIPT_TEXT,
+        BATCH_SCRIPT_REVIEW,
+    ):
+        if key in variables:
+            state.set_var(key, variables[key])
     if APPEARANCE_MAPPING in variables:
         normalized_mapping = _normalize_appearance_mapping_object(variables[APPEARANCE_MAPPING])
         if normalized_mapping is not None:
