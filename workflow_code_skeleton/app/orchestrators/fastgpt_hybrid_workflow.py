@@ -53,13 +53,16 @@ from ..services.fastgpt_contracts import (
     CHARACTER_ALIAS_NAMING_RULES,
     CHARACTER_ALIAS_REGISTRY,
     CHARACTER_APPEARANCE_REQUIREMENTS,
+    CHARACTER_PLAN,
     CHARACTER_REGISTRY,
+    CHARACTER_STORYLINES,
     CONFLICT_MEMORY,
     CONFLICT_START_EPISODE,
     EPISODE_WORD_COUNT,
     EPISODE_PLAN,
     EPISODE_ALIAS_PLAN,
     FINAL_SCRIPT,
+    BEAT_CHECKPOINT_TIMELINE,
     FRAMEWORK_NATURAL_LANGUAGE,
     FRAMEWORK_PLAN_PACKAGE,
     HOOK_MEMORY,
@@ -145,6 +148,7 @@ from ..services.fastgpt_contracts import (
     USER_CONTENT_BASELINE,
     USER_SCENES,
     WORLDVIEW,
+    WORLDVIEW_PLAN,
     WORLDVIEW_NATURAL_LANGUAGE,
     coerce_strict_fastgpt_boolean,
     contract_for,
@@ -183,9 +187,20 @@ from ..workflow_ids import (
     APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
     APPEARANCE_REQUIREMENTS_VAR,
     APPEARANCE_REVIEW_VAR,
+    ALL_ENRICHED_EPISODE_PLAN_VAR,
+    BATCH_CAUSAL_CONFLICT_PLAN_VAR,
+    BATCH_CAUSAL_CONFLICT_REVIEW_VAR,
+    BATCH_ENRICHED_EPISODE_PLAN_VAR,
+    BATCH_SCRIPT_REVIEW_VAR,
+    BATCH_SCRIPT_TEXT_VAR,
+    BEAT_CHECKPOINT_TIMELINE_VAR,
     CHARACTER_BIOS_VAR,
     CHARACTER_NATURAL_LANGUAGE_VAR,
+    CHARACTER_PLAN_VAR,
+    CHARACTER_STORYLINES_VAR,
     CHARACTER_VAR,
+    CONFLICT_MEMORY_VAR,
+    CONFLICT_START_EPISODE_VAR,
     CORE_SCENE_INPUT_VAR,
     CORE_SCENE_FINAL_VAR,
     DIALOGUE_CURRENT_VAR,
@@ -210,8 +225,10 @@ from ..workflow_ids import (
     EPISODE_PLAN_VAR,
     EPISODE_PLAN_CURSOR_VAR,
     EPISODE_PLAN_NORMALIZED_VAR,
+    EPISODE_WORD_COUNT_VAR,
     FINAL_CHARACTER_VAR,
     FINAL_SCENE_VAR,
+    FRAMEWORK_PLAN_PACKAGE_VAR,
     FRAMEWORK_ALIAS_NAMING_RULES_VAR,
     FRAMEWORK_APPEARANCE_REQUIREMENTS_VAR,
     HOOK_CURRENT_VAR,
@@ -228,9 +245,13 @@ from ..workflow_ids import (
     MEMORY_VAR,
     OUTFIT_SWITCH_RULES_VAR,
     SCENE_MAX_RETRY_VAR,
+    SCENE_DICTIONARY_VAR,
     SCENE_NATURAL_LANGUAGE_VAR,
     SCENE_RETRY_VAR,
     SCENE_VAR,
+    SCRIPT_MEMORY_VAR,
+    SCRIPT_START_EPISODE_VAR,
+    SCRIPT_WORLD_RULES_DIGEST_VAR,
     SCRIPT_CURRENT_VAR,
     SCRIPT_CURRENT_WRITE_VAR,
     SCRIPT_DIALOGUE_BATCH_VAR,
@@ -245,10 +266,12 @@ from ..workflow_ids import (
     SCRIPT_FINAL_VAR,
     STORY_OUTLINE_VAR,
     TITLE_VAR,
+    TOTAL_EPISODES_VAR,
     UNSTRUCTURED_KIND_VAR,
     UNSTRUCTURED_OUTPUT_VAR,
     UNSTRUCTURED_SOURCE_VAR,
     WORLDVIEW_VAR,
+    WORLDVIEW_PLAN_VAR,
 )
 from .runtime_tools import set_runtime_stage, sync_runtime_state
 
@@ -614,7 +637,9 @@ def _initial_fastgpt_variables(payload: WorkflowInput) -> dict[str, Any]:
     return {
         SCRIPT_TITLE: payload.title,
         TOTAL_EPISODES: payload.total_episodes,
+        TOTAL_EPISODES_VAR: payload.total_episodes,
         EPISODE_WORD_COUNT: payload.episode_word_count,
+        EPISODE_WORD_COUNT_VAR: payload.episode_word_count,
         USER_EXPECTATION: payload.user_expectation,
         CHARACTER_COUNT: payload.character_count,
         # 这 3 个字段只是运行态占位，供 appearance_pre_strategy 及其后续阶段复用。
@@ -631,11 +656,16 @@ def _initial_fastgpt_variables(payload: WorkflowInput) -> dict[str, Any]:
         "user_knowledge_tag_prompt": payload.user_knowledge_tag_prompt,
         "script_format_mode": payload.script_format_mode,
         FRAMEWORK_PLAN_PACKAGE: copy.deepcopy(payload.framework_plan_package),
+        FRAMEWORK_PLAN_PACKAGE_VAR: copy.deepcopy(payload.framework_plan_package),
         WORLDVIEW: copy.deepcopy(payload.worldview_plan),
-        "worldview_plan": copy.deepcopy(payload.worldview_plan),
-        "beat_checkpoint_timeline": copy.deepcopy(payload.beat_checkpoint_timeline),
-        "character_storylines": copy.deepcopy(payload.character_storylines),
-        "character_plan": copy.deepcopy(payload.character_plan),
+        WORLDVIEW_PLAN: copy.deepcopy(payload.worldview_plan),
+        WORLDVIEW_PLAN_VAR: copy.deepcopy(payload.worldview_plan),
+        BEAT_CHECKPOINT_TIMELINE: copy.deepcopy(payload.beat_checkpoint_timeline),
+        BEAT_CHECKPOINT_TIMELINE_VAR: copy.deepcopy(payload.beat_checkpoint_timeline),
+        CHARACTER_STORYLINES: copy.deepcopy(payload.character_storylines),
+        CHARACTER_STORYLINES_VAR: copy.deepcopy(payload.character_storylines),
+        CHARACTER_PLAN: copy.deepcopy(payload.character_plan),
+        CHARACTER_PLAN_VAR: copy.deepcopy(payload.character_plan),
         USER_SCENES: payload.core_scene_input,
         USER_CHARACTERS: payload.character_bios,
         APPEARANCE_MAPPING: {},
@@ -1162,29 +1192,44 @@ def _ensure_framework_to_script_seed_variables(
     if not _has_value(package):
         raise ValueError("framework_to_script 新链路缺少 framework_plan_package。")
     variables[FRAMEWORK_PLAN_PACKAGE] = copy.deepcopy(package)
-    variables.setdefault("worldview_plan", copy.deepcopy(getattr(payload, "worldview_plan", {})))
-    variables.setdefault("character_plan", copy.deepcopy(getattr(payload, "character_plan", {})))
+    variables[FRAMEWORK_PLAN_PACKAGE_VAR] = copy.deepcopy(package)
+    variables.setdefault(WORLDVIEW_PLAN, copy.deepcopy(getattr(payload, "worldview_plan", {})))
+    variables.setdefault(CHARACTER_PLAN, copy.deepcopy(getattr(payload, "character_plan", {})))
     variables.setdefault(
-        "beat_checkpoint_timeline",
+        BEAT_CHECKPOINT_TIMELINE,
         copy.deepcopy(getattr(payload, "beat_checkpoint_timeline", [])),
     )
     variables.setdefault(
-        "character_storylines",
+        CHARACTER_STORYLINES,
         copy.deepcopy(getattr(payload, "character_storylines", [])),
     )
     if not _has_value(variables.get(WORLDVIEW)):
-        variables[WORLDVIEW] = copy.deepcopy(variables.get("worldview_plan") or {})
-    if not _has_value(variables.get("worldview_plan")) and isinstance(package, dict):
-        variables["worldview_plan"] = copy.deepcopy(package.get("worldview_plan") or {})
-        variables[WORLDVIEW] = copy.deepcopy(variables["worldview_plan"])
-    if not _has_value(variables.get("character_plan")) and isinstance(package, dict):
-        variables["character_plan"] = copy.deepcopy(package.get("character_plan") or {})
-    if not _has_value(variables.get("beat_checkpoint_timeline")) and isinstance(package, dict):
-        variables["beat_checkpoint_timeline"] = copy.deepcopy(package.get("beat_checkpoint_timeline") or [])
-    if not _has_value(variables.get("character_storylines")) and isinstance(package, dict):
-        variables["character_storylines"] = copy.deepcopy(package.get("character_storylines") or [])
+        variables[WORLDVIEW] = copy.deepcopy(variables.get(WORLDVIEW_PLAN) or {})
+    if not _has_value(variables.get(WORLDVIEW_PLAN)) and isinstance(package, dict):
+        variables[WORLDVIEW_PLAN] = copy.deepcopy(package.get("worldview_plan") or package.get("worldviewPlan") or {})
+        variables[WORLDVIEW] = copy.deepcopy(variables[WORLDVIEW_PLAN])
+    if not _has_value(variables.get(CHARACTER_PLAN)) and isinstance(package, dict):
+        variables[CHARACTER_PLAN] = copy.deepcopy(package.get("character_plan") or package.get("characterPlan") or {})
+    if not _has_value(variables.get(BEAT_CHECKPOINT_TIMELINE)) and isinstance(package, dict):
+        variables[BEAT_CHECKPOINT_TIMELINE] = copy.deepcopy(
+            package.get("beat_checkpoint_timeline") or package.get("beatCheckpointTimeline") or []
+        )
+    if not _has_value(variables.get(CHARACTER_STORYLINES)) and isinstance(package, dict):
+        variables[CHARACTER_STORYLINES] = copy.deepcopy(
+            package.get("character_storylines") or package.get("characterStorylines") or []
+        )
+    variables[WORLDVIEW_PLAN_VAR] = copy.deepcopy(variables.get(WORLDVIEW_PLAN) or {})
+    variables[CHARACTER_PLAN_VAR] = copy.deepcopy(variables.get(CHARACTER_PLAN) or {})
+    variables[BEAT_CHECKPOINT_TIMELINE_VAR] = copy.deepcopy(
+        variables.get(BEAT_CHECKPOINT_TIMELINE) or []
+    )
+    variables[CHARACTER_STORYLINES_VAR] = copy.deepcopy(variables.get(CHARACTER_STORYLINES) or [])
+    variables[TOTAL_EPISODES_VAR] = variables.get(TOTAL_EPISODES) or payload.total_episodes
+    variables[EPISODE_WORD_COUNT_VAR] = variables.get(EPISODE_WORD_COUNT) or payload.episode_word_count
     variables.setdefault(CONFLICT_MEMORY, "")
+    variables.setdefault(CONFLICT_MEMORY_VAR, "")
     variables.setdefault(SCRIPT_MEMORY, "")
+    variables.setdefault(SCRIPT_MEMORY_VAR, "")
     variables.setdefault(ALL_SCRIPT, "")
 
 
@@ -1473,7 +1518,13 @@ def _normalize_stage_output_aliases(stage_name: str, output: dict[str, Any]) -> 
             field_name,
             contract.aliases_for_output(field_name),
         )
-        if not _has_value(value) and field_name in {HOOK_MEMORY, DIALOGUE_MEMORY, SCRIPT_MEMORY, LAST_SUMMARY}:
+        if not _has_value(value) and field_name in {
+            HOOK_MEMORY,
+            DIALOGUE_MEMORY,
+            SCRIPT_MEMORY,
+            CONFLICT_MEMORY,
+            LAST_SUMMARY,
+        }:
             value = normalized.get("answerText")
         if _has_value(value):
             normalized[field_name] = value
@@ -1487,6 +1538,10 @@ def _review_aliases_for_stage_key(stage_key: str) -> tuple[str, tuple[str, ...]]
         return DIALOGUE_REVIEW_RESULT, DIALOGUE_REVIEW_ALIASES
     if stage_key == "script":
         return SCRIPT_REVIEW_RESULT, SCRIPT_REVIEW_ALIASES
+    if stage_key == "framework_causal_conflict":
+        return BATCH_CAUSAL_CONFLICT_REVIEW, (BATCH_CAUSAL_CONFLICT_REVIEW_VAR,)
+    if stage_key == "framework_script":
+        return BATCH_SCRIPT_REVIEW, (BATCH_SCRIPT_REVIEW_VAR,)
     return PASS_REVIEW_JSON, ()
 
 
@@ -1557,6 +1612,10 @@ def _current_output_aliases_for_field(output_field: str) -> tuple[str, ...]:
         return DIALOGUE_BATCH_ALIASES
     if output_field == BATCH_SCRIPT:
         return SCRIPT_BATCH_ALIASES
+    if output_field == BATCH_CAUSAL_CONFLICT_PLAN:
+        return (BATCH_CAUSAL_CONFLICT_PLAN_VAR,)
+    if output_field == BATCH_SCRIPT_TEXT:
+        return (BATCH_SCRIPT_TEXT_VAR,)
     return ()
 
 
@@ -6799,6 +6858,10 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
 
     if SCRIPT_TITLE in variables:
         state.set_var(TITLE_VAR, variables[SCRIPT_TITLE])
+    if TOTAL_EPISODES in variables:
+        state.set_var(TOTAL_EPISODES_VAR, variables[TOTAL_EPISODES])
+    if EPISODE_WORD_COUNT in variables:
+        state.set_var(EPISODE_WORD_COUNT_VAR, variables[EPISODE_WORD_COUNT])
     if STORY_OUTLINE in variables:
         state.set_var(STORY_OUTLINE_VAR, variables[STORY_OUTLINE])
     if CHARACTER_APPEARANCE_REQUIREMENTS in variables:
@@ -6822,6 +6885,14 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
         state.set_var(EPISODE_PLAN_VAR, variables[EPISODE_PLAN])
     if WORLDVIEW in variables:
         state.set_var(WORLDVIEW_VAR, variables[WORLDVIEW])
+    if WORLDVIEW_PLAN in variables:
+        state.set_var(WORLDVIEW_PLAN_VAR, variables[WORLDVIEW_PLAN])
+    if CHARACTER_PLAN in variables:
+        state.set_var(CHARACTER_PLAN_VAR, variables[CHARACTER_PLAN])
+    if BEAT_CHECKPOINT_TIMELINE in variables:
+        state.set_var(BEAT_CHECKPOINT_TIMELINE_VAR, variables[BEAT_CHECKPOINT_TIMELINE])
+    if CHARACTER_STORYLINES in variables:
+        state.set_var(CHARACTER_STORYLINES_VAR, variables[CHARACTER_STORYLINES])
     if CHARACTER_NATURAL_LANGUAGE_VAR in variables:
         state.set_var(
             CHARACTER_NATURAL_LANGUAGE_VAR,
@@ -6901,6 +6972,24 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
     ):
         if key in variables:
             state.set_var(key, variables[key])
+    framework_to_script_var_aliases = {
+        FRAMEWORK_PLAN_PACKAGE: FRAMEWORK_PLAN_PACKAGE_VAR,
+        SCENE_DICTIONARY: SCENE_DICTIONARY_VAR,
+        SCRIPT_WORLD_RULES_DIGEST: SCRIPT_WORLD_RULES_DIGEST_VAR,
+        ALL_ENRICHED_EPISODE_PLAN: ALL_ENRICHED_EPISODE_PLAN_VAR,
+        BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+        CONFLICT_START_EPISODE: CONFLICT_START_EPISODE_VAR,
+        BATCH_CAUSAL_CONFLICT_PLAN: BATCH_CAUSAL_CONFLICT_PLAN_VAR,
+        BATCH_CAUSAL_CONFLICT_REVIEW: BATCH_CAUSAL_CONFLICT_REVIEW_VAR,
+        CONFLICT_MEMORY: CONFLICT_MEMORY_VAR,
+        SCRIPT_START_EPISODE: SCRIPT_START_EPISODE_VAR,
+        BATCH_SCRIPT_TEXT: BATCH_SCRIPT_TEXT_VAR,
+        BATCH_SCRIPT_REVIEW: BATCH_SCRIPT_REVIEW_VAR,
+        SCRIPT_MEMORY: SCRIPT_MEMORY_VAR,
+    }
+    for canonical_name, var_name in framework_to_script_var_aliases.items():
+        if canonical_name in variables:
+            state.set_var(var_name, variables[canonical_name])
     if APPEARANCE_MAPPING in variables:
         normalized_mapping = _normalize_appearance_mapping_object(variables[APPEARANCE_MAPPING])
         if normalized_mapping is not None:

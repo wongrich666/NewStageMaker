@@ -163,6 +163,22 @@ http://127.0.0.1:5000
   - `all_hooks -> all_dialogues -> all_script`
 - 每批默认 5 集，批次大小来自 `BATCH_SIZE`。
 
+### 三幕十五节拍框架转剧本专用链路
+
+当输入的 `script_format_mode` 为 `framework_to_script` 或 `better_framework_script`，并提供第 07 阶段的 `framework_plan_package` 时，后端会进入独立的新链路：
+
+```text
+07 framework_plan_package
+-> 08 sceneDictionary
+-> 09 appearanceMapping
+-> 10 enrichedEpisodePlan
+-> framework_causal_conflict_write/review/rewrite/memory
+-> framework_script_write/review/rewrite/memory
+-> final
+```
+
+这条链路专用于“三幕十五节拍框架转剧本”，不会复用旧的 `all_hooks / all_dialogues / all_script` 批处理，也不会调用 `dialogue_write / dialogue_review / dialogue_rewrite / dialogue_memory`。普通新建剧本仍走原有主链路。
+
 ## 辅助工具
 
 当前工具列表由后端动态读取并暴露为：
@@ -274,6 +290,24 @@ FASTGPT_SCRIPT_MEMORY_API_KEY=
 
 FASTGPT_FINAL_API_KEY=
 ```
+
+三幕十五节拍框架转剧本专用链路需要单独配置：
+
+```env
+FASTGPT_FRAMEWORK_SCENE_DICTIONARY_API_KEY=
+FASTGPT_FRAMEWORK_APPEARANCE_MAPPING_API_KEY=
+FASTGPT_FRAMEWORK_ENRICHED_EPISODE_PLAN_API_KEY=
+FASTGPT_FRAMEWORK_CAUSAL_CONFLICT_WRITE_API_KEY=
+FASTGPT_FRAMEWORK_CAUSAL_CONFLICT_REVIEW_API_KEY=
+FASTGPT_FRAMEWORK_CAUSAL_CONFLICT_REWRITE_API_KEY=
+FASTGPT_FRAMEWORK_CAUSAL_CONFLICT_MEMORY_API_KEY=
+FASTGPT_FRAMEWORK_SCRIPT_WRITE_API_KEY=
+FASTGPT_FRAMEWORK_SCRIPT_REVIEW_API_KEY=
+FASTGPT_FRAMEWORK_SCRIPT_REWRITE_API_KEY=
+FASTGPT_FRAMEWORK_SCRIPT_MEMORY_API_KEY=
+```
+
+这些 key 不会回退到旧的 hooks/dialogues/script 或全局 `FASTGPT_API_KEY`；缺少当前阶段 key 时，错误信息会直接指出缺少的环境变量名。
 
 辅助工具 key：
 
