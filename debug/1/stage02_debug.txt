@@ -1,0 +1,20 @@
+=== Framework Planner Stage Debug ===
+timestamp: 2026-05-15T14:46:40.202831+08:00
+stage: 02 - 世界观方案生成更新
+status: success
+-- variables --
+mode: str(len=2) 创作
+source_brief: dict(keys=[adaptation_direction, content, core_premise, episodes_per_season, minutes_per_episode, ready_for_script_workflow, season_count, source_title, story_outline, target_format], size=10) {"adaptation_direction":"保持强钩子、强反转、强情绪推进","content":"1","core_premise":"1","episodes_per_season":60,"minutes_per_episode":2,"ready_for_script_workflow":true,"season_count":1,"source_title":"未命名项目","st...
+locked_basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements], size=11) {"project_title":"1","mode":"创作","source_text":"1","source_title":"1","target_format":"短剧","season_count":1,"episodes_per_season":1,"minutes_per_episode":1,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"1","mode":"创作","source_text":"1","source_title":"1","target_format":"短剧","season_count":1,"episodes_per_season":1,"minutes_per_episode":1,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+previous_worldview_plan: dict(keys=[], size=0) {}
+user_feedback: str(len=0)
+adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+user_requirements: str(len=1) 1
+worldview_plan: dict(keys=[content, world_type, core_setting, main_conflict, rules, tone, ready_for_script_workflow], size=7) {"content":"创作","world_type":"现实/类型化世界","core_setting":"创作","main_conflict":"主角目标与外部阻力形成持续对抗","rules":[],"tone":"强情绪、强节奏、强反转","ready_for_script_workflow":true}
+project_id: str(len=7) unsaved
+project_title: str(len=1) 1
+title: str(len=1) 1
+source_title: str(len=1) 1
+display_text: str(len=0)
+parse_warnings: list(len=1) ["worldview_plan 不是 dict，已回退为对象占位"]

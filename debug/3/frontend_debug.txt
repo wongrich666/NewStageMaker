@@ -1,0 +1,641 @@
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:40:10.153209+08:00
+event: stage01_request
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.episodes_per_season: int 3
+payload.minutes_per_episode: int 3
+payload.mode: str(len=2) 创作
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.season_count: int 1
+payload.source_text: str(len=1) 3
+payload.source_title: str(len=1) 3
+payload.target_format: str(len=2) 短剧
+payload.title: str(len=1) 3
+payload.user_constraints: str(len=1) 3
+payload.user_requirements: str(len=1) 3
+-- detail --
+detail.current_view: str(len=5) basic
+detail.revise: bool False
+detail.stageKey: str(len=5) basic
+detail.stageNo: str(len=2) 01
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:40:21.920601+08:00
+event: stage01_response
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.episodes_per_season: int 3
+payload.minutes_per_episode: int 3
+payload.mode: str(len=2) 创作
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.season_count: int 1
+payload.source_text: str(len=1) 3
+payload.source_title: str(len=1) 3
+payload.target_format: str(len=2) 短剧
+payload.title: str(len=1) 3
+payload.user_constraints: str(len=1) 3
+payload.user_requirements: str(len=1) 3
+-- detail --
+detail.data_summary: dict(keys=[display_text, source_brief], size=2) {"display_text":{"type":"string","length":221,"polluted":false},"source_brief":{"type":"object","keys":["adaptation_direction","available_material_summary","core_conflict","core_logline","core_premise...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage01_20260515-164021-912.json","latest_filename":"latest_stage01.json","payload_keys":["adaptation_direction","episodes_per_season","minutes_per_episode","mode","project_id","project_t...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=5) basic
+detail.stageNo: str(len=2) 01
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:40:21.945516+08:00
+event: stage02_request
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.locked_basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements], size=11) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.mode: str(len=2) 创作
+payload.previous_worldview_plan: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+-- detail --
+detail.current_view: str(len=9) worldview
+detail.revise: bool False
+detail.stageKey: str(len=9) worldview
+detail.stageNo: str(len=2) 02
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:40:59.733169+08:00
+event: stage02_response
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.locked_basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements], size=11) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.mode: str(len=2) 创作
+payload.previous_worldview_plan: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+-- detail --
+detail.data_summary: dict(keys=[display_text, worldview_plan], size=2) {"display_text":{"type":"string","length":68,"polluted":false},"worldview_plan":{"type":"object","keys":["conflict_engine","core_resource","core_rules","core_setting","forbidden_deviations","main_conf...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage02_20260515-164059-724.json","latest_filename":"latest_stage02.json","payload_keys":["adaptation_direction","basic_config","locked_basic_config","mode","previous_worldview_plan","pro...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=9) worldview
+detail.stageNo: str(len=2) 02
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:41:29.045384+08:00
+event: stage03_request
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.locked_basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements], size=11) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.mode: str(len=2) 创作
+payload.previous_character_plan: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.current_view: str(len=9) character
+detail.revise: bool False
+detail.stageKey: str(len=9) character
+detail.stageNo: str(len=2) 03
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:42:40.102432+08:00
+event: stage03_response
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.locked_basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements], size=11) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.mode: str(len=2) 创作
+payload.previous_character_plan: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.data_summary: dict(keys=[character_plan, display_text], size=2) {"character_plan":{"type":"object","keys":["character_relationships","character_rules","character_system_summary","characters","emotion_engine","main_characters","protagonist","ready_for_script_workfl...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage03_20260515-164240-093.json","latest_filename":"latest_stage03.json","payload_keys":["adaptation_direction","basic_config","locked_basic_config","mode","previous_character_plan","pro...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=9) character
+detail.stageNo: str(len=2) 03
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:43:03.311961+08:00
+event: stage04_request
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.framework_score_report: str(len=0)
+payload.mode: str(len=2) 创作
+payload.previous_beat_checkpoint_timeline: list(len=0) []
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.current_view: str(len=13) beat_timeline
+detail.revise: bool False
+detail.stageKey: str(len=4) beat
+detail.stageNo: str(len=2) 04
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:43:14.169780+08:00
+event: stage04_error
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.framework_score_report: str(len=0)
+payload.mode: str(len=2) 创作
+payload.previous_beat_checkpoint_timeline: list(len=0) []
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.detail: dict(keys=[], size=0) {}
+detail.message: str(len=15) Failed to fetch
+detail.stageKey: str(len=4) beat
+detail.stageNo: str(len=2) 04
+detail.status: int 0
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:45:54.736587+08:00
+event: stage04_request
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.framework_score_report: str(len=0)
+payload.mode: str(len=2) 创作
+payload.previous_beat_checkpoint_timeline: list(len=0) []
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.current_view: str(len=13) beat_timeline
+detail.revise: bool False
+detail.stageKey: str(len=4) beat
+detail.stageNo: str(len=2) 04
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:48:45.562883+08:00
+event: stage04_response
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.framework_score_report: str(len=0)
+payload.mode: str(len=2) 创作
+payload.previous_beat_checkpoint_timeline: list(len=0) []
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.data_summary: dict(keys=[beat_checkpoint_timeline, checkpoint_explanation, display_text], size=3) {"beat_checkpoint_timeline":{"type":"array","isArray":true,"length":15,"firstItemType":"object"},"checkpoint_explanation":{"type":"object","keys":["beat_notes","overview"],"polluted":false},"display_t...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage04_20260515-164845-551.json","latest_filename":"latest_stage04.json","payload_keys":["adaptation_direction","basic_config","character_plan","framework_score_report","mode","previous_...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=4) beat
+detail.stageNo: str(len=2) 04
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:48:56.356785+08:00
+event: stage05_request
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, source_title, mode, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=11) {"project_title":"3","source_title":"3","mode":"创作","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","us...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.current_storyline_decisions: list(len=0) []
+payload.mode: str(len=2) 创作
+payload.previous_character_storylines: list(len=0) []
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.current_view: str(len=10) storylines
+detail.revise: bool False
+detail.stageKey: str(len=10) storylines
+detail.stageNo: str(len=2) 05
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:49:50.560612+08:00
+event: stage05_response
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, source_title, mode, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=11) {"project_title":"3","source_title":"3","mode":"创作","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","us...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.current_storyline_decisions: list(len=0) []
+payload.mode: str(len=2) 创作
+payload.previous_character_storylines: list(len=0) []
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.data_summary: dict(keys=[character_storylines, display_text], size=2) {"character_storylines":{"type":"array","isArray":true,"length":5,"firstItemType":"object"},"display_text":{"type":"string","length":377,"polluted":false}}
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage05_20260515-164950-548.json","latest_filename":"latest_stage05.json","payload_keys":["adaptation_direction","basic_config","beat_checkpoint_timeline","character_plan","current_storyl...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=10) storylines
+detail.stageNo: str(len=2) 05
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:50:35.436458+08:00
+event: stage06_request
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.character_storylines: list(len=5) [{"id":"protagonist_main_line","title":"林夜","summary":"林夜从孤胆前特种兵进入规则囚笼，以寻找妹妹林雪为外部目标，在3分钟轮回的生死压力下，经历信任裂痕、团队合作、中点抉择、灵魂黑夜，最终学会信任队友并利用规则漏洞摧毁囚笼，完成从独狼到团队核心的成长，同时救出妹妹，付出阿鬼牺牲的代价。","detailed_storyline":"第一幕（第1...
+payload.mode: str(len=2) 创作
+payload.previous_adaptation_guide: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.storyline_decisions: list(len=5) [{"storyline_id":"protagonist_main_line","title":"林夜","linked_beats":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"裁判","linked_beats":[2,...
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.current_view: str(len=5) guide
+detail.revise: bool False
+detail.stageKey: str(len=5) guide
+detail.stageNo: str(len=2) 06
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:51:03.903983+08:00
+event: stage06_response
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.character_storylines: list(len=5) [{"id":"protagonist_main_line","title":"林夜","summary":"林夜从孤胆前特种兵进入规则囚笼，以寻找妹妹林雪为外部目标，在3分钟轮回的生死压力下，经历信任裂痕、团队合作、中点抉择、灵魂黑夜，最终学会信任队友并利用规则漏洞摧毁囚笼，完成从独狼到团队核心的成长，同时救出妹妹，付出阿鬼牺牲的代价。","detailed_storyline":"第一幕（第1...
+payload.mode: str(len=2) 创作
+payload.previous_adaptation_guide: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.storyline_decisions: list(len=5) [{"storyline_id":"protagonist_main_line","title":"林夜","linked_beats":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"裁判","linked_beats":[2,...
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.data_summary: dict(keys=[adaptation_guide, display_text], size=2) {"adaptation_guide":{"type":"object","keys":["character_emotion_strategy","core_setting_adjustments","structure_and_rhythm","visualization_strategy"],"polluted":false},"display_text":{"type":"string",...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage06_20260515-165103-893.json","latest_filename":"latest_stage06.json","payload_keys":["adaptation_direction","basic_config","beat_checkpoint_timeline","character_plan","character_stor...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=5) guide
+detail.stageNo: str(len=2) 06
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:51:40.198312+08:00
+event: stage07_request
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.adaptation_guide: dict(keys=[character_emotion_strategy, core_setting_adjustments, structure_and_rhythm, visualization_strategy], size=4) {"character_emotion_strategy":"","core_setting_adjustments":"{\n \"core_setting_adjustment\": \"必须保留‘规则囚笼’核心设定：每3分钟触发规则更新、违反者承受随机代价、规则中存在隐藏条款。世界观类型为现代都市异能/规则类怪谈，不得引入超现实魔法或硬科幻。主场景为封闭现代建筑楼层（如废弃医院），空间结构随...
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.character_storylines: list(len=5) [{"id":"protagonist_main_line","title":"林夜","summary":"林夜从孤胆前特种兵进入规则囚笼，以寻找妹妹林雪为外部目标，在3分钟轮回的生死压力下，经历信任裂痕、团队合作、中点抉择、灵魂黑夜，最终学会信任队友并利用规则漏洞摧毁囚笼，完成从独狼到团队核心的成长，同时救出妹妹，付出阿鬼牺牲的代价。","detailed_storyline":"第一幕（第1...
+payload.checkpoint_explanation: dict(keys=[beat_notes, overview], size=2) {"beat_notes":[{"beat_no":1,"explanation":"林夜在废弃医院的冰冷地板上惊醒，头顶倒计时显示3:00。广播响起：第一条规则——找到出口，否则抹杀。林夜迅速观察环境，发现门上张贴规则纸条。他尝试破门，发现规则禁止暴力破坏。此时倒计时开始跳动，强压开场。"},{"beat_no":2,"explanation":"林夜在走廊遇到苏晴和阿鬼。苏晴冷静分析规则，阿鬼...
+payload.mode: str(len=2) 创作
+payload.previous_framework_plan_package: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.storyline_decisions: list(len=5) [{"storyline_id":"protagonist_main_line","title":"林夜","linked_beats":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"裁判","linked_beats":[2,...
+payload.title: str(len=1) 3
+payload.user_edit_history: list(len=14) [{"at":"2026-05-15T08:40:21.919Z","action":"generate_stage","detail":{"stageKey":"basic","stageNo":"01"}},{"at":"2026-05-15T08:40:21.922Z","action":"confirm_stage","detail":{"stageKey":"basic","stageN...
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.current_view: str(len=7) package
+detail.revise: bool False
+detail.stageKey: str(len=7) package
+detail.stageNo: str(len=2) 07
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T16:53:12.124434+08:00
+event: stage07_response
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.adaptation_guide: dict(keys=[character_emotion_strategy, core_setting_adjustments, structure_and_rhythm, visualization_strategy], size=4) {"character_emotion_strategy":"","core_setting_adjustments":"{\n \"core_setting_adjustment\": \"必须保留‘规则囚笼’核心设定：每3分钟触发规则更新、违反者承受随机代价、规则中存在隐藏条款。世界观类型为现代都市异能/规则类怪谈，不得引入超现实魔法或硬科幻。主场景为封闭现代建筑楼层（如废弃医院），空间结构随...
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.character_storylines: list(len=5) [{"id":"protagonist_main_line","title":"林夜","summary":"林夜从孤胆前特种兵进入规则囚笼，以寻找妹妹林雪为外部目标，在3分钟轮回的生死压力下，经历信任裂痕、团队合作、中点抉择、灵魂黑夜，最终学会信任队友并利用规则漏洞摧毁囚笼，完成从独狼到团队核心的成长，同时救出妹妹，付出阿鬼牺牲的代价。","detailed_storyline":"第一幕（第1...
+payload.checkpoint_explanation: dict(keys=[beat_notes, overview], size=2) {"beat_notes":[{"beat_no":1,"explanation":"林夜在废弃医院的冰冷地板上惊醒，头顶倒计时显示3:00。广播响起：第一条规则——找到出口，否则抹杀。林夜迅速观察环境，发现门上张贴规则纸条。他尝试破门，发现规则禁止暴力破坏。此时倒计时开始跳动，强压开场。"},{"beat_no":2,"explanation":"林夜在走廊遇到苏晴和阿鬼。苏晴冷静分析规则，阿鬼...
+payload.mode: str(len=2) 创作
+payload.previous_framework_plan_package: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.storyline_decisions: list(len=5) [{"storyline_id":"protagonist_main_line","title":"林夜","linked_beats":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"裁判","linked_beats":[2,...
+payload.title: str(len=1) 3
+payload.user_edit_history: list(len=14) [{"at":"2026-05-15T08:40:21.919Z","action":"generate_stage","detail":{"stageKey":"basic","stageNo":"01"}},{"at":"2026-05-15T08:40:21.922Z","action":"confirm_stage","detail":{"stageKey":"basic","stageN...
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.data_summary: dict(keys=[display_text, framework_plan_package, validation_report], size=3) {"display_text":{"type":"string","length":0,"polluted":false},"framework_plan_package":{"type":"object","keys":["adaptation_direction","adaptation_guide","basic_config","beat_checkpoint_timeline","cha...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage07_20260515-165312-107.json","latest_filename":"latest_stage07.json","payload_keys":["adaptation_direction","adaptation_guide","basic_config","beat_checkpoint_timeline","character_pl...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=7) package
+detail.stageNo: str(len=2) 07
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T17:41:05.907158+08:00
+event: stage06_request
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.character_storylines: list(len=5) [{"id":"protagonist_main_line","title":"林夜","summary":"林夜从孤胆前特种兵进入规则囚笼，以寻找妹妹林雪为外部目标，在3分钟轮回的生死压力下，经历信任裂痕、团队合作、中点抉择、灵魂黑夜，最终学会信任队友并利用规则漏洞摧毁囚笼，完成从独狼到团队核心的成长，同时救出妹妹，付出阿鬼牺牲的代价。","detailed_storyline":"第一幕（第1...
+payload.mode: str(len=2) 创作
+payload.previous_adaptation_guide: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.storyline_decisions: list(len=5) [{"storyline_id":"protagonist_main_line","title":"林夜","linked_beats":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"裁判","linked_beats":[2,...
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.current_view: str(len=5) guide
+detail.revise: bool False
+detail.stageKey: str(len=5) guide
+detail.stageNo: str(len=2) 06
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T17:41:31.743119+08:00
+event: stage06_response
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.character_storylines: list(len=5) [{"id":"protagonist_main_line","title":"林夜","summary":"林夜从孤胆前特种兵进入规则囚笼，以寻找妹妹林雪为外部目标，在3分钟轮回的生死压力下，经历信任裂痕、团队合作、中点抉择、灵魂黑夜，最终学会信任队友并利用规则漏洞摧毁囚笼，完成从独狼到团队核心的成长，同时救出妹妹，付出阿鬼牺牲的代价。","detailed_storyline":"第一幕（第1...
+payload.mode: str(len=2) 创作
+payload.previous_adaptation_guide: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.storyline_decisions: list(len=5) [{"storyline_id":"protagonist_main_line","title":"林夜","linked_beats":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"裁判","linked_beats":[2,...
+payload.title: str(len=1) 3
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.data_summary: dict(keys=[adaptation_guide, display_text], size=2) {"adaptation_guide":{"type":"object","keys":["character_emotion_strategy","core_setting_adjustments","hard_constraints_for_script_workflow","structure_and_rhythm","visualization_strategy"],"polluted":...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage06_20260515-174131-733.json","latest_filename":"latest_stage06.json","payload_keys":["adaptation_direction","basic_config","beat_checkpoint_timeline","character_plan","character_stor...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=5) guide
+detail.stageNo: str(len=2) 06
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T17:41:47.331194+08:00
+event: stage07_request
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.adaptation_guide: dict(keys=[character_emotion_strategy, core_setting_adjustments, hard_constraints_for_script_workflow, structure_and_rhythm, visualization_strategy], size=5) {"character_emotion_strategy":"主角林夜：情绪曲线从孤胆强韧（第1集）→ 受伤后接受团队（第2集前半）→ 中点抉择的痛苦（第2集后半）→ 灵魂黑夜崩溃（第3集前半）→ 重燃希望并牺牲队友（第3集后半）→ 平静中留下悬念（终场）。观众情绪：代入林夜的紧迫感和愧疚，通过苏晴的理性提供喘息空间，裁判的压迫制造悬念，阿鬼的背叛引发愤怒，最终阿鬼牺牲触发共情。反派裁判：保持神秘...
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.character_storylines: list(len=5) [{"id":"protagonist_main_line","title":"林夜","summary":"林夜从孤胆前特种兵进入规则囚笼，以寻找妹妹林雪为外部目标，在3分钟轮回的生死压力下，经历信任裂痕、团队合作、中点抉择、灵魂黑夜，最终学会信任队友并利用规则漏洞摧毁囚笼，完成从独狼到团队核心的成长，同时救出妹妹，付出阿鬼牺牲的代价。","detailed_storyline":"第一幕（第1...
+payload.checkpoint_explanation: dict(keys=[beat_notes, overview], size=2) {"beat_notes":[{"beat_no":1,"explanation":"林夜在废弃医院的冰冷地板上惊醒，头顶倒计时显示3:00。广播响起：第一条规则——找到出口，否则抹杀。林夜迅速观察环境，发现门上张贴规则纸条。他尝试破门，发现规则禁止暴力破坏。此时倒计时开始跳动，强压开场。"},{"beat_no":2,"explanation":"林夜在走廊遇到苏晴和阿鬼。苏晴冷静分析规则，阿鬼...
+payload.mode: str(len=2) 创作
+payload.previous_framework_plan_package: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.storyline_decisions: list(len=5) [{"storyline_id":"protagonist_main_line","title":"林夜","linked_beats":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"裁判","linked_beats":[2,...
+payload.title: str(len=1) 3
+payload.user_edit_history: list(len=19) [{"at":"2026-05-15T08:40:21.919Z","action":"generate_stage","detail":{"stageKey":"basic","stageNo":"01"}},{"at":"2026-05-15T08:40:21.922Z","action":"confirm_stage","detail":{"stageKey":"basic","stageN...
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.current_view: str(len=7) package
+detail.revise: bool False
+detail.stageKey: str(len=7) package
+detail.stageNo: str(len=2) 07
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T17:43:21.026548+08:00
+event: stage07_response
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.adaptation_guide: dict(keys=[character_emotion_strategy, core_setting_adjustments, hard_constraints_for_script_workflow, structure_and_rhythm, visualization_strategy], size=5) {"character_emotion_strategy":"主角林夜：情绪曲线从孤胆强韧（第1集）→ 受伤后接受团队（第2集前半）→ 中点抉择的痛苦（第2集后半）→ 灵魂黑夜崩溃（第3集前半）→ 重燃希望并牺牲队友（第3集后半）→ 平静中留下悬念（终场）。观众情绪：代入林夜的紧迫感和愧疚，通过苏晴的理性提供喘息空间，裁判的压迫制造悬念，阿鬼的背叛引发愤怒，最终阿鬼牺牲触发共情。反派裁判：保持神秘...
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.character_storylines: list(len=5) [{"id":"protagonist_main_line","title":"林夜","summary":"林夜从孤胆前特种兵进入规则囚笼，以寻找妹妹林雪为外部目标，在3分钟轮回的生死压力下，经历信任裂痕、团队合作、中点抉择、灵魂黑夜，最终学会信任队友并利用规则漏洞摧毁囚笼，完成从独狼到团队核心的成长，同时救出妹妹，付出阿鬼牺牲的代价。","detailed_storyline":"第一幕（第1...
+payload.checkpoint_explanation: dict(keys=[beat_notes, overview], size=2) {"beat_notes":[{"beat_no":1,"explanation":"林夜在废弃医院的冰冷地板上惊醒，头顶倒计时显示3:00。广播响起：第一条规则——找到出口，否则抹杀。林夜迅速观察环境，发现门上张贴规则纸条。他尝试破门，发现规则禁止暴力破坏。此时倒计时开始跳动，强压开场。"},{"beat_no":2,"explanation":"林夜在走廊遇到苏晴和阿鬼。苏晴冷静分析规则，阿鬼...
+payload.mode: str(len=2) 创作
+payload.previous_framework_plan_package: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.storyline_decisions: list(len=5) [{"storyline_id":"protagonist_main_line","title":"林夜","linked_beats":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"裁判","linked_beats":[2,...
+payload.title: str(len=1) 3
+payload.user_edit_history: list(len=19) [{"at":"2026-05-15T08:40:21.919Z","action":"generate_stage","detail":{"stageKey":"basic","stageNo":"01"}},{"at":"2026-05-15T08:40:21.922Z","action":"confirm_stage","detail":{"stageKey":"basic","stageN...
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.data_summary: dict(keys=[display_text, framework_plan_package, validation_report], size=3) {"display_text":{"type":"string","length":0,"polluted":false},"framework_plan_package":{"type":"object","keys":["adaptation_direction","adaptation_guide","basic_config","beat_checkpoint_timeline","cha...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage07_20260515-174321-009.json","latest_filename":"latest_stage07.json","payload_keys":["adaptation_direction","adaptation_guide","basic_config","beat_checkpoint_timeline","character_pl...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=7) package
+detail.stageNo: str(len=2) 07
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T17:49:11.945818+08:00
+event: stage07_request
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.adaptation_guide: dict(keys=[character_emotion_strategy, core_setting_adjustments, hard_constraints_for_script_workflow, structure_and_rhythm, visualization_strategy], size=5) {"character_emotion_strategy":"主角林夜：情绪曲线从孤胆强韧（第1集）→ 受伤后接受团队（第2集前半）→ 中点抉择的痛苦（第2集后半）→ 灵魂黑夜崩溃（第3集前半）→ 重燃希望并牺牲队友（第3集后半）→ 平静中留下悬念（终场）。观众情绪：代入林夜的紧迫感和愧疚，通过苏晴的理性提供喘息空间，裁判的压迫制造悬念，阿鬼的背叛引发愤怒，最终阿鬼牺牲触发共情。反派裁判：保持神秘...
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.character_storylines: list(len=5) [{"id":"protagonist_main_line","title":"林夜","summary":"林夜从孤胆前特种兵进入规则囚笼，以寻找妹妹林雪为外部目标，在3分钟轮回的生死压力下，经历信任裂痕、团队合作、中点抉择、灵魂黑夜，最终学会信任队友并利用规则漏洞摧毁囚笼，完成从独狼到团队核心的成长，同时救出妹妹，付出阿鬼牺牲的代价。","detailed_storyline":"第一幕（第1...
+payload.checkpoint_explanation: dict(keys=[beat_notes, overview], size=2) {"beat_notes":[{"beat_no":1,"explanation":"林夜在废弃医院的冰冷地板上惊醒，头顶倒计时显示3:00。广播响起：第一条规则——找到出口，否则抹杀。林夜迅速观察环境，发现门上张贴规则纸条。他尝试破门，发现规则禁止暴力破坏。此时倒计时开始跳动，强压开场。"},{"beat_no":2,"explanation":"林夜在走廊遇到苏晴和阿鬼。苏晴冷静分析规则，阿鬼...
+payload.mode: str(len=2) 创作
+payload.previous_framework_plan_package: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.storyline_decisions: list(len=5) [{"storyline_id":"protagonist_main_line","title":"林夜","linked_beats":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"裁判","linked_beats":[2,...
+payload.title: str(len=1) 3
+payload.user_edit_history: list(len=22) [{"at":"2026-05-15T08:40:21.919Z","action":"generate_stage","detail":{"stageKey":"basic","stageNo":"01"}},{"at":"2026-05-15T08:40:21.922Z","action":"confirm_stage","detail":{"stageKey":"basic","stageN...
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.current_view: str(len=7) package
+detail.revise: bool False
+detail.stageKey: str(len=7) package
+detail.stageNo: str(len=2) 07
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T17:50:40.323853+08:00
+event: stage07_response
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.adaptation_guide: dict(keys=[character_emotion_strategy, core_setting_adjustments, hard_constraints_for_script_workflow, structure_and_rhythm, visualization_strategy], size=5) {"character_emotion_strategy":"主角林夜：情绪曲线从孤胆强韧（第1集）→ 受伤后接受团队（第2集前半）→ 中点抉择的痛苦（第2集后半）→ 灵魂黑夜崩溃（第3集前半）→ 重燃希望并牺牲队友（第3集后半）→ 平静中留下悬念（终场）。观众情绪：代入林夜的紧迫感和愧疚，通过苏晴的理性提供喘息空间，裁判的压迫制造悬念，阿鬼的背叛引发愤怒，最终阿鬼牺牲触发共情。反派裁判：保持神秘...
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.character_storylines: list(len=5) [{"id":"protagonist_main_line","title":"林夜","summary":"林夜从孤胆前特种兵进入规则囚笼，以寻找妹妹林雪为外部目标，在3分钟轮回的生死压力下，经历信任裂痕、团队合作、中点抉择、灵魂黑夜，最终学会信任队友并利用规则漏洞摧毁囚笼，完成从独狼到团队核心的成长，同时救出妹妹，付出阿鬼牺牲的代价。","detailed_storyline":"第一幕（第1...
+payload.checkpoint_explanation: dict(keys=[beat_notes, overview], size=2) {"beat_notes":[{"beat_no":1,"explanation":"林夜在废弃医院的冰冷地板上惊醒，头顶倒计时显示3:00。广播响起：第一条规则——找到出口，否则抹杀。林夜迅速观察环境，发现门上张贴规则纸条。他尝试破门，发现规则禁止暴力破坏。此时倒计时开始跳动，强压开场。"},{"beat_no":2,"explanation":"林夜在走廊遇到苏晴和阿鬼。苏晴冷静分析规则，阿鬼...
+payload.mode: str(len=2) 创作
+payload.previous_framework_plan_package: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.storyline_decisions: list(len=5) [{"storyline_id":"protagonist_main_line","title":"林夜","linked_beats":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"裁判","linked_beats":[2,...
+payload.title: str(len=1) 3
+payload.user_edit_history: list(len=22) [{"at":"2026-05-15T08:40:21.919Z","action":"generate_stage","detail":{"stageKey":"basic","stageNo":"01"}},{"at":"2026-05-15T08:40:21.922Z","action":"confirm_stage","detail":{"stageKey":"basic","stageN...
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.data_summary: dict(keys=[display_text, framework_plan_package, validation_report], size=3) {"display_text":{"type":"string","length":0,"polluted":false},"framework_plan_package":{"type":"object","keys":["adaptation_direction","adaptation_guide","basic_config","beat_checkpoint_timeline","cha...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage07_20260515-175040-307.json","latest_filename":"latest_stage07.json","payload_keys":["adaptation_direction","adaptation_guide","basic_config","beat_checkpoint_timeline","character_pl...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=7) package
+detail.stageNo: str(len=2) 07
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T17:53:59.732843+08:00
+event: stage07_request
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.adaptation_guide: dict(keys=[character_emotion_strategy, core_setting_adjustments, hard_constraints_for_script_workflow, structure_and_rhythm, visualization_strategy], size=5) {"character_emotion_strategy":"主角林夜：情绪曲线从孤胆强韧（第1集）→ 受伤后接受团队（第2集前半）→ 中点抉择的痛苦（第2集后半）→ 灵魂黑夜崩溃（第3集前半）→ 重燃希望并牺牲队友（第3集后半）→ 平静中留下悬念（终场）。观众情绪：代入林夜的紧迫感和愧疚，通过苏晴的理性提供喘息空间，裁判的压迫制造悬念，阿鬼的背叛引发愤怒，最终阿鬼牺牲触发共情。反派裁判：保持神秘...
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.character_storylines: list(len=5) [{"id":"protagonist_main_line","title":"林夜","summary":"林夜从孤胆前特种兵进入规则囚笼，以寻找妹妹林雪为外部目标，在3分钟轮回的生死压力下，经历信任裂痕、团队合作、中点抉择、灵魂黑夜，最终学会信任队友并利用规则漏洞摧毁囚笼，完成从独狼到团队核心的成长，同时救出妹妹，付出阿鬼牺牲的代价。","detailed_storyline":"第一幕（第1...
+payload.checkpoint_explanation: dict(keys=[beat_notes, overview], size=2) {"beat_notes":[{"beat_no":1,"explanation":"林夜在废弃医院的冰冷地板上惊醒，头顶倒计时显示3:00。广播响起：第一条规则——找到出口，否则抹杀。林夜迅速观察环境，发现门上张贴规则纸条。他尝试破门，发现规则禁止暴力破坏。此时倒计时开始跳动，强压开场。"},{"beat_no":2,"explanation":"林夜在走廊遇到苏晴和阿鬼。苏晴冷静分析规则，阿鬼...
+payload.mode: str(len=2) 创作
+payload.previous_framework_plan_package: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.storyline_decisions: list(len=5) [{"storyline_id":"protagonist_main_line","title":"林夜","linked_beats":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"裁判","linked_beats":[2,...
+payload.title: str(len=1) 3
+payload.user_edit_history: list(len=25) [{"at":"2026-05-15T08:40:21.919Z","action":"generate_stage","detail":{"stageKey":"basic","stageNo":"01"}},{"at":"2026-05-15T08:40:21.922Z","action":"confirm_stage","detail":{"stageKey":"basic","stageN...
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.current_view: str(len=7) package
+detail.revise: bool False
+detail.stageKey: str(len=7) package
+detail.stageNo: str(len=2) 07
+=== Framework Planner Frontend Debug ===
+timestamp: 2026-05-15T17:55:33.928280+08:00
+event: stage07_response
+project: 3
+-- payload --
+payload.adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+payload.adaptation_guide: dict(keys=[character_emotion_strategy, core_setting_adjustments, hard_constraints_for_script_workflow, structure_and_rhythm, visualization_strategy], size=5) {"character_emotion_strategy":"主角林夜：情绪曲线从孤胆强韧（第1集）→ 受伤后接受团队（第2集前半）→ 中点抉择的痛苦（第2集后半）→ 灵魂黑夜崩溃（第3集前半）→ 重燃希望并牺牲队友（第3集后半）→ 平静中留下悬念（终场）。观众情绪：代入林夜的紧迫感和愧疚，通过苏晴的理性提供喘息空间，裁判的压迫制造悬念，阿鬼的背叛引发愤怒，最终阿鬼牺牲触发共情。反派裁判：保持神秘...
+payload.basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+payload.beat_checkpoint_timeline: list(len=15) [{"act":"第一幕","beat_name":"开场","beat_no":1,"character_change":"林夜从日常状态进入极端生存模式，展现冷静与果决","checkpoint_title":"规则囚笼的降临","conflict_upgrade":"外部规则与生存本能的冲突即刻建立","episode_range":"第1集","hook_or_reversal":"倒计时...
+payload.character_plan: dict(keys=[character_relationships, character_rules, character_system_summary, characters, emotion_engine, main_characters, protagonist, ready_for_script_workflow, relationship_map], size=9) {"character_relationships":["林夜 vs 裁判：正面对抗，理念冲突（逃离 vs 维持囚笼），裁判可能囚禁林雪作为筹码","林夜 & 苏晴：初期互不信任，中期合作破解规则，形成理性与感性的互补关系","裁判 & 阿鬼：利用与被利用，阿鬼畏惧裁判但内心不满","阿鬼 & 林夜：短暂冲突后可能因林雪的线索产生交集","林夜 & 林雪：兄妹亲情主线，林雪失踪是剧情悬念，最终相聚...
+payload.character_storylines: list(len=5) [{"id":"protagonist_main_line","title":"林夜","summary":"林夜从孤胆前特种兵进入规则囚笼，以寻找妹妹林雪为外部目标，在3分钟轮回的生死压力下，经历信任裂痕、团队合作、中点抉择、灵魂黑夜，最终学会信任队友并利用规则漏洞摧毁囚笼，完成从独狼到团队核心的成长，同时救出妹妹，付出阿鬼牺牲的代价。","detailed_storyline":"第一幕（第1...
+payload.checkpoint_explanation: dict(keys=[beat_notes, overview], size=2) {"beat_notes":[{"beat_no":1,"explanation":"林夜在废弃医院的冰冷地板上惊醒，头顶倒计时显示3:00。广播响起：第一条规则——找到出口，否则抹杀。林夜迅速观察环境，发现门上张贴规则纸条。他尝试破门，发现规则禁止暴力破坏。此时倒计时开始跳动，强压开场。"},{"beat_no":2,"explanation":"林夜在走廊遇到苏晴和阿鬼。苏晴冷静分析规则，阿鬼...
+payload.mode: str(len=2) 创作
+payload.previous_framework_plan_package: dict(keys=[], size=0) {}
+payload.project_id: str(len=7) unsaved
+payload.project_title: str(len=1) 3
+payload.source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+payload.source_title: str(len=1) 3
+payload.storyline_decisions: list(len=5) [{"storyline_id":"protagonist_main_line","title":"林夜","linked_beats":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],"decision":"keep"},{"storyline_id":"antagonist_pressure_line","title":"裁判","linked_beats":[2,...
+payload.title: str(len=1) 3
+payload.user_edit_history: list(len=25) [{"at":"2026-05-15T08:40:21.919Z","action":"generate_stage","detail":{"stageKey":"basic","stageNo":"01"}},{"at":"2026-05-15T08:40:21.922Z","action":"confirm_stage","detail":{"stageKey":"basic","stageN...
+payload.user_feedback: str(len=0)
+payload.user_requirements: str(len=1) 3
+payload.worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+-- detail --
+detail.data_summary: dict(keys=[display_text, framework_plan_package, validation_report], size=3) {"display_text":{"type":"string","length":0,"polluted":false},"framework_plan_package":{"type":"object","keys":["adaptation_direction","adaptation_guide","basic_config","beat_checkpoint_timeline","cha...
+detail.history: dict(keys=[filename, latest_filename, payload_keys, project_id, project_name, stage, status, timestamp], size=8) {"filename":"stage07_20260515-175533-910.json","latest_filename":"latest_stage07.json","payload_keys":["adaptation_direction","adaptation_guide","basic_config","beat_checkpoint_timeline","character_pl...
+detail.ok: bool True
+detail.response_keys: list(len=6) ["data","display_text","history"]
+detail.stageKey: str(len=7) package
+detail.stageNo: str(len=2) 07

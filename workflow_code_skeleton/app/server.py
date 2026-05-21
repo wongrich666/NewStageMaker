@@ -177,14 +177,22 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "builtin": bool(item.get("builtin")),
                     "description": str(item.get("description") or "").strip(),
                     "prompt_text": str(item.get("prompt_text") or "").strip(),
+                    "stage_prompts": _coerce_stage_prompts(item.get("stage_prompts")),
                 }
                 if tag["id"] or tag["name"]:
                     result.append(tag)
             else:
                 text = str(item or "").strip()
                 if text:
-                    result.append({"id": text, "name": text, "category": "", "builtin": False, "description": "", "prompt_text": ""})
+                    result.append({"id": text, "name": text, "category": "", "builtin": False, "description": "", "prompt_text": "", "stage_prompts": _coerce_stage_prompts({})})
         return result
+
+    def _coerce_stage_prompts(value) -> dict:
+        source = value if isinstance(value, dict) else {}
+        return {
+            key: _coerce_prompt_text(source.get(key))
+            for key in ("basic", "worldview", "character", "beat", "storylines", "guide", "package")
+        }
 
     def _coerce_prompt_text(value) -> str:
         if value is None:
@@ -204,11 +212,19 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         payload["selected_preference_tag_ids"] = selected_ids
         payload["user_preference_prompt"] = _coerce_prompt_text(data.get("user_preference_prompt"))
         payload["user_knowledge_tag_prompt"] = _coerce_prompt_text(data.get("user_knowledge_tag_prompt"))
-        if any(key in data for key in ("selected_preference_tags", "selected_preference_tag_ids", "user_preference_prompt", "user_knowledge_tag_prompt")):
+        payload["user_knowledge_stage_prompts"] = _coerce_stage_prompts(data.get("user_knowledge_stage_prompts"))
+        prompt_preferences = data.get("prompt_preferences") if isinstance(data.get("prompt_preferences"), dict) else {}
+        prompt_preferences = dict(prompt_preferences)
+        prompt_preferences["stage_prompts"] = _coerce_stage_prompts(prompt_preferences.get("stage_prompts"))
+        payload["prompt_preferences"] = prompt_preferences
+        if any(key in data for key in ("selected_preference_tags", "selected_preference_tag_ids", "user_preference_prompt", "user_knowledge_tag_prompt", "user_knowledge_stage_prompts", "prompt_preferences")):
+            stage_prompt_length = sum(len(value or "") for value in payload["user_knowledge_stage_prompts"].values())
             logger.info(
-                "workflow user knowledge fields: selected_preference_tags_count=%s user_preference_prompt_length=%s",
+                "workflow user knowledge fields: selected_preference_tags_count=%s selected_preference_tag_ids_count=%s user_preference_prompt_length=%s stage_prompt_length=%s",
                 len(selected_tags),
+                len(selected_ids),
                 len(payload["user_preference_prompt"]),
+                stage_prompt_length,
             )
 
     @app.get("/")
@@ -623,6 +639,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @_login_required
     def run_framework_planner_stage_api(stage: str):
         data = request.get_json(silent=True) or {}
+        if isinstance(data, dict):
+            _attach_user_knowledge_payload(data, data)
         project_id = data.get("project_id") if isinstance(data, dict) else None
         source_text = ""
         if isinstance(data, dict):

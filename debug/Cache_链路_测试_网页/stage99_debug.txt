@@ -1,0 +1,19 @@
+=== Framework Planner Stage Debug ===
+timestamp: 2026-05-15T10:01:45.448634+08:00
+stage: 99 - 未知阶段
+status: failed
+-- failure --
+reason: str(len=9) 未知的框架策划阶段
+exception_type: str(len=26) FrameworkPlannerStageError
+exception_message: str(len=9) 未知的框架策划阶段
+status_code: int 404
+-- variables --
+basic_config: dict(keys=[project_title, title, source_title], size=3) {"project_title":"Cache 链路/测试:网页?","title":"Cache 链路/测试:网页?","source_title":"Cache 链路/测试:网页?"}
+project_id: str(len=16) cache-debug-test
+project_title: str(len=15) Cache 链路/测试:网页?
+title: str(len=15) Cache 链路/测试:网页?
+source_title: str(len=15) Cache 链路/测试:网页?
+reason: str(len=9) 未知的框架策划阶段
+exception_type: str(len=26) FrameworkPlannerStageError
+exception_message: str(len=9) 未知的框架策划阶段
+status_code: int 404

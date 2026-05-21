@@ -1,0 +1,21 @@
+=== Framework Planner Stage Debug ===
+timestamp: 2026-05-15T16:42:40.090818+08:00
+stage: 03 - 人设方案生成更新
+status: success
+-- variables --
+mode: str(len=2) 创作
+source_brief: dict(keys=[adaptation_direction, available_material_summary, core_conflict, core_logline, core_premise, episodes_per_season, forbidden_deviations, genre, main_opposition, minutes_per_episode, missing_information_risks, must_keep_elements], size=21) {"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。","available_material_summary":"当前可用材料极少。用户仅提供了标识source_text=3、source_title=3，以及基本配置（短剧、1季3集每集3分钟），未提供任何实质性的故事内容、人物设定或剧情细节。改编方向要求强钩子、强反转、强情绪。缺...
+locked_basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements], size=11) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"3","mode":"创作","source_text":"3","source_title":"3","target_format":"短剧","season_count":1,"episodes_per_season":3,"minutes_per_episode":3,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+worldview_plan: dict(keys=[conflict_engine, core_resource, core_rules, core_setting, forbidden_deviations, main_conflict, must_keep, power_structure, ready_for_script_workflow, rules, social_order, space_logic], size=16) {"conflict_engine":["规则更新造成的生存压力与角色冲突","隐藏身份（内奸、猎人、关键知情人）引发的信任危机与反转","时间压力（3分钟倒计时）迫使角色在信息不完整时决策，产生意外后果"],"core_resource":"规则漏洞和隐藏条款——用于破解困境、逆转劣势、获得优势，是主角目标推进和爽点兑现的核心","core_rules":["每3分钟触发一次规则更新，违反者立即...
+previous_character_plan: dict(keys=[], size=0) {}
+user_feedback: str(len=0)
+adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+user_requirements: str(len=1) 3
+character_plan: dict(keys=[character_system_summary, characters, relationship_map, character_rules, protagonist, main_characters, character_relationships, emotion_engine, ready_for_script_workflow], size=9) {"character_system_summary":"人物系统围绕规则囚笼的生存压力与信任危机构建。主角林夜以寻找妹妹为外部驱动，与理性派苏晴形成互补搭档，对抗利用规则操控他人的老手“裁判”，并引入摇摆角色阿鬼制造变数。每个角色都具备与3分钟节奏匹配的强行动线，通过隐藏身份、规则漏洞和情感钩子推动反转与情绪爆发，适合短剧密集叙事。","characters":[{"id":"lin_ye","...
+project_id: str(len=7) unsaved
+project_title: str(len=1) 3
+title: str(len=1) 3
+source_title: str(len=1) 3
+display_text: str(len=370) 本方案围绕规则囚笼世界观设计了一套四名核心角色加一名隐藏角色的短剧人设系统。主角林夜是前特种兵，为寻找失踪妹妹主动踏入囚笼，他懂格斗、善分析，但过于独断，需要在团队合作中完成成长。反派“裁判”是老牌囚徒，精通隐藏条款并试图维持囚笼平衡，其背后动机将作为反转引爆点。程序员苏晴负责逻辑解谜，与林夜形成理性与感性的互补，B故事线以战友情替代爱情，强化信任主题。街头混混阿鬼被裁判收买，是背叛与倒戈的变数。...
+parse_warnings: list(len=1) ["已从 FastGPT 原始返回修复阶段输出 source=responseData[2].updateVarResult[0] fields=character_plan"]

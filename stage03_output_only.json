@@ -1,0 +1,25 @@
+{
+    "character_plan":  {
+                           "content":  "创作",
+                           "protagonist":  {
+                                               "name":  "主角",
+                                               "goal":  "完成核心目标并推动主线",
+                                               "flaw":  "关键弱点待人工补充",
+                                               "arc":  "从被动承压转向主动破局"
+                                           },
+                           "main_characters":  [
+                                                   {
+                                                       "name":  "主角",
+                                                       "goal":  "完成核心目标并推动主线",
+                                                       "flaw":  "关键弱点待人工补充",
+                                                       "arc":  "从被动承压转向主动破局"
+                                                   }
+                                               ],
+                           "character_relationships":  [
+
+                                                       ],
+                           "emotion_engine":  "围绕目标、阻力、关系变化持续推进情绪",
+                           "ready_for_script_workflow":  true
+                       },
+    "display_text":  ""
+}

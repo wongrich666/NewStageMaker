@@ -1511,40 +1511,7 @@ def load_stage_workflow_spec(stage: str) -> FrameworkPlannerWorkflowSpec:
 
 
 def _normalize_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
-    normalized = dict(payload or {})
-    stage_prompts = normalized.get("user_knowledge_stage_prompts")
-    prompt_preferences = normalized.get("prompt_preferences") if isinstance(normalized.get("prompt_preferences"), dict) else {}
-    if not isinstance(stage_prompts, dict):
-        stage_prompts = prompt_preferences.get("stage_prompts") if isinstance(prompt_preferences.get("stage_prompts"), dict) else {}
-    normalized["user_knowledge_stage_prompts"] = _normalize_stage_prompt_payload(stage_prompts)
-    prompt_preferences = dict(prompt_preferences)
-    prompt_preferences["stage_prompts"] = _normalize_stage_prompt_payload(prompt_preferences.get("stage_prompts"))
-    normalized["prompt_preferences"] = prompt_preferences
-    if "selected_preference_tags" not in normalized or not isinstance(normalized.get("selected_preference_tags"), list):
-        normalized["selected_preference_tags"] = []
-    if "selected_preference_tag_ids" not in normalized or not isinstance(normalized.get("selected_preference_tag_ids"), list):
-        normalized["selected_preference_tag_ids"] = []
-    normalized["user_preference_prompt"] = _coerce_text_payload(normalized.get("user_preference_prompt"))
-    normalized["user_knowledge_tag_prompt"] = _coerce_text_payload(normalized.get("user_knowledge_tag_prompt"))
-    return normalized
-
-
-def _normalize_stage_prompt_payload(value: Any) -> dict[str, str]:
-    source = value if isinstance(value, dict) else {}
-    return {
-        key: _coerce_text_payload(source.get(key))
-        for key in ("basic", "worldview", "character", "beat", "storylines", "guide", "package")
-    }
-
-
-def _coerce_text_payload(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, (dict, list)):
-        return json.dumps(value, ensure_ascii=False, default=str)
-    return str(value).strip()
+    return dict(payload or {})
 
 
 def _should_use_mock_backend(definition: FrameworkPlannerStageDefinition) -> bool:
@@ -1628,35 +1595,9 @@ def _build_stage_request_variables(
     for key, value in payload.items():
         if key in variables or _is_blank(value):
             continue
-        if definition.stage in STAGE_DEFINITIONS and key not in public_keys and key not in {
-            "selected_preference_tags",
-            "selected_preference_tag_ids",
-            "user_preference_prompt",
-            "user_knowledge_tag_prompt",
-            "user_knowledge_stage_prompts",
-            "prompt_preferences",
-        }:
+        if definition.stage in STAGE_DEFINITIONS and key not in public_keys:
             continue
         variables[key] = _wire_value(value)
-
-    stage_key = {
-        "01": "basic",
-        "02": "worldview",
-        "03": "character",
-        "04": "beat",
-        "05": "storylines",
-        "06": "guide",
-        "07": "package",
-    }.get(definition.stage, "")
-    stage_prompts = payload.get("user_knowledge_stage_prompts") if isinstance(payload.get("user_knowledge_stage_prompts"), dict) else {}
-    logger.info(
-        "framework planner user knowledge fields: stage=%s selected_preference_tags_count=%s selected_preference_tag_ids_count=%s user_preference_prompt_length=%s stage_prompt_length=%s",
-        definition.stage,
-        len(payload.get("selected_preference_tags") or []),
-        len(payload.get("selected_preference_tag_ids") or []),
-        len(str(payload.get("user_preference_prompt") or "")),
-        len(str(stage_prompts.get(stage_key) or "")),
-    )
 
     return variables
 
@@ -2976,51 +2917,44 @@ def _normalize_stage_output(
         )
         return normalized
     if stage == "07":
-        raw_validation_missing = normalized.get("validation_report") in (None, "", [], {})
-
+        validation_missing = normalized.get("validation_report") in (None, "", [], {})
         if not isinstance(normalized.get("framework_plan_package"), dict):
-            warnings.append("framework_plan_package 不是 dict，已尝试清洗为对象")
+            warnings.append("framework_plan_package 不是 dict，已回退为对象占位")
             _log_field_type_mismatch(stage, "framework_plan_package", "dict", normalized.get("framework_plan_package"))
-
-        if (not raw_validation_missing) and not isinstance(normalized.get("validation_report"), (dict, list, str)):
+        if validation_missing:
+            warnings.append("validation_report 缺失，已保留校验报告占位")
+            logger.warning(
+                "框架策划阶段 07 validation_report 缺失，已保留占位；raw_output=%s",
+                _preview_return_object(data),
+            )
+            normalized["validation_report"] = _stage_output_placeholder("validation_report")
+        elif not isinstance(normalized.get("validation_report"), (dict, list, str)):
             warnings.append("validation_report 类型异常，已回退为对象占位")
             _log_field_type_mismatch(stage, "validation_report", "dict/list/str", normalized.get("validation_report"))
-            normalized["validation_report"] = _stage_output_placeholder("validation_report")
-
         normalized["framework_plan_package"] = _sanitize_framework_plan_package(
             normalized.get("framework_plan_package")
         )
 
         validation_report = _normalize_validation_report(normalized.get("validation_report"))
-        summary_text = str(validation_report.get("summary") or "").strip() if isinstance(validation_report, dict) else ""
-        warning_text = json.dumps(validation_report, ensure_ascii=False, default=str) if isinstance(validation_report, dict) else ""
 
-        is_placeholder_validation = (
-            raw_validation_missing
-            or summary_text in {"", "未明确，需后续确认……"}
-            or "缺少关键字段 validation_report" in warning_text
-            or "缺少输出字段 ['validation_report']" in warning_text
-            or "缺少输出字段 [\\u0027validation_report\\u0027]" in warning_text
-        )
+        # 如果 FastGPT 没给 validation_report，或者只剩默认占位，则用 package 自动生成一个可用校验报告。
+        summary_text = str(validation_report.get("summary") or "").strip() if isinstance(validation_report,
+                                                                                         dict) else ""
+        is_placeholder_validation = summary_text in {"", "未明确，需后续确认……"}
 
-        used_local_validation_report = False
-        if is_placeholder_validation:
+        if validation_missing or is_placeholder_validation:
             validation_report = _build_validation_report_from_package(
                 normalized["framework_plan_package"],
-                parse_warnings=[],
+                parse_warnings=warnings,
             )
-            used_local_validation_report = True
 
         normalized["validation_report"] = validation_report
 
-        # 如果 stage07 已经基于清洗后的 framework_plan_package 生成本地校验报告，
-        # 不再把“缺少 validation_report”的旧解析警告附回最终报告。
-        if warnings and not used_local_validation_report:
+        if warnings:
             normalized["validation_report"] = _attach_parse_warnings_to_validation_report(
                 normalized["validation_report"],
                 warnings,
             )
-
         return normalized
     return normalized
 
@@ -3361,74 +3295,19 @@ def _attach_parse_warnings_to_validation_report(
     parse_warnings: list[str],
 ) -> dict[str, Any]:
     normalized = dict(report if isinstance(report, dict) else {})
-
-    def is_stale_validation_missing_warning(text: str) -> bool:
-        return (
-            "validation_report" in text
-            and (
-                "缺少输出字段" in text
-                or "缺少关键字段" in text
-                or "已使用阶段默认占位补齐" in text
-                or "已填充占位结构" in text
-            )
-        )
-
-    def clean_warning_list(value: Any) -> list[str]:
-        if not isinstance(value, list):
-            return []
-        result: list[str] = []
-        seen: set[str] = set()
-        for item in value:
-            text = str(item).strip()
-            if not text:
-                continue
-            if normalized.get("passed") is True and is_stale_validation_missing_warning(text):
-                continue
-            if text in seen:
-                continue
-            seen.add(text)
-            result.append(text)
-        return result
-
-    if normalized.get("passed") is True:
-        existing_warnings = clean_warning_list(normalized.get("warnings"))
-        existing_parse_warnings = clean_warning_list(normalized.get("parse_warning"))
-
-        if existing_warnings:
-            normalized["warnings"] = existing_warnings
-        else:
-            normalized.pop("warnings", None)
-
-        if existing_parse_warnings:
-            normalized["parse_warning"] = existing_parse_warnings
-        else:
-            normalized.pop("parse_warning", None)
-
     if not parse_warnings:
         return normalized
-
     warning_list = [str(item).strip() for item in parse_warnings if str(item).strip()]
-    if normalized.get("passed") is True:
-        warning_list = [
-            item for item in warning_list
-            if not is_stale_validation_missing_warning(item)
-        ]
-
     if not warning_list:
         return normalized
-
-    existing_warnings = clean_warning_list(normalized.get("warnings"))
-    merged: list[str] = []
-    seen: set[str] = set()
-    for item in [*existing_warnings, *warning_list]:
-        if item in seen:
-            continue
-        seen.add(item)
-        merged.append(item)
-
-    normalized["warnings"] = merged
+    existing_warnings = normalized.get("warnings")
+    if isinstance(existing_warnings, list):
+        existing_warnings.extend(warning_list)
+    else:
+        normalized["warnings"] = warning_list
     normalized["parse_warning"] = warning_list
     return normalized
+
 
 def _log_stage_output_parse_exception(
     *,

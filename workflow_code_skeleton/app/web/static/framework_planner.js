@@ -121,6 +121,7 @@
       active_template_id: "custom",
       script_preference: "",
       stage_prompts: {
+        basic: "",
         worldview: "",
         character: "",
         beat: "",
@@ -211,6 +212,16 @@
       beatTimeline: false,
       beatExplanation: false,
       guide: false,
+    },
+    knowledge: {
+      open: false,
+      loading: false,
+      status: "",
+      tags: [],
+      selectedIds: [],
+      editingId: "",
+      formOpen: false,
+      form: emptyKnowledgeTagForm(),
     },
   };
   let state = loadState();
@@ -1264,6 +1275,64 @@
     return JSON.stringify(value == null ? {} : value, null, 2);
   }
 
+  function emptyKnowledgeTagForm() {
+    return {
+      id: "",
+      name: "",
+      category: "自定义",
+      description: "",
+      prompt_text: "",
+      stage_prompts: {
+        basic: "",
+        worldview: "",
+        character: "",
+        beat: "",
+        storylines: "",
+        guide: "",
+        package: "",
+      },
+    };
+  }
+
+  function normalizeStagePrompts(value) {
+    const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    return {
+      basic: String(source.basic || ""),
+      worldview: String(source.worldview || ""),
+      character: String(source.character || ""),
+      beat: String(source.beat || ""),
+      storylines: String(source.storylines || ""),
+      guide: String(source.guide || ""),
+      package: String(source.package || ""),
+    };
+  }
+
+  function selectedKnowledgeTags() {
+    const selected = new Set((ui.knowledge.selectedIds || []).map((item) => String(item)));
+    return (ui.knowledge.tags || []).filter((tag) => selected.has(String(tag.id || "")));
+  }
+
+  function knowledgePayloadFields(stageKey) {
+    const tags = selectedKnowledgeTags();
+    const stagePrompts = normalizeStagePrompts((state.prompt_preferences || {}).stage_prompts || {});
+    return {
+      selected_preference_tag_ids: tags.map((tag) => String(tag.id || "")).filter(Boolean),
+      selected_preference_tags: tags,
+      user_preference_prompt: String((state.prompt_preferences || {}).script_preference || ""),
+      user_knowledge_tag_prompt: String(ui.knowledge.tagPromptText || ""),
+      user_knowledge_stage_prompts: stagePrompts,
+      prompt_preferences: {
+        script_preference: String((state.prompt_preferences || {}).script_preference || ""),
+        stage_prompts: stagePrompts,
+      },
+      user_knowledge_stage_prompt: String(stagePrompts[stageKey] || ""),
+    };
+  }
+
+  function attachKnowledgePayload(payload, stageKey) {
+    return Object.assign({}, payload || {}, knowledgePayloadFields(stageKey || "basic"));
+  }
+
   function truncateText(value, limit) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     const max = Number(limit || 80);
@@ -1487,11 +1556,11 @@
           <button class="fp-btn small primary" data-action="open-new-script">新建剧本</button>
           <button class="fp-btn small" data-action="toggle-assets">${ui.assetsOpen ? "收起资产" : "查看和管理资产"}</button>
           <a class="fp-btn small ghost" href="${escapeHtml(config.workspaceUrl || "/workspace")}">返回主工作台</a>
-          <button class="fp-btn small" data-action="copy-working-payload">复制当前策划数据</button>
-          <button class="fp-btn small danger" data-action="reset-state">重置本地状态</button>
+          <button class="fp-btn small danger" data-action="reset-state" ${canClearFrameworkInput() ? "" : "disabled"}>清空输入</button>
         </div>
       </div>
       ${ui.assetsOpen ? renderAssetManager() : ""}
+      ${renderKnowledgePanel()}
       <div class="fp-card fp-steps">${renderStepRail()}</div>
       ${renderRunningStageStatus()}
     `;

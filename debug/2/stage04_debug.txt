@@ -1,0 +1,23 @@
+=== Framework Planner Stage Debug ===
+timestamp: 2026-05-15T16:10:46.931733+08:00
+stage: 04 - 三幕十五节拍卡点规划生成更新
+status: success
+-- variables --
+mode: str(len=2) 创作
+source_brief: dict(keys=[adaptation_direction, content, core_premise, episodes_per_season, minutes_per_episode, ready_for_script_workflow, season_count, source_title, story_outline, target_format], size=10) {"adaptation_direction":"保持强钩子、强反转、强情绪推进","content":"2","core_premise":"2","episodes_per_season":60,"minutes_per_episode":2,"ready_for_script_workflow":true,"season_count":1,"source_title":"未命名项目","st...
+basic_config: dict(keys=[project_title, mode, source_text, source_title, target_format, season_count, episodes_per_season, minutes_per_episode, adaptation_direction, user_constraints, user_requirements, title], size=12) {"project_title":"2","mode":"创作","source_text":"2","source_title":"2","target_format":"短剧","season_count":1,"episodes_per_season":2,"minutes_per_episode":2,"adaptation_direction":"请保持强钩子、强反转、强情绪推进，并优先...
+worldview_plan: dict(keys=[content, core_setting, main_conflict, ready_for_script_workflow, rules, tone, world_type], size=7) {"content":"创作","core_setting":"创作","main_conflict":"主角目标与外部阻力形成持续对抗","ready_for_script_workflow":true,"rules":[],"tone":"强情绪、强节奏、强反转","world_type":"现实/类型化世界"}
+character_plan: dict(keys=[character_relationships, content, emotion_engine, main_characters, protagonist, ready_for_script_workflow], size=6) {"character_relationships":[],"content":"创作","emotion_engine":"围绕目标、阻力、关系变化持续推进情绪","main_characters":[{"arc":"从被动承压转向主动破局","flaw":"关键弱点待人工补充","goal":"完成核心目标并推动主线","name":"主角"}],"protagonist":{"arc":"从...
+previous_beat_checkpoint_timeline: list(len=0) []
+user_feedback: str(len=0)
+framework_score_report: str(len=0)
+adaptation_direction: str(len=33) 请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。
+user_requirements: str(len=11) 2 用户偏好提示：1
+beat_checkpoint_timeline: list(len=15) [{"beat_no":1,"beat_name":"开场","act":"第一幕","episode_range":"第1集","checkpoint_title":"日常被打破","narrative_function":"展示主角日常状态和潜在问题，建立代入感并埋下冲突种子。","plot_content":"主角在普通日常中遭遇一个小挫折（如被上级批评、偶然偷听到秘密），暗示其被动承压的状...
+checkpoint_explanation: dict(keys=[overview, beat_notes], size=2) {"overview":"该卡点说明与同一条十五节拍时间轴一一对应，用于解释各节拍的叙事功能与阶段作用。","beat_notes":[{"beat_no":1,"explanation":"主角在普通日常中遭遇一个小挫折（如被上级批评、偶然偷听到秘密），暗示其被动承压的状态。"},{"beat_no":2,"explanation":"主角在多个场景中持续受压：工作出错、家庭矛盾、或重要约定被迫...
+project_id: int 25
+project_title: str(len=1) 2
+title: str(len=1) 2
+source_title: str(len=1) 2
+display_text: str(len=559) 本规划针对2集短剧（每集2分钟）生成三幕十五节拍卡点时间轴。第一幕（第1集）以日常打破开场，通过催化剂（第4节拍）迅速引发主角被动承压状态的动摇；争执（第5节拍）加深内心矛盾，最终在第二幕衔接点（第6节拍）主角决定主动破局。第二幕（第2集前半段）引入B故事线（第7节拍），在游戏及斗争（第8节拍）中主角初尝新世界的代价；中点（第9节拍）用虚假胜利反转引爆全局危机，随后危险逼近（第10节拍）和一败涂地...
+parse_warnings: list(len=0) []

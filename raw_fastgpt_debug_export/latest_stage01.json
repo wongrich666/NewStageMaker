@@ -1,0 +1,161 @@
+{
+  "stage": "stage01",
+  "timestamp": "20260515-141627-371",
+  "status": "success",
+  "payload_project_name": "1",
+  "payload_keys": [
+    "adaptation_direction",
+    "episodes_per_season",
+    "minutes_per_episode",
+    "mode",
+    "project_id",
+    "project_title",
+    "season_count",
+    "source_text",
+    "source_title",
+    "target_format",
+    "title",
+    "user_constraints",
+    "user_requirements"
+  ],
+  "payload_debug_summary": {
+    "type": "dict",
+    "payload_keys": [
+      "adaptation_direction",
+      "episodes_per_season",
+      "minutes_per_episode",
+      "mode",
+      "project_id",
+      "project_title",
+      "season_count",
+      "source_text",
+      "source_title",
+      "target_format",
+      "title",
+      "user_constraints",
+      "user_requirements"
+    ],
+    "field_summary": {
+      "project_title": {
+        "type": "str",
+        "length": 1,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'1'"
+      },
+      "mode": {
+        "type": "str",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'创作'"
+      },
+      "source_text": {
+        "type": "str",
+        "length": 1,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'1'"
+      },
+      "source_title": {
+        "type": "str",
+        "length": 1,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'1'"
+      },
+      "target_format": {
+        "type": "str",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'短剧'"
+      },
+      "season_count": {
+        "type": "int",
+        "length": 1,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "1"
+      },
+      "episodes_per_season": {
+        "type": "int",
+        "length": 1,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "1"
+      },
+      "minutes_per_episode": {
+        "type": "int",
+        "length": 1,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "1"
+      },
+      "adaptation_direction": {
+        "type": "str",
+        "length": 33,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。'"
+      },
+      "user_constraints": {
+        "type": "str",
+        "length": 1,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'1'"
+      },
+      "user_requirements": {
+        "type": "str",
+        "length": 1,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'1'"
+      },
+      "project_id": {
+        "type": "str",
+        "length": 7,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'unsaved'"
+      },
+      "title": {
+        "type": "str",
+        "length": 1,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'1'"
+      }
+    },
+    "suspected_raw_response_fields": []
+  },
+  "output": {
+    "source_brief": {
+      "content": "1",
+      "source_title": "未命名项目",
+      "target_format": "短剧",
+      "season_count": 1,
+      "episodes_per_season": 60,
+      "minutes_per_episode": 2,
+      "core_premise": "1",
+      "story_outline": "1",
+      "adaptation_direction": "保持强钩子、强反转、强情绪推进",
+      "ready_for_script_workflow": true
+    },
+    "display_text": ""
+  }
+}

@@ -711,6 +711,9 @@
 }
 
 function ensureRuntimeDebugPanel() {
+  if (window.scriptMakerConfig?.enableRuntimeDebugPanel !== true) {
+    return null;
+  }
   let panel = document.getElementById("runtime-debug-panel");
   if (panel) {
     return panel;
@@ -762,6 +765,9 @@ function ensureRuntimeDebugPanel() {
 }
 
 function renderRuntimeDebug(debug) {
+  if (window.scriptMakerConfig?.enableRuntimeDebugPanel !== true) {
+    return;
+  }
   if (!debug || typeof debug !== "object") {
     return;
   }
@@ -773,6 +779,7 @@ function renderRuntimeDebug(debug) {
   }
 
   const panel = ensureRuntimeDebugPanel();
+  if (!panel) return;
   panel.style.display = "";
 
   const summary = panel.querySelector("[data-role='summary']");
@@ -893,6 +900,9 @@ async function fetchRuntimeDebug() {
 }
 
 function startRuntimeDebugPolling() {
+  if (window.scriptMakerConfig?.enableRuntimeDebugPanel !== true) {
+    return;
+  }
   if (state.debugPollTimer) {
     return;
   }
