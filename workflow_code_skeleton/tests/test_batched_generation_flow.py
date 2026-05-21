@@ -407,6 +407,45 @@ def _rich_characters_text() -> str:
     )
 
 
+def _natural_character_text() -> str:
+    return (
+        "【主角】林夏\n"
+        "人物定位：项目负责人，主线反击的承压者。\n"
+        "核心动机：扛住项目并保住团队。\n"
+        "说话方式：简短克制，冲突中会直接逼问关键事实。\n"
+        "关系特点：面对周沉先试探再靠近，对方替她决定时会反弹。\n\n"
+        "【危险盟友】周沉\n"
+        "人物定位：掌握旧案线索的外部压力源。\n"
+        "核心动机：用真相换取重新入局的机会。\n"
+        "说话方式：短句多，习惯先给结论再补条件。"
+    )
+
+
+def _character_plan_text() -> str:
+    return json.dumps(
+        {
+            "character_plan": {
+                "protagonist": {
+                    "name": "林夏",
+                    "goal": "扛住项目并保住团队。",
+                    "flaw": "习惯独自承担压力。",
+                    "arc": "从被动承压转向主动破局。",
+                },
+                "main_characters": [
+                    {
+                        "name": "林夏",
+                        "role_type": "主角",
+                        "goal": "扛住项目并保住团队。",
+                        "flaw": "习惯独自承担压力。",
+                        "arc": "从被动承压转向主动破局。",
+                    }
+                ],
+            }
+        },
+        ensure_ascii=False,
+    )
+
+
 def _rich_scenes_text() -> str:
     return json.dumps(
         {
@@ -2739,6 +2778,62 @@ class BatchedGenerationFlowTests(unittest.TestCase):
             original_appearance_mapping,
         )
 
+    def test_hook_stage_keeps_natural_language_character_content(self) -> None:
+        alias_plan = _episode_alias_plan(10)
+        state, payload, variables = self._state_and_payload(
+            10,
+            variables={
+                CHARACTERS: _natural_character_text(),
+                SCENES: _rich_scenes_text(),
+                EPISODE_ALIAS_PLAN: alias_plan,
+            },
+        )
+        runner = _PhaseRecordingRunner()
+
+        flow._run_all_hook_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=list(iter_episode_batches(10, batch_size=5)),
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=alias_plan,
+            rewrite_from_stage="",
+        )
+
+        characters_text = runner.stage_calls(STAGE_HOOKS_WRITING)[0]["characters_text"]
+        self.assertIn('"character_name":"林夏"', characters_text)
+        self.assertIn('"core_motivation"', characters_text)
+        self.assertNotIn('"characters":[]', characters_text)
+
+    def test_hook_stage_keeps_character_plan_content(self) -> None:
+        alias_plan = _episode_alias_plan(10)
+        state, payload, variables = self._state_and_payload(
+            10,
+            variables={
+                CHARACTERS: _character_plan_text(),
+                SCENES: _rich_scenes_text(),
+                EPISODE_ALIAS_PLAN: alias_plan,
+            },
+        )
+        runner = _PhaseRecordingRunner()
+
+        flow._run_all_hook_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=list(iter_episode_batches(10, batch_size=5)),
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=alias_plan,
+            rewrite_from_stage="",
+        )
+
+        characters_text = runner.stage_calls(STAGE_HOOKS_WRITING)[0]["characters_text"]
+        self.assertIn('"character_name":"林夏"', characters_text)
+        self.assertIn("扛住项目并保住团队", characters_text)
+        self.assertNotIn('"characters":[]', characters_text)
+
     def test_dialogue_stage_uses_compact_context_and_current_batch_alias_plan(self) -> None:
         alias_plan = _episode_alias_plan(10)
         state, payload, variables = self._state_and_payload(
@@ -2787,6 +2882,70 @@ class BatchedGenerationFlowTests(unittest.TestCase):
             json.dumps(variables[APPEARANCE_MAPPING], ensure_ascii=False),
             original_appearance_mapping,
         )
+
+    def test_dialogue_stage_keeps_natural_language_character_content(self) -> None:
+        alias_plan = _episode_alias_plan(10)
+        state, payload, variables = self._state_and_payload(
+            10,
+            variables={
+                ALL_HOOKS: flow.merge_batch_object(
+                    _hook_batch([1, 2, 3, 4, 5]),
+                    _hook_batch([6, 7, 8, 9, 10]),
+                ),
+                CHARACTERS: _natural_character_text(),
+                SCENES: _rich_scenes_text(),
+                EPISODE_ALIAS_PLAN: alias_plan,
+            },
+        )
+        runner = _PhaseRecordingRunner()
+
+        flow._run_all_dialogue_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=list(iter_episode_batches(10, batch_size=5)),
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=alias_plan,
+            rewrite_from_stage="",
+        )
+
+        characters_text = runner.stage_calls(STAGE_DIALOGUES_WRITING)[0]["characters_text"]
+        self.assertIn('"character_name":"林夏"', characters_text)
+        self.assertIn('"speech_profile"', characters_text)
+        self.assertNotIn('"characters":[]', characters_text)
+
+    def test_dialogue_stage_keeps_character_plan_content(self) -> None:
+        alias_plan = _episode_alias_plan(10)
+        state, payload, variables = self._state_and_payload(
+            10,
+            variables={
+                ALL_HOOKS: flow.merge_batch_object(
+                    _hook_batch([1, 2, 3, 4, 5]),
+                    _hook_batch([6, 7, 8, 9, 10]),
+                ),
+                CHARACTERS: _character_plan_text(),
+                SCENES: _rich_scenes_text(),
+                EPISODE_ALIAS_PLAN: alias_plan,
+            },
+        )
+        runner = _PhaseRecordingRunner()
+
+        flow._run_all_dialogue_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=list(iter_episode_batches(10, batch_size=5)),
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=alias_plan,
+            rewrite_from_stage="",
+        )
+
+        characters_text = runner.stage_calls(STAGE_DIALOGUES_WRITING)[0]["characters_text"]
+        self.assertIn('"character_name":"林夏"', characters_text)
+        self.assertIn("主角", characters_text)
+        self.assertNotIn('"characters":[]', characters_text)
 
     def test_script_alias_write_review_revise_and_memory_aliases(self) -> None:
         state, payload, variables, batches = self._script_ready_state(5)
@@ -3063,6 +3222,34 @@ class BatchedGenerationFlowTests(unittest.TestCase):
             json.dumps(variables[APPEARANCE_MAPPING], ensure_ascii=False),
             original_appearance_mapping,
         )
+
+    def test_script_stage_keeps_character_plan_content(self) -> None:
+        alias_plan = _episode_alias_plan(10)
+        state, payload, variables, batches = self._script_ready_state(
+            10,
+            variables={
+                CHARACTERS: _character_plan_text(),
+                SCENES: _rich_scenes_text(),
+                EPISODE_ALIAS_PLAN: alias_plan,
+            },
+        )
+        runner = _PhaseRecordingRunner()
+
+        flow._run_all_script_batches(
+            state,
+            runner,
+            payload,
+            variables,
+            batches=batches,
+            normalized_plan=variables[NORMALIZED_EPISODE_PLAN],
+            episode_alias_plan=alias_plan,
+            rewrite_from_stage="",
+        )
+
+        characters_text = runner.stage_calls(STAGE_SCRIPT_WRITING)[0]["characters_text"]
+        self.assertIn('"character_name":"林夏"', characters_text)
+        self.assertIn("扛住项目并保住团队", characters_text)
+        self.assertNotIn('"characters":[]', characters_text)
 
     def test_script_memory_answertext_is_accepted_and_invalid_memory_does_not_pollute_batch(self) -> None:
         state, payload, variables, batches = self._script_ready_state(5)

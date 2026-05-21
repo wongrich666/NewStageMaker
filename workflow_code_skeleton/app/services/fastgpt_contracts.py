@@ -6,16 +6,27 @@ from typing import Any
 
 from ..workflow_ids import (
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
+    APPEARANCE_ALIAS_MAPPING_VAR,
     APPEARANCE_MAPPING_VAR,
     APPEARANCE_NATURAL_LANGUAGE_VAR,
     APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
     APPEARANCE_REQUIREMENTS_VAR,
     APPEARANCE_REVIEW_VAR,
+    ALL_ENRICHED_EPISODE_PLAN_VAR,
+    BATCH_CAUSAL_CONFLICT_PLAN_VAR,
+    BATCH_CAUSAL_CONFLICT_REVIEW_VAR,
+    BATCH_ENRICHED_EPISODE_PLAN_VAR,
+    BATCH_SCRIPT_REVIEW_VAR,
+    BATCH_SCRIPT_TEXT_VAR,
     CHARACTER_BIOS_VAR,
     CHARACTER_NATURAL_LANGUAGE_VAR,
+    CHARACTER_PLAN_VAR,
     CHARACTER_SEARCH_INTENT_VAR,
     CHARACTER_MAX_RETRY_VAR,
     CHARACTER_VAR,
+    CHARACTER_STORYLINES_VAR,
+    CONFLICT_MEMORY_VAR,
+    CONFLICT_START_EPISODE_VAR,
     CORE_SCENE_FINAL_VAR,
     CORE_SCENE_INPUT_VAR,
     DIALOGUE_CURRENT_VAR,
@@ -36,16 +47,20 @@ from ..workflow_ids import (
     EPISODE_PLAN_VAR,
     EPISODE_PLAN_NORMALIZED_VAR,
     EPISODE_WORD_COUNT_VAR,
+    LEGACY_EPISODE_WORD_COUNT_VAR,
+    LEGACY_TOTAL_EPISODES_VAR,
     FINAL_CHARACTER_VAR,
     FINAL_SCENE_VAR,
     FRAMEWORK_CHARACTER_BIOS_VAR,
     FRAMEWORK_CHARACTER_COUNT_VAR,
     FRAMEWORK_CORE_SCENE_VAR,
     FRAMEWORK_EPISODE_PLAN_VAR,
+    FRAMEWORK_PLAN_PACKAGE_VAR,
     FRAMEWORK_TITLE_VAR,
     FRAMEWORK_TOTAL_EPISODES_VAR,
     FRAMEWORK_STORY_OUTLINE_VAR,
     FRAMEWORK_USER_EXPECTATION_VAR,
+    BEAT_CHECKPOINT_TIMELINE_VAR,
     HOOK_CURRENT_VAR,
     HOOK_CURRENT_WRITE_VAR,
     HOOK_FINAL_VAR,
@@ -60,7 +75,11 @@ from ..workflow_ids import (
     SCENE_MAX_RETRY_VAR,
     SCENE_APPEARANCE_REQUIREMENTS_VAR,
     SCENE_ALIAS_NAMING_RULES_VAR,
+    SCENE_DICTIONARY_VAR,
     SCENE_VAR,
+    SCRIPT_MEMORY_VAR,
+    SCRIPT_START_EPISODE_VAR,
+    SCRIPT_WORLD_RULES_DIGEST_VAR,
     DIALOGUE_CHARACTER_INPUT_VAR,
     SCRIPT_CURRENT_VAR,
     SCRIPT_CURRENT_WRITE_VAR,
@@ -96,8 +115,10 @@ from .stage_output_repair import describe_repairable_stage_output_issue
 
 script_title_content = "script_title_content"
 SCRIPT_TITLE = script_title_content
-TOTAL_EPISODES = "total_episodes"
-EPISODE_WORD_COUNT = "episode_word_count"
+LEGACY_TOTAL_EPISODES = "total_episodes"
+LEGACY_EPISODE_WORD_COUNT = "episode_word_count"
+TOTAL_EPISODES = "totalEpisodes"
+EPISODE_WORD_COUNT = "episodeWordCount"
 USER_EXPECTATION = "user_expectation"
 CHARACTER_COUNT = "character_count"
 CHARACTER_APPEARANCE_REQUIREMENTS = "character_appearance_requirements"
@@ -134,13 +155,14 @@ BATCH_SCRIPT = "batch_script"
 SCRIPT_BATCH_START_EPISODE = BATCH_START_EPISODE
 SCRIPT_BATCH_CONTENT = BATCH_SCRIPT
 SCRIPT_REVIEW_RESULT = "script_review_result"
-SCRIPT_MEMORY = "last_summary"
+SCRIPT_MEMORY = "scriptMemory"
 ALL_SCRIPT = "all_script"
 LAST_SUMMARY = "last_summary"
 FINAL_SCRIPT = "final_script"
 IS_CONSISTENT = "is_consistent"
 NORMALIZED_EPISODE_PLAN = "normalized_episode_plan"
-APPEARANCE_MAPPING = "appearance_mapping"
+LEGACY_APPEARANCE_MAPPING = "appearance_mapping"
+APPEARANCE_MAPPING = "appearanceMapping"
 CHARACTER_REGISTRY = "character_registry"
 CHARACTER_ALIAS_REGISTRY = "character_alias_registry"
 EPISODE_ALIAS_PLAN = "episode_alias_plan"
@@ -170,6 +192,17 @@ STAGE_APPEARANCE_ALIAS_WRITING = "appearance_alias_writing"
 STAGE_APPEARANCE_ALIAS_REVIEW = "appearance_alias_review"
 STAGE_APPEARANCE_ALIAS_REWRITE = "appearance_alias_rewrite"
 STAGE_APPEARANCE_ALIAS_UNSTRUCTURED = "appearance_alias_unstructured"
+STAGE_FRAMEWORK_SCENE_DICTIONARY = "framework_scene_dictionary"
+STAGE_FRAMEWORK_APPEARANCE_MAPPING = "framework_appearance_mapping"
+STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN = "framework_enriched_episode_plan"
+STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE = "framework_causal_conflict_write"
+STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW = "framework_causal_conflict_review"
+STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE = "framework_causal_conflict_rewrite"
+STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY = "framework_causal_conflict_memory"
+STAGE_FRAMEWORK_SCRIPT_WRITE = "framework_script_write"
+STAGE_FRAMEWORK_SCRIPT_REVIEW = "framework_script_review"
+STAGE_FRAMEWORK_SCRIPT_REWRITE = "framework_script_rewrite"
+STAGE_FRAMEWORK_SCRIPT_MEMORY = "framework_script_memory"
 STAGE_HOOKS = "hooks"
 STAGE_HOOKS_WRITING = "hooks_writing"
 STAGE_HOOK_WRITE = "hook_write"
@@ -195,6 +228,19 @@ STAGE_SCRIPT_REVISE = "script_revise"
 STAGE_MEMORY = "memory"
 STAGE_SCRIPT_MEMORY = "script_memory"
 STAGE_FINAL = "final"
+
+FRAMEWORK_PLAN_PACKAGE = "framework_plan_package"
+SCENE_DICTIONARY = "sceneDictionary"
+SCRIPT_WORLD_RULES_DIGEST = "scriptWorldRulesDigest"
+ALL_ENRICHED_EPISODE_PLAN = "allEnrichedEpisodePlan"
+BATCH_ENRICHED_EPISODE_PLAN = "batchEnrichedEpisodePlan"
+CONFLICT_START_EPISODE = "conflictStartEpisode"
+BATCH_CAUSAL_CONFLICT_PLAN = "batchCausalConflictPlan"
+BATCH_CAUSAL_CONFLICT_REVIEW = "batchCausalConflictReview"
+CONFLICT_MEMORY = "conflictMemory"
+SCRIPT_START_EPISODE = "scriptStartEpisode"
+BATCH_SCRIPT_TEXT = "batchScriptText"
+BATCH_SCRIPT_REVIEW = "batchScriptReview"
 
 HOOK_CURRENT_ALIASES = (HOOK_CURRENT_VAR, HOOK_CURRENT_WRITE_VAR)
 HOOK_MEMORY_ALIASES = (
@@ -339,7 +385,7 @@ class FastGPTStageContract:
                 payload[name] = variables[name]
             elif name in OPTIONAL_EMPTY_INPUTS:
                 payload[name] = ""
-            elif name in {LAST_SUMMARY, HOOK_MEMORY, DIALOGUE_MEMORY, SCRIPT_MEMORY}:
+            elif name in {LAST_SUMMARY, HOOK_MEMORY, DIALOGUE_MEMORY, SCRIPT_MEMORY, CONFLICT_MEMORY}:
                 # 记忆类字段允许缺省为“空记忆”，这样首批正文不需要为了凑输入
                 # 额外制造一个伪 summary。
                 payload[name] = ""
@@ -380,6 +426,8 @@ class FastGPTStageContract:
                         STAGE_DIALOGUES_REVIEW,
                         STAGE_DIALOGUE_REVIEW,
                         STAGE_SCRIPT_REVIEW,
+                        STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+                        STAGE_FRAMEWORK_SCRIPT_REVIEW,
                     }
                     and name in {REVIEW_PASSED, REWRITE_REQUIRED}
                 ):
@@ -539,6 +587,10 @@ def _is_script_family_stage(stage_name: str) -> bool:
         STAGE_SCRIPT_REVIEW,
         STAGE_SCRIPT_REWRITE,
         STAGE_SCRIPT_REVISE,
+        STAGE_FRAMEWORK_SCRIPT_WRITE,
+        STAGE_FRAMEWORK_SCRIPT_REVIEW,
+        STAGE_FRAMEWORK_SCRIPT_REWRITE,
+        STAGE_FRAMEWORK_SCRIPT_MEMORY,
     }
 
 
@@ -869,6 +921,10 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
 
 LegacyInputAlias = str | tuple[str, ...]
 
+LEGACY_TOTAL_EPISODES_ALIASES = (TOTAL_EPISODES_VAR, LEGACY_TOTAL_EPISODES_VAR)
+LEGACY_EPISODE_WORD_COUNT_ALIASES = (EPISODE_WORD_COUNT_VAR, LEGACY_EPISODE_WORD_COUNT_VAR)
+LEGACY_APPEARANCE_MAPPING_ALIASES = (APPEARANCE_MAPPING_VAR, APPEARANCE_ALIAS_MAPPING_VAR)
+
 
 LEGACY_INPUT_ALIASES: dict[str, dict[str, LegacyInputAlias]] = {
     STAGE_FRAMEWORK: {
@@ -984,6 +1040,91 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, LegacyInputAlias]] = {
         SCENES: SCENE_VAR,
         CHARACTER_ALIAS_NAMING_RULES: APPEARANCE_ALIAS_NAMING_RULES_VAR,
         APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+    },
+    STAGE_FRAMEWORK_SCENE_DICTIONARY: {
+        FRAMEWORK_PLAN_PACKAGE: FRAMEWORK_PLAN_PACKAGE_VAR,
+        WORLDVIEW: WORLDVIEW_PLAN_VAR,
+        "beat_checkpoint_timeline": BEAT_CHECKPOINT_TIMELINE_VAR,
+        "character_storylines": CHARACTER_STORYLINES_VAR,
+        SCENE_DICTIONARY: SCENE_DICTIONARY_VAR,
+        SCRIPT_WORLD_RULES_DIGEST: SCRIPT_WORLD_RULES_DIGEST_VAR,
+    },
+    STAGE_FRAMEWORK_APPEARANCE_MAPPING: {
+        FRAMEWORK_PLAN_PACKAGE: FRAMEWORK_PLAN_PACKAGE_VAR,
+        "character_plan": CHARACTER_PLAN_VAR,
+        SCENE_DICTIONARY: SCENE_DICTIONARY_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+    },
+    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: {
+        FRAMEWORK_PLAN_PACKAGE: FRAMEWORK_PLAN_PACKAGE_VAR,
+        SCENE_DICTIONARY: SCENE_DICTIONARY_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        ALL_ENRICHED_EPISODE_PLAN: ALL_ENRICHED_EPISODE_PLAN_VAR,
+        BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+    },
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE: {
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        CONFLICT_START_EPISODE: CONFLICT_START_EPISODE_VAR,
+        BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+        SCENE_DICTIONARY: SCENE_DICTIONARY_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        SCRIPT_WORLD_RULES_DIGEST: SCRIPT_WORLD_RULES_DIGEST_VAR,
+        CONFLICT_MEMORY: CONFLICT_MEMORY_VAR,
+    },
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW: {
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        CONFLICT_START_EPISODE: CONFLICT_START_EPISODE_VAR,
+        BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+        BATCH_CAUSAL_CONFLICT_PLAN: BATCH_CAUSAL_CONFLICT_PLAN_VAR,
+        BATCH_CAUSAL_CONFLICT_REVIEW: BATCH_CAUSAL_CONFLICT_REVIEW_VAR,
+    },
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE: {
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        CONFLICT_START_EPISODE: CONFLICT_START_EPISODE_VAR,
+        BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+        BATCH_CAUSAL_CONFLICT_PLAN: BATCH_CAUSAL_CONFLICT_PLAN_VAR,
+        BATCH_CAUSAL_CONFLICT_REVIEW: BATCH_CAUSAL_CONFLICT_REVIEW_VAR,
+        CONFLICT_MEMORY: CONFLICT_MEMORY_VAR,
+    },
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY: {
+        BATCH_CAUSAL_CONFLICT_PLAN: BATCH_CAUSAL_CONFLICT_PLAN_VAR,
+        CONFLICT_MEMORY: CONFLICT_MEMORY_VAR,
+        CONFLICT_START_EPISODE: CONFLICT_START_EPISODE_VAR,
+    },
+    STAGE_FRAMEWORK_SCRIPT_WRITE: {
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        SCRIPT_START_EPISODE: SCRIPT_START_EPISODE_VAR,
+        EPISODE_WORD_COUNT: EPISODE_WORD_COUNT_VAR,
+        BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+        BATCH_CAUSAL_CONFLICT_PLAN: BATCH_CAUSAL_CONFLICT_PLAN_VAR,
+        SCENE_DICTIONARY: SCENE_DICTIONARY_VAR,
+        APPEARANCE_MAPPING: APPEARANCE_MAPPING_VAR,
+        SCRIPT_WORLD_RULES_DIGEST: SCRIPT_WORLD_RULES_DIGEST_VAR,
+        SCRIPT_MEMORY: SCRIPT_MEMORY_VAR,
+    },
+    STAGE_FRAMEWORK_SCRIPT_REVIEW: {
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        SCRIPT_START_EPISODE: SCRIPT_START_EPISODE_VAR,
+        EPISODE_WORD_COUNT: EPISODE_WORD_COUNT_VAR,
+        BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+        BATCH_CAUSAL_CONFLICT_PLAN: BATCH_CAUSAL_CONFLICT_PLAN_VAR,
+        BATCH_SCRIPT_TEXT: BATCH_SCRIPT_TEXT_VAR,
+        BATCH_SCRIPT_REVIEW: BATCH_SCRIPT_REVIEW_VAR,
+    },
+    STAGE_FRAMEWORK_SCRIPT_REWRITE: {
+        TOTAL_EPISODES: TOTAL_EPISODES_VAR,
+        SCRIPT_START_EPISODE: SCRIPT_START_EPISODE_VAR,
+        EPISODE_WORD_COUNT: EPISODE_WORD_COUNT_VAR,
+        BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+        BATCH_CAUSAL_CONFLICT_PLAN: BATCH_CAUSAL_CONFLICT_PLAN_VAR,
+        BATCH_SCRIPT_TEXT: BATCH_SCRIPT_TEXT_VAR,
+        BATCH_SCRIPT_REVIEW: BATCH_SCRIPT_REVIEW_VAR,
+        SCRIPT_MEMORY: SCRIPT_MEMORY_VAR,
+    },
+    STAGE_FRAMEWORK_SCRIPT_MEMORY: {
+        BATCH_SCRIPT_TEXT: BATCH_SCRIPT_TEXT_VAR,
+        SCRIPT_MEMORY: SCRIPT_MEMORY_VAR,
+        SCRIPT_START_EPISODE: SCRIPT_START_EPISODE_VAR,
     },
     STAGE_HOOKS: {
         WORLDVIEW: WORLDVIEW_VAR,
@@ -1287,6 +1428,35 @@ LEGACY_INPUT_ALIASES: dict[str, dict[str, LegacyInputAlias]] = {
 }
 
 
+def _apply_legacy_workflow_id_aliases() -> None:
+    framework_to_script_stages = {
+        STAGE_FRAMEWORK_SCENE_DICTIONARY,
+        STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+        STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+        STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE,
+        STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+        STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
+        STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
+        STAGE_FRAMEWORK_SCRIPT_WRITE,
+        STAGE_FRAMEWORK_SCRIPT_REVIEW,
+        STAGE_FRAMEWORK_SCRIPT_REWRITE,
+        STAGE_FRAMEWORK_SCRIPT_MEMORY,
+    }
+    for stage_name, aliases in LEGACY_INPUT_ALIASES.items():
+        if stage_name in framework_to_script_stages:
+            continue
+        for canonical_name, wire_name in list(aliases.items()):
+            if wire_name == TOTAL_EPISODES_VAR:
+                aliases[canonical_name] = LEGACY_TOTAL_EPISODES_ALIASES
+            elif wire_name == EPISODE_WORD_COUNT_VAR:
+                aliases[canonical_name] = LEGACY_EPISODE_WORD_COUNT_ALIASES
+            elif wire_name == APPEARANCE_MAPPING_VAR:
+                aliases[canonical_name] = LEGACY_APPEARANCE_MAPPING_ALIASES
+
+
+_apply_legacy_workflow_id_aliases()
+
+
 # Keep broad legacy alias coverage for compatibility with workflow public input
 # declarations, but allow individual stages to further trim what is actually sent
 # on the wire when their active system prompt only references a smaller subset.
@@ -1474,7 +1644,12 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             CHARACTER_ALIAS_NAMING_RULES,
         ),
         output_types={APPEARANCE_MAPPING: "object"},
-        output_aliases={APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,)},
+        output_aliases={
+            APPEARANCE_MAPPING: (
+                APPEARANCE_MAPPING_VAR,
+                LEGACY_APPEARANCE_MAPPING,
+            )
+        },
         fastgpt_responsibility="逻辑阶段名；实际由 Python 依次调用服装映射编写、审核、修订与自然语言说明四个独立 workflow。",
         local_responsibility="编排四阶段循环，审核通过后才提交正式 appearance_mapping，并在本地提炼 registry / alias plan。",
     ),
@@ -1491,7 +1666,13 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             CHARACTER_ALIAS_NAMING_RULES,
         ),
         output_types={APPEARANCE_MAPPING: "object"},
-        output_aliases={APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,)},
+        output_aliases={
+            APPEARANCE_MAPPING: (
+                APPEARANCE_MAPPING_VAR,
+                APPEARANCE_ALIAS_MAPPING_VAR,
+                LEGACY_APPEARANCE_MAPPING,
+            )
+        },
         fastgpt_responsibility="编写完整结构化服装版本映射 JSON。",
         local_responsibility="只做输出 repair/结构校验；正式缓存提交由 Python 审核结果决定。",
         expected_output_kind="appearance_mapping_json",
@@ -1540,7 +1721,13 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             PASS_REVIEW_JSON,
         ),
         output_types={APPEARANCE_MAPPING: "object"},
-        output_aliases={APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,)},
+        output_aliases={
+            APPEARANCE_MAPPING: (
+                APPEARANCE_MAPPING_VAR,
+                APPEARANCE_ALIAS_MAPPING_VAR,
+                LEGACY_APPEARANCE_MAPPING,
+            )
+        },
         fastgpt_responsibility="基于当前服装映射与审核结果，输出新的完整 appearance_mapping。",
         local_responsibility="只做输出 repair/结构校验；是否继续循环由 Python 决定。",
         expected_output_kind="appearance_mapping_json",
@@ -1565,6 +1752,199 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         local_responsibility="只缓存 c7VnQ4eX 展示文本；不能覆盖 h2KpLm91。",
         expected_output_kind="unstructured_natural_language_text",
         workflow_json_name="自然语言服装版本映射.json",
+    ),
+    STAGE_FRAMEWORK_SCENE_DICTIONARY: FastGPTStageContract(
+        stage_name=STAGE_FRAMEWORK_SCENE_DICTIONARY,
+        label="框架转剧本场景字典",
+        input_names=(
+            FRAMEWORK_PLAN_PACKAGE,
+            WORLDVIEW,
+            "beat_checkpoint_timeline",
+            "character_storylines",
+        ),
+        output_types={
+            SCENE_DICTIONARY: "object",
+            SCRIPT_WORLD_RULES_DIGEST: "string",
+        },
+        output_aliases={
+            SCENE_DICTIONARY: (SCENE_DICTIONARY_VAR,),
+            SCRIPT_WORLD_RULES_DIGEST: (SCRIPT_WORLD_RULES_DIGEST_VAR,),
+        },
+        fastgpt_responsibility="把三幕十五节拍 stage07 framework_plan_package 资产化为 sceneDictionary 与正文世界规则摘要。",
+        local_responsibility="作为三幕十五节拍框架转剧本专用链路的 08 阶段，不写入旧 scenes/all_hooks/all_dialogues。",
+        workflow_json_name="08_框架转剧本场景字典.json",
+    ),
+    STAGE_FRAMEWORK_APPEARANCE_MAPPING: FastGPTStageContract(
+        stage_name=STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+        label="框架转剧本外观映射",
+        input_names=(FRAMEWORK_PLAN_PACKAGE, "character_plan", SCENE_DICTIONARY),
+        output_types={APPEARANCE_MAPPING: "object"},
+        output_aliases={APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,)},
+        fastgpt_responsibility="基于最终策划包、人物方案与 sceneDictionary 生成 appearanceMapping。",
+        local_responsibility="作为三幕十五节拍框架转剧本专用链路的 09 阶段，不复用旧 appearance_alias_generation。",
+        workflow_json_name="09_框架转剧本外观映射.json",
+    ),
+    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: FastGPTStageContract(
+        stage_name=STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+        label="框架转剧本增强分集计划",
+        input_names=(FRAMEWORK_PLAN_PACKAGE, SCENE_DICTIONARY, APPEARANCE_MAPPING),
+        output_types={
+            ALL_ENRICHED_EPISODE_PLAN: "object",
+            BATCH_ENRICHED_EPISODE_PLAN: "object",
+        },
+        output_aliases={
+            ALL_ENRICHED_EPISODE_PLAN: (ALL_ENRICHED_EPISODE_PLAN_VAR,),
+            BATCH_ENRICHED_EPISODE_PLAN: (BATCH_ENRICHED_EPISODE_PLAN_VAR,),
+        },
+        fastgpt_responsibility="把 stage07 策划包扩展为可分批写作的 enrichedEpisodePlan。",
+        local_responsibility="作为三幕十五节拍框架转剧本专用链路的 10 阶段，不写入旧 episode_plan/all_hooks。",
+        workflow_json_name="10_框架转剧本增强分集计划.json",
+    ),
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE: FastGPTStageContract(
+        stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE,
+        label="框架转剧本因果冲突推进计划编写",
+        input_names=(
+            TOTAL_EPISODES,
+            CONFLICT_START_EPISODE,
+            BATCH_ENRICHED_EPISODE_PLAN,
+            SCENE_DICTIONARY,
+            APPEARANCE_MAPPING,
+            SCRIPT_WORLD_RULES_DIGEST,
+            CONFLICT_MEMORY,
+        ),
+        output_types={BATCH_CAUSAL_CONFLICT_PLAN: "object"},
+        output_aliases={BATCH_CAUSAL_CONFLICT_PLAN: (BATCH_CAUSAL_CONFLICT_PLAN_VAR,)},
+        fastgpt_responsibility="生成当前批次因果冲突推进计划。",
+        local_responsibility="只服务 framework_to_script 新链路，不调用 dialogue_write/dialogue_review/dialogue_rewrite/dialogue_memory。",
+        workflow_json_name="框架转剧本因果冲突推进计划编写.json",
+    ),
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW: FastGPTStageContract(
+        stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+        label="框架转剧本因果冲突推进计划审核",
+        input_names=(
+            TOTAL_EPISODES,
+            CONFLICT_START_EPISODE,
+            BATCH_ENRICHED_EPISODE_PLAN,
+            BATCH_CAUSAL_CONFLICT_PLAN,
+        ),
+        output_types={
+            REVIEW_PASSED: "boolean",
+            REWRITE_REQUIRED: "boolean",
+            BLOCKING_ISSUES: "array",
+        },
+        output_aliases={
+            REVIEW_PASSED: (BATCH_CAUSAL_CONFLICT_REVIEW_VAR, "approved"),
+            REWRITE_REQUIRED: (BATCH_CAUSAL_CONFLICT_REVIEW_VAR,),
+            BLOCKING_ISSUES: (BATCH_CAUSAL_CONFLICT_REVIEW_VAR,),
+        },
+        fastgpt_responsibility="审核当前批次因果冲突推进计划。",
+        local_responsibility="只解析 review JSON 并驱动新链路修订循环，不接入旧 dialogues。",
+        expected_output_kind="review_json",
+        workflow_json_name="框架转剧本因果冲突推进计划审核.json",
+    ),
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE: FastGPTStageContract(
+        stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
+        label="框架转剧本因果冲突推进计划修订",
+        input_names=(
+            TOTAL_EPISODES,
+            CONFLICT_START_EPISODE,
+            BATCH_ENRICHED_EPISODE_PLAN,
+            BATCH_CAUSAL_CONFLICT_PLAN,
+            BATCH_CAUSAL_CONFLICT_REVIEW,
+            CONFLICT_MEMORY,
+        ),
+        output_types={BATCH_CAUSAL_CONFLICT_PLAN: "object"},
+        output_aliases={BATCH_CAUSAL_CONFLICT_PLAN: (BATCH_CAUSAL_CONFLICT_PLAN_VAR,)},
+        fastgpt_responsibility="根据审核结果修订当前批次因果冲突推进计划。",
+        local_responsibility="保留独立 batchCausalConflictPlan，不写入 batch_dialogues/all_dialogues。",
+        workflow_json_name="框架转剧本因果冲突推进计划修订.json",
+    ),
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY: FastGPTStageContract(
+        stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
+        label="框架转剧本因果冲突记忆",
+        input_names=(BATCH_CAUSAL_CONFLICT_PLAN, CONFLICT_MEMORY, CONFLICT_START_EPISODE),
+        output_types={CONFLICT_MEMORY: "string"},
+        output_aliases={CONFLICT_MEMORY: (CONFLICT_MEMORY_VAR,)},
+        fastgpt_responsibility="基于当前批次因果冲突推进计划生成下一批 conflictMemory。",
+        local_responsibility="维护新链路 conflictMemory，不复用旧 dialogue_memory。",
+        workflow_json_name="框架转剧本因果冲突记忆存储.json",
+    ),
+    STAGE_FRAMEWORK_SCRIPT_WRITE: FastGPTStageContract(
+        stage_name=STAGE_FRAMEWORK_SCRIPT_WRITE,
+        label="框架转剧本正文对白融合编写",
+        input_names=(
+            TOTAL_EPISODES,
+            SCRIPT_START_EPISODE,
+            EPISODE_WORD_COUNT,
+            BATCH_ENRICHED_EPISODE_PLAN,
+            BATCH_CAUSAL_CONFLICT_PLAN,
+            SCENE_DICTIONARY,
+            APPEARANCE_MAPPING,
+            SCRIPT_WORLD_RULES_DIGEST,
+            SCRIPT_MEMORY,
+        ),
+        output_types={BATCH_SCRIPT_TEXT: "string"},
+        output_aliases={BATCH_SCRIPT_TEXT: (BATCH_SCRIPT_TEXT_VAR,)},
+        fastgpt_responsibility="直接生成当前批次正文对白融合稿 batchScriptText。",
+        local_responsibility="新链路正文阶段不依赖 all_dialogues，不调用旧 script_writing。",
+        expected_output_kind="script_text",
+        workflow_json_name="框架转剧本正文对白融合编写.json",
+    ),
+    STAGE_FRAMEWORK_SCRIPT_REVIEW: FastGPTStageContract(
+        stage_name=STAGE_FRAMEWORK_SCRIPT_REVIEW,
+        label="框架转剧本正文对白融合审核",
+        input_names=(
+            TOTAL_EPISODES,
+            SCRIPT_START_EPISODE,
+            EPISODE_WORD_COUNT,
+            BATCH_ENRICHED_EPISODE_PLAN,
+            BATCH_CAUSAL_CONFLICT_PLAN,
+            BATCH_SCRIPT_TEXT,
+        ),
+        output_types={
+            REVIEW_PASSED: "boolean",
+            REWRITE_REQUIRED: "boolean",
+            BLOCKING_ISSUES: "array",
+        },
+        output_aliases={
+            REVIEW_PASSED: (BATCH_SCRIPT_REVIEW_VAR, "approved"),
+            REWRITE_REQUIRED: (BATCH_SCRIPT_REVIEW_VAR,),
+            BLOCKING_ISSUES: (BATCH_SCRIPT_REVIEW_VAR,),
+        },
+        fastgpt_responsibility="审核当前批次正文对白融合稿。",
+        local_responsibility="只驱动 framework_script_rewrite，不复用旧 dialogue/script review。",
+        expected_output_kind="review_json",
+        workflow_json_name="框架转剧本正文对白融合审核.json",
+    ),
+    STAGE_FRAMEWORK_SCRIPT_REWRITE: FastGPTStageContract(
+        stage_name=STAGE_FRAMEWORK_SCRIPT_REWRITE,
+        label="框架转剧本正文对白融合修订",
+        input_names=(
+            TOTAL_EPISODES,
+            SCRIPT_START_EPISODE,
+            EPISODE_WORD_COUNT,
+            BATCH_ENRICHED_EPISODE_PLAN,
+            BATCH_CAUSAL_CONFLICT_PLAN,
+            BATCH_SCRIPT_TEXT,
+            BATCH_SCRIPT_REVIEW,
+            SCRIPT_MEMORY,
+        ),
+        output_types={BATCH_SCRIPT_TEXT: "string"},
+        output_aliases={BATCH_SCRIPT_TEXT: (BATCH_SCRIPT_TEXT_VAR,)},
+        fastgpt_responsibility="根据审核结果修订当前批次正文对白融合稿。",
+        local_responsibility="保留 batchScriptText，不写入 batch_dialogues/all_dialogues。",
+        expected_output_kind="script_text",
+        workflow_json_name="框架转剧本正文对白融合修订.json",
+    ),
+    STAGE_FRAMEWORK_SCRIPT_MEMORY: FastGPTStageContract(
+        stage_name=STAGE_FRAMEWORK_SCRIPT_MEMORY,
+        label="框架转剧本正文记忆",
+        input_names=(BATCH_SCRIPT_TEXT, SCRIPT_MEMORY, SCRIPT_START_EPISODE),
+        output_types={SCRIPT_MEMORY: "string"},
+        output_aliases={SCRIPT_MEMORY: (SCRIPT_MEMORY_VAR,)},
+        fastgpt_responsibility="基于当前批次正文生成下一批 scriptMemory。",
+        local_responsibility="维护新链路 scriptMemory，不复用旧 last_summary/script_memory。",
+        workflow_json_name="框架转剧本正文记忆存储.json",
     ),
     STAGE_HOOKS: FastGPTStageContract(
         stage_name=STAGE_HOOKS,

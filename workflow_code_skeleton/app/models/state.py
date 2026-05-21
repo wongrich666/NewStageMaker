@@ -9,6 +9,8 @@ from ..workflow_ids import (
     CORE_SCENE_INPUT_VAR,
     EPISODE_PLAN_VAR,
     EPISODE_WORD_COUNT_VAR,
+    LEGACY_EPISODE_WORD_COUNT_VAR,
+    LEGACY_TOTAL_EPISODES_VAR,
     STORY_OUTLINE_VAR,
     TITLE_VAR,
     TOTAL_EPISODES_VAR,
@@ -51,7 +53,9 @@ class WorkflowState:
             {
                 TITLE_VAR: user_input.title,
                 EPISODE_WORD_COUNT_VAR: user_input.episode_word_count,
+                LEGACY_EPISODE_WORD_COUNT_VAR: user_input.episode_word_count,
                 TOTAL_EPISODES_VAR: user_input.total_episodes,
+                LEGACY_TOTAL_EPISODES_VAR: user_input.total_episodes,
                 STORY_OUTLINE_VAR: user_input.story_outline,
                 CORE_SCENE_INPUT_VAR: user_input.core_scene_input,
                 CHARACTER_BIOS_VAR: user_input.character_bios,

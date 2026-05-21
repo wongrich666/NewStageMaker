@@ -75,6 +75,17 @@ from .fastgpt_contracts import (
     STAGE_EPISODE_PLAN_NORMALIZE,
     STAGE_FRAMEWORK,
     STAGE_FRAMEWORK_NATURALIZE,
+    STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE,
+    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+    STAGE_FRAMEWORK_SCENE_DICTIONARY,
+    STAGE_FRAMEWORK_SCRIPT_MEMORY,
+    STAGE_FRAMEWORK_SCRIPT_REVIEW,
+    STAGE_FRAMEWORK_SCRIPT_REWRITE,
+    STAGE_FRAMEWORK_SCRIPT_WRITE,
     STAGE_CHARACTERS,
     STAGE_HOOKS,
     STAGE_HOOK_MEMORY,
@@ -225,6 +236,19 @@ STAGE_API_KEY_ENV_ALIASES: dict[str, tuple[str, ...]] = {
     STAGE_DIALOGUE_REVISE: ("FASTGPT_DIALOGUE_REVISE_API_KEY", "FASTGPT_DIALOGUES_REWRITE_API_KEY", "FASTGPT_DIALOGUE_API_KEY"),
     STAGE_DIALOGUE_MEMORY: ("FASTGPT_DIALOGUE_MEMORY_API_KEY", "FASTGPT_DIALOGUES_MEMORY_API_KEY", "FASTGPT_MEMORY_API_KEY", "FASTGPT_DIALOGUE_API_KEY"),
 }
+FRAMEWORK_TO_SCRIPT_STAGE_API_KEY_ENVS: dict[str, str] = {
+    STAGE_FRAMEWORK_SCENE_DICTIONARY: "FASTGPT_FRAMEWORK_SCENE_DICTIONARY_API_KEY",
+    STAGE_FRAMEWORK_APPEARANCE_MAPPING: "FASTGPT_FRAMEWORK_APPEARANCE_MAPPING_API_KEY",
+    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: "FASTGPT_FRAMEWORK_ENRICHED_EPISODE_PLAN_API_KEY",
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE: "FASTGPT_FRAMEWORK_CAUSAL_CONFLICT_WRITE_API_KEY",
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW: "FASTGPT_FRAMEWORK_CAUSAL_CONFLICT_REVIEW_API_KEY",
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE: "FASTGPT_FRAMEWORK_CAUSAL_CONFLICT_REWRITE_API_KEY",
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY: "FASTGPT_FRAMEWORK_CAUSAL_CONFLICT_MEMORY_API_KEY",
+    STAGE_FRAMEWORK_SCRIPT_WRITE: "FASTGPT_FRAMEWORK_SCRIPT_WRITE_API_KEY",
+    STAGE_FRAMEWORK_SCRIPT_REVIEW: "FASTGPT_FRAMEWORK_SCRIPT_REVIEW_API_KEY",
+    STAGE_FRAMEWORK_SCRIPT_REWRITE: "FASTGPT_FRAMEWORK_SCRIPT_REWRITE_API_KEY",
+    STAGE_FRAMEWORK_SCRIPT_MEMORY: "FASTGPT_FRAMEWORK_SCRIPT_MEMORY_API_KEY",
+}
 SCRIPT_API_PROFILE_STAGE_KEY_ENV_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
     "waibao": {
         STAGE_SCRIPT_WRITING: (
@@ -253,6 +277,8 @@ TEXT_FIRST_MULTI_FIELD_STAGES = {
     STAGE_DIALOGUES_REVIEW,
     STAGE_DIALOGUE_REVIEW,
     STAGE_SCRIPT_REVIEW,
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+    STAGE_FRAMEWORK_SCRIPT_REVIEW,
 }
 PARTIAL_MATCH_MISSING_ERROR_STAGES = {
     STAGE_FRAMEWORK,
@@ -273,6 +299,7 @@ APPEARANCE_MAPPING_OUTPUT_STAGES = {
     STAGE_APPEARANCE_ALIAS_GENERATION,
     STAGE_APPEARANCE_ALIAS_WRITING,
     STAGE_APPEARANCE_ALIAS_REWRITE,
+    STAGE_FRAMEWORK_APPEARANCE_MAPPING,
 }
 APPEARANCE_DETAIL_STAGES = {
     STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -288,6 +315,8 @@ PASS_REVIEW_OUTPUT_STAGES = {
     STAGE_DIALOGUES_REVIEW,
     STAGE_DIALOGUE_REVIEW,
     STAGE_SCRIPT_REVIEW,
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+    STAGE_FRAMEWORK_SCRIPT_REVIEW,
 }
 
 
@@ -730,7 +759,7 @@ class FastGPTClient:
                     continue
                 _set_wire_values(wire, wire_names, variables[canonical_name])
                 continue
-            if canonical_name in {LAST_SUMMARY, HOOK_MEMORY, DIALOGUE_MEMORY, SCRIPT_MEMORY}:
+            if canonical_name in {LAST_SUMMARY, HOOK_MEMORY, DIALOGUE_MEMORY, SCRIPT_MEMORY, "conflictMemory"}:
                 _set_wire_values(wire, wire_names, "")
             elif canonical_name in {ALL_HOOKS, ALL_DIALOGUES, ALL_SCRIPT}:
                 _set_wire_values(wire, wire_names, "")
@@ -743,15 +772,25 @@ class FastGPTClient:
     def _endpoint_for(self, stage_name: str) -> FastGPTEndpoint:
         env_prefix = f"FASTGPT_{stage_name.upper()}"
         profile_aliases = _stage_api_profile_aliases(self._script_api_profile, stage_name)
-        stage_api_key_candidates: list[str] = list(profile_aliases)
-        if stage_name not in STAGE_ENV_PREFIX_API_KEY_BYPASS:
-            stage_api_key_candidates.append(f"{env_prefix}_API_KEY")
-        stage_api_key_candidates.extend(STAGE_API_KEY_ENV_ALIASES.get(stage_name, ()))
-        stage_api_key_candidates.append("FASTGPT_API_KEY")
+        required_framework_key = FRAMEWORK_TO_SCRIPT_STAGE_API_KEY_ENVS.get(stage_name)
+        if required_framework_key:
+            stage_api_key_candidates = [required_framework_key]
+        else:
+            stage_api_key_candidates = list(profile_aliases)
+            if stage_name not in STAGE_ENV_PREFIX_API_KEY_BYPASS:
+                stage_api_key_candidates.append(f"{env_prefix}_API_KEY")
+            stage_api_key_candidates.extend(STAGE_API_KEY_ENV_ALIASES.get(stage_name, ()))
+            stage_api_key_candidates.append("FASTGPT_API_KEY")
         api_key_source, api_key = _env_with_name(
             *stage_api_key_candidates,
         )
         if not api_key:
+            if required_framework_key:
+                raise ValueError(
+                    "缺少三幕十五节拍框架转剧本专用 FastGPT API Key："
+                    f"请在 workflow_code_skeleton/.env 中配置 {required_framework_key}。"
+                    "该新链路不会回退到旧 all_hooks/all_dialogues/dialogues 或 FASTGPT_API_KEY。"
+                )
             raise ValueError(
                 f"缺少 FastGPT API Key：请在 workflow_code_skeleton/.env 中配置 "
                 f"{env_prefix}_API_KEY 或 FASTGPT_API_KEY"

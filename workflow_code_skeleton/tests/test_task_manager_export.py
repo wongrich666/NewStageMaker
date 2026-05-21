@@ -298,6 +298,22 @@ class TaskManagerExportTests(unittest.TestCase):
         self.assertIn("人物服饰说明", text)
         self.assertIn("核心场景", text)
         self.assertIn("剧本正文", text)
+
+    def test_character_setting_export_block_parses_inline_natural_text(self) -> None:
+        snapshot = _snapshot()
+        snapshot["artifacts"]["character_summary"] = (
+            "林夏：作为项目负责人，性格冷静克制，核心目标是保住团队。\n"
+            "顾川（关键对手）：表面强势，实际被旧案束缚。"
+        )
+        snapshot["artifacts"].pop("characters", None)
+        snapshot["artifacts"].pop("character_bios", None)
+
+        block = self.manager._build_character_setting_export_block(snapshot)
+
+        self.assertIsNotNone(block)
+        characters = block["character_setting"]["characters"]  # type: ignore[index]
+        self.assertEqual([item["character_name"] for item in characters], ["林夏", "顾川"])
+        self.assertIn("项目负责人", characters[0]["dramatic_value"])
         self.assertIn("林夏：是故事中的主角", text)
         self.assertIn("顾川：是故事中的关键对手", text)
         self.assertIn("旧港调度塔：悬疑调查场", text)

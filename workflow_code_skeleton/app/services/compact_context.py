@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from .json_utils import parse_json
@@ -258,13 +259,221 @@ def _extract_character_items(value: Any) -> list[dict[str, Any]]:
     if isinstance(candidate, list):
         return [item for item in candidate if isinstance(item, dict)]
     if not isinstance(candidate, dict):
-        return []
+        return _extract_character_items_from_text(value)
+    if isinstance(candidate.get("character_plan"), dict):
+        candidate = candidate["character_plan"]
     if isinstance(candidate.get("character_setting"), dict):
         candidate = candidate["character_setting"]
     items = candidate.get("characters")
     if isinstance(items, list):
         return [item for item in items if isinstance(item, dict)]
-    return []
+    items = candidate.get("main_characters")
+    if isinstance(items, list):
+        result = [_normalize_character_plan_item(item) for item in items if isinstance(item, dict)]
+        return [item for item in result if item]
+    protagonist = candidate.get("protagonist")
+    if isinstance(protagonist, dict):
+        item = _normalize_character_plan_item(protagonist, default_role="主角")
+        return [item] if item else []
+    return _extract_character_items_from_text(value)
+
+
+def _normalize_character_plan_item(
+    item: dict[str, Any],
+    *,
+    default_role: str = "",
+) -> dict[str, Any]:
+    name = _text(item.get("character_name") or item.get("name"))
+    if not name:
+        return {}
+    story_role = _text(item.get("story_role") or item.get("role_type") or default_role)
+    core_motivation = _text(
+        item.get("core_motivation")
+        or item.get("goal")
+        or item.get("core_desire")
+        or item.get("deep_motivation")
+    )
+    flaw = _text(item.get("flaw") or item.get("weaknesses"))
+    arc = _text(item.get("arc") or item.get("growth_arc"))
+    normalized: dict[str, Any] = {
+        "character_name": name,
+        "story_role": story_role or "角色设定",
+        "core_motivation": core_motivation,
+        "dramatic_value": _join_nonempty([core_motivation, flaw, arc], sep="；"),
+    }
+    speech_profile = item.get("speech_profile")
+    if isinstance(speech_profile, dict):
+        normalized["speech_profile"] = speech_profile
+    elif _text(item.get("personality")):
+        normalized["speech_profile"] = {
+            "baseline_register": _short_text(item.get("personality"), limit=80),
+            "sentence_rhythm": "",
+            "keyword_habits": [],
+            "conflict_style": "",
+            "intimacy_style": "",
+            "when_angry": "",
+            "when_hiding_truth": "",
+        }
+    relation_modes = item.get("relation_modes")
+    if isinstance(relation_modes, list):
+        normalized["relation_modes"] = relation_modes
+    elif _text(item.get("relationship_to_protagonist")):
+        relation = _text(item.get("relationship_to_protagonist"))
+        normalized["relation_modes"] = [
+            {
+                "target": "主角",
+                "relation_type": _short_text(relation, limit=60),
+                "default_posture": _short_text(relation, limit=80),
+                "speech_difference": "",
+                "conflict_trigger": "",
+            }
+        ]
+    return normalized
+
+
+def _extract_character_items_from_text(value: Any) -> list[dict[str, Any]]:
+    text = _text(value)
+    if not text:
+        return []
+    blocks = _split_character_text_blocks(text)
+    items: list[dict[str, Any]] = []
+    for block in blocks:
+        item = _character_item_from_text_block(block)
+        if item:
+            items.append(item)
+    return items
+
+
+def _split_character_text_blocks(text: str) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    current_heading = ""
+    current_lines: list[str] = []
+    for raw_line in text.replace("\r", "").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if _looks_like_character_text_heading(line):
+            if current_heading:
+                blocks.append({"heading": current_heading, "lines": current_lines[:]})
+            current_heading = line
+            current_lines = []
+            continue
+        if current_heading:
+            current_lines.append(line)
+            continue
+        inline = _split_inline_character_line(line)
+        if inline:
+            blocks.append(inline)
+    if current_heading:
+        blocks.append({"heading": current_heading, "lines": current_lines[:]})
+    return blocks
+
+
+def _looks_like_character_text_heading(line: str) -> bool:
+    text = _strip_list_marker(line)
+    if not text:
+        return False
+    if text.startswith("【") and "】" in text:
+        suffix = text.split("】", 1)[1].strip()
+        return bool(suffix)
+    if re.match(r"^[\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9·]{1,12}[（(][^）)]{1,20}[）)]", text):
+        return True
+    return False
+
+
+def _split_inline_character_line(line: str) -> dict[str, Any] | None:
+    text = _strip_list_marker(line)
+    match = re.match(
+        r"^(?P<name>[\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9·]{1,12})(?:[（(](?P<role>[^）)]{1,20})[）)])?[：:]\s*(?P<body>.+)$",
+        text,
+    )
+    if not match:
+        return None
+    role = _text(match.group("role"))
+    body = _text(match.group("body"))
+    lines = [body] if body else []
+    heading = f"【{role or '角色'}】{match.group('name')}"
+    return {"heading": heading, "lines": lines}
+
+
+def _character_item_from_text_block(block: dict[str, Any]) -> dict[str, Any] | None:
+    heading = _text(block.get("heading"))
+    lines = [str(line).strip() for line in block.get("lines") or [] if str(line).strip()]
+    name, role_hint = _parse_character_text_heading(heading)
+    if not name:
+        return None
+    fields = _parse_character_text_fields(lines)
+    body = "\n".join(lines).strip()
+    story_role = _first_field(fields, "人物定位", "身份定位", "故事角色", "角色定位") or role_hint
+    core_motivation = _first_field(fields, "核心欲望", "核心动机", "深层动机", "外部目标")
+    dramatic_value = _first_field(fields, "主线作用", "戏剧价值", "人物小传", "关系特点")
+    speech = _first_field(fields, "说话方式", "语言风格", "对白风格", "语气特点")
+    relation = _first_field(fields, "关系特点", "与主角关系", "与其他主要角色关系")
+    summary = _short_text(body, limit=220)
+    item: dict[str, Any] = {
+        "character_name": name,
+        "story_role": _short_text(story_role or summary or "角色设定", limit=100),
+        "core_motivation": _short_text(core_motivation or summary, limit=160),
+        "dramatic_value": _short_text(dramatic_value or summary, limit=180),
+    }
+    if speech or summary:
+        item["speech_profile"] = {
+            "baseline_register": _short_text(speech or summary, limit=80),
+            "sentence_rhythm": "",
+            "keyword_habits": [],
+            "conflict_style": "",
+            "intimacy_style": "",
+            "when_angry": "",
+            "when_hiding_truth": "",
+        }
+    if relation:
+        item["relation_modes"] = [
+            {
+                "target": "",
+                "relation_type": _short_text(relation, limit=60),
+                "default_posture": _short_text(relation, limit=80),
+                "speech_difference": "",
+                "conflict_trigger": "",
+            }
+        ]
+    return item
+
+
+def _parse_character_text_heading(heading: str) -> tuple[str, str]:
+    text = _strip_list_marker(heading)
+    match = re.match(r"^【(?P<label>[^】]+)】\s*(?P<name>.+)$", text)
+    if match:
+        name = re.split(r"[（(：:]", match.group("name"), maxsplit=1)[0].strip()
+        return name, match.group("label").strip()
+    match = re.match(r"^(?P<name>.+?)[（(](?P<role>[^）)]+)[）)]", text)
+    if match:
+        return match.group("name").strip(), match.group("role").strip()
+    return re.split(r"[：:]", text, maxsplit=1)[0].strip(), ""
+
+
+def _parse_character_text_fields(lines: list[str]) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    current_key = ""
+    for line in lines:
+        match = re.match(r"^(?P<key>[^：:]{1,24})[:：]\s*(?P<value>.*)$", line)
+        if match:
+            current_key = match.group("key").strip()
+            fields[current_key] = match.group("value").strip()
+        elif current_key:
+            fields[current_key] = f"{fields.get(current_key, '')}\n{line}".strip()
+    return fields
+
+
+def _first_field(fields: dict[str, str], *keys: str) -> str:
+    for key in keys:
+        value = _text(fields.get(key))
+        if value:
+            return value
+    return ""
+
+
+def _strip_list_marker(line: str) -> str:
+    return re.sub(r"^\s*(?:[-*•]\s*|\d+[.、]\s*)", "", _text(line)).strip()
 
 
 def _extract_scene_items(value: Any) -> list[dict[str, Any]]:

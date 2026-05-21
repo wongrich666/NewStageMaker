@@ -458,7 +458,7 @@ class RuntimeExportStoreMixin:
         structured = self._snapshot_export_value(
             snapshot,
             artifact_keys=("appearance_mapping",),
-            variable_keys=(APPEARANCE_MAPPING, APPEARANCE_MAPPING_VAR),
+            variable_keys=(APPEARANCE_MAPPING, APPEARANCE_MAPPING_VAR, APPEARANCE_ALIAS_MAPPING_VAR),
         )
         if not has_meaningful_content(structured):
             logger.info("appearance_natural_language_export status=skip_missing_mapping project_id=%s", project_id)
@@ -698,7 +698,7 @@ class RuntimeExportStoreMixin:
         structured = self._snapshot_export_value(
             snapshot,
             artifact_keys=("appearance_mapping",),
-            variable_keys=(APPEARANCE_MAPPING, APPEARANCE_MAPPING_VAR),
+            variable_keys=(APPEARANCE_MAPPING, APPEARANCE_MAPPING_VAR, APPEARANCE_ALIAS_MAPPING_VAR),
         )
         characters = _appearance_character_items_from_value(structured)
         if not characters:
@@ -1041,6 +1041,10 @@ class RuntimeExportStoreMixin:
                 continue
             if current_heading:
                 current_lines.append(line)
+                continue
+            inline_block = self._parse_inline_character_block(line)
+            if inline_block:
+                blocks.append(inline_block)
         if current_heading:
             blocks.append({"heading": current_heading, "lines": current_lines[:]})
         return blocks
@@ -1054,6 +1058,8 @@ class RuntimeExportStoreMixin:
         if text.startswith("【") and "】" in text and "人物小传" not in text and "主要角色设定" not in text:
             suffix = text.split("】", 1)[1].strip()
             return bool(suffix)
+        if re.match(r"^[\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9·]{1,12}[（(][^）)]{1,20}[）)]", text):
+            return True
         return False
 
     def _parse_character_heading(self, heading: str) -> tuple[str, str]:
@@ -1069,7 +1075,25 @@ class RuntimeExportStoreMixin:
         if match:
             name = re.split(r"[（(]", match.group("name"), maxsplit=1)[0].strip()
             return name, match.group("label").strip()
+        match = re.match(r"^(?P<name>.+?)[（(](?P<role>[^）)]+)[）)]", text)
+        if match:
+            return match.group("name").strip(), match.group("role").strip()
         return text, ""
+
+    def _parse_inline_character_block(self, line: str) -> dict[str, Any] | None:
+        text = re.sub(r"^\s*(?:[-*•]\s*|\d+[.、]\s*)", "", str(line or "").strip()).strip()
+        match = re.match(
+            r"^(?P<name>[\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9·]{1,12})(?:[（(](?P<role>[^）)]{1,20})[）)])?[：:]\s*(?P<body>.+)$",
+            text,
+        )
+        if not match:
+            return None
+        role = str(match.group("role") or "角色").strip()
+        name = str(match.group("name") or "").strip()
+        body = str(match.group("body") or "").strip()
+        if not name or not body:
+            return None
+        return {"heading": f"【{role}】{name}", "lines": [f"人物小传：{body}"]}
 
     def _parse_inline_fields(self, lines: list[str]) -> dict[str, str]:
         fields: dict[str, str] = {}

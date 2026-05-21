@@ -5,7 +5,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..workflow_ids import APPEARANCE_MAPPING_VAR, CHARACTER_VAR, SCENE_VAR, WORLDVIEW_VAR
+from ..workflow_ids import (
+    APPEARANCE_ALIAS_MAPPING_VAR,
+    APPEARANCE_MAPPING_VAR,
+    CHARACTER_VAR,
+    SCENE_VAR,
+    WORLDVIEW_VAR,
+)
 from .json_utils import parse_json, strip_code_fence
 
 STAGE_WORLDVIEW = "worldview"
@@ -18,6 +24,7 @@ WORLDVIEW_FIELD = "worldview"
 CHARACTERS_FIELD = "characters"
 SCENES_FIELD = "scenes"
 APPEARANCE_MAPPING_FIELD = "appearance_mapping"
+APPEARANCE_MAPPING_FIELD_NAMES = {APPEARANCE_MAPPING_FIELD, "appearanceMapping"}
 WORLDVIEW_REQUIRED_STRING_FIELDS = (
     "worldview_summary",
     "era_background",
@@ -128,6 +135,7 @@ SCENE_WRAPPER_KEYS = (
 APPEARANCE_WRAPPER_KEYS = (
     APPEARANCE_MAPPING_FIELD,
     APPEARANCE_MAPPING_VAR,
+    APPEARANCE_ALIAS_MAPPING_VAR,
     "appearanceMapping",
     "appearance_mapping_json",
     "appearanceMappingJson",
@@ -592,7 +600,7 @@ def describe_repairable_stage_output_issue(
         return _describe_characters_output_issue(value)
     if stage_name == STAGE_SCENES and field_name == SCENES_FIELD:
         return _describe_scenes_output_issue(value)
-    if stage_name in APPEARANCE_MAPPING_STAGE_NAMES and field_name == APPEARANCE_MAPPING_FIELD:
+    if stage_name in APPEARANCE_MAPPING_STAGE_NAMES and field_name in APPEARANCE_MAPPING_FIELD_NAMES:
         return describe_appearance_mapping_output_issue(value)
     return None
 

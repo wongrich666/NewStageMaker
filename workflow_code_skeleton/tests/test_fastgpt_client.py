@@ -37,9 +37,11 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     STAGE_CHARACTERS,
     STAGE_CHARACTERS_NATURALIZE,
     STAGE_DIALOGUE_REVIEW,
+    STAGE_DIALOGUES_WRITING,
     STAGE_EPISODE_PLAN_NORMALIZE,
     STAGE_FRAMEWORK,
     STAGE_FRAMEWORK_NATURALIZE,
+    STAGE_HOOKS_WRITING,
     STAGE_HOOK_REVIEW,
     STAGE_SCENES,
     STAGE_SCRIPT_REWRITE,
@@ -60,6 +62,7 @@ from workflow_code_skeleton.app.workflow_ids import (
     APPEARANCE_REVIEW_VAR,
     CHARACTER_NATURAL_LANGUAGE_VAR,
     CHARACTER_VAR,
+    DIALOGUE_CHARACTER_INPUT_VAR,
     DIALOGUE_FINAL_VAR,
     EPISODE_PLAN_VAR,
     EPISODE_WORD_COUNT_VAR,
@@ -1003,6 +1006,44 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         body_variables = dict(client.request_bodies[0]["variables"])
         self.assertEqual(body_variables[CHARACTER_VAR], inputs[CHARACTERS])
         self.assertNotIn("【场景结果JSON】", str(body_variables[CHARACTER_VAR]))
+
+    def test_hook_dialogue_and_script_wire_payloads_include_character_content(self) -> None:
+        client = FastGPTClient()
+        variables = {
+            WORLDVIEW: "世界观内容",
+            CHARACTERS: "人设内容-林夏",
+            SCENES: "场景内容",
+            STORY_OUTLINE: "故事大纲",
+            EPISODE_PLAN: "分集计划",
+            APPEARANCE_MAPPING: "服装映射",
+            TOTAL_EPISODES: 10,
+            BATCH_START_EPISODE: 1,
+            EPISODE_WORD_COUNT: 600,
+            LAST_SUMMARY: "",
+            ALL_HOOKS: {"episodes": []},
+            ALL_DIALOGUES: {"episode_dialogue_blocks": []},
+            "all_script": "",
+        }
+
+        hook_wire = client._build_wire_variables(  # type: ignore[attr-defined]
+            STAGE_HOOKS_WRITING,
+            variables,
+            contract_for(STAGE_HOOKS_WRITING),
+        )
+        dialogue_wire = client._build_wire_variables(  # type: ignore[attr-defined]
+            STAGE_DIALOGUES_WRITING,
+            variables,
+            contract_for(STAGE_DIALOGUES_WRITING),
+        )
+        script_wire = client._build_wire_variables(  # type: ignore[attr-defined]
+            STAGE_SCRIPT_WRITING,
+            variables,
+            contract_for(STAGE_SCRIPT_WRITING),
+        )
+
+        self.assertEqual(hook_wire[CHARACTER_VAR], variables[CHARACTERS])
+        self.assertEqual(dialogue_wire[DIALOGUE_CHARACTER_INPUT_VAR], variables[CHARACTERS])
+        self.assertIn("人设内容-林夏", str(script_wire[CHARACTER_VAR]))
 
     def test_script_rewrite_keeps_legacy_hook_dialogue_aliases_and_character_scene_bundle(self) -> None:
         response = {

@@ -155,6 +155,7 @@ from ..utils.user_visible_text import has_meaningful_content, is_meaningful_text
 from ..workflow_ids import (
     APPEARANCE_NATURAL_LANGUAGE_VAR,
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
+    APPEARANCE_ALIAS_MAPPING_VAR,
     APPEARANCE_MAPPING_VAR,
     APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
     APPEARANCE_REQUIREMENTS_VAR,
@@ -1642,9 +1643,30 @@ def _compact_stage_text(
             exc_info=True,
         )
         compact = ""
-    if compact:
+    if compact and _compact_payload_has_meaningful_content(compact):
         return compact
     return str(fallback or "").strip()
+
+
+def _compact_payload_has_meaningful_content(value: str) -> bool:
+    try:
+        parsed = parse_json(value)
+    except Exception:
+        return bool(str(value or "").strip())
+    if isinstance(parsed, dict):
+        for item in parsed.values():
+            if isinstance(item, list) and item:
+                return True
+            if isinstance(item, dict) and _compact_payload_has_meaningful_content(
+                json.dumps(item, ensure_ascii=False)
+            ):
+                return True
+            if isinstance(item, str) and item.strip():
+                return True
+        return False
+    if isinstance(parsed, list):
+        return bool(parsed)
+    return bool(parsed)
 
 
 def _build_hook_stage_context(
@@ -1678,7 +1700,7 @@ def _build_hook_stage_context(
     context[CHARACTERS] = _compact_stage_text(
         variables.get(CHARACTERS),
         builder=build_compact_character_context_for_hooks,
-        fallback="",
+        fallback=context.get(CHARACTERS),
     )
     context[SCENES] = _compact_stage_text(
         variables.get(SCENES),
@@ -1727,7 +1749,7 @@ def _build_dialogue_stage_context(
     context[CHARACTERS] = _compact_stage_text(
         variables.get(CHARACTERS),
         builder=build_compact_character_context_for_dialogues,
-        fallback="",
+        fallback=context.get(CHARACTERS),
     )
     context[SCENES] = _compact_stage_text(
         variables.get(SCENES),
@@ -4407,7 +4429,7 @@ def _build_script_stage_context(
     context[CHARACTERS] = _compact_stage_text(
         variables.get(CHARACTERS),
         builder=build_compact_character_context_for_script,
-        fallback="",
+        fallback=context.get(CHARACTERS),
     )
     context[SCENES] = _compact_stage_text(
         variables.get(SCENES),
@@ -6507,6 +6529,7 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
         if normalized_mapping is not None:
             state.set_var(APPEARANCE_MAPPING, normalized_mapping)
             state.set_var(APPEARANCE_MAPPING_VAR, json.dumps(normalized_mapping, ensure_ascii=False))
+            state.set_var(APPEARANCE_ALIAS_MAPPING_VAR, json.dumps(normalized_mapping, ensure_ascii=False))
     if CHARACTER_REGISTRY in variables:
         state.set_var(CHARACTER_REGISTRY, variables[CHARACTER_REGISTRY])
     if CHARACTER_ALIAS_REGISTRY in variables:
