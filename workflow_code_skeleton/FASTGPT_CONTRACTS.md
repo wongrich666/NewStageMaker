@@ -51,6 +51,17 @@
 | `appearance_alias_review` | `服装版本映射审核.json` | `passed`, `rewrite_required`, `blocking_issues` |
 | `appearance_alias_rewrite` | `服装版本映射修订.json` | `appearance_mapping` |
 | `appearance_alias_unstructured` | `自然语言服装版本映射.json` | `c7VnQ4eX` |
+| `framework_scene_dictionary` | `08_框架转剧本场景字典.json` | `sceneDictionary`, `scriptWorldRulesDigest` |
+| `framework_appearance_mapping` | `09_框架转剧本外观映射.json` | `appearanceMapping` |
+| `framework_enriched_episode_plan` | `10_框架转剧本增强分集计划.json` | `allEnrichedEpisodePlan`, `batchEnrichedEpisodePlan` |
+| `framework_causal_conflict_write` | `框架转剧本因果冲突推进计划编写.json` | `batchCausalConflictPlan` |
+| `framework_causal_conflict_review` | `框架转剧本因果冲突推进计划审核.json` | `passed`, `rewrite_required`, `blocking_issues` |
+| `framework_causal_conflict_rewrite` | `框架转剧本因果冲突推进计划修订.json` | `batchCausalConflictPlan` |
+| `framework_causal_conflict_memory` | `框架转剧本因果冲突记忆存储.json` | `conflictMemory` |
+| `framework_script_write` | `框架转剧本正文对白融合编写.json` | `batchScriptText` |
+| `framework_script_review` | `框架转剧本正文对白融合审核.json` | `passed`, `rewrite_required`, `blocking_issues` |
+| `framework_script_rewrite` | `框架转剧本正文对白融合修订.json` | `batchScriptText` |
+| `framework_script_memory` | `框架转剧本正文记忆存储.json` | `scriptMemory` |
 | `hooks_writing` / `hook_write` | `开头冲突钩子编写.json` | `batch_hooks` |
 | `hooks_review` / `hook_review` | `开头冲突钩子审核.json` | `passed`, `rewrite_required`, `blocking_issues` |
 | `hooks_rewrite` / `hook_revise` | `开头冲突钩子修订.json` | `batch_hooks` |
@@ -77,6 +88,14 @@
 | `dialogues` | 当前批 dialogues 逻辑阶段名，实际落到 `dialogues_writing/review/rewrite` |
 | `script` | 当前批 script 逻辑阶段名，实际落到 `script_writing/review/rewrite/script_memory` |
 
+### 三幕十五节拍框架转剧本专用链路
+
+`script_format_mode` 为 `framework_to_script` 或 `better_framework_script` 时，Python 会进入独立的新链路：
+
+`07 framework_plan_package -> 08 sceneDictionary -> 09 appearanceMapping -> 10 enrichedEpisodePlan -> 因果冲突推进计划 -> 正文对白融合生成 -> final`
+
+这条链路只服务“三幕十五节拍框架输出后的框架到剧本生成”，不会进入旧的 `all_hooks -> all_dialogues -> all_script` 三段式，也不会调用 `dialogue_write / dialogue_review / dialogue_rewrite / dialogue_memory`。旧普通新建剧本链路仍保留 `all_hooks / all_dialogues / all_script`。
+
 ## 3. 当前关键变量语义
 
 ### 正式结构化变量
@@ -97,6 +116,18 @@
 | `batch_script` / `all_script` | 当前批 / 全量 script |
 | `last_summary` | 当前滚动 script memory |
 | `final_script` | 最终完整剧本 |
+| `framework_plan_package` | 三幕十五节拍第 07 阶段输出策划包，新链路起点 |
+| `sceneDictionary` | 新链路 08 场景字典 |
+| `scriptWorldRulesDigest` | 新链路正文世界规则摘要 |
+| `appearanceMapping` | 新链路 09 外观映射；旧链路兼容 `appearance_mapping` |
+| `allEnrichedEpisodePlan` / `batchEnrichedEpisodePlan` | 新链路 10 全量 / 当前批增强分集计划 |
+| `conflictStartEpisode` | 新链路因果冲突批次起始集 |
+| `batchCausalConflictPlan` / `batchCausalConflictReview` | 新链路当前批因果冲突推进计划 / 审核结果 |
+| `conflictMemory` | 新链路因果冲突滚动记忆 |
+| `scriptStartEpisode` | 新链路正文批次起始集 |
+| `episodeWordCount` | 新链路每集正文字数 |
+| `batchScriptText` / `batchScriptReview` | 新链路当前批正文对白融合稿 / 审核结果 |
+| `scriptMemory` | 新链路正文滚动记忆，不复用旧 `last_summary` |
 
 ### 辅助自然语言变量
 
@@ -339,6 +370,20 @@ appearance 正式结构化来源白名单顺序：
 - `FASTGPT_SCRIPT_REWRITE_API_KEY`
 - `FASTGPT_SCRIPT_MEMORY_API_KEY`
 - `FASTGPT_FINAL_API_KEY`
+
+三幕十五节拍框架转剧本专用链路必须独立配置下面的 key。缺少任意一个当前阶段 key 时，代码会明确报出缺少的变量名，并拒绝回退到旧 `all_hooks / all_dialogues / dialogues / FASTGPT_API_KEY`：
+
+- `FASTGPT_FRAMEWORK_SCENE_DICTIONARY_API_KEY`
+- `FASTGPT_FRAMEWORK_APPEARANCE_MAPPING_API_KEY`
+- `FASTGPT_FRAMEWORK_ENRICHED_EPISODE_PLAN_API_KEY`
+- `FASTGPT_FRAMEWORK_CAUSAL_CONFLICT_WRITE_API_KEY`
+- `FASTGPT_FRAMEWORK_CAUSAL_CONFLICT_REVIEW_API_KEY`
+- `FASTGPT_FRAMEWORK_CAUSAL_CONFLICT_REWRITE_API_KEY`
+- `FASTGPT_FRAMEWORK_CAUSAL_CONFLICT_MEMORY_API_KEY`
+- `FASTGPT_FRAMEWORK_SCRIPT_WRITE_API_KEY`
+- `FASTGPT_FRAMEWORK_SCRIPT_REVIEW_API_KEY`
+- `FASTGPT_FRAMEWORK_SCRIPT_REWRITE_API_KEY`
+- `FASTGPT_FRAMEWORK_SCRIPT_MEMORY_API_KEY`
 
 辅助工具另用：
 

@@ -50,6 +50,7 @@ from .fastgpt_contracts import (
     DIALOGUE_MEMORY,
     HOOK_MEMORY,
     LAST_SUMMARY,
+    LEGACY_APPEARANCE_MAPPING,
     LEGACY_INPUT_ALIASES,
     LEGACY_WIRE_INPUT_ALIASES_OVERRIDES,
     MAX_RETRIES,
@@ -2858,6 +2859,7 @@ def _iter_appearance_answer_node_candidates(
             for key in (
                 output_alias,
                 APPEARANCE_MAPPING,
+                LEGACY_APPEARANCE_MAPPING,
                 "scene_setting",
                 APPEARANCE_NATURAL_LANGUAGE_VAR,
                 CORE_SCENE_FINAL_VAR,
@@ -2881,6 +2883,7 @@ def _iter_appearance_choice_json_candidates(
                 key in candidate
                 for key in (
                     APPEARANCE_MAPPING,
+                    LEGACY_APPEARANCE_MAPPING,
                     "scene_setting",
                     APPEARANCE_NATURAL_LANGUAGE_VAR,
                     CORE_SCENE_FINAL_VAR,
@@ -2990,7 +2993,7 @@ def _coerce_appearance_candidate(
     if CORE_SCENE_FINAL_VAR in current:
         return None, f"候选是 {CORE_SCENE_FINAL_VAR}，不是 appearance_mapping", alias_empty
 
-    for key in (APPEARANCE_MAPPING_VAR, APPEARANCE_MAPPING):
+    for key in (APPEARANCE_MAPPING_VAR, APPEARANCE_MAPPING, LEGACY_APPEARANCE_MAPPING):
         if key not in current:
             continue
         wrapped = current.get(key)
