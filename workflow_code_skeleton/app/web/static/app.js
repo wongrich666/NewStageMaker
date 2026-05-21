@@ -1575,7 +1575,7 @@ startRuntimeDebugPolling();
     state.taskId = snapshot.task_id || null;
     state.status = snapshot.status || "idle";
 
-    if (state.taskId && String(state.taskId) !== state.lastDebugTaskId) {
+    if (window.scriptMakerConfig?.enableRuntimeDebugPanel === true && state.taskId && String(state.taskId) !== state.lastDebugTaskId) {
       state.lastConsoleLogIndex = 0;
       state.lastDebugError = "";
       fetchRuntimeDebug().catch((error) => {
@@ -1671,7 +1671,7 @@ startRuntimeDebugPolling();
     els.pauseBtn.disabled = isActionLoading("pause") || !(state.taskId && ["running", "pending"].includes(state.status));
     els.resumeBtn.disabled = isActionLoading("resume") || !(state.taskId && RESUMABLE_STATUSES.has(state.status));
     els.terminateBtn.disabled = isActionLoading("terminate") || !(state.taskId && TERMINATABLE_STATUSES.has(state.status));
-    els.clearBtn.disabled = !isAuthenticated();
+    els.clearBtn.disabled = !isAuthenticated() || !canClearCurrentInput();
     els.saveBtn.disabled = isActionLoading("download") || !isAuthenticated() || !hasProject || !hasFinal;
     if (els.confirmCompletionBtn) {
       els.confirmCompletionBtn.disabled = isActionLoading("confirmCompletion") || !isAuthenticated() || !canConfirmCompletion;
@@ -2254,14 +2254,48 @@ startRuntimeDebugPolling();
       builtin: Boolean(tag.builtin),
       pinned: Boolean(tag.pinned),
       description: String(tag.description || ""),
-      prompt_text: String(tag.prompt_text || "")
+      prompt_text: String(tag.prompt_text || ""),
+      stage_prompts: normalizeKnowledgeStagePrompts(tag.stage_prompts || {})
     }));
+    const stagePrompts = mergeSelectedKnowledgeStagePrompts(tags);
     return {
       selected_preference_tag_ids: [...state.selectedKnowledgeTagIds],
       selected_preference_tags: tags,
       user_preference_prompt: String(els.userPreferenceInput?.value || ""),
-      user_knowledge_tag_prompt: String(state.userKnowledgeTagPrompt || "")
+      user_knowledge_tag_prompt: String(state.userKnowledgeTagPrompt || ""),
+      user_knowledge_stage_prompts: stagePrompts,
+      prompt_preferences: {
+        stage_prompts: stagePrompts
+      }
     };
+  }
+
+  function normalizeKnowledgeStagePrompts(value) {
+    const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    return {
+      basic: String(source.basic || ""),
+      worldview: String(source.worldview || ""),
+      character: String(source.character || ""),
+      beat: String(source.beat || ""),
+      storylines: String(source.storylines || ""),
+      guide: String(source.guide || ""),
+      package: String(source.package || "")
+    };
+  }
+
+  function mergeSelectedKnowledgeStagePrompts(tags) {
+    const result = normalizeKnowledgeStagePrompts({});
+    (tags || []).forEach((tag) => {
+      const name = String(tag.name || tag.id || "").trim();
+      const prompts = normalizeKnowledgeStagePrompts(tag.stage_prompts || {});
+      Object.keys(result).forEach((stageKey) => {
+        const text = String(prompts[stageKey] || "").trim();
+        if (!text) return;
+        const section = `【${name}】\n${text}`;
+        result[stageKey] = result[stageKey] ? `${result[stageKey]}\n\n${section}` : section;
+      });
+    });
+    return result;
   }
 
   function attachUserKnowledgePayload(payload) {
@@ -2766,6 +2800,10 @@ startRuntimeDebugPolling();
 
   function clearCurrentInput() {
     if (!requireLogin()) return;
+    if (!canClearCurrentInput()) {
+      showToast("不能清空输入", "当前策划已开始，不能清空输入；如需新建，请点击新建剧本。");
+      return;
+    }
     clearDraft();
     els.expectationInput.value = "";
     els.characterCountInput.value = 5;
@@ -2779,6 +2817,23 @@ startRuntimeDebugPolling();
     syncExpectationInputHeight();
     syncButtons();
     els.formHint.textContent = "输入已清空。";
+  }
+
+  function canClearCurrentInput() {
+    const status = String(state.status || "idle");
+    const hasProject = Boolean(state.projectId);
+    const hasTask = Boolean(state.taskId);
+    if (!hasProject && !hasTask) return true;
+    const snapshot = state.latestSnapshot || {};
+    const hasGenerated = Boolean(
+      snapshot.has_final
+      || snapshot.final_output
+      || snapshot.output
+      || snapshot.generated_episodes
+      || snapshot.current_stage
+      || snapshot.current_node_id
+    );
+    return ["idle", "draft"].includes(status) && !hasGenerated;
   }
 
   function saveFinalScript() {

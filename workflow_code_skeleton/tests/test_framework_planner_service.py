@@ -983,7 +983,9 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
                 payload = service.run_framework_planner_stage("07", _stage_07_payload())
 
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["data"]["framework_plan_package"], {})
+        self.assertIsInstance(payload["data"]["framework_plan_package"], dict)
+        self.assertIsInstance(payload["data"]["framework_plan_package"].get("beat_checkpoint_timeline"), list)
+        self.assertIsInstance(payload["data"]["framework_plan_package"].get("character_storylines"), list)
         self.assertIsInstance(payload["data"]["validation_report"].get("parse_warning"), list)
         self.assertTrue(payload["raw"]["parse_warning"])
 

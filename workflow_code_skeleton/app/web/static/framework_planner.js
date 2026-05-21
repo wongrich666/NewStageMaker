@@ -3,6 +3,7 @@
   const STORAGE_KEY = config.storageKey || "frameworkPlannerState.v2";
   const LEGACY_STORAGE_KEY = "new_stage_maker_framework_planner_v2";
   const PREFERENCE_STORAGE_KEY = config.preferenceStorageKey || "frameworkPlannerPromptPreferences.v1";
+  const KNOWLEDGE_PANEL_STORAGE_KEY = config.knowledgePanelStorageKey || "frameworkPlannerKnowledgePanelOpen.v1";
   const API_BASE = config.apiBase || "/api/framework-planner";
   const authToken = String(config.authToken || "").trim();
   const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "display_text", "choices", "usage"];
@@ -214,11 +215,12 @@
       guide: false,
     },
     knowledge: {
-      open: false,
+      open: readKnowledgePanelOpen(),
       loading: false,
       status: "",
       tags: [],
       selectedIds: [],
+      tagPromptText: "",
       editingId: "",
       formOpen: false,
       form: emptyKnowledgeTagForm(),
@@ -1275,6 +1277,34 @@
     return JSON.stringify(value == null ? {} : value, null, 2);
   }
 
+  function readKnowledgePanelOpen() {
+    try {
+      return window.localStorage.getItem(KNOWLEDGE_PANEL_STORAGE_KEY) === "1";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function persistKnowledgePanelOpen(open) {
+    try {
+      window.localStorage.setItem(KNOWLEDGE_PANEL_STORAGE_KEY, open ? "1" : "0");
+    } catch (error) {
+      // ignore storage write errors
+    }
+  }
+
+  function stagePromptLabel(stageKey) {
+    return {
+      basic: "01 基础信息",
+      worldview: "02 世界观",
+      character: "03 人设",
+      beat: "04 十五节拍",
+      storylines: "05 人物故事线",
+      guide: "06 改编指引",
+      package: "07 最终策划包",
+    }[stageKey] || stageKey;
+  }
+
   function emptyKnowledgeTagForm() {
     return {
       id: "",
@@ -1314,9 +1344,10 @@
 
   function knowledgePayloadFields(stageKey) {
     const tags = selectedKnowledgeTags();
+    const selectedIds = (ui.knowledge.selectedIds || []).map((item) => String(item || "").trim()).filter(Boolean);
     const stagePrompts = normalizeStagePrompts((state.prompt_preferences || {}).stage_prompts || {});
     return {
-      selected_preference_tag_ids: tags.map((tag) => String(tag.id || "")).filter(Boolean),
+      selected_preference_tag_ids: selectedIds,
       selected_preference_tags: tags,
       user_preference_prompt: String((state.prompt_preferences || {}).script_preference || ""),
       user_knowledge_tag_prompt: String(ui.knowledge.tagPromptText || ""),
@@ -1628,6 +1659,151 @@
           <button class="fp-btn small danger subtle" data-action="delete-asset" data-project-id="${escapeHtml(projectId)}">删除</button>
         </div>
       </article>
+    `;
+  }
+
+  function renderKnowledgePanel() {
+    const selectedTags = selectedKnowledgeTags();
+    const missingIds = (ui.knowledge.selectedIds || []).filter((id) => !selectedTags.some((tag) => String(tag.id || "") === String(id)));
+    const builtinTags = (ui.knowledge.tags || []).filter((tag) => tag.builtin);
+    const customTags = (ui.knowledge.tags || []).filter((tag) => !tag.builtin);
+    const selectedLabel = selectedTags.length || missingIds.length
+      ? `${selectedTags.length + missingIds.length} 个已选`
+      : "允许不选择";
+    return `
+      <section class="fp-card fp-knowledge-panel ${ui.knowledge.open ? "is-open" : ""}">
+        <button class="fp-knowledge-toggle" type="button" data-action="toggle-knowledge-panel" aria-expanded="${ui.knowledge.open ? "true" : "false"}">
+          <span>
+            <strong>智慧库标签</strong>
+            <small>${escapeHtml(selectedLabel)} · ${ui.knowledge.status ? escapeHtml(ui.knowledge.status) : "可为每个策划阶段注入不同偏好"}</small>
+          </span>
+          <span class="fp-tag blue">${ui.knowledge.open ? "收起" : "展开"}</span>
+        </button>
+        ${ui.knowledge.open ? `
+          <div class="fp-knowledge-body">
+            <div class="fp-knowledge-actions">
+              <button class="fp-btn small" data-action="refresh-knowledge-tags" ${ui.knowledge.loading ? "disabled" : ""}>${ui.knowledge.loading ? "加载中..." : "刷新标签"}</button>
+              <button class="fp-btn small primary" data-action="apply-knowledge-tags">一键应用到用户偏好</button>
+              <button class="fp-btn small" data-action="new-knowledge-tag">${ui.knowledge.formOpen && !ui.knowledge.editingId ? "收起新建" : "新建自定义标签"}</button>
+            </div>
+            ${ui.knowledge.status ? `<div class="fp-inline-warning compact">${escapeHtml(ui.knowledge.status)}</div>` : ""}
+            ${renderKnowledgeSelected(selectedTags, missingIds)}
+            <div class="fp-knowledge-grid">
+              <div>
+                <h3>系统预设标签</h3>
+                ${renderKnowledgeTagGroup(builtinTags, "暂无系统预设标签。")}
+              </div>
+              <div>
+                <h3>用户自定义标签</h3>
+                ${renderKnowledgeTagGroup(customTags, "暂无自定义标签。")}
+              </div>
+            </div>
+            ${renderKnowledgeStagePreview()}
+            ${ui.knowledge.formOpen ? renderKnowledgeForm() : ""}
+          </div>
+        ` : ""}
+      </section>
+    `;
+  }
+
+  function renderKnowledgeSelected(tags, missingIds) {
+    const items = tags.map((tag) => `<span class="fp-tag ${tag.builtin ? "blue" : "ok"}">${escapeHtml(tag.name || tag.id)}</span>`)
+      .concat((missingIds || []).map((id) => `<span class="fp-tag red">${escapeHtml(id)}（标签已删除）</span>`));
+    return `
+      <div class="fp-knowledge-selected">
+        <strong>当前已选择标签</strong>
+        <div>${items.length ? items.join("") : `<span class="fp-tag lock">未选择标签</span>`}</div>
+      </div>
+    `;
+  }
+
+  function renderKnowledgeTagGroup(tags, emptyText) {
+    if (ui.knowledge.loading && !(ui.knowledge.tags || []).length) {
+      return `<div class="fp-empty small">正在加载智慧库标签...</div>`;
+    }
+    if (!tags.length) {
+      return `<div class="fp-empty small">${escapeHtml(emptyText)}</div>`;
+    }
+    return `
+      <div class="fp-knowledge-list">
+        ${tags.map(renderKnowledgeTagItem).join("")}
+      </div>
+    `;
+  }
+
+  function renderKnowledgeTagItem(tag) {
+    const id = String(tag.id || "");
+    const selected = (ui.knowledge.selectedIds || []).includes(id);
+    return `
+      <label class="fp-knowledge-item">
+        <input type="checkbox" data-knowledge-tag-id="${escapeHtml(id)}" ${selected ? "checked" : ""} />
+        <span>
+          <strong>${escapeHtml(tag.name || id)}</strong>
+          <small>${escapeHtml(tag.category || (tag.builtin ? "系统预设" : "自定义"))} · ${tag.builtin ? "系统预设" : "自定义标签"}</small>
+          ${tag.description ? `<em>${escapeHtml(truncateText(tag.description, 90))}</em>` : ""}
+        </span>
+        <span class="fp-knowledge-item-actions">
+          ${tag.builtin ? `<span class="fp-tag lock">系统预设</span>` : `
+            <button class="fp-btn small" type="button" data-action="edit-knowledge-tag" data-tag-id="${escapeHtml(id)}">编辑</button>
+            <button class="fp-btn small danger subtle" type="button" data-action="delete-knowledge-tag" data-tag-id="${escapeHtml(id)}">删除</button>
+          `}
+        </span>
+      </label>
+    `;
+  }
+
+  function renderKnowledgeStagePreview() {
+    const prompts = normalizeStagePrompts((state.prompt_preferences || {}).stage_prompts || {});
+    return `
+      <div class="fp-knowledge-preview">
+        <div class="fp-card-title-row">
+          <div>
+            <h3>每阶段提示词预览</h3>
+            <p class="fp-card-sub">这里直接读取并写入当前工作台的 <code>prompt_preferences.stage_prompts</code>。</p>
+          </div>
+        </div>
+        <div class="fp-knowledge-stage-grid">
+          ${STAGE_SEQUENCE.map((stageKey) => `
+            <div class="fp-knowledge-stage">
+              <strong>${escapeHtml(stagePromptLabel(stageKey))}</strong>
+              <p>${escapeHtml(truncateText(prompts[stageKey] || "", 120) || "暂无阶段提示词")}</p>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderKnowledgeForm() {
+    const form = ui.knowledge.form || emptyKnowledgeTagForm();
+    const editing = Boolean(ui.knowledge.editingId);
+    return `
+      <div class="fp-knowledge-form">
+        <div class="fp-card-title-row">
+          <div>
+            <h3>${editing ? "编辑自定义标签" : "新建自定义标签"}</h3>
+            <p class="fp-card-sub">通用偏好用于主工作台，阶段提示词用于框架策划 01-07。</p>
+          </div>
+          <button class="fp-btn small" data-action="cancel-knowledge-edit">取消</button>
+        </div>
+        <div class="fp-grid three">
+          <label class="fp-field"><span>名称</span><input data-knowledge-form-key="name" value="${escapeHtml(form.name)}" /></label>
+          <label class="fp-field"><span>分类</span><input data-knowledge-form-key="category" value="${escapeHtml(form.category)}" /></label>
+          <label class="fp-field"><span>描述</span><input data-knowledge-form-key="description" value="${escapeHtml(form.description)}" /></label>
+        </div>
+        <label class="fp-field" style="margin-top:12px"><span>通用偏好 prompt_text</span><textarea data-knowledge-form-key="prompt_text">${escapeHtml(form.prompt_text)}</textarea></label>
+        <div class="fp-knowledge-stage-edit-grid">
+          ${STAGE_SEQUENCE.map((stageKey) => `
+            <label class="fp-field">
+              <span>${escapeHtml(stagePromptLabel(stageKey))}</span>
+              <textarea data-knowledge-stage-key="${escapeHtml(stageKey)}">${escapeHtml((form.stage_prompts || {})[stageKey] || "")}</textarea>
+            </label>
+          `).join("")}
+        </div>
+        <div class="fp-actions">
+          <button class="fp-btn primary" data-action="save-knowledge-tag">${editing ? "保存编辑" : "创建标签"}</button>
+        </div>
+      </div>
     `;
   }
 
@@ -3032,7 +3208,7 @@
     render();
     try {
       await waitForPaint();
-      const payload = cleanOutgoingPayload(attachProjectContext(buildStagePayload(stageKey, options || {})), `stage${stageNo} payload`);
+      const payload = cleanOutgoingPayload(attachProjectContext(attachKnowledgePayload(buildStagePayload(stageKey, options || {}), stageKey)), `stage${stageNo} payload`);
       debugFrontendEvent(`stage${stageNo}_request`, payload, {
         stageKey,
         stageNo,
@@ -3061,7 +3237,7 @@
     } catch (error) {
       state.stage_state[stageKey].status = "error";
       ui.stageErrors[stageKey] = formatStageError(error, stageNo);
-      debugFrontendEvent(`stage${stageNo}_error`, attachProjectContext(buildStagePayload(stageKey, options || {})), {
+      debugFrontendEvent(`stage${stageNo}_error`, attachProjectContext(attachKnowledgePayload(buildStagePayload(stageKey, options || {}), stageKey)), {
         stageKey,
         stageNo,
         message: error && error.message ? error.message : String(error || ""),
@@ -3271,7 +3447,7 @@
     }
     state.feedback[stageKey] = prompt;
     savePromptPreferences(`apply_stage_preference:${stageKey}`);
-    const payload = cleanOutgoingPayload(attachProjectContext(buildStagePayload(stageKey, { revise: hasStageData(stageKey) })), `stage${stageNoForKey(stageKey)} applied-preference payload`);
+    const payload = cleanOutgoingPayload(attachProjectContext(attachKnowledgePayload(buildStagePayload(stageKey, { revise: hasStageData(stageKey) }), stageKey)), `stage${stageNoForKey(stageKey)} applied-preference payload`);
     ui.lastStagePayloadPreview[stageKey] = {
       stageNo: stageNoForKey(stageKey),
       keys: Object.keys(payload).filter((key) => !key.startsWith("_")).slice(0, 12),
@@ -3507,7 +3683,7 @@
     render();
     try {
       while (round <= rounds) {
-        const payload = cleanOutgoingPayload({
+        const payload = cleanOutgoingPayload(attachKnowledgePayload({
           mode: current ? "改写" : "创作",
           project_id: currentProjectId(),
           source_brief: state.source_brief,
@@ -3519,7 +3695,7 @@
           framework_score_report: lastScoreReport,
           adaptation_direction: state.basic_config.adaptation_direction,
           user_requirements: payloadUserRequirements(),
-        }, "stage04 score-loop payload");
+        }, "beat"), "stage04 score-loop payload");
         const beatResponse = await planningApi.runStage("04", payload);
         applyStageResponse("04", beatResponse);
         state.beat_revision_round = round;
@@ -3605,15 +3781,174 @@
   }
 
   function resetState() {
-    const proceed = window.confirm("确认重置当前框架策划工作台的本地状态吗？这会清空本页缓存、阶段数据、偏好提示和临时错误状态。");
+    if (!canClearFrameworkInput()) {
+      showToast("当前策划已开始，不能清空输入；如需新建，请点击新建剧本");
+      return;
+    }
+    const proceed = window.confirm("确认清空当前输入吗？资产、历史版本、cache 和 logs 会保留。");
     if (!proceed) return;
-    storageRemove(STORAGE_KEY);
-    storageRemove(LEGACY_STORAGE_KEY);
-    storageRemove(PREFERENCE_STORAGE_KEY);
-    state = clone(initialState);
+    const assetState = clone(state.asset_state || initialState.asset_state);
+    state.basic_config = clone(initialState.basic_config);
+    state.source_brief = {};
+    state.prompt_preferences = normalizePromptPreferences({});
+    state.asset_state = assetState;
+    state.current_view = "basic";
+    state.feedback = clone(initialState.feedback);
+    state.editors = clone(initialState.editors);
+    state.stage_state = clone(initialState.stage_state);
+    ui.knowledge.selectedIds = [];
+    ui.knowledge.tagPromptText = "";
     syncStageFlow(state);
-    resetTransientUi();
+    saveState();
+    savePromptPreferences("clear_input");
     render();
+  }
+
+  function canClearFrameworkInput() {
+    if (state.current_view !== "basic") return false;
+    if (Object.values(ui.loading || {}).some(Boolean)) return false;
+    const confirmed = STAGE_SEQUENCE.some((stageKey) => Boolean((state.stage_state[stageKey] || {}).confirmed));
+    if (confirmed) return false;
+    return STAGE_SEQUENCE.every((stageKey) => !hasStageData(stageKey));
+  }
+
+  async function loadKnowledgeTags() {
+    ui.knowledge.loading = true;
+    ui.knowledge.status = "";
+    if (ui.knowledge.open) render();
+    try {
+      const data = await requestJson("/api/user-knowledge/tags");
+      ui.knowledge.tags = Array.isArray(data.tags) ? data.tags : [];
+      ui.knowledge.status = ui.knowledge.tags.length ? "" : "暂无可用标签";
+    } catch (error) {
+      ui.knowledge.tags = [];
+      ui.knowledge.status = error.message || "智慧库标签加载失败，已显示空列表";
+    } finally {
+      ui.knowledge.loading = false;
+      render();
+    }
+  }
+
+  function setKnowledgeSelection(tagId, selected) {
+    const id = String(tagId || "").trim();
+    if (!id) return;
+    const ids = new Set(ui.knowledge.selectedIds || []);
+    if (selected) ids.add(id);
+    else ids.delete(id);
+    ui.knowledge.selectedIds = Array.from(ids);
+    saveState();
+    render();
+  }
+
+  async function applyKnowledgeTags() {
+    const selectedIds = (ui.knowledge.selectedIds || []).map((item) => String(item || "").trim()).filter(Boolean);
+    try {
+      const data = await requestJson("/api/user-knowledge/apply-tags", {
+        method: "POST",
+        body: JSON.stringify({
+          selected_tag_ids: selectedIds,
+          existing_user_preference: String((state.prompt_preferences || {}).script_preference || ""),
+        }),
+      });
+      const stagePrompts = normalizeStagePrompts(data.stage_prompts || {});
+      state.prompt_preferences = normalizePromptPreferences(Object.assign({}, state.prompt_preferences || {}, {
+        script_preference: String(data.merged_preference_prompt || ""),
+        stage_prompts: stagePrompts,
+        active_template_id: "custom",
+      }));
+      ui.knowledge.selectedIds = Array.isArray(data.selected_tag_ids) ? data.selected_tag_ids.map(String) : selectedIds;
+      ui.knowledge.tagPromptText = String(data.tag_prompt_text || "");
+      savePromptPreferences("apply_knowledge_tags");
+      saveState();
+      showToast(selectedIds.length ? "智慧库标签已应用到每阶段提示词" : "已清空智慧库阶段提示词");
+      render();
+    } catch (error) {
+      ui.knowledge.status = error.message || "智慧库标签应用失败";
+      showToast(ui.knowledge.status);
+      render();
+    }
+  }
+
+  function collectKnowledgeFormFromDom() {
+    const form = emptyKnowledgeTagForm();
+    form.id = ui.knowledge.editingId || "";
+    app.querySelectorAll("[data-knowledge-form-key]").forEach((field) => {
+      const key = field.dataset.knowledgeFormKey;
+      if (key) form[key] = field.value;
+    });
+    app.querySelectorAll("[data-knowledge-stage-key]").forEach((field) => {
+      const key = field.dataset.knowledgeStageKey;
+      if (key) form.stage_prompts[key] = field.value;
+    });
+    ui.knowledge.form = form;
+    return form;
+  }
+
+  function openKnowledgeForm(tagId) {
+    const id = String(tagId || "");
+    const tag = id ? (ui.knowledge.tags || []).find((item) => String(item.id || "") === id) : null;
+    if (tag && tag.builtin) return;
+    ui.knowledge.editingId = tag ? id : "";
+    ui.knowledge.formOpen = true;
+    ui.knowledge.form = tag ? {
+      id,
+      name: String(tag.name || ""),
+      category: String(tag.category || "自定义"),
+      description: String(tag.description || ""),
+      prompt_text: String(tag.prompt_text || ""),
+      stage_prompts: normalizeStagePrompts(tag.stage_prompts || {}),
+    } : emptyKnowledgeTagForm();
+    render();
+  }
+
+  async function saveKnowledgeTag() {
+    const form = collectKnowledgeFormFromDom();
+    if (!String(form.name || "").trim()) {
+      showToast("请填写标签名称");
+      return;
+    }
+    const editingId = String(ui.knowledge.editingId || "");
+    const url = editingId ? `/api/user-knowledge/tags/${encodeURIComponent(editingId)}` : "/api/user-knowledge/tags";
+    const method = editingId ? "PATCH" : "POST";
+    try {
+      const data = await requestJson(url, {
+        method,
+        body: JSON.stringify(form),
+      });
+      const tag = data.tag;
+      if (tag && tag.id) {
+        const existingIndex = ui.knowledge.tags.findIndex((item) => String(item.id || "") === String(tag.id));
+        if (existingIndex >= 0) ui.knowledge.tags.splice(existingIndex, 1, tag);
+        else ui.knowledge.tags.push(tag);
+        ui.knowledge.selectedIds = Array.from(new Set((ui.knowledge.selectedIds || []).concat(String(tag.id))));
+      }
+      ui.knowledge.formOpen = false;
+      ui.knowledge.editingId = "";
+      ui.knowledge.form = emptyKnowledgeTagForm();
+      await loadKnowledgeTags();
+      showToast(editingId ? "标签已保存" : "标签已创建");
+    } catch (error) {
+      showToast(error.message || "标签保存失败");
+    }
+  }
+
+  async function deleteKnowledgeTag(tagId) {
+    const id = String(tagId || "").trim();
+    if (!id) return;
+    if (!window.confirm("确认删除这个自定义标签吗？已生成项目会保留历史内容。")) return;
+    try {
+      await requestJson(`/api/user-knowledge/tags/${encodeURIComponent(id)}`, { method: "DELETE" });
+      ui.knowledge.tags = ui.knowledge.tags.filter((tag) => String(tag.id || "") !== id);
+      ui.knowledge.selectedIds = ui.knowledge.selectedIds.filter((item) => String(item) !== id);
+      if (ui.knowledge.editingId === id) {
+        ui.knowledge.formOpen = false;
+        ui.knowledge.editingId = "";
+      }
+      await loadKnowledgeTags();
+      showToast("标签已删除");
+    } catch (error) {
+      showToast(error.message || "标签删除失败");
+    }
   }
 
   async function loadAssets() {
@@ -3988,6 +4323,16 @@
       });
       return;
     }
+    if (target.matches("[data-knowledge-form-key]")) {
+      const key = target.dataset.knowledgeFormKey;
+      if (key) ui.knowledge.form[key] = target.value;
+      return;
+    }
+    if (target.matches("[data-knowledge-stage-key]")) {
+      const key = target.dataset.knowledgeStageKey;
+      if (key) ui.knowledge.form.stage_prompts[key] = target.value;
+      return;
+    }
     if (target.matches("[data-asset-search]")) {
       ui.assetSearch = target.value;
       render();
@@ -4073,6 +4418,10 @@
       render();
       return;
     }
+    if (target.matches("[data-knowledge-tag-id]")) {
+      setKnowledgeSelection(target.dataset.knowledgeTagId, target.checked);
+      return;
+    }
     if (!target.matches("[data-preference-template]")) return;
     const templateId = target.value || "custom";
     const templates = ((state.prompt_preferences || {}).templates || DEFAULT_PROMPT_TEMPLATES);
@@ -4135,6 +4484,50 @@
       if (ui.assetsOpen && !ui.assets.length) await loadAssets();
       return;
     }
+    if (action === "toggle-knowledge-panel") {
+      ui.knowledge.open = !ui.knowledge.open;
+      persistKnowledgePanelOpen(ui.knowledge.open);
+      render();
+      if (ui.knowledge.open && !ui.knowledge.tags.length) await loadKnowledgeTags();
+      return;
+    }
+    if (action === "refresh-knowledge-tags") {
+      await loadKnowledgeTags();
+      return;
+    }
+    if (action === "apply-knowledge-tags") {
+      await applyKnowledgeTags();
+      return;
+    }
+    if (action === "new-knowledge-tag") {
+      if (ui.knowledge.formOpen && !ui.knowledge.editingId) {
+        ui.knowledge.formOpen = false;
+        ui.knowledge.form = emptyKnowledgeTagForm();
+        render();
+      } else {
+        openKnowledgeForm("");
+      }
+      return;
+    }
+    if (action === "edit-knowledge-tag") {
+      openKnowledgeForm(actionElement.dataset.tagId);
+      return;
+    }
+    if (action === "cancel-knowledge-edit") {
+      ui.knowledge.formOpen = false;
+      ui.knowledge.editingId = "";
+      ui.knowledge.form = emptyKnowledgeTagForm();
+      render();
+      return;
+    }
+    if (action === "save-knowledge-tag") {
+      await saveKnowledgeTag();
+      return;
+    }
+    if (action === "delete-knowledge-tag") {
+      await deleteKnowledgeTag(actionElement.dataset.tagId);
+      return;
+    }
     if (action === "refresh-assets") {
       await loadAssets();
       return;
@@ -4173,10 +4566,6 @@
     }
     if (action === "reset-state") {
       resetState();
-      return;
-    }
-    if (action === "copy-working-payload") {
-      copyText(prettyJson(buildWorkingPayload()), "已复制当前策划数据");
       return;
     }
     if (action === "copy-final-package") {
@@ -4273,7 +4662,7 @@
   window.frameworkPlannerDebug = {
     getState: () => clone(state),
     buildWorkingPayload,
-    buildStagePayload: (stageKey, options) => cleanOutgoingPayload(buildStagePayload(stageKey, options || {}), `debug stage ${stageKey} payload`),
+    buildStagePayload: (stageKey, options) => cleanOutgoingPayload(attachKnowledgePayload(buildStagePayload(stageKey, options || {}), stageKey), `debug stage ${stageKey} payload`),
     getLastStagePayloadPreview: () => clone(ui.lastStagePayloadPreview),
     runBeatScoreLoop,
   };

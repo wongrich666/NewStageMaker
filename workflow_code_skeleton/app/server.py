@@ -212,10 +212,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         payload["selected_preference_tag_ids"] = selected_ids
         payload["user_preference_prompt"] = _coerce_prompt_text(data.get("user_preference_prompt"))
         payload["user_knowledge_tag_prompt"] = _coerce_prompt_text(data.get("user_knowledge_tag_prompt"))
-        payload["user_knowledge_stage_prompts"] = _coerce_stage_prompts(data.get("user_knowledge_stage_prompts"))
         prompt_preferences = data.get("prompt_preferences") if isinstance(data.get("prompt_preferences"), dict) else {}
         prompt_preferences = dict(prompt_preferences)
         prompt_preferences["stage_prompts"] = _coerce_stage_prompts(prompt_preferences.get("stage_prompts"))
+        stage_prompt_source = data.get("user_knowledge_stage_prompts")
+        if not isinstance(stage_prompt_source, dict):
+            stage_prompt_source = prompt_preferences.get("stage_prompts")
+        payload["user_knowledge_stage_prompts"] = _coerce_stage_prompts(stage_prompt_source)
         payload["prompt_preferences"] = prompt_preferences
         if any(key in data for key in ("selected_preference_tags", "selected_preference_tag_ids", "user_preference_prompt", "user_knowledge_tag_prompt", "user_knowledge_stage_prompts", "prompt_preferences")):
             stage_prompt_length = sum(len(value or "") for value in payload["user_knowledge_stage_prompts"].values())
