@@ -268,12 +268,16 @@
         headers: buildHeaders(),
         body: JSON.stringify(payload || {}),
       });
-      const data = await response.json().catch(() => ({
-        success: false,
-        message: "框架转剧本接口返回了无法解析的响应",
-      }));
+      const rawText = await response.text();
+      let data = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch (error) {
+        const snippet = String(rawText || "").slice(0, 240).replace(/\s+/g, " ");
+        throw new Error(`框架转剧本接口返回非 JSON 响应：status=${response.status} contentType=${response.headers.get("content-type") || ""} body=${snippet}`);
+      }
       if (!response.ok || data.success === false || data.ok === false) {
-        throw new Error(data.error || data.message || "框架转剧本任务创建失败");
+        throw new Error(data.error || data.message || data.fallback || "框架转剧本任务创建失败");
       }
       return data;
     },
@@ -1013,9 +1017,7 @@
   }
 
   function canStartFrameworkScript() {
-    const packageStage = (state.stage_state || {}).package || {};
     return !isEmptyValue(state.framework_plan_package)
-      && packageStage.confirmed === true
       && !runningStageKey()
       && !ui.loading.framework_script;
   }
@@ -1023,7 +1025,7 @@
   function renderFrameworkScriptButton(sizeClass) {
     const className = sizeClass ? ` ${sizeClass}` : "";
     const disabled = canStartFrameworkScript() ? "" : "disabled";
-    const label = ui.loading.framework_script ? "正在创建剧本任务..." : "用当前框架生成剧本";
+    const label = ui.loading.framework_script ? "正在进入子链路工作台..." : "进入框架转剧本工作台";
     return `<button class="fp-btn${className} primary" data-action="start-framework-script" ${disabled}>${label}</button>`;
   }
 
@@ -4100,32 +4102,58 @@
       showToast("请先完成并确认 07 最终策划包输出");
       return;
     }
-    const confirmed = window.confirm("确认使用当前最终策划包进入下游剧本生成吗？系统会自动执行场景字典、人设服装 alias、丰富分集计划、因果冲突和正文对白融合。");
+    const confirmed = window.confirm("确认进入框架转剧本工作台吗？本操作只会保存当前框架并跳转，不会自动开始生成剧本。");
     if (!confirmed) return;
+
     ui.loading.framework_script = true;
     render();
+
     try {
       if (!hasSavedFrameworkProjectId()) {
         try {
           await saveFrameworkAsset({ silent: true });
         } catch (error) {
-          showToast("当前框架保存失败，无法进入下游剧本生成。");
+          showToast(`当前框架保存失败，无法进入框架转剧本工作台：${(error && error.message) || "未知错误"}`);
           return;
         }
       }
+
       if (!hasSavedFrameworkProjectId()) {
-        showToast("project_id 缺失，无法进入下游剧本生成。");
+        showToast("project_id 缺失，无法进入框架转剧本工作台。");
         return;
       }
-      const data = await planningApi.startFrameworkScript(frameworkToScriptPayload());
-      const task = (data && data.task) || data || {};
-      const workspaceUrl = new URL(config.workspaceUrl || "/workspace", window.location.origin);
-      if (task.project_id !== undefined && task.project_id !== null && task.project_id !== "") {
-        workspaceUrl.searchParams.set("project_id", String(task.project_id));
+
+      const sourceProjectId =
+        state.project_id
+        || (state.asset_state || {}).project_id
+        || (state.asset_state || {}).asset_id;
+
+      try {
+        window.localStorage.setItem("frameworkToScriptSource", JSON.stringify({
+          source_framework_project_id: sourceProjectId,
+          project_id: sourceProjectId,
+          framework_plan_package: state.framework_plan_package || {},
+          worldview_plan: state.worldview_plan || (state.framework_plan_package || {}).worldview_plan || {},
+          beat_checkpoint_timeline: state.beat_checkpoint_timeline || (state.framework_plan_package || {}).beat_checkpoint_timeline || [],
+          character_storylines: state.character_storylines || (state.framework_plan_package || {}).character_storylines || [],
+          character_plan: state.character_plan || (state.framework_plan_package || {}).character_plan || {},
+          saved_at: new Date().toISOString()
+        }));
+      } catch (error) {
+        console.warn("保存框架转剧本本地上下文失败", error);
       }
+
+      const workspaceUrl = new URL("/framework-to-script", window.location.origin);
+      workspaceUrl.searchParams.set("source_framework_project_id", String(sourceProjectId));
+      workspaceUrl.searchParams.set("project_id", String(sourceProjectId));
+      const authToken = new URLSearchParams(window.location.search).get("auth_token") || config.authToken || "";
+      if (authToken) {
+        workspaceUrl.searchParams.set("auth_token", authToken);
+      }
+
       window.location.href = workspaceUrl.pathname + workspaceUrl.search + workspaceUrl.hash;
     } catch (error) {
-      showToast((error && error.message) || "框架转剧本任务创建失败");
+      showToast((error && error.message) || "进入框架转剧本工作台失败");
     } finally {
       ui.loading.framework_script = false;
       render();
@@ -4138,8 +4166,8 @@
     try {
       const data = await planningApi.saveFrameworkAsset(frameworkAssetSavePayload());
       const asset = data.asset || data.project || {};
-      const projectId = Number(data.project_id || asset.project_id || 0);
-      if (!(projectId > 0)) {
+      const projectId = data.project_id || asset.project_id || asset.asset_id || asset.id || "";
+      if (projectId === undefined || projectId === null || String(projectId).trim() === "") {
         throw new Error("project_id 缺失");
       }
       state.project_id = projectId;

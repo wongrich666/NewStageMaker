@@ -798,6 +798,198 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=500, fallback="新建剧本失败，请稍后重试。")
         return _json_ok(asset=asset)
 
+
+
+    @app.post("/api/framework-to-script/stage/08")
+    @_login_required
+    def run_framework_to_script_stage08_api():
+        """单独运行 08 场景字典提炼。只跑 08，不继续 09/10。"""
+        import json as _json
+
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return _json_error("请求体必须是 JSON object。", status=400)
+
+        framework_plan_package = (
+            data.get("framework_plan_package")
+            or data.get("frameworkPlanPackage")
+            or {}
+        )
+        if not isinstance(framework_plan_package, dict) or not framework_plan_package:
+            return _json_error(
+                "缺少 framework_plan_package，请先从 07 最终策划包进入框架转剧本工作台。",
+                status=400,
+            )
+
+        worldview_plan = (
+            data.get("worldview_plan")
+            or data.get("worldviewPlan")
+            or framework_plan_package.get("worldview_plan")
+            or framework_plan_package.get("worldviewPlan")
+            or {}
+        )
+        beat_checkpoint_timeline = (
+            data.get("beat_checkpoint_timeline")
+            or data.get("beatCheckpointTimeline")
+            or framework_plan_package.get("beat_checkpoint_timeline")
+            or framework_plan_package.get("beatCheckpointTimeline")
+            or []
+        )
+        character_storylines = (
+            data.get("character_storylines")
+            or data.get("characterStorylines")
+            or framework_plan_package.get("character_storylines")
+            or framework_plan_package.get("characterStorylines")
+            or []
+        )
+
+        variables = {
+            "frameworkPlanPackage": framework_plan_package,
+            "framework_plan_package": framework_plan_package,
+            "worldviewPlan": worldview_plan,
+            "worldview_plan": worldview_plan,
+            "beatCheckpointTimeline": beat_checkpoint_timeline,
+            "beat_checkpoint_timeline": beat_checkpoint_timeline,
+            "characterStorylines": character_storylines,
+            "character_storylines": character_storylines,
+            "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
+        }
+
+        def _try_parse_json_text(value):
+            if not isinstance(value, str):
+                return None
+            text = value.strip()
+            if not text:
+                return None
+            if text.startswith("```"):
+                text = text.strip("`").strip()
+                if text.lower().startswith("json"):
+                    text = text[4:].strip()
+            try:
+                return _json.loads(text)
+            except Exception:
+                return None
+
+        def _extract_update_vars(payload):
+            found = {}
+            if not isinstance(payload, dict):
+                return found
+            response_data = payload.get("responseData")
+            if not isinstance(response_data, dict):
+                return found
+            update_results = response_data.get("updateVarResult")
+            if not isinstance(update_results, list):
+                return found
+            for item in update_results:
+                if not isinstance(item, dict):
+                    continue
+                variable = item.get("variable")
+                value = item.get("value")
+                key = ""
+                if isinstance(variable, list) and variable:
+                    key = str(variable[-1] or "")
+                elif isinstance(variable, str):
+                    key = variable
+                if key:
+                    found[key] = value
+            return found
+
+        def _extract_scene_payload(payload):
+            candidates = []
+
+            def visit(obj):
+                if isinstance(obj, dict):
+                    candidates.append(obj)
+
+                    parsed_answer = _try_parse_json_text(obj.get("answerText"))
+                    if parsed_answer is not None:
+                        visit(parsed_answer)
+
+                    parsed_text = _try_parse_json_text(obj.get("text"))
+                    if parsed_text is not None:
+                        visit(parsed_text)
+
+                    update_vars = _extract_update_vars(obj)
+                    if update_vars:
+                        candidates.append(update_vars)
+                        for val in update_vars.values():
+                            parsed = _try_parse_json_text(val)
+                            if parsed is not None:
+                                visit(parsed)
+
+                    for key in ("data", "result", "output", "response", "responseData"):
+                        val = obj.get(key)
+                        if isinstance(val, (dict, list)):
+                            visit(val)
+                        else:
+                            parsed = _try_parse_json_text(val)
+                            if parsed is not None:
+                                visit(parsed)
+
+                elif isinstance(obj, list):
+                    for item in obj:
+                        visit(item)
+                else:
+                    parsed = _try_parse_json_text(obj)
+                    if parsed is not None:
+                        visit(parsed)
+
+            visit(payload)
+
+            for item in candidates:
+                if not isinstance(item, dict):
+                    continue
+                scene_dictionary = (
+                    item.get("sceneDictionary")
+                    or item.get("scene_dictionary")
+                    or item.get("scene_dictionary_result")
+                )
+                rules_digest = (
+                    item.get("scriptWorldRulesDigest")
+                    or item.get("script_world_rules_digest")
+                    or item.get("worldRulesDigest")
+                )
+                if scene_dictionary and rules_digest:
+                    return scene_dictionary, rules_digest
+
+            return None, None
+
+        try:
+            from .services.fastgpt_client import fastgpt_client
+            from .services.fastgpt_contracts import STAGE_FRAMEWORK_SCENE_DICTIONARY
+
+            raw_output = fastgpt_client.run_stage(
+                STAGE_FRAMEWORK_SCENE_DICTIONARY,
+                variables,
+            )
+        except Exception as exc:
+            return _json_error(
+                str(exc),
+                status=500,
+                fallback="08 场景字典提炼调用失败，请检查 FASTGPT_FRAMEWORK_SCENE_DICTIONARY_API_KEY 和工作流变量。",
+            )
+
+        scene_dictionary, rules_digest = _extract_scene_payload(raw_output)
+        if not scene_dictionary or not rules_digest:
+            return _json_error(
+                "08 场景字典阶段输出缺少 sceneDictionary 或 scriptWorldRulesDigest。",
+                status=500,
+                fallback="请检查 08_场景字典提炼.json 是否把 sceneDictionary 和 scriptWorldRulesDigest 写入变量或 answerText JSON。",
+            )
+
+        return _json_ok(
+            stage="08",
+            sceneDictionary=scene_dictionary,
+            scriptWorldRulesDigest=rules_digest,
+            raw_output=raw_output,
+        )
+
+
+    @app.get("/framework-to-script")
+    @_login_required
+    def framework_to_script_workspace():
+        return render_template("framework_to_script.html")
+
     @app.post("/api/framework-planner/assets/save")
     @_login_required
     def save_framework_planner_asset_api():
