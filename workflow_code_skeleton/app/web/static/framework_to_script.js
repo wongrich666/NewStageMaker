@@ -20,7 +20,7 @@
     sceneDictionary: "场景字典",
     scriptWorldRulesDigest: "世界观规则摘要",
     appearanceMapping: "角色外观映射",
-    enrichedEpisodePlan: "分集细化方案",
+    enrichedEpisodePlan: "分集细化文本",
     batchCausalConflictPlan: "因果冲突推进计划",
     batchCausalConflictReview: "因果冲突审核",
     conflictMemory: "因果冲突记忆",
@@ -585,32 +585,7 @@
           <button type="button" class="wts-btn ghost" data-action="show-version-history">版本历史</button>
         </div>
         <div class="wts-steps">
-          ${renderStageCard("08", "场景字典提炼", state.runningStage === "08" ? "运行中" : has08 ? "已完成" : "待运行", has08 ? "重新运行 08" : "运行 08", "run-stage-08", locked, has08 ? `
-            <details class="wts-output" open><summary>场景字典</summary>${renderTree(stage08.sceneDictionary, "sceneDictionary")}</details>
-            <details class="wts-output"><summary>世界观规则摘要</summary>${renderTree(stage08.scriptWorldRulesDigest, "scriptWorldRulesDigest")}</details>
-          ` : "")}
-          ${renderStageCard("09", "角色外观映射", state.runningStage === "09" ? "运行中" : has09 ? "已完成" : has08 ? "待运行" : "等待 08", has09 ? "重新运行 09" : "运行 09", "run-stage-09", locked || !has08, has09 ? `
-            <details class="wts-output" open><summary>角色外观映射</summary>${renderTree(stage09.appearanceMapping, "appearanceMapping")}</details>
-          ` : "")}
-          ${renderStageCard(
-            "10",
-            "分集细化方案",
-            state.runningStage === "10" ? "运行中" : has10 ? "已完成" : has09 ? "待运行" : "等待 09",
-            has10 ? "重新运行 10" : "运行 10",
-            "run-stage-10",
-            locked || !has09,
-            has10 ? `
-              <details class="wts-output" open>
-                <summary>分集细化方案</summary>
-                ${renderTree(stage10.enrichedEpisodePlan || stage10.allEnrichedEpisodePlan, "enrichedEpisodePlan")}
-              </details>
-              ${stage10.enrichedEpisodePlanText || stage10.allEnrichedEpisodePlanText ? `
-                <details class="wts-output">
-                  <summary>分集细化文本</summary>
-                  ${renderTree(stage10.enrichedEpisodePlanText || stage10.allEnrichedEpisodePlanText, "enrichedEpisodePlan")}
-                </details>
-              ` : ""}
-            ` : `<p class="wts-hint">将沿用当前导入的框架资产和已完成的 08/09 输出。</p>`
+          ${renderStageCard("08", "场景字典提炼", state.runningStage === "08" ? "运行中" : has08 ? "已完成" : "待运行", has08 ? "重新运行 08" : "运行 08", "run-stage-08", locked, has08 ? "" : `<p class="wts-hint">完成前不会展示输出；运行后结果会保存到缓存并供后续阶段使用。</p>`
           )}
           ${renderStageCard(
             "11",
