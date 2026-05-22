@@ -4135,6 +4135,12 @@ def _normalize_payload_candidate(
     candidate: Any,
     contract: FastGPTStageContract,
 ) -> Any:
+    if isinstance(candidate, str):
+        parsed = _try_parse_json(candidate)
+        if parsed is not None:
+            return _normalize_payload_candidate(parsed, contract)
+        return candidate
+
     if isinstance(candidate, list):
         if len(candidate) == 1:
             single = _normalize_payload_candidate(candidate[0], contract)
@@ -4161,6 +4167,8 @@ def _normalize_payload_candidate(
 
     nested_text_keys = (
         "contract_json",
+        "frameworkContractJson",
+        "textOutput",
         "answerText",
         "answer",
         "content",

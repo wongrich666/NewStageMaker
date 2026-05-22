@@ -11,6 +11,7 @@
 - 失败后保留进度并继续生成
 - 阶段回退重写与完成确认
 - 主链路按 FastGPT workflow 逐阶段执行
+- 框架转剧本工作台已支持 10/11/12：分集细化、开头冲突钩子、正文及对话。FastGPT JSON 型输出优先从 `answerText/textOutput` 里的 JSON 解析，`newVariables` 仅作为候选之一；正文纯文本阶段读取最终 AI 文本输出。
 - 辅助工具动态接入：`/api/tools`、`/api/tools/<tool_id>/run`
 - 稳定导出：`txt + docx`
 

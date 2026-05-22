@@ -21,6 +21,12 @@
     scriptWorldRulesDigest: "世界观规则摘要",
     appearanceMapping: "角色外观映射",
     enrichedEpisodePlan: "分集细化方案",
+    batchCausalConflictPlan: "因果冲突推进计划",
+    batchCausalConflictReview: "因果冲突审核",
+    conflictMemory: "因果冲突记忆",
+    batchScriptText: "正文及对话",
+    batchScriptReview: "正文审核",
+    scriptMemory: "正文记忆",
   };
 
   const state = Object.assign({
@@ -328,6 +334,96 @@
     }
   }
 
+  async function runStage11() {
+    if (!currentAssetReady()) {
+      state.error = "请先导入框架资产，或从框架生成页面一键进入。";
+      render();
+      return;
+    }
+    const stage10 = state.scriptStages.stage10 || {};
+    const allEnrichedEpisodePlan = stage10.allEnrichedEpisodePlan || stage10.enrichedEpisodePlan || [];
+    if (!hasContent(allEnrichedEpisodePlan)) {
+      state.error = "请先完成 10 分集细化方案。";
+      render();
+      return;
+    }
+    state.runningStage = "11";
+    state.isRunning = true;
+    state.error = null;
+    render();
+    try {
+      const data = await requestJson("/api/framework-to-script/stage/11", {
+        method: "POST",
+        body: JSON.stringify({
+          framework_asset_id: state.frameworkAssetId,
+          allEnrichedEpisodePlan,
+        }),
+      });
+      state.scriptStages.stage11 = {
+        batchStartEpisode: data.batchStartEpisode,
+        batchEndEpisode: data.batchEndEpisode,
+        batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan,
+        batchCausalConflictPlan: data.batchCausalConflictPlan,
+        batchCausalConflictReview: data.batchCausalConflictReview,
+        conflictMemory: data.conflictMemory,
+        batches: data.batches || {},
+        updated_at: new Date().toISOString(),
+      };
+      saveWorkspace();
+    } catch (error) {
+      state.error = error.message || "11 开头冲突钩子失败";
+    } finally {
+      state.runningStage = "";
+      state.isRunning = false;
+      render();
+    }
+  }
+
+  async function runStage12() {
+    if (!currentAssetReady()) {
+      state.error = "请先导入框架资产，或从框架生成页面一键进入。";
+      render();
+      return;
+    }
+    const stage11 = state.scriptStages.stage11 || {};
+    if (!hasContent(stage11.batchCausalConflictPlan)) {
+      state.error = "请先完成 11 当前批次开头冲突钩子。";
+      render();
+      return;
+    }
+    state.runningStage = "12";
+    state.isRunning = true;
+    state.error = null;
+    render();
+    try {
+      const data = await requestJson("/api/framework-to-script/stage/12", {
+        method: "POST",
+        body: JSON.stringify({
+          framework_asset_id: state.frameworkAssetId,
+          batchStartEpisode: stage11.batchStartEpisode,
+        }),
+      });
+      state.scriptStages.stage12 = {
+        batchStartEpisode: data.batchStartEpisode,
+        batchEndEpisode: data.batchEndEpisode,
+        batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan,
+        batchCausalConflictPlan: data.batchCausalConflictPlan,
+        batchScriptText: data.batchScriptText,
+        batchScriptReview: data.batchScriptReview,
+        scriptMemory: data.scriptMemory,
+        batches: data.batches || {},
+        updated_at: new Date().toISOString(),
+      };
+      saveWorkspace();
+    } catch (error) {
+      state.error = error.message || "12 正文及对话失败";
+    } finally {
+      state.runningStage = "";
+      state.isRunning = false;
+      render();
+    }
+  }
+
   function renderTree(value, keyName = "root", depth = 0) {
     const clean = stripRaw(value);
     if (clean === null || clean === undefined || clean === "") {
@@ -472,9 +568,13 @@
     const stage08 = state.scriptStages.stage08 || {};
     const stage09 = state.scriptStages.stage09 || {};
     const stage10 = state.scriptStages.stage10 || {};
+    const stage11 = state.scriptStages.stage11 || {};
+    const stage12 = state.scriptStages.stage12 || {};
     const has08 = hasObject(stage08.sceneDictionary);
     const has09 = hasObject(stage09.appearanceMapping);
     const has10 = hasContent(stage10.enrichedEpisodePlan) || hasContent(stage10.allEnrichedEpisodePlan);
+    const has11 = hasContent(stage11.batchCausalConflictPlan);
+    const has12 = hasContent(stage12.batchScriptText);
     return `
       <section class="wts-card" id="scriptStageArea">
         <div class="wts-card-head">
@@ -511,6 +611,54 @@
                 </details>
               ` : ""}
             ` : `<p class="wts-hint">将沿用当前导入的框架资产和已完成的 08/09 输出。</p>`
+          )}
+          ${renderStageCard(
+            "11",
+            "开头冲突钩子",
+            state.runningStage === "11" ? "运行中" : has11 ? "已完成" : has10 ? "待运行" : "等待 10",
+            has11 ? "运行下一批 11" : "运行 11",
+            "run-stage-11",
+            locked || !has10,
+            has11 ? `
+              <details class="wts-output" open>
+                <summary>第 ${escapeHtml(stage11.batchStartEpisode || "")}-${escapeHtml(stage11.batchEndEpisode || "")} 集因果冲突</summary>
+                ${renderTree(stage11.batchCausalConflictPlan, "batchCausalConflictPlan")}
+              </details>
+              <details class="wts-output">
+                <summary>因果冲突审核</summary>
+                ${renderTree(stage11.batchCausalConflictReview, "batchCausalConflictReview")}
+              </details>
+              ${stage11.conflictMemory ? `
+                <details class="wts-output">
+                  <summary>因果冲突记忆</summary>
+                  ${renderTree(stage11.conflictMemory, "conflictMemory")}
+                </details>
+              ` : ""}
+            ` : `<p class="wts-hint">将按 10 输出每 5 集切分 batchEnrichedEpisodePlan。</p>`
+          )}
+          ${renderStageCard(
+            "12",
+            "正文及对话",
+            state.runningStage === "12" ? "运行中" : has12 ? "已完成" : has11 ? "待运行" : "等待 11",
+            has12 ? "运行下一批 12" : "运行 12",
+            "run-stage-12",
+            locked || !has11,
+            has12 ? `
+              <details class="wts-output" open>
+                <summary>第 ${escapeHtml(stage12.batchStartEpisode || "")}-${escapeHtml(stage12.batchEndEpisode || "")} 集正文</summary>
+                ${renderTree(stage12.batchScriptText, "batchScriptText")}
+              </details>
+              <details class="wts-output">
+                <summary>正文审核</summary>
+                ${renderTree(stage12.batchScriptReview, "batchScriptReview")}
+              </details>
+              ${stage12.scriptMemory ? `
+                <details class="wts-output">
+                  <summary>正文记忆</summary>
+                  ${renderTree(stage12.scriptMemory, "scriptMemory")}
+                </details>
+              ` : ""}
+            ` : `<p class="wts-hint">将使用 11 当前批次因果冲突计划生成正文及对话。</p>`
           )}
         </div>
       </section>
@@ -560,6 +708,10 @@
       runStage09();
     } else if (action === "run-stage-10") {
       runStage10();
+    } else if (action === "run-stage-11") {
+      runStage11();
+    } else if (action === "run-stage-12") {
+      runStage12();
     } else if (action === "save-workspace") {
       saveWorkspace();
       state.error = null;
