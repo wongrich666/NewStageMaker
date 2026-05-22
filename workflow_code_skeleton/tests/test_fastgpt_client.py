@@ -81,7 +81,7 @@ from workflow_code_skeleton.app.workflow_ids import (
 )
 from workflow_code_skeleton.tests.test_stage_output_repair import (
     _appearance_input_variables,
-    _appearance_mapping_json,
+    _appearanceMapping_json,
     _character_setting_json,
     _input_variables,
     _scene_setting_json,
@@ -242,7 +242,7 @@ def _script_review_inputs() -> dict[str, object]:
         WORLDVIEW: json.dumps({"tone": "近未来都市"}, ensure_ascii=False),
         CHARACTERS: json.dumps(_character_setting_json(), ensure_ascii=False),
         SCENES: json.dumps(_scene_setting_json(), ensure_ascii=False),
-        APPEARANCE_MAPPING: _appearance_mapping_json(),
+        APPEARANCE_MAPPING: _appearanceMapping_json(),
         EPISODE_PLAN: json.dumps(_normalized_episode_plan_payload(5), ensure_ascii=False),
         TOTAL_EPISODES: 5,
         EPISODE_WORD_COUNT: 800,
@@ -1379,7 +1379,7 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
             "responseData": {
                 "variableUpdate": {
                     APPEARANCE_MAPPING_VAR: json.dumps(
-                        _appearance_mapping_json(),
+                        _appearanceMapping_json(),
                         ensure_ascii=False,
                     )
                 }
@@ -1409,7 +1409,7 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
                 {
                     "message": {
                         "content": json.dumps(
-                            _appearance_mapping_json(),
+                            _appearanceMapping_json(),
                             ensure_ascii=False,
                         )
                     }
@@ -1440,7 +1440,7 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
                 {
                     "message": {
                         "content": json.dumps(
-                            _appearance_mapping_json(),
+                            _appearanceMapping_json(),
                             ensure_ascii=False,
                         )
                     }
@@ -1449,7 +1449,7 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         }
         client = _QueuedFastGPTClient([response])
         variables = _appearance_input_variables()
-        variables[APPEARANCE_MAPPING] = _appearance_mapping_json()
+        variables[APPEARANCE_MAPPING] = _appearanceMapping_json()
         variables[PASS_REVIEW_JSON] = _appearance_review_json(
             passed=False,
             rewrite_required=True,
@@ -1495,7 +1495,7 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         }
         client = _QueuedFastGPTClient([response])
         variables = _appearance_input_variables()
-        variables[APPEARANCE_MAPPING] = _appearance_mapping_json()
+        variables[APPEARANCE_MAPPING] = _appearanceMapping_json()
 
         output = client.run_stage(
             STAGE_APPEARANCE_ALIAS_REVIEW,
@@ -1523,7 +1523,7 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
         }
         client = _QueuedFastGPTClient([response])
         variables = _appearance_input_variables()
-        variables[APPEARANCE_MAPPING] = _appearance_mapping_json()
+        variables[APPEARANCE_MAPPING] = _appearanceMapping_json()
 
         output = client.run_stage(
             STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,

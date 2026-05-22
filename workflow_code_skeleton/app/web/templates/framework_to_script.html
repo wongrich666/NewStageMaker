@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>框架转剧本工作台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='framework_to_script.css') }}?v=20260522-step-workspace" />
+</head>
+<body>
+  <div id="framework-to-script-app"></div>
+  <script>
+    window.FRAMEWORK_TO_SCRIPT_CONFIG = {
+      workspaceUrl: "{{ url_for('workspace') if false else '/workspace' }}",
+      frameworkPlannerUrl: "{{ url_for('framework_planner') if false else '/framework-planner' }}"
+    };
+  </script>
+  <script src="{{ url_for('static', filename='framework_to_script.js') }}?v=20260522-step-workspace"></script>
+</body>
+</html>

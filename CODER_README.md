@@ -69,7 +69,7 @@ all_hooks -> all_dialogues -> all_script
 3. `appearance_alias_rewrite`
 4. `appearance_alias_unstructured`
 
-正式结构化结果始终是 `appearance_mapping / h2KpLm91`；自然语言说明 `c7VnQ4eX` 只用于展示，不能覆盖正式映射。
+正式结构化结果始终是 `appearanceMapping / h2KpLm91`；自然语言说明 `c7VnQ4eX` 只用于展示，不能覆盖正式映射。
 
 ## 3. 当前用户可见层与私有层
 
@@ -86,7 +86,7 @@ all_hooks -> all_dialogues -> all_script
 
 - `characters`
 - `scenes`
-- `appearance_mapping`
+- `appearanceMapping`
 - debug_state
 - FastGPT 原始响应壳字段
 
@@ -110,7 +110,7 @@ all_hooks -> all_dialogues -> all_script
   - 包括 `story_outline`、`normalized_episode_plan`
   - 包括 `character_natural_language / character_summary`
   - 包括 `scene_natural_language / core_scene_summary`
-  - 包括 `appearance_mapping / character_registry / character_alias_registry / episode_alias_plan`
+  - 包括 `appearanceMapping / character_registry / character_alias_registry / episode_alias_plan`
 
 要点：
 
@@ -208,7 +208,7 @@ all_hooks -> all_dialogues -> all_script
 ### appearance
 
 - `appearance_alias_generation` 已经切成 4 个独立 workflow
-- 正式结构化输出是 `h2KpLm91 / appearance_mapping`
+- 正式结构化输出是 `h2KpLm91 / appearanceMapping`
 - 自然语言说明是 `c7VnQ4eX`
 - `c7VnQ4eX` 只做展示，不得覆盖正式结构化结果
 

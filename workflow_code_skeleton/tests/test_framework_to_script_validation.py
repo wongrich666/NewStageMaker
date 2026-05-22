@@ -36,7 +36,7 @@ def _valid_rules_digest() -> dict[str, object]:
     }
 
 
-def _valid_appearance_mapping() -> dict[str, object]:
+def _valid_appearanceMapping() -> dict[str, object]:
     return {
         "mapping_version": "v1",
         "characters": [
@@ -120,10 +120,10 @@ def test_scene_dictionary_answer_text_wrapper_is_normalized() -> None:
     assert flow._validate_framework_scene_dictionary_assets(variables) == []
 
 
-def test_appearance_mapping_answer_text_wrapper_is_normalized() -> None:
+def test_appearanceMapping_answer_text_wrapper_is_normalized() -> None:
     variables = {
         "answerText": json.dumps(
-            {APPEARANCE_MAPPING: _valid_appearance_mapping()},
+            {APPEARANCE_MAPPING: _valid_appearanceMapping()},
             ensure_ascii=False,
         )
     }
@@ -131,7 +131,7 @@ def test_appearance_mapping_answer_text_wrapper_is_normalized() -> None:
     flow._normalize_framework_to_script_asset_variables(variables)
 
     assert variables[APPEARANCE_MAPPING]["characters"][0]["name"] == "林夏"
-    assert flow._validate_framework_appearance_mapping_assets(variables) == []
+    assert flow._validate_framework_appearanceMapping_assets(variables) == []
 
 
 def test_enriched_episode_plan_result_wrapper_is_normalized() -> None:

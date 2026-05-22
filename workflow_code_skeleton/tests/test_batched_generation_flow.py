@@ -849,7 +849,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
             WORLDVIEW: json.dumps({"worldview_summary": "测试世界观"}, ensure_ascii=False),
             CHARACTERS: json.dumps({"character_setting": {"characters": []}}, ensure_ascii=False),
             SCENES: json.dumps({"scene_setting": {"scenes": []}}, ensure_ascii=False),
-            APPEARANCE_MAPPING: {"appearance_mapping": {"characters": []}},
+            APPEARANCE_MAPPING: {"appearanceMapping": {"characters": []}},
             CHARACTER_ALIAS_NAMING_RULES: "统一使用正式中文名",
             EPISODE_PLAN: json.dumps(normalized_plan, ensure_ascii=False),
             NORMALIZED_EPISODE_PLAN: normalized_plan,
@@ -2745,7 +2745,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         )
         original_characters = str(variables[CHARACTERS])
         original_scenes = str(variables[SCENES])
-        original_appearance_mapping = json.dumps(
+        original_appearanceMapping = json.dumps(
             variables[APPEARANCE_MAPPING],
             ensure_ascii=False,
         )
@@ -2775,7 +2775,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertEqual(str(variables[SCENES]), original_scenes)
         self.assertEqual(
             json.dumps(variables[APPEARANCE_MAPPING], ensure_ascii=False),
-            original_appearance_mapping,
+            original_appearanceMapping,
         )
 
     def test_hook_stage_keeps_natural_language_character_content(self) -> None:
@@ -2850,7 +2850,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         )
         original_characters = str(variables[CHARACTERS])
         original_scenes = str(variables[SCENES])
-        original_appearance_mapping = json.dumps(
+        original_appearanceMapping = json.dumps(
             variables[APPEARANCE_MAPPING],
             ensure_ascii=False,
         )
@@ -2880,7 +2880,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertEqual(str(variables[SCENES]), original_scenes)
         self.assertEqual(
             json.dumps(variables[APPEARANCE_MAPPING], ensure_ascii=False),
-            original_appearance_mapping,
+            original_appearanceMapping,
         )
 
     def test_dialogue_stage_keeps_natural_language_character_content(self) -> None:
@@ -3190,7 +3190,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         )
         original_characters = str(variables[CHARACTERS])
         original_scenes = str(variables[SCENES])
-        original_appearance_mapping = json.dumps(
+        original_appearanceMapping = json.dumps(
             variables[APPEARANCE_MAPPING],
             ensure_ascii=False,
         )
@@ -3220,7 +3220,7 @@ class BatchedGenerationFlowTests(unittest.TestCase):
         self.assertEqual(str(variables[SCENES]), original_scenes)
         self.assertEqual(
             json.dumps(variables[APPEARANCE_MAPPING], ensure_ascii=False),
-            original_appearance_mapping,
+            original_appearanceMapping,
         )
 
     def test_script_stage_keeps_character_plan_content(self) -> None:

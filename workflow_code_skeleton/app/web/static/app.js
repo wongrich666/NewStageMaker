@@ -1008,7 +1008,7 @@ startRuntimeDebugPolling();
       appearance_alias_rewrite: "正在修订服装版本映射",
       appearance_alias_unstructured: "正在整理服装版本映射自然语言说明",
       framework_scene_dictionary: "正在生成框架转剧本：场景字典提炼",
-      framework_appearance_mapping: "正在生成框架转剧本：人设服装 alias 映射",
+      framework_appearanceMapping: "正在生成框架转剧本：人设服装 alias 映射",
       framework_enriched_episode_plan: "正在生成框架转剧本：丰富分集计划",
       framework_causal_conflict: "正在生成框架转剧本因果冲突推进计划",
       framework_causal_conflict_write: "正在编写框架转剧本：因果冲突推进计划",
@@ -1100,7 +1100,7 @@ startRuntimeDebugPolling();
   function frameworkStageLabel(stageKey) {
     const mapping = {
       framework_scene_dictionary: "框架转剧本：场景字典提炼",
-      framework_appearance_mapping: "框架转剧本：人设服装 alias 映射",
+      framework_appearanceMapping: "框架转剧本：人设服装 alias 映射",
       framework_enriched_episode_plan: "框架转剧本：丰富分集计划",
       framework_causal_conflict: "框架转剧本：因果冲突推进计划",
       framework_causal_conflict_write: "框架转剧本：因果冲突推进计划",
@@ -1132,7 +1132,7 @@ startRuntimeDebugPolling();
     const stageKey = String(snapshot?.current_stage || "").trim().toLowerCase();
     if (!isFrameworkToScriptSnapshot(snapshot)) return 0;
     if (stageKey === "framework_scene_dictionary") return 8;
-    if (stageKey === "framework_appearance_mapping") return 14;
+    if (stageKey === "framework_appearanceMapping") return 14;
     if (stageKey === "framework_enriched_episode_plan") return 22;
     if (stageKey.startsWith("framework_causal_conflict")) return 45;
     if (stageKey.startsWith("framework_script")) return 78;
@@ -1170,7 +1170,7 @@ startRuntimeDebugPolling();
       appearance_alias_rewrite: "internal",
       appearance_alias_unstructured: "internal",
       framework_scene_dictionary: "framework_to_script",
-      framework_appearance_mapping: "framework_to_script",
+      framework_appearanceMapping: "framework_to_script",
       framework_enriched_episode_plan: "framework_to_script",
       framework_causal_conflict: "framework_to_script",
       framework_causal_conflict_write: "framework_to_script",

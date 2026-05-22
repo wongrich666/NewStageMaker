@@ -265,7 +265,7 @@ class WorkflowRuntime:
             "character_appearance_requirements": state.get_var(CHARACTER_APPEARANCE_REQUIREMENTS, ""),
             "character_alias_naming_rules": state.get_var(CHARACTER_ALIAS_NAMING_RULES, ""),
             "outfit_switch_rules": state.get_var(OUTFIT_SWITCH_RULES, ""),
-            "appearance_mapping": state.get_var(APPEARANCE_MAPPING, ""),
+            "appearanceMapping": state.get_var(APPEARANCE_MAPPING, ""),
             APPEARANCE_NATURAL_LANGUAGE_ARTIFACT: appearance_natural_language,
             "character_registry": state.get_var(CHARACTER_REGISTRY, ""),
             "character_alias_registry": state.get_var(CHARACTER_ALIAS_REGISTRY, ""),

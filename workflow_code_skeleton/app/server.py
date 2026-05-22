@@ -985,6 +985,204 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
 
 
+
+    @app.post("/api/framework-to-script/stage/09")
+    @_login_required
+    def run_framework_to_script_stage09_api():
+        """单独运行 09 人设服装 alias 映射。只跑 09，不继续 10。"""
+        import json as _json
+
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return _json_error("请求体必须是 JSON object。", status=400)
+
+        framework_plan_package = (
+            data.get("framework_plan_package")
+            or data.get("frameworkPlanPackage")
+            or {}
+        )
+        if not isinstance(framework_plan_package, dict) or not framework_plan_package:
+            return _json_error(
+                "缺少 framework_plan_package，请先从 07 最终策划包进入框架转剧本工作台。",
+                status=400,
+            )
+
+        character_plan = (
+            data.get("character_plan")
+            or data.get("characterPlan")
+            or framework_plan_package.get("character_plan")
+            or framework_plan_package.get("characterPlan")
+            or {}
+        )
+        if not isinstance(character_plan, dict) or not character_plan:
+            return _json_error(
+                "缺少 character_plan，无法运行 09 人设服装 alias 映射。",
+                status=400,
+            )
+
+        scene_dictionary = (
+            data.get("sceneDictionary")
+            or data.get("scene_dictionary")
+            or {}
+        )
+        if not isinstance(scene_dictionary, dict) or not scene_dictionary:
+            return _json_error(
+                "缺少 sceneDictionary，请先运行并确认 08 场景字典提炼。",
+                status=400,
+            )
+
+        beat_checkpoint_timeline = (
+            data.get("beat_checkpoint_timeline")
+            or data.get("beatCheckpointTimeline")
+            or framework_plan_package.get("beat_checkpoint_timeline")
+            or framework_plan_package.get("beatCheckpointTimeline")
+            or []
+        )
+
+        variables = {
+            "frameworkPlanPackage": framework_plan_package,
+            "framework_plan_package": framework_plan_package,
+            "characterPlan": character_plan,
+            "character_plan": character_plan,
+            "sceneDictionary": scene_dictionary,
+            "scene_dictionary": scene_dictionary,
+            "beatCheckpointTimeline": beat_checkpoint_timeline,
+            "beat_checkpoint_timeline": beat_checkpoint_timeline,
+            "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
+        }
+
+        def _try_parse_json_text(value):
+            if not isinstance(value, str):
+                return None
+            text = value.strip()
+            if not text:
+                return None
+            if text.startswith("```"):
+                text = text.strip("`").strip()
+                if text.lower().startswith("json"):
+                    text = text[4:].strip()
+            try:
+                return _json.loads(text)
+            except Exception:
+                return None
+
+        def _extract_update_vars(payload):
+            found = {}
+            if not isinstance(payload, dict):
+                return found
+            response_data = payload.get("responseData")
+            if not isinstance(response_data, dict):
+                return found
+            update_results = response_data.get("updateVarResult")
+            if not isinstance(update_results, list):
+                return found
+            for item in update_results:
+                if not isinstance(item, dict):
+                    continue
+                variable = item.get("variable")
+                value = item.get("value")
+                key = ""
+                if isinstance(variable, list) and variable:
+                    key = str(variable[-1] or "")
+                elif isinstance(variable, str):
+                    key = variable
+                if key:
+                    found[key] = value
+            return found
+
+        def _extract_appearance_payload(payload):
+            candidates = []
+
+            def visit(obj):
+                if isinstance(obj, dict):
+                    candidates.append(obj)
+
+                    parsed_answer = _try_parse_json_text(obj.get("answerText"))
+                    if parsed_answer is not None:
+                        visit(parsed_answer)
+
+                    parsed_text = _try_parse_json_text(obj.get("text"))
+                    if parsed_text is not None:
+                        visit(parsed_text)
+
+                    update_vars = _extract_update_vars(obj)
+                    if update_vars:
+                        candidates.append(update_vars)
+                        for val in update_vars.values():
+                            parsed = _try_parse_json_text(val)
+                            if parsed is not None:
+                                visit(parsed)
+
+                    for key in ("data", "result", "output", "response", "responseData"):
+                        val = obj.get(key)
+                        if isinstance(val, (dict, list)):
+                            visit(val)
+                        else:
+                            parsed = _try_parse_json_text(val)
+                            if parsed is not None:
+                                visit(parsed)
+
+                elif isinstance(obj, list):
+                    for item in obj:
+                        visit(item)
+                else:
+                    parsed = _try_parse_json_text(obj)
+                    if parsed is not None:
+                        visit(parsed)
+
+            visit(payload)
+
+            for item in candidates:
+                if not isinstance(item, dict):
+                    continue
+                appearanceMapping = (
+                    item.get("appearanceMapping")
+                    or item.get("appearanceMapping")
+                    or item.get("appearanceMappingResult")
+                )
+                if isinstance(appearanceMapping, dict) and appearanceMapping:
+                    return appearanceMapping
+
+            return None
+
+        try:
+            from .services.fastgpt_client import fastgpt_client
+            from .services.fastgpt_contracts import STAGE_FRAMEWORK_APPEARANCE_MAPPING
+
+            raw_output = fastgpt_client.run_stage(
+                STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+                variables,
+            )
+        except Exception as exc:
+            return _json_error(
+                str(exc),
+                status=500,
+                fallback="09 人设服装 alias 映射调用失败，请检查 FASTGPT_FRAMEWORK_APPEARANCE_MAPPING_API_KEY 和工作流变量。",
+            )
+
+        appearanceMapping = _extract_appearance_payload(raw_output)
+        if not appearanceMapping:
+            return _json_error(
+                "09 人设服装 alias 映射输出缺少 appearanceMapping。",
+                status=500,
+                fallback="请检查 09_人设服装alias映射.json 是否把 appearanceMapping 写入变量或 answerText JSON。",
+            )
+
+        characters = appearanceMapping.get("characters")
+        if not isinstance(characters, list) or not characters:
+            return _json_error(
+                "09 人设服装 alias 映射输出缺少 appearanceMapping.characters。",
+                status=500,
+                fallback="请检查 09 工作流输出 schema。",
+            )
+
+        return _json_ok(
+            stage="09",
+            appearanceMapping=appearanceMapping,
+            raw_output=raw_output,
+        )
+
+
     @app.get("/framework-to-script")
     @_login_required
     def framework_to_script_workspace():

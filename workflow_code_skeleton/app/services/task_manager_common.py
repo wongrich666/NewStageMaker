@@ -143,7 +143,7 @@ STAGE_LABELS = {
     "appearance_alias_rewrite": "服装版本映射修订",
     "appearance_alias_unstructured": "服装版本映射自然语言说明",
     "framework_scene_dictionary": "框架转剧本：场景字典提炼",
-    "framework_appearance_mapping": "框架转剧本：人设服装 alias 映射",
+    "framework_appearanceMapping": "框架转剧本：人设服装 alias 映射",
     "framework_enriched_episode_plan": "框架转剧本：丰富分集计划",
     "framework_causal_conflict": "框架转剧本：因果冲突推进计划",
     "framework_causal_conflict_write": "框架转剧本：因果冲突推进计划",
@@ -208,7 +208,7 @@ RUNNING_STAGE_MESSAGE_FALLBACKS = {
     "appearance_alias_rewrite": "正在修订服装版本映射",
     "appearance_alias_unstructured": "正在整理服装版本映射自然语言说明",
     "framework_scene_dictionary": "正在生成框架转剧本：场景字典提炼",
-    "framework_appearance_mapping": "正在生成框架转剧本：人设服装 alias 映射",
+    "framework_appearanceMapping": "正在生成框架转剧本：人设服装 alias 映射",
     "framework_enriched_episode_plan": "正在生成框架转剧本：丰富分集计划",
     "framework_causal_conflict": "正在生成框架转剧本因果冲突推进计划",
     "framework_causal_conflict_write": "正在编写框架转剧本：因果冲突推进计划",
@@ -308,7 +308,7 @@ COMPLETED_ARTIFACT_KEYS = (
     "core_scene_summary",
     "worldview_natural_language",
     APPEARANCE_NATURAL_LANGUAGE_ARTIFACT,
-    "appearance_mapping",
+    "appearanceMapping",
     "character_registry",
     "character_alias_registry",
     "episode_alias_plan",
@@ -749,7 +749,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "character_appearance_requirements",
         "character_alias_naming_rules",
         "outfit_switch_rules",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -773,7 +773,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "character_appearance_requirements",
         "character_alias_naming_rules",
         "outfit_switch_rules",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -794,7 +794,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "scene_natural_language",
         "scene_json",
         "core_scene_summary",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -815,7 +815,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "scene_natural_language",
         "scene_json",
         "core_scene_summary",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -835,7 +835,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "scene_natural_language",
         "scene_json",
         "core_scene_summary",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -854,7 +854,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "scene_natural_language",
         "scene_json",
         "core_scene_summary",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -871,7 +871,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "scene_natural_language",
         "scene_json",
         "core_scene_summary",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -885,7 +885,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "halted_message",
     ),
     "appearance": (
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -1028,12 +1028,12 @@ def _clean_export_key_line(line: str) -> str:
 
 
 INLINE_STRUCTURED_DUMP_MARKERS = (
-    '{"appearance_mapping"',
+    '{"appearanceMapping"',
     '{"character_setting"',
     '{"scene_setting"',
     '{"characters"',
     '{"scenes"',
-    "{'appearance_mapping'",
+    "{'appearanceMapping'",
     "{'character_setting'",
     "{'scene_setting'",
     "{'characters'",
@@ -1747,7 +1747,7 @@ def _scene_items_from_value(value: Any) -> list[dict[str, Any]]:
 def _appearance_character_items_from_value(value: Any) -> list[dict[str, Any]]:
     candidate = _jsonish_value(value)
     if isinstance(candidate, dict):
-        nested = candidate.get("appearance_mapping")
+        nested = candidate.get("appearanceMapping")
         if isinstance(nested, dict) and isinstance(nested.get("characters"), list):
             return [item for item in nested.get("characters") or [] if isinstance(item, dict)]
         if isinstance(candidate.get("characters"), list):

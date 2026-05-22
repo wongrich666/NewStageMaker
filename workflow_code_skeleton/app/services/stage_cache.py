@@ -505,10 +505,10 @@ class StageCacheMixin:
                 variables.get("allEnrichedEpisodePlanText") or variables.get("all_enriched_episode_plan_text") or variables.get("allEnrichedEpisodePlan"),
             ),
             (
-                ("framework_appearance_mapping",),
-                "framework_appearance_mapping",
+                ("framework_appearanceMapping",),
+                "framework_appearanceMapping",
                 "框架转剧本：人设服装 alias 映射",
-                variables.get("appearanceMapping") or variables.get("appearance_mapping"),
+                variables.get("appearanceMapping") or variables.get("appearanceMapping"),
             ),
             (
                 ("framework_scene_dictionary",),
@@ -1154,7 +1154,7 @@ class StageCacheMixin:
             or variables.get(SCENE_NATURAL_LANGUAGE_VAR)
         )
         appearance_done = self._progress_value_present(
-            variables.get(APPEARANCE_MAPPING) or artifacts.get("appearance_mapping")
+            variables.get(APPEARANCE_MAPPING) or artifacts.get("appearanceMapping")
         )
         return [
             framework_done,
@@ -1364,7 +1364,7 @@ class StageCacheMixin:
                     artifacts.pop(key, None)
             if is_meaningful_text(artifacts.get(APPEARANCE_NATURAL_LANGUAGE_ARTIFACT)):
                 for key in (
-                    "appearance_mapping",
+                    "appearanceMapping",
                     "character_registry",
                     "character_alias_registry",
                     "episode_alias_plan",
