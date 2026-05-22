@@ -221,7 +221,7 @@ def validate_stage_output_with_workflow_contract(
         meta["normalized_preview"] = _preview(normalized)
         return normalized, meta
 
-    if kind == "appearance_mapping_json":
+    if kind == "appearanceMapping_json":
         payload = _normalize_batch_json_candidate(candidate, canonical_name=canonical_name)
         issues = list(batch_validator(payload) if callable(batch_validator) else [])
         if issues:

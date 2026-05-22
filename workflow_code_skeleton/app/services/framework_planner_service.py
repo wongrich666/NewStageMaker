@@ -1529,6 +1529,40 @@ def _normalize_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     return normalized
 
 
+FRAMEWORK_PLANNER_STAGE_KEY_BY_STAGE = {
+    "01": "basic",
+    "02": "worldview",
+    "03": "character",
+    "04": "beat",
+    "05": "storylines",
+    "06": "guide",
+    "07": "package",
+}
+
+
+def framework_planner_stage_key(stage: Any) -> str:
+    return FRAMEWORK_PLANNER_STAGE_KEY_BY_STAGE.get(str(stage or "").zfill(2), "")
+
+
+def resolve_stage_preference_prompt(stage: Any, payload: dict[str, Any] | None) -> str:
+    """Resolve only the current 01-07 stage preference prompt."""
+    stage_key = framework_planner_stage_key(stage)
+    if not stage_key:
+        return ""
+    source = payload if isinstance(payload, dict) else {}
+    stage_prompts = source.get("user_knowledge_stage_prompts")
+    if isinstance(stage_prompts, dict):
+        prompt = _coerce_text_payload(stage_prompts.get(stage_key))
+        if prompt:
+            return prompt
+    prompt_preferences = source.get("prompt_preferences") if isinstance(source.get("prompt_preferences"), dict) else {}
+    pref_stage_prompts = prompt_preferences.get("stage_prompts") if isinstance(prompt_preferences.get("stage_prompts"), dict) else {}
+    prompt = _coerce_text_payload(pref_stage_prompts.get(stage_key))
+    if prompt:
+        return prompt
+    return _coerce_text_payload(source.get("user_preference_prompt") or source.get("user_knowledge_tag_prompt"))
+
+
 def _normalize_stage_prompt_payload(value: Any) -> dict[str, str]:
     source = value if isinstance(value, dict) else {}
     return {
@@ -1625,6 +1659,15 @@ def _build_stage_request_variables(
             detail={"missing_fields": missing_fields},
         )
 
+    stage_preference_prompt = resolve_stage_preference_prompt(definition.stage, payload)
+    if stage_preference_prompt:
+        for preference_key in (
+            "stage_preference_prompt",
+            "user_stage_preference_prompt",
+            "user_preference_prompt",
+        ):
+            variables[preference_key] = _wire_value(stage_preference_prompt)
+
     for key, value in payload.items():
         if key in variables or _is_blank(value):
             continue
@@ -1634,28 +1677,21 @@ def _build_stage_request_variables(
             "user_preference_prompt",
             "user_knowledge_tag_prompt",
             "user_knowledge_stage_prompts",
+            "stage_preference_prompt",
+            "user_stage_preference_prompt",
             "prompt_preferences",
         }:
             continue
         variables[key] = _wire_value(value)
 
-    stage_key = {
-        "01": "basic",
-        "02": "worldview",
-        "03": "character",
-        "04": "beat",
-        "05": "storylines",
-        "06": "guide",
-        "07": "package",
-    }.get(definition.stage, "")
-    stage_prompts = payload.get("user_knowledge_stage_prompts") if isinstance(payload.get("user_knowledge_stage_prompts"), dict) else {}
+    stage_key = framework_planner_stage_key(definition.stage)
     logger.info(
-        "framework planner user knowledge fields: stage=%s selected_preference_tags_count=%s selected_preference_tag_ids_count=%s user_preference_prompt_length=%s stage_prompt_length=%s",
+        "framework planner user knowledge fields: stage=%s selected_preference_tags_count=%s selected_preference_tag_ids_count=%s current_stage_key=%s current_stage_preference_prompt_length=%s",
         definition.stage,
         len(payload.get("selected_preference_tags") or []),
         len(payload.get("selected_preference_tag_ids") or []),
-        len(str(payload.get("user_preference_prompt") or "")),
-        len(str(stage_prompts.get(stage_key) or "")),
+        stage_key,
+        len(stage_preference_prompt),
     )
 
     return variables

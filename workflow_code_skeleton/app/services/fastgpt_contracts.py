@@ -162,7 +162,7 @@ LAST_SUMMARY = "last_summary"
 FINAL_SCRIPT = "final_script"
 IS_CONSISTENT = "is_consistent"
 NORMALIZED_EPISODE_PLAN = "normalized_episode_plan"
-LEGACY_APPEARANCE_MAPPING = "appearance_mapping"
+LEGACY_APPEARANCE_MAPPING = "appearanceMapping"
 APPEARANCE_MAPPING = "appearanceMapping"
 CHARACTER_REGISTRY = "character_registry"
 CHARACTER_ALIAS_REGISTRY = "character_alias_registry"
@@ -194,7 +194,7 @@ STAGE_APPEARANCE_ALIAS_REVIEW = "appearance_alias_review"
 STAGE_APPEARANCE_ALIAS_REWRITE = "appearance_alias_rewrite"
 STAGE_APPEARANCE_ALIAS_UNSTRUCTURED = "appearance_alias_unstructured"
 STAGE_FRAMEWORK_SCENE_DICTIONARY = "framework_scene_dictionary"
-STAGE_FRAMEWORK_APPEARANCE_MAPPING = "framework_appearance_mapping"
+STAGE_FRAMEWORK_APPEARANCE_MAPPING = "framework_appearanceMapping"
 STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN = "framework_enriched_episode_plan"
 STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE = "framework_causal_conflict_write"
 STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW = "framework_causal_conflict_review"
@@ -553,12 +553,12 @@ def describe_stage_output_shape_issue(
     if stage_name in APPEARANCE_MAPPING_STAGE_NAMES and field_name == APPEARANCE_MAPPING:
         if not isinstance(value, dict):
             return "必须是 object"
-        mapping = value.get("appearance_mapping") if isinstance(value.get("appearance_mapping"), dict) else value
+        mapping = value.get("appearanceMapping") if isinstance(value.get("appearanceMapping"), dict) else value
         characters = mapping.get("characters")
         if not isinstance(characters, list):
-            return "appearance_mapping.characters 必须是数组"
+            return "appearanceMapping.characters 必须是数组"
         if not any(isinstance(item, dict) for item in characters):
-            return "appearance_mapping.characters 不能为空"
+            return "appearanceMapping.characters 不能为空"
         return None
 
     return None
@@ -823,19 +823,19 @@ GLOBAL_VARIABLES: dict[str, FastGPTVariable] = {
         CHARACTER_REGISTRY,
         "object",
         "角色基础身份注册表。保存 canonical 角色本体与稳定识别锚点。",
-        "本地从 appearance_mapping 提炼",
+        "本地从 appearanceMapping 提炼",
     ),
     CHARACTER_ALIAS_REGISTRY: FastGPTVariable(
         CHARACTER_ALIAS_REGISTRY,
         "object",
         "角色别名注册表。保存 alias_name 与 canonical 角色的映射关系。",
-        "本地从 appearance_mapping 提炼",
+        "本地从 appearanceMapping 提炼",
     ),
     EPISODE_ALIAS_PLAN: FastGPTVariable(
         EPISODE_ALIAS_PLAN,
         "object",
         "逐集 alias 使用计划。为当前批次切片后供 hooks / dialogues / script 使用。",
-        "本地从 normalized_episode_plan + appearance_mapping 提炼",
+        "本地从 normalized_episode_plan + appearanceMapping 提炼",
     ),
     APPEARANCE_CONTINUITY_MEMORY: FastGPTVariable(
         APPEARANCE_CONTINUITY_MEMORY,
@@ -1672,7 +1672,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
             )
         },
         fastgpt_responsibility="逻辑阶段名；实际由 Python 依次调用服装映射编写、审核、修订与自然语言说明四个独立 workflow。",
-        local_responsibility="编排四阶段循环，审核通过后才提交正式 appearance_mapping，并在本地提炼 registry / alias plan。",
+        local_responsibility="编排四阶段循环，审核通过后才提交正式 appearanceMapping，并在本地提炼 registry / alias plan。",
     ),
     STAGE_APPEARANCE_ALIAS_WRITING: FastGPTStageContract(
         stage_name=STAGE_APPEARANCE_ALIAS_WRITING,
@@ -1696,7 +1696,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         },
         fastgpt_responsibility="编写完整结构化服装版本映射 JSON。",
         local_responsibility="只做输出 repair/结构校验；正式缓存提交由 Python 审核结果决定。",
-        expected_output_kind="appearance_mapping_json",
+        expected_output_kind="appearanceMapping_json",
         workflow_json_name="服装版本映射编写.json",
     ),
     STAGE_APPEARANCE_ALIAS_REVIEW: FastGPTStageContract(
@@ -1749,9 +1749,9 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
                 LEGACY_APPEARANCE_MAPPING,
             )
         },
-        fastgpt_responsibility="基于当前服装映射与审核结果，输出新的完整 appearance_mapping。",
+        fastgpt_responsibility="基于当前服装映射与审核结果，输出新的完整 appearanceMapping。",
         local_responsibility="只做输出 repair/结构校验；是否继续循环由 Python 决定。",
-        expected_output_kind="appearance_mapping_json",
+        expected_output_kind="appearanceMapping_json",
         workflow_json_name="服装版本映射修订.json",
     ),
     STAGE_APPEARANCE_ALIAS_UNSTRUCTURED: FastGPTStageContract(

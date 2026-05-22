@@ -159,16 +159,23 @@ class UserKnowledgeApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.get_json()["tag"]["enabled"])
 
-    def test_builtin_tag_cannot_be_updated(self) -> None:
+    def test_builtin_tag_can_update_stage_prompts(self) -> None:
         builtin = next(tag for tag in self.store.list_tags() if tag["builtin"])
 
         response = self.client.patch(
             f"/api/user-knowledge/tags/{builtin['id']}",
             headers=self.headers,
-            json={"name": "非法修改"},
+            json={
+                "name": "可编辑默认标签",
+                "stage_prompts": {"worldview": "只改世界观阶段"},
+            },
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200)
+        tag = response.get_json()["tag"]
+        self.assertTrue(tag["builtin"])
+        self.assertEqual(tag["name"], "可编辑默认标签")
+        self.assertEqual(tag["stage_prompts"]["worldview"], "只改世界观阶段")
 
     def test_apply_tags_api_empty_selection(self) -> None:
         response = self.client.post(
@@ -274,6 +281,42 @@ class UserKnowledgeApiTests(unittest.TestCase):
         input_payload = mocked.call_args.args[1]
         self.assertEqual(input_payload["prompt_preferences"]["stage_prompts"]["worldview"], "阶段二偏好")
         self.assertEqual(input_payload["user_knowledge_stage_prompts"]["worldview"], "阶段二偏好")
+        self.assertEqual(input_payload["stage_preference_prompt"], "阶段二偏好")
+        self.assertEqual(input_payload["user_preference_prompt"], "阶段二偏好")
+
+    def test_resolve_stage_preference_prompt_uses_only_current_stage(self) -> None:
+        payload = {
+            "user_knowledge_stage_prompts": {
+                "basic": "阶段一",
+                "worldview": "阶段二",
+                "character": "阶段三",
+                "beat": "阶段四",
+                "storylines": "阶段五",
+                "guide": "阶段六",
+                "package": "阶段七",
+            },
+            "user_preference_prompt": "全局兜底",
+        }
+
+        self.assertEqual(framework_planner_service.resolve_stage_preference_prompt("01", payload), "阶段一")
+        self.assertEqual(framework_planner_service.resolve_stage_preference_prompt("04", payload), "阶段四")
+        self.assertEqual(framework_planner_service.resolve_stage_preference_prompt("07", payload), "阶段七")
+        self.assertNotIn("阶段二", framework_planner_service.resolve_stage_preference_prompt("01", payload))
+
+    def test_resolve_stage_preference_prompt_fallback_order(self) -> None:
+        payload = {
+            "prompt_preferences": {"stage_prompts": {"character": "prompt_preferences 三阶段"}},
+            "user_preference_prompt": "全局兜底",
+        }
+
+        self.assertEqual(
+            framework_planner_service.resolve_stage_preference_prompt("03", payload),
+            "prompt_preferences 三阶段",
+        )
+        self.assertEqual(
+            framework_planner_service.resolve_stage_preference_prompt("06", payload),
+            "全局兜底",
+        )
 
     def test_stage07_package_sanitizer_removes_fastgpt_internal_keys(self) -> None:
         package = framework_planner_service._sanitize_framework_plan_package(

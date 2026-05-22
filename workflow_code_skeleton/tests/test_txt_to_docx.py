@@ -187,7 +187,7 @@ class TxtToDocxCompatibilityTests(unittest.TestCase):
             self.assertNotIn("待补全", text)
             self.assertNotIn("TODO", text)
             self.assertNotIn("服装版本映射内容", text)
-            self.assertNotIn("appearance_mapping", text)
+            self.assertNotIn("appearanceMapping", text)
             self.assertNotIn("{", text)
             self.assertNotIn("}", text)
 

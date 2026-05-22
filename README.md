@@ -188,6 +188,23 @@ http://127.0.0.1:5000
 
 这条链路专用于“三幕十五节拍框架输出后的剧本生成”。它不会复用旧的 `all_hooks / all_dialogues / all_script` 三段式批处理，也不会调用 `dialogue_write / dialogue_review / dialogue_rewrite / dialogue_memory`。正文和对白已经在 `framework_script_write/review/rewrite/memory` 中融合生成，角色对话工作流不再用于 `framework_to_script` 链路。普通新建剧本仍走原有主链路。
 
+#### Framework-to-script 08-12 chain
+
+- 08 `framework_scene_dictionary` 生成 `sceneDictionary / scriptWorldRulesDigest`。
+- 09 `framework_appearanceMapping` 生成 `appearanceMapping`，兼容 `appearance_mapping`。
+- 10 `framework_enriched_episode_plan` 生成 `allEnrichedEpisodePlan`。
+- 11 `framework_causal_conflict_write/review/memory` 串行生成因果冲突计划。
+- 12 `framework_script_write/review/memory` 串行生成正文；最终导出字段是 `final_script / final_output_text`。
+- 运行时按批次串行执行，代码上由同一条 `framework_to_script` 链路一次性串联；`.env`、`cache/`、`debug/`、`logs/` 不应提交。
+
+#### Framework planner stage preferences
+
+- 智慧库现在按 01-07 阶段保存偏好：`01=basic`、`02=worldview`、`03=character`、`04=beat`、`05=storylines`、`06=guide`、`07=package`。
+- 默认标签和自定义标签都可编辑；应用标签后会写入各阶段 `stage_prompts`，当前阶段文本框仍可二次修改。
+- 阶段请求优先使用当前阶段的 `stage_preference_prompt / user_stage_preference_prompt`，全局 `user_preference_prompt` 只作兼容兜底。
+- 普通用户界面只展示用户友好的折叠结构，不直接展示 JSON 或 FastGPT 原始壳字段。
+- 阶段历史在界面中称为“版本历史”，不对普通用户展示 `cache/logs/debug` 等工程词。
+
 框架转剧本任务识别条件是输入中出现以下任一标记：
 
 - `workflow_mode = "framework_to_script"`
@@ -211,7 +228,7 @@ http://127.0.0.1:5000
    - 框架转剧本：丰富分集计划
    - 框架转剧本：因果冲突推进计划
    - 框架转剧本：正文对白融合
-10. 最终生成 `final_script_text`。
+10. 最终生成 `final_script / final_output_text`。
 11. 导出 `txt/docx`。
 
 ## 辅助工具

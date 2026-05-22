@@ -6,7 +6,7 @@
   const KNOWLEDGE_PANEL_STORAGE_KEY = config.knowledgePanelStorageKey || "frameworkPlannerKnowledgePanelOpen.v1";
   const API_BASE = config.apiBase || "/api/framework-planner";
   const authToken = String(config.authToken || "").trim();
-  const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "display_text", "choices", "usage"];
+  const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "choices", "usage", "updateVarResult", "newVariables"];
   const BUSINESS_FIELD_KEYS = [
     "source_brief",
     "worldview_plan",
@@ -905,6 +905,28 @@
     } catch (error) {
       // ignore storage write errors
     }
+    syncPromptPreferencesRemote(reason);
+  }
+
+  let preferenceSyncTimer = null;
+
+  function syncPromptPreferencesRemote(reason) {
+    window.clearTimeout(preferenceSyncTimer);
+    preferenceSyncTimer = window.setTimeout(() => {
+      requestJson("/api/user-knowledge/preferences", {
+        method: "PUT",
+        body: JSON.stringify({
+          user_preference_prompt: String((state.prompt_preferences || {}).script_preference || ""),
+          selected_preference_tag_ids: (ui.knowledge.selectedIds || []).map(String),
+          stage_prompts: normalizeStagePrompts((state.prompt_preferences || {}).stage_prompts || {}),
+          reason: reason || "update",
+        }),
+      }).catch((error) => {
+        if (DEV_LOG_ENABLED && typeof console !== "undefined" && console.warn) {
+          console.warn("[framework_planner] preference sync failed", error);
+        }
+      });
+    }, 400);
   }
 
   function simpleHash(value) {
@@ -1464,6 +1486,8 @@
         stage_prompts: stagePrompts,
       },
       user_knowledge_stage_prompt: String(stagePrompts[stageKey] || ""),
+      stage_preference_prompt: String(stagePrompts[stageKey] || ""),
+      user_stage_preference_prompt: String(stagePrompts[stageKey] || ""),
     };
   }
 
@@ -1478,12 +1502,13 @@
   }
 
   const FIELD_LABELS = {
-    source_brief: "原文摘要",
+    source_brief: "原文信息提取",
     worldview_plan: "世界观方案",
-    character_plan: "人设方案",
+    character_plan: "人物设定",
     beat_checkpoint_timeline: "三幕十五节拍时间轴",
-    checkpoint_explanation: "卡点说明",
+    checkpoint_explanation: "节拍说明",
     character_storylines: "人物故事线",
+    storyline_decisions: "故事线处理",
     character_relationships: "人物关系",
     main_characters: "主要角色",
     protagonist: "主角",
@@ -1575,6 +1600,23 @@
       .replace(/([a-z])([A-Z])/g, "$1 $2")
       .trim()
       || "补充信息";
+  }
+
+  function isHiddenTechnicalKey(key) {
+    return RAW_RESPONSE_KEYS.includes(String(key || ""));
+  }
+
+  function isRenderableValue(value) {
+    if (value === null || value === undefined) return false;
+    if (typeof value === "string") {
+      const text = value.trim();
+      return Boolean(text) && !["{}", "[]", "null", "undefined", "[object Object]"].includes(text);
+    }
+    if (Array.isArray(value)) return value.some(isRenderableValue);
+    if (typeof value === "object") {
+      return Object.keys(value).some((key) => !isHiddenTechnicalKey(key) && isRenderableValue(value[key]));
+    }
+    return true;
   }
 
   function editorValueFor(key) {
@@ -1805,7 +1847,7 @@
       <section class="fp-card fp-knowledge-panel ${ui.knowledge.open ? "is-open" : ""}">
         <button class="fp-knowledge-toggle" type="button" data-action="toggle-knowledge-panel" aria-expanded="${ui.knowledge.open ? "true" : "false"}">
           <span>
-            <strong>智慧库标签</strong>
+          <strong>智慧库 / 阶段偏好</strong>
             <small>${escapeHtml(selectedLabel)} · ${ui.knowledge.status ? escapeHtml(ui.knowledge.status) : "可为每个策划阶段注入不同偏好"}</small>
           </span>
           <span class="fp-tag blue">${ui.knowledge.open ? "收起" : "展开"}</span>
@@ -1814,14 +1856,14 @@
           <div class="fp-knowledge-body">
             <div class="fp-knowledge-actions">
               <button class="fp-btn small" data-action="refresh-knowledge-tags" ${ui.knowledge.loading ? "disabled" : ""}>${ui.knowledge.loading ? "加载中..." : "刷新标签"}</button>
-              <button class="fp-btn small primary" data-action="apply-knowledge-tags">一键应用到用户偏好</button>
+              <button class="fp-btn small primary" data-action="apply-knowledge-tags">应用到 01-07 阶段偏好</button>
               <button class="fp-btn small" data-action="new-knowledge-tag">${ui.knowledge.formOpen && !ui.knowledge.editingId ? "收起新建" : "新建自定义标签"}</button>
             </div>
             ${ui.knowledge.status ? `<div class="fp-inline-warning compact">${escapeHtml(ui.knowledge.status)}</div>` : ""}
             ${renderKnowledgeSelected(selectedTags, missingIds)}
             <div class="fp-knowledge-grid">
               <div>
-                <h3>系统预设标签</h3>
+                <h3>默认标签</h3>
                 ${renderKnowledgeTagGroup(builtinTags, "暂无系统预设标签。")}
               </div>
               <div>
@@ -1865,19 +1907,26 @@
   function renderKnowledgeTagItem(tag) {
     const id = String(tag.id || "");
     const selected = (ui.knowledge.selectedIds || []).includes(id);
+    const prompts = normalizeStagePrompts(tag.stage_prompts || {});
     return `
       <label class="fp-knowledge-item">
         <input type="checkbox" data-knowledge-tag-id="${escapeHtml(id)}" ${selected ? "checked" : ""} />
         <span>
           <strong>${escapeHtml(tag.name || id)}</strong>
-          <small>${escapeHtml(tag.category || (tag.builtin ? "系统预设" : "自定义"))} · ${tag.builtin ? "系统预设" : "自定义标签"}</small>
+          <small>${escapeHtml(tag.category || (tag.builtin ? "默认标签" : "自定义"))} · ${tag.builtin ? "默认标签，可编辑" : "自定义标签"}</small>
           ${tag.description ? `<em>${escapeHtml(truncateText(tag.description, 90))}</em>` : ""}
+          <details class="fp-knowledge-stage-details">
+            <summary>查看 01-07 阶段提示词</summary>
+            <div>
+              ${STAGE_SEQUENCE.map((stageKey) => `
+                <p><strong>${escapeHtml(stagePromptLabel(stageKey))}</strong><span>${escapeHtml(truncateText(prompts[stageKey] || "", 120) || "暂无")}</span></p>
+              `).join("")}
+            </div>
+          </details>
         </span>
         <span class="fp-knowledge-item-actions">
-          ${tag.builtin ? `<span class="fp-tag lock">系统预设</span>` : `
-            <button class="fp-btn small" type="button" data-action="edit-knowledge-tag" data-tag-id="${escapeHtml(id)}">编辑</button>
-            <button class="fp-btn small danger subtle" type="button" data-action="delete-knowledge-tag" data-tag-id="${escapeHtml(id)}">删除</button>
-          `}
+          <button class="fp-btn small" type="button" data-action="edit-knowledge-tag" data-tag-id="${escapeHtml(id)}">编辑</button>
+          <button class="fp-btn small danger subtle" type="button" data-action="delete-knowledge-tag" data-tag-id="${escapeHtml(id)}">${tag.builtin ? "隐藏" : "删除"}</button>
         </span>
       </label>
     `;
@@ -1890,7 +1939,7 @@
         <div class="fp-card-title-row">
           <div>
             <h3>每阶段提示词预览</h3>
-            <p class="fp-card-sub">这里直接读取并写入当前工作台的 <code>prompt_preferences.stage_prompts</code>。</p>
+            <p class="fp-card-sub">应用标签后仍可在当前阶段文本框继续微调。</p>
           </div>
         </div>
         <div class="fp-knowledge-stage-grid">
@@ -1912,7 +1961,7 @@
       <div class="fp-knowledge-form">
         <div class="fp-card-title-row">
           <div>
-            <h3>${editing ? "编辑自定义标签" : "新建自定义标签"}</h3>
+            <h3>${editing ? "编辑标签" : "新建自定义标签"}</h3>
             <p class="fp-card-sub">通用偏好用于主工作台，阶段提示词用于框架策划 01-07。</p>
           </div>
           <button class="fp-btn small" data-action="cancel-knowledge-edit">取消</button>
@@ -2159,8 +2208,8 @@
       <div class="fp-preference-panel compact">
         <div class="fp-preference-head">
           <div>
-            <strong>用户偏好提示</strong>
-            <p>保存后，下次打开同一剧本会自动填入</p>
+            <strong>本阶段偏好</strong>
+            <p>只影响 ${escapeHtml(stagePromptLabel(stageKey))}，不会污染其他阶段</p>
           </div>
           <button class="fp-btn small" data-action="apply-stage-preference" data-stage-key="${escapeHtml(stageKey)}" ${disabled || !String(value).trim() ? "disabled" : ""}>应用偏好</button>
         </div>
@@ -2186,7 +2235,7 @@
             <strong>历史版本</strong>
             <p>每次生成都会保留独立版本，成功版本会同步为本阶段最新有效版本。</p>
           </div>
-          <button class="fp-btn small" data-action="refresh-stage-history" data-stage-key="${escapeHtml(stageKey)}" ${loading ? "disabled" : ""}>${loading ? "刷新中..." : "刷新历史"}</button>
+          <button class="fp-btn small" data-action="refresh-stage-history" data-stage-key="${escapeHtml(stageKey)}" ${loading ? "disabled" : ""}>${loading ? "刷新中..." : "查看历史版本"}</button>
         </div>
         <div class="fp-history-list">
           ${entries.length ? entries.map((entry) => `
@@ -2198,7 +2247,7 @@
               </div>
               <div class="fp-history-actions">
                 <span class="fp-tag ${entry.status === "success" ? "ok" : "red"}">${entry.status === "success" ? "成功" : "失败"}</span>
-                <button class="fp-btn small" data-action="load-stage-history" data-stage-key="${escapeHtml(stageKey)}" data-history-file="${escapeHtml(entry.filename)}" ${entry.status !== "success" ? "disabled" : ""}>加载</button>
+                <button class="fp-btn small" data-action="load-stage-history" data-stage-key="${escapeHtml(stageKey)}" data-history-file="${escapeHtml(entry.filename)}" ${entry.status !== "success" ? "disabled" : ""}>恢复到此版本</button>
               </div>
             </div>
           `).join("") : `<div class="fp-empty small">暂无历史版本。生成本阶段后会自动保存。</div>`}
@@ -2609,11 +2658,7 @@
     return `
       <div class="fp-business-form" data-business-form="${escapeHtml((options && options.dataKey) || "")}">
         ${overview}
-        <details class="fp-business-debug">
-          <summary>调试 / 完整结构</summary>
-          ${form}
-          <pre>${escapeHtml(prettyJson(data))}</pre>
-        </details>
+        ${form}
       </div>
     `;
   }
@@ -2668,14 +2713,14 @@
 
   function renderPayloadSummary(payload) {
     const cleaned = cleanOutgoingPayload(payload || {});
-    const entries = Object.keys(cleaned);
+    const entries = Object.keys(cleaned).filter((key) => !isHiddenTechnicalKey(key) && isRenderableValue(cleaned[key]));
     if (!entries.length) return `<div class="fp-empty small">当前没有可发送的业务字段。</div>`;
     return `
       <div class="fp-business-form compact">
         ${entries.map((key) => `
           <div class="fp-detail-item">
             <strong>${escapeHtml(fieldLabel(key))}</strong>
-            ${escapeHtml(fieldSummary(cleaned[key]))}
+            <span>${escapeHtml(summarizeBusinessValue(cleaned[key]))}</span>
           </div>
         `).join("")}
       </div>
@@ -2695,7 +2740,7 @@
   }
 
   function renderBusinessObject(value, context, path, depth) {
-    const entries = Object.keys(value || {});
+    const entries = Object.keys(value || {}).filter((key) => !isHiddenTechnicalKey(key) && isRenderableValue(value[key]));
     if (!entries.length) return `<div class="fp-empty small">暂无内容</div>`;
     const title = fieldLabel(context.keyName || path[path.length - 1] || "内容");
     const panelKey = businessPanelKey(context.rootKey, path);
@@ -2728,7 +2773,9 @@
     const title = fieldLabel(context.keyName || path[path.length - 1] || "列表");
     const panelKey = businessPanelKey(context.rootKey, path);
     const open = context.forceOpen || isCoreBusinessKey(context.keyName) || ui.expandedBusinessPanels[panelKey] === true;
-    const items = value.map((item, index) => {
+    const visibleItems = value.filter(isRenderableValue);
+    if (!visibleItems.length) return `<div class="fp-empty small">暂无条目</div>`;
+    const items = visibleItems.map((item, index) => {
       const itemPath = path.concat(index);
       const itemKey = businessPanelKey(context.rootKey, itemPath);
       const itemOpen = index === 0 || ui.expandedBusinessPanels[itemKey] === true;
@@ -2757,7 +2804,7 @@
       <details class="fp-business-panel" data-business-panel="${escapeHtml(panelKey)}" ${open ? "open" : ""}>
         <summary>
           <strong>${escapeHtml(title)}</strong>
-          <small>${escapeHtml(`${value.length} 条 · ${summarizeBusinessValue(value)}`)}</small>
+          <small>${escapeHtml(`${visibleItems.length} 条 · ${summarizeBusinessValue(visibleItems)}`)}</small>
         </summary>
         <div class="fp-business-panel-body">${items || `<div class="fp-empty small">暂无条目</div>`}</div>
       </details>
@@ -2766,6 +2813,7 @@
 
   function renderBusinessPrimitive(value, context, path) {
     const label = fieldLabel(context.keyName || path[path.length - 1] || "内容");
+    if (!isRenderableValue(value)) return "";
     const encodedPath = encodeBusinessPath(path);
     const disabled = context.editable ? "" : "disabled";
     const type = typeof value;
@@ -3403,6 +3451,8 @@
 
   async function loadHistoryVersion(stageKey, filename) {
     if (!filename) return;
+    const proceed = window.confirm(`将恢复到“${stageDisplayTitle(stageKey)}”在该时间点的版本，不影响已保存的其他历史版本。`);
+    if (!proceed) return;
     try {
       const projectId = encodeURIComponent(currentProjectCacheName());
       const data = await requestJson(`/api/framework-planner/history/${projectId}/${encodeURIComponent(filename)}`);
@@ -3417,7 +3467,7 @@
       state.stage_state[stageKey].confirmed = false;
       recordHistory("load_stage_history", { stageKey, filename });
       saveState();
-      showToast("已加载历史版本到当前界面，请确认后再进入下游阶段");
+      showToast("已恢复到此版本，请确认后再进入下游阶段");
       render();
     } catch (error) {
       showToast(error.message || "历史版本加载失败");
@@ -4070,7 +4120,7 @@
       showToast("当前策划已开始，不能清空输入；如需新建，请点击新建剧本");
       return;
     }
-    const proceed = window.confirm("确认清空当前输入吗？资产、历史版本、cache 和 logs 会保留。");
+    const proceed = window.confirm("确认清空当前输入吗？已保存的资产和历史版本会保留。");
     if (!proceed) return;
     const assetState = clone(state.asset_state || initialState.asset_state);
     state.basic_config = clone(initialState.basic_config);
@@ -4210,6 +4260,28 @@
     } finally {
       ui.knowledge.loading = false;
       render();
+    }
+  }
+
+  async function loadKnowledgePreferences() {
+    try {
+      const data = await requestJson("/api/user-knowledge/preferences");
+      const preferences = data.preferences || {};
+      const remoteStagePrompts = normalizeStagePrompts(preferences.stage_prompts || {});
+      const hasRemoteStagePrompt = Object.values(remoteStagePrompts).some((value) => String(value || "").trim());
+      if (Array.isArray(preferences.selected_preference_tag_ids)) {
+        ui.knowledge.selectedIds = preferences.selected_preference_tag_ids.map(String);
+      }
+      state.prompt_preferences = normalizePromptPreferences(Object.assign({}, state.prompt_preferences || {}, {
+        script_preference: preferences.user_preference_prompt || (state.prompt_preferences || {}).script_preference || "",
+        stage_prompts: hasRemoteStagePrompt ? remoteStagePrompts : (state.prompt_preferences || {}).stage_prompts || {},
+      }));
+      saveState();
+      render();
+    } catch (error) {
+      if (DEV_LOG_ENABLED && typeof console !== "undefined" && console.warn) {
+        console.warn("[framework_planner] preference load failed", error);
+      }
     }
   }
 
@@ -4404,7 +4476,7 @@
       user_requirements: state.basic_config.user_requirements,
     }, {
       asset,
-      cache_hint: `cache/${currentProjectCacheName()}/frontend_debug.txt`,
+      history_hint: `版本历史：${currentProjectCacheName()}`,
     });
     await loadAssets();
     await loadStageHistory("basic");
@@ -5140,6 +5212,7 @@
   };
 
   render();
+  loadKnowledgePreferences().catch(() => {});
   loadAssets().catch(() => {});
   loadStageHistory(stageKeyForView(state.current_view || "basic")).catch(() => {});
 })();

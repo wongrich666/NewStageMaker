@@ -741,16 +741,16 @@ function ensureRuntimeDebugPanel() {
 
   panel.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
-      <strong>运行 cache / logs</strong>
+      <strong>运行状态 / 版本历史</strong>
       <button type="button" data-role="close-debug-panel" style="border:0;border-radius:8px;padding:4px 8px;cursor:pointer;">隐藏</button>
     </div>
     <div data-role="summary" style="margin-bottom:8px;color:#cbd5e1;"></div>
     <details open style="margin-bottom:8px;">
-      <summary style="cursor:pointer;color:#f9fafb;">Cache snapshot</summary>
+      <summary style="cursor:pointer;color:#f9fafb;">状态快照</summary>
       <pre data-role="cache" style="white-space:pre-wrap;word-break:break-word;background:#020617;border-radius:8px;padding:8px;margin:8px 0 0;max-height:260px;overflow:auto;"></pre>
     </details>
     <details open>
-      <summary style="cursor:pointer;color:#f9fafb;">Runtime logs</summary>
+      <summary style="cursor:pointer;color:#f9fafb;">运行记录</summary>
       <div data-role="logs" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
     </details>
   `;
@@ -814,7 +814,7 @@ function renderRuntimeDebug(debug) {
       `status=${debug.status || "-"}`,
       `stage=${debug.current_stage || "-"}`,
       `node=${debug.current_node_name || debug.current_node_id || "-"}`,
-      `logs=${logs.length}`,
+      `运行记录=${logs.length}`,
       `checkpoint=${debug.resume_checkpoint_exists ? "yes" : "no"}`,
     ].join(" | ");
   }
@@ -1008,7 +1008,7 @@ startRuntimeDebugPolling();
       appearance_alias_rewrite: "正在修订服装版本映射",
       appearance_alias_unstructured: "正在整理服装版本映射自然语言说明",
       framework_scene_dictionary: "正在生成框架转剧本：场景字典提炼",
-      framework_appearance_mapping: "正在生成框架转剧本：人设服装 alias 映射",
+      framework_appearanceMapping: "正在生成框架转剧本：人设服装 alias 映射",
       framework_enriched_episode_plan: "正在生成框架转剧本：丰富分集计划",
       framework_causal_conflict: "正在生成框架转剧本因果冲突推进计划",
       framework_causal_conflict_write: "正在编写框架转剧本：因果冲突推进计划",
@@ -1100,6 +1100,7 @@ startRuntimeDebugPolling();
   function frameworkStageLabel(stageKey) {
     const mapping = {
       framework_scene_dictionary: "框架转剧本：场景字典提炼",
+      framework_appearancemapping: "框架转剧本：人设服装 alias 映射",
       framework_appearance_mapping: "框架转剧本：人设服装 alias 映射",
       framework_enriched_episode_plan: "框架转剧本：丰富分集计划",
       framework_causal_conflict: "框架转剧本：因果冲突推进计划",
@@ -1132,7 +1133,7 @@ startRuntimeDebugPolling();
     const stageKey = String(snapshot?.current_stage || "").trim().toLowerCase();
     if (!isFrameworkToScriptSnapshot(snapshot)) return 0;
     if (stageKey === "framework_scene_dictionary") return 8;
-    if (stageKey === "framework_appearance_mapping") return 14;
+    if (stageKey === "framework_appearancemapping" || stageKey === "framework_appearance_mapping") return 14;
     if (stageKey === "framework_enriched_episode_plan") return 22;
     if (stageKey.startsWith("framework_causal_conflict")) return 45;
     if (stageKey.startsWith("framework_script")) return 78;
@@ -1170,6 +1171,7 @@ startRuntimeDebugPolling();
       appearance_alias_rewrite: "internal",
       appearance_alias_unstructured: "internal",
       framework_scene_dictionary: "framework_to_script",
+      framework_appearancemapping: "framework_to_script",
       framework_appearance_mapping: "framework_to_script",
       framework_enriched_episode_plan: "framework_to_script",
       framework_causal_conflict: "framework_to_script",

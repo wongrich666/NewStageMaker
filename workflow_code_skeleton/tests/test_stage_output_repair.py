@@ -17,8 +17,8 @@ from workflow_code_skeleton.app.services.fastgpt_client import (
     FastGPTStageFormatError,
 )
 from workflow_code_skeleton.app.services.stage_output_repair import (
-    normalize_appearance_mapping_candidate,
-    validate_appearance_mapping_output,
+    normalize_appearanceMapping_candidate,
+    validate_appearanceMapping_output,
 )
 from workflow_code_skeleton.app.services.fastgpt_contracts import (
     APPEARANCE_MAPPING,
@@ -297,9 +297,9 @@ def _scene_setting_from_output_text(output_text: str) -> dict[str, object]:
     raise AssertionError("scenes 输出未包含可识别的 scene_setting")
 
 
-def _appearance_mapping_json() -> dict[str, object]:
+def _appearanceMapping_json() -> dict[str, object]:
     return {
-        "appearance_mapping": {
+        "appearanceMapping": {
             "mapping_principle": "同一角色按场景与身份状态切换服饰别名，但始终保留同一人物识别锚点。",
             "global_naming_style": "统一使用“角色中文全名【场景/状态/身份】”的命名方式。",
             "characters": [
@@ -366,9 +366,9 @@ def _appearance_mapping_json() -> dict[str, object]:
     }
 
 
-def _appearance_mapping_with_principle(principle: str) -> dict[str, object]:
-    payload = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
-    payload["appearance_mapping"]["mapping_principle"] = principle
+def _appearanceMapping_with_principle(principle: str) -> dict[str, object]:
+    payload = json.loads(json.dumps(_appearanceMapping_json(), ensure_ascii=False))
+    payload["appearanceMapping"]["mapping_principle"] = principle
     return payload
 
 
@@ -387,9 +387,9 @@ def _appearance_review_json(
     }
 
 
-def _simplified_appearance_mapping_json() -> dict[str, object]:
+def _simplified_appearanceMapping_json() -> dict[str, object]:
     return {
-        "appearance_mapping": {
+        "appearanceMapping": {
             "characters": [
                 {
                     "character_name": "白雪公主",
@@ -914,7 +914,7 @@ class StageOutputRepairTests(unittest.TestCase):
 
     def test_prepare_appearance_stage_inputs_do_not_overwrite_formal_mapping(self) -> None:
         variables = dict(self.appearance_variables)
-        original_mapping = json.dumps(_appearance_mapping_json(), ensure_ascii=False)
+        original_mapping = json.dumps(_appearanceMapping_json(), ensure_ascii=False)
         variables[APPEARANCE_MAPPING] = original_mapping
 
         prepared, warnings, fatal_errors = _prepare_appearance_stage_inputs(variables)
@@ -924,15 +924,15 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertEqual(variables[APPEARANCE_MAPPING], original_mapping)
         self.assertEqual(prepared[APPEARANCE_MAPPING], original_mapping)
 
-    def test_appearance_mapping_standard_json_passes(self) -> None:
+    def test_appearanceMapping_standard_json_passes(self) -> None:
         result = self._extract(
             STAGE_APPEARANCE_ALIAS_GENERATION,
-            {"output": _appearance_mapping_json()},
+            {"output": _appearanceMapping_json()},
         )
         mapping = result[APPEARANCE_MAPPING]
         self.assertEqual(mapping["characters"][0]["canonical_name"], "林夏")
 
-    def test_appearance_mapping_choices_json_object_passes(self) -> None:
+    def test_appearanceMapping_choices_json_object_passes(self) -> None:
         result = self._extract(
             STAGE_APPEARANCE_ALIAS_GENERATION,
             {
@@ -940,7 +940,7 @@ class StageOutputRepairTests(unittest.TestCase):
                     {
                         "message": {
                             "content": json.dumps(
-                                _appearance_mapping_json(),
+                                _appearanceMapping_json(),
                                 ensure_ascii=False,
                             )
                         }
@@ -951,10 +951,10 @@ class StageOutputRepairTests(unittest.TestCase):
         mapping = result[APPEARANCE_MAPPING]
         self.assertEqual(mapping["scene_level_usage_plan"][0]["scene_name"], "玻璃会议室")
 
-    def test_appearance_mapping_wrapped_in_answer_node_alias_string_passes(self) -> None:
+    def test_appearanceMapping_wrapped_in_answer_node_alias_string_passes(self) -> None:
         answer_node = {
             APPEARANCE_MAPPING_VAR: json.dumps(
-                _appearance_mapping_json(),
+                _appearanceMapping_json(),
                 ensure_ascii=False,
             )
         }
@@ -969,27 +969,27 @@ class StageOutputRepairTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._extract(
                 STAGE_APPEARANCE_ALIAS_GENERATION,
-                {"answerText": json.dumps(_appearance_mapping_json(), ensure_ascii=False)},
+                {"answerText": json.dumps(_appearanceMapping_json(), ensure_ascii=False)},
             )
 
-    def test_appearance_mapping_wrapped_in_update_var_result_passes(self) -> None:
+    def test_appearanceMapping_wrapped_in_update_var_result_passes(self) -> None:
         data = {
             "responseData": {
                 "updateVarResult": [
                     {
                         "variable": ["VARIABLE_NODE_ID", APPEARANCE_MAPPING_VAR],
-                        "value": json.dumps(_appearance_mapping_json(), ensure_ascii=False),
+                        "value": json.dumps(_appearanceMapping_json(), ensure_ascii=False),
                     }
                 ]
             }
         }
         result = self._extract(STAGE_APPEARANCE_ALIAS_GENERATION, data)
         mapping = result[APPEARANCE_MAPPING]
-        self.assertEqual(mapping["mapping_principle"], _appearance_mapping_json()["appearance_mapping"]["mapping_principle"])
+        self.assertEqual(mapping["mapping_principle"], _appearanceMapping_json()["appearanceMapping"]["mapping_principle"])
 
-    def test_appearance_mapping_blank_default_name_repairs_from_canonical_name(self) -> None:
-        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
-        broken["appearance_mapping"]["characters"][0]["default_name"] = ""
+    def test_appearanceMapping_blank_default_name_repairs_from_canonical_name(self) -> None:
+        broken = json.loads(json.dumps(_appearanceMapping_json(), ensure_ascii=False))
+        broken["appearanceMapping"]["characters"][0]["default_name"] = ""
 
         result = self._extract(
             STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -998,21 +998,21 @@ class StageOutputRepairTests(unittest.TestCase):
 
         mapping = result[APPEARANCE_MAPPING]
         self.assertEqual(mapping["characters"][0]["default_name"], "林夏")
-        self.assertEqual(validate_appearance_mapping_output(mapping), [])
+        self.assertEqual(validate_appearanceMapping_output(mapping), [])
 
-    def test_appearance_mapping_blank_default_name_repairs_from_character_id_when_name_missing(self) -> None:
-        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
-        broken["appearance_mapping"]["characters"][0]["canonical_name"] = ""
-        broken["appearance_mapping"]["characters"][0]["default_name"] = ""
+    def test_appearanceMapping_blank_default_name_repairs_from_character_id_when_name_missing(self) -> None:
+        broken = json.loads(json.dumps(_appearanceMapping_json(), ensure_ascii=False))
+        broken["appearanceMapping"]["characters"][0]["canonical_name"] = ""
+        broken["appearanceMapping"]["characters"][0]["default_name"] = ""
 
-        normalized = normalize_appearance_mapping_candidate(broken)
+        normalized = normalize_appearanceMapping_candidate(broken)
 
         self.assertIsNotNone(normalized)
-        repaired = normalized["appearance_mapping"]["characters"][0]
+        repaired = normalized["appearanceMapping"]["characters"][0]
         self.assertEqual(repaired["canonical_name"], "linxia")
         self.assertEqual(repaired["default_name"], "linxia")
         self.assertEqual(
-            validate_appearance_mapping_output(normalized["appearance_mapping"]),
+            validate_appearanceMapping_output(normalized["appearanceMapping"]),
             [],
         )
 
@@ -1029,7 +1029,7 @@ class StageOutputRepairTests(unittest.TestCase):
                         {
                             "message": {
                                 "content": json.dumps(
-                                    _appearance_mapping_json(),
+                                    _appearanceMapping_json(),
                                     ensure_ascii=False,
                                 )
                             }
@@ -1069,7 +1069,7 @@ class StageOutputRepairTests(unittest.TestCase):
                     "responseData": {
                         "answerNode": {
                             APPEARANCE_MAPPING_VAR: json.dumps(
-                                _appearance_mapping_json(),
+                                _appearanceMapping_json(),
                                 ensure_ascii=False,
                             )
                         }
@@ -1093,9 +1093,9 @@ class StageOutputRepairTests(unittest.TestCase):
         )
 
     def test_appearance_root_newvariables_beats_update_var_result_and_variable_update(self) -> None:
-        preferred = _appearance_mapping_with_principle("FROM_ROOT_NEWVARIABLES")
-        update_result = _appearance_mapping_with_principle("FROM_ROOT_UPDATEVARRESULT")
-        variable_update = _appearance_mapping_with_principle("FROM_RESPONSE_VARIABLEUPDATE")
+        preferred = _appearanceMapping_with_principle("FROM_ROOT_NEWVARIABLES")
+        update_result = _appearanceMapping_with_principle("FROM_ROOT_UPDATEVARRESULT")
+        variable_update = _appearanceMapping_with_principle("FROM_RESPONSE_VARIABLEUPDATE")
 
         result = self._extract(
             STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -1123,8 +1123,8 @@ class StageOutputRepairTests(unittest.TestCase):
         )
 
     def test_appearance_variable_update_beats_answer_node(self) -> None:
-        variable_update = _appearance_mapping_with_principle("FROM_RESPONSE_VARIABLEUPDATE")
-        answer_node = _appearance_mapping_with_principle("FROM_ANSWER_NODE")
+        variable_update = _appearanceMapping_with_principle("FROM_RESPONSE_VARIABLEUPDATE")
+        answer_node = _appearanceMapping_with_principle("FROM_ANSWER_NODE")
 
         result = self._extract(
             STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -1152,8 +1152,8 @@ class StageOutputRepairTests(unittest.TestCase):
         )
 
     def test_appearance_answer_node_beats_choices(self) -> None:
-        answer_node = _appearance_mapping_with_principle("FROM_ANSWER_NODE")
-        choice_payload = _appearance_mapping_with_principle("FROM_CHOICES")
+        answer_node = _appearanceMapping_with_principle("FROM_ANSWER_NODE")
+        choice_payload = _appearanceMapping_with_principle("FROM_CHOICES")
 
         result = self._extract(
             STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -1212,7 +1212,7 @@ class StageOutputRepairTests(unittest.TestCase):
                 },
             )
 
-    def test_appearance_mapping_string_is_rejected(self) -> None:
+    def test_appearanceMapping_string_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             self._extract(
                 STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -1263,8 +1263,8 @@ class StageOutputRepairTests(unittest.TestCase):
             )
 
     def test_appearance_missing_characters_fails(self) -> None:
-        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
-        broken["appearance_mapping"].pop("characters", None)
+        broken = json.loads(json.dumps(_appearanceMapping_json(), ensure_ascii=False))
+        broken["appearanceMapping"].pop("characters", None)
         with self.assertRaises(ValueError):
             self._extract(
                 STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -1272,8 +1272,8 @@ class StageOutputRepairTests(unittest.TestCase):
             )
 
     def test_appearance_missing_outfit_variants_fails(self) -> None:
-        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
-        broken["appearance_mapping"]["characters"][0].pop("outfit_variants", None)
+        broken = json.loads(json.dumps(_appearanceMapping_json(), ensure_ascii=False))
+        broken["appearanceMapping"]["characters"][0].pop("outfit_variants", None)
         with self.assertRaises(ValueError):
             self._extract(
                 STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -1281,8 +1281,8 @@ class StageOutputRepairTests(unittest.TestCase):
             )
 
     def test_appearance_empty_outfit_variants_fails(self) -> None:
-        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
-        broken["appearance_mapping"]["characters"][0]["outfit_variants"] = []
+        broken = json.loads(json.dumps(_appearanceMapping_json(), ensure_ascii=False))
+        broken["appearanceMapping"]["characters"][0]["outfit_variants"] = []
         with self.assertRaises(ValueError):
             self._extract(
                 STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -1290,8 +1290,8 @@ class StageOutputRepairTests(unittest.TestCase):
             )
 
     def test_appearance_alias_name_without_brackets_fails(self) -> None:
-        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
-        broken["appearance_mapping"]["characters"][0]["outfit_variants"][0]["alias_name"] = "林夏会议室交锋态"
+        broken = json.loads(json.dumps(_appearanceMapping_json(), ensure_ascii=False))
+        broken["appearanceMapping"]["characters"][0]["outfit_variants"][0]["alias_name"] = "林夏会议室交锋态"
         with self.assertRaises(ValueError):
             self._extract(
                 STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -1299,8 +1299,8 @@ class StageOutputRepairTests(unittest.TestCase):
             )
 
     def test_appearance_scene_trigger_rules_must_be_object(self) -> None:
-        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
-        broken["appearance_mapping"]["characters"][0]["outfit_variants"][0]["scene_trigger_rules"] = ["玻璃会议室"]
+        broken = json.loads(json.dumps(_appearanceMapping_json(), ensure_ascii=False))
+        broken["appearanceMapping"]["characters"][0]["outfit_variants"][0]["scene_trigger_rules"] = ["玻璃会议室"]
         with self.assertRaises(ValueError):
             self._extract(
                 STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -1308,9 +1308,9 @@ class StageOutputRepairTests(unittest.TestCase):
             )
 
     def test_appearance_string_booleans_fail(self) -> None:
-        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
-        broken["appearance_mapping"]["characters"][0]["outfit_variants"][0]["must_use_when_triggered"] = "true"
-        broken["appearance_mapping"]["characters"][0]["outfit_variants"][0]["fallback_allowed"] = "false"
+        broken = json.loads(json.dumps(_appearanceMapping_json(), ensure_ascii=False))
+        broken["appearanceMapping"]["characters"][0]["outfit_variants"][0]["must_use_when_triggered"] = "true"
+        broken["appearanceMapping"]["characters"][0]["outfit_variants"][0]["fallback_allowed"] = "false"
         with self.assertRaises(ValueError):
             self._extract(
                 STAGE_APPEARANCE_ALIAS_GENERATION,
@@ -1320,7 +1320,7 @@ class StageOutputRepairTests(unittest.TestCase):
     def test_appearance_generation_runs_writing_review_unstructured_in_order(self) -> None:
         runner = _QueuedStageRunner(
             [
-                {APPEARANCE_MAPPING: _appearance_mapping_json()},
+                {APPEARANCE_MAPPING: _appearanceMapping_json()},
                 _appearance_review_json(
                     passed=True,
                     rewrite_required=False,
@@ -1349,7 +1349,7 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertEqual(str(variables[CHARACTERS]), original_characters)
         self.assertEqual(str(variables[SCENES]), original_scenes)
         self.assertIsInstance(variables[APPEARANCE_MAPPING], dict)
-        mapping = variables[APPEARANCE_MAPPING]["appearance_mapping"]
+        mapping = variables[APPEARANCE_MAPPING]["appearanceMapping"]
         self.assertEqual(
             mapping["characters"][0]["canonical_name"],
             "林夏",
@@ -1366,7 +1366,7 @@ class StageOutputRepairTests(unittest.TestCase):
         runner = _QueuedStageRunner(
             [
                 {APPEARANCE_NATURAL_LANGUAGE_VAR: "这只是自然语言说明，不是结构化映射。"},
-                {APPEARANCE_MAPPING: _appearance_mapping_json()},
+                {APPEARANCE_MAPPING: _appearanceMapping_json()},
                 _appearance_review_json(
                     passed=True,
                     rewrite_required=False,
@@ -1392,17 +1392,17 @@ class StageOutputRepairTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            variables[APPEARANCE_MAPPING]["appearance_mapping"]["characters"][0]["canonical_name"],
+            variables[APPEARANCE_MAPPING]["appearanceMapping"]["characters"][0]["canonical_name"],
             "林夏",
         )
         artifact = state.get_output(STAGE_APPEARANCE_ALIAS_WRITING, "contract_guard", {})
         self.assertEqual(artifact.get("status"), "validated")
 
     def test_appearance_review_failure_triggers_rewrite_then_review(self) -> None:
-        rewritten = _appearance_mapping_with_principle("REWRITTEN_AFTER_REVIEW")
+        rewritten = _appearanceMapping_with_principle("REWRITTEN_AFTER_REVIEW")
         runner = _QueuedStageRunner(
             [
-                {APPEARANCE_MAPPING: _appearance_mapping_json()},
+                {APPEARANCE_MAPPING: _appearanceMapping_json()},
                 _appearance_review_json(
                     passed=False,
                     rewrite_required=True,
@@ -1435,15 +1435,15 @@ class StageOutputRepairTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            variables[APPEARANCE_MAPPING]["appearance_mapping"]["mapping_principle"],
+            variables[APPEARANCE_MAPPING]["appearanceMapping"]["mapping_principle"],
             "REWRITTEN_AFTER_REVIEW",
         )
 
     def test_appearance_runtime_messages_increment_review_rounds(self) -> None:
-        rewritten = _appearance_mapping_with_principle("REWRITTEN_AFTER_REVIEW")
+        rewritten = _appearanceMapping_with_principle("REWRITTEN_AFTER_REVIEW")
         runner = _QueuedStageRunner(
             [
-                {APPEARANCE_MAPPING: _appearance_mapping_json()},
+                {APPEARANCE_MAPPING: _appearanceMapping_json()},
                 _appearance_review_json(
                     passed=False,
                     rewrite_required=True,
@@ -1483,7 +1483,7 @@ class StageOutputRepairTests(unittest.TestCase):
     def test_appearance_stage_uses_compact_characters_and_scenes_without_overwriting_formal_outputs(self) -> None:
         runner = _QueuedStageRunner(
             [
-                {APPEARANCE_MAPPING: _appearance_mapping_json()},
+                {APPEARANCE_MAPPING: _appearanceMapping_json()},
                 _appearance_review_json(
                     passed=True,
                     rewrite_required=False,
@@ -1511,8 +1511,8 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertNotIn("outfit_requirements", str(stage_input[SCENES]))
 
     def test_appearance_rewrite_review_limit_raises_without_cache_pollution(self) -> None:
-        rewrite_payload = {APPEARANCE_MAPPING: _appearance_mapping_json()}
-        responses: list[dict[str, object]] = [{APPEARANCE_MAPPING: _appearance_mapping_json()}]
+        rewrite_payload = {APPEARANCE_MAPPING: _appearanceMapping_json()}
+        responses: list[dict[str, object]] = [{APPEARANCE_MAPPING: _appearanceMapping_json()}]
         for _ in range(9):
             responses.append(
                 _appearance_review_json(
@@ -1552,7 +1552,7 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertNotIn(APPEARANCE_NATURAL_LANGUAGE_VAR, state.variables)
 
     def test_appearance_broken_upstream_inputs_fail_without_stage_rerun(self) -> None:
-        runner = _QueuedStageRunner([{APPEARANCE_MAPPING: _appearance_mapping_json()}])
+        runner = _QueuedStageRunner([{APPEARANCE_MAPPING: _appearanceMapping_json()}])
         state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
         variables = dict(self.appearance_variables)
         variables[WORLDVIEW] = ""
@@ -1569,12 +1569,12 @@ class StageOutputRepairTests(unittest.TestCase):
     def test_appearance_unstructured_failure_does_not_break_structured_output(self) -> None:
         runner = _QueuedStageRunner(
             [
-                {APPEARANCE_MAPPING: _appearance_mapping_json()},
+                {APPEARANCE_MAPPING: _appearanceMapping_json()},
                 _appearance_review_json(
                     passed=True,
                     rewrite_required=False,
                 ),
-                {APPEARANCE_MAPPING_VAR: json.dumps(_appearance_mapping_json(), ensure_ascii=False)},
+                {APPEARANCE_MAPPING_VAR: json.dumps(_appearanceMapping_json(), ensure_ascii=False)},
             ]
         )
         state = WorkflowState.from_defaults(user_input=_workflow_input(), default_variables={})
@@ -1584,7 +1584,7 @@ class StageOutputRepairTests(unittest.TestCase):
         _ensure_appearance_outputs(state, runner, variables)
 
         self.assertIsInstance(variables[APPEARANCE_MAPPING], dict)
-        mapping = variables[APPEARANCE_MAPPING]["appearance_mapping"]
+        mapping = variables[APPEARANCE_MAPPING]["appearanceMapping"]
         self.assertEqual(
             mapping["characters"][0]["canonical_name"],
             "林夏",
@@ -1594,7 +1594,7 @@ class StageOutputRepairTests(unittest.TestCase):
     def test_appearance_writing_simplified_mapping_repairs_and_passes(self) -> None:
         runner = _QueuedStageRunner(
             [
-                {APPEARANCE_MAPPING: _simplified_appearance_mapping_json()},
+                {APPEARANCE_MAPPING: _simplified_appearanceMapping_json()},
                 _appearance_review_json(
                     passed=True,
                     rewrite_required=False,
@@ -1610,7 +1610,7 @@ class StageOutputRepairTests(unittest.TestCase):
 
         _ensure_appearance_outputs(state, runner, variables)
 
-        mapping = variables[APPEARANCE_MAPPING]["appearance_mapping"]
+        mapping = variables[APPEARANCE_MAPPING]["appearanceMapping"]
         character = mapping["characters"][0]
         variant = character["outfit_variants"][0]
         self.assertEqual(character["story_role"], "关键角色")
@@ -1618,13 +1618,13 @@ class StageOutputRepairTests(unittest.TestCase):
         self.assertEqual(character["default_name"], "白雪公主【日常】")
         self.assertEqual(variant["applicable_identity_state"], "日常")
         self.assertEqual(variant["episode_range_hint"], "按场景或状态触发")
-        self.assertEqual(validate_appearance_mapping_output(mapping), [])
+        self.assertEqual(validate_appearanceMapping_output(mapping), [])
 
     def test_appearance_variant_scene_trigger_fields_migrate_from_top_level(self) -> None:
-        normalized = normalize_appearance_mapping_candidate(_simplified_appearance_mapping_json())
+        normalized = normalize_appearanceMapping_candidate(_simplified_appearanceMapping_json())
 
         self.assertIsNotNone(normalized)
-        variant = normalized["appearance_mapping"]["characters"][0]["outfit_variants"][0]
+        variant = normalized["appearanceMapping"]["characters"][0]["outfit_variants"][0]
         self.assertEqual(variant["scene_trigger_rules"]["scene_names"], ["王宫走廊"])
         self.assertEqual(variant["scene_trigger_rules"]["scene_types"], ["宫廷"])
         self.assertEqual(variant["scene_trigger_rules"]["status_conditions"], ["常态"])
@@ -1638,7 +1638,7 @@ class StageOutputRepairTests(unittest.TestCase):
                         {
                             "message": {
                                 "content": json.dumps(
-                                    _appearance_mapping_json(),
+                                    _appearanceMapping_json(),
                                     ensure_ascii=False,
                                 )
                             }
@@ -1667,8 +1667,8 @@ class StageOutputRepairTests(unittest.TestCase):
         )
 
     def test_appearance_default_name_empty_repairs_from_canonical_name(self) -> None:
-        broken = json.loads(json.dumps(_appearance_mapping_json(), ensure_ascii=False))
-        broken["appearance_mapping"]["characters"][0]["default_name"] = ""
+        broken = json.loads(json.dumps(_appearanceMapping_json(), ensure_ascii=False))
+        broken["appearanceMapping"]["characters"][0]["default_name"] = ""
         result = self._extract(
             STAGE_APPEARANCE_ALIAS_GENERATION,
             {"output": broken},

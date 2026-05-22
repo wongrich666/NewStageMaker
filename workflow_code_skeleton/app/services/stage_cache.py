@@ -3,6 +3,8 @@ from __future__ import annotations
 
 """Extracted TaskManager mixin for StageCacheMixin."""
 
+import json
+
 from . import task_manager_common as _task_manager_common
 from .task_manager_common import *
 globals().update(
@@ -219,7 +221,18 @@ class StageCacheMixin:
         max_index = self._max_reached_rollback_stage_index(snapshot)
         if max_index < 0:
             return []
-        return list(ROLLBACK_STAGE_OPTIONS[: max_index + 1])
+        options = list(ROLLBACK_STAGE_OPTIONS[: max_index + 1])
+        if self._is_framework_to_script_snapshot(snapshot):
+            return [
+                (key, label)
+                for key, label in options
+                if key not in LEGACY_SCRIPT_ROLLBACK_KEYS
+            ]
+        return [
+            (key, label)
+            for key, label in options
+            if key not in FRAMEWORK_TO_SCRIPT_ROLLBACK_KEYS
+        ]
 
     def _max_reached_rollback_stage_index(self, snapshot: dict[str, Any]) -> int:
         """根据正式产物、缓存变量和当前阶段，推断用户真正已经到达的最深阶段。"""
@@ -261,6 +274,16 @@ class StageCacheMixin:
             reached.add("scenes")
         if variables.get(APPEARANCE_MAPPING):
             reached.add("appearance")
+        if variables.get(SCENE_DICTIONARY) or variables.get(SCRIPT_WORLD_RULES_DIGEST):
+            reached.add("framework_scene_dictionary")
+        if variables.get(APPEARANCE_MAPPING) and self._is_framework_to_script_snapshot(snapshot):
+            reached.add("framework_appearance_mapping")
+        if variables.get(ALL_ENRICHED_EPISODE_PLAN):
+            reached.add("framework_enriched_episode_plan")
+        if variables.get(BATCH_CAUSAL_CONFLICT_PLAN) or variables.get(CONFLICT_MEMORY):
+            reached.add("framework_causal_conflict")
+        if variables.get(BATCH_SCRIPT_TEXT) or variables.get(BATCH_SCRIPT) or variables.get(ALL_SCRIPT):
+            reached.add("framework_script")
         if variables.get(ALL_HOOKS) or variables.get(BATCH_HOOKS):
             reached.add("hooks")
         if variables.get(ALL_DIALOGUES) or variables.get(BATCH_DIALOGUES):
@@ -314,6 +337,20 @@ class StageCacheMixin:
             "appearance_alias_review": "appearance",
             "appearance_alias_rewrite": "appearance",
             "appearance_alias_unstructured": "appearance",
+            "framework_scene_dictionary": "framework_scene_dictionary",
+            "framework_appearancemapping": "framework_appearance_mapping",
+            "framework_appearance_mapping": "framework_appearance_mapping",
+            "framework_enriched_episode_plan": "framework_enriched_episode_plan",
+            "framework_causal_conflict": "framework_causal_conflict",
+            "framework_causal_conflict_write": "framework_causal_conflict",
+            "framework_causal_conflict_review": "framework_causal_conflict",
+            "framework_causal_conflict_rewrite": "framework_causal_conflict",
+            "framework_causal_conflict_memory": "framework_causal_conflict",
+            "framework_script": "framework_script",
+            "framework_script_write": "framework_script",
+            "framework_script_review": "framework_script",
+            "framework_script_rewrite": "framework_script",
+            "framework_script_memory": "framework_script",
             "hook": "hooks",
             "hooks": "hooks",
             "hooks_writing": "hooks",
@@ -502,19 +539,34 @@ class StageCacheMixin:
                 ("framework_enriched_episode_plan",),
                 "framework_enriched_episode_plan",
                 "框架转剧本：丰富分集计划",
-                variables.get("allEnrichedEpisodePlanText") or variables.get("all_enriched_episode_plan_text") or variables.get("allEnrichedEpisodePlan"),
+                variables.get("allEnrichedEpisodePlanText")
+                or variables.get("all_enriched_episode_plan_text")
+                or self._framework_to_script_summary_value(
+                    "allEnrichedEpisodePlan",
+                    variables.get("allEnrichedEpisodePlan") or variables.get("all_enriched_episode_plan"),
+                ),
             ),
             (
-                ("framework_appearance_mapping",),
-                "framework_appearance_mapping",
+                ("framework_appearanceMapping",),
+                "framework_appearanceMapping",
                 "框架转剧本：人设服装 alias 映射",
-                variables.get("appearanceMapping") or variables.get("appearance_mapping"),
+                self._framework_to_script_summary_value(
+                    "appearanceMapping",
+                    variables.get("appearanceMapping")
+                    or variables.get("appearance_mapping")
+                    or variables.get(APPEARANCE_MAPPING),
+                ),
             ),
             (
                 ("framework_scene_dictionary",),
                 "framework_scene_dictionary",
                 "框架转剧本：场景字典提炼",
-                variables.get("sceneDictionary") or variables.get("scene_dictionary") or variables.get("scriptWorldRulesDigest"),
+                self._framework_to_script_summary_value(
+                    "sceneDictionary",
+                    variables.get("sceneDictionary")
+                    or variables.get("scene_dictionary")
+                    or variables.get("scriptWorldRulesDigest"),
+                ),
             ),
         ]
         chosen_key = "framework_to_script"
@@ -546,6 +598,61 @@ class StageCacheMixin:
             "output": raw_output,
             "natural_output": natural_output,
         }
+
+    def _framework_to_script_summary_value(self, stage_key: str, value: Any) -> str:
+        payload = self._framework_to_script_parse_display_value(value)
+        if stage_key == "appearanceMapping":
+            mapping = payload.get("appearanceMapping") if isinstance(payload, dict) else None
+            if not isinstance(mapping, dict):
+                mapping = payload if isinstance(payload, dict) else {}
+            characters = mapping.get("characters") if isinstance(mapping, dict) else []
+            count = len(characters) if isinstance(characters, list) else 0
+            principle = (
+                mapping.get("mapping_principle")
+                or mapping.get("naming_principle")
+                or mapping.get("global_naming_style")
+                or mapping.get("global_alias_rules")
+                if isinstance(mapping, dict)
+                else ""
+            )
+            suffix = f"；{pick_best_user_visible_value(principle)[:160]}" if principle else ""
+            return f"外观映射已生成：{count} 个角色{suffix}" if count else ""
+        if stage_key == "allEnrichedEpisodePlan":
+            items = payload if isinstance(payload, list) else payload.get("allEnrichedEpisodePlan", [])
+            if not isinstance(items, list):
+                return ""
+            episodes = [
+                _safe_int(item.get("episode"), 0)
+                for item in items
+                if isinstance(item, dict) and _safe_int(item.get("episode"), 0) > 0
+            ]
+            if episodes:
+                return f"丰富分集计划已生成：第 {min(episodes)}-{max(episodes)} 集，共 {len(items)} 条"
+            return f"丰富分集计划已生成：共 {len(items)} 条" if items else ""
+        if stage_key == "sceneDictionary":
+            scene = payload.get("sceneDictionary") if isinstance(payload, dict) else None
+            if not isinstance(scene, dict):
+                scene = payload if isinstance(payload, dict) else {}
+            core_scenes = scene.get("core_scenes") if isinstance(scene, dict) else []
+            count = len(core_scenes) if isinstance(core_scenes, list) else _safe_int(scene.get("scene_count"), 0)
+            names = [
+                str(item.get("name") or item.get("scene_name") or item.get("scene_id") or "").strip()
+                for item in core_scenes
+                if isinstance(item, dict)
+            ][:3] if isinstance(core_scenes, list) else []
+            suffix = f"：{'、'.join(name for name in names if name)}" if any(names) else ""
+            return f"场景字典已生成：{count} 个核心场景{suffix}" if count else pick_best_user_visible_value(value)[:500]
+        return pick_best_user_visible_value(value)[:500]
+
+    def _framework_to_script_parse_display_value(self, value: Any) -> Any:
+        if isinstance(value, (dict, list)):
+            return value
+        if isinstance(value, str) and value.strip():
+            try:
+                return json.loads(value)
+            except Exception:
+                return {}
+        return {}
 
     def _framework_stage_output_text(self, artifacts: dict[str, Any]) -> str:
         return pick_best_user_visible_value(artifacts.get("framework_natural_language"))
@@ -1154,7 +1261,7 @@ class StageCacheMixin:
             or variables.get(SCENE_NATURAL_LANGUAGE_VAR)
         )
         appearance_done = self._progress_value_present(
-            variables.get(APPEARANCE_MAPPING) or artifacts.get("appearance_mapping")
+            variables.get(APPEARANCE_MAPPING) or artifacts.get("appearanceMapping")
         )
         return [
             framework_done,
@@ -1364,7 +1471,7 @@ class StageCacheMixin:
                     artifacts.pop(key, None)
             if is_meaningful_text(artifacts.get(APPEARANCE_NATURAL_LANGUAGE_ARTIFACT)):
                 for key in (
-                    "appearance_mapping",
+                    "appearanceMapping",
                     "character_registry",
                     "character_alias_registry",
                     "episode_alias_plan",

@@ -69,7 +69,7 @@ all_hooks -> all_dialogues -> all_script
 3. `appearance_alias_rewrite`
 4. `appearance_alias_unstructured`
 
-正式结构化结果始终是 `appearance_mapping / h2KpLm91`；自然语言说明 `c7VnQ4eX` 只用于展示，不能覆盖正式映射。
+正式结构化结果始终是 `appearanceMapping / h2KpLm91`；自然语言说明 `c7VnQ4eX` 只用于展示，不能覆盖正式映射。
 
 ## 3. 当前用户可见层与私有层
 
@@ -86,7 +86,7 @@ all_hooks -> all_dialogues -> all_script
 
 - `characters`
 - `scenes`
-- `appearance_mapping`
+- `appearanceMapping`
 - debug_state
 - FastGPT 原始响应壳字段
 
@@ -110,7 +110,7 @@ all_hooks -> all_dialogues -> all_script
   - 包括 `story_outline`、`normalized_episode_plan`
   - 包括 `character_natural_language / character_summary`
   - 包括 `scene_natural_language / core_scene_summary`
-  - 包括 `appearance_mapping / character_registry / character_alias_registry / episode_alias_plan`
+  - 包括 `appearanceMapping / character_registry / character_alias_registry / episode_alias_plan`
 
 要点：
 
@@ -118,6 +118,23 @@ all_hooks -> all_dialogues -> all_script
 - 普通用户页面不会再把这些字段直接当阶段输出渲染。
 
 ## 4. FastGPT 输出处理真实规则
+
+### Framework-to-script 08-12 chain
+
+- 08 `framework_scene_dictionary` 产出 `sceneDictionary / scriptWorldRulesDigest`。
+- 09 `framework_appearanceMapping` 产出 `appearanceMapping`，兼容 `appearance_mapping`。
+- 10 `framework_enriched_episode_plan` 产出 `allEnrichedEpisodePlan`。
+- 11 `framework_causal_conflict_write/review/memory` 串行生成因果冲突计划。
+- 12 `framework_script_write/review/memory` 串行生成正文，最终导出字段固定为 `final_script / final_output_text`。
+- 运行时串行执行，代码上一次性串联；`.env`、`cache/`、`debug/`、`logs/` 不应提交。
+
+### Framework planner stage preferences
+
+- 智慧库偏好按阶段生效：`01=basic`、`02=worldview`、`03=character`、`04=beat`、`05=storylines`、`06=guide`、`07=package`。
+- 默认标签允许用户编辑运行时标签实例，不修改 `BUILTIN_TAG_DEFINITIONS` 种子；删除默认标签等价于隐藏/禁用。
+- 阶段调用优先读取 `user_knowledge_stage_prompts[stage_key]`，其次 `prompt_preferences.stage_prompts[stage_key]`，最后才用全局兼容字段。
+- 前端应用标签会写入各阶段 `stage_prompts`；当前阶段文本框只修改当前阶段。
+- 普通界面展示折叠树状业务结构和“版本历史”，不展示 JSON、FastGPT 原始壳字段、`cache/logs/debug` 工程词。
 
 ### 输出抽取顺序
 
@@ -208,7 +225,7 @@ all_hooks -> all_dialogues -> all_script
 ### appearance
 
 - `appearance_alias_generation` 已经切成 4 个独立 workflow
-- 正式结构化输出是 `h2KpLm91 / appearance_mapping`
+- 正式结构化输出是 `h2KpLm91 / appearanceMapping`
 - 自然语言说明是 `c7VnQ4eX`
 - `c7VnQ4eX` 只做展示，不得覆盖正式结构化结果
 

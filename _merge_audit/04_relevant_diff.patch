@@ -6727,16 +6727,16 @@ index 81718a3..abfbf7f 100644
      if not match:
          return False
  
-@@ -2123,7 +2128,7 @@ def _canonicalize_appearance_mapping_body(
-         warnings.append("appearance_mapping.mapping_principle 缂哄け锛屽凡琛ラ粯璁ゆ槧灏勫師鍒?)
+@@ -2123,7 +2128,7 @@ def _canonicalize_appearanceMapping_body(
+         warnings.append("appearanceMapping.mapping_principle 缂哄け锛屽凡琛ラ粯璁ゆ槧灏勫師鍒?)
      if not str(normalized.get("global_naming_style") or "").strip():
          normalized["global_naming_style"] = (
 -            "缁熶竴浣跨敤鈥滆鑹蹭腑鏂囧叏鍚?鍦烘櫙/鐘舵€?韬唤)鈥濇牸寮忥紱甯告€侀粯璁や娇鐢?default_name銆?
 +            "缁熶竴浣跨敤鈥滆鑹蹭腑鏂囧叏鍚嶃€愬満鏅?鐘舵€?韬唤銆戔€濇牸寮忥紱甯告€侀粯璁や娇鐢?default_name銆?
          )
-         warnings.append("appearance_mapping.global_naming_style 缂哄け锛屽凡琛ラ粯璁ゅ懡鍚嶉鏍?)
+         warnings.append("appearanceMapping.global_naming_style 缂哄け锛屽凡琛ラ粯璁ゅ懡鍚嶉鏍?)
      if not isinstance(normalized.get("characters"), list):
-@@ -2808,7 +2813,7 @@ def _validate_appearance_mapping_contract_shape(value: Any) -> list[str]:
+@@ -2808,7 +2813,7 @@ def _validate_appearanceMapping_contract_shape(value: Any) -> list[str]:
  
              if not _is_valid_new_alias_name(alias_name):
                  issues.append(
@@ -6745,7 +6745,7 @@ index 81718a3..abfbf7f 100644
                  )
              if not _normalize_string_list(variant.get("visual_keypoints")):
                  issues.append(f"{variant_prefix}.visual_keypoints 蹇呴』鏄潪绌烘暟缁?)
-@@ -2865,7 +2870,7 @@ def _validate_appearance_mapping_local_review(value: Any) -> list[str]:
+@@ -2865,7 +2870,7 @@ def _validate_appearanceMapping_local_review(value: Any) -> list[str]:
                      alias_item["recommended_alias_name"] = alias_name
                      if not _is_valid_new_alias_name(alias_name):
                          issues.append(
@@ -6754,7 +6754,7 @@ index 81718a3..abfbf7f 100644
                          )
                  if not str(alias_item.get("reason") or "").strip():
                      issues.append(f"{alias_prefix}.reason 涓嶈兘涓虹┖")
-@@ -2895,7 +2900,7 @@ def _validate_appearance_mapping_local_review(value: Any) -> list[str]:
+@@ -2895,7 +2900,7 @@ def _validate_appearanceMapping_local_review(value: Any) -> list[str]:
                      alias_item["alias_name"] = alias_name
                      if not _is_valid_new_alias_name(alias_name):
                          issues.append(

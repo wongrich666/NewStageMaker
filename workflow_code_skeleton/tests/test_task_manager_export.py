@@ -58,10 +58,10 @@ def _structured_characters_payload() -> str:
     )
 
 
-def _appearance_mapping_payload() -> str:
+def _appearanceMapping_payload() -> str:
     return json.dumps(
         {
-            "appearance_mapping": {
+            "appearanceMapping": {
                 "characters": [
                     {
                         "character_name": "林夏",
@@ -123,6 +123,10 @@ def _snapshot_with_export_artifacts() -> dict[str, object]:
             "node_outputs": {},
         },
     }
+
+
+def _snapshot() -> dict[str, object]:
+    return _snapshot_with_export_artifacts()
 
 
 def _counterexample_snapshot() -> dict[str, object]:
@@ -188,7 +192,7 @@ def _counterexample_snapshot() -> dict[str, object]:
         },
         ensure_ascii=False,
     )
-    artifacts["appearance_mapping"] = json.dumps(
+    artifacts["appearanceMapping"] = json.dumps(
         {
             "服装版本映射内容": {
                 "characters": [
@@ -204,7 +208,7 @@ def _counterexample_snapshot() -> dict[str, object]:
                     }
                 ]
             },
-            "appearance_mapping": {
+            "appearanceMapping": {
                 "characters": [
                     {
                         "character_name": "林夏",
@@ -280,7 +284,7 @@ class TaskManagerExportTests(unittest.TestCase):
             "null",
             "[object Object]",
             "服装版本映射内容",
-            "appearance_mapping",
+            "appearanceMapping",
             "scene_json",
             "character_setting",
             "outfit_variants",
@@ -309,6 +313,7 @@ class TaskManagerExportTests(unittest.TestCase):
         snapshot["artifacts"].pop("character_bios", None)
 
         block = self.manager._build_character_setting_export_block(snapshot)
+        text = self.manager._build_docx_export_source_text(_counterexample_snapshot())
 
         self.assertIsNotNone(block)
         characters = block["character_setting"]["characters"]  # type: ignore[index]
@@ -366,9 +371,9 @@ class TaskManagerExportTests(unittest.TestCase):
             },
             ensure_ascii=False,
         )
-        snapshot["artifacts"]["appearance_mapping"] = json.dumps(
+        snapshot["artifacts"]["appearanceMapping"] = json.dumps(
             {
-                "appearance_mapping": {
+                "appearanceMapping": {
                     "characters": [
                         {
                             "character_name": "林夏",
@@ -532,7 +537,7 @@ class TaskManagerExportTests(unittest.TestCase):
 
     def test_completed_snapshot_does_not_keep_user_visible_appearance_json_artifacts(self) -> None:
         snapshot = _snapshot_with_export_artifacts()
-        snapshot["artifacts"]["appearance_mapping"] = _appearance_mapping_payload()
+        snapshot["artifacts"]["appearanceMapping"] = _appearanceMapping_payload()
         snapshot["artifacts"]["character_registry"] = {"林夏": {"default_name": "林夏【日常】"}}
         snapshot["artifacts"]["character_alias_registry"] = {"林夏【会议室交锋态】": "林夏"}
         snapshot["artifacts"]["episode_alias_plan"] = [{"episode": 1, "alias": "林夏【会议室交锋态】"}]
@@ -541,7 +546,7 @@ class TaskManagerExportTests(unittest.TestCase):
         artifacts = compacted.get("artifacts") or {}
 
         self.assertIn(APPEARANCE_NATURAL_LANGUAGE_ARTIFACT, artifacts)
-        self.assertNotIn("appearance_mapping", artifacts)
+        self.assertNotIn("appearanceMapping", artifacts)
         self.assertNotIn("character_registry", artifacts)
         self.assertNotIn("character_alias_registry", artifacts)
         self.assertNotIn("episode_alias_plan", artifacts)
@@ -649,7 +654,7 @@ class TaskManagerExportTests(unittest.TestCase):
         snapshot = _snapshot_with_export_artifacts()
         snapshot["artifacts"].pop(APPEARANCE_NATURAL_LANGUAGE_ARTIFACT, None)
         snapshot["debug_state"]["variables"].pop(APPEARANCE_NATURAL_LANGUAGE_VAR, None)
-        snapshot["artifacts"]["appearance_mapping"] = _appearance_mapping_payload()
+        snapshot["artifacts"]["appearanceMapping"] = _appearanceMapping_payload()
         self._persist(snapshot)
 
         with patch(
@@ -676,7 +681,7 @@ class TaskManagerExportTests(unittest.TestCase):
         snapshot = _snapshot_with_export_artifacts()
         snapshot["artifacts"].pop(APPEARANCE_NATURAL_LANGUAGE_ARTIFACT, None)
         snapshot["debug_state"]["variables"].pop(APPEARANCE_NATURAL_LANGUAGE_VAR, None)
-        snapshot["artifacts"]["appearance_mapping"] = _appearance_mapping_payload()
+        snapshot["artifacts"]["appearanceMapping"] = _appearanceMapping_payload()
         self._persist(snapshot)
 
         with patch(
@@ -737,7 +742,7 @@ class TaskManagerExportTests(unittest.TestCase):
 
         self.assertIn("第1集：风起", public_visible_text)
         self.assertNotIn("scene_json", public_visible_text)
-        self.assertNotIn("appearance_mapping", public_visible_text)
+        self.assertNotIn("appearanceMapping", public_visible_text)
 
 
 if __name__ == "__main__":

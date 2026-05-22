@@ -5,14 +5,19 @@ import json
 from workflow_code_skeleton.app.orchestrators import fastgpt_hybrid_workflow as flow
 from workflow_code_skeleton.app.services.fastgpt_contracts import (
     ALL_ENRICHED_EPISODE_PLAN,
+    ALL_SCRIPT,
     APPEARANCE_MAPPING,
     BATCH_CAUSAL_CONFLICT_PLAN,
     BATCH_SCRIPT_TEXT,
     CONFLICT_MEMORY,
+    FINAL_SCRIPT,
     SCENE_DICTIONARY,
     SCRIPT_MEMORY,
     SCRIPT_WORLD_RULES_DIGEST,
 )
+from workflow_code_skeleton.app.services.task_manager import TaskManager, TaskRecord, WorkflowRuntime
+from workflow_code_skeleton.app.models.inputs import WorkflowInput
+from workflow_code_skeleton.app.models.state import WorkflowState
 from workflow_code_skeleton.app.utils.episode import BatchWindow
 
 
@@ -36,7 +41,7 @@ def _valid_rules_digest() -> dict[str, object]:
     }
 
 
-def _valid_appearance_mapping() -> dict[str, object]:
+def _valid_appearanceMapping() -> dict[str, object]:
     return {
         "mapping_version": "v1",
         "characters": [
@@ -120,10 +125,10 @@ def test_scene_dictionary_answer_text_wrapper_is_normalized() -> None:
     assert flow._validate_framework_scene_dictionary_assets(variables) == []
 
 
-def test_appearance_mapping_answer_text_wrapper_is_normalized() -> None:
+def test_appearanceMapping_answer_text_wrapper_is_normalized() -> None:
     variables = {
         "answerText": json.dumps(
-            {APPEARANCE_MAPPING: _valid_appearance_mapping()},
+            {APPEARANCE_MAPPING: _valid_appearanceMapping()},
             ensure_ascii=False,
         )
     }
@@ -131,7 +136,61 @@ def test_appearance_mapping_answer_text_wrapper_is_normalized() -> None:
     flow._normalize_framework_to_script_asset_variables(variables)
 
     assert variables[APPEARANCE_MAPPING]["characters"][0]["name"] == "林夏"
-    assert flow._validate_framework_appearance_mapping_assets(variables) == []
+    assert flow._validate_framework_appearanceMapping_assets(variables) == []
+
+
+def test_appearanceMapping_without_mapping_version_is_allowed() -> None:
+    variables = {
+        APPEARANCE_MAPPING: {
+            "mapping_principle": "优先使用角色默认名和服装锚点。",
+            "global_naming_style": "短名、稳定、避免泛称。",
+            "characters": [
+                {
+                    "character_id": "char_001",
+                    "canonical_name": "林夏",
+                    "story_role": "主角",
+                    "same_person_anchor": {"default": "林夏"},
+                    "default_name": "林夏",
+                    "forbidden_generic_names": ["女人"],
+                    "outfit_variants": [{"alias_name": "林夏工作装"}],
+                }
+            ],
+        }
+    }
+
+    assert flow._validate_framework_appearanceMapping_assets(variables) == []
+
+
+def test_appearanceMapping_snake_case_is_normalized() -> None:
+    variables = {
+        "appearance_mapping": {
+            "mapping_principle": "snake case 来源。",
+            "characters": [{"character_id": "char_001", "canonical_name": "林夏"}],
+        }
+    }
+
+    flow._normalize_framework_to_script_asset_variables(variables)
+
+    assert variables[APPEARANCE_MAPPING]["mapping_principle"] == "snake case 来源。"
+    assert variables["appearanceMapping"] == variables[APPEARANCE_MAPPING]
+    assert variables["appearance_mapping"] == variables[APPEARANCE_MAPPING]
+
+
+def test_answer_text_concatenated_json_extracts_target_objects() -> None:
+    appearance = {
+        "appearanceMapping": {
+            "mapping_principle": "第二个对象才是外观映射。",
+            "characters": [{"character_id": "char_001", "canonical_name": "林夏"}],
+        }
+    }
+    variables = {
+        "answerText": json.dumps({"note": "ignore"}, ensure_ascii=False)
+        + json.dumps(appearance, ensure_ascii=False)
+    }
+
+    flow._normalize_framework_to_script_asset_variables(variables)
+
+    assert variables[APPEARANCE_MAPPING]["mapping_principle"] == "第二个对象才是外观映射。"
 
 
 def test_enriched_episode_plan_result_wrapper_is_normalized() -> None:
@@ -149,6 +208,33 @@ def test_enriched_episode_plan_result_wrapper_is_normalized() -> None:
 
     assert len(variables[ALL_ENRICHED_EPISODE_PLAN]) == 2
     assert flow._validate_framework_enriched_episode_plan_assets(variables, total_episodes=2) == []
+
+
+def test_enriched_episode_plan_sources_are_normalized() -> None:
+    for source_key in ("enrichedEpisodePlanResult", ALL_ENRICHED_EPISODE_PLAN, "answerText"):
+        variables = {
+            source_key: json.dumps(
+                {ALL_ENRICHED_EPISODE_PLAN: _valid_enriched_plan(2)},
+                ensure_ascii=False,
+            )
+            if source_key != ALL_ENRICHED_EPISODE_PLAN
+            else _valid_enriched_plan(2)
+        }
+
+        flow._normalize_framework_to_script_asset_variables(variables)
+
+        assert [item["episode"] for item in variables[ALL_ENRICHED_EPISODE_PLAN]] == [1, 2]
+
+
+def test_answer_text_concatenated_json_extracts_enriched_plan() -> None:
+    variables = {
+        "answerText": json.dumps({"appearanceMapping": {"characters": [{"canonical_name": "林夏"}]}}, ensure_ascii=False)
+        + json.dumps({ALL_ENRICHED_EPISODE_PLAN: _valid_enriched_plan(2)}, ensure_ascii=False)
+    }
+
+    flow._normalize_framework_to_script_asset_variables(variables)
+
+    assert [item["episode"] for item in variables[ALL_ENRICHED_EPISODE_PLAN]] == [1, 2]
 
 
 def test_enriched_episode_plan_can_be_sliced_by_batches() -> None:
@@ -225,3 +311,55 @@ def test_valid_causal_conflict_plan_and_empty_script_text_validation() -> None:
     assert flow._validate_framework_script_batch_text("", batch=batch) == [
         "batchScriptText 第 1-2 集必须是非空字符串"
     ]
+
+
+def test_framework_to_script_final_sync_exposes_export_artifacts(tmp_path) -> None:
+    manager = TaskManager()
+    manager.set_storage_root(
+        tmp_path / "runtime_data",
+        runtime_archive_dir=tmp_path / "runtime_archive",
+    )
+    record = TaskRecord(
+        user_id=1,
+        project_id=1,
+        task_id="task-framework-final",
+        workflow_spec_path="spec.json",
+        input_payload={"title": "测试项目", "framework_to_script": True},
+        model_option=None,
+        snapshot={
+            "status": "running",
+            "title": "测试项目",
+            "artifacts": {},
+            "debug_state": {},
+            "prompt_fixes": [],
+            "input_payload": {"framework_to_script": True},
+        },
+    )
+    runtime = WorkflowRuntime(manager=manager, record=record, spec=None)
+    state = WorkflowState(
+        WorkflowInput(
+            title="测试项目",
+            episode_word_count=1200,
+            total_episodes=2,
+            user_expectation="需求",
+            character_count=2,
+            character_appearance_requirements="",
+            character_alias_naming_rules="",
+            outfit_switch_rules="",
+            story_outline="",
+            core_scene_input="",
+            character_bios="",
+            episode_plan="",
+        )
+    )
+    final_text = "第1集\n林夏：开始。\n\n第2集\n林夏：完成。"
+    state.set_var(ALL_SCRIPT, final_text)
+    state.set_var(FINAL_SCRIPT, final_text)
+    state.final_output_text = final_text
+
+    runtime.sync_from_state(state)
+    artifacts = record.clone_snapshot()["artifacts"]
+
+    assert artifacts["final_script"]
+    assert artifacts["final_output_text"] == artifacts["final_script"]
+    assert "林夏：开始。" in artifacts["final_script"]

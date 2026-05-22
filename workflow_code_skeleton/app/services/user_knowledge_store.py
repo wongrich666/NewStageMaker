@@ -152,8 +152,6 @@ class UserKnowledgeStore:
         for index, tag in enumerate(tags):
             if str(tag.get("id") or "") != str(tag_id):
                 continue
-            if tag.get("builtin") is True:
-                raise ValueError("系统预置标签不能直接编辑")
             for key in ("name", "category", "description", "prompt_text", "enabled", "pinned"):
                 if key not in changes:
                     continue
@@ -176,8 +174,6 @@ class UserKnowledgeStore:
         for index, tag in enumerate(tags):
             if str(tag.get("id") or "") != str(tag_id):
                 continue
-            if tag.get("builtin") is True:
-                raise ValueError("系统预置标签不能删除")
             tag["enabled"] = False
             tag["updated_at"] = _now_iso()
             tags[index] = self._normalize_tag(tag)
@@ -189,6 +185,7 @@ class UserKnowledgeStore:
         data = self._read_preferences()
         record = dict(data.get(str(user_id)) or {})
         record["selected_preference_tag_ids"] = _coerce_string_list(record.get("selected_preference_tag_ids"))
+        record["stage_prompts"] = _normalize_stage_prompts(record.get("stage_prompts"), "")
         return record
 
     def save_preferences(self, user_id: int | str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -196,6 +193,7 @@ class UserKnowledgeStore:
         record = {
             "user_preference_prompt": _coerce_prompt_text(payload.get("user_preference_prompt")),
             "selected_preference_tag_ids": _coerce_string_list(payload.get("selected_preference_tag_ids")),
+            "stage_prompts": _normalize_stage_prompts(payload.get("stage_prompts"), ""),
             "updated_at": _now_iso(),
         }
         data[str(user_id)] = record

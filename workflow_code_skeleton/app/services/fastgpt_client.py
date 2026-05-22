@@ -121,7 +121,7 @@ from .json_utils import parse_json, strip_code_fence
 from .stage_output_repair import (
     StageRepairOutcome,
     is_repairable_stage_output,
-    normalize_appearance_mapping_candidate,
+    normalize_appearanceMapping_candidate,
     repair_stage_output_candidate,
     validate_scenes_output,
 )
@@ -270,6 +270,7 @@ STAGE_ENV_PREFIX_API_KEY_BYPASS = {
     STAGE_APPEARANCE_ALIAS_GENERATION,
 }
 TEXT_FIRST_MULTI_FIELD_STAGES = {
+    STAGE_FRAMEWORK_APPEARANCE_MAPPING,
     STAGE_FRAMEWORK,
     STAGE_APPEARANCE_PRE_STRATEGY,
     STAGE_APPEARANCE_ALIAS_REVIEW,
@@ -1613,7 +1614,7 @@ def _compact_stage_canonical_value(
     if canonical_name == SCENES:
         return _compact_scene_payload_for_stage(stage_name, value)
     if canonical_name == APPEARANCE_MAPPING:
-        return _compact_appearance_mapping_payload(value)
+        return _compact_appearanceMapping_payload(value)
     if canonical_name in {EPISODE_PLAN, NORMALIZED_EPISODE_PLAN}:
         return _compact_episode_plan_payload(
             value,
@@ -1779,12 +1780,12 @@ def _compact_previous_script_payload(value: Any) -> str:
     return "\n\n".join(sections[-2:])[:2200].strip()
 
 
-def _compact_appearance_mapping_payload(value: Any) -> str:
+def _compact_appearanceMapping_payload(value: Any) -> str:
     parsed = _try_parse_jsonish(value)
     if not isinstance(parsed, dict):
         return _compact_large_text_payload(value, max_chars=2200)
-    if isinstance(parsed.get("appearance_mapping"), dict):
-        mapping = parsed.get("appearance_mapping")
+    if isinstance(parsed.get("appearanceMapping"), dict):
+        mapping = parsed.get("appearanceMapping")
     else:
         mapping = parsed
     if not isinstance(mapping, dict):
@@ -2641,11 +2642,11 @@ def _extract_appearance_stage_output(
             )
         ) or [(source, normalized_candidate)]
 
-        last_reason = "候选未能映射到 appearance_mapping 契约"
+        last_reason = "候选未能映射到 appearanceMapping 契约"
         for variant_source, variant_candidate in variants:
             match = _payload_from_candidate(variant_candidate, contract)
             if match is None:
-                last_reason = "候选未能映射到 appearance_mapping 契约"
+                last_reason = "候选未能映射到 appearanceMapping 契约"
                 rejected_candidates.append((variant_source, last_reason, None))
                 continue
             try:
@@ -2975,23 +2976,23 @@ def _coerce_appearance_candidate(
     if isinstance(current, str):
         text = strip_code_fence(current).strip()
         if not text:
-            return None, "appearance_mapping 候选为空字符串", True
+            return None, "appearanceMapping 候选为空字符串", True
         if _looks_like_core_scene_text(text):
-            return None, "候选是核心场景提炼文本，不是 appearance_mapping JSON", False
+            return None, "候选是核心场景提炼文本，不是 appearanceMapping JSON", False
         parsed = _try_parse_json(text)
         if not isinstance(parsed, dict):
-            return None, "appearance_mapping 候选不是可解析的 JSON object", False
+            return None, "appearanceMapping 候选不是可解析的 JSON object", False
         current = parsed
 
     if not isinstance(current, dict):
-        return None, "appearance_mapping 候选不是 object", alias_empty
+        return None, "appearanceMapping 候选不是 object", alias_empty
 
     if "scene_setting" in current:
-        return None, "候选是 scene_setting，不是 appearance_mapping", alias_empty
+        return None, "候选是 scene_setting，不是 appearanceMapping", alias_empty
     if APPEARANCE_NATURAL_LANGUAGE_VAR in current:
-        return None, f"候选是 {APPEARANCE_NATURAL_LANGUAGE_VAR}，不是 appearance_mapping", alias_empty
+        return None, f"候选是 {APPEARANCE_NATURAL_LANGUAGE_VAR}，不是 appearanceMapping", alias_empty
     if CORE_SCENE_FINAL_VAR in current:
-        return None, f"候选是 {CORE_SCENE_FINAL_VAR}，不是 appearance_mapping", alias_empty
+        return None, f"候选是 {CORE_SCENE_FINAL_VAR}，不是 appearanceMapping", alias_empty
 
     for key in (APPEARANCE_MAPPING_VAR, APPEARANCE_MAPPING, LEGACY_APPEARANCE_MAPPING):
         if key not in current:
@@ -3003,7 +3004,7 @@ def _coerce_appearance_candidate(
                 alias_empty = alias_empty or key == APPEARANCE_MAPPING_VAR
                 return None, f"{key} 为空字符串", alias_empty
             if _looks_like_core_scene_text(text):
-                return None, f"{key} 是核心场景提炼文本，不是 appearance_mapping JSON", alias_empty
+                return None, f"{key} 是核心场景提炼文本，不是 appearanceMapping JSON", alias_empty
             parsed = _try_parse_json(text)
             if parsed is None:
                 return None, f"{key} 是纯文本，不是 JSON object", alias_empty
@@ -3011,11 +3012,11 @@ def _coerce_appearance_candidate(
             alias_empty = alias_empty or key == APPEARANCE_MAPPING_VAR
             return None, f"{key} 为空字符串", alias_empty
 
-    normalized = normalize_appearance_mapping_candidate(current)
+    normalized = normalize_appearanceMapping_candidate(current)
     if isinstance(normalized, dict):
         return normalized, "", alias_empty
 
-    return None, "候选不是可归一化的 appearance_mapping object", alias_empty
+    return None, "候选不是可归一化的 appearanceMapping object", alias_empty
 
 
 def _looks_like_core_scene_text(text: str) -> bool:
@@ -3288,7 +3289,7 @@ def _normalize_stage_specific_output_candidate(
     if contract.stage_name == STAGE_APPEARANCE_PRE_STRATEGY:
         return _normalize_appearance_pre_strategy_output_candidate(candidate, contract)
     if contract.stage_name in APPEARANCE_MAPPING_OUTPUT_STAGES:
-        return _normalize_appearance_mapping_output_candidate(candidate, contract)
+        return _normalize_appearanceMapping_output_candidate(candidate, contract)
     if contract.stage_name == STAGE_EPISODE_PLAN_NORMALIZE:
         return _normalize_episode_plan_normalize_output_candidate(candidate, contract)
     if contract.stage_name == STAGE_SCENES:
@@ -3398,18 +3399,18 @@ def _normalize_scenes_contract_value(value: Any) -> str | None:
     return json.dumps(business_payload, ensure_ascii=False)
 
 
-def _normalize_appearance_mapping_output_candidate(
+def _normalize_appearanceMapping_output_candidate(
     candidate: dict[str, Any],
     contract: FastGPTStageContract,
 ) -> dict[str, Any]:
     del contract
-    normalized = normalize_appearance_mapping_candidate(candidate)
+    normalized = normalize_appearanceMapping_candidate(candidate)
     if isinstance(normalized, dict):
         return normalized
     return candidate
 
 
-def _normalize_appearance_mapping_body(value: Any) -> dict[str, Any] | None:
+def _normalize_appearanceMapping_body(value: Any) -> dict[str, Any] | None:
     candidate = value
     if isinstance(candidate, str):
         parsed = _try_parse_json(candidate)
@@ -3425,16 +3426,16 @@ def _normalize_appearance_mapping_body(value: Any) -> dict[str, Any] | None:
     for key in (APPEARANCE_MAPPING, "appearanceMapping"):
         if key not in candidate:
             continue
-        wrapped = _normalize_appearance_mapping_body(candidate.get(key))
+        wrapped = _normalize_appearanceMapping_body(candidate.get(key))
         if isinstance(wrapped, dict):
             return wrapped
 
-    if _looks_like_appearance_mapping_body(candidate):
+    if _looks_like_appearanceMapping_body(candidate):
         return candidate
     return None
 
 
-def _looks_like_appearance_mapping_body(candidate: dict[str, Any]) -> bool:
+def _looks_like_appearanceMapping_body(candidate: dict[str, Any]) -> bool:
     mapping = (
         candidate.get(APPEARANCE_MAPPING)
         if isinstance(candidate.get(APPEARANCE_MAPPING), dict)

@@ -433,7 +433,7 @@ class RuntimeExportStoreMixin:
             input_payload.get("character_alias_naming_rules"),
             input_payload.get("alias_naming_rules"),
         )
-        fill(APPEARANCE_MAPPING, artifacts.get("appearance_mapping"))
+        fill(APPEARANCE_MAPPING, artifacts.get("appearanceMapping"))
         return variables
 
     def _ensure_export_appearance_natural_language(
@@ -457,7 +457,7 @@ class RuntimeExportStoreMixin:
 
         structured = self._snapshot_export_value(
             snapshot,
-            artifact_keys=("appearance_mapping",),
+            artifact_keys=("appearanceMapping",),
             variable_keys=(APPEARANCE_MAPPING, APPEARANCE_MAPPING_VAR, APPEARANCE_ALIAS_MAPPING_VAR),
         )
         if not has_meaningful_content(structured):
@@ -697,7 +697,7 @@ class RuntimeExportStoreMixin:
 
         structured = self._snapshot_export_value(
             snapshot,
-            artifact_keys=("appearance_mapping",),
+            artifact_keys=("appearanceMapping",),
             variable_keys=(APPEARANCE_MAPPING, APPEARANCE_MAPPING_VAR, APPEARANCE_ALIAS_MAPPING_VAR),
         )
         characters = _appearance_character_items_from_value(structured)
@@ -1321,7 +1321,7 @@ class RuntimeExportStoreMixin:
             self.exports_dir / f"{base_name}_character_registry.json",
             self.exports_dir / f"{base_name}_character_alias_registry.json",
             self.exports_dir / f"{base_name}_episode_alias_plan.json",
-            self.exports_dir / f"{base_name}_appearance_mapping.json",
+            self.exports_dir / f"{base_name}_appearanceMapping.json",
             self.exports_dir / f"{base_name}_appearance_continuity_memory.json",
             self.exports_dir / f"{base_name}_normalized_episode_plan.json",
         ]

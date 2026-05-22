@@ -157,8 +157,8 @@ from ..services.fastgpt_contracts import (
 )
 from ..services.json_utils import normalize_pass_review, parse_json
 from ..services.stage_output_repair import (
-    normalize_appearance_mapping_candidate,
-    validate_appearance_mapping_output,
+    normalize_appearanceMapping_candidate,
+    validate_appearanceMapping_output,
     validate_scenes_output,
 )
 from ..services.unstructured_naturalize import (
@@ -939,7 +939,47 @@ def _is_framework_to_script_payload(payload: WorkflowInput, variables: dict[str,
 
 
 
-def _framework_to_script_json_object(value: Any) -> dict[str, Any]:
+_FRAMEWORK_TO_SCRIPT_OBJECT_TARGET_FIELDS = (
+    SCENE_DICTIONARY,
+    "sceneDictionary",
+    "scene_dictionary",
+    SCRIPT_WORLD_RULES_DIGEST,
+    "scriptWorldRulesDigest",
+    "script_world_rules_digest",
+    APPEARANCE_MAPPING,
+    "appearance_mapping",
+    "appearanceMappingResult",
+    "appearance_mapping_result",
+    ALL_ENRICHED_EPISODE_PLAN,
+    "all_enriched_episode_plan",
+    "enrichedEpisodePlanResult",
+    "enriched_episode_plan_result",
+)
+
+
+def _scan_framework_to_script_json_objects(raw: str) -> list[dict[str, Any]]:
+    decoder = json.JSONDecoder()
+    objects: list[dict[str, Any]] = []
+    index = 0
+    while index < len(raw):
+        brace_index = raw.find("{", index)
+        if brace_index < 0:
+            break
+        try:
+            parsed, end_index = decoder.raw_decode(raw, brace_index)
+        except Exception:
+            index = brace_index + 1
+            continue
+        if isinstance(parsed, dict):
+            objects.append(parsed)
+        index = max(end_index, brace_index + 1)
+    return objects
+
+
+def _framework_to_script_json_object(
+    value: Any,
+    target_fields: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     if isinstance(value, str):
@@ -950,8 +990,19 @@ def _framework_to_script_json_object(value: Any) -> dict[str, Any]:
             try:
                 parsed = json.loads(raw)
             except Exception:
-                return {}
+                scanned = _scan_framework_to_script_json_objects(raw)
+                fields = target_fields or _FRAMEWORK_TO_SCRIPT_OBJECT_TARGET_FIELDS
+                for obj in scanned:
+                    if any(field in obj for field in fields):
+                        return obj
+                return scanned[0] if scanned else {}
             if isinstance(parsed, dict):
+                fields = target_fields or ()
+                if fields and not any(field in parsed for field in fields):
+                    scanned = _scan_framework_to_script_json_objects(raw)
+                    for obj in scanned:
+                        if any(field in obj for field in fields):
+                            return obj
                 return parsed
             if isinstance(parsed, str):
                 raw = parsed.strip()
@@ -977,16 +1028,32 @@ def _framework_to_script_json_list(value: Any) -> list[Any]:
                 reparsed = None
             if isinstance(reparsed, list):
                 return reparsed
-    obj = _framework_to_script_json_object(value)
+    obj = _framework_to_script_json_object(
+        value,
+        (
+            ALL_ENRICHED_EPISODE_PLAN,
+            "allEnrichedEpisodePlan",
+            "all_enriched_episode_plan",
+            "enrichedEpisodePlanResult",
+            "enriched_episode_plan_result",
+        ),
+    )
     if isinstance(obj.get(ALL_ENRICHED_EPISODE_PLAN), list):
         return list(obj.get(ALL_ENRICHED_EPISODE_PLAN) or [])
     if isinstance(obj.get("allEnrichedEpisodePlan"), list):
         return list(obj.get("allEnrichedEpisodePlan") or [])
+    if isinstance(obj.get("all_enriched_episode_plan"), list):
+        return list(obj.get("all_enriched_episode_plan") or [])
     nested = _framework_to_script_json_object(obj.get("enrichedEpisodePlanResult"))
     if isinstance(nested.get(ALL_ENRICHED_EPISODE_PLAN), list):
         return list(nested.get(ALL_ENRICHED_EPISODE_PLAN) or [])
     if isinstance(nested.get("allEnrichedEpisodePlan"), list):
         return list(nested.get("allEnrichedEpisodePlan") or [])
+    nested = _framework_to_script_json_object(obj.get("enriched_episode_plan_result"))
+    if isinstance(nested.get(ALL_ENRICHED_EPISODE_PLAN), list):
+        return list(nested.get(ALL_ENRICHED_EPISODE_PLAN) or [])
+    if isinstance(nested.get("all_enriched_episode_plan"), list):
+        return list(nested.get("all_enriched_episode_plan") or [])
     return []
 
 
@@ -1005,21 +1072,40 @@ def _normalize_framework_to_script_asset_variables(variables: dict[str, Any]) ->
         variables.get("sceneDictionaryResult"),
         variables.get("answerText"),
     ):
-        obj = _framework_to_script_json_object(raw)
+        obj = _framework_to_script_json_object(
+            raw,
+            (
+                SCENE_DICTIONARY,
+                "sceneDictionary",
+                "scene_dictionary",
+                SCRIPT_WORLD_RULES_DIGEST,
+                "scriptWorldRulesDigest",
+                "script_world_rules_digest",
+                "sceneDictionaryResult",
+                "scene_dictionary_result",
+            ),
+        )
         if not obj:
             continue
         nested_result = _framework_to_script_json_object(obj.get("sceneDictionaryResult"))
+        nested_snake_result = _framework_to_script_json_object(obj.get("scene_dictionary_result"))
         scene_value = (
             obj.get(SCENE_DICTIONARY)
             or obj.get("sceneDictionary")
+            or obj.get("scene_dictionary")
             or nested_result.get(SCENE_DICTIONARY)
             or nested_result.get("sceneDictionary")
+            or nested_snake_result.get(SCENE_DICTIONARY)
+            or nested_snake_result.get("scene_dictionary")
         )
         rules_value = (
             obj.get(SCRIPT_WORLD_RULES_DIGEST)
             or obj.get("scriptWorldRulesDigest")
+            or obj.get("script_world_rules_digest")
             or nested_result.get(SCRIPT_WORLD_RULES_DIGEST)
             or nested_result.get("scriptWorldRulesDigest")
+            or nested_snake_result.get(SCRIPT_WORLD_RULES_DIGEST)
+            or nested_snake_result.get("script_world_rules_digest")
         )
         if _has_value(scene_value):
             variables[SCENE_DICTIONARY] = scene_value
@@ -1041,56 +1127,108 @@ def _normalize_framework_to_script_asset_variables(variables: dict[str, Any]) ->
     # 09 appearanceMapping
     for raw in (
         variables.get(APPEARANCE_MAPPING),
+        variables.get("appearance_mapping"),
         variables.get("appearanceMappingResult"),
+        variables.get("appearance_mapping_result"),
         variables.get("answerText"),
     ):
-        obj = _framework_to_script_json_object(raw)
+        obj = _framework_to_script_json_object(
+            raw,
+            (
+                APPEARANCE_MAPPING,
+                "appearance_mapping",
+                "appearanceMappingResult",
+                "appearance_mapping_result",
+            ),
+        )
         if not obj:
             continue
         nested_result = _framework_to_script_json_object(obj.get("appearanceMappingResult"))
+        nested_snake_result = _framework_to_script_json_object(obj.get("appearance_mapping_result"))
         appearance_value = (
             obj.get(APPEARANCE_MAPPING)
             or obj.get("appearanceMapping")
+            or obj.get("appearance_mapping")
             or nested_result.get(APPEARANCE_MAPPING)
             or nested_result.get("appearanceMapping")
+            or nested_result.get("appearance_mapping")
+            or nested_snake_result.get(APPEARANCE_MAPPING)
+            or nested_snake_result.get("appearance_mapping")
         )
+        if not _has_value(appearance_value) and isinstance(obj.get("characters"), list):
+            appearance_value = obj
         if _has_value(appearance_value):
             variables[APPEARANCE_MAPPING] = appearance_value
             variables["appearanceMapping"] = appearance_value
+            variables["appearance_mapping"] = appearance_value
 
     nested_appearance = _framework_to_script_json_object(variables.get(APPEARANCE_MAPPING))
-    if _has_value(nested_appearance.get(APPEARANCE_MAPPING) or nested_appearance.get("appearanceMapping")):
-        variables[APPEARANCE_MAPPING] = nested_appearance.get(APPEARANCE_MAPPING) or nested_appearance.get("appearanceMapping")
+    if _has_value(nested_appearance.get(APPEARANCE_MAPPING) or nested_appearance.get("appearanceMapping") or nested_appearance.get("appearance_mapping")):
+        variables[APPEARANCE_MAPPING] = (
+            nested_appearance.get(APPEARANCE_MAPPING)
+            or nested_appearance.get("appearanceMapping")
+            or nested_appearance.get("appearance_mapping")
+        )
         variables["appearanceMapping"] = variables[APPEARANCE_MAPPING]
+        variables["appearance_mapping"] = variables[APPEARANCE_MAPPING]
 
     # 10 allEnrichedEpisodePlan + allEnrichedEpisodePlanText
     for raw in (
         variables.get("enrichedEpisodePlanResult"),
+        variables.get("enriched_episode_plan_result"),
         variables.get(ALL_ENRICHED_EPISODE_PLAN),
         variables.get("allEnrichedEpisodePlan"),
+        variables.get("all_enriched_episode_plan"),
         variables.get("answerText"),
     ):
-        obj = _framework_to_script_json_object(raw)
+        obj = _framework_to_script_json_object(
+            raw,
+            (
+                ALL_ENRICHED_EPISODE_PLAN,
+                "allEnrichedEpisodePlan",
+                "all_enriched_episode_plan",
+                "allEnrichedEpisodePlanText",
+                "all_enriched_episode_plan_text",
+                "enrichedEpisodePlanResult",
+                "enriched_episode_plan_result",
+            ),
+        )
         if not obj:
             continue
         nested_result = _framework_to_script_json_object(obj.get("enrichedEpisodePlanResult"))
+        nested_snake_result = _framework_to_script_json_object(obj.get("enriched_episode_plan_result"))
         plan_value = (
             obj.get(ALL_ENRICHED_EPISODE_PLAN)
             or obj.get("allEnrichedEpisodePlan")
+            or obj.get("all_enriched_episode_plan")
             or nested_result.get(ALL_ENRICHED_EPISODE_PLAN)
             or nested_result.get("allEnrichedEpisodePlan")
+            or nested_result.get("all_enriched_episode_plan")
+            or nested_snake_result.get(ALL_ENRICHED_EPISODE_PLAN)
+            or nested_snake_result.get("allEnrichedEpisodePlan")
+            or nested_snake_result.get("all_enriched_episode_plan")
         )
-        text_value = obj.get("allEnrichedEpisodePlanText") or nested_result.get("allEnrichedEpisodePlanText")
+        text_value = (
+            obj.get("allEnrichedEpisodePlanText")
+            or obj.get("all_enriched_episode_plan_text")
+            or nested_result.get("allEnrichedEpisodePlanText")
+            or nested_result.get("all_enriched_episode_plan_text")
+            or nested_snake_result.get("allEnrichedEpisodePlanText")
+            or nested_snake_result.get("all_enriched_episode_plan_text")
+        )
         if isinstance(plan_value, list) and plan_value:
             variables[ALL_ENRICHED_EPISODE_PLAN] = plan_value
             variables["allEnrichedEpisodePlan"] = plan_value
+            variables["all_enriched_episode_plan"] = plan_value
         if _has_value(text_value):
             variables["allEnrichedEpisodePlanText"] = text_value
+            variables["all_enriched_episode_plan_text"] = text_value
 
     plan_items = _framework_to_script_json_list(variables.get(ALL_ENRICHED_EPISODE_PLAN))
     if plan_items:
         variables[ALL_ENRICHED_EPISODE_PLAN] = plan_items
         variables["allEnrichedEpisodePlan"] = plan_items
+        variables["all_enriched_episode_plan"] = plan_items
 
 
 FRAMEWORK_SCENE_DICTIONARY_ERROR = "08 场景字典阶段输出缺少 sceneDictionary 或 scriptWorldRulesDigest，无法进入 09。"
@@ -1194,37 +1332,24 @@ def _validate_framework_scene_dictionary_assets(variables: dict[str, Any]) -> li
     return issues
 
 
-def _validate_framework_appearance_mapping_assets(variables: dict[str, Any]) -> list[str]:
+def _validate_framework_appearanceMapping_assets(variables: dict[str, Any]) -> list[str]:
     _normalize_framework_to_script_asset_variables(variables)
-    mapping = _framework_nested_object(variables.get(APPEARANCE_MAPPING), APPEARANCE_MAPPING, "appearanceMapping")
+    mapping = _framework_nested_object(
+        variables.get(APPEARANCE_MAPPING) or variables.get("appearance_mapping"),
+        APPEARANCE_MAPPING,
+        "appearanceMapping",
+        "appearance_mapping",
+    )
     if not mapping:
         return [FRAMEWORK_APPEARANCE_MAPPING_ERROR]
 
     issues: list[str] = []
-    if not _has_value(mapping.get("mapping_version")):
-        issues.append("appearanceMapping 缺少 mapping_version")
     characters = mapping.get("characters")
     if not isinstance(characters, list) or not characters:
         return [FRAMEWORK_APPEARANCE_MAPPING_ERROR]
-
-    required_character_fields = (
-        "name",
-        "default_name",
-        "role_type",
-        "identity",
-        "core_desire",
-        "deep_motivation",
-        "appearance_anchor",
-        "outfit_versions",
-        "alias_rules",
-    )
     for index, character in enumerate(characters, start=1):
         if not isinstance(character, dict):
             issues.append(f"appearanceMapping.characters[{index}] 必须是对象")
-            continue
-        missing = _framework_required_missing(character, required_character_fields)
-        if missing:
-            issues.append(f"appearanceMapping.characters[{index}] 缺少字段：{', '.join(missing)}")
     return issues
 
 
@@ -1235,22 +1360,10 @@ def _validate_framework_enriched_episode_plan_assets(
 ) -> list[str]:
     _normalize_framework_to_script_asset_variables(variables)
     plan_items = _framework_to_script_json_list(variables.get(ALL_ENRICHED_EPISODE_PLAN))
-    text = str(variables.get("allEnrichedEpisodePlanText") or "").strip()
-    if not plan_items or not text:
+    if not plan_items:
         return [FRAMEWORK_ENRICHED_PLAN_ERROR]
 
     issues: list[str] = []
-    required_fields = (
-        "episode",
-        "title",
-        "characters",
-        "scene_refs",
-        "scenes",
-        "specific_plot",
-        "pressure_sources",
-        "ending_hook",
-        "text_view",
-    )
     episodes: list[int] = []
     seen: set[int] = set()
     for index, item in enumerate(plan_items, start=1):
@@ -1265,17 +1378,17 @@ def _validate_framework_enriched_episode_plan_assets(
         else:
             seen.add(episode)
             episodes.append(episode)
-        missing = _framework_required_missing(item, required_fields)
-        if missing:
-            issues.append(f"allEnrichedEpisodePlan[{index}] 缺少字段：{', '.join(missing)}")
 
     if episodes:
         sorted_episodes = sorted(episodes)
         expected = list(range(1, sorted_episodes[-1] + 1))
         if sorted_episodes[0] != 1 or sorted_episodes != expected:
             issues.append("allEnrichedEpisodePlan episode 必须从 1 开始且连续不重复")
-        if total_episodes and sorted_episodes[-1] > int(total_episodes):
-            issues.append(f"allEnrichedEpisodePlan episode 超出 total_episodes={total_episodes}")
+        if total_episodes:
+            if sorted_episodes[-1] > int(total_episodes):
+                issues.append(f"allEnrichedEpisodePlan episode 超出 total_episodes={total_episodes}")
+            if sorted_episodes[-1] < int(total_episodes):
+                issues.append(f"allEnrichedEpisodePlan 未覆盖 total_episodes={total_episodes}")
     return issues
 
 
@@ -1472,7 +1585,7 @@ def _run_framework_to_script_workflow(
         variables.update(output)
         _normalize_framework_to_script_asset_variables(variables)
         _sync_state_variables(state, variables)
-    appearance_issues = _validate_framework_appearance_mapping_assets(variables)
+    appearance_issues = _validate_framework_appearanceMapping_assets(variables)
     if appearance_issues:
         _raise_framework_validation_error(
             state,
@@ -1597,6 +1710,7 @@ def _run_framework_to_script_workflow(
             validation_failure_title="因果冲突计划校验失败",
         )
         variables[BATCH_CAUSAL_CONFLICT_PLAN] = conflict_plan
+        variables["batchCausalConflictPlan"] = conflict_plan
         variables[BATCH_CAUSAL_CONFLICT_REVIEW] = json.dumps(conflict_review, ensure_ascii=False)
         memory_output = _run_fastgpt_stage(
             state,
@@ -1678,9 +1792,13 @@ def _run_framework_to_script_workflow(
             validation_failure_title="正文对白融合校验失败",
         )
         variables[BATCH_SCRIPT_TEXT] = batch_script
+        variables[BATCH_SCRIPT] = batch_script
+        variables["batchScriptText"] = batch_script
+        variables["batch_script_text"] = batch_script
         variables[BATCH_SCRIPT_REVIEW] = json.dumps(script_review, ensure_ascii=False)
         all_script = merge_batch_script(all_script, batch_script, batch)
         variables[ALL_SCRIPT] = all_script
+        variables["all_script"] = all_script
         state.set_output(STAGE_FRAMEWORK_SCRIPT_WRITE, f"batch_{batch.start_episode}", batch_script)
         _sync_state_variables(state, variables)
 
@@ -1711,6 +1829,8 @@ def _run_framework_to_script_workflow(
         _sync_state_variables(state, variables)
 
     variables[FINAL_SCRIPT] = str(variables.get(ALL_SCRIPT) or "").strip()
+    variables["final_script"] = variables[FINAL_SCRIPT]
+    variables["final_output_text"] = variables[FINAL_SCRIPT]
     state.final_output_text = variables[FINAL_SCRIPT]
     _sync_state_variables(state, variables)
     set_runtime_stage(
@@ -2874,7 +2994,7 @@ def _run_hook_batches(
                     "characters": hook_base.get(CHARACTERS),
                     "scenes": hook_base.get(SCENES),
                     "story_outline": hook_base.get(STORY_OUTLINE),
-                    "appearance_mapping": hook_base.get(APPEARANCE_MAPPING),
+                    "appearanceMapping": hook_base.get(APPEARANCE_MAPPING),
                     "hook_memory": hook_base.get(HOOK_MEMORY),
                 },
                 wire_context=hook_base,
@@ -3138,7 +3258,7 @@ def _run_dialogue_batches(
                     "worldview": dialogue_base.get(WORLDVIEW),
                     "characters": dialogue_base.get(CHARACTERS),
                     "scenes": dialogue_base.get(SCENES),
-                    "appearance_mapping": dialogue_base.get(APPEARANCE_MAPPING),
+                    "appearanceMapping": dialogue_base.get(APPEARANCE_MAPPING),
                     "dialogue_memory": dialogue_base.get(DIALOGUE_MEMORY),
                 },
                 wire_context=dialogue_base,
@@ -3443,7 +3563,7 @@ def _run_script_batches(
                     "batch_dialogues": script_base.get(BATCH_DIALOGUES),
                     "previous_batch_summary": script_base.get(ALL_SCRIPT),
                     "script_memory": script_base.get(LAST_SUMMARY),
-                    "appearance_mapping": script_base.get(APPEARANCE_MAPPING),
+                    "appearanceMapping": script_base.get(APPEARANCE_MAPPING),
                     "character_scene_bundle": _build_script_character_scene_bundle_for_estimate(
                         script_base.get(CHARACTERS),
                         script_base.get(SCENES),
@@ -5616,7 +5736,7 @@ def _script_stage_payload_breakdown(context: dict[str, Any]) -> dict[str, int]:
         "batch_dialogues": context.get(ALL_DIALOGUES),
         "previous_batch_summary": context.get(ALL_SCRIPT),
         "script_memory": context.get(LAST_SUMMARY),
-        "appearance_mapping": context.get(APPEARANCE_MAPPING),
+        "appearanceMapping": context.get(APPEARANCE_MAPPING),
         "appearance_memory": context.get(APPEARANCE_CONTINUITY_MEMORY),
         "character_scene_bundle": _build_script_character_scene_bundle_for_estimate(
             context.get(CHARACTERS),
@@ -6690,7 +6810,7 @@ def _ensure_appearance_outputs(
         sync_runtime_state(state)
         return
     if not cached_issues:
-        cached_issues = ["appearance_mapping 通过契约校验后仍无法生成本地 alias registry"]
+        cached_issues = ["appearanceMapping 通过契约校验后仍无法生成本地 alias registry"]
 
     if _appearance_stage_has_transient_state(state, variables):
         logger.warning(
@@ -6763,10 +6883,10 @@ def _ensure_appearance_outputs(
             message="正在编写人物服装版本映射。",
             progress_percent=42,
             output_field=APPEARANCE_MAPPING,
-            validator=validate_appearance_mapping_output,
+            validator=validate_appearanceMapping_output,
             sync_output_to_state=False,
         )
-        current_mapping = _normalize_appearance_mapping_object(
+        current_mapping = _normalize_appearanceMapping_object(
             writing_output.get(APPEARANCE_MAPPING)
         )
         if current_mapping is None:
@@ -6807,7 +6927,7 @@ def _ensure_appearance_outputs(
                 variables[APPEARANCE_REVIEW_VAR] = copy.deepcopy(current_review_payload)
                 if not _apply_appearance_outputs_to_variables(variables):
                     raise ValueError(
-                        "appearance_mapping 通过审核后仍无法生成 registry / alias plan"
+                        "appearanceMapping 通过审核后仍无法生成 registry / alias plan"
                     )
                 _sync_state_variables(state, variables)
                 state.set_var(APPEARANCE_REVIEW_VAR, copy.deepcopy(current_review_payload))
@@ -6839,10 +6959,10 @@ def _ensure_appearance_outputs(
                 progress_percent=42,
                 review_round=review_round,
                 output_field=APPEARANCE_MAPPING,
-                validator=validate_appearance_mapping_output,
+                validator=validate_appearanceMapping_output,
                 sync_output_to_state=False,
             )
-            current_mapping = _normalize_appearance_mapping_object(
+            current_mapping = _normalize_appearanceMapping_object(
                 rewrite_output.get(APPEARANCE_MAPPING)
             )
             if current_mapping is None:
@@ -7191,12 +7311,12 @@ def _scene_output_integrity_issue(value: Any) -> str | None:
 
 def _appearance_output_integrity_issues(value: Any) -> list[str]:
     if not _has_value(value):
-        return ["appearance_mapping 为空"]
-    issues = validate_appearance_mapping_output(value)
+        return ["appearanceMapping 为空"]
+    issues = validate_appearanceMapping_output(value)
     if issues:
         return issues
-    if _normalize_appearance_mapping_object(value) is None:
-        return ["appearance_mapping 未能规范化为内部可消费对象"]
+    if _normalize_appearanceMapping_object(value) is None:
+        return ["appearanceMapping 未能规范化为内部可消费对象"]
     return []
 
 
@@ -7569,7 +7689,7 @@ def _sync_state_variables(state: WorkflowState, variables: dict[str, Any]) -> No
         if canonical_name in variables:
             state.set_var(var_name, variables[canonical_name])
     if APPEARANCE_MAPPING in variables:
-        normalized_mapping = _normalize_appearance_mapping_object(variables[APPEARANCE_MAPPING])
+        normalized_mapping = _normalize_appearanceMapping_object(variables[APPEARANCE_MAPPING])
         if normalized_mapping is not None:
             state.set_var(APPEARANCE_MAPPING, normalized_mapping)
             state.set_var(APPEARANCE_MAPPING_VAR, json.dumps(normalized_mapping, ensure_ascii=False))
@@ -8845,12 +8965,12 @@ def _merge_optional_text(*parts: Any) -> str:
 
 
 def _apply_appearance_outputs_to_variables(variables: dict[str, Any]) -> bool:
-    normalized_mapping = _normalize_appearance_mapping_object(variables.get(APPEARANCE_MAPPING))
+    normalized_mapping = _normalize_appearanceMapping_object(variables.get(APPEARANCE_MAPPING))
     if normalized_mapping is None:
         return False
 
     normalized_plan = _normalize_episode_plan_object(variables.get(NORMALIZED_EPISODE_PLAN))
-    # appearance_mapping 是 FastGPT 给出的“原始服装/别名母本”；
+    # appearanceMapping 是 FastGPT 给出的“原始服装/别名母本”；
     # 本地会继续拆成 registry / alias plan / continuity memory，目的是让后续批处理
     # 直接消费稳定结构，而不是每个阶段都重新自己理解一遍大 JSON。
     character_registry = _build_character_registry(normalized_mapping)
@@ -8871,8 +8991,8 @@ def _apply_appearance_outputs_to_variables(variables: dict[str, Any]) -> bool:
     return True
 
 
-def _normalize_appearance_mapping_object(value: Any) -> dict[str, Any] | None:
-    normalized_candidate = normalize_appearance_mapping_candidate(value)
+def _normalize_appearanceMapping_object(value: Any) -> dict[str, Any] | None:
+    normalized_candidate = normalize_appearanceMapping_candidate(value)
     candidate = normalized_candidate if isinstance(normalized_candidate, dict) else value
     if candidate in (None, ""):
         return None
@@ -8886,7 +9006,7 @@ def _normalize_appearance_mapping_object(value: Any) -> dict[str, Any] | None:
             return None
     if not isinstance(candidate, dict):
         return None
-    mapping = candidate.get("appearance_mapping") if isinstance(candidate.get("appearance_mapping"), dict) else candidate
+    mapping = candidate.get("appearanceMapping") if isinstance(candidate.get("appearanceMapping"), dict) else candidate
     characters = mapping.get("characters")
     if not isinstance(characters, list):
         return None
@@ -8947,7 +9067,7 @@ def _normalize_appearance_mapping_object(value: Any) -> dict[str, Any] | None:
         return None
 
     normalized = {
-        "appearance_mapping": {
+        "appearanceMapping": {
             "mapping_principle": str(mapping.get("mapping_principle") or "").strip(),
             "global_naming_style": str(mapping.get("global_naming_style") or "").strip(),
             "characters": normalized_characters,
@@ -9065,8 +9185,8 @@ def _normalize_alias_display_name(value: Any) -> str:
     return f"{base}({note})"
 
 
-def _build_character_registry(appearance_mapping: dict[str, Any]) -> dict[str, Any]:
-    mapping = appearance_mapping.get("appearance_mapping") or {}
+def _build_character_registry(appearanceMapping: dict[str, Any]) -> dict[str, Any]:
+    mapping = appearanceMapping.get("appearanceMapping") or {}
     characters = mapping.get("characters") or []
     return {
         "global_naming_style": str(mapping.get("global_naming_style") or "").strip(),
@@ -9085,8 +9205,8 @@ def _build_character_registry(appearance_mapping: dict[str, Any]) -> dict[str, A
     }
 
 
-def _build_character_alias_registry(appearance_mapping: dict[str, Any]) -> dict[str, Any]:
-    mapping = appearance_mapping.get("appearance_mapping") or {}
+def _build_character_alias_registry(appearanceMapping: dict[str, Any]) -> dict[str, Any]:
+    mapping = appearanceMapping.get("appearanceMapping") or {}
     characters = mapping.get("characters") or []
     aliases_by_name: dict[str, dict[str, Any]] = {}
     character_entries: list[dict[str, Any]] = []
@@ -9131,9 +9251,9 @@ def _build_character_alias_registry(appearance_mapping: dict[str, Any]) -> dict[
 
 def _build_episode_alias_plan(
     normalized_plan: dict[str, Any] | None,
-    appearance_mapping: dict[str, Any],
+    appearanceMapping: dict[str, Any],
 ) -> dict[str, Any]:
-    mapping = appearance_mapping.get("appearance_mapping") or {}
+    mapping = appearanceMapping.get("appearanceMapping") or {}
     normalized = _normalize_episode_plan_object(normalized_plan) or {"parsed_episode_count": 0, "episodes": []}
     planning = normalized.get("appearance_alias_planning") or {}
     episode_usage = mapping.get("episode_level_usage_plan") or []

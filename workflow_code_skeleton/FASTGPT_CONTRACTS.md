@@ -47,12 +47,12 @@
 | `characters_naturalize` | `自然语言化.json` | `dT7mQ2Nz` / `character_natural_language` |
 | `characters` | `人设生成.json` | `characters` |
 | `scenes` | `场景生成.json` | `scenes` |
-| `appearance_alias_writing` | `服装版本映射编写.json` | `appearance_mapping` |
+| `appearance_alias_writing` | `服装版本映射编写.json` | `appearanceMapping` |
 | `appearance_alias_review` | `服装版本映射审核.json` | `passed`, `rewrite_required`, `blocking_issues` |
-| `appearance_alias_rewrite` | `服装版本映射修订.json` | `appearance_mapping` |
+| `appearance_alias_rewrite` | `服装版本映射修订.json` | `appearanceMapping` |
 | `appearance_alias_unstructured` | `自然语言服装版本映射.json` | `c7VnQ4eX` |
 | `framework_scene_dictionary` | `08_场景字典提炼.json` | `sceneDictionary`, `scriptWorldRulesDigest` |
-| `framework_appearance_mapping` | `09_人设服装alias映射.json` | `appearanceMapping` |
+| `framework_appearanceMapping` | `09_人设服装alias映射.json` | `appearanceMapping` |
 | `framework_enriched_episode_plan` | `10_丰富分集计划.json` | `enrichedEpisodePlanResult`; 后端解析 `allEnrichedEpisodePlan`, `allEnrichedEpisodePlanText` |
 | `framework_causal_conflict_write` | `框架转剧本因果冲突推进计划编写.json` | `batchCausalConflictPlan` |
 | `framework_causal_conflict_review` | `框架转剧本因果冲突推进计划审核.json` | `passed`, `rewrite_required`, `blocking_issues` |
@@ -129,7 +129,7 @@
 | `worldview` | 世界观 JSON string |
 | `characters` | 人设 JSON string |
 | `scenes` | 场景业务 JSON string |
-| `appearance_mapping` | 正式结构化服装映射 object |
+| `appearanceMapping` | 正式结构化服装映射 object |
 | `batch_hooks` / `all_hooks` | 当前批 / 全量 hooks |
 | `batch_dialogues` / `all_dialogues` | 当前批 / 全量 dialogues |
 | `batch_script` / `all_script` | 当前批 / 全量 script |
@@ -138,7 +138,7 @@
 | `framework_plan_package` | 三幕十五节拍第 07 阶段输出策划包，新链路起点 |
 | `sceneDictionary` | 新链路 08 场景字典 |
 | `scriptWorldRulesDigest` | 新链路正文世界规则摘要 |
-| `appearanceMapping` | 新链路 09 外观映射；旧链路兼容 `appearance_mapping` |
+| `appearanceMapping` | 新链路 09 外观映射；旧链路兼容 `appearanceMapping` |
 | `allEnrichedEpisodePlan` / `batchEnrichedEpisodePlan` | 新链路 10 全量 / 当前批增强分集计划 |
 | `conflictStartEpisode` | 新链路因果冲突批次起始集 |
 | `batchCausalConflictPlan` / `batchCausalConflictReview` | 新链路当前批因果冲突推进计划 / 审核结果 |
@@ -298,19 +298,19 @@ appearance 正式结构化来源白名单顺序：
 1. `newVariables.h2KpLm91`
 2. `updateVarResult.h2KpLm91`
 3. `responseData.variableUpdate.h2KpLm91`
-4. answerNode 输出里的 `h2KpLm91` 或顶层 `appearance_mapping`
-5. `choices.message.content` 中可解析且顶层带 `appearance_mapping` 的 JSON object
+4. answerNode 输出里的 `h2KpLm91` 或顶层 `appearanceMapping`
+5. `choices.message.content` 中可解析且顶层带 `appearanceMapping` 的 JSON object
 
 仍然拒绝：
 
 - 空 `h2KpLm91`
-- 空 `appearance_mapping`
+- 空 `appearanceMapping`
 - `c7VnQ4eX`
 - `fuKbtNtY`
 - `scene_setting`
 - `核心场景：...`
-- `appearance_mapping` 为 string
-- 把纯文本包装成 `{"appearance_mapping":"..."}` 的伪修复
+- `appearanceMapping` 为 string
+- 把纯文本包装成 `{"appearanceMapping":"..."}` 的伪修复
 
 ## 8. 当前 detail 与自然语言 stage 规则
 
@@ -349,7 +349,7 @@ appearance 正式结构化来源白名单顺序：
 
 - `character_natural_language`
 - `scene_natural_language`
-- `appearance_mapping`
+- `appearanceMapping`
 - `character_registry`
 - `character_alias_registry`
 - `episode_alias_plan`

@@ -5,9 +5,13 @@ import unittest
 from pathlib import Path
 
 from workflow_code_skeleton.app.services.fastgpt_contracts import (
+    ALL_ENRICHED_EPISODE_PLAN,
+    APPEARANCE_MAPPING,
     CHARACTERS,
     EPISODE_PLAN,
+    SCENE_DICTIONARY,
     SCENES,
+    SCRIPT_WORLD_RULES_DIGEST,
     STORY_OUTLINE,
     USER_CHARACTERS,
     USER_SCENES,
@@ -207,6 +211,35 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
         self.assertEqual(public["display_stage_title"], "框架转剧本：场景字典提炼")
         self.assertIn("2", public["display_stage_output"])
         self.assertIn("旧仓库", public["display_stage_output"])
+
+    def test_framework_to_script_failed_at_stage_10_exposes_stage_10_rollback_option(self) -> None:
+        snapshot = _snapshot(current_stage="framework_enriched_episode_plan")
+        snapshot["status"] = "failed"
+        snapshot["input_payload"] = {
+            "title": "测试项目",
+            "total_episodes": 10,
+            "framework_to_script": True,
+            "generation_chain": "framework_to_script",
+            "framework_planner_source": True,
+        }
+        snapshot["debug_state"]["variables"].update(
+            {
+                SCENE_DICTIONARY: {"scene_count": 2, "core_scenes": [{"name": "旧仓库"}]},
+                SCRIPT_WORLD_RULES_DIGEST: {"world_type": "近未来都市"},
+                APPEARANCE_MAPPING: {
+                    "mapping_principle": "稳定命名",
+                    "characters": [{"canonical_name": "林夏"}],
+                },
+                ALL_ENRICHED_EPISODE_PLAN: [{"episode": 1, "title": "第1集"}],
+            }
+        )
+
+        public = self.manager._public_snapshot(snapshot)
+        option_keys = [item["key"] for item in public["rollback_stage_options"]]
+
+        self.assertIn("framework_enriched_episode_plan", option_keys)
+        self.assertNotIn("hooks", option_keys)
+        self.assertEqual(public["rollback_stage_default"], "framework_enriched_episode_plan")
 
     def test_private_snapshot_keeps_structured_framework_and_worldview_for_debug(self) -> None:
         snapshot = _snapshot(current_stage="worldview")
