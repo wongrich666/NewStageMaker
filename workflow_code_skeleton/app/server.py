@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import copy
+import threading
 from functools import wraps
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 
 from flask import (
     Flask,
@@ -122,6 +124,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         "logs",
         "cache",
     }
+    framework_stage_runs: set[tuple[int, str, str]] = set()
+    framework_stage_runs_lock = threading.Lock()
+
+    def _now_iso() -> str:
+        return datetime.now(timezone.utc).astimezone().isoformat()
 
     def _strip_raw_fastgpt_fields(value):
         if isinstance(value, list):
@@ -209,10 +216,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "can_import": bool(package),
         }
         if include_detail:
+            artifacts = project.get("artifacts") if isinstance(project.get("artifacts"), dict) else {}
+            workspace_state = artifacts.get("framework_to_script_state") if isinstance(artifacts.get("framework_to_script_state"), dict) else {}
             asset.update(
                 {
                     "framework_plan_package": _strip_raw_fastgpt_fields(copy.deepcopy(package)),
                     "stage_outputs": stage_outputs,
+                    "framework_to_script_state": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state)),
+                    "scriptStages": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state.get("scriptStages") or {})),
                 }
             )
         return asset
@@ -225,11 +236,73 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             project_id = 0
         if project_id <= 0:
             return None
-        project = task_manager.get_project_snapshot(project_id, user_id=user_id, public_view=True)
+        project = task_manager.get_project_snapshot(project_id, user_id=user_id, public_view=False)
         if not project or str(project.get("asset_kind") or "").strip() != "framework_planner":
             return None
         asset = _framework_asset_payload(project, include_detail=True)
         return asset if asset.get("can_import") else None
+
+    def _try_begin_framework_stage(user_id: int, asset_id: str, stage: str) -> bool:
+        key = (int(user_id), str(asset_id or "").strip(), str(stage or "").strip())
+        if not key[1] or not key[2]:
+            return True
+        with framework_stage_runs_lock:
+            if key in framework_stage_runs:
+                return False
+            framework_stage_runs.add(key)
+        return True
+
+    def _end_framework_stage(user_id: int, asset_id: str, stage: str) -> None:
+        key = (int(user_id), str(asset_id or "").strip(), str(stage or "").strip())
+        with framework_stage_runs_lock:
+            framework_stage_runs.discard(key)
+
+    def _save_framework_to_script_stage(
+        *,
+        user_id: int,
+        asset_id: str,
+        stage_key: str,
+        output: dict,
+    ) -> None:
+        try:
+            project_id = int(str(asset_id or "").strip())
+        except Exception:
+            return
+        if project_id <= 0 or not isinstance(output, dict):
+            return
+        snapshot = task_manager.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+        if not snapshot or str(snapshot.get("asset_kind") or "").strip() != "framework_planner":
+            return
+        now = _now_iso()
+        clean_output = _strip_raw_fastgpt_fields(copy.deepcopy(output))
+        artifacts = snapshot.setdefault("artifacts", {})
+        if not isinstance(artifacts, dict):
+            artifacts = {}
+            snapshot["artifacts"] = artifacts
+        workspace_state = artifacts.get("framework_to_script_state")
+        if not isinstance(workspace_state, dict):
+            workspace_state = {"scriptStages": {}}
+        script_stages = workspace_state.get("scriptStages")
+        if not isinstance(script_stages, dict):
+            script_stages = {}
+        clean_output["updated_at"] = now
+        script_stages[str(stage_key)] = clean_output
+        workspace_state["scriptStages"] = script_stages
+        workspace_state["framework_asset_id"] = str(asset_id)
+        workspace_state["project_id"] = project_id
+        workspace_state["updated_at"] = now
+        artifacts["framework_to_script_state"] = workspace_state
+        snapshot["updated_at"] = now
+        record = task_manager._projects.get(project_id)
+        if record:
+            with record.lock:
+                record.snapshot = snapshot
+            task_manager._persist_snapshot(record)
+        else:
+            task_manager._project_path(project_id).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
     def _inject_framework_asset(data: dict, user_id: int) -> tuple[dict, dict | None]:
         asset_id = str(data.get("framework_asset_id") or data.get("asset_id") or "").strip()
@@ -994,7 +1067,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not isinstance(data, dict):
             return _json_error("请求体必须是 JSON object。", status=400)
         try:
-            data, framework_asset = _inject_framework_asset(data, _require_user_id())
+            user_id = _require_user_id()
+            data, framework_asset = _inject_framework_asset(data, user_id)
         except ValueError as exc:
             return _json_error(str(exc), status=400)
 
@@ -1142,32 +1216,48 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
             return None, None
 
+        asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
+        if not _try_begin_framework_stage(user_id, asset_id, "08"):
+            return _json_error("08 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
-            from .services.fastgpt_client import fastgpt_client
-            from .services.fastgpt_contracts import STAGE_FRAMEWORK_SCENE_DICTIONARY
+            try:
+                from .services.fastgpt_client import fastgpt_client
+                from .services.fastgpt_contracts import STAGE_FRAMEWORK_SCENE_DICTIONARY
 
-            raw_output = fastgpt_client.run_stage(
-                STAGE_FRAMEWORK_SCENE_DICTIONARY,
-                variables,
-            )
-        except Exception as exc:
-            return _json_error(
-                str(exc),
-                status=500,
-                fallback="08 场景字典提炼调用失败，请检查 FASTGPT_FRAMEWORK_SCENE_DICTIONARY_API_KEY 和工作流变量。",
-            )
+                raw_output = fastgpt_client.run_stage(
+                    STAGE_FRAMEWORK_SCENE_DICTIONARY,
+                    variables,
+                )
+            except Exception as exc:
+                return _json_error(
+                    str(exc),
+                    status=500,
+                    fallback="08 场景字典提炼调用失败，请检查 FASTGPT_FRAMEWORK_SCENE_DICTIONARY_API_KEY 和工作流变量。",
+                )
 
-        scene_dictionary, rules_digest = _extract_scene_payload(raw_output)
-        if not scene_dictionary or not rules_digest:
-            return _json_error(
-                "08 场景字典阶段输出缺少 sceneDictionary 或 scriptWorldRulesDigest。",
-                status=500,
-                fallback="请检查 08_场景字典提炼.json 是否把 sceneDictionary 和 scriptWorldRulesDigest 写入变量或 answerText JSON。",
-            )
+            scene_dictionary, rules_digest = _extract_scene_payload(raw_output)
+            if not scene_dictionary or not rules_digest:
+                return _json_error(
+                    "08 场景字典阶段输出缺少 sceneDictionary 或 scriptWorldRulesDigest。",
+                    status=500,
+                    fallback="请检查 08_场景字典提炼.json 是否把 sceneDictionary 和 scriptWorldRulesDigest 写入变量或 answerText JSON。",
+                )
+            if asset_id:
+                _save_framework_to_script_stage(
+                    user_id=user_id,
+                    asset_id=asset_id,
+                    stage_key="stage08",
+                    output={
+                        "sceneDictionary": scene_dictionary,
+                        "scriptWorldRulesDigest": rules_digest,
+                    },
+                )
+        finally:
+            _end_framework_stage(user_id, asset_id, "08")
 
         return _json_ok(
             stage="08",
-            framework_asset_id=(framework_asset or {}).get("asset_id") if framework_asset else data.get("framework_asset_id"),
+            framework_asset_id=asset_id,
             sceneDictionary=scene_dictionary,
             scriptWorldRulesDigest=rules_digest,
         )
@@ -1184,7 +1274,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not isinstance(data, dict):
             return _json_error("请求体必须是 JSON object。", status=400)
         try:
-            data, framework_asset = _inject_framework_asset(data, _require_user_id())
+            user_id = _require_user_id()
+            data, framework_asset = _inject_framework_asset(data, user_id)
         except ValueError as exc:
             return _json_error(str(exc), status=400)
 
@@ -1337,41 +1428,268 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
             return None
 
+        asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
+        if not _try_begin_framework_stage(user_id, asset_id, "09"):
+            return _json_error("09 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
-            from .services.fastgpt_client import fastgpt_client
-            from .services.fastgpt_contracts import STAGE_FRAMEWORK_APPEARANCE_MAPPING
+            try:
+                from .services.fastgpt_client import fastgpt_client
+                from .services.fastgpt_contracts import STAGE_FRAMEWORK_APPEARANCE_MAPPING
 
-            raw_output = fastgpt_client.run_stage(
-                STAGE_FRAMEWORK_APPEARANCE_MAPPING,
-                variables,
-            )
-        except Exception as exc:
-            return _json_error(
-                str(exc),
-                status=500,
-                fallback="09 人设服装 alias 映射调用失败，请检查 FASTGPT_FRAMEWORK_APPEARANCE_MAPPING_API_KEY 和工作流变量。",
-            )
+                raw_output = fastgpt_client.run_stage(
+                    STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+                    variables,
+                )
+            except Exception as exc:
+                return _json_error(
+                    str(exc),
+                    status=500,
+                    fallback="09 人设服装 alias 映射调用失败，请检查 FASTGPT_FRAMEWORK_APPEARANCE_MAPPING_API_KEY 和工作流变量。",
+                )
 
-        appearanceMapping = _extract_appearance_payload(raw_output)
-        if not appearanceMapping:
-            return _json_error(
-                "09 人设服装 alias 映射输出缺少 appearanceMapping。",
-                status=500,
-                fallback="请检查 09_人设服装alias映射.json 是否把 appearanceMapping 写入变量或 answerText JSON。",
-            )
+            appearanceMapping = _extract_appearance_payload(raw_output)
+            if not appearanceMapping:
+                return _json_error(
+                    "09 人设服装 alias 映射输出缺少 appearanceMapping。",
+                    status=500,
+                    fallback="请检查 09_人设服装alias映射.json 是否把 appearanceMapping 写入变量或 answerText JSON。",
+                )
 
-        characters = appearanceMapping.get("characters")
-        if not isinstance(characters, list) or not characters:
-            return _json_error(
-                "09 人设服装 alias 映射输出缺少 appearanceMapping.characters。",
-                status=500,
-                fallback="请检查 09 工作流输出 schema。",
-            )
+            characters = appearanceMapping.get("characters")
+            if not isinstance(characters, list) or not characters:
+                return _json_error(
+                    "09 人设服装 alias 映射输出缺少 appearanceMapping.characters。",
+                    status=500,
+                    fallback="请检查 09 工作流输出 schema。",
+                )
+            if asset_id:
+                _save_framework_to_script_stage(
+                    user_id=user_id,
+                    asset_id=asset_id,
+                    stage_key="stage09",
+                    output={"appearanceMapping": appearanceMapping},
+                )
+        finally:
+            _end_framework_stage(user_id, asset_id, "09")
 
         return _json_ok(
             stage="09",
-            framework_asset_id=(framework_asset or {}).get("asset_id") if framework_asset else data.get("framework_asset_id"),
+            framework_asset_id=asset_id,
             appearanceMapping=appearanceMapping,
+        )
+
+
+    @app.post("/api/framework-to-script/stage/10")
+    @_login_required
+    def run_framework_to_script_stage10_api():
+        """单独运行 10 分集细化方案。只跑 10，不继续后续因果冲突。"""
+        import json as _json
+
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return _json_error("请求体必须是 JSON object。", status=400)
+        try:
+            user_id = _require_user_id()
+            data, framework_asset = _inject_framework_asset(data, user_id)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+        framework_plan_package = (
+            data.get("framework_plan_package")
+            or data.get("frameworkPlanPackage")
+            or {}
+        )
+        if not isinstance(framework_plan_package, dict) or not framework_plan_package:
+            return _json_error("缺少 framework_plan_package，请先导入框架资产。", status=400)
+
+        scene_dictionary = data.get("sceneDictionary") or data.get("scene_dictionary") or {}
+        if not isinstance(scene_dictionary, dict) or not scene_dictionary:
+            return _json_error("缺少 sceneDictionary，请先完成 08 场景字典提炼。", status=400)
+
+        rules_digest = (
+            data.get("scriptWorldRulesDigest")
+            or data.get("script_world_rules_digest")
+            or {}
+        )
+        if not isinstance(rules_digest, dict) or not rules_digest:
+            return _json_error("缺少 scriptWorldRulesDigest，请先完成 08 场景字典提炼。", status=400)
+
+        appearance_mapping = (
+            data.get("appearanceMapping")
+            or data.get("appearance_mapping")
+            or {}
+        )
+        if not isinstance(appearance_mapping, dict) or not appearance_mapping:
+            return _json_error("缺少 appearanceMapping，请先完成 09 角色外观映射。", status=400)
+
+        variables = {
+            "frameworkPlanPackage": framework_plan_package,
+            "framework_plan_package": framework_plan_package,
+            "sceneDictionary": scene_dictionary,
+            "scene_dictionary": scene_dictionary,
+            "scriptWorldRulesDigest": rules_digest,
+            "script_world_rules_digest": rules_digest,
+            "appearanceMapping": appearance_mapping,
+            "appearance_mapping": appearance_mapping,
+            "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
+        }
+
+        def _try_parse_json_text(value):
+            if not isinstance(value, str):
+                return None
+            text = value.strip()
+            if not text:
+                return None
+            if text.startswith("```"):
+                text = text.strip("`").strip()
+                if text.lower().startswith("json"):
+                    text = text[4:].strip()
+            try:
+                return _json.loads(text)
+            except Exception:
+                return None
+
+        def _extract_update_vars(payload):
+            found = {}
+            if not isinstance(payload, dict):
+                return found
+            response_data = payload.get("responseData")
+            if not isinstance(response_data, dict):
+                return found
+            update_results = response_data.get("updateVarResult")
+            if not isinstance(update_results, list):
+                return found
+            for item in update_results:
+                if not isinstance(item, dict):
+                    continue
+                variable = item.get("variable")
+                value = item.get("value")
+                key = ""
+                if isinstance(variable, list) and variable:
+                    key = str(variable[-1] or "")
+                elif isinstance(variable, str):
+                    key = variable
+                if key:
+                    found[key] = value
+            return found
+
+        def _extract_enriched_payload(payload):
+            candidates = []
+
+            def visit(obj):
+                if isinstance(obj, dict):
+                    candidates.append(obj)
+                    for text_key in ("answerText", "text", "content"):
+                        parsed = _try_parse_json_text(obj.get(text_key))
+                        if parsed is not None:
+                            visit(parsed)
+                    update_vars = _extract_update_vars(obj)
+                    if update_vars:
+                        candidates.append(update_vars)
+                        for value in update_vars.values():
+                            parsed = _try_parse_json_text(value)
+                            if parsed is not None:
+                                visit(parsed)
+                    for key in ("data", "result", "output", "response", "responseData", "enrichedEpisodePlanResult", "enriched_episode_plan_result"):
+                        value = obj.get(key)
+                        if isinstance(value, (dict, list)):
+                            visit(value)
+                        else:
+                            parsed = _try_parse_json_text(value)
+                            if parsed is not None:
+                                visit(parsed)
+                elif isinstance(obj, list):
+                    candidates.append({"allEnrichedEpisodePlan": obj})
+                    for item in obj:
+                        visit(item)
+                else:
+                    parsed = _try_parse_json_text(obj)
+                    if parsed is not None:
+                        visit(parsed)
+
+            visit(payload)
+
+            for item in candidates:
+                if not isinstance(item, dict):
+                    continue
+                nested = item.get("enrichedEpisodePlanResult") or item.get("enriched_episode_plan_result")
+                if isinstance(nested, str):
+                    nested = _try_parse_json_text(nested) or {}
+                if isinstance(nested, dict):
+                    candidates.append(nested)
+
+            for item in candidates:
+                if not isinstance(item, dict):
+                    continue
+                plan = (
+                    item.get("allEnrichedEpisodePlan")
+                    or item.get("enrichedEpisodePlan")
+                    or item.get("all_enriched_episode_plan")
+                    or item.get("enriched_episode_plan")
+                )
+                text = (
+                    item.get("allEnrichedEpisodePlanText")
+                    or item.get("enrichedEpisodePlanText")
+                    or item.get("all_enriched_episode_plan_text")
+                    or item.get("enriched_episode_plan_text")
+                    or ""
+                )
+                if isinstance(plan, str):
+                    parsed_plan = _try_parse_json_text(plan)
+                    if isinstance(parsed_plan, list):
+                        plan = parsed_plan
+                if isinstance(plan, list) and plan:
+                    return plan, str(text or "")
+            return None, ""
+
+        asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
+        if not _try_begin_framework_stage(user_id, asset_id, "10"):
+            return _json_error("10 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
+        try:
+            try:
+                from .services.fastgpt_client import fastgpt_client
+                from .services.fastgpt_contracts import STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN
+
+                raw_output = fastgpt_client.run_stage(
+                    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+                    variables,
+                )
+            except Exception as exc:
+                return _json_error(
+                    str(exc),
+                    status=500,
+                    fallback="10 分集细化方案调用失败，请检查 FASTGPT_FRAMEWORK_ENRICHED_EPISODE_PLAN_API_KEY 和工作流变量。",
+                )
+
+            plan, plan_text = _extract_enriched_payload(raw_output)
+            if not plan:
+                return _json_error(
+                    "10 分集细化方案输出缺少 allEnrichedEpisodePlan。",
+                    status=500,
+                    fallback="请检查 10 工作流是否把 allEnrichedEpisodePlan 写入变量或 answerText JSON。",
+                )
+            if asset_id:
+                _save_framework_to_script_stage(
+                    user_id=user_id,
+                    asset_id=asset_id,
+                    stage_key="stage10",
+                    output={
+                        "allEnrichedEpisodePlan": plan,
+                        "allEnrichedEpisodePlanText": plan_text,
+                        "enrichedEpisodePlan": plan,
+                        "enrichedEpisodePlanText": plan_text,
+                    },
+                )
+        finally:
+            _end_framework_stage(user_id, asset_id, "10")
+
+        return _json_ok(
+            stage="10",
+            framework_asset_id=asset_id,
+            allEnrichedEpisodePlan=plan,
+            allEnrichedEpisodePlanText=plan_text,
+            enrichedEpisodePlan=plan,
+            enrichedEpisodePlanText=plan_text,
         )
 
 

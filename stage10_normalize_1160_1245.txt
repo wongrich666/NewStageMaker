@@ -1,0 +1,86 @@
+﻿            or nested_appearance.get("appearanceMapping")
+            or nested_appearance.get("appearance_mapping")
+        )
+        variables["appearanceMapping"] = variables[APPEARANCE_MAPPING]
+        variables["appearance_mapping"] = variables[APPEARANCE_MAPPING]
+
+    # 10 allEnrichedEpisodePlan + allEnrichedEpisodePlanText
+    for raw in (
+        variables.get("enrichedEpisodePlanResult"),
+        variables.get("enriched_episode_plan_result"),
+        variables.get(ALL_ENRICHED_EPISODE_PLAN),
+        variables.get("allEnrichedEpisodePlan"),
+        variables.get("all_enriched_episode_plan"),
+        variables.get("answerText"),
+    ):
+        obj = _framework_to_script_json_object(
+            raw,
+            (
+                ALL_ENRICHED_EPISODE_PLAN,
+                "allEnrichedEpisodePlan",
+                "all_enriched_episode_plan",
+                "allEnrichedEpisodePlanText",
+                "all_enriched_episode_plan_text",
+                "enrichedEpisodePlanResult",
+                "enriched_episode_plan_result",
+            ),
+        )
+        if not obj:
+            continue
+        nested_result = _framework_to_script_json_object(obj.get("enrichedEpisodePlanResult"))
+        nested_snake_result = _framework_to_script_json_object(obj.get("enriched_episode_plan_result"))
+        plan_value = (
+            obj.get(ALL_ENRICHED_EPISODE_PLAN)
+            or obj.get("allEnrichedEpisodePlan")
+            or obj.get("all_enriched_episode_plan")
+            or nested_result.get(ALL_ENRICHED_EPISODE_PLAN)
+            or nested_result.get("allEnrichedEpisodePlan")
+            or nested_result.get("all_enriched_episode_plan")
+            or nested_snake_result.get(ALL_ENRICHED_EPISODE_PLAN)
+            or nested_snake_result.get("allEnrichedEpisodePlan")
+            or nested_snake_result.get("all_enriched_episode_plan")
+        )
+        text_value = (
+            obj.get("allEnrichedEpisodePlanText")
+            or obj.get("all_enriched_episode_plan_text")
+            or nested_result.get("allEnrichedEpisodePlanText")
+            or nested_result.get("all_enriched_episode_plan_text")
+            or nested_snake_result.get("allEnrichedEpisodePlanText")
+            or nested_snake_result.get("all_enriched_episode_plan_text")
+        )
+        if isinstance(plan_value, list) and plan_value:
+            variables[ALL_ENRICHED_EPISODE_PLAN] = plan_value
+            variables["allEnrichedEpisodePlan"] = plan_value
+            variables["all_enriched_episode_plan"] = plan_value
+        if _has_value(text_value):
+            variables["allEnrichedEpisodePlanText"] = text_value
+            variables["all_enriched_episode_plan_text"] = text_value
+
+    plan_items = _framework_to_script_json_list(variables.get(ALL_ENRICHED_EPISODE_PLAN))
+    if plan_items:
+        variables[ALL_ENRICHED_EPISODE_PLAN] = plan_items
+        variables["allEnrichedEpisodePlan"] = plan_items
+        variables["all_enriched_episode_plan"] = plan_items
+
+
+FRAMEWORK_SCENE_DICTIONARY_ERROR = "08 鍦烘櫙瀛楀吀闃舵杈撳嚭缂哄皯 sceneDictionary 鎴?scriptWorldRulesDigest锛屾棤娉曡繘鍏?09銆?
+FRAMEWORK_APPEARANCE_MAPPING_ERROR = "09 浜鸿鏈嶈 alias 鏄犲皠杈撳嚭缂哄皯 appearanceMapping.characters锛屾棤娉曡繘鍏?10銆?
+FRAMEWORK_ENRICHED_PLAN_ERROR = "10 涓板瘜鍒嗛泦璁″垝杈撳嚭缂哄皯鍙垏鐗囩殑 allEnrichedEpisodePlan锛屾棤娉曡繘鍏ュ洜鏋滃啿绐併€?
+FRAMEWORK_BATCH_ENRICHED_PLAN_ERROR = "褰撳墠鎵规娌℃湁鎵惧埌瀵瑰簲 episode 鐨?enriched plan锛岃妫€鏌?10 闃舵杈撳嚭闆嗘暟銆?
+
+
+def _framework_nested_object(value: Any, *names: str) -> dict[str, Any]:
+    payload = _framework_to_script_json_object(value)
+    for name in names:
+        nested = _framework_to_script_json_object(payload.get(name))
+        if nested:
+            return nested
+    return payload
+
+
+def _framework_required_missing(payload: dict[str, Any], fields: tuple[str, ...]) -> list[str]:
+    return [field for field in fields if not _has_value(payload.get(field))]
+
+
+def _log_framework_validation_failure(
+    state: WorkflowState | None,

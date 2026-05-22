@@ -125,6 +125,12 @@
     return value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length > 0;
   }
 
+  function hasContent(value) {
+    if (Array.isArray(value)) return value.length > 0;
+    if (value && typeof value === "object") return Object.keys(value).length > 0;
+    return String(value || "").trim().length > 0;
+  }
+
   function currentAssetReady() {
     return Boolean(state.frameworkAssetId && hasObject(state.frameworkPlanPackage));
   }
@@ -173,7 +179,7 @@
       state.importedFrameworkAsset = asset;
       state.frameworkPlanPackage = asset.framework_plan_package || {};
       state.stageOutputs = asset.stage_outputs || {};
-      state.scriptStages = {};
+      state.scriptStages = asset.scriptStages || (asset.framework_to_script_state || {}).scriptStages || {};
       state.assetPanelOpen = false;
       saveWorkspace();
     } catch (error) {
@@ -247,6 +253,74 @@
       saveWorkspace();
     } catch (error) {
       state.error = error.message || "09 角色外观映射失败";
+    } finally {
+      state.runningStage = "";
+      state.isRunning = false;
+      render();
+    }
+  }
+
+  async function runStage10() {
+    if (!currentAssetReady()) {
+      state.error = "请先导入框架资产，或从框架生成页面一键进入。";
+      render();
+      return;
+    }
+
+    const stage08 = state.scriptStages.stage08 || {};
+    const stage09 = state.scriptStages.stage09 || {};
+
+    if (!hasObject(stage08.sceneDictionary)) {
+      state.error = "请先完成 08 场景字典提炼。";
+      render();
+      return;
+    }
+
+    if (!hasObject(stage09.appearanceMapping)) {
+      state.error = "请先完成 09 角色外观映射。";
+      render();
+      return;
+    }
+
+    state.runningStage = "10";
+    state.isRunning = true;
+    state.error = null;
+    render();
+
+    try {
+      const data = await requestJson("/api/framework-to-script/stage/10", {
+        method: "POST",
+        body: JSON.stringify({
+          framework_asset_id: state.frameworkAssetId,
+          sceneDictionary: stage08.sceneDictionary,
+          scriptWorldRulesDigest: stage08.scriptWorldRulesDigest,
+          appearanceMapping: stage09.appearanceMapping,
+        }),
+      });
+
+      const enrichedEpisodePlan =
+        data.enrichedEpisodePlan ||
+        data.allEnrichedEpisodePlan ||
+        data.enriched_episode_plan ||
+        null;
+
+      const enrichedEpisodePlanText =
+        data.enrichedEpisodePlanText ||
+        data.allEnrichedEpisodePlanText ||
+        data.enriched_episode_plan_text ||
+        "";
+
+      state.scriptStages.stage10 = {
+        enrichedEpisodePlan,
+        enrichedEpisodePlanText,
+        allEnrichedEpisodePlan: data.allEnrichedEpisodePlan || enrichedEpisodePlan,
+        allEnrichedEpisodePlanText: data.allEnrichedEpisodePlanText || enrichedEpisodePlanText,
+        updated_at: new Date().toISOString(),
+      };
+
+      saveWorkspace();
+    } catch (error) {
+      state.error = error.message || "10 分集细化方案失败";
     } finally {
       state.runningStage = "";
       state.isRunning = false;
@@ -397,8 +471,10 @@
     const locked = !currentAssetReady() || state.isRunning;
     const stage08 = state.scriptStages.stage08 || {};
     const stage09 = state.scriptStages.stage09 || {};
+    const stage10 = state.scriptStages.stage10 || {};
     const has08 = hasObject(stage08.sceneDictionary);
     const has09 = hasObject(stage09.appearanceMapping);
+    const has10 = hasContent(stage10.enrichedEpisodePlan) || hasContent(stage10.allEnrichedEpisodePlan);
     return `
       <section class="wts-card" id="scriptStageArea">
         <div class="wts-card-head">
@@ -416,7 +492,26 @@
           ${renderStageCard("09", "角色外观映射", state.runningStage === "09" ? "运行中" : has09 ? "已完成" : has08 ? "待运行" : "等待 08", has09 ? "重新运行 09" : "运行 09", "run-stage-09", locked || !has08, has09 ? `
             <details class="wts-output" open><summary>角色外观映射</summary>${renderTree(stage09.appearanceMapping, "appearanceMapping")}</details>
           ` : "")}
-          ${renderStageCard("10", "分集细化方案", has09 ? "待接入" : "等待 09", "运行本阶段", "noop", true, `<p class="wts-hint">后续阶段将沿用当前导入的框架资产和已完成的 08/09 输出。</p>`)}
+          ${renderStageCard(
+            "10",
+            "分集细化方案",
+            state.runningStage === "10" ? "运行中" : has10 ? "已完成" : has09 ? "待运行" : "等待 09",
+            has10 ? "重新运行 10" : "运行 10",
+            "run-stage-10",
+            locked || !has09,
+            has10 ? `
+              <details class="wts-output" open>
+                <summary>分集细化方案</summary>
+                ${renderTree(stage10.enrichedEpisodePlan || stage10.allEnrichedEpisodePlan, "enrichedEpisodePlan")}
+              </details>
+              ${stage10.enrichedEpisodePlanText || stage10.allEnrichedEpisodePlanText ? `
+                <details class="wts-output">
+                  <summary>分集细化文本</summary>
+                  ${renderTree(stage10.enrichedEpisodePlanText || stage10.allEnrichedEpisodePlanText, "enrichedEpisodePlan")}
+                </details>
+              ` : ""}
+            ` : `<p class="wts-hint">将沿用当前导入的框架资产和已完成的 08/09 输出。</p>`
+          )}
         </div>
       </section>
     `;
@@ -431,7 +526,7 @@
           <div>
             <div class="wts-eyebrow">Framework Asset to Script</div>
             <h1>框架转剧本</h1>
-            <p>从框架资产导入 07 最终策划包，然后继续 08+ 剧本链路。</p>
+            <p>导入剧本框架，进行剧本创作。</p>
           </div>
           <div class="wts-actions">
             <button type="button" class="wts-btn" data-action="open-asset-panel">导入框架资产</button>
@@ -463,6 +558,8 @@
       runStage08();
     } else if (action === "run-stage-09") {
       runStage09();
+    } else if (action === "run-stage-10") {
+      runStage10();
     } else if (action === "save-workspace") {
       saveWorkspace();
       state.error = null;
