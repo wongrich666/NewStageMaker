@@ -1141,20 +1141,42 @@
     return item ? item.id : "basic";
   }
 
+  function realStageDisplayTitle(stageKey) {
+    return {
+      basic: "01 原文信息提取 / 基础配置",
+      worldview: "02 世界观方案",
+      character: "03 人设方案",
+      beat: "04 三幕十五节拍阶段",
+      storylines: "05 人物故事线阶段",
+      guide: "06 整体改编指引",
+      package: "07 最终策划包输出",
+    }[stageKey] || stageDisplayTitle(stageKey);
+  }
+
   function upstreamStageKey(stageKey) {
     const index = STAGE_SEQUENCE.indexOf(stageKey);
     return index > 0 ? STAGE_SEQUENCE[index - 1] : "";
   }
 
   function stageDisplayTitle(stageKey) {
-    return viewDef(firstViewForStage(stageKey)).label.replace(/^\d+\.\s*/, "");
+    return viewDef(firstViewForStage(stageKey)).label.replace(/^\d+[a-z]?\.\s*/i, "");
+  }
+
+  function sharedStageHint(stageKey) {
+    if (stageKey === "beat") {
+      return "04 阶段包含“时间轴”和“卡点说明”两个子视图。";
+    }
+    if (stageKey === "storylines") {
+      return "05 阶段包含“故事线总览”“故事线详情”“故事线处理”三个子视图。";
+    }
+    return "";
   }
 
   function renderUpstreamRollbackButton(stageKey) {
     const upstream = upstreamStageKey(stageKey);
     if (!upstream) return "";
     if (!hasStageData(upstream)) return "";
-    return `<button class="fp-btn danger subtle" data-action="rollback-stage" data-stage-key="${upstream}">回退到上游：${escapeHtml(stageDisplayTitle(upstream))}</button>`;
+    return `<button class="fp-btn danger subtle" data-action="rollback-stage" data-stage-key="${upstream}">回退 ${escapeHtml(realStageDisplayTitle(upstream))}</button>`;
   }
 
   function firstAccessibleView(targetState) {
@@ -1288,8 +1310,12 @@
   }
 
   function rollbackStage(stageKey) {
-    const title = viewDef(firstViewForStage(stageKey)).label.replace(/^\d+\.\s*/, "");
-    const proceed = window.confirm(`确认回退到“${title}”并清空下游结果与确认状态吗？`);
+    const title = realStageDisplayTitle(stageKey);
+    const hint = sharedStageHint(stageKey);
+    const affected = downstreamStages(stageKey).map(realStageDisplayTitle).join("、") || "无后续阶段";
+    const proceed = window.confirm(
+      `确认回退 ${title} 吗？\n\n${hint ? `${hint}\n` : ""}这会清空整个当前真实阶段及后续阶段结果与确认状态，不只是当前子页。\n\n后续将清空：${affected}`
+    );
     if (!proceed) return;
 
     if (stageKey === "basic") {
@@ -1519,12 +1545,34 @@
     source_text: "原文材料",
     style: "风格",
     focus: "重点",
+    display_text: "展示文本",
+    display_texts: "展示文本",
+    framework_score_report: "框架评分报告",
+    validation_report: "校验报告",
+    passed_checks: "通过检查",
+    blocking_issues: "阻断问题",
+    repair_notes: "修复说明",
+    handoff_to_script_workflow: "下游交接说明",
+    generation_priorities: "生成优先级",
+    hard_constraints: "硬约束",
+    do_not_change: "不可改动",
+    risk_flags: "风险提醒",
+    recommended_next_action: "推荐下一步",
+    sceneDictionary: "场景字典",
+    scriptWorldRulesDigest: "正文世界规则摘要",
+    appearanceMapping: "人设服装 alias 映射",
+    allEnrichedEpisodePlan: "丰富分集计划",
+    allEnrichedEpisodePlanText: "丰富分集计划文本",
   };
 
   function fieldLabel(key) {
     const normalized = String(key || "");
     if (FIELD_LABELS[normalized]) return FIELD_LABELS[normalized];
-    return "补充信息";
+    return normalized
+      .replace(/_/g, " ")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .trim()
+      || "补充信息";
   }
 
   function editorValueFor(key) {
@@ -2193,7 +2241,7 @@
         <div class="fp-lock-note">本阶段由上游确认或底部“下一阶段”自动生成。人工操作只保留确认与显式回退。</div>
         <div class="fp-actions">
           ${renderUpstreamRollbackButton(options.stageKey)}
-          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="${options.stageKey}">回退到此阶段并清空下游</button>` : ""}
+          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="${options.stageKey}">回退 ${escapeHtml(realStageDisplayTitle(options.stageKey))}</button>` : ""}
           <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="${options.stageKey}" ${blocked || confirmed || isEmptyValue(data) ? "disabled" : ""}>确认并进入${escapeHtml(options.nextTitle)}</button>
         </div>
       </section>
@@ -2211,6 +2259,7 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">三幕十五节拍卡点规划时间轴</h2>
+            <p class="fp-card-sub">04 阶段子视图：时间轴。与“卡点说明”共用同一个后端阶段。</p>
 
           </div>
           ${stageStatusTag("beat")}
@@ -2224,7 +2273,7 @@
         <div class="fp-lock-note">时间轴可直接编辑；修改节拍后会同步卡点说明，并清空已失效的 05 人物故事线。</div>
         <div class="fp-actions">
           ${renderUpstreamRollbackButton("beat")}
-          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="beat">回退到此阶段并清空下游</button>` : ""}
+          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="beat">回退 04 三幕十五节拍阶段</button>` : ""}
           <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="beat" ${blocked || confirmed || !canConfirm ? "disabled" : ""}>确认并进入人物故事线</button>
         </div>
       </section>
@@ -2364,6 +2413,7 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">三幕十五节拍卡点说明</h2>
+            <p class="fp-card-sub">04 阶段子视图：卡点说明。与“时间轴”共用同一个后端阶段。</p>
           </div>
           ${stageStatusTag("beat")}
         </div>
@@ -2402,7 +2452,7 @@
         <div class="fp-lock-note">05 阶段由 04 确认后自动生成；如回退 04，人物故事线会同步清空，避免旧故事线引用旧节拍。</div>
         <div class="fp-actions">
           ${renderUpstreamRollbackButton("storylines")}
-          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="storylines">回退到此阶段并清空下游</button>` : ""}
+          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="storylines">回退 05 人物故事线阶段</button>` : ""}
           <button class="fp-btn" data-action="go-view" data-view="storyline_details" ${!state.character_storylines.length ? "disabled" : ""}>查看详细故事线</button>
           <button class="fp-btn primary" data-action="go-view" data-view="storyline_decisions" ${!state.character_storylines.length ? "disabled" : ""}>进入故事线处理</button>
         </div>
@@ -2419,7 +2469,7 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">查看详细不同人物故事线</h2>
-            <p class="fp-card-sub">可查看每条人物线的摘要、详细剧情、关联节拍、分集安排和编辑备注。</p>
+            <p class="fp-card-sub">05 阶段子视图：详情查看。与“故事线总览”“故事线处理”共用同一个后端阶段。</p>
           </div>
           ${stageStatusTag("storylines")}
         </div>
@@ -2446,6 +2496,7 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">故事线处理：保留 / 精简 / 删除</h2>
+            <p class="fp-card-sub">05 阶段子视图：处理决策。回退会清空整个 05 人物故事线阶段及后续阶段。</p>
           </div>
           ${stageStatusTag("storylines")}
         </div>
@@ -2454,7 +2505,7 @@
         ${renderStageHistoryPanel("storylines")}
         <div class="fp-actions">
           ${renderUpstreamRollbackButton("storylines")}
-          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="storylines">回退到此阶段并清空下游</button>` : ""}
+          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="storylines">回退 05 人物故事线阶段</button>` : ""}
           <button class="fp-btn" data-action="go-view" data-view="storyline_details" ${!state.character_storylines.length ? "disabled" : ""}>返回详情查看</button>
           <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="storylines" ${blocked || confirmed || !canConfirm ? "disabled" : ""}>确认并进入整体改编指引</button>
         </div>
@@ -2483,7 +2534,7 @@
         ${renderStageError("guide")}
         <div class="fp-actions">
           ${renderUpstreamRollbackButton("guide")}
-          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="guide">回退到此阶段并清空下游</button>` : ""}
+          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="guide">回退 ${escapeHtml(realStageDisplayTitle("guide"))}</button>` : ""}
           <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="guide" ${blocked || confirmed || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>确认并进入最终输出</button>
         </div>
       </section>
@@ -2543,6 +2594,7 @@
     if (isEmptyValue(data)) {
       return `<div class="fp-empty">当前阶段还没有可展示结果。请先生成，或基于上一版执行更新。</div>`;
     }
+    const overview = renderStructuredOutputOverview(data, options || {});
     const form = renderBusinessValue(data, {
       rootKey: options && options.dataKey,
       stageKey: options && options.stageKey,
@@ -2554,9 +2606,62 @@
     });
     return `
       <div class="fp-business-form" data-business-form="${escapeHtml((options && options.dataKey) || "")}">
-        ${form}
+        ${overview}
+        <details class="fp-business-debug">
+          <summary>调试 / 完整结构</summary>
+          ${form}
+          <pre>${escapeHtml(prettyJson(data))}</pre>
+        </details>
       </div>
     `;
+  }
+
+  function renderStructuredOutputOverview(data, options) {
+    if (!data || typeof data !== "object") {
+      return `<div class="fp-output-overview"><h3>${escapeHtml(fieldLabel(options.dataKey || "内容"))}</h3><p>${escapeHtml(String(data || ""))}</p></div>`;
+    }
+    const title = extractOutputTitle(data, options);
+    const summary = extractOutputSummary(data);
+    const bullets = extractOutputBullets(data);
+    return `
+      <div class="fp-output-overview">
+        <h3>${escapeHtml(title)}</h3>
+        ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
+        ${bullets.length ? `<ul>${bullets.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+      </div>
+    `;
+  }
+
+  function extractOutputTitle(data, options) {
+    if (data.title) return data.title;
+    if (data.project_title) return data.project_title;
+    if (data.name) return data.name;
+    return fieldLabel(options.dataKey || options.rootKey || "阶段输出");
+  }
+
+  function extractOutputSummary(data) {
+    for (const key of ["summary", "overview", "display_text", "core_premise", "input_summary", "recommended_next_action"]) {
+      if (typeof data[key] === "string" && data[key].trim()) return truncateText(data[key], 260);
+    }
+    if (data.handoff_to_script_workflow && typeof data.handoff_to_script_workflow === "object") {
+      return truncateText(data.handoff_to_script_workflow.input_summary || data.handoff_to_script_workflow.recommended_next_action || "", 260);
+    }
+    return summarizeBusinessValue(data);
+  }
+
+  function extractOutputBullets(data) {
+    const keys = ["passed_checks", "warnings", "blocking_issues", "generation_priorities", "hard_constraints", "do_not_change", "risk_flags"];
+    const result = [];
+    for (const key of keys) {
+      const value = data[key] || (data.validation_report && data.validation_report[key]) || (data.handoff_to_script_workflow && data.handoff_to_script_workflow[key]);
+      if (!Array.isArray(value)) continue;
+      value.slice(0, 5).forEach((item) => {
+        const text = typeof item === "string" ? item : summarizeBusinessValue(item);
+        if (text) result.push(`${fieldLabel(key)}：${truncateText(text, 120)}`);
+      });
+      if (result.length >= 6) break;
+    }
+    return result.slice(0, 6);
   }
 
   function renderPayloadSummary(payload) {
@@ -3068,6 +3173,10 @@
       storyline_decisions: clone(state.storyline_decisions),
       adaptation_guide: clone(state.adaptation_guide),
       prompt_preferences: clone(state.prompt_preferences || {}),
+      workflow_mode: "framework_to_script",
+      generation_chain: "framework_to_script",
+      framework_to_script: true,
+      framework_planner_source: true,
     }, knowledgeFields);
     payload.prompt_preferences = clone(state.prompt_preferences || {});
     if (state.user_knowledge_step_prompts) {
@@ -4014,9 +4123,6 @@
       if (task.project_id !== undefined && task.project_id !== null && task.project_id !== "") {
         workspaceUrl.searchParams.set("project_id", String(task.project_id));
       }
-      if (task.task_id !== undefined && task.task_id !== null && task.task_id !== "") {
-        workspaceUrl.searchParams.set("task_id", String(task.task_id));
-      }
       window.location.href = workspaceUrl.pathname + workspaceUrl.search + workspaceUrl.hash;
     } catch (error) {
       showToast((error && error.message) || "框架转剧本任务创建失败");
@@ -4793,6 +4899,9 @@
       return;
     }
     if (action === "close-new-script") {
+      if (actionElement.matches(".fp-modal-mask") && event.target !== actionElement) {
+        return;
+      }
       ui.showNewScriptModal = false;
       render();
       return;

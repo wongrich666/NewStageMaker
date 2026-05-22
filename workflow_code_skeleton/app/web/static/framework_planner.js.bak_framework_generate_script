@@ -33,7 +33,7 @@
     { id: "storylines", label: "6. 不同人物故事线", stageKey: "storylines" },
     { id: "storyline_details", label: "7. 查看详细不同人物故事线", stageKey: "storylines" },
     { id: "storyline_decisions", label: "8. 故事线处理", stageKey: "storylines" },
-    { id: "guide", label: "9. 整体改编指引四项", stageKey: "guide" },
+    { id: "guide", label: "9. 剧本改编方向", stageKey: "guide" },
     { id: "package", label: "10. 最终策划包输出", stageKey: "package" },
   ];
 
@@ -2390,7 +2390,7 @@
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
           <div>
-            <h2 class="fp-card-title">整体改编指引四项</h2>
+            <h2 class="fp-card-title">剧本改编方向</h2>
           </div>
           ${stageStatusTag("guide")}
         </div>

@@ -229,7 +229,7 @@ class UserKnowledgeStore:
                 for tag in selected_tags
                 if str((tag.get("stage_prompts") or {}).get(stage_key) or "").strip()
             )
-        merged = _merge_preference_prompt(existing, tag_prompt_text)
+        merged = existing
         selected_ids = [tag["id"] for tag in selected_tags]
         return {
             "selected_tags": selected_tags,

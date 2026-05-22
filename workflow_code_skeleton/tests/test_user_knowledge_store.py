@@ -63,14 +63,15 @@ class UserKnowledgeStoreTests(unittest.TestCase):
         self.assertEqual(result["tag_prompt_text"], "")
         self.assertTrue(all(value == "" for value in result["stage_prompts"].values()))
 
-    def test_apply_tags_merges_multiple_prompts(self) -> None:
+    def test_apply_tags_returns_metadata_without_merging_prompt_text(self) -> None:
         with workspace_tempdir("knowledge-store-") as temp_dir:
             store = UserKnowledgeStore(temp_dir)
             tag_ids = [tag["id"] for tag in store.list_tags()[:2]]
             result = store.apply_tags(tag_ids, existing_user_preference="用户手写偏好")
 
-        self.assertIn("用户手写偏好", result["merged_preference_prompt"])
-        self.assertIn("来自智慧库标签", result["merged_preference_prompt"])
+        self.assertEqual(result["merged_preference_prompt"], "用户手写偏好")
+        self.assertNotIn("来自智慧库标签", result["merged_preference_prompt"])
+        self.assertIn("【", result["tag_prompt_text"])
         self.assertEqual(len(result["selected_tags"]), 2)
         self.assertIn("basic", result["stage_prompts"])
         self.assertIn("【", result["stage_prompts"]["worldview"])
@@ -192,7 +193,7 @@ class UserKnowledgeApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
-        self.assertIn("原偏好", payload["merged_preference_prompt"])
+        self.assertEqual(payload["merged_preference_prompt"], "原偏好")
         self.assertEqual(len(payload["selected_tags"]), 2)
         self.assertIn("【", payload["stage_prompts"]["beat"])
 

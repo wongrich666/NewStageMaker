@@ -1,0 +1,129 @@
+{
+  "stage": "stage02",
+  "timestamp": "20260522-105932-645",
+  "status": "success",
+  "payload_project_name": "未命名项目",
+  "payload_keys": [
+    "project_title",
+    "prompt_preferences",
+    "selected_preference_tag_ids",
+    "selected_preference_tags",
+    "source_brief",
+    "source_title",
+    "title",
+    "user_knowledge_stage_prompts",
+    "user_knowledge_tag_prompt",
+    "user_preference_prompt"
+  ],
+  "payload_debug_summary": {
+    "type": "dict",
+    "payload_keys": [
+      "project_title",
+      "prompt_preferences",
+      "selected_preference_tag_ids",
+      "selected_preference_tags",
+      "source_brief",
+      "source_title",
+      "title",
+      "user_knowledge_stage_prompts",
+      "user_knowledge_tag_prompt",
+      "user_preference_prompt"
+    ],
+    "field_summary": {
+      "prompt_preferences": {
+        "type": "dict",
+        "length": 134,
+        "dict_keys": [
+          "stage_prompts"
+        ],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "{'stage_prompts': {'basic': '', 'worldview': '阶段二偏好', 'character': '阶段三偏好', 'beat': '', 'storylines': '', 'guide': '', 'package': ''}}"
+      },
+      "selected_preference_tag_ids": {
+        "type": "list",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "[]"
+      },
+      "selected_preference_tags": {
+        "type": "list",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "[]"
+      },
+      "source_brief": {
+        "type": "dict",
+        "length": 2,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "{}"
+      },
+      "user_preference_prompt": {
+        "type": "str",
+        "length": 0,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "''"
+      },
+      "user_knowledge_tag_prompt": {
+        "type": "str",
+        "length": 0,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "''"
+      },
+      "user_knowledge_stage_prompts": {
+        "type": "dict",
+        "length": 115,
+        "dict_keys": [
+          "basic",
+          "beat",
+          "character",
+          "guide",
+          "package",
+          "storylines",
+          "worldview"
+        ],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "{'basic': '', 'worldview': '阶段二偏好', 'character': '阶段三偏好', 'beat': '', 'storylines': '', 'guide': '', 'package': ''}"
+      },
+      "project_title": {
+        "type": "str",
+        "length": 5,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'未命名项目'"
+      },
+      "title": {
+        "type": "str",
+        "length": 5,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'未命名项目'"
+      },
+      "source_title": {
+        "type": "str",
+        "length": 5,
+        "dict_keys": [],
+        "list_length": 0,
+        "first_item_type": "",
+        "preview": "'未命名项目'"
+      }
+    },
+    "suspected_raw_response_fields": []
+  },
+  "output": {
+    "worldview_plan": {}
+  }
+}

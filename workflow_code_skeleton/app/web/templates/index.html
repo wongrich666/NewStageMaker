@@ -206,32 +206,14 @@
           <button id="startBtn" class="composer-send-btn" type="button" aria-label="开始生成">开始</button>
         </div>
 
-        <section id="userKnowledgePanel" class="user-knowledge-panel" aria-label="智慧库标签">
+        <section class="user-knowledge-panel compact" aria-label="智慧库提示">
           <div class="user-knowledge-head">
             <div>
               <span class="tool-panel-kicker">用户智慧库</span>
-              <h3>智慧库标签</h3>
+              <h3>智慧库已移至框架策划工作台</h3>
             </div>
-            <button id="applyKnowledgeTagsBtn" class="btn btn-secondary" type="button">应用到用户偏好</button>
+            <a class="btn btn-secondary" href="/framework-planner">打开框架策划</a>
           </div>
-          <div id="knowledgeTagStatus" class="user-knowledge-status">正在加载标签...</div>
-          <div id="knowledgeTagList" class="knowledge-tag-list"></div>
-          <div id="selectedKnowledgeTags" class="selected-knowledge-tags">当前未选择标签</div>
-          <label class="field user-preference-field">
-            <span>本次用户偏好</span>
-            <textarea id="userPreferenceInput" placeholder="可手写本次偏好，也可选择标签后一键应用。"></textarea>
-          </label>
-          <details class="knowledge-create">
-            <summary>新建自定义标签</summary>
-            <div class="knowledge-create-grid">
-              <input id="knowledgeTagNameInput" type="text" placeholder="标签名称">
-              <input id="knowledgeTagCategoryInput" type="text" placeholder="分类">
-              <input id="knowledgeTagDescriptionInput" type="text" placeholder="描述">
-              <textarea id="knowledgeTagPromptInput" placeholder="偏好提示词"></textarea>
-              <button id="createKnowledgeTagBtn" class="btn btn-primary" type="button">新增标签</button>
-            </div>
-          </details>
-          <pre id="knowledgePreferencePreview" class="knowledge-preview hidden"></pre>
         </section>
 
         <p id="formHint" class="composer-hint">只需要填写故事期待、角色数量和总集数。</p>
