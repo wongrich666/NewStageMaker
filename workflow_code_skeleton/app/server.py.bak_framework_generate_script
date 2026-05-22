@@ -798,24 +798,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=500, fallback="新建剧本失败，请稍后重试。")
         return _json_ok(asset=asset)
 
-    @app.post("/api/framework-planner/assets/save")
-    @_login_required
-    def save_framework_planner_asset_api():
-        data = request.get_json(silent=True) or {}
-        if not isinstance(data, dict):
-            return _json_error("保存内容格式不正确", status=400)
-        try:
-            asset = task_manager.save_framework_planner_asset(
-                user_id=_require_user_id(),
-                payload=data,
-            )
-        except ValueError as exc:
-            return _json_error(str(exc), status=400)
-        except Exception as exc:
-            logger.exception("framework planner asset save failed")
-            return _json_error(str(exc), status=500, fallback="当前框架保存失败，请稍后重试。")
-        return _json_ok(asset=asset, project=asset, project_id=asset.get("project_id"))
-
     @app.get("/api/community")
     def community_assets():
         assets = task_manager.list_public_assets()
@@ -876,110 +858,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         except ValueError as exc:
             return _json_error(str(exc), status=400)
         return _json_ok(task=snapshot)
-
-
-    @app.post("/api/framework-planner/generate-script")
-    @_login_required
-    def generate_script_from_framework_planner():
-        data = request.get_json(silent=True) or {}
-
-        framework_plan_package = data.get("framework_plan_package")
-        if not isinstance(framework_plan_package, dict) or not framework_plan_package:
-            return _json_error(
-                "缺少 framework_plan_package，请先完成并确认 07 最终策划包输出。",
-                status=400,
-            )
-
-        basic_config = data.get("basic_config") if isinstance(data.get("basic_config"), dict) else {}
-        title = (
-            str(data.get("title") or "")
-            or str(data.get("project_title") or "")
-            or str(basic_config.get("project_title") or "")
-            or str(basic_config.get("source_title") or "")
-            or "未命名框架剧本"
-        ).strip()
-
-        def _safe_int(value, default):
-            try:
-                number = int(value)
-                return number if number > 0 else default
-            except Exception:
-                return default
-
-        total_episodes = _safe_int(
-            data.get("total_episodes")
-            or data.get("episodes_per_season")
-            or basic_config.get("episodes_per_season"),
-            60,
-        )
-        minutes_per_episode = _safe_int(
-            data.get("minutes_per_episode") or basic_config.get("minutes_per_episode"),
-            2,
-        )
-        episode_word_count = _safe_int(
-            data.get("episode_word_count"),
-            max(600, minutes_per_episode * 450),
-        )
-
-        expectation_parts = [
-            str(data.get("user_expectation") or "").strip(),
-            str(data.get("adaptation_direction") or basic_config.get("adaptation_direction") or "").strip(),
-            str(data.get("user_requirements") or basic_config.get("user_requirements") or "").strip(),
-        ]
-        expectation = "\n".join([item for item in expectation_parts if item]).strip()
-        if not expectation:
-            expectation = f"基于《{title}》的三幕十五节拍框架策划包生成短剧正文。"
-
-        payload = {
-            "title": title,
-            "project_title": title,
-            "source_title": str(data.get("source_title") or basic_config.get("source_title") or title),
-            "target_format": str(data.get("target_format") or basic_config.get("target_format") or "短剧"),
-            "season_count": _safe_int(data.get("season_count") or basic_config.get("season_count"), 1),
-            "episodes_per_season": total_episodes,
-            "total_episodes": total_episodes,
-            "minutes_per_episode": minutes_per_episode,
-            "episode_word_count": episode_word_count,
-            "user_expectation": expectation,
-            "user_requirements": str(data.get("user_requirements") or basic_config.get("user_requirements") or ""),
-            "adaptation_direction": str(data.get("adaptation_direction") or basic_config.get("adaptation_direction") or ""),
-            "basic_config": basic_config,
-            "framework_plan_package": framework_plan_package,
-            "source_framework_project_id": data.get("source_framework_project_id") or data.get("project_id"),
-            "source_brief": data.get("source_brief") or framework_plan_package.get("source_brief") or {},
-            "worldview_plan": data.get("worldview_plan") or framework_plan_package.get("worldview_plan") or {},
-            "character_plan": data.get("character_plan") or framework_plan_package.get("character_plan") or {},
-            "beat_checkpoint_timeline": data.get("beat_checkpoint_timeline") or framework_plan_package.get("beat_checkpoint_timeline") or [],
-            "checkpoint_explanation": data.get("checkpoint_explanation") or framework_plan_package.get("checkpoint_explanation") or {},
-            "character_storylines": data.get("character_storylines") or framework_plan_package.get("character_storylines") or [],
-            "storyline_decisions": data.get("storyline_decisions") or framework_plan_package.get("storyline_decisions") or [],
-            "adaptation_guide": data.get("adaptation_guide") or framework_plan_package.get("adaptation_guide") or {},
-            "workflow_mode": "framework_to_script",
-            "generation_chain": "framework_to_script",
-            "framework_to_script": True,
-            "framework_planner_source": True,
-        }
-        if isinstance(data.get("user_knowledge_step_prompts"), dict):
-            payload["user_knowledge_step_prompts"] = data.get("user_knowledge_step_prompts")
-
-        _attach_user_knowledge_payload(payload, data)
-
-        try:
-            snapshot = task_manager.start_task(
-                user_id=_require_user_id(),
-                input_payload=payload,
-                workflow_spec_path=_resolve_spec_path(data),
-                model_selection_id=data.get("model_selection_id"),
-            )
-        except Exception as exc:
-            return _json_error(
-                str(exc),
-                status=400,
-                fallback="框架转剧本任务创建失败，请检查新链路 FastGPT API Key 和工作流配置。",
-            )
-
-        return _json_ok(task=snapshot)
-
 
     @app.post("/api/workflows/start")
     @_login_required

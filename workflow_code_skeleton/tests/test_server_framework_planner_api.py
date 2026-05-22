@@ -141,6 +141,166 @@ class ServerFrameworkPlannerApiTests(unittest.TestCase):
         self.assertIn("framework_plan_package", data["data"])
         self.assertIn("validation_report", data["data"])
 
+    def test_generate_script_requires_framework_plan_package(self) -> None:
+        response = self.client.post(
+            "/api/framework-planner/generate-script",
+            headers=self.headers,
+            json={"basic_config": _basic_config()},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertFalse(data["success"])
+        self.assertEqual(data["message"], "缺少 framework_plan_package，请先完成并确认 07 最终策划包输出。")
+
+    def test_generate_script_starts_framework_to_script_chain(self) -> None:
+        fake_snapshot = {
+            "project_id": 123,
+            "task_id": "task-framework-script",
+            "status": "running",
+            "current_stage": "framework_scene_dictionary",
+            "current_stage_label": "框架转剧本场景字典",
+            "progress_percent": 5,
+        }
+        payload = _planner_payload()
+        payload.update(
+            {
+                "title": "夜行审判",
+                "project_title": "夜行审判",
+                "source_title": "夜行审判",
+                "target_format": "短剧",
+                "season_count": 1,
+                "episodes_per_season": 60,
+                "total_episodes": 60,
+                "minutes_per_episode": 2,
+                "episode_word_count": 900,
+                "user_expectation": "走新框架转剧本链路",
+                "user_requirements": "保留主角成长线",
+                "adaptation_direction": "强化反转",
+                "framework_plan_package": {"package_id": "stage07", "source_brief": {"source_title": "夜行审判"}},
+                "source_brief": {"source_title": "夜行审判"},
+                "worldview_plan": {"world_type": "近未来都市"},
+                "character_plan": {"protagonist": {"name": "林渡"}},
+                "beat_checkpoint_timeline": [{"beat_no": 1, "beat_name": "开场"}],
+                "checkpoint_explanation": {"overview": "ok"},
+                "character_storylines": [{"id": "main", "decision": "keep"}],
+                "storyline_decisions": [{"storyline_id": "main", "decision": "keep"}],
+                "adaptation_guide": {"structure_and_rhythm": "强钩子"},
+                "prompt_preferences": {"stage_prompts": {"package": "进入下游"}},
+                "user_knowledge_stage_prompts": {"package": "进入下游"},
+                "user_knowledge_step_prompts": {"framework_script": "正文更强冲突"},
+                "selected_preference_tag_ids": ["tag-a"],
+                "selected_preference_tags": [{"id": "tag-a", "name": "短剧强钩子"}],
+            }
+        )
+
+        with patch("workflow_code_skeleton.app.server.task_manager.start_task", return_value=fake_snapshot) as mocked:
+            response = self.client.post(
+                "/api/framework-planner/generate-script",
+                headers=self.headers,
+                json=payload,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["task"]["project_id"], 123)
+        self.assertEqual(data["task"]["task_id"], "task-framework-script")
+        self.assertEqual(data["task"]["status"], "running")
+        self.assertEqual(data["task"]["current_stage"], "framework_scene_dictionary")
+        self.assertEqual(data["task"]["current_stage_label"], "框架转剧本场景字典")
+        self.assertEqual(data["task"]["progress_percent"], 5)
+
+        start_payload = mocked.call_args.kwargs["input_payload"]
+        self.assertEqual(start_payload["workflow_mode"], "framework_to_script")
+        self.assertEqual(start_payload["generation_chain"], "framework_to_script")
+        self.assertTrue(start_payload["framework_to_script"])
+        self.assertTrue(start_payload["framework_planner_source"])
+        self.assertEqual(start_payload["basic_config"]["project_title"], "夜行审判")
+        self.assertEqual(start_payload["framework_plan_package"]["package_id"], "stage07")
+        self.assertEqual(start_payload["user_knowledge_step_prompts"]["framework_script"], "正文更强冲突")
+        self.assertEqual(start_payload["selected_preference_tag_ids"], ["tag-a"])
+        self.assertNotIn("all_hooks", start_payload)
+        self.assertNotIn("all_dialogues", start_payload)
+        self.assertNotIn("all_script", start_payload)
+
+    def test_save_framework_planner_asset_returns_project_id_and_restorable_state(self) -> None:
+        payload = _planner_payload()
+        payload.update(
+            {
+                "project_title": "夜行审判",
+                "framework_plan_package": {"package_id": "stage07"},
+                "validation_report": {"status": "pass"},
+                "display_texts": {"07": "最终策划包可进入资产化链路"},
+                "prompt_preferences": {"stage_prompts": {"package": "保持强钩子"}},
+                "selected_preference_tag_ids": ["tag-a"],
+                "selected_preference_tags": [{"id": "tag-a", "name": "短剧强钩子"}],
+                "asset_state": {"status": "completed", "current_stage": "package"},
+                "stage_state": {
+                    "package": {"status": "confirmed", "confirmed": True, "locked": True},
+                },
+                "current_view": "package",
+            }
+        )
+
+        response = self.client.post(
+            "/api/framework-planner/assets/save",
+            headers=self.headers,
+            json=payload,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["success"])
+        project_id = data["project_id"]
+        self.assertIsInstance(project_id, int)
+        self.assertGreater(project_id, 0)
+        self.assertEqual(data["asset"]["asset_kind"], "framework_planner")
+
+        restored_response = self.client.get(f"/api/projects/{project_id}", headers=self.headers)
+        self.assertEqual(restored_response.status_code, 200)
+        restored = restored_response.get_json()["project"]
+        self.assertEqual(restored["project_id"], project_id)
+        self.assertEqual(restored["asset_kind"], "framework_planner")
+        framework_state = restored["framework_planner_state"]
+        self.assertEqual(framework_state["project_id"], project_id)
+        self.assertEqual(framework_state["framework_plan_package"]["package_id"], "stage07")
+        self.assertEqual(framework_state["validation_report"]["status"], "pass")
+        self.assertEqual(framework_state["display_texts"]["07"], "最终策划包可进入资产化链路")
+        self.assertEqual(framework_state["prompt_preferences"]["stage_prompts"]["package"], "保持强钩子")
+        self.assertEqual(framework_state["selected_preference_tag_ids"], ["tag-a"])
+        self.assertTrue(framework_state["stage_state"]["package"]["confirmed"])
+        self.assertEqual(framework_state["asset_state"]["project_id"], project_id)
+
+    def test_generate_script_receives_source_framework_project_id(self) -> None:
+        fake_snapshot = {
+            "project_id": 456,
+            "task_id": "task-framework-script",
+            "status": "running",
+            "current_stage": "framework_scene_dictionary",
+            "current_stage_label": "框架转剧本场景字典",
+            "progress_percent": 5,
+        }
+        payload = _planner_payload()
+        payload.update(
+            {
+                "title": "夜行审判",
+                "framework_plan_package": {"package_id": "stage07"},
+                "source_framework_project_id": 321,
+            }
+        )
+
+        with patch("workflow_code_skeleton.app.server.task_manager.start_task", return_value=fake_snapshot) as mocked:
+            response = self.client.post(
+                "/api/framework-planner/generate-script",
+                headers=self.headers,
+                json=payload,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        start_payload = mocked.call_args.kwargs["input_payload"]
+        self.assertEqual(start_payload["source_framework_project_id"], 321)
+
     def test_stage_api_returns_stable_error_shape_when_required_inputs_missing(self) -> None:
         with patch.dict(
             os.environ,

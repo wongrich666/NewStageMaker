@@ -620,6 +620,19 @@ class StageCacheMixin:
                 str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip()
             ),
         }
+        if str(snapshot.get("asset_kind") or "").strip() == "framework_planner":
+            input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+            raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+            debug_state = snapshot.get("debug_state") if isinstance(snapshot.get("debug_state"), dict) else {}
+            variables = debug_state.get("variables") if isinstance(debug_state.get("variables"), dict) else {}
+            framework_state = (
+                raw_artifacts.get("framework_planner_state")
+                or input_payload.get("framework_planner_state")
+                or variables.get("framework_planner_state")
+                or {}
+            )
+            if isinstance(framework_state, dict):
+                payload["framework_planner_state"] = copy.deepcopy(framework_state)
         # 有意不把 debug_state / logs / 内部控制位直接暴露给前端。
         # 前端只看正式字段，避免中间变量、节点回显和恢复指针泄漏到公开接口。
         return payload

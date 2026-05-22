@@ -89,7 +89,6 @@
   }
 
   const initialState = {
-    project_id: null,
     current_view: "basic",
     basic_config: {
       project_title: "",
@@ -262,36 +261,6 @@
       }
       return data;
     },
-    async startFrameworkScript(payload) {
-      const response = await fetch(`${API_BASE}/generate-script`, {
-        method: "POST",
-        headers: buildHeaders(),
-        body: JSON.stringify(payload || {}),
-      });
-      const data = await response.json().catch(() => ({
-        success: false,
-        message: "框架转剧本接口返回了无法解析的响应",
-      }));
-      if (!response.ok || data.success === false || data.ok === false) {
-        throw new Error(data.error || data.message || "框架转剧本任务创建失败");
-      }
-      return data;
-    },
-    async saveFrameworkAsset(payload) {
-      const response = await fetch(`${API_BASE}/assets/save`, {
-        method: "POST",
-        headers: buildHeaders(),
-        body: JSON.stringify(payload || {}),
-      });
-      const data = await response.json().catch(() => ({
-        success: false,
-        message: "保存接口返回了无法解析的响应",
-      }));
-      if (!response.ok || data.success === false || data.ok === false) {
-        throw new Error(data.error || data.message || "当前框架保存失败");
-      }
-      return data;
-    },
   };
 
   const mockApi = {
@@ -324,12 +293,6 @@
         throw error;
       }
     },
-    async startFrameworkScript(payload) {
-      return realApi.startFrameworkScript(payload);
-    },
-    async saveFrameworkAsset(payload) {
-      return realApi.saveFrameworkAsset(payload);
-    },
   };
 
   async function requestJson(url, options) {
@@ -350,23 +313,9 @@
   }
 
   function currentProjectId() {
-    const stateProjectId = state ? state.project_id : null;
-    const stateNumeric = Number(stateProjectId || 0);
-    if (stateNumeric > 0) return stateNumeric;
-    const projectId = state && state.asset_state ? state.asset_state.project_id : null;
-    const projectNumeric = Number(projectId || 0);
-    if (projectNumeric > 0) return projectNumeric;
     const assetId = state && state.asset_state ? state.asset_state.asset_id : null;
     const numeric = Number(assetId || 0);
     return numeric > 0 ? numeric : "unsaved";
-  }
-
-  function hasSavedFrameworkProjectId() {
-    const value = currentProjectId();
-    if (value === null || value === undefined) return false;
-    const text = String(value || "").trim().toLowerCase();
-    if (!text || ["unsaved", "draft", "null", "undefined"].includes(text)) return false;
-    return Number(value) > 0;
   }
 
   function currentProjectCacheName() {
@@ -725,12 +674,6 @@
       clone(initialState.asset_state),
       saved.asset_state && typeof saved.asset_state === "object" && !Array.isArray(saved.asset_state) ? saved.asset_state : {}
     );
-    const savedProjectId = Number(saved.project_id || next.asset_state.project_id || next.asset_state.asset_id || 0);
-    next.project_id = savedProjectId > 0 ? savedProjectId : null;
-    if (next.project_id) {
-      next.asset_state.project_id = next.project_id;
-      next.asset_state.asset_id = next.project_id;
-    }
     next.prompt_preferences = normalizePromptPreferences(Object.assign({}, storedPreferences || {}, saved.prompt_preferences || {}));
     next.source_brief = next.source_brief && typeof next.source_brief === "object" && !Array.isArray(next.source_brief) ? next.source_brief : {};
     next.worldview_plan = next.worldview_plan && typeof next.worldview_plan === "object" && !Array.isArray(next.worldview_plan) ? next.worldview_plan : {};
@@ -1010,28 +953,6 @@
 
   function runningStageKey() {
     return STAGE_SEQUENCE.find((stageKey) => isStageLoading(stageKey) || (state.stage_state[stageKey] || {}).status === "running") || "";
-  }
-
-  function canStartFrameworkScript() {
-    const packageStage = (state.stage_state || {}).package || {};
-    return !isEmptyValue(state.framework_plan_package)
-      && packageStage.confirmed === true
-      && !runningStageKey()
-      && !ui.loading.framework_script;
-  }
-
-  function renderFrameworkScriptButton(sizeClass) {
-    const className = sizeClass ? ` ${sizeClass}` : "";
-    const disabled = canStartFrameworkScript() ? "" : "disabled";
-    const label = ui.loading.framework_script ? "正在创建剧本任务..." : "用当前框架生成剧本";
-    return `<button class="fp-btn${className} primary" data-action="start-framework-script" ${disabled}>${label}</button>`;
-  }
-
-  function renderSaveFrameworkButton(sizeClass) {
-    const className = sizeClass ? ` ${sizeClass}` : "";
-    const disabled = runningStageKey() || ui.loading.framework_save || ui.loading.framework_script ? "disabled" : "";
-    const label = ui.loading.framework_save ? "正在保存..." : "保存当前框架";
-    return `<button class="fp-btn${className}" data-action="save-framework-asset" ${disabled}>${label}</button>`;
   }
 
   function processingElapsedLabel(stageKey) {
@@ -1664,8 +1585,6 @@
         </div>
         <div class="fp-top-actions">
           <button class="fp-btn small primary" data-action="open-new-script">新建剧本</button>
-          ${renderSaveFrameworkButton("small")}
-          ${renderFrameworkScriptButton("small")}
           <button class="fp-btn small" data-action="toggle-assets">${ui.assetsOpen ? "收起资产" : "查看和管理资产"}</button>
           <a class="fp-btn small ghost" href="${escapeHtml(config.workspaceUrl || "/workspace")}">返回主工作台</a>
           <button class="fp-btn small danger" data-action="reset-state" ${canClearFrameworkInput() ? "" : "disabled"}>清空输入</button>
@@ -2509,9 +2428,7 @@
         ${renderStageHistoryPanel("package")}
         <div class="fp-actions">
           ${renderUpstreamRollbackButton("package")}
-          ${renderSaveFrameworkButton("")}
           <button class="fp-btn primary" data-action="copy-final-package" ${locked || !hasOutput ? "disabled" : ""}>复制最终策划包</button>
-          ${renderFrameworkScriptButton("")}
         </div>
       </section>
     `;
@@ -3022,97 +2939,6 @@
         stage_state: clone(state.stage_state),
       },
     };
-  }
-
-  function positiveNumber(value, fallback) {
-    const number = Number(value);
-    return Number.isFinite(number) && number > 0 ? number : fallback;
-  }
-
-  function frameworkToScriptPayload() {
-    syncBasicConfigFromDom();
-    const basic = state.basic_config || {};
-    const seasonCount = positiveNumber(basic.season_count, 1);
-    const episodesPerSeason = positiveNumber(basic.episodes_per_season, 60);
-    const totalEpisodes = positiveNumber(basic.total_episodes, seasonCount * episodesPerSeason);
-    const minutesPerEpisode = positiveNumber(basic.minutes_per_episode, 2);
-    const title = String(basic.project_title || basic.source_title || "未命名框架剧本").trim();
-    const knowledgeFields = knowledgePayloadFields("package");
-    const payload = Object.assign({
-      title,
-      project_title: title,
-      source_title: String(basic.source_title || title).trim(),
-      target_format: String(basic.target_format || "短剧").trim(),
-      season_count: seasonCount,
-      episodes_per_season: episodesPerSeason,
-      total_episodes: totalEpisodes,
-      minutes_per_episode: minutesPerEpisode,
-      episode_word_count: basic.episode_word_count ? positiveNumber(basic.episode_word_count, undefined) : undefined,
-      source_framework_project_id: currentProjectId(),
-      project_id: currentProjectId(),
-      user_expectation: [
-        String(basic.adaptation_direction || "").trim(),
-        String(basic.user_constraints || "").trim(),
-        payloadUserRequirements(),
-      ].filter(Boolean).join("\n\n"),
-      user_requirements: payloadUserRequirements(),
-      adaptation_direction: String(basic.adaptation_direction || "").trim(),
-      basic_config: clone(basic),
-      framework_plan_package: clone(state.framework_plan_package),
-      source_brief: clone(state.source_brief),
-      worldview_plan: clone(state.worldview_plan),
-      character_plan: clone(state.character_plan),
-      beat_checkpoint_timeline: clone(state.beat_checkpoint_timeline),
-      checkpoint_explanation: clone(state.checkpoint_explanation),
-      character_storylines: clone(state.character_storylines),
-      storyline_decisions: clone(state.storyline_decisions),
-      adaptation_guide: clone(state.adaptation_guide),
-      prompt_preferences: clone(state.prompt_preferences || {}),
-    }, knowledgeFields);
-    payload.prompt_preferences = clone(state.prompt_preferences || {});
-    if (state.user_knowledge_step_prompts) {
-      payload.user_knowledge_step_prompts = clone(state.user_knowledge_step_prompts);
-    } else if ((state.prompt_preferences || {}).step_prompts) {
-      payload.user_knowledge_step_prompts = clone(state.prompt_preferences.step_prompts);
-    }
-    return cleanOutgoingPayload(payload, "framework_to_script payload");
-  }
-
-  function frameworkAssetSavePayload() {
-    syncBasicConfigFromDom();
-    const knowledgeFields = knowledgePayloadFields("package");
-    const assetState = clone(state.asset_state || {});
-    const projectId = currentProjectId();
-    if (Number(projectId) > 0) {
-      assetState.asset_id = Number(projectId);
-      assetState.project_id = Number(projectId);
-    }
-    const payload = Object.assign({
-      project_id: Number(projectId) > 0 ? Number(projectId) : null,
-      asset_kind: "framework_planner",
-      project_title: state.basic_config.project_title || state.basic_config.source_title || "未命名框架策划",
-      title: state.basic_config.project_title || state.basic_config.source_title || "未命名框架策划",
-      basic_config: clone(state.basic_config),
-      source_brief: clone(state.source_brief),
-      worldview_plan: clone(state.worldview_plan),
-      character_plan: clone(state.character_plan),
-      beat_checkpoint_timeline: clone(state.beat_checkpoint_timeline),
-      checkpoint_explanation: clone(state.checkpoint_explanation),
-      character_storylines: clone(state.character_storylines),
-      storyline_decisions: clone(state.storyline_decisions),
-      adaptation_guide: clone(state.adaptation_guide),
-      framework_plan_package: clone(state.framework_plan_package),
-      validation_report: clone(state.validation_report),
-      display_texts: clone(state.display_texts || {}),
-      prompt_preferences: clone(state.prompt_preferences || {}),
-      asset_state: assetState,
-      stage_state: clone(state.stage_state || {}),
-      current_view: state.current_view || "basic",
-      created_at: assetState.created_at || "",
-      updated_at: new Date().toISOString(),
-    }, knowledgeFields);
-    payload.prompt_preferences = clone(state.prompt_preferences || {});
-    return cleanOutgoingPayload(payload, "framework_asset_save payload");
   }
 
   function payloadUserRequirements() {
@@ -3986,82 +3812,6 @@
     return STAGE_SEQUENCE.every((stageKey) => !hasStageData(stageKey));
   }
 
-  async function startFrameworkScript() {
-    if (!canStartFrameworkScript()) {
-      showToast("请先完成并确认 07 最终策划包输出");
-      return;
-    }
-    const confirmed = window.confirm("确认使用当前最终策划包进入下游剧本生成吗？系统会自动执行场景字典、人设服装 alias、丰富分集计划、因果冲突和正文对白融合。");
-    if (!confirmed) return;
-    ui.loading.framework_script = true;
-    render();
-    try {
-      if (!hasSavedFrameworkProjectId()) {
-        try {
-          await saveFrameworkAsset({ silent: true });
-        } catch (error) {
-          showToast("当前框架保存失败，无法进入下游剧本生成。");
-          return;
-        }
-      }
-      if (!hasSavedFrameworkProjectId()) {
-        showToast("project_id 缺失，无法进入下游剧本生成。");
-        return;
-      }
-      const data = await planningApi.startFrameworkScript(frameworkToScriptPayload());
-      const task = (data && data.task) || data || {};
-      const workspaceUrl = new URL(config.workspaceUrl || "/workspace", window.location.origin);
-      if (task.project_id !== undefined && task.project_id !== null && task.project_id !== "") {
-        workspaceUrl.searchParams.set("project_id", String(task.project_id));
-      }
-      if (task.task_id !== undefined && task.task_id !== null && task.task_id !== "") {
-        workspaceUrl.searchParams.set("task_id", String(task.task_id));
-      }
-      window.location.href = workspaceUrl.pathname + workspaceUrl.search + workspaceUrl.hash;
-    } catch (error) {
-      showToast((error && error.message) || "框架转剧本任务创建失败");
-    } finally {
-      ui.loading.framework_script = false;
-      render();
-    }
-  }
-
-  async function saveFrameworkAsset(options) {
-    ui.loading.framework_save = true;
-    render();
-    try {
-      const data = await planningApi.saveFrameworkAsset(frameworkAssetSavePayload());
-      const asset = data.asset || data.project || {};
-      const projectId = Number(data.project_id || asset.project_id || 0);
-      if (!(projectId > 0)) {
-        throw new Error("project_id 缺失");
-      }
-      state.project_id = projectId;
-      state.asset_state = Object.assign({}, state.asset_state || {}, asset.asset_state || {}, {
-        asset_kind: "framework_planner",
-        asset_id: projectId,
-        project_id: projectId,
-        status: asset.status || (state.asset_state || {}).status || "in_progress",
-        updated_at: asset.updated_at || new Date().toISOString(),
-      });
-      syncStageFlow(state);
-      saveState();
-      if (!options || !options.silent) {
-        showToast("当前框架已保存");
-      }
-      await loadAssets();
-      return asset;
-    } catch (error) {
-      if (!options || !options.silent) {
-        showToast((error && error.message) || "保存失败");
-      }
-      throw error;
-    } finally {
-      ui.loading.framework_save = false;
-      render();
-    }
-  }
-
   async function loadKnowledgeTags() {
     ui.knowledge.loading = true;
     ui.knowledge.status = "";
@@ -4251,9 +4001,7 @@
     state.basic_config.episodes_per_season = Number(form.episodes_per_season || 60);
     state.basic_config.user_requirements = form.style || "";
     state.basic_config.source_text = form.description || "";
-    state.project_id = asset.project_id || null;
     state.asset_state.asset_id = asset.project_id || null;
-    state.asset_state.project_id = asset.project_id || null;
     state.asset_state.status = "draft";
     state.current_view = "basic";
     ui.assetsOpen = true;
@@ -4300,84 +4048,9 @@
     await createNewScript();
   }
 
-  function restoreFrameworkPlannerState(project) {
-    const restored = project.framework_planner_state
-      || ((project.input_payload || {}).framework_planner_state)
-      || ((project.artifacts || {}).framework_planner_state)
-      || {};
-    if (!restored || typeof restored !== "object" || Array.isArray(restored)) {
-      throw new Error("资产恢复失败：缺少 framework_planner_state");
-    }
-    resetTransientUi();
-    state = clone(initialState);
-    [
-      "basic_config",
-      "source_brief",
-      "worldview_plan",
-      "character_plan",
-      "beat_checkpoint_timeline",
-      "checkpoint_explanation",
-      "character_storylines",
-      "storyline_decisions",
-      "adaptation_guide",
-      "framework_plan_package",
-      "validation_report",
-      "display_texts",
-      "prompt_preferences",
-      "asset_state",
-      "stage_state",
-    ].forEach((key) => {
-      if (restored[key] !== undefined && restored[key] !== null) {
-        state[key] = clone(restored[key]);
-      }
-    });
-    const projectId = Number(project.project_id || restored.project_id || 0);
-    state.project_id = projectId > 0 ? projectId : null;
-    state.asset_state = Object.assign(clone(initialState.asset_state), state.asset_state || {}, {
-      asset_kind: "framework_planner",
-      asset_id: state.project_id,
-      project_id: state.project_id,
-      status: project.status || (state.asset_state || {}).status || "in_progress",
-    });
-    if (!state.stage_state || typeof state.stage_state !== "object") {
-      state.stage_state = clone(initialState.stage_state);
-    }
-    if (!isEmptyValue(state.framework_plan_package)) {
-      STAGE_SEQUENCE.forEach((stageKey) => {
-        state.stage_state[stageKey] = Object.assign(clone(initialState.stage_state[stageKey]), state.stage_state[stageKey] || {}, {
-          confirmed: true,
-          locked: true,
-          status: "confirmed",
-        });
-      });
-      state.current_view = restored.current_view || "package";
-    } else {
-      state.current_view = restored.current_view || "basic";
-    }
-    ui.knowledge.selectedIds = Array.isArray(restored.selected_preference_tag_ids)
-      ? restored.selected_preference_tag_ids.map(String)
-      : [];
-    syncStageFlow(state);
-    saveState();
-  }
-
   async function openAsset(projectId) {
     const data = await requestJson(`/api/projects/${projectId}`);
     const project = data.project || {};
-    if (String(project.asset_kind || "") === "framework_planner") {
-      try {
-        restoreFrameworkPlannerState(project);
-      } catch (error) {
-        showToast((error && error.message) || "资产恢复失败");
-        return;
-      }
-      ui.stageHistory = {};
-      ui.stageHistoryLoading = {};
-      await loadStageHistory(stageKeyForView(state.current_view || "basic"));
-      showToast("已恢复框架策划资产，可继续生成或进入下游剧本");
-      render();
-      return;
-    }
     const input = project.input_payload || {};
     resetTransientUi();
     state = clone(initialState);
@@ -4900,14 +4573,6 @@
         framework_plan_package: state.framework_plan_package,
         validation_report: state.validation_report,
       }), "已复制最终策划包");
-      return;
-    }
-    if (action === "save-framework-asset") {
-      await saveFrameworkAsset();
-      return;
-    }
-    if (action === "start-framework-script") {
-      await startFrameworkScript();
       return;
     }
     if (action === "confirm-basic") {

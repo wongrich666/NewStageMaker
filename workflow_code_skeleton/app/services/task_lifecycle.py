@@ -321,6 +321,161 @@ class TaskLifecycleMixin:
         self._remember_latest_project(int(user_id), project_id)
         return self._public_snapshot(snapshot)
 
+    def save_framework_planner_asset(
+        self,
+        *,
+        user_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("保存内容格式不正确")
+        basic_config = payload.get("basic_config") if isinstance(payload.get("basic_config"), dict) else {}
+        asset_state = payload.get("asset_state") if isinstance(payload.get("asset_state"), dict) else {}
+        raw_project_id = (
+            payload.get("project_id")
+            or asset_state.get("project_id")
+            or asset_state.get("asset_id")
+        )
+        project_id = _safe_int(raw_project_id, 0)
+        title = clean_user_visible_text(
+            payload.get("project_title")
+            or payload.get("title")
+            or basic_config.get("project_title")
+            or basic_config.get("source_title")
+            or ""
+        ).strip() or "未命名框架策划"
+        now = now_iso()
+
+        if project_id > 0:
+            snapshot = self.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+            if not snapshot or not self._snapshot_belongs_to_user(snapshot, user_id):
+                raise ValueError("project_id 缺失或无权保存该框架资产")
+            if str(snapshot.get("asset_kind") or "").strip() != "framework_planner":
+                raise ValueError("该项目不是 framework_planner 资产，不能用框架策划保存接口覆盖")
+            created_at = snapshot.get("created_at") or now
+            task_id = snapshot.get("task_id") or f"framework-planner-{uuid.uuid4().hex[:10]}"
+        else:
+            project_id = self._next_project_id()
+            created_at = now
+            task_id = f"framework-planner-{uuid.uuid4().hex[:10]}"
+
+        framework_plan_package = payload.get("framework_plan_package") if isinstance(payload.get("framework_plan_package"), dict) else {}
+        stage_state = payload.get("stage_state") if isinstance(payload.get("stage_state"), dict) else {}
+        current_stage = str((asset_state or {}).get("current_stage") or "framework_planner").strip() or "framework_planner"
+        confirmed_package = bool((stage_state.get("package") or {}).get("confirmed")) if isinstance(stage_state.get("package"), dict) else False
+        status = str((asset_state or {}).get("status") or "").strip()
+        if status not in {"draft", "in_progress", "completed", "running", "failed", "terminated"}:
+            status = "completed" if framework_plan_package and confirmed_package else "in_progress"
+        if status == "running":
+            status = "in_progress"
+
+        total_episodes = _safe_int(
+            payload.get("total_episodes")
+            or basic_config.get("total_episodes")
+            or basic_config.get("episodes_per_season"),
+            0,
+        )
+        if total_episodes <= 0:
+            total_episodes = max(1, _safe_int(basic_config.get("season_count"), 1)) * max(
+                1,
+                _safe_int(basic_config.get("episodes_per_season"), 60),
+            )
+
+        framework_state = {
+            "project_id": project_id,
+            "project_title": title,
+            "basic_config": copy.deepcopy(basic_config),
+            "source_brief": copy.deepcopy(payload.get("source_brief") if isinstance(payload.get("source_brief"), dict) else {}),
+            "worldview_plan": copy.deepcopy(payload.get("worldview_plan") if isinstance(payload.get("worldview_plan"), dict) else {}),
+            "character_plan": copy.deepcopy(payload.get("character_plan") if isinstance(payload.get("character_plan"), dict) else {}),
+            "beat_checkpoint_timeline": copy.deepcopy(payload.get("beat_checkpoint_timeline") if isinstance(payload.get("beat_checkpoint_timeline"), list) else []),
+            "checkpoint_explanation": copy.deepcopy(payload.get("checkpoint_explanation") if isinstance(payload.get("checkpoint_explanation"), dict) else {}),
+            "character_storylines": copy.deepcopy(payload.get("character_storylines") if isinstance(payload.get("character_storylines"), list) else []),
+            "storyline_decisions": copy.deepcopy(payload.get("storyline_decisions") if isinstance(payload.get("storyline_decisions"), list) else []),
+            "adaptation_guide": copy.deepcopy(payload.get("adaptation_guide") if isinstance(payload.get("adaptation_guide"), dict) else {}),
+            "framework_plan_package": copy.deepcopy(framework_plan_package),
+            "validation_report": copy.deepcopy(payload.get("validation_report") if isinstance(payload.get("validation_report"), dict) else {}),
+            "display_texts": copy.deepcopy(payload.get("display_texts") if isinstance(payload.get("display_texts"), dict) else {}),
+            "prompt_preferences": copy.deepcopy(payload.get("prompt_preferences") if isinstance(payload.get("prompt_preferences"), dict) else {}),
+            "selected_preference_tag_ids": copy.deepcopy(payload.get("selected_preference_tag_ids") if isinstance(payload.get("selected_preference_tag_ids"), list) else []),
+            "selected_preference_tags": copy.deepcopy(payload.get("selected_preference_tags") if isinstance(payload.get("selected_preference_tags"), list) else []),
+            "asset_state": copy.deepcopy(asset_state),
+            "stage_state": copy.deepcopy(stage_state),
+            "current_view": str(payload.get("current_view") or "package" if framework_plan_package else "basic"),
+            "created_at": created_at,
+            "updated_at": now,
+        }
+        framework_state["asset_state"]["asset_kind"] = "framework_planner"
+        framework_state["asset_state"]["asset_id"] = project_id
+        framework_state["asset_state"]["project_id"] = project_id
+        framework_state["asset_state"]["status"] = status
+        framework_state["asset_state"]["updated_at"] = now
+
+        input_payload = copy.deepcopy(framework_state)
+        input_payload.update(
+            {
+                "title": title,
+                "project_title": title,
+                "source_title": str(basic_config.get("source_title") or title),
+                "target_format": str(basic_config.get("target_format") or payload.get("target_format") or "短剧"),
+                "season_count": _safe_int(basic_config.get("season_count") or payload.get("season_count"), 1),
+                "episodes_per_season": _safe_int(basic_config.get("episodes_per_season") or payload.get("episodes_per_season"), total_episodes),
+                "total_episodes": total_episodes,
+                "story_outline": clean_multiline_user_visible_text(
+                    basic_config.get("source_text")
+                    or payload.get("user_expectation")
+                    or payload.get("adaptation_direction")
+                    or ""
+                ).strip(),
+                "asset_kind": "framework_planner",
+                "framework_planner_state": copy.deepcopy(framework_state),
+            }
+        )
+
+        snapshot = {
+            "user_id": int(user_id),
+            "project_id": project_id,
+            "task_id": task_id,
+            "status": status,
+            "title": title,
+            "message": "框架策划资产已保存。",
+            "created_at": created_at,
+            "updated_at": now,
+            "finished_at": now if status == "completed" else None,
+            "workflow_spec_path": "",
+            "visibility": "private",
+            "model_option": None,
+            "asset_kind": "framework_planner",
+            "input_payload": input_payload,
+            "artifacts": {
+                "story_outline": input_payload.get("story_outline") or "",
+                "framework_planner_state": copy.deepcopy(framework_state),
+                "framework_plan_package": copy.deepcopy(framework_plan_package),
+                "validation_report": copy.deepcopy(framework_state["validation_report"]),
+            },
+            "logs": [],
+            "progress_percent": 100 if status == "completed" else 0,
+            "generated_episodes": 0,
+            "total_episodes": total_episodes,
+            "current_stage": current_stage,
+            "current_stage_label": "三幕十五节拍框架策划",
+            "current_node_id": None,
+            "current_node_name": None,
+            "current_batch": None,
+            "completion_confirmed": status == "completed",
+            "awaiting_user_confirmation": False,
+            "cache_retained": False,
+            "debug_state": {"variables": {"framework_planner_state": copy.deepcopy(framework_state)}},
+            "wait_elapsed_ms": 0,
+            "wait_started_at": None,
+        }
+        self._project_path(project_id).write_text(
+            json.dumps(snapshot, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        self._remember_latest_project(int(user_id), project_id)
+        return self._public_snapshot(snapshot)
+
     def update_project_asset(
         self,
         project_id: int,
