@@ -714,13 +714,13 @@ function ensureRuntimeDebugPanel() {
   if (window.scriptMakerConfig?.enableRuntimeDebugPanel !== true) {
     return null;
   }
-  let panel = document.getElementById("runtime-debug-panel");
+  let panel = document.getElementById("runtime-version-panel") || document.getElementById("runtime-debug-panel");
   if (panel) {
     return panel;
   }
 
   panel = document.createElement("section");
-  panel.id = "runtime-debug-panel";
+  panel.id = "runtime-version-panel";
   panel.style.cssText = [
     "position:fixed",
     "right:16px",
@@ -742,20 +742,20 @@ function ensureRuntimeDebugPanel() {
   panel.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
       <strong>运行状态 / 版本历史</strong>
-      <button type="button" data-role="close-debug-panel" style="border:0;border-radius:8px;padding:4px 8px;cursor:pointer;">隐藏</button>
+      <button type="button" data-role="close-version-panel" style="border:0;border-radius:8px;padding:4px 8px;cursor:pointer;">隐藏</button>
     </div>
     <div data-role="summary" style="margin-bottom:8px;color:#cbd5e1;"></div>
     <details open style="margin-bottom:8px;">
-      <summary style="cursor:pointer;color:#f9fafb;">状态快照</summary>
-      <pre data-role="cache" style="white-space:pre-wrap;word-break:break-word;background:#020617;border-radius:8px;padding:8px;margin:8px 0 0;max-height:260px;overflow:auto;"></pre>
+      <summary style="cursor:pointer;color:#f9fafb;">当前版本</summary>
+      <div data-role="version" style="display:flex;flex-direction:column;gap:6px;background:#020617;border-radius:8px;padding:8px;margin:8px 0 0;max-height:260px;overflow:auto;"></div>
     </details>
     <details open>
-      <summary style="cursor:pointer;color:#f9fafb;">运行记录</summary>
-      <div data-role="logs" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
+      <summary style="cursor:pointer;color:#f9fafb;">版本历史</summary>
+      <div data-role="versions" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
     </details>
   `;
 
-  const closeButton = panel.querySelector("[data-role='close-debug-panel']");
+  const closeButton = panel.querySelector("[data-role='close-version-panel']");
   closeButton?.addEventListener("click", () => {
     panel.style.display = "none";
   });
@@ -783,31 +783,19 @@ function renderRuntimeDebug(debug) {
   panel.style.display = "";
 
   const summary = panel.querySelector("[data-role='summary']");
-  const cacheBox = panel.querySelector("[data-role='cache']");
-  const logsBox = panel.querySelector("[data-role='logs']");
+  const versionBox = panel.querySelector("[data-role='version']");
+  const versionsBox = panel.querySelector("[data-role='versions']");
 
   const logs = Array.isArray(debug.logs) ? debug.logs : [];
-  const cacheSnapshot = {
-    task_id: debug.task_id,
-    project_id: debug.project_id,
-    status: debug.status,
-    message: debug.message,
-    error: debug.error,
-    current_stage: debug.current_stage,
-    current_stage_label: debug.current_stage_label,
-    current_node_id: debug.current_node_id,
-    current_node_name: debug.current_node_name,
-    current_batch: debug.current_batch,
-    progress_percent: debug.progress_percent,
-    generated_episodes: debug.generated_episodes,
-    cache_retained: debug.cache_retained,
-    awaiting_user_confirmation: debug.awaiting_user_confirmation,
-    runtime_cache_notice: debug.runtime_cache_notice,
-    resume_checkpoint_exists: debug.resume_checkpoint_exists,
-    resume_checkpoint: debug.resume_checkpoint,
-    debug_state: debug.debug_state,
-    prompt_fixes: debug.prompt_fixes,
-  };
+  const versionRows = [
+    ["项目编号", debug.project_id],
+    ["任务状态", debug.status],
+    ["当前阶段", debug.current_stage_label || debug.current_stage],
+    ["当前批次", debug.current_batch],
+    ["完成进度", debug.progress_percent ? `${debug.progress_percent}%` : ""],
+    ["已生成集数", debug.generated_episodes],
+    ["等待确认", debug.awaiting_user_confirmation ? "是" : "否"],
+  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
 
   if (summary) {
     summary.textContent = [
@@ -819,15 +807,20 @@ function renderRuntimeDebug(debug) {
     ].join(" | ");
   }
 
-  if (cacheBox) {
-    cacheBox.textContent = JSON.stringify(cacheSnapshot, null, 2);
+  if (versionBox) {
+    versionBox.innerHTML = versionRows.map(([label, value]) => `
+      <div style="display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:4px;">
+        <span style="color:#94a3b8;">${escapeHtml(label)}</span>
+        <strong style="color:#e5e7eb;text-align:right;">${escapeHtml(String(value))}</strong>
+      </div>
+    `).join("");
   }
 
-  if (logsBox) {
+  if (versionsBox) {
     if (!logs.length) {
-      logsBox.innerHTML = `<div style="color:#94a3b8;">暂无运行日志。</div>`;
+      versionsBox.innerHTML = `<div style="color:#94a3b8;">暂无版本历史。</div>`;
     } else {
-      logsBox.innerHTML = logs
+      versionsBox.innerHTML = logs
         .slice(-80)
         .map((item) => {
           const level = escapeHtml(String(item.level || "info"));

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import copy
 from functools import wraps
 import os
 from pathlib import Path
@@ -104,6 +105,148 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def _json_error(message: str, status: int = 400, *, fallback: str | None = None):
         public_message = _sanitize_error_message(message, status=status, fallback=fallback)
         return jsonify({"success": False, "message": public_message}), status
+
+    raw_fastgpt_response_keys = {
+        "responseData",
+        "choices",
+        "reasoningText",
+        "historyPreview",
+        "newVariables",
+        "updateVarResult",
+        "raw_stage_responses",
+        "raw_output",
+        "raw",
+        "answerText",
+        "usage",
+        "debug",
+        "logs",
+        "cache",
+    }
+
+    def _strip_raw_fastgpt_fields(value):
+        if isinstance(value, list):
+            return [_strip_raw_fastgpt_fields(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        result = {}
+        for key, item in value.items():
+            if str(key) in raw_fastgpt_response_keys:
+                continue
+            result[key] = _strip_raw_fastgpt_fields(item)
+        return result
+
+    def _framework_state_from_project(project: dict) -> dict:
+        if not isinstance(project, dict):
+            return {}
+        artifacts = project.get("artifacts") if isinstance(project.get("artifacts"), dict) else {}
+        input_payload = project.get("input_payload") if isinstance(project.get("input_payload"), dict) else {}
+        state = (
+            project.get("framework_planner_state")
+            or artifacts.get("framework_planner_state")
+            or input_payload.get("framework_planner_state")
+            or {}
+        )
+        return state if isinstance(state, dict) else {}
+
+    def _framework_stage_outputs(framework_state: dict) -> dict:
+        package = framework_state.get("framework_plan_package") if isinstance(framework_state.get("framework_plan_package"), dict) else {}
+        outputs = {
+            "source_brief": framework_state.get("source_brief") or package.get("source_brief") or {},
+            "worldview_plan": framework_state.get("worldview_plan") or package.get("worldview_plan") or {},
+            "character_plan": framework_state.get("character_plan") or package.get("character_plan") or {},
+            "beat_checkpoint_timeline": framework_state.get("beat_checkpoint_timeline") or package.get("beat_checkpoint_timeline") or [],
+            "checkpoint_explanation": framework_state.get("checkpoint_explanation") or package.get("checkpoint_explanation") or {},
+            "character_storylines": framework_state.get("character_storylines") or package.get("character_storylines") or [],
+            "storyline_decisions": framework_state.get("storyline_decisions") or package.get("storyline_decisions") or [],
+            "adaptation_guide": framework_state.get("adaptation_guide") or package.get("adaptation_guide") or {},
+        }
+        return _strip_raw_fastgpt_fields(outputs)
+
+    def _framework_asset_payload(project: dict, *, include_detail: bool) -> dict:
+        def _safe_positive_int(value, default=0):
+            try:
+                number = int(value)
+                return number if number > 0 else default
+            except Exception:
+                return default
+
+        framework_state = _framework_state_from_project(project)
+        basic = framework_state.get("basic_config") if isinstance(framework_state.get("basic_config"), dict) else {}
+        package = framework_state.get("framework_plan_package") if isinstance(framework_state.get("framework_plan_package"), dict) else {}
+        stage_outputs = _framework_stage_outputs(framework_state)
+        title = str(
+            framework_state.get("project_title")
+            or project.get("title")
+            or basic.get("project_title")
+            or basic.get("source_title")
+            or "未命名框架资产"
+        ).strip()
+        source_title = str(basic.get("source_title") or title).strip()
+        summary_source = (
+            package.get("summary")
+            or package.get("logline")
+            or package.get("core_summary")
+            or basic.get("adaptation_direction")
+            or basic.get("source_text")
+            or project.get("summary")
+            or ""
+        )
+        summary = str(summary_source or "").replace("\r", "\n").strip()
+        if len(summary) > 220:
+            summary = summary[:220].rstrip() + "..."
+        asset = {
+            "asset_id": str(project.get("project_id") or framework_state.get("project_id") or ""),
+            "project_id": project.get("project_id") or framework_state.get("project_id"),
+            "title": title,
+            "source_title": source_title,
+            "target_format": str(basic.get("target_format") or project.get("target_format") or "短剧"),
+            "episodes_per_season": _safe_positive_int(basic.get("episodes_per_season") or project.get("total_episodes"), 0),
+            "minutes_per_episode": _safe_positive_int(basic.get("minutes_per_episode"), 0),
+            "season_count": _safe_positive_int(basic.get("season_count"), 1),
+            "created_at": project.get("created_at") or framework_state.get("created_at"),
+            "updated_at": project.get("updated_at") or framework_state.get("updated_at"),
+            "summary": summary or "已保存的框架资产，可导入后继续 08+ 剧本链路。",
+            "can_import": bool(package),
+        }
+        if include_detail:
+            asset.update(
+                {
+                    "framework_plan_package": _strip_raw_fastgpt_fields(copy.deepcopy(package)),
+                    "stage_outputs": stage_outputs,
+                }
+            )
+        return asset
+
+    def _load_framework_asset_for_user(asset_id: str, user_id: int) -> dict | None:
+        project_id = 0
+        try:
+            project_id = int(str(asset_id or "").strip())
+        except Exception:
+            project_id = 0
+        if project_id <= 0:
+            return None
+        project = task_manager.get_project_snapshot(project_id, user_id=user_id, public_view=True)
+        if not project or str(project.get("asset_kind") or "").strip() != "framework_planner":
+            return None
+        asset = _framework_asset_payload(project, include_detail=True)
+        return asset if asset.get("can_import") else None
+
+    def _inject_framework_asset(data: dict, user_id: int) -> tuple[dict, dict | None]:
+        asset_id = str(data.get("framework_asset_id") or data.get("asset_id") or "").strip()
+        if not asset_id:
+            return data, None
+        asset = _load_framework_asset_for_user(asset_id, user_id)
+        if not asset:
+            raise ValueError("框架资产不存在、无权访问，或尚未生成 07 最终策划包。")
+        merged = dict(data)
+        package = asset.get("framework_plan_package") if isinstance(asset.get("framework_plan_package"), dict) else {}
+        stage_outputs = asset.get("stage_outputs") if isinstance(asset.get("stage_outputs"), dict) else {}
+        merged["framework_asset_id"] = asset.get("asset_id")
+        merged["source_framework_project_id"] = asset.get("project_id")
+        merged["framework_plan_package"] = package
+        for key, value in stage_outputs.items():
+            merged.setdefault(key, value)
+        return merged, asset
 
     def _request_auth_token() -> str:
         auth_header = str(request.headers.get("Authorization") or "").strip()
@@ -793,6 +936,31 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         assets = task_manager.list_user_assets(user_id=_require_user_id())
         return _json_ok(assets=assets)
 
+    @app.get("/api/framework-assets")
+    @_login_required
+    def list_framework_assets_api():
+        user_id = _require_user_id()
+        projects = [
+            task_manager._public_snapshot(snapshot)
+            for snapshot in task_manager._all_project_snapshots()
+            if task_manager._snapshot_belongs_to_user(snapshot, user_id)
+            and str(snapshot.get("asset_kind") or "").strip() == "framework_planner"
+        ]
+        assets = [
+            _framework_asset_payload(project, include_detail=False)
+            for project in projects
+        ]
+        assets.sort(key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+        return _json_ok(assets=_strip_raw_fastgpt_fields(assets))
+
+    @app.get("/api/framework-assets/<asset_id>")
+    @_login_required
+    def get_framework_asset_api(asset_id: str):
+        asset = _load_framework_asset_for_user(asset_id, _require_user_id())
+        if not asset:
+            return _json_error("框架资产不存在，或尚未完成 07 最终策划包。", status=404)
+        return _json_ok(asset=_strip_raw_fastgpt_fields(asset))
+
     @app.post("/api/framework-planner/assets")
     @_login_required
     def create_framework_planner_asset_api():
@@ -825,6 +993,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return _json_error("请求体必须是 JSON object。", status=400)
+        try:
+            data, framework_asset = _inject_framework_asset(data, _require_user_id())
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
 
         framework_plan_package = (
             data.get("framework_plan_package")
@@ -995,9 +1167,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         return _json_ok(
             stage="08",
+            framework_asset_id=(framework_asset or {}).get("asset_id") if framework_asset else data.get("framework_asset_id"),
             sceneDictionary=scene_dictionary,
             scriptWorldRulesDigest=rules_digest,
-            raw_output=raw_output,
         )
 
 
@@ -1011,6 +1183,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return _json_error("请求体必须是 JSON object。", status=400)
+        try:
+            data, framework_asset = _inject_framework_asset(data, _require_user_id())
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
 
         framework_plan_package = (
             data.get("framework_plan_package")
@@ -1194,8 +1370,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         return _json_ok(
             stage="09",
+            framework_asset_id=(framework_asset or {}).get("asset_id") if framework_asset else data.get("framework_asset_id"),
             appearanceMapping=appearanceMapping,
-            raw_output=raw_output,
         )
 
 

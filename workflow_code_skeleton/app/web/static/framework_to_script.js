@@ -1,50 +1,103 @@
 (() => {
   const app = document.getElementById("framework-to-script-app");
-  const params = new URLSearchParams(window.location.search);
-  const sourceFrameworkProjectId = params.get("source_framework_project_id") || params.get("project_id") || "";
-  const authToken = params.get("auth_token") || "";
+  if (!app) return;
 
-  const state = {
-    source: loadSource(),
-    runningStage: "",
-    error: "",
-    sceneDictionary: null,
-    scriptWorldRulesDigest: null,
-    appearanceMapping: null,
-    rawStage08: null,
-    rawStage09: null,
+  const config = window.FRAMEWORK_TO_SCRIPT_CONFIG || {};
+  const params = new URLSearchParams(window.location.search);
+  const authToken = params.get("auth_token") || "";
+  const STORAGE_KEY = "frameworkToScriptWorkspace.v1";
+  const RAW_KEYS = new Set(["responseData", "choices", "reasoningText", "historyPreview", "newVariables", "updateVarResult", "raw_stage_responses", "raw_output", "raw", "answerText", "debug", "logs", "cache"]);
+  const FIELD_LABELS = {
+    framework_plan_package: "最终框架策划包",
+    source_brief: "原文信息",
+    worldview_plan: "世界观方案",
+    character_plan: "人物设定",
+    beat_checkpoint_timeline: "三幕十五节拍",
+    checkpoint_explanation: "节拍说明",
+    character_storylines: "人物故事线",
+    storyline_decisions: "故事线处理",
+    adaptation_guide: "整体改编指引",
+    sceneDictionary: "场景字典",
+    scriptWorldRulesDigest: "世界观规则摘要",
+    appearanceMapping: "角色外观映射",
+    enrichedEpisodePlan: "分集细化方案",
   };
 
-  hydrateFromSource();
+  const state = Object.assign({
+    frameworkAssetId: null,
+    projectId: null,
+    importedFrameworkAsset: null,
+    frameworkPlanPackage: null,
+    stageOutputs: {},
+    settings: {},
+    scriptStages: {},
+    assets: [],
+    assetPanelOpen: false,
+    isLoadingAsset: false,
+    isRunning: false,
+    runningStage: "",
+    error: null,
+  }, loadWorkspace());
 
-  function loadSource() {
+  const urlAssetId = params.get("framework_asset_id") || params.get("asset_id") || "";
+  if (urlAssetId && String(urlAssetId) !== String(state.frameworkAssetId || "")) {
+    state.frameworkAssetId = urlAssetId;
+  }
+
+  function headers() {
+    const value = { "Content-Type": "application/json" };
+    if (authToken) value.Authorization = `Bearer ${authToken}`;
+    return value;
+  }
+
+  function apiUrl(path) {
+    if (!authToken) return path;
+    const url = new URL(path, window.location.origin);
+    url.searchParams.set("auth_token", authToken);
+    return url.pathname + url.search;
+  }
+
+  async function requestJson(path, options) {
+    const response = await fetch(apiUrl(path), Object.assign({ headers: headers() }, options || {}));
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false || data.ok === false) {
+      throw new Error(data.message || data.error || "请求失败，请稍后重试。");
+    }
+    return stripRaw(data);
+  }
+
+  function stripRaw(value) {
+    if (Array.isArray(value)) return value.map(stripRaw);
+    if (!value || typeof value !== "object") return value;
+    const next = {};
+    Object.keys(value).forEach((key) => {
+      if (RAW_KEYS.has(key)) return;
+      next[key] = stripRaw(value[key]);
+    });
+    return next;
+  }
+
+  function loadWorkspace() {
     try {
-      const raw = window.localStorage.getItem("frameworkToScriptSource");
+      const raw = window.localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : {};
-      return parsed && typeof parsed === "object" ? parsed : {};
+      return parsed && typeof parsed === "object" ? stripRaw(parsed) : {};
     } catch (error) {
       return {};
     }
   }
 
-  function refreshSourceFromLocalStorage() {
-    const latest = loadSource();
-    state.source = Object.assign({}, state.source || {}, latest || {});
-    hydrateFromSource();
-  }
-
-  function hydrateFromSource() {
-    const source = state.source || {};
-    state.sceneDictionary = source.sceneDictionary || source.scene_dictionary || state.sceneDictionary || null;
-    state.scriptWorldRulesDigest = source.scriptWorldRulesDigest || source.script_world_rules_digest || state.scriptWorldRulesDigest || null;
-    state.appearanceMapping = source.appearanceMapping || source.appearanceMapping || state.appearanceMapping || null;
-  }
-
-  function saveSourcePatch(patch) {
-    state.source = Object.assign({}, state.source || {}, patch || {});
-    hydrateFromSource();
+  function saveWorkspace() {
     try {
-      window.localStorage.setItem("frameworkToScriptSource", JSON.stringify(state.source));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(stripRaw({
+        frameworkAssetId: state.frameworkAssetId,
+        projectId: state.projectId,
+        importedFrameworkAsset: state.importedFrameworkAsset,
+        frameworkPlanPackage: state.frameworkPlanPackage,
+        stageOutputs: state.stageOutputs,
+        settings: state.settings,
+        scriptStages: state.scriptStages,
+      })));
     } catch (error) {}
   }
 
@@ -57,317 +110,339 @@
       .replaceAll("'", "&#39;");
   }
 
-  function prettyJson(value) {
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch (error) {
-      return String(value ?? "");
-    }
+  function formatDate(value) {
+    if (!value) return "未记录";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString("zh-CN", { hour12: false });
   }
 
-  function apiUrl(path) {
-    if (!authToken) return path;
-    const url = new URL(path, window.location.origin);
-    url.searchParams.set("auth_token", authToken);
-    return url.pathname + url.search + url.hash;
-  }
-
-  function frameworkPackage() {
-    return state.source.framework_plan_package || state.source.frameworkPlanPackage || {};
-  }
-
-  function characterPlan() {
-    return state.source.character_plan || state.source.characterPlan || frameworkPackage().character_plan || frameworkPackage().characterPlan || {};
-  }
-
-  function beatTimeline() {
-    return state.source.beat_checkpoint_timeline
-      || state.source.beatCheckpointTimeline
-      || frameworkPackage().beat_checkpoint_timeline
-      || frameworkPackage().beatCheckpointTimeline
-      || [];
-  }
-
-  function characterStorylines() {
-    return state.source.character_storylines
-      || state.source.characterStorylines
-      || frameworkPackage().character_storylines
-      || frameworkPackage().characterStorylines
-      || [];
-  }
-
-  function worldviewPlan() {
-    return state.source.worldview_plan
-      || state.source.worldviewPlan
-      || frameworkPackage().worldview_plan
-      || frameworkPackage().worldviewPlan
-      || {};
+  function labelFor(key) {
+    return FIELD_LABELS[key] || String(key || "").replaceAll("_", " ");
   }
 
   function hasObject(value) {
     return value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length > 0;
   }
 
-  function hasFrameworkPackage() {
-    return hasObject(frameworkPackage());
+  function currentAssetReady() {
+    return Boolean(state.frameworkAssetId && hasObject(state.frameworkPlanPackage));
   }
 
-  function canRunStage08() {
-    refreshSourceFromLocalStorage();
-    return hasFrameworkPackage() && !state.runningStage;
+  function frameworkStageValue(key) {
+    const packageValue = state.frameworkPlanPackage || {};
+    const outputs = state.stageOutputs || {};
+    return outputs[key] || packageValue[key] || {};
   }
 
-  function canRunStage09() {
-    refreshSourceFromLocalStorage();
-    return hasFrameworkPackage()
-      && hasObject(characterPlan())
-      && hasObject(state.sceneDictionary)
-      && !state.runningStage;
-  }
-
-  async function parseJsonResponse(response, label) {
-    const rawText = await response.text();
-    let data = {};
+  async function loadAssets() {
+    state.isLoadingAsset = true;
+    state.error = null;
+    render();
     try {
-      data = rawText ? JSON.parse(rawText) : {};
+      const data = await requestJson("/api/framework-assets");
+      state.assets = Array.isArray(data.assets) ? data.assets : [];
+      state.assetPanelOpen = true;
     } catch (error) {
-      throw new Error(`${label} 接口返回非 JSON：status=${response.status} body=${rawText.slice(0, 260).replace(/\s+/g, " ")}`);
+      state.error = error.message || "框架资产列表加载失败";
+    } finally {
+      state.isLoadingAsset = false;
+      render();
     }
-    if (!response.ok || data.ok === false || data.success === false) {
-      throw new Error(data.error || data.message || data.fallback || `${label} 失败`);
+  }
+
+  async function importAsset(assetId, options = {}) {
+    const id = String(assetId || "").trim();
+    if (!id) return;
+    if (
+      state.frameworkAssetId &&
+      String(state.frameworkAssetId) !== id &&
+      !options.skipConfirm &&
+      !window.confirm("切换框架资产会替换当前框架输入，但不会删除历史版本。继续切换吗？")
+    ) {
+      return;
     }
-    return data;
+    state.isLoadingAsset = true;
+    state.error = null;
+    render();
+    try {
+      const data = await requestJson(`/api/framework-assets/${encodeURIComponent(id)}`);
+      const asset = data.asset || {};
+      state.frameworkAssetId = asset.asset_id || id;
+      state.projectId = asset.project_id || asset.asset_id || id;
+      state.importedFrameworkAsset = asset;
+      state.frameworkPlanPackage = asset.framework_plan_package || {};
+      state.stageOutputs = asset.stage_outputs || {};
+      state.scriptStages = {};
+      state.assetPanelOpen = false;
+      saveWorkspace();
+    } catch (error) {
+      state.error = error.message || "框架资产导入失败";
+    } finally {
+      state.isLoadingAsset = false;
+      render();
+    }
   }
 
   async function runStage08() {
-    refreshSourceFromLocalStorage();
-
-    if (!hasFrameworkPackage()) {
-      state.error = "缺少 framework_plan_package。请从 07 最终策划包页面重新进入。";
+    if (!currentAssetReady()) {
+      state.error = "请先导入框架资产，或从框架生成页面一键进入。";
       render();
       return;
     }
-
     state.runningStage = "08";
-    state.error = "";
+    state.isRunning = true;
+    state.error = null;
     render();
-
     try {
-      const payload = {
-        source_framework_project_id: sourceFrameworkProjectId || state.source.source_framework_project_id || state.source.project_id || "",
-        framework_plan_package: frameworkPackage(),
-        worldview_plan: worldviewPlan(),
-        beat_checkpoint_timeline: beatTimeline(),
-        character_storylines: characterStorylines(),
-      };
-
-      const response = await fetch(apiUrl("/api/framework-to-script/stage/08"), {
+      const data = await requestJson("/api/framework-to-script/stage/08", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          framework_asset_id: state.frameworkAssetId,
+        }),
       });
-
-      const data = await parseJsonResponse(response, "08 场景字典提炼");
-
-      state.sceneDictionary = data.sceneDictionary;
-      state.scriptWorldRulesDigest = data.scriptWorldRulesDigest;
-      state.rawStage08 = data.raw_output || data;
-
-      saveSourcePatch({
+      state.scriptStages.stage08 = {
         sceneDictionary: data.sceneDictionary,
         scriptWorldRulesDigest: data.scriptWorldRulesDigest,
-        stage08_saved_at: new Date().toISOString(),
-      });
+        updated_at: new Date().toISOString(),
+      };
+      saveWorkspace();
     } catch (error) {
-      state.error = (error && error.message) || "08 场景字典提炼失败";
+      state.error = error.message || "08 场景字典提炼失败";
     } finally {
       state.runningStage = "";
+      state.isRunning = false;
       render();
     }
   }
 
   async function runStage09() {
-    refreshSourceFromLocalStorage();
-
-    if (!hasFrameworkPackage()) {
-      state.error = "缺少 framework_plan_package。请从 07 最终策划包页面重新进入。";
+    if (!currentAssetReady()) {
+      state.error = "请先导入框架资产，或从框架生成页面一键进入。";
       render();
       return;
     }
-    if (!hasObject(state.sceneDictionary)) {
-      state.error = "缺少 sceneDictionary。请先运行 08 场景字典提炼。";
+    const stage08 = state.scriptStages.stage08 || {};
+    if (!hasObject(stage08.sceneDictionary)) {
+      state.error = "请先完成 08 场景字典提炼。";
       render();
       return;
     }
-    if (!hasObject(characterPlan())) {
-      state.error = "缺少 character_plan。请回到 07 框架资产检查人设方案是否已保存。";
-      render();
-      return;
-    }
-
     state.runningStage = "09";
-    state.error = "";
+    state.isRunning = true;
+    state.error = null;
     render();
-
     try {
-      const payload = {
-        source_framework_project_id: sourceFrameworkProjectId || state.source.source_framework_project_id || state.source.project_id || "",
-        framework_plan_package: frameworkPackage(),
-        character_plan: characterPlan(),
-        sceneDictionary: state.sceneDictionary,
-        beat_checkpoint_timeline: beatTimeline(),
-      };
-
-      const response = await fetch(apiUrl("/api/framework-to-script/stage/09"), {
+      const data = await requestJson("/api/framework-to-script/stage/09", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          framework_asset_id: state.frameworkAssetId,
+          sceneDictionary: stage08.sceneDictionary,
+        }),
       });
-
-      const data = await parseJsonResponse(response, "09 人设服装 alias 映射");
-
-      state.appearanceMapping = data.appearanceMapping;
-      state.rawStage09 = data.raw_output || data;
-
-      saveSourcePatch({
+      state.scriptStages.stage09 = {
         appearanceMapping: data.appearanceMapping,
-        stage09_saved_at: new Date().toISOString(),
-      });
+        updated_at: new Date().toISOString(),
+      };
+      saveWorkspace();
     } catch (error) {
-      state.error = (error && error.message) || "09 人设服装 alias 映射失败";
+      state.error = error.message || "09 角色外观映射失败";
     } finally {
       state.runningStage = "";
+      state.isRunning = false;
       render();
     }
   }
 
-  function renderOutputBlock(title, value) {
+  function renderTree(value, keyName = "root", depth = 0) {
+    const clean = stripRaw(value);
+    if (clean === null || clean === undefined || clean === "") {
+      return `<div class="wts-empty-inline">暂无内容</div>`;
+    }
+    if (Array.isArray(clean)) {
+      if (!clean.length) return `<div class="wts-empty-inline">暂无条目</div>`;
+      return `<div class="wts-tree-list">${clean.map((item, index) => `
+        <details class="wts-tree-node" ${depth < 1 ? "open" : ""}>
+          <summary>${escapeHtml(labelFor(keyName))} ${index + 1}</summary>
+          <div>${renderTree(item, keyName, depth + 1)}</div>
+        </details>
+      `).join("")}</div>`;
+    }
+    if (typeof clean === "object") {
+      const entries = Object.entries(clean).filter(([key]) => !RAW_KEYS.has(key));
+      if (!entries.length) return `<div class="wts-empty-inline">暂无内容</div>`;
+      return `<div class="wts-tree-list">${entries.map(([key, item]) => {
+        const complex = item && typeof item === "object";
+        return complex ? `
+          <details class="wts-tree-node" ${depth < 1 ? "open" : ""}>
+            <summary>${escapeHtml(labelFor(key))}</summary>
+            <div>${renderTree(item, key, depth + 1)}</div>
+          </details>
+        ` : `
+          <div class="wts-tree-leaf">
+            <b>${escapeHtml(labelFor(key))}</b>
+            <span>${escapeHtml(item)}</span>
+          </div>
+        `;
+      }).join("")}</div>`;
+    }
+    return `<div class="wts-tree-text">${escapeHtml(clean)}</div>`;
+  }
+
+  function renderAssetPanel() {
+    if (!state.assetPanelOpen) return "";
     return `
-      <details open class="wts-output">
-        <summary>${escapeHtml(title)}</summary>
-        <pre>${escapeHtml(prettyJson(value))}</pre>
-      </details>
+      <section class="wts-card wts-asset-panel" id="frameworkAssetPanel">
+        <div class="wts-card-head">
+          <div>
+            <h2>导入框架资产</h2>
+            <p>选择已完成 07 最终策划包的框架资产，导入后即可执行 08+ 链路。</p>
+          </div>
+          <button type="button" class="wts-btn ghost" data-action="close-asset-panel">收起</button>
+        </div>
+        ${state.isLoadingAsset ? `<div class="wts-loading">正在读取框架资产...</div>` : ""}
+        <div class="wts-asset-list">
+          ${state.assets.length ? state.assets.map(renderAssetItem).join("") : `<div class="wts-empty">暂无可导入框架资产。请先在框架生成页面完成 01-07 并保存。</div>`}
+        </div>
+      </section>
     `;
   }
 
-  function renderStage08Card() {
-    const done = hasObject(state.sceneDictionary) && hasObject(state.scriptWorldRulesDigest);
-    const running = state.runningStage === "08";
-    const disabled = running || !hasFrameworkPackage() || !!state.runningStage;
-
+  function renderAssetItem(asset) {
+    const disabled = asset.can_import ? "" : "disabled";
+    const meta = [
+      asset.target_format || "未填写类型",
+      asset.episodes_per_season ? `${asset.episodes_per_season} 集` : "",
+      asset.minutes_per_episode ? `${asset.minutes_per_episode} 分钟/集` : "",
+      `更新时间：${formatDate(asset.updated_at || asset.created_at)}`,
+    ].filter(Boolean);
     return `
-      <article class="wts-step ${done ? "done" : ""}">
-        <b>08</b>
+      <article class="wts-asset-item">
         <div>
-          <div class="wts-step-head">
-            <h3>场景字典提炼</h3>
-            <span>${running ? "运行中" : done ? "已完成" : "待运行"}</span>
+          <h3>${escapeHtml(asset.title || "未命名框架资产")}</h3>
+          <div class="wts-meta">
+            <span>原文：${escapeHtml(asset.source_title || "未填写")}</span>
+            ${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+            <span>${asset.can_import ? "可导入" : "不可导入"}</span>
           </div>
-          <p>输入：framework_plan_package.worldview_plan + beat_checkpoint_timeline + character_storylines</p>
-          <p>输出：sceneDictionary + scriptWorldRulesDigest</p>
-          <div class="wts-step-actions">
-            <button type="button" ${disabled ? "disabled" : ""} data-action="run-stage-08">
-              ${running ? "08 运行中..." : done ? "重新运行 08" : "运行 08"}
-            </button>
-          </div>
-          ${done ? `
-            ${renderOutputBlock("sceneDictionary", state.sceneDictionary)}
-            ${renderOutputBlock("scriptWorldRulesDigest", state.scriptWorldRulesDigest)}
-          ` : ""}
+          <p>${escapeHtml(asset.summary || "暂无摘要")}</p>
         </div>
+        <button type="button" class="wts-btn" data-action="import-asset" data-asset-id="${escapeHtml(asset.asset_id)}" ${disabled}>导入</button>
       </article>
     `;
   }
 
-  function renderStage09Card() {
-    const done = hasObject(state.appearanceMapping);
-    const running = state.runningStage === "09";
-    const ready = hasObject(state.sceneDictionary) && hasObject(characterPlan());
-    const disabled = running || !ready || !!state.runningStage;
-
+  function renderImportedSummary() {
+    if (!currentAssetReady()) {
+      return `
+        <section class="wts-card wts-empty-state">
+          <h2>请先导入框架资产，或从框架生成页面一键进入。</h2>
+          <p>框架生成与框架转剧本是两个独立工作区；这里会从已保存的框架资产继续 08+。</p>
+        </section>
+      `;
+    }
+    const asset = state.importedFrameworkAsset || {};
     return `
-      <article class="wts-step ${done ? "done" : ""} ${ready ? "" : "locked"}">
-        <b>09</b>
-        <div>
-          <div class="wts-step-head">
-            <h3>人设服装 alias 映射</h3>
-            <span>${running ? "运行中" : done ? "已完成" : ready ? "待运行" : "等待 08"}</span>
+      <section class="wts-card">
+        <div class="wts-card-head">
+          <div>
+            <span class="wts-label">已导入框架资产</span>
+            <h2>${escapeHtml(asset.title || "未命名框架资产")}</h2>
+            <p>${escapeHtml(asset.summary || "已导入，可以执行 08+ 链路。")}</p>
           </div>
-          <p>输入：character_plan + sceneDictionary + beat_checkpoint_timeline</p>
-          <p>输出：appearanceMapping</p>
-          <div class="wts-step-actions">
-            <button type="button" ${disabled ? "disabled" : ""} data-action="run-stage-09">
-              ${running ? "09 运行中..." : done ? "重新运行 09" : "运行 09"}
-            </button>
+          <div class="wts-version">
+            <span>当前框架版本：${escapeHtml(state.frameworkAssetId)}</span>
+            <span>保存时间：${escapeHtml(formatDate(asset.updated_at || asset.created_at))}</span>
+            <button type="button" class="wts-btn ghost" data-action="save-workspace">保存当前版本</button>
           </div>
-          ${!ready ? `<p class="wts-hint">请先完成 08，并确保框架资产里有人设方案 character_plan。</p>` : ""}
-          ${done ? renderOutputBlock("appearanceMapping", state.appearanceMapping) : ""}
         </div>
-      </article>
+        <div class="wts-summary-grid">
+          ${[
+            ["worldview_plan", "世界观"],
+            ["character_plan", "人物"],
+            ["beat_checkpoint_timeline", "节拍"],
+            ["character_storylines", "故事线"],
+            ["adaptation_guide", "改编指引"],
+            ["framework_plan_package", "最终策划包"],
+          ].map(([key, title]) => `
+            <details class="wts-output">
+              <summary>${escapeHtml(title)}</summary>
+              ${renderTree(key === "framework_plan_package" ? state.frameworkPlanPackage : frameworkStageValue(key), key)}
+            </details>
+          `).join("")}
+        </div>
+      </section>
     `;
   }
 
-  function renderPlaceholderStep(id, title, output, status = "待接入") {
+  function renderStageCard(id, title, status, buttonText, action, disabled, body) {
     return `
-      <article class="wts-step locked">
+      <article class="wts-step ${status === "已完成" ? "done" : disabled ? "locked" : ""}">
         <b>${escapeHtml(id)}</b>
         <div>
           <div class="wts-step-head">
             <h3>${escapeHtml(title)}</h3>
             <span>${escapeHtml(status)}</span>
           </div>
-          <p>输出：${escapeHtml(output)}</p>
           <div class="wts-step-actions">
-            <button disabled>查看输入</button>
-            <button disabled>运行本阶段</button>
-            <button disabled>查看输出</button>
+            <button type="button" data-action="${escapeHtml(action)}" ${disabled ? "disabled" : ""}>${escapeHtml(buttonText)}</button>
           </div>
+          ${body || ""}
         </div>
       </article>
     `;
   }
 
+  function renderStages() {
+    const locked = !currentAssetReady() || state.isRunning;
+    const stage08 = state.scriptStages.stage08 || {};
+    const stage09 = state.scriptStages.stage09 || {};
+    const has08 = hasObject(stage08.sceneDictionary);
+    const has09 = hasObject(stage09.appearanceMapping);
+    return `
+      <section class="wts-card" id="scriptStageArea">
+        <div class="wts-card-head">
+          <div>
+            <h2>08+ 剧本链路</h2>
+            <p>未导入框架前，阶段按钮会保持禁用。</p>
+          </div>
+          <button type="button" class="wts-btn ghost" data-action="show-version-history">版本历史</button>
+        </div>
+        <div class="wts-steps">
+          ${renderStageCard("08", "场景字典提炼", state.runningStage === "08" ? "运行中" : has08 ? "已完成" : "待运行", has08 ? "重新运行 08" : "运行 08", "run-stage-08", locked, has08 ? `
+            <details class="wts-output" open><summary>场景字典</summary>${renderTree(stage08.sceneDictionary, "sceneDictionary")}</details>
+            <details class="wts-output"><summary>世界观规则摘要</summary>${renderTree(stage08.scriptWorldRulesDigest, "scriptWorldRulesDigest")}</details>
+          ` : "")}
+          ${renderStageCard("09", "角色外观映射", state.runningStage === "09" ? "运行中" : has09 ? "已完成" : has08 ? "待运行" : "等待 08", has09 ? "重新运行 09" : "运行 09", "run-stage-09", locked || !has08, has09 ? `
+            <details class="wts-output" open><summary>角色外观映射</summary>${renderTree(stage09.appearanceMapping, "appearanceMapping")}</details>
+          ` : "")}
+          ${renderStageCard("10", "分集细化方案", has09 ? "待接入" : "等待 09", "运行本阶段", "noop", true, `<p class="wts-hint">后续阶段将沿用当前导入的框架资产和已完成的 08/09 输出。</p>`)}
+        </div>
+      </section>
+    `;
+  }
+
   function render() {
-    refreshSourceFromLocalStorage();
-
-    const sourceId = sourceFrameworkProjectId || state.source.source_framework_project_id || state.source.project_id || "未指定";
-    const sourceReady = hasFrameworkPackage();
-
+    const plannerUrl = `${config.frameworkPlannerUrl || "/framework-planner"}${authToken ? `?auth_token=${encodeURIComponent(authToken)}` : ""}`;
+    const workspaceUrl = `${config.workspaceUrl || "/workspace"}${authToken ? `?auth_token=${encodeURIComponent(authToken)}` : ""}`;
     app.innerHTML = `
       <main class="wts-shell">
         <header class="wts-header">
           <div>
-            <div class="wts-eyebrow">Framework to Script</div>
-            <h1>框架转剧本工作台</h1>
-            <p>这里不会自动后台生成。你可以从已保存的 07 最终策划包开始，逐步调试 08、09、10、因果冲突和正文对白融合。</p>
+            <div class="wts-eyebrow">Framework Asset to Script</div>
+            <h1>框架转剧本</h1>
+            <p>从框架资产导入 07 最终策划包，然后继续 08+ 剧本链路。</p>
           </div>
           <div class="wts-actions">
-            <a href="/framework-planner${authToken ? `?auth_token=${encodeURIComponent(authToken)}` : ""}">返回框架策划</a>
-            <a href="/workspace${authToken ? `?auth_token=${encodeURIComponent(authToken)}` : ""}">返回主工作台</a>
+            <button type="button" class="wts-btn" data-action="open-asset-panel">导入框架资产</button>
+            <a class="wts-btn ghost" href="${escapeHtml(plannerUrl)}">返回框架生成</a>
+            <a class="wts-btn ghost" href="${escapeHtml(workspaceUrl)}">返回主工作台</a>
           </div>
         </header>
-
-        <section class="wts-card">
-          <span>源框架资产</span>
-          <strong>${escapeHtml(sourceId)}</strong>
-          <p>${sourceReady ? "已读取 07 最终策划包，可以分步运行。" : "未读取到 07 最终策划包。请从框架策划 07 页面重新进入。"}</p>
-          <div class="wts-step-actions">
-            <button type="button" data-action="reload-source">重新读取框架上下文</button>
-          </div>
-        </section>
-
-        ${state.error ? `<section class="wts-error">${escapeHtml(state.error)}</section>` : ""}
-
-        <section class="wts-card">
-          <h2>分步调试流程</h2>
-          <div class="wts-steps">
-            ${renderStage08Card()}
-            ${renderStage09Card()}
-            ${renderPlaceholderStep("10", "丰富分集计划", "allEnrichedEpisodePlan + allEnrichedEpisodePlanText", hasObject(state.appearanceMapping) ? "待接入" : "等待 09")}
-            ${renderPlaceholderStep("11", "因果冲突推进计划", "batchCausalConflictPlan")}
-            ${renderPlaceholderStep("12", "正文对白融合", "batchScriptText")}
-          </div>
-        </section>
+        ${state.error ? `<section class="wts-error" id="frameworkToScriptError">${escapeHtml(state.error)}</section>` : `<section class="wts-error hidden" id="frameworkToScriptError"></section>`}
+        ${renderAssetPanel()}
+        ${renderImportedSummary()}
+        ${renderStages()}
       </main>
     `;
   }
@@ -375,29 +450,31 @@
   app.addEventListener("click", (event) => {
     const target = event.target && event.target.closest ? event.target.closest("[data-action]") : null;
     if (!target) return;
-
-    if (target.dataset.action === "reload-source") {
-      event.preventDefault();
-      refreshSourceFromLocalStorage();
-      state.error = "";
+    const action = target.dataset.action;
+    if (action === "open-asset-panel") {
+      state.assetPanelOpen = true;
+      loadAssets();
+    } else if (action === "close-asset-panel") {
+      state.assetPanelOpen = false;
       render();
-    }
-
-    if (target.dataset.action === "run-stage-08") {
-      event.preventDefault();
+    } else if (action === "import-asset") {
+      importAsset(target.dataset.assetId);
+    } else if (action === "run-stage-08") {
       runStage08();
-    }
-
-    if (target.dataset.action === "run-stage-09") {
-      event.preventDefault();
+    } else if (action === "run-stage-09") {
       runStage09();
+    } else if (action === "save-workspace") {
+      saveWorkspace();
+      state.error = null;
+      render();
+    } else if (action === "show-version-history") {
+      state.assetPanelOpen = true;
+      loadAssets();
     }
-  });
-
-  window.addEventListener("pageshow", () => {
-    refreshSourceFromLocalStorage();
-    render();
   });
 
   render();
+  if (state.frameworkAssetId && !currentAssetReady()) {
+    importAsset(state.frameworkAssetId, { skipConfirm: true });
+  }
 })();

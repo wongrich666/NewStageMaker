@@ -121,6 +121,10 @@ all_hooks -> all_dialogues -> all_script
 
 ### Framework-to-script 08-12 chain
 
+框架生成与框架转剧本是两个独立但可衔接的工作区。01-07 完成并确认 07 后，框架生成页必须保存“框架资产”；用户可以一键进入 `/framework-to-script?framework_asset_id=...`，也可以直接打开框架转剧本页并从已有框架资产导入。08+ 接口支持 `framework_asset_id`，后端会读取资产并注入 `framework_plan_package` 与 01-07 阶段输出，前端不要求用户复制 JSON。
+
+框架资产的前端可见字段至少包括 `asset_id / project_id / title / source_title / framework_plan_package / stage_outputs / target_format / episodes_per_season / minutes_per_episode / season_count / created_at / updated_at / summary`。普通 UI 统一叫“框架资产”“版本历史”“保存当前版本”“恢复到此版本”，不要出现 JSON/raw/cache/logs/debug，也不要透出 `responseData / choices / reasoningText / historyPreview / newVariables / updateVarResult / raw_stage_responses`。
+
 - 08 `framework_scene_dictionary` 产出 `sceneDictionary / scriptWorldRulesDigest`。
 - 09 `framework_appearanceMapping` 产出 `appearanceMapping`，兼容 `appearance_mapping`。
 - 10 `framework_enriched_episode_plan` 产出 `allEnrichedEpisodePlan`。

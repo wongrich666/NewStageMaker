@@ -1047,7 +1047,7 @@
   function renderFrameworkScriptButton(sizeClass) {
     const className = sizeClass ? ` ${sizeClass}` : "";
     const disabled = canStartFrameworkScript() ? "" : "disabled";
-    const label = ui.loading.framework_script ? "正在进入子链路工作台..." : "进入框架转剧本工作台";
+    const label = ui.loading.framework_script ? "正在保存并进入剧本阶段..." : "进入剧本阶段";
     return `<button class="fp-btn${className} primary" data-action="start-framework-script" ${disabled}>${label}</button>`;
   }
 
@@ -1758,7 +1758,7 @@
           <button class="fp-btn small primary" data-action="open-new-script">新建剧本</button>
           ${renderSaveFrameworkButton("small")}
           ${renderFrameworkScriptButton("small")}
-          <button class="fp-btn small" data-action="toggle-assets">${ui.assetsOpen ? "收起资产" : "查看和管理资产"}</button>
+          <button class="fp-btn small" data-action="toggle-assets">${ui.assetsOpen ? "收起版本历史" : "版本历史"}</button>
           <a class="fp-btn small ghost" href="${escapeHtml(config.workspaceUrl || "/workspace")}">返回主工作台</a>
           <button class="fp-btn small danger" data-action="reset-state" ${canClearFrameworkInput() ? "" : "disabled"}>清空输入</button>
         </div>
@@ -1776,13 +1776,13 @@
       <section class="fp-card fp-asset-manager">
         <div class="fp-card-title-row">
           <div>
-            <h2 class="fp-card-title">剧本资产</h2>
-            <p class="fp-card-sub">管理已创建和生成中的剧本。操作后列表会自动刷新。</p>
+            <h2 class="fp-card-title">版本历史</h2>
+            <p class="fp-card-sub">查看已保存的框架资产与剧本资产。恢复操作不会删除其他版本。</p>
           </div>
           <button class="fp-btn small" data-action="refresh-assets" ${ui.assetsLoading ? "disabled" : ""}>${ui.assetsLoading ? "刷新中..." : "刷新"}</button>
         </div>
         <div class="fp-asset-toolbar">
-          <input data-asset-search placeholder="搜索剧本名称或描述" value="${escapeHtml(ui.assetSearch)}" />
+          <input data-asset-search placeholder="搜索标题或摘要" value="${escapeHtml(ui.assetSearch)}" />
           <select data-asset-status-filter>
             ${[
               ["all", "全部状态"],
@@ -2635,8 +2635,12 @@
         </div>
       </div>
       <div class="fp-stage-note">
-        <strong>当前工作台入参摘要</strong>
-        ${renderPayloadSummary(buildWorkingPayload())}
+        <strong>当前框架版本</strong>
+        <div class="fp-asset-meta">
+          <span>资产编号：${escapeHtml((state.asset_state || {}).asset_id || state.project_id || "尚未保存")}</span>
+          <span>保存时间：${escapeHtml(formatDateTime((state.asset_state || {}).updated_at || "" ) || "尚未保存")}</span>
+          <span>状态：${escapeHtml(assetStatusLabel((state.asset_state || {}).status || "draft"))}</span>
+        </div>
       </div>
     `;
   }
@@ -4194,6 +4198,7 @@
       }
 
       const workspaceUrl = new URL("/framework-to-script", window.location.origin);
+      workspaceUrl.searchParams.set("framework_asset_id", String(sourceProjectId));
       workspaceUrl.searchParams.set("source_framework_project_id", String(sourceProjectId));
       workspaceUrl.searchParams.set("project_id", String(sourceProjectId));
       const authToken = new URLSearchParams(window.location.search).get("auth_token") || config.authToken || "";

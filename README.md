@@ -165,6 +165,10 @@ http://127.0.0.1:5000
 
 ### 三幕十五节拍框架转剧本专用链路
 
+框架生成和框架转剧本是两个独立但可衔接的工作区。框架生成页负责完成 01-07；07 最终策划包确认后会保存为可复用的“框架资产”，并可通过“进入剧本阶段”跳转到 `/framework-to-script?framework_asset_id=...`。框架转剧本页也可以独立打开，从已有框架资产中选择导入后继续 08+。
+
+框架资产接口只给前端业务字段：`asset_id`、`project_id`、`title`、`source_title`、`framework_plan_package`、`stage_outputs`、`target_format`、`episodes_per_season`、`minutes_per_episode`、`season_count`、`created_at`、`updated_at`、`summary`。UI 统一使用“框架资产”“版本历史”“保存当前版本”“恢复到此版本”等命名，不展示 JSON/raw/cache/logs/debug，也不展示 FastGPT 原始壳字段。
+
 框架策划工作台先完成 01-07 的策划资产，然后由用户在 07 后点击“用当前框架生成剧本”，进入主工作台的下游自动任务：
 
 ```text
