@@ -384,7 +384,7 @@
     {
       "nodeId": "var10EnrichedEpisodePlan",
       "name": "保存丰富分集计划",
-      "intro": "将 10 阶段完整 JSON 输出写入 allEnrichedEpisodePlan，供 API 返回和后端解析。",
+      "intro": "将下游资产化阶段完整 JSON 输出写入 enrichedEpisodePlanResult；后端再解析 allEnrichedEpisodePlan 与 allEnrichedEpisodePlanText。",
       "avatar": "core/workflow/template/variableUpdate",
       "flowNodeType": "variableUpdate",
       "showStatus": false,

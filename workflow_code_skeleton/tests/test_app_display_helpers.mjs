@@ -7,7 +7,7 @@ import { URL, fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appJsPath = path.join(__dirname, "..", "app", "web", "static", "app.js");
-const source = fs.readFileSync(appJsPath, "utf8");
+const source = fs.readFileSync(appJsPath, "utf8").replace(/\r\n/g, "\n");
 
 function extractBetween(startToken, endToken) {
   const start = source.indexOf(startToken);
@@ -30,6 +30,8 @@ const bootstrap = [
   extractBetween("function scriptFormatModeLabel(value) {", "\n\n  function syncScriptFormatModeUi(snapshot = null) {"),
   extractBetween("function normalizeStageKey(stageKey) {", "\n\n  function formatDisplayValue(value) {"),
   extractBetween("function formatDisplayValue(value) {", "\n\n  // 把框架阶段的多个正式产物拼成一个完整回复，方便在聊天流里整体展示。"),
+  extractBetween("function finalOutputFrom(snapshot) {", "\n\n  // 只展示用户真正关心的正式阶段内容，避免把中间过程直接摊开。"),
+  extractBetween("function stageDisplayPayload(snapshot) {", "\n\n  function runtimeLoadingSuffix(snapshot, nowMs = Date.now()) {"),
   extractBetween("function compactMessageText(value) {", "\n\n  async function copyTextToClipboard(text) {"),
   extractBetween("function runtimeLoadingSuffix(snapshot, nowMs = Date.now()) {", "\n\n  function defaultRuntimeMessage(snapshot) {"),
   extractBetween("function defaultRuntimeMessage(snapshot) {", "\n\n  // 当前状态下只保留必要提示，避免和“当前阶段”重复。"),
@@ -47,7 +49,7 @@ const bootstrap = [
   extractBetween("function renderAssistantStageBubble(message) {", "\n\n  function renderThinkingBubble(thinkingState) {"),
   extractBetween("function renderThinkingBubble(thinkingState) {", "\n\n  function transcriptSignature(snapshot) {"),
   extractBetween("function flashCopyButton(button, label) {", "\n\n  function projectTooltip(item) {"),
-  "module.exports = { buildWorkspaceUrl, normalizeScriptFormatMode, scriptFormatModeLabel, formatDisplayValue, normalizeStageKey, compactMessageText, partialScriptOutput, statusNoteFrom, frameworkStageOutput, worldviewStageOutput, visibleStageMessages, thinkingStateFrom, thinkingMessageCopyText, renderCopyButton, renderUserPromptBubble, renderAssistantStageBubble, renderThinkingBubble, flashCopyButton };",
+  "module.exports = { buildWorkspaceUrl, normalizeScriptFormatMode, scriptFormatModeLabel, formatDisplayValue, normalizeStageKey, compactMessageText, partialScriptOutput, statusNoteFrom, frameworkStageOutput, worldviewStageOutput, visibleStageMessages, thinkingStateFrom, thinkingMessageCopyText, renderCopyButton, renderUserPromptBubble, renderAssistantStageBubble, renderThinkingBubble, flashCopyButton, isFrameworkToScriptSnapshot, frameworkStageLabel, displayProgressPercent };",
 ].join("\n\n");
 
 const context = {
@@ -88,6 +90,10 @@ const {
   buildWorkspaceUrl,
   normalizeScriptFormatMode,
   scriptFormatModeLabel,
+  normalizeStageKey,
+  isFrameworkToScriptSnapshot,
+  frameworkStageLabel,
+  displayProgressPercent,
 } = context.module.exports;
 
 test("build workspace url keeps waibao script format mode for fresh workspace", () => {
@@ -273,6 +279,53 @@ test("running snapshots still expose a live stage-status bubble after earlier ou
 
   assert.equal(thinking?.stateLabel, "创作中");
   assert.match(thinking?.content || "", /正在审核剧本正文：第 6-10 集/);
+});
+
+test("framework-to-script snapshots expose explicit internal stage labels", () => {
+  const snapshot = {
+    status: "running",
+    current_stage: "framework_scene_dictionary",
+    current_stage_label: "",
+    input_payload: {
+      framework_to_script: true,
+      source_framework_project_id: 321,
+    },
+    display_stage_key: "framework_scene_dictionary",
+    display_stage_title: "框架转剧本：场景字典提炼",
+    display_stage_output: {
+      sceneDictionary: {
+        scene_count: 2,
+        core_scenes: [{ name: "旧仓库" }],
+      },
+    },
+  };
+
+  assert.equal(isFrameworkToScriptSnapshot(snapshot), true);
+  assert.equal(normalizeStageKey(snapshot.current_stage), "framework_to_script");
+  assert.equal(frameworkStageLabel(snapshot.current_stage), "框架转剧本：场景字典提炼");
+  assert.equal(displayProgressPercent(snapshot), 8);
+
+  const thinking = thinkingStateFrom(snapshot);
+  assert.equal(thinking?.stageLabel, "框架转剧本：场景字典提炼");
+  assert.match(thinking?.note || "", /来源：三幕十五节拍框架策划包/);
+
+  const messages = visibleStageMessages(snapshot);
+  assert.equal(messages.at(-1)?.title, "框架转剧本：场景字典提炼");
+  assert.match(messages.at(-1)?.output || "", /sceneDictionary/);
+});
+
+test("framework-to-script prompt bubble shows framework source", () => {
+  const html = renderUserPromptBubble({
+    input_payload: {
+      framework_to_script: true,
+      source_framework_project_id: 321,
+      user_expectation: "基于最终策划包生成剧本。",
+      total_episodes: 60,
+    },
+  });
+
+  assert.match(html, /来源：三幕十五节拍框架策划包/);
+  assert.match(html, /框架资产：321/);
 });
 
 test("thinking bubble copy text includes the visible runtime message and note", () => {

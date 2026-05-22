@@ -165,19 +165,54 @@ http://127.0.0.1:5000
 
 ### 三幕十五节拍框架转剧本专用链路
 
-当输入的 `script_format_mode` 为 `framework_to_script` 或 `better_framework_script`，并提供第 07 阶段的 `framework_plan_package` 时，后端会进入独立的新链路：
+框架策划工作台先完成 01-07 的策划资产，然后由用户在 07 后点击“用当前框架生成剧本”，进入主工作台的下游自动任务：
 
 ```text
-07 framework_plan_package
--> 08 sceneDictionary
--> 09 appearanceMapping
--> 10 enrichedEpisodePlan
--> framework_causal_conflict_write/review/rewrite/memory
--> framework_script_write/review/rewrite/memory
--> final
+01 原文信息提取 / 基础配置
+02 世界观方案
+03 人设方案
+04 三幕十五节拍卡点规划
+05 人物故事线
+06 整体改编指引
+07 最终策划包输出
+点击“用当前框架生成剧本”
+08 场景字典提炼
+09 人设服装 alias 映射
+10 丰富分集计划
+因果冲突推进计划
+正文对白融合
+最终输出剧本正文
 ```
 
-这条链路专用于“三幕十五节拍框架转剧本”，不会复用旧的 `all_hooks / all_dialogues / all_script` 批处理，也不会调用 `dialogue_write / dialogue_review / dialogue_rewrite / dialogue_memory`。普通新建剧本仍走原有主链路。
+其中 08、09、10 是框架转剧本内部阶段，也可以称为下游资产化阶段；它们不是框架策划工作台里需要用户手动点击的阶段。用户只需要确认 07 最终策划包，保存当前框架资产，然后点击“用当前框架生成剧本”。
+
+这条链路专用于“三幕十五节拍框架输出后的剧本生成”。它不会复用旧的 `all_hooks / all_dialogues / all_script` 三段式批处理，也不会调用 `dialogue_write / dialogue_review / dialogue_rewrite / dialogue_memory`。正文和对白已经在 `framework_script_write/review/rewrite/memory` 中融合生成，角色对话工作流不再用于 `framework_to_script` 链路。普通新建剧本仍走原有主链路。
+
+框架转剧本任务识别条件是输入中出现以下任一标记：
+
+- `workflow_mode = "framework_to_script"`
+- `generation_chain = "framework_to_script"`
+- `framework_to_script = true`
+- `framework_planner_source = true`
+
+手动验收流程：
+
+1. 启动服务：`python main.py`
+2. 进入框架策划工作台。
+3. 创建一个 5 集短项目。
+4. 依次完成 01-07。
+5. 确认 07 最终策划包输出。
+6. 点击“保存当前框架”。
+7. 点击“用当前框架生成剧本”。
+8. 跳转到主工作台。
+9. 检查运行阶段依次出现：
+   - 框架转剧本：场景字典提炼
+   - 框架转剧本：人设服装 alias 映射
+   - 框架转剧本：丰富分集计划
+   - 框架转剧本：因果冲突推进计划
+   - 框架转剧本：正文对白融合
+10. 最终生成 `final_script_text`。
+11. 导出 `txt/docx`。
 
 ## 辅助工具
 

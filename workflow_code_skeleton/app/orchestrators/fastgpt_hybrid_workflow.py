@@ -963,11 +963,30 @@ def _framework_to_script_json_object(value: Any) -> dict[str, Any]:
 def _framework_to_script_json_list(value: Any) -> list[Any]:
     if isinstance(value, list):
         return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, str):
+            try:
+                reparsed = json.loads(parsed.strip())
+            except Exception:
+                reparsed = None
+            if isinstance(reparsed, list):
+                return reparsed
     obj = _framework_to_script_json_object(value)
     if isinstance(obj.get(ALL_ENRICHED_EPISODE_PLAN), list):
         return list(obj.get(ALL_ENRICHED_EPISODE_PLAN) or [])
     if isinstance(obj.get("allEnrichedEpisodePlan"), list):
         return list(obj.get("allEnrichedEpisodePlan") or [])
+    nested = _framework_to_script_json_object(obj.get("enrichedEpisodePlanResult"))
+    if isinstance(nested.get(ALL_ENRICHED_EPISODE_PLAN), list):
+        return list(nested.get(ALL_ENRICHED_EPISODE_PLAN) or [])
+    if isinstance(nested.get("allEnrichedEpisodePlan"), list):
+        return list(nested.get("allEnrichedEpisodePlan") or [])
     return []
 
 
@@ -989,8 +1008,19 @@ def _normalize_framework_to_script_asset_variables(variables: dict[str, Any]) ->
         obj = _framework_to_script_json_object(raw)
         if not obj:
             continue
-        scene_value = obj.get(SCENE_DICTIONARY) or obj.get("sceneDictionary")
-        rules_value = obj.get(SCRIPT_WORLD_RULES_DIGEST) or obj.get("scriptWorldRulesDigest")
+        nested_result = _framework_to_script_json_object(obj.get("sceneDictionaryResult"))
+        scene_value = (
+            obj.get(SCENE_DICTIONARY)
+            or obj.get("sceneDictionary")
+            or nested_result.get(SCENE_DICTIONARY)
+            or nested_result.get("sceneDictionary")
+        )
+        rules_value = (
+            obj.get(SCRIPT_WORLD_RULES_DIGEST)
+            or obj.get("scriptWorldRulesDigest")
+            or nested_result.get(SCRIPT_WORLD_RULES_DIGEST)
+            or nested_result.get("scriptWorldRulesDigest")
+        )
         if _has_value(scene_value):
             variables[SCENE_DICTIONARY] = scene_value
             variables["sceneDictionary"] = scene_value
@@ -1017,7 +1047,13 @@ def _normalize_framework_to_script_asset_variables(variables: dict[str, Any]) ->
         obj = _framework_to_script_json_object(raw)
         if not obj:
             continue
-        appearance_value = obj.get(APPEARANCE_MAPPING) or obj.get("appearanceMapping")
+        nested_result = _framework_to_script_json_object(obj.get("appearanceMappingResult"))
+        appearance_value = (
+            obj.get(APPEARANCE_MAPPING)
+            or obj.get("appearanceMapping")
+            or nested_result.get(APPEARANCE_MAPPING)
+            or nested_result.get("appearanceMapping")
+        )
         if _has_value(appearance_value):
             variables[APPEARANCE_MAPPING] = appearance_value
             variables["appearanceMapping"] = appearance_value
@@ -1037,8 +1073,14 @@ def _normalize_framework_to_script_asset_variables(variables: dict[str, Any]) ->
         obj = _framework_to_script_json_object(raw)
         if not obj:
             continue
-        plan_value = obj.get(ALL_ENRICHED_EPISODE_PLAN) or obj.get("allEnrichedEpisodePlan")
-        text_value = obj.get("allEnrichedEpisodePlanText")
+        nested_result = _framework_to_script_json_object(obj.get("enrichedEpisodePlanResult"))
+        plan_value = (
+            obj.get(ALL_ENRICHED_EPISODE_PLAN)
+            or obj.get("allEnrichedEpisodePlan")
+            or nested_result.get(ALL_ENRICHED_EPISODE_PLAN)
+            or nested_result.get("allEnrichedEpisodePlan")
+        )
+        text_value = obj.get("allEnrichedEpisodePlanText") or nested_result.get("allEnrichedEpisodePlanText")
         if isinstance(plan_value, list) and plan_value:
             variables[ALL_ENRICHED_EPISODE_PLAN] = plan_value
             variables["allEnrichedEpisodePlan"] = plan_value
@@ -1049,6 +1091,315 @@ def _normalize_framework_to_script_asset_variables(variables: dict[str, Any]) ->
     if plan_items:
         variables[ALL_ENRICHED_EPISODE_PLAN] = plan_items
         variables["allEnrichedEpisodePlan"] = plan_items
+
+
+FRAMEWORK_SCENE_DICTIONARY_ERROR = "08 场景字典阶段输出缺少 sceneDictionary 或 scriptWorldRulesDigest，无法进入 09。"
+FRAMEWORK_APPEARANCE_MAPPING_ERROR = "09 人设服装 alias 映射输出缺少 appearanceMapping.characters，无法进入 10。"
+FRAMEWORK_ENRICHED_PLAN_ERROR = "10 丰富分集计划输出缺少可切片的 allEnrichedEpisodePlan，无法进入因果冲突。"
+FRAMEWORK_BATCH_ENRICHED_PLAN_ERROR = "当前批次没有找到对应 episode 的 enriched plan，请检查 10 阶段输出集数。"
+
+
+def _framework_nested_object(value: Any, *names: str) -> dict[str, Any]:
+    payload = _framework_to_script_json_object(value)
+    for name in names:
+        nested = _framework_to_script_json_object(payload.get(name))
+        if nested:
+            return nested
+    return payload
+
+
+def _framework_required_missing(payload: dict[str, Any], fields: tuple[str, ...]) -> list[str]:
+    return [field for field in fields if not _has_value(payload.get(field))]
+
+
+def _log_framework_validation_failure(
+    state: WorkflowState | None,
+    *,
+    title: str,
+    message: str,
+    stage_name: str = "",
+    batch_label: str | None = None,
+) -> None:
+    logger.error("%s：%s", title, message)
+    runtime = getattr(state, "runtime", None)
+    manager = getattr(runtime, "manager", None)
+    record = getattr(runtime, "record", None)
+    append_log = getattr(manager, "_append_log", None)
+    if callable(append_log) and record is not None:
+        append_log(
+            record,
+            title=title,
+            message=message,
+            node_id=f"framework_to_script:{stage_name or title}",
+        )
+    if state is not None:
+        output_key = str(batch_label or "validation_failure")
+        state.set_output(stage_name or "framework_to_script", output_key, {
+            "title": title,
+            "message": message,
+        })
+
+
+def _raise_framework_validation_error(
+    state: WorkflowState,
+    *,
+    title: str,
+    message: str,
+    stage_name: str,
+    details: list[str] | None = None,
+    batch_label: str | None = None,
+) -> None:
+    log_message = message
+    if details:
+        log_message = f"{message} 详情：{'；'.join(details[:20])}"
+    _log_framework_validation_failure(
+        state,
+        title=title,
+        message=log_message,
+        stage_name=stage_name,
+        batch_label=batch_label,
+    )
+    raise ValueError(message)
+
+
+def _validate_framework_scene_dictionary_assets(variables: dict[str, Any]) -> list[str]:
+    _normalize_framework_to_script_asset_variables(variables)
+    scene_dictionary = _framework_nested_object(variables.get(SCENE_DICTIONARY), SCENE_DICTIONARY, "sceneDictionary")
+    rules_digest = _framework_nested_object(
+        variables.get(SCRIPT_WORLD_RULES_DIGEST),
+        SCRIPT_WORLD_RULES_DIGEST,
+        "scriptWorldRulesDigest",
+    )
+    issues: list[str] = []
+    if not scene_dictionary or not rules_digest:
+        return [FRAMEWORK_SCENE_DICTIONARY_ERROR]
+
+    missing_scene = _framework_required_missing(scene_dictionary, ("scene_count", "core_scenes"))
+    if missing_scene:
+        issues.append(f"sceneDictionary 缺少字段：{', '.join(missing_scene)}")
+    core_scenes = scene_dictionary.get("core_scenes")
+    if not isinstance(core_scenes, list) or len(core_scenes) not in {2, 3}:
+        issues.append("sceneDictionary.core_scenes 必须是长度 2-3 的数组")
+
+    digest_fields = (
+        "world_type",
+        "core_rules",
+        "action_limits",
+        "danger_sources",
+        "do_not_break_rules",
+    )
+    missing_digest = _framework_required_missing(rules_digest, digest_fields)
+    if missing_digest:
+        issues.append(f"scriptWorldRulesDigest 缺少字段：{', '.join(missing_digest)}")
+    return issues
+
+
+def _validate_framework_appearance_mapping_assets(variables: dict[str, Any]) -> list[str]:
+    _normalize_framework_to_script_asset_variables(variables)
+    mapping = _framework_nested_object(variables.get(APPEARANCE_MAPPING), APPEARANCE_MAPPING, "appearanceMapping")
+    if not mapping:
+        return [FRAMEWORK_APPEARANCE_MAPPING_ERROR]
+
+    issues: list[str] = []
+    if not _has_value(mapping.get("mapping_version")):
+        issues.append("appearanceMapping 缺少 mapping_version")
+    characters = mapping.get("characters")
+    if not isinstance(characters, list) or not characters:
+        return [FRAMEWORK_APPEARANCE_MAPPING_ERROR]
+
+    required_character_fields = (
+        "name",
+        "default_name",
+        "role_type",
+        "identity",
+        "core_desire",
+        "deep_motivation",
+        "appearance_anchor",
+        "outfit_versions",
+        "alias_rules",
+    )
+    for index, character in enumerate(characters, start=1):
+        if not isinstance(character, dict):
+            issues.append(f"appearanceMapping.characters[{index}] 必须是对象")
+            continue
+        missing = _framework_required_missing(character, required_character_fields)
+        if missing:
+            issues.append(f"appearanceMapping.characters[{index}] 缺少字段：{', '.join(missing)}")
+    return issues
+
+
+def _validate_framework_enriched_episode_plan_assets(
+    variables: dict[str, Any],
+    *,
+    total_episodes: int | None = None,
+) -> list[str]:
+    _normalize_framework_to_script_asset_variables(variables)
+    plan_items = _framework_to_script_json_list(variables.get(ALL_ENRICHED_EPISODE_PLAN))
+    text = str(variables.get("allEnrichedEpisodePlanText") or "").strip()
+    if not plan_items or not text:
+        return [FRAMEWORK_ENRICHED_PLAN_ERROR]
+
+    issues: list[str] = []
+    required_fields = (
+        "episode",
+        "title",
+        "characters",
+        "scene_refs",
+        "scenes",
+        "specific_plot",
+        "pressure_sources",
+        "ending_hook",
+        "text_view",
+    )
+    episodes: list[int] = []
+    seen: set[int] = set()
+    for index, item in enumerate(plan_items, start=1):
+        if not isinstance(item, dict):
+            issues.append(f"allEnrichedEpisodePlan[{index}] 必须是对象")
+            continue
+        episode = _safe_int(item.get("episode"), 0)
+        if episode <= 0:
+            issues.append(f"allEnrichedEpisodePlan[{index}].episode 必须是正整数")
+        elif episode in seen:
+            issues.append(f"allEnrichedEpisodePlan episode 重复：{episode}")
+        else:
+            seen.add(episode)
+            episodes.append(episode)
+        missing = _framework_required_missing(item, required_fields)
+        if missing:
+            issues.append(f"allEnrichedEpisodePlan[{index}] 缺少字段：{', '.join(missing)}")
+
+    if episodes:
+        sorted_episodes = sorted(episodes)
+        expected = list(range(1, sorted_episodes[-1] + 1))
+        if sorted_episodes[0] != 1 or sorted_episodes != expected:
+            issues.append("allEnrichedEpisodePlan episode 必须从 1 开始且连续不重复")
+        if total_episodes and sorted_episodes[-1] > int(total_episodes):
+            issues.append(f"allEnrichedEpisodePlan episode 超出 total_episodes={total_episodes}")
+    return issues
+
+
+def _validate_framework_batch_enriched_plan(value: Any, *, batch: BatchWindow) -> list[str]:
+    items = _framework_to_script_json_list(value)
+    if not items:
+        return [FRAMEWORK_BATCH_ENRICHED_PLAN_ERROR]
+    episodes = [
+        _safe_int(item.get("episode"), 0)
+        for item in items
+        if isinstance(item, dict)
+    ]
+    expected = set(range(batch.start_episode, batch.end_episode + 1))
+    actual = {episode for episode in episodes if episode > 0}
+    if not actual or not actual.issubset(expected):
+        return [FRAMEWORK_BATCH_ENRICHED_PLAN_ERROR]
+    missing = sorted(expected - actual)
+    if missing:
+        return [f"{FRAMEWORK_BATCH_ENRICHED_PLAN_ERROR} 缺少集数：{missing}"]
+    return []
+
+
+def _validate_framework_causal_conflict_plan(value: Any, *, batch: BatchWindow) -> list[str]:
+    payload = _framework_nested_object(value, BATCH_CAUSAL_CONFLICT_PLAN, "batchCausalConflictPlan")
+    if not payload:
+        return [f"batchCausalConflictPlan 第 {batch.label} 集输出必须是非空 JSON object"]
+    issues: list[str] = []
+    missing_root = _framework_required_missing(
+        payload,
+        ("batch_meta", "global_conflict_engine", "episodes"),
+    )
+    if missing_root:
+        issues.append(f"batchCausalConflictPlan 缺少字段：{', '.join(missing_root)}")
+
+    episodes = payload.get("episodes")
+    if not isinstance(episodes, list) or not episodes:
+        issues.append("batchCausalConflictPlan.episodes 必须是非空数组")
+        return issues
+    expected_count = batch.end_episode - batch.start_episode + 1
+    if len(episodes) != expected_count and len(episodes) > 5:
+        issues.append("batchCausalConflictPlan.episodes 数量必须等于当前 batch 集数，或者至少不超过 5")
+
+    required_episode_fields = (
+        "episode",
+        "episode_title",
+        "active_characters",
+        "scene_refs",
+        "carry_in",
+        "why_now",
+        "character_motivation",
+        "emotional_precondition",
+        "scene_cause_chain",
+        "non_conflict_moment",
+        "natural_transition",
+        "opening_image",
+        "opening_action",
+        "current_goal",
+        "core_obstacle",
+        "episode_state_change",
+        "ending_hook",
+        "dialogue_strategy",
+    )
+    expected_episodes = set(range(batch.start_episode, batch.end_episode + 1))
+    actual_episodes: set[int] = set()
+    for index, episode_payload in enumerate(episodes, start=1):
+        if not isinstance(episode_payload, dict):
+            issues.append(f"batchCausalConflictPlan.episodes[{index}] 必须是对象")
+            continue
+        episode_no = _safe_int(episode_payload.get("episode"), 0)
+        if episode_no > 0:
+            actual_episodes.add(episode_no)
+        missing = _framework_required_missing(episode_payload, required_episode_fields)
+        if missing:
+            issues.append(f"batchCausalConflictPlan.episodes[{index}] 缺少字段：{', '.join(missing)}")
+    missing_episodes = sorted(expected_episodes - actual_episodes)
+    if missing_episodes:
+        issues.append(f"batchCausalConflictPlan 缺少集数：{missing_episodes}")
+    return issues
+
+
+def _validate_framework_script_batch_text(value: Any, *, batch: BatchWindow) -> list[str]:
+    if not isinstance(value, str) or not value.strip():
+        return [f"batchScriptText 第 {batch.label} 集必须是非空字符串"]
+    return _validate_script_batch_output(value, batch=batch)
+
+
+def _extract_framework_memory_text(
+    output: dict[str, Any],
+    *,
+    field_name: str,
+    state: WorkflowState | None = None,
+    stage_name: str = "",
+    batch_label: str | None = None,
+) -> str:
+    direct = str(output.get(field_name) or "").strip()
+    if direct:
+        return direct
+    for raw in (output.get("answerText"), output.get("text"), output.get("content")):
+        obj = _framework_to_script_json_object(raw)
+        text = str(obj.get(field_name) or "").strip()
+        if text:
+            return text
+    message = f"{field_name} 未能从结构化字段或 answerText 抽取，已写入空字符串继续。"
+    logger.warning(message)
+    if state is not None:
+        _log_framework_validation_failure(
+            state,
+            title=f"{field_name} 记忆兜底为空",
+            message=message,
+            stage_name=stage_name,
+            batch_label=batch_label,
+        )
+    return ""
+
+
+def _drop_framework_full_plan_context(context: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(context)
+    for key in (
+        ALL_ENRICHED_EPISODE_PLAN,
+        "allEnrichedEpisodePlan",
+        "allEnrichedEpisodePlanText",
+    ):
+        sanitized.pop(key, None)
+    return sanitized
 
 
 def _run_framework_to_script_workflow(
@@ -1090,6 +1441,15 @@ def _run_framework_to_script_workflow(
         variables.update(output)
         _normalize_framework_to_script_asset_variables(variables)
         _sync_state_variables(state, variables)
+    scene_issues = _validate_framework_scene_dictionary_assets(variables)
+    if scene_issues:
+        _raise_framework_validation_error(
+            state,
+            title="08 场景字典校验失败",
+            message=FRAMEWORK_SCENE_DICTIONARY_ERROR,
+            stage_name=STAGE_FRAMEWORK_SCENE_DICTIONARY,
+            details=scene_issues,
+        )
 
     if _has_value(variables.get(APPEARANCE_MAPPING)):
         set_runtime_stage(
@@ -1112,6 +1472,15 @@ def _run_framework_to_script_workflow(
         variables.update(output)
         _normalize_framework_to_script_asset_variables(variables)
         _sync_state_variables(state, variables)
+    appearance_issues = _validate_framework_appearance_mapping_assets(variables)
+    if appearance_issues:
+        _raise_framework_validation_error(
+            state,
+            title="09 人设服装映射校验失败",
+            message=FRAMEWORK_APPEARANCE_MAPPING_ERROR,
+            stage_name=STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+            details=appearance_issues,
+        )
 
     if _has_value(variables.get(ALL_ENRICHED_EPISODE_PLAN)):
         set_runtime_stage(
@@ -1136,6 +1505,19 @@ def _run_framework_to_script_workflow(
         _sync_state_variables(state, variables)
 
     total_episodes = int(variables[TOTAL_EPISODES])
+    enriched_issues = _validate_framework_enriched_episode_plan_assets(
+        variables,
+        total_episodes=total_episodes,
+    )
+    if enriched_issues:
+        _raise_framework_validation_error(
+            state,
+            title="10 丰富分集计划校验失败",
+            message=FRAMEWORK_ENRICHED_PLAN_ERROR,
+            stage_name=STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+            details=enriched_issues,
+        )
+
     batch_size = max(1, int(settings.batch_size or 5))
     batches = list(iter_episode_batches(total_episodes, batch_size=batch_size))
     all_script = str(variables.get(ALL_SCRIPT) or "").strip()
@@ -1145,14 +1527,21 @@ def _run_framework_to_script_workflow(
     for index, batch in enumerate(batches, start=1):
         batch_label = batch.label
         batch_enriched = _framework_enriched_plan_for_batch(variables, batch)
-        if not _has_value(batch_enriched):
-            raise ValueError(
-                f"框架转剧本增强分集计划缺少第 {batch.label} 集切片，"
-                "已停止继续生成，避免把空计划送入正文链路。"
+        batch_enriched_issues = _validate_framework_batch_enriched_plan(batch_enriched, batch=batch)
+        if batch_enriched_issues:
+            _raise_framework_validation_error(
+                state,
+                title="10 丰富分集计划校验失败",
+                message=FRAMEWORK_BATCH_ENRICHED_PLAN_ERROR,
+                stage_name=STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+                details=batch_enriched_issues,
+                batch_label=batch_label,
             )
         variables[BATCH_ENRICHED_EPISODE_PLAN] = batch_enriched
 
-        conflict_context = _stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE, variables)
+        conflict_context = _drop_framework_full_plan_context(
+            _stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE, variables)
+        )
         conflict_context.update(
             {
                 CONFLICT_START_EPISODE: batch.start_episode,
@@ -1180,14 +1569,18 @@ def _run_framework_to_script_workflow(
             rewrite_stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
             writing_context=conflict_context,
             review_context_builder=lambda current: {
-                **_stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW, variables),
+                **_drop_framework_full_plan_context(
+                    _stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW, variables)
+                ),
                 CONFLICT_START_EPISODE: batch.start_episode,
                 BATCH_CAUSAL_CONFLICT_PLAN: current,
                 BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
                 APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
             },
             rewrite_context_builder=lambda current, review: {
-                **_stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE, variables),
+                **_drop_framework_full_plan_context(
+                    _stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE, variables)
+                ),
                 CONFLICT_START_EPISODE: batch.start_episode,
                 BATCH_CAUSAL_CONFLICT_PLAN: current,
                 BATCH_CAUSAL_CONFLICT_REVIEW: json.dumps(review, ensure_ascii=False),
@@ -1197,11 +1590,11 @@ def _run_framework_to_script_workflow(
             },
             progress_percent=min(78, 44 + index * 18 // max(1, len(batches))),
             generated_episodes=max(0, batch.start_episode - 1),
-            approved_output_validator=lambda candidate: _validate_framework_batch_object(
+            approved_output_validator=lambda candidate: _validate_framework_causal_conflict_plan(
                 candidate,
                 batch=batch,
-                label="batchCausalConflictPlan",
             ),
+            validation_failure_title="因果冲突计划校验失败",
         )
         variables[BATCH_CAUSAL_CONFLICT_PLAN] = conflict_plan
         variables[BATCH_CAUSAL_CONFLICT_REVIEW] = json.dumps(conflict_review, ensure_ascii=False)
@@ -1221,7 +1614,13 @@ def _run_framework_to_script_workflow(
             progress_percent=min(82, 48 + index * 18 // max(1, len(batches))),
             generated_episodes=max(0, batch.start_episode - 1),
         )
-        conflict_memory = str(memory_output.get(CONFLICT_MEMORY) or "").strip()
+        conflict_memory = _extract_framework_memory_text(
+            memory_output,
+            field_name=CONFLICT_MEMORY,
+            state=state,
+            stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
+            batch_label=batch_label,
+        )
         variables[CONFLICT_MEMORY] = conflict_memory
 
         script_context = _stage_input_context(STAGE_FRAMEWORK_SCRIPT_WRITE, variables)
@@ -1272,10 +1671,11 @@ def _run_framework_to_script_workflow(
             },
             progress_percent=min(96, 62 + index * 24 // max(1, len(batches))),
             generated_episodes=max(0, batch.start_episode - 1),
-            approved_output_validator=lambda candidate: _validate_script_batch_output(
+            approved_output_validator=lambda candidate: _validate_framework_script_batch_text(
                 candidate,
                 batch=batch,
             ),
+            validation_failure_title="正文对白融合校验失败",
         )
         variables[BATCH_SCRIPT_TEXT] = batch_script
         variables[BATCH_SCRIPT_REVIEW] = json.dumps(script_review, ensure_ascii=False)
@@ -1300,7 +1700,13 @@ def _run_framework_to_script_workflow(
             progress_percent=min(98, 66 + index * 24 // max(1, len(batches))),
             generated_episodes=batch.end_episode,
         )
-        script_memory = str(script_memory_output.get(SCRIPT_MEMORY) or "").strip()
+        script_memory = _extract_framework_memory_text(
+            script_memory_output,
+            field_name=SCRIPT_MEMORY,
+            state=state,
+            stage_name=STAGE_FRAMEWORK_SCRIPT_MEMORY,
+            batch_label=batch_label,
+        )
         variables[SCRIPT_MEMORY] = script_memory
         _sync_state_variables(state, variables)
 
@@ -1388,11 +1794,7 @@ def _framework_enriched_plan_for_batch(
     if _has_value(cached):
         return cached
 
-    fallback = variables.get(BATCH_ENRICHED_EPISODE_PLAN)
-    fallback_items = _framework_to_script_json_list(fallback)
-    if fallback_items:
-        return json.dumps(fallback_items, ensure_ascii=False)
-    return fallback
+    return ""
 
 
 def _validate_framework_batch_object(
@@ -1991,6 +2393,7 @@ def _run_batch_write_review_revise_loop(
     generated_episodes: int = 0,
     approved_output_validator=None,
     before_rewrite=None,
+    validation_failure_title: str | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     review_loop_limit = _stage_review_revise_loop_limit()
     variables[max_retry_var] = review_loop_limit
@@ -2105,6 +2508,17 @@ def _run_batch_write_review_revise_loop(
                     "last_local_validation",
                     copy.deepcopy(review_payload),
                 )
+                if validation_failure_title:
+                    _log_framework_validation_failure(
+                        state,
+                        title=validation_failure_title,
+                        message=(
+                            f"{stage_label} 第 {batch.label} 集代码侧校验未通过："
+                            + "；".join(local_issues[:10])
+                        ),
+                        stage_name=review_stage_name,
+                        batch_label=batch.label,
+                    )
                 review_result = normalize_pass_review(review_payload)
                 logger.warning(
                     "%s %s 集代码侧批次校验未通过，将按需要修订处理：%s",
@@ -2119,6 +2533,18 @@ def _run_batch_write_review_revise_loop(
 
         issues = list(review_result.blocking_issues or [])
         if review_round >= review_loop_limit:
+            if validation_failure_title:
+                _log_framework_validation_failure(
+                    state,
+                    title=validation_failure_title,
+                    message=(
+                        f"{stage_label} {batch.label} 集审核未通过，"
+                        f"已达到最多 {review_loop_limit} 轮："
+                        + "；".join(issues[:10] or ["缺少 blocking_issues"])
+                    ),
+                    stage_name=review_stage_name,
+                    batch_label=batch.label,
+                )
             raise ValueError(
                 f"{stage_label} {batch.label} 集审核未通过，已达到最多 {review_loop_limit} 轮："
                 + "；".join(issues[:10] or ["缺少 blocking_issues"])

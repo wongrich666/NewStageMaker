@@ -1785,7 +1785,7 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         ),
         output_types={
             SCENE_DICTIONARY: "object",
-            SCRIPT_WORLD_RULES_DIGEST: "string",
+            SCRIPT_WORLD_RULES_DIGEST: "object",
         },
         output_aliases={
             SCENE_DICTIONARY: (SCENE_DICTIONARY_VAR,),
@@ -1808,8 +1808,8 @@ STAGE_CONTRACTS: dict[str, FastGPTStageContract] = {
         label="框架转剧本增强分集计划",
         input_names=(FRAMEWORK_PLAN_PACKAGE, SCENE_DICTIONARY, APPEARANCE_MAPPING),
         output_types={
-            ALL_ENRICHED_EPISODE_PLAN: "object",
-            BATCH_ENRICHED_EPISODE_PLAN: "object",
+            ALL_ENRICHED_EPISODE_PLAN: "array",
+            "allEnrichedEpisodePlanText": "string",
         },
         output_aliases={
             ALL_ENRICHED_EPISODE_PLAN: (ALL_ENRICHED_EPISODE_PLAN_VAR,),

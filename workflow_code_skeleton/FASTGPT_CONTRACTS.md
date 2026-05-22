@@ -51,9 +51,9 @@
 | `appearance_alias_review` | `服装版本映射审核.json` | `passed`, `rewrite_required`, `blocking_issues` |
 | `appearance_alias_rewrite` | `服装版本映射修订.json` | `appearance_mapping` |
 | `appearance_alias_unstructured` | `自然语言服装版本映射.json` | `c7VnQ4eX` |
-| `framework_scene_dictionary` | `08_框架转剧本场景字典.json` | `sceneDictionary`, `scriptWorldRulesDigest` |
-| `framework_appearance_mapping` | `09_框架转剧本外观映射.json` | `appearanceMapping` |
-| `framework_enriched_episode_plan` | `10_框架转剧本增强分集计划.json` | `allEnrichedEpisodePlan`, `batchEnrichedEpisodePlan` |
+| `framework_scene_dictionary` | `08_场景字典提炼.json` | `sceneDictionary`, `scriptWorldRulesDigest` |
+| `framework_appearance_mapping` | `09_人设服装alias映射.json` | `appearanceMapping` |
+| `framework_enriched_episode_plan` | `10_丰富分集计划.json` | `enrichedEpisodePlanResult`; 后端解析 `allEnrichedEpisodePlan`, `allEnrichedEpisodePlanText` |
 | `framework_causal_conflict_write` | `框架转剧本因果冲突推进计划编写.json` | `batchCausalConflictPlan` |
 | `framework_causal_conflict_review` | `框架转剧本因果冲突推进计划审核.json` | `passed`, `rewrite_required`, `blocking_issues` |
 | `framework_causal_conflict_rewrite` | `框架转剧本因果冲突推进计划修订.json` | `batchCausalConflictPlan` |
@@ -95,6 +95,25 @@
 `07 framework_plan_package -> 08 sceneDictionary -> 09 appearanceMapping -> 10 enrichedEpisodePlan -> 因果冲突推进计划 -> 正文对白融合生成 -> final`
 
 这条链路只服务“三幕十五节拍框架输出后的框架到剧本生成”，不会进入旧的 `all_hooks -> all_dialogues -> all_script` 三段式，也不会调用 `dialogue_write / dialogue_review / dialogue_rewrite / dialogue_memory`。旧普通新建剧本链路仍保留 `all_hooks / all_dialogues / all_script`。
+
+08、09、10 是框架转剧本内部阶段 / 下游资产化阶段，不是框架策划工作台的手动阶段。用户在 07 最终策划包确认后点击“用当前框架生成剧本”，后端自动执行 08、09、10、因果冲突推进计划和正文对白融合。正文和对白已经在新链路中融合生成，角色对话工作流不再用于 `framework_to_script`。
+
+#### framework_to_script 变量契约
+
+| 环节 | 输入变量 | 输出变量 |
+| --- | --- | --- |
+| 08 场景字典提炼 | `frameworkPlanPackage`, `worldviewPlan`, `beatCheckpointTimeline`, `characterStorylines` | `sceneDictionary`, `scriptWorldRulesDigest` |
+| 09 人设服装 alias 映射 | `frameworkPlanPackage`, `characterPlan`, `sceneDictionary`, `beatCheckpointTimeline` | `appearanceMapping` |
+| 10 丰富分集计划 | `frameworkPlanPackage`, `beatCheckpointTimeline`, `characterStorylines`, `sceneDictionary`, `appearanceMapping` | `enrichedEpisodePlanResult` |
+| 10 后端解析 | `enrichedEpisodePlanResult` | `allEnrichedEpisodePlan`, `allEnrichedEpisodePlanText` |
+| 因果冲突推进计划 | `totalEpisodes`, `conflictStartEpisode`, `batchEnrichedEpisodePlan`, `sceneDictionary`, `scriptWorldRulesDigest`, `appearanceMapping`, `conflictMemory` | `batchCausalConflictPlan`, `batchCausalConflictReview`, `conflictMemory` |
+| 正文对白融合 | `totalEpisodes`, `scriptStartEpisode`, `episodeWordCount`, `batchCausalConflictPlan`, `batchEnrichedEpisodePlan`, `scriptWorldRulesDigest`, `appearanceMapping`, `scriptMemory` | `batchScriptText`, `batchScriptReview`, `scriptMemory` |
+
+注意：
+
+- `batchEnrichedEpisodePlan` 由后端从 `allEnrichedEpisodePlan` 按当前批次切片得到，因果冲突阶段只消费当前批次，不消费完整 `frameworkPlanPackage`。
+- `framework_to_script` 不允许回退到旧 `all_hooks / all_dialogues / all_script`，也不允许缺少新链路专用 key 时回退到全局 `FASTGPT_API_KEY`。
+- 10 阶段工作流可以把完整 JSON 包在 `enrichedEpisodePlanResult` 或 `answerText` 中；后端会解析顶层 `allEnrichedEpisodePlan` 与 `allEnrichedEpisodePlanText`。
 
 ## 3. 当前关键变量语义
 

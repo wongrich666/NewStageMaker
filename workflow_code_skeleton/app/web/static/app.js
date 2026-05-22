@@ -962,6 +962,13 @@ startRuntimeDebugPolling();
         natural: ""
       };
     }
+    if (isFrameworkToScriptSnapshot(snapshot) && normalizeStageKey(snapshot.current_stage) === "final") {
+      return {
+        title: "基于框架生成的剧本正文",
+        output: snapshot.display_stage_output || finalOutputFrom(snapshot) || "",
+        natural: snapshot.display_stage_output_natural || ""
+      };
+    }
     return {
       title: snapshot.display_stage_title || "当前阶段输出",
       output: snapshot.display_stage_output || "",
@@ -1000,19 +1007,19 @@ startRuntimeDebugPolling();
       appearance_alias_review: "正在审核服装版本映射",
       appearance_alias_rewrite: "正在修订服装版本映射",
       appearance_alias_unstructured: "正在整理服装版本映射自然语言说明",
-      framework_scene_dictionary: "正在生成框架转剧本场景字典",
-      framework_appearance_mapping: "正在生成框架转剧本外观映射",
-      framework_enriched_episode_plan: "正在生成框架转剧本增强分集计划",
+      framework_scene_dictionary: "正在生成框架转剧本：场景字典提炼",
+      framework_appearance_mapping: "正在生成框架转剧本：人设服装 alias 映射",
+      framework_enriched_episode_plan: "正在生成框架转剧本：丰富分集计划",
       framework_causal_conflict: "正在生成框架转剧本因果冲突推进计划",
-      framework_causal_conflict_write: "正在编写框架转剧本因果冲突推进计划",
-      framework_causal_conflict_review: "正在审核框架转剧本因果冲突推进计划",
-      framework_causal_conflict_rewrite: "正在修订框架转剧本因果冲突推进计划",
-      framework_causal_conflict_memory: "正在写入框架转剧本因果冲突记忆",
+      framework_causal_conflict_write: "正在编写框架转剧本：因果冲突推进计划",
+      framework_causal_conflict_review: "正在审核框架转剧本：因果冲突推进计划",
+      framework_causal_conflict_rewrite: "正在修订框架转剧本：因果冲突推进计划",
+      framework_causal_conflict_memory: "正在写入框架转剧本：因果冲突记忆",
       framework_script: "正在生成框架转剧本正文对白融合稿",
-      framework_script_write: "正在编写框架转剧本正文对白融合稿",
-      framework_script_review: "正在审核框架转剧本正文对白融合稿",
-      framework_script_rewrite: "正在修订框架转剧本正文对白融合稿",
-      framework_script_memory: "正在写入框架转剧本正文记忆",
+      framework_script_write: "正在编写框架转剧本：正文对白融合",
+      framework_script_review: "正在审核框架转剧本：正文对白融合",
+      framework_script_rewrite: "正在修订框架转剧本：正文对白融合",
+      framework_script_memory: "正在写入框架转剧本：正文记忆",
       hooks: "正在生成开头冲突钩子",
       hooks_writing: "正在生成开头冲突钩子",
       hook: "正在生成开头冲突钩子",
@@ -1080,6 +1087,67 @@ startRuntimeDebugPolling();
     return "创作中";
   }
 
+  function isFrameworkToScriptSnapshot(snapshot) {
+    const inputPayload = snapshot?.input_payload || {};
+    return Boolean(
+      inputPayload.framework_to_script === true
+      || String(inputPayload.generation_chain || "").trim() === "framework_to_script"
+      || String(inputPayload.workflow_mode || "").trim() === "framework_to_script"
+      || inputPayload.framework_planner_source === true
+    );
+  }
+
+  function frameworkStageLabel(stageKey) {
+    const mapping = {
+      framework_scene_dictionary: "框架转剧本：场景字典提炼",
+      framework_appearance_mapping: "框架转剧本：人设服装 alias 映射",
+      framework_enriched_episode_plan: "框架转剧本：丰富分集计划",
+      framework_causal_conflict: "框架转剧本：因果冲突推进计划",
+      framework_causal_conflict_write: "框架转剧本：因果冲突推进计划编写",
+      framework_causal_conflict_review: "框架转剧本：因果冲突推进计划审核",
+      framework_causal_conflict_rewrite: "框架转剧本：因果冲突推进计划修订",
+      framework_causal_conflict_memory: "框架转剧本：因果冲突记忆",
+      framework_script: "框架转剧本：正文对白融合",
+      framework_script_write: "框架转剧本：正文对白融合编写",
+      framework_script_review: "框架转剧本：正文对白融合审核",
+      framework_script_rewrite: "框架转剧本：正文对白融合修订",
+      framework_script_memory: "框架转剧本：正文记忆",
+      final: "基于框架生成的剧本正文",
+      finalize: "基于框架生成的剧本正文",
+      finished: "基于框架生成的剧本正文",
+    };
+    return mapping[String(stageKey || "").trim().toLowerCase()] || "";
+  }
+
+  function displayStageLabel(snapshot) {
+    const backendLabel = String(snapshot?.current_stage_label || "").trim();
+    if (backendLabel) return backendLabel;
+    if (isFrameworkToScriptSnapshot(snapshot)) {
+      return frameworkStageLabel(snapshot.current_stage) || "正在处理";
+    }
+    return snapshot?.display_stage_title || "正在处理";
+  }
+
+  function fallbackProgressPercent(snapshot) {
+    const stageKey = String(snapshot?.current_stage || "").trim().toLowerCase();
+    if (!isFrameworkToScriptSnapshot(snapshot)) return 0;
+    if (stageKey === "framework_scene_dictionary") return 8;
+    if (stageKey === "framework_appearance_mapping") return 14;
+    if (stageKey === "framework_enriched_episode_plan") return 22;
+    if (stageKey.startsWith("framework_causal_conflict")) return 45;
+    if (stageKey.startsWith("framework_script")) return 78;
+    if (["final", "finalize", "finished"].includes(stageKey) || snapshot?.status === "completed") return 100;
+    return 0;
+  }
+
+  function displayProgressPercent(snapshot) {
+    const backendProgress = Number(snapshot?.progress_percent || 0);
+    if (backendProgress > 0 || snapshot?.status === "completed") {
+      return Math.max(0, Math.min(100, backendProgress || 100));
+    }
+    return fallbackProgressPercent(snapshot);
+  }
+
   // 把后端阶段名统一折叠成前端可识别的正式阶段键。
   function normalizeStageKey(stageKey) {
     const mapping = {
@@ -1101,19 +1169,19 @@ startRuntimeDebugPolling();
       appearance_alias_review: "internal",
       appearance_alias_rewrite: "internal",
       appearance_alias_unstructured: "internal",
-      framework_scene_dictionary: "internal",
-      framework_appearance_mapping: "internal",
-      framework_enriched_episode_plan: "internal",
-      framework_causal_conflict: "internal",
-      framework_causal_conflict_write: "internal",
-      framework_causal_conflict_review: "internal",
-      framework_causal_conflict_rewrite: "internal",
-      framework_causal_conflict_memory: "internal",
-      framework_script: "internal",
-      framework_script_write: "internal",
-      framework_script_review: "internal",
-      framework_script_rewrite: "internal",
-      framework_script_memory: "internal",
+      framework_scene_dictionary: "framework_to_script",
+      framework_appearance_mapping: "framework_to_script",
+      framework_enriched_episode_plan: "framework_to_script",
+      framework_causal_conflict: "framework_to_script",
+      framework_causal_conflict_write: "framework_to_script",
+      framework_causal_conflict_review: "framework_to_script",
+      framework_causal_conflict_rewrite: "framework_to_script",
+      framework_causal_conflict_memory: "framework_to_script",
+      framework_script: "framework_to_script",
+      framework_script_write: "framework_to_script",
+      framework_script_review: "framework_to_script",
+      framework_script_rewrite: "framework_to_script",
+      framework_script_memory: "framework_to_script",
       hook: "internal",
       hooks: "internal",
       hooks_writing: "internal",
@@ -1235,7 +1303,7 @@ startRuntimeDebugPolling();
     const artifacts = snapshot?.artifacts || {};
     const currentDisplayKey = normalizeStageKey(snapshot.display_stage_key);
     const currentNatural = String(snapshot.display_stage_output_natural || "").trim();
-    const messages = [
+    const messages = isFrameworkToScriptSnapshot(snapshot) ? [] : [
       {
         key: "framework",
         title: "剧本框架",
@@ -1253,9 +1321,25 @@ startRuntimeDebugPolling();
       }
     ].filter((item) => isMeaningfulStageOutput(item.output));
 
+    if (isFrameworkToScriptSnapshot(snapshot)) {
+      const displayPayload = stageDisplayPayload(snapshot);
+      const displayOutput = formatDisplayValue(displayPayload.output);
+      const displayKey = String(snapshot.display_stage_key || snapshot.current_stage || "framework_to_script").trim();
+      const normalizedDisplayKey = normalizeStageKey(displayKey);
+      const isFinal = normalizeStageKey(snapshot.current_stage) === "final" || snapshot.status === "completed";
+      if (isMeaningfulStageOutput(displayOutput)) {
+        messages.push({
+          key: isFinal ? "framework_to_script_final" : (normalizedDisplayKey || "framework_to_script"),
+          title: isFinal ? "基于框架生成的剧本正文" : (displayPayload.title || displayStageLabel(snapshot)),
+          output: displayOutput,
+          natural: displayPayload.natural || "",
+        });
+      }
+    }
+
     return messages.map((item) => ({
       ...item,
-      natural: currentDisplayKey === item.key ? currentNatural : ""
+      natural: item.natural || (currentDisplayKey === item.key ? currentNatural : "")
     }));
   }
 
@@ -1264,13 +1348,13 @@ startRuntimeDebugPolling();
     if (!snapshot) return null;
     const normalizedCurrentStage = normalizeStageKey(snapshot.current_stage);
     const isRunning = RUNNING_STATUSES.has(snapshot.status) || snapshot.status === "pausing";
-    if (!isRunning && normalizedCurrentStage !== "internal") return null;
+    if (!isRunning && !["internal", "framework_to_script"].includes(normalizedCurrentStage)) return null;
     const runtimeMessage = String(statusNoteFrom(snapshot) || "").trim();
     return {
-      stageLabel: snapshot.current_stage_label || snapshot.display_stage_title || "正在处理",
+      stageLabel: displayStageLabel(snapshot),
       stateLabel: creationStatusLabel(snapshot),
       content: runtimeMessage,
-      note: "",
+      note: isFrameworkToScriptSnapshot(snapshot) ? "来源：三幕十五节拍框架策划包" : "",
     };
   }
 
@@ -1279,7 +1363,9 @@ startRuntimeDebugPolling();
     return {
       expectation: String(inputPayload.user_expectation || "").trim(),
       characterCount: Number(inputPayload.character_count || 0),
-      totalEpisodes: Number(inputPayload.total_episodes || 0)
+      totalEpisodes: Number(inputPayload.total_episodes || 0),
+      frameworkToScript: isFrameworkToScriptSnapshot(snapshot),
+      sourceFrameworkProjectId: String(inputPayload.source_framework_project_id || "").trim()
     };
   }
 
@@ -1323,6 +1409,8 @@ startRuntimeDebugPolling();
     const toggleKey = promptToggleKey(snapshot);
     const collapsed = lineCount > MAX_EXPECTATION_LINES && !state.expandedUserPrompts[toggleKey];
     const chips = [
+      prompt.frameworkToScript ? "来源：三幕十五节拍框架策划包" : "",
+      prompt.sourceFrameworkProjectId ? `框架资产：${prompt.sourceFrameworkProjectId}` : "",
       prompt.characterCount > 0 ? `角色数量 ${prompt.characterCount}` : "",
       prompt.totalEpisodes > 0 ? `总集数 ${prompt.totalEpisodes}` : ""
     ].filter(Boolean);
@@ -1612,7 +1700,7 @@ startRuntimeDebugPolling();
       });
     }
 
-    const progress = Number(snapshot.progress_percent || 0);
+    const progress = displayProgressPercent(snapshot);
     const displayPayload = stageDisplayPayload(snapshot);
     const finalOutput = displayPayload.output || (RUNNING_STATUSES.has(snapshot.status) ? "" : "暂无内容");
     const projectTitle = runtimeProjectDisplayTitle(snapshot);
@@ -1621,7 +1709,7 @@ startRuntimeDebugPolling();
     els.statusText.textContent = statusLabel(snapshot.status);
     els.messageText.textContent = statusMessage;
     els.messageText.classList.toggle("hidden", !statusMessage);
-    els.stageText.textContent = snapshot.current_stage_label || snapshot.display_stage_title || "正在处理";
+    els.stageText.textContent = displayStageLabel(snapshot);
     els.progressFill.style.width = `${progress}%`;
     els.progressText.textContent = `${progress}%`;
     els.projectText.textContent = `当前剧本：${projectTitle}`;

@@ -179,6 +179,35 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
         self.assertNotIn("worldview", public["artifacts"])
         self.assertEqual(public["artifacts"]["worldview_natural_language"], "世界观自然语言版")
 
+    def test_framework_to_script_public_snapshot_exposes_current_internal_output(self) -> None:
+        snapshot = _snapshot(current_stage="framework_scene_dictionary")
+        snapshot["input_payload"] = {
+            "title": "测试项目",
+            "total_episodes": 10,
+            "framework_to_script": True,
+            "generation_chain": "framework_to_script",
+            "framework_planner_source": True,
+            "source_framework_project_id": 321,
+        }
+        snapshot["current_stage_label"] = "框架转剧本：场景字典提炼"
+        snapshot["debug_state"]["variables"].update(
+            {
+                "sceneDictionary": {
+                    "scene_count": 2,
+                    "core_scenes": [{"name": "旧仓库"}, {"name": "审讯室"}],
+                },
+                "scriptWorldRulesDigest": {"world_type": "近未来都市"},
+            }
+        )
+
+        public = self.manager._public_snapshot(snapshot)
+
+        self.assertEqual(public["current_stage_label"], "框架转剧本：场景字典提炼")
+        self.assertEqual(public["display_stage_key"], "framework_scene_dictionary")
+        self.assertEqual(public["display_stage_title"], "框架转剧本：场景字典提炼")
+        self.assertIn("2", public["display_stage_output"])
+        self.assertIn("旧仓库", public["display_stage_output"])
+
     def test_private_snapshot_keeps_structured_framework_and_worldview_for_debug(self) -> None:
         snapshot = _snapshot(current_stage="worldview")
         self._persist_snapshot(snapshot)

@@ -359,6 +359,9 @@ class StageCacheMixin:
     ) -> dict[str, str]:
         """只挑用户需要看的正式阶段内容，并补一段自然语言版摘要减轻等待焦虑。"""
         raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        framework_payload = self._framework_to_script_display_payload(snapshot, raw_artifacts)
+        if framework_payload:
+            return framework_payload
         partial_script_output = clean_user_visible_text(
             artifacts.get(PARTIAL_SCRIPT_ARTIFACT)
             or raw_artifacts.get(PARTIAL_SCRIPT_ARTIFACT)
@@ -444,6 +447,102 @@ class StageCacheMixin:
         return {
             "stage_key": chosen_stage,
             "stage_title": stage_title_map[chosen_stage],
+            "output": raw_output,
+            "natural_output": natural_output,
+        }
+
+    def _is_framework_to_script_snapshot(self, snapshot: dict[str, Any]) -> bool:
+        input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+        return (
+            bool(input_payload.get("framework_to_script"))
+            or str(input_payload.get("generation_chain") or "").strip() == "framework_to_script"
+            or str(input_payload.get("workflow_mode") or "").strip() == "framework_to_script"
+            or bool(input_payload.get("framework_planner_source"))
+        )
+
+    def _framework_to_script_display_payload(
+        self,
+        snapshot: dict[str, Any],
+        raw_artifacts: dict[str, Any],
+    ) -> dict[str, str] | None:
+        if not self._is_framework_to_script_snapshot(snapshot):
+            return None
+        debug_state = snapshot.get("debug_state") if isinstance(snapshot.get("debug_state"), dict) else {}
+        variables = debug_state.get("variables") if isinstance(debug_state.get("variables"), dict) else {}
+        current_stage = str(snapshot.get("current_stage") or "").strip().lower()
+        final_text = pick_best_user_visible_value(
+            raw_artifacts.get("final_output_text")
+            or raw_artifacts.get("final_script")
+            or snapshot.get("final_output_text")
+            or variables.get("finalScript")
+            or variables.get("final_script")
+            or variables.get("all_script")
+            or variables.get(ALL_SCRIPT)
+        )
+        stage_specs = [
+            (
+                ("final", "finalize", "finished"),
+                "final",
+                "基于框架生成的剧本正文",
+                final_text,
+            ),
+            (
+                ("framework_script", "framework_script_write", "framework_script_review", "framework_script_rewrite", "framework_script_memory"),
+                "framework_script",
+                STAGE_LABELS.get(current_stage) or "框架转剧本：正文对白融合编写",
+                variables.get("batchScriptText") or variables.get("batch_script_text") or variables.get(BATCH_SCRIPT) or variables.get(ALL_SCRIPT) or final_text,
+            ),
+            (
+                ("framework_causal_conflict", "framework_causal_conflict_write", "framework_causal_conflict_review", "framework_causal_conflict_rewrite", "framework_causal_conflict_memory"),
+                "framework_causal_conflict",
+                STAGE_LABELS.get(current_stage) or "框架转剧本：因果冲突推进计划编写",
+                variables.get("batchCausalConflictPlan") or variables.get("batch_causal_conflict_plan"),
+            ),
+            (
+                ("framework_enriched_episode_plan",),
+                "framework_enriched_episode_plan",
+                "框架转剧本：丰富分集计划",
+                variables.get("allEnrichedEpisodePlanText") or variables.get("all_enriched_episode_plan_text") or variables.get("allEnrichedEpisodePlan"),
+            ),
+            (
+                ("framework_appearance_mapping",),
+                "framework_appearance_mapping",
+                "框架转剧本：人设服装 alias 映射",
+                variables.get("appearanceMapping") or variables.get("appearance_mapping"),
+            ),
+            (
+                ("framework_scene_dictionary",),
+                "framework_scene_dictionary",
+                "框架转剧本：场景字典提炼",
+                variables.get("sceneDictionary") or variables.get("scene_dictionary") or variables.get("scriptWorldRulesDigest"),
+            ),
+        ]
+        chosen_key = "framework_to_script"
+        chosen_title = STAGE_LABELS.get(current_stage) or "框架转剧本"
+        chosen_output: Any = ""
+        for stage_names, key, title, output in stage_specs:
+            if current_stage in stage_names:
+                chosen_key = key
+                chosen_title = title
+                chosen_output = output
+                break
+        if not chosen_output:
+            for _stage_names, key, title, output in stage_specs:
+                if output not in (None, "", {}, []):
+                    chosen_key = key
+                    chosen_title = title
+                    chosen_output = output
+                    break
+        raw_output = pick_best_user_visible_value(chosen_output)
+        natural_output = self._stage_preview_text(
+            snapshot,
+            stage_key=chosen_key,
+            stage_title=chosen_title,
+            raw_output=raw_output,
+        ) if raw_output else ""
+        return {
+            "stage_key": chosen_key,
+            "stage_title": chosen_title,
             "output": raw_output,
             "natural_output": natural_output,
         }

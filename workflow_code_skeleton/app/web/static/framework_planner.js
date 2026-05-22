@@ -25,16 +25,16 @@
   );
 
   const VIEW_DEFS = [
-    { id: "basic", label: "1. 基础配置", stageKey: "basic" },
-    { id: "worldview", label: "2. 世界观方案", stageKey: "worldview" },
-    { id: "character", label: "3. 人设方案", stageKey: "character" },
-    { id: "beat_timeline", label: "4. 三幕十五节拍卡点规划时间轴", stageKey: "beat" },
-    { id: "beat_explanation", label: "5. 三幕十五节拍卡点说明", stageKey: "beat" },
-    { id: "storylines", label: "6. 不同人物故事线", stageKey: "storylines" },
-    { id: "storyline_details", label: "7. 查看详细不同人物故事线", stageKey: "storylines" },
-    { id: "storyline_decisions", label: "8. 故事线处理", stageKey: "storylines" },
-    { id: "guide", label: "9. 整体改编指引四项", stageKey: "guide" },
-    { id: "package", label: "10. 最终策划包输出", stageKey: "package" },
+    { id: "basic", label: "01. 原文信息提取 / 基础配置", stageKey: "basic" },
+    { id: "worldview", label: "02. 世界观方案", stageKey: "worldview" },
+    { id: "character", label: "03. 人设方案", stageKey: "character" },
+    { id: "beat_timeline", label: "04. 三幕十五节拍卡点规划时间轴", stageKey: "beat" },
+    { id: "beat_explanation", label: "04b. 三幕十五节拍卡点说明", stageKey: "beat" },
+    { id: "storylines", label: "05. 不同人物故事线", stageKey: "storylines" },
+    { id: "storyline_details", label: "05b. 查看详细不同人物故事线", stageKey: "storylines" },
+    { id: "storyline_decisions", label: "05c. 故事线处理", stageKey: "storylines" },
+    { id: "guide", label: "06. 整体改编指引四项", stageKey: "guide" },
+    { id: "package", label: "07. 最终策划包输出", stageKey: "package" },
   ];
 
   const STAGE_SEQUENCE = ["basic", "worldview", "character", "beat", "storylines", "guide", "package"];
