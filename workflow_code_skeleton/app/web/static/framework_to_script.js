@@ -42,6 +42,7 @@
     isLoadingAsset: false,
     isRunning: false,
     runningStage: "",
+    runningStartedAt: "",
     error: null,
   }, loadWorkspace());
 
@@ -105,6 +106,103 @@
         scriptStages: state.scriptStages,
       })));
     } catch (error) {}
+  }
+
+    const RUNNING_STAGE_STORAGE_KEY = "frameworkToScriptRunningStage.v1";
+  const RUNNING_STAGE_TIMEOUT_MS = 1000 * 60 * 60;
+
+  function saveRunningStage(stage) {
+    const payload = {
+      runningStage: String(stage || ""),
+      startedAt: new Date().toISOString(),
+      frameworkAssetId: state.frameworkAssetId || "",
+    };
+
+    state.runningStage = payload.runningStage;
+    state.runningStartedAt = payload.startedAt;
+    state.isRunning = Boolean(payload.runningStage);
+
+    try {
+      window.localStorage.setItem(RUNNING_STAGE_STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      console.warn("save running stage failed", error);
+    }
+  }
+
+  function clearRunningStage(stage) {
+    if (stage && state.runningStage && String(stage) !== String(state.runningStage)) {
+      return;
+    }
+
+    state.runningStage = "";
+    state.runningStartedAt = "";
+    state.isRunning = false;
+
+    try {
+      window.localStorage.removeItem(RUNNING_STAGE_STORAGE_KEY);
+    } catch (error) {
+      console.warn("clear running stage failed", error);
+    }
+  }
+
+  function restoreRunningStage() {
+    try {
+      const raw = window.localStorage.getItem(RUNNING_STAGE_STORAGE_KEY);
+      if (!raw) return;
+
+      const payload = JSON.parse(raw);
+      if (!payload || !payload.runningStage || !payload.startedAt) {
+        window.localStorage.removeItem(RUNNING_STAGE_STORAGE_KEY);
+        return;
+      }
+
+      const startedAt = new Date(payload.startedAt).getTime();
+      if (!Number.isFinite(startedAt) || Date.now() - startedAt > RUNNING_STAGE_TIMEOUT_MS) {
+        window.localStorage.removeItem(RUNNING_STAGE_STORAGE_KEY);
+        return;
+      }
+
+      if (
+        payload.frameworkAssetId &&
+        state.frameworkAssetId &&
+        String(payload.frameworkAssetId) !== String(state.frameworkAssetId)
+      ) {
+        return;
+      }
+
+      state.runningStage = String(payload.runningStage);
+      state.runningStartedAt = payload.startedAt;
+      state.isRunning = true;
+      state.error = `检测到 ${state.runningStage} 阶段可能仍在运行，正在恢复状态。请先不要重复点击运行按钮。`;
+    } catch (error) {
+      console.warn("restore running stage failed", error);
+      try {
+        window.localStorage.removeItem(RUNNING_STAGE_STORAGE_KEY);
+      } catch (_) {}
+    }
+  }
+
+  function stageHasCompleted(stage) {
+    const stages = state.scriptStages || {};
+    const stage08 = stages.stage08 || {};
+    const stage09 = stages.stage09 || {};
+    const stage10 = stages.stage10 || {};
+    const stage11 = stages.stage11 || {};
+    const stage12 = stages.stage12 || {};
+
+    if (stage === "08") return hasObject(stage08.sceneDictionary);
+    if (stage === "09") return hasObject(stage09.appearanceMapping);
+    if (stage === "10") return hasContent(stage10.allEnrichedEpisodePlan) || hasContent(stage10.enrichedEpisodePlan);
+    if (stage === "11") return hasContent(stage11.batchCausalConflictPlan);
+    if (stage === "12") return hasContent(stage12.batchScriptText);
+    return false;
+  }
+
+  function reconcileRunningStageResult() {
+    if (state.runningStage && stageHasCompleted(state.runningStage)) {
+      clearRunningStage(state.runningStage);
+      state.error = null;
+    }
   }
 
   function escapeHtml(value) {
@@ -187,6 +285,7 @@
       state.stageOutputs = asset.stage_outputs || {};
       state.scriptStages = asset.scriptStages || (asset.framework_to_script_state || {}).scriptStages || {};
       state.assetPanelOpen = false;
+      reconcileRunningStageResult();
       saveWorkspace();
     } catch (error) {
       state.error = error.message || "框架资产导入失败";
@@ -202,9 +301,9 @@
       render();
       return;
     }
-    state.runningStage = "08";
-    state.isRunning = true;
+    saveRunningStage("08");
     state.error = null;
+    render();
     render();
     try {
       const data = await requestJson("/api/framework-to-script/stage/08", {
@@ -222,8 +321,7 @@
     } catch (error) {
       state.error = error.message || "08 场景字典提炼失败";
     } finally {
-      state.runningStage = "";
-      state.isRunning = false;
+      clearRunningStage("08");
       render();
     }
   }
@@ -260,8 +358,7 @@
     } catch (error) {
       state.error = error.message || "09 角色外观映射失败";
     } finally {
-      state.runningStage = "";
-      state.isRunning = false;
+      clearRunningStage("09");
       render();
     }
   }
@@ -288,8 +385,7 @@
       return;
     }
 
-    state.runningStage = "10";
-    state.isRunning = true;
+    saveRunningStage("10");
     state.error = null;
     render();
 
@@ -328,8 +424,7 @@
     } catch (error) {
       state.error = error.message || "10 分集细化方案失败";
     } finally {
-      state.runningStage = "";
-      state.isRunning = false;
+      clearRunningStage("10");
       render();
     }
   }
@@ -348,7 +443,6 @@
       return;
     }
     state.runningStage = "11";
-    state.isRunning = true;
     state.error = null;
     render();
     try {
@@ -373,8 +467,7 @@
     } catch (error) {
       state.error = error.message || "11 开头冲突钩子失败";
     } finally {
-      state.runningStage = "";
-      state.isRunning = false;
+      clearRunningStage("11");
       render();
     }
   }
@@ -392,7 +485,6 @@
       return;
     }
     state.runningStage = "12";
-    state.isRunning = true;
     state.error = null;
     render();
     try {
@@ -418,8 +510,7 @@
     } catch (error) {
       state.error = error.message || "12 正文及对话失败";
     } finally {
-      state.runningStage = "";
-      state.isRunning = false;
+      clearRunningStage("12");
       render();
     }
   }
@@ -564,7 +655,7 @@
   }
 
   function renderStages() {
-    const locked = !currentAssetReady() || state.isRunning;
+    const locked = !currentAssetReady() || state.isRunning || Boolean(state.runningStage);
     const stage08 = state.scriptStages.stage08 || {};
     const stage09 = state.scriptStages.stage09 || {};
     const stage10 = state.scriptStages.stage10 || {};
@@ -579,13 +670,53 @@
       <section class="wts-card" id="scriptStageArea">
         <div class="wts-card-head">
           <div>
-            <h2>08+ 剧本链路</h2>
+            <h2>框架到剧本链路</h2>
             <p>未导入框架前，阶段按钮会保持禁用。</p>
           </div>
           <button type="button" class="wts-btn ghost" data-action="show-version-history">版本历史</button>
         </div>
-        <div class="wts-steps">
-          ${renderStageCard("08", "场景字典提炼", state.runningStage === "08" ? "运行中" : has08 ? "已完成" : "待运行", has08 ? "重新运行 08" : "运行 08", "run-stage-08", locked, has08 ? "" : `<p class="wts-hint">完成前不会展示输出；运行后结果会保存到缓存并供后续阶段使用。</p>`
+               <div class="wts-steps">
+          ${renderStageCard(
+            "08",
+            "场景字典提炼",
+            state.runningStage === "08" ? "运行中" : has08 ? "已完成" : "待运行",
+            has08 ? "重新运行 08" : "运行 08",
+            "run-stage-08",
+            locked,
+            has08
+              ? `<p class="wts-hint">已完成</p>`
+              : `<p class="wts-hint">运行完成前不展示输出；结果会自动缓存并供后续阶段使用。</p>`
+          )}
+
+          ${renderStageCard(
+            "09",
+            "角色外观映射",
+            state.runningStage === "09" ? "运行中" : has09 ? "已完成" : has08 ? "待运行" : "等待 08",
+            has09 ? "重新运行 09" : "运行 09",
+            "run-stage-09",
+            locked || !has08,
+            has09
+              ? `<p class="wts-hint">已完成</p>`
+              : `<p class="wts-hint">运行完成前不展示输出；结果会自动缓存并供后续阶段使用。</p>`
+          )}
+          ${renderStageCard(
+            "10",
+            "分集细化方案",
+            state.runningStage === "10" ? "运行中" : has10 ? "已完成" : has09 ? "待运行" : "等待 09",
+            has10 ? "重新运行 10" : "运行 10",
+            "run-stage-10",
+            locked || !has09,
+            has10 ? `
+              <details class="wts-output" open>
+                <summary>分集细化文本</summary>
+                ${renderTree(
+                  stage10.enrichedEpisodePlanText ||
+                  stage10.allEnrichedEpisodePlanText ||
+                  "已生成结构化分集细化方案，供 11/12 阶段继续使用；本次未返回分集细化文本。",
+                  "enrichedEpisodePlanText"
+                )}
+              </details>
+            ` : `<p class="wts-hint">将沿用当前导入的框架资产和已完成的 08/09 输出。</p>`
           )}
           ${renderStageCard(
             "11",
@@ -614,7 +745,7 @@
           ${renderStageCard(
             "12",
             "正文及对话",
-            state.runningStage === "12" ? "运行中" : has12 ? "已完成" : has11 ? "待运行" : "等待 11",
+            state.runningStage === "12" ? "运行中" : has12 ? "已完成" : has11 ? "待运行" : "待运行",
             has12 ? "运行下一批 12" : "运行 12",
             "run-stage-12",
             locked || !has11,
@@ -697,8 +828,11 @@
     }
   });
 
+  restoreRunningStage();
+  reconcileRunningStageResult();
   render();
-  if (state.frameworkAssetId && !currentAssetReady()) {
+
+  if (state.frameworkAssetId && (state.runningStage || !currentAssetReady())) {
     importAsset(state.frameworkAssetId, { skipConfirm: true });
   }
 })();

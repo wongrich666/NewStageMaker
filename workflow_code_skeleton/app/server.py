@@ -212,7 +212,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "season_count": _safe_positive_int(basic.get("season_count"), 1),
             "created_at": project.get("created_at") or framework_state.get("created_at"),
             "updated_at": project.get("updated_at") or framework_state.get("updated_at"),
-            "summary": summary or "已保存的框架资产，可导入后继续 08+ 剧本链路。",
+            "summary": summary or "已保存的框架资产，可导入后继续 框架到剧本链路。",
             "can_import": bool(package),
         }
         if include_detail:

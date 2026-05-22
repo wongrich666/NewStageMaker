@@ -2614,77 +2614,315 @@ def _extract_appearance_stage_output(
     candidate_summaries: list[dict[str, Any]] = []
     empty_alias_seen = False
 
+    best_selected: ValidatedStageOutput | None = None
+    best_source = ""
+    best_preview = ""
+    best_score: tuple[int, int, int, int, int, int, int, int, int, int] | None = None
+
+    def _list_count(value: Any) -> int:
+        return len(value) if isinstance(value, list) else 0
+
+    def _unwrap_mapping_from_any(value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+
+        first = value.get(APPEARANCE_MAPPING)
+        if isinstance(first, dict):
+            second = first.get(APPEARANCE_MAPPING)
+            if isinstance(second, dict):
+                return second
+            return first
+
+        return value
+
+    def _rich_counts(value: Any) -> dict[str, int]:
+        mapping = _unwrap_mapping_from_any(value)
+
+        result = {
+            "characters": 0,
+            "outfit_versions": 0,
+            "outfit_variants": 0,
+            "alias_rules": 0,
+            "scene_trigger_rules": 0,
+            "episode_usage_plan": 0,
+            "episode_level_usage_plan": 0,
+            "global_alias_rules": _list_count(mapping.get("global_alias_rules")),
+            "continuity_warnings": _list_count(mapping.get("continuity_warnings")),
+        }
+
+        characters = mapping.get("characters")
+        if isinstance(characters, list):
+            result["characters"] = len(characters)
+            for character in characters:
+                if not isinstance(character, dict):
+                    continue
+                result["outfit_versions"] += _list_count(character.get("outfit_versions"))
+                result["outfit_variants"] += _list_count(character.get("outfit_variants"))
+                result["alias_rules"] += _list_count(character.get("alias_rules"))
+                result["scene_trigger_rules"] += _list_count(character.get("scene_trigger_rules"))
+                result["episode_usage_plan"] += _list_count(character.get("episode_usage_plan"))
+                result["episode_level_usage_plan"] += _list_count(character.get("episode_level_usage_plan"))
+
+        result["scene_trigger_rules"] += _list_count(mapping.get("scene_level_usage_plan"))
+        result["episode_usage_plan"] += _list_count(mapping.get("episode_level_usage_plan"))
+
+        return result
+
+    def _is_rich_appearance_candidate(value: Any) -> bool:
+        counts = _rich_counts(value)
+        return (
+            counts["outfit_versions"] > 0
+            or counts["outfit_variants"] > 0
+            or counts["alias_rules"] > 0
+            or counts["scene_trigger_rules"] > 0
+            or counts["episode_usage_plan"] > 0
+        )
+
+    def _normalize_rich_appearance_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            return payload
+
+        normalized_payload = dict(payload)
+        wrapped = normalized_payload.get(APPEARANCE_MAPPING)
+
+        if isinstance(wrapped, dict):
+            mapping = dict(wrapped)
+            return_wrapped = True
+        else:
+            mapping = dict(normalized_payload)
+            return_wrapped = False
+
+        characters = mapping.get("characters")
+        if isinstance(characters, list):
+            normalized_characters = []
+            for character in characters:
+                if not isinstance(character, dict):
+                    normalized_characters.append(character)
+                    continue
+
+                item = dict(character)
+
+                outfit_versions = item.get("outfit_versions")
+                outfit_variants = item.get("outfit_variants")
+
+                if isinstance(outfit_versions, list) and outfit_versions and not outfit_variants:
+                    converted = []
+                    default_name = (
+                        item.get("default_name")
+                        or item.get("name")
+                        or item.get("canonical_name")
+                        or item.get("character_id")
+                        or ""
+                    )
+
+                    for version in outfit_versions:
+                        if isinstance(version, dict):
+                            version_item = dict(version)
+                            version_id = (
+                                version_item.get("variant_id")
+                                or version_item.get("version_id")
+                                or version_item.get("linked_outfit_version")
+                                or ""
+                            )
+                            version_item.setdefault("variant_id", version_id)
+                            version_item.setdefault("linked_outfit_version", version_id)
+                            version_item.setdefault("alias_name", default_name)
+                            version_item.setdefault(
+                                "outfit_description",
+                                version_item.get("clothing") or version_item.get("description") or "",
+                            )
+                            version_item.setdefault(
+                                "usage_rule",
+                                version_item.get("usage_rule") or version_item.get("trigger_condition") or "",
+                            )
+                            if "scene_trigger_rules" not in version_item:
+                                scene_refs = version_item.get("scene_refs")
+                                version_item["scene_trigger_rules"] = scene_refs if isinstance(scene_refs, list) else []
+                            converted.append(version_item)
+                        elif isinstance(version, str) and version.strip():
+                            converted.append(
+                                {
+                                    "variant_id": version.strip(),
+                                    "linked_outfit_version": version.strip(),
+                                    "alias_name": default_name,
+                                    "outfit_description": "",
+                                    "usage_rule": "",
+                                    "scene_trigger_rules": [],
+                                }
+                            )
+
+                    item["outfit_variants"] = converted
+
+                if "episode_level_usage_plan" not in item and isinstance(item.get("episode_usage_plan"), list):
+                    item["episode_level_usage_plan"] = item.get("episode_usage_plan")
+
+                normalized_characters.append(item)
+
+            mapping["characters"] = normalized_characters
+
+        if return_wrapped:
+            normalized_payload[APPEARANCE_MAPPING] = mapping
+            return normalized_payload
+
+        return mapping
+
+    def _appearance_richness_score(
+        payload: dict[str, Any],
+        source: str,
+        match: StageOutputMatch,
+    ) -> tuple[int, int, int, int, int, int, int, int, int, int]:
+        counts = _rich_counts(payload)
+
+        richness = (
+            counts["outfit_versions"] * 200
+            + counts["outfit_variants"] * 180
+            + counts["alias_rules"] * 100
+            + counts["scene_trigger_rules"] * 70
+            + counts["episode_usage_plan"] * 70
+            + counts["episode_level_usage_plan"] * 40
+            + counts["global_alias_rules"] * 25
+            + counts["continuity_warnings"] * 25
+            + counts["characters"] * 5
+        )
+
+        return (
+            richness,
+            counts["outfit_versions"] + counts["outfit_variants"],
+            counts["alias_rules"],
+            counts["scene_trigger_rules"],
+            counts["episode_usage_plan"] + counts["episode_level_usage_plan"],
+            counts["global_alias_rules"] + counts["continuity_warnings"],
+            match.canonical_hits,
+            -match.alias_hits,
+            _payload_source_priority(source),
+            -len(source),
+        )
+
     for source, candidate in _iter_appearance_output_candidates(data, contract):
         preview = _truncate_log_text(_json_for_log(candidate), limit=260)
-        normalized_candidate, rejection_reason, alias_empty = _coerce_appearance_candidate(
-            candidate
-        )
-        empty_alias_seen = empty_alias_seen or alias_empty
-        if normalized_candidate is None:
-            candidate_summaries.append(
-                {
-                    "source": source,
-                    "status": "rejected",
-                    "reason": rejection_reason,
-                    "preview": preview,
-                }
-            )
-            rejected_candidates.append((source, rejection_reason, None))
-            continue
 
-        variants = list(
-            _iter_repaired_candidate_variants(
-                contract=contract,
-                variables=variables,
-                source=source,
-                candidate=normalized_candidate,
-                allow_textual_relaxation=False,
-            )
-        ) or [(source, normalized_candidate)]
+        # ???????????? outfit_versions / alias_rules ?????
+        # ???? _coerce_appearance_candidate / repair??????????
+        if _is_rich_appearance_candidate(candidate):
+            candidates_to_check = [(source, candidate)]
+            alias_empty = False
+            rejection_reason = ""
+        else:
+            normalized_candidate, rejection_reason, alias_empty = _coerce_appearance_candidate(candidate)
+            empty_alias_seen = empty_alias_seen or alias_empty
 
-        last_reason = "候选未能映射到 appearanceMapping 契约"
-        for variant_source, variant_candidate in variants:
+            if normalized_candidate is None:
+                candidate_summaries.append(
+                    {
+                        "source": source,
+                        "status": "rejected",
+                        "reason": rejection_reason,
+                        "preview": preview,
+                    }
+                )
+                rejected_candidates.append((source, rejection_reason, None))
+                continue
+
+            candidates_to_check = list(
+                _iter_repaired_candidate_variants(
+                    contract=contract,
+                    variables=variables,
+                    source=source,
+                    candidate=normalized_candidate,
+                    allow_textual_relaxation=False,
+                )
+            ) or [(source, normalized_candidate)]
+
+        last_reason = "??????? appearanceMapping ??"
+        any_valid_for_source = False
+
+        for variant_source, variant_candidate in candidates_to_check:
             match = _payload_from_candidate(variant_candidate, contract)
             if match is None:
-                last_reason = "候选未能映射到 appearanceMapping 契约"
+                last_reason = "??????? appearanceMapping ??"
                 rejected_candidates.append((variant_source, last_reason, None))
                 continue
+
             try:
                 validated_payload = contract.validate_output_payload(match.payload)
             except ValueError as exc:
                 last_reason = str(exc)
                 rejected_candidates.append((variant_source, last_reason, match.payload))
                 continue
+
+            normalized_payload = _normalize_rich_appearance_payload(match.payload)
+            normalized_validated_payload = _normalize_rich_appearance_payload(validated_payload)
+
+            score = _appearance_richness_score(normalized_validated_payload, variant_source, match)
+
+            # framework-to-script ? 09 ???FastGPT ? newVariables.appearanceMapping
+            # ???????????????? choices/message.content ? responseData.textOutput
+            # ?? AI ??????????????????????????????? root.newVariables?
+            if contract.stage_name == "framework_appearanceMapping":
+                _source_lower = str(variant_source or "").lower()
+                if (
+                    "choices" in _source_lower
+                    or "message.content" in _source_lower
+                    or "textoutput" in _source_lower
+                    or "answertext" in _source_lower
+                ):
+                    score = (1000000000, *score)
+                elif _source_lower.startswith("root.newvariables") or _source_lower.startswith("root.updatevarresult"):
+                    score = (-1000000000, *score)
+
+            any_valid_for_source = True
+
+            counts = _rich_counts(normalized_validated_payload)
+
             candidate_summaries.append(
                 {
                     "source": variant_source,
-                    "status": "selected",
+                    "status": "valid",
                     "reason": "",
+                    "score": score,
+                    "counts": counts,
                     "preview": preview,
                 }
             )
-            return AppearanceSelectionResult(
-                selected=ValidatedStageOutput(
-                    source=f"{variant_source}(appearance)",
-                    payload=match.payload,
-                    validated_payload=validated_payload,
-                    matched_keys=match.matched_keys,
-                    canonical_hits=match.canonical_hits,
-                    alias_hits=match.alias_hits,
-                ),
-                candidate_summaries=candidate_summaries,
-                selected_source=variant_source,
-                selected_preview=preview,
-                empty_alias_seen=empty_alias_seen,
+
+            selected_candidate = ValidatedStageOutput(
+                source=f"{variant_source}(appearance)",
+                payload=normalized_payload,
+                validated_payload=normalized_validated_payload,
+                matched_keys=match.matched_keys,
+                canonical_hits=match.canonical_hits,
+                alias_hits=match.alias_hits,
             )
 
-        candidate_summaries.append(
-            {
-                "source": source,
-                "status": "rejected",
-                "reason": last_reason,
-                "preview": preview,
-            }
+            if best_score is None or score > best_score:
+                best_score = score
+                best_selected = selected_candidate
+                best_source = variant_source
+                best_preview = preview
+
+        if not any_valid_for_source:
+            candidate_summaries.append(
+                {
+                    "source": source,
+                    "status": "rejected",
+                    "reason": last_reason,
+                    "preview": preview,
+                }
+            )
+
+    if best_selected is not None:
+        for item in candidate_summaries:
+            if item.get("source") == best_source and item.get("status") == "valid":
+                item["status"] = "selected"
+                item["reason"] = "richest raw appearanceMapping candidate"
+                break
+
+        return AppearanceSelectionResult(
+            selected=best_selected,
+            candidate_summaries=candidate_summaries,
+            selected_source=best_source,
+            selected_preview=best_preview,
+            empty_alias_seen=empty_alias_seen,
         )
 
     return AppearanceSelectionResult(
@@ -2694,144 +2932,50 @@ def _extract_appearance_stage_output(
     )
 
 
-def _iter_framework_scored_candidates(
-    data: dict[str, Any],
-    contract: FastGPTStageContract,
-) -> Iterable[FrameworkScoredCandidate]:
-    seen: set[str] = set()
-    for source, candidate in _iter_framework_output_candidates(data):
-        if not isinstance(candidate, dict):
-            continue
-        serialized = _stable_candidate_fingerprint(candidate)
-        cache_key = f"{source}:{serialized}"
-        if cache_key in seen:
-            continue
-        seen.add(cache_key)
-        preview = _truncate_log_text(_json_for_log(candidate), limit=500)
-        yield FrameworkScoredCandidate(
-            source=source,
-            candidate=candidate,
-            preview=preview,
-            score=_score_framework_candidate(candidate, source, contract),
-        )
-
-
-def _iter_framework_output_candidates(
-    data: dict[str, Any],
-) -> Iterable[tuple[str, dict[str, Any]]]:
-    for source, candidate in _iter_framework_structured_candidates(data):
-        normalized = _coerce_framework_candidate_object(candidate)
-        if isinstance(normalized, dict):
-            yield (source, normalized)
-
-    for source, text in _iter_framework_named_text_candidates(data):
-        if not text:
-            continue
-        for index, candidate in enumerate(extract_json_object_candidates(text)):
-            yield (f"{source}[json_object:{index}]", candidate)
-
-
-def _iter_framework_structured_candidates(
-    data: Any,
-) -> Iterable[tuple[str, Any]]:
-    for source, candidate in _iter_named_structured_candidates(data):
-        yield from _iter_framework_wrapped_candidates(source, candidate)
-
-
-def _iter_framework_named_text_candidates(data: Any) -> Iterable[tuple[str, str]]:
-    if not isinstance(data, dict):
-        return
-
-    choices = data.get("choices")
-    if isinstance(choices, list):
-        for index, choice in enumerate(choices):
-            if not isinstance(choice, dict):
-                continue
-            message = choice.get("message")
-            if not isinstance(message, dict):
-                continue
-            content = message.get("content")
-            if isinstance(content, str):
-                text = strip_code_fence(content)
-                if text:
-                    yield (f"choices[{index}].message.content", text)
-            elif isinstance(content, list):
-                for text_index, text in enumerate(
-                    _iter_framework_text_blocks_from_content_list(content)
-                ):
-                    cleaned = strip_code_fence(text)
-                    if cleaned:
-                        yield (
-                            f"choices[{index}].message.content[{text_index}]",
-                            cleaned,
-                        )
-
-    response_data = data.get("responseData")
-    if isinstance(response_data, dict):
-        yield from _yield_named_text_fields("responseData", response_data)
-    elif isinstance(response_data, list):
-        yield from _yield_named_text_list_fields("responseData", response_data)
-
-    yield from _yield_named_text_fields("root", data)
-
-
-def _iter_framework_text_blocks_from_content_list(content: list[Any]) -> Iterable[str]:
-    for item in content:
-        if isinstance(item, dict):
-            item_type = str(item.get("type") or "").strip().lower()
-            if item_type and item_type != "text":
-                continue
-            text = item.get("text")
-            if isinstance(text, str):
-                yield text
-                continue
-            if isinstance(text, dict) and isinstance(text.get("content"), str):
-                yield text["content"]
-                continue
-            if isinstance(item.get("content"), str):
-                yield item["content"]
-
-
 def _iter_appearance_output_candidates(
     data: dict[str, Any],
     contract: FastGPTStageContract,
 ) -> Iterable[tuple[str, Any]]:
-    output_alias = next(iter(contract.aliases_for_output(APPEARANCE_MAPPING)), "h2KpLm91")
-    yielded: set[str] = set()
+    """?? appearanceMapping ???
 
-    def emit(source: str, value: Any) -> Iterable[tuple[str, Any]]:
-        if source in yielded:
-            return ()
-        yielded.add(source)
-        return ((source, value),)
+    ???
+    framework-to-script ? 09 ????????? answerText/textOutput ??
+    ? newVariables.appearanceMapping ???????
+    ????????? JSON ??????????? newVariables/updateVarResult?
+    """
 
-    for source, candidate in _iter_appearance_named_alias_candidates(
-        data,
-        output_alias,
-        "newVariables",
-    ):
-        yield from emit(source, candidate)
-
-    for source, candidate in _iter_appearance_named_alias_candidates(
-        data,
-        output_alias,
-        "updateVarResult",
-    ):
-        yield from emit(source, candidate)
-
-    response_data = data.get("responseData")
-    for source, container in _iter_response_like_branches(response_data, "responseData"):
-        if not isinstance(container, dict) or "variableUpdate" not in container:
+    # 1. ??????????? JSON ??????
+    # ????????? AI ????????? outfit_versions / alias_rules ?????
+    for source, text in _iter_named_text_candidates(data):
+        if not isinstance(text, str) or not text.strip():
             continue
-        source_name = f"{source}.variableUpdate.{output_alias}"
-        yield from emit(source_name, _extract_named_value(container.get("variableUpdate"), output_alias))
 
-    for source, candidate in _iter_appearance_answer_node_candidates(data, output_alias):
-        yield from emit(source, candidate)
+        parsed_text = _try_parse_json(text)
+        if parsed_text is not None:
+            yield (f"{source}(json)", parsed_text)
 
-    for source, candidate in _iter_appearance_choice_json_candidates(data):
-        yield from emit(source, candidate)
+        try:
+            json_candidates = extract_json_object_candidates(text)
+        except Exception:
+            json_candidates = []
 
+        for index, candidate in enumerate(json_candidates):
+            if isinstance(candidate, dict):
+                yield (f"{source}[json_object:{index}]", candidate)
+
+    # 2. ?????????
+    # ???? newVariables / updateVarResult / responseData ??????
+    for source, candidate in _iter_named_structured_candidates(data):
+        yield (source, candidate)
+
+        # ??????????? textOutput / answerText???????
+        try:
+            normalized = _normalize_payload_candidate(candidate, contract)
+        except Exception:
+            normalized = None
+
+        if normalized is not None and normalized is not candidate:
+            yield (f"{source}(normalized)", normalized)
 
 def _iter_appearance_named_alias_candidates(
     data: dict[str, Any],
