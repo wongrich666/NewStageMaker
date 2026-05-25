@@ -68,7 +68,14 @@
     const response = await fetch(apiUrl(path), Object.assign({ headers: headers() }, options || {}));
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.success === false || data.ok === false) {
-      throw new Error(data.message || data.error || "请求失败，请稍后重试。");
+      const detail = data.detail && typeof data.detail === "object" ? data.detail : {};
+      const detailMessage = detail.error_message || detail.message || "";
+      const failedSubStage = detail.failed_sub_stage ? `（${detail.failed_sub_stage}）` : "";
+      throw new Error(
+        [data.message || data.error || "请求失败，请稍后重试。", failedSubStage, detailMessage]
+          .filter(Boolean)
+          .join(" ")
+      );
     }
     return stripRaw(data);
   }
@@ -170,10 +177,11 @@
         return;
       }
 
-      state.runningStage = String(payload.runningStage);
-      state.runningStartedAt = payload.startedAt;
-      state.isRunning = true;
-      state.error = `检测到 ${state.runningStage} 阶段可能仍在运行，正在恢复状态。请先不要重复点击运行按钮。`;
+      window.localStorage.removeItem(RUNNING_STAGE_STORAGE_KEY);
+      state.runningStage = "";
+      state.runningStartedAt = "";
+      state.isRunning = false;
+      state.error = `已清除上次遗留的 ${payload.runningStage} 阶段运行锁，可重新点击运行。`;
     } catch (error) {
       console.warn("restore running stage failed", error);
       try {
@@ -235,6 +243,16 @@
     return String(value || "").trim().length > 0;
   }
 
+  function stage10Plan(stage10) {
+    const value = stage10 || {};
+    return value.allEnrichedEpisodePlan || value.enrichedEpisodePlan || [];
+  }
+
+  function stage10Text(stage10) {
+    const value = stage10 || {};
+    return value.allEnrichedEpisodePlanText || value.enrichedEpisodePlanText || "";
+  }
+
   function currentAssetReady() {
     return Boolean(state.frameworkAssetId && hasObject(state.frameworkPlanPackage));
   }
@@ -284,6 +302,18 @@
       state.frameworkPlanPackage = asset.framework_plan_package || {};
       state.stageOutputs = asset.stage_outputs || {};
       state.scriptStages = asset.scriptStages || (asset.framework_to_script_state || {}).scriptStages || {};
+      const stage10 = state.scriptStages.stage10 || {};
+      const allEnrichedEpisodePlan = stage10Plan(stage10);
+      const allEnrichedEpisodePlanText = stage10Text(stage10);
+      if (hasContent(allEnrichedEpisodePlan) || hasContent(allEnrichedEpisodePlanText)) {
+        state.scriptStages.stage10 = {
+          ...stage10,
+          allEnrichedEpisodePlan,
+          enrichedEpisodePlan: stage10.enrichedEpisodePlan || allEnrichedEpisodePlan,
+          allEnrichedEpisodePlanText,
+          enrichedEpisodePlanText: stage10.enrichedEpisodePlanText || allEnrichedEpisodePlanText,
+        };
+      }
       state.assetPanelOpen = false;
       reconcileRunningStageResult();
       saveWorkspace();
@@ -436,13 +466,26 @@
       return;
     }
     const stage10 = state.scriptStages.stage10 || {};
-    const allEnrichedEpisodePlan = stage10.allEnrichedEpisodePlan || stage10.enrichedEpisodePlan || [];
+    const stage08 = state.scriptStages.stage08 || {};
+    const stage09 = state.scriptStages.stage09 || {};
+    const stage11 = state.scriptStages.stage11 || {};
+    const allEnrichedEpisodePlan = stage10Plan(stage10);
     if (!hasContent(allEnrichedEpisodePlan)) {
-      state.error = "请先完成 10 分集细化方案。";
+      state.error = "缺少第10阶段结构化分集计划，请先重新运行10。";
       render();
       return;
     }
-    state.runningStage = "11";
+    if (!hasObject(stage08.sceneDictionary)) {
+      state.error = "请先完成 08 场景字典提炼。";
+      render();
+      return;
+    }
+    if (!hasObject(stage09.appearanceMapping)) {
+      state.error = "请先完成 09 角色外观映射。";
+      render();
+      return;
+    }
+    saveRunningStage("11");
     state.error = null;
     render();
     try {
@@ -451,6 +494,11 @@
         body: JSON.stringify({
           framework_asset_id: state.frameworkAssetId,
           allEnrichedEpisodePlan,
+          sceneDictionary: stage08.sceneDictionary,
+          scriptWorldRulesDigest: stage08.scriptWorldRulesDigest,
+          appearanceMapping: stage09.appearanceMapping,
+          batchStartEpisode: state.settings.batchStartEpisode || null,
+          conflictMemory: stage11.conflictMemory || "",
         }),
       });
       state.scriptStages.stage11 = {
@@ -663,7 +711,9 @@
     const stage12 = state.scriptStages.stage12 || {};
     const has08 = hasObject(stage08.sceneDictionary);
     const has09 = hasObject(stage09.appearanceMapping);
-    const has10 = hasContent(stage10.enrichedEpisodePlan) || hasContent(stage10.allEnrichedEpisodePlan);
+    const has10Plan = hasContent(stage10Plan(stage10));
+    const has10Output = has10Plan || hasContent(stage10Text(stage10));
+    const has10 = has10Plan;
     const has11 = hasContent(stage11.batchCausalConflictPlan);
     const has12 = hasContent(stage12.batchScriptText);
     return `
@@ -721,10 +771,10 @@
           ${renderStageCard(
             "11",
             "开头冲突钩子",
-            state.runningStage === "11" ? "运行中" : has11 ? "已完成" : has10 ? "待运行" : "等待 10",
+            state.runningStage === "11" ? "运行中" : has11 ? "已完成" : has10Output ? "待运行" : "等待 10",
             has11 ? "运行下一批 11" : "运行 11",
             "run-stage-11",
-            locked || !has10,
+            locked || !has10Output,
             has11 ? `
               <details class="wts-output" open>
                 <summary>第 ${escapeHtml(stage11.batchStartEpisode || "")}-${escapeHtml(stage11.batchEndEpisode || "")} 集因果冲突</summary>
@@ -740,7 +790,7 @@
                   ${renderTree(stage11.conflictMemory, "conflictMemory")}
                 </details>
               ` : ""}
-            ` : `<p class="wts-hint"></p>`
+            ` : `<p class="wts-hint">${state.runningStage ? `当前 ${escapeHtml(state.runningStage)} 阶段运行态锁定，完成或超时后可继续。` : ""}</p>`
           )}
           ${renderStageCard(
             "12",

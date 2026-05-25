@@ -2013,6 +2013,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error("缺少 sceneDictionary，请先完成 08 场景字典提炼。", status=400)
         if not isinstance(appearance_mapping, dict) or not appearance_mapping:
             return _json_error("缺少 appearanceMapping，请先完成 09 角色外观映射。", status=400)
+        if not isinstance(rules_digest, dict) or not rules_digest:
+            return _json_error("缺少 scriptWorldRulesDigest，请先完成 08 场景字典提炼。", status=400)
 
         existing_stage11 = _framework_script_stage_cache(framework_asset, "stage11")
         existing_batches = existing_stage11.get("batches") if isinstance(existing_stage11.get("batches"), dict) else {}
@@ -2028,8 +2030,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not _try_begin_framework_stage(user_id, asset_id, "11"):
             return _json_error("11 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
+            failed_sub_stage = "stage11_prepare"
+            base_vars = {}
+            total_episodes = 0
             try:
-                from .services.fastgpt_client import fastgpt_client
+                from .services.fastgpt_client import FastGPTStageFormatError, fastgpt_client
                 from .services.fastgpt_contracts import (
                     STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
                     STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
@@ -2043,6 +2048,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 )
                 conflict_memory = str(data.get("conflictMemory") or existing_stage11.get("conflictMemory") or "")
                 base_vars = {
+                    "totalEpisodes": total_episodes,
                     "total_episodes": total_episodes,
                     "conflictStartEpisode": start_episode,
                     "batchEnrichedEpisodePlan": batch_plan,
@@ -2051,21 +2057,112 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "scriptWorldRulesDigest": rules_digest,
                     "conflictMemory": conflict_memory,
                 }
-                write_output = fastgpt_client.run_stage(STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE, base_vars)
-                conflict_plan = write_output.get("batchCausalConflictPlan")
-                review_output = fastgpt_client.run_stage(
-                    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+                first_batch_item = batch_plan[0] if batch_plan and isinstance(batch_plan[0], dict) else {}
+                appearance_characters = appearance_mapping.get("characters") if isinstance(appearance_mapping, dict) else []
+                appearance_character_count = (
+                    len(appearance_characters)
+                    if isinstance(appearance_characters, list)
+                    else len(appearance_mapping)
+                    if isinstance(appearance_mapping, dict)
+                    else 0
+                )
+                logger.info(
+                    "framework-to-script stage11 start: asset_id=%s start_episode=%s end_episode=%s "
+                    "batch_plan_count=%s total_episodes=%s has_sceneDictionary=%s "
+                    "has_scriptWorldRulesDigest=%s has_appearanceMapping=%s appearanceMapping.characters_count=%s "
+                    "first_batch_episode=%s first_batch_title=%s first_batch_characters=%s stage_names=%s",
+                    asset_id,
+                    start_episode,
+                    end_episode,
+                    len(batch_plan),
+                    total_episodes,
+                    bool(scene_dictionary),
+                    bool(rules_digest),
+                    bool(appearance_mapping),
+                    appearance_character_count,
+                    first_batch_item.get("episode"),
+                    first_batch_item.get("title"),
+                    first_batch_item.get("characters"),
                     {
-                        **base_vars,
-                        "batchCausalConflictPlan": conflict_plan,
+                        "write": STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE,
+                        "review": STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+                        "rewrite": STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
+                        "memory": STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
                     },
                 )
+                failed_sub_stage = "causal_conflict_write"
+                write_output = fastgpt_client.run_stage(STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE, base_vars)
+                write_output_data = write_output if isinstance(write_output, dict) else {}
+                conflict_plan = write_output_data.get("batchCausalConflictPlan")
+                logger.info(
+                    "framework-to-script stage11 write done: asset_id=%s write_output_keys=%s "
+                    "conflict_plan_type=%s conflict_plan_empty=%s",
+                    asset_id,
+                    sorted(write_output_data.keys()),
+                    type(conflict_plan).__name__,
+                    not bool(conflict_plan),
+                )
+                if not isinstance(conflict_plan, dict) or not conflict_plan:
+                    return jsonify(
+                        {
+                            "success": False,
+                            "message": "11 write 阶段未返回 batchCausalConflictPlan",
+                            "detail": {
+                                "failed_sub_stage": "causal_conflict_write",
+                                "error_message": "11 write 阶段未返回 batchCausalConflictPlan",
+                                "write_output_keys": sorted(write_output_data.keys()),
+                            },
+                        }
+                    ), 500
+                failed_sub_stage = "causal_conflict_review"
+                try:
+                    review_output = fastgpt_client.run_stage(
+                        STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+                        {
+                            **base_vars,
+                            "batchCausalConflictPlan": conflict_plan,
+                        },
+                    )
+                except FastGPTStageFormatError as exc:
+                    logger.warning(
+                        "framework-to-script stage11 review missing fields, using defaults: "
+                        "asset_id=%s missing_fields=%s error=%s",
+                        asset_id,
+                        list(exc.missing_fields),
+                        str(exc),
+                    )
+                    review_output = {}
+                review_output_data = review_output if isinstance(review_output, dict) else {}
+                review_passed = review_output_data.get("reviewPassed")
+                rewrite_required = review_output_data.get("rewriteRequired")
+                blocking_issues = (
+                    review_output_data.get("blockingIssues")
+                    if isinstance(review_output_data.get("blockingIssues"), list)
+                    else []
+                )
+                if review_passed is None and rewrite_required is None:
+                    logger.warning(
+                        "framework-to-script stage11 review output missing reviewPassed/rewriteRequired, using pass defaults: "
+                        "asset_id=%s review_output_keys=%s",
+                        asset_id,
+                        sorted(review_output_data.keys()),
+                    )
+                    review_passed = True
+                    rewrite_required = False
+                    blocking_issues = []
                 conflict_review = {
-                    "reviewPassed": review_output.get("reviewPassed"),
-                    "rewriteRequired": review_output.get("rewriteRequired"),
-                    "blockingIssues": review_output.get("blockingIssues") or [],
+                    "reviewPassed": review_passed,
+                    "rewriteRequired": rewrite_required,
+                    "blockingIssues": blocking_issues,
                 }
+                logger.info(
+                    "framework-to-script stage11 review done: asset_id=%s review_output_keys=%s conflict_review=%s",
+                    asset_id,
+                    sorted(review_output_data.keys()),
+                    conflict_review,
+                )
                 if _framework_review_needs_rewrite(conflict_review):
+                    failed_sub_stage = "causal_conflict_rewrite"
                     rewrite_output = fastgpt_client.run_stage(
                         STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
                         {
@@ -2074,22 +2171,76 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "batchCausalConflictReview": conflict_review,
                         },
                     )
-                    conflict_plan = rewrite_output.get("batchCausalConflictPlan") or conflict_plan
-                memory_output = fastgpt_client.run_stage(
-                    STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
-                    {
-                        "batchCausalConflictPlan": conflict_plan,
-                        "conflictMemory": conflict_memory,
-                        "conflictStartEpisode": start_episode,
-                    },
+                    logger.info(
+                        "framework-to-script stage11 rewrite done: asset_id=%s rewrite_output_keys=%s",
+                        asset_id,
+                        sorted(rewrite_output.keys()) if isinstance(rewrite_output, dict) else [],
+                    )
+                    rewrite_output_data = rewrite_output if isinstance(rewrite_output, dict) else {}
+                    conflict_plan = rewrite_output_data.get("batchCausalConflictPlan") or conflict_plan
+                failed_sub_stage = "causal_conflict_memory"
+                try:
+                    memory_output = fastgpt_client.run_stage(
+                        STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
+                        {
+                            "batchCausalConflictPlan": conflict_plan,
+                            "conflictMemory": conflict_memory,
+                            "conflictStartEpisode": start_episode,
+                        },
+                    )
+                except FastGPTStageFormatError as exc:
+                    logger.warning(
+                        "framework-to-script stage11 memory missing conflictMemory, keeping previous memory: "
+                        "asset_id=%s missing_fields=%s error=%s",
+                        asset_id,
+                        list(exc.missing_fields),
+                        str(exc),
+                    )
+                    memory_output = {}
+                memory_output_data = memory_output if isinstance(memory_output, dict) else {}
+                if "conflictMemory" not in memory_output_data:
+                    logger.warning(
+                        "framework-to-script stage11 memory output missing conflictMemory, keeping previous memory: "
+                        "asset_id=%s memory_output_keys=%s",
+                        asset_id,
+                        sorted(memory_output_data.keys()),
+                    )
+                conflict_memory = str(memory_output_data.get("conflictMemory") or conflict_memory)
+                logger.info(
+                    "framework-to-script stage11 memory done: asset_id=%s memory_output_keys=%s conflictMemory_length=%s",
+                    asset_id,
+                    sorted(memory_output_data.keys()),
+                    len(conflict_memory),
                 )
-                conflict_memory = str(memory_output.get("conflictMemory") or conflict_memory)
             except Exception as exc:
-                return _json_error(
+                logger.exception(
+                    "framework-to-script stage11 failed: failed_sub_stage=%s asset_id=%s start_episode=%s "
+                    "end_episode=%s batch_plan_count=%s base_vars_keys=%s error_type=%s error=%s",
+                    failed_sub_stage,
+                    asset_id,
+                    start_episode,
+                    end_episode,
+                    len(batch_plan) if isinstance(batch_plan, list) else 0,
+                    sorted(base_vars.keys()) if isinstance(base_vars, dict) else [],
+                    type(exc).__name__,
                     str(exc),
-                    status=500,
-                    fallback="11 因果冲突批次调用失败，请检查对应 FastGPT API Key 和工作流变量。",
                 )
+                return jsonify(
+                    {
+                        "success": False,
+                        "message": "11 因果冲突批次调用失败",
+                        "detail": {
+                            "failed_sub_stage": failed_sub_stage,
+                            "error_type": type(exc).__name__,
+                            "error_message": str(exc),
+                            "asset_id": asset_id,
+                            "start_episode": start_episode,
+                            "end_episode": end_episode,
+                            "batch_plan_count": len(batch_plan) if isinstance(batch_plan, list) else 0,
+                            "base_var_keys": sorted(base_vars.keys()) if isinstance(base_vars, dict) else [],
+                        },
+                    }
+                ), 500
 
             batch_key = str(start_episode)
             batches = dict(existing_batches)
