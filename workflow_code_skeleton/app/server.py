@@ -2313,7 +2313,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not _try_begin_framework_stage(user_id, asset_id, "12"):
             return _json_error("12 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
-            failed_sub_stage = "prepare"
+            failed_sub_stage = "stage12_prepare"
             start_episode = None
             end_episode = None
             base_vars = {}
@@ -2441,14 +2441,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 }
                 logger.info(
                     "framework-to-script stage12 script_review output review_output_keys=%s batchScriptReview_type=%s "
-                    "reviewPassed=%s rewriteRequired=%s blockingIssues_summary=%s",
+                    "reviewPassed=%s rewriteRequired=%s blockingIssues_count=%s",
                     review_keys,
                     type(script_review).__name__,
                     script_review.get("reviewPassed"),
                     script_review.get("rewriteRequired"),
-                    script_review.get("blockingIssues")[:3]
+                    len(script_review.get("blockingIssues"))
                     if isinstance(script_review.get("blockingIssues"), list)
-                    else script_review.get("blockingIssues"),
+                    else 0,
                 )
                 if _framework_review_needs_rewrite(script_review):
                     failed_sub_stage = "script_rewrite"

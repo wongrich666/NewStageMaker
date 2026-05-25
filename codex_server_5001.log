@@ -14,3 +14,14 @@ Traceback (most recent call last):
   File "C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py", line 405, in build_input_payload
     raise ValueError(f"FastGPT 阶段 {self.stage_name} 缺少输入变量：{joined}")
 ValueError: FastGPT 阶段 framework_script_write 缺少输入变量：totalEpisodes, episodeWordCount
+[2026-05-25 22:17:43,641] [INFO] [server] framework-to-script stage12 entering FastGPT asset_id=32 start_episode=26 end_episode=30 batch_plan_count=5 has_batchCausalConflictPlan=True has_sceneDictionary=True has_appearanceMapping=True appearanceMapping.characters_count=4 base_vars_keys=['appearanceMapping', 'batchCausalConflictPlan', 'batchEnrichedEpisodePlan', 'episode_word_count', 'sceneDictionary', 'scriptMemory', 'scriptStartEpisode', 'scriptWorldRulesDigest', 'total_episodes'] first_batchEnrichedEpisodePlan={'episode': 26, 'title': '红绳未尽', 'characters': ['夏冬']} batchCausalConflictPlan_episodes_count=0 stage_names={'script_write': 'framework_script_write', 'script_review': 'framework_script_review', 'script_rewrite': 'framework_script_rewrite', 'script_memory': 'framework_script_memory'}
+[2026-05-25 22:17:43,642] [ERROR] [server] framework-to-script stage12 failed failed_sub_stage=script_write asset_id=32 start_episode=26 end_episode=30 batch_plan_count=5 base_vars_keys=['appearanceMapping', 'batchCausalConflictPlan', 'batchEnrichedEpisodePlan', 'episode_word_count', 'sceneDictionary', 'scriptMemory', 'scriptStartEpisode', 'scriptWorldRulesDigest', 'total_episodes'] error_type=ValueError error_message=FastGPT 阶段 framework_script_write 缺少输入变量：totalEpisodes, episodeWordCount
+Traceback (most recent call last):
+  File "C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\server.py", line 2391, in run_framework_to_script_stage12_api
+    write_output = fastgpt_client.run_stage(STAGE_FRAMEWORK_SCRIPT_WRITE, base_vars)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_client.py", line 504, in run_stage
+    contract.build_input_payload(variables)
+  File "C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py", line 405, in build_input_payload
+    raise ValueError(f"FastGPT 阶段 {self.stage_name} 缺少输入变量：{joined}")
+ValueError: FastGPT 阶段 framework_script_write 缺少输入变量：totalEpisodes, episodeWordCount
