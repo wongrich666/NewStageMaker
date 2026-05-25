@@ -2298,16 +2298,29 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         batch_plan = stage11_batch.get("batchEnrichedEpisodePlan") or []
         conflict_plan = stage11_batch.get("batchCausalConflictPlan") or {}
-        if not isinstance(batch_plan, list) or not batch_plan or not isinstance(conflict_plan, dict) or not conflict_plan:
-            return _json_error("11 当前批次缓存不完整，缺少 batchEnrichedEpisodePlan 或 batchCausalConflictPlan。", status=400)
+        scene_dictionary = stage08.get("sceneDictionary") or {}
+        appearance_mapping = stage09.get("appearanceMapping") or {}
+        if not isinstance(batch_plan, list) or not batch_plan:
+            return _json_error("缺少第11阶段批次分集计划，请先重新运行11。", status=400)
+        if not isinstance(conflict_plan, dict) or not conflict_plan:
+            return _json_error("缺少第11阶段因果冲突计划，请先重新运行11。", status=400)
+        if not scene_dictionary:
+            return _json_error("缺少第08阶段场景字典，请先重新运行08。", status=400)
+        if not appearance_mapping:
+            return _json_error("缺少第09阶段人设服装映射，请先重新运行09。", status=400)
 
         asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
         if not _try_begin_framework_stage(user_id, asset_id, "12"):
             return _json_error("12 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
+            failed_sub_stage = "prepare"
+            start_episode = None
+            end_episode = None
+            base_vars = {}
             try:
                 from .services.fastgpt_client import fastgpt_client
                 from .services.fastgpt_contracts import (
+                    STAGE_CONTRACTS,
                     STAGE_FRAMEWORK_SCRIPT_MEMORY,
                     STAGE_FRAMEWORK_SCRIPT_REVIEW,
                     STAGE_FRAMEWORK_SCRIPT_REWRITE,
@@ -2329,13 +2342,77 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "episode_word_count": episode_word_count,
                     "batchEnrichedEpisodePlan": batch_plan,
                     "batchCausalConflictPlan": conflict_plan,
-                    "sceneDictionary": stage08.get("sceneDictionary") or {},
-                    "appearanceMapping": stage09.get("appearanceMapping") or {},
+                    "sceneDictionary": scene_dictionary,
+                    "appearanceMapping": appearance_mapping,
                     "scriptWorldRulesDigest": stage08.get("scriptWorldRulesDigest") or {},
                     "scriptMemory": script_memory,
                 }
+                first_plan = batch_plan[0] if isinstance(batch_plan[0], dict) else {}
+                first_plan_summary = {
+                    "episode": first_plan.get("episode"),
+                    "title": first_plan.get("title"),
+                    "characters": first_plan.get("characters"),
+                }
+                appearance_characters = (
+                    appearance_mapping.get("characters")
+                    if isinstance(appearance_mapping, dict)
+                    else []
+                )
+                conflict_episodes = (
+                    conflict_plan.get("episodes")
+                    or conflict_plan.get("batchCausalConflictPlan")
+                    or []
+                )
+                stage_names = {
+                    "script_write": getattr(STAGE_CONTRACTS.get(STAGE_FRAMEWORK_SCRIPT_WRITE), "stage_name", STAGE_FRAMEWORK_SCRIPT_WRITE),
+                    "script_review": getattr(STAGE_CONTRACTS.get(STAGE_FRAMEWORK_SCRIPT_REVIEW), "stage_name", STAGE_FRAMEWORK_SCRIPT_REVIEW),
+                    "script_rewrite": getattr(STAGE_CONTRACTS.get(STAGE_FRAMEWORK_SCRIPT_REWRITE), "stage_name", STAGE_FRAMEWORK_SCRIPT_REWRITE),
+                    "script_memory": getattr(STAGE_CONTRACTS.get(STAGE_FRAMEWORK_SCRIPT_MEMORY), "stage_name", STAGE_FRAMEWORK_SCRIPT_MEMORY),
+                }
+                logger.info(
+                    "framework-to-script stage12 entering FastGPT asset_id=%s start_episode=%s end_episode=%s "
+                    "batch_plan_count=%s has_batchCausalConflictPlan=%s has_sceneDictionary=%s "
+                    "has_appearanceMapping=%s appearanceMapping.characters_count=%s base_vars_keys=%s "
+                    "first_batchEnrichedEpisodePlan=%s batchCausalConflictPlan_episodes_count=%s stage_names=%s",
+                    asset_id,
+                    start_episode,
+                    end_episode,
+                    len(batch_plan),
+                    isinstance(conflict_plan, dict) and bool(conflict_plan),
+                    bool(scene_dictionary),
+                    bool(appearance_mapping),
+                    len(appearance_characters) if isinstance(appearance_characters, list) else 0,
+                    sorted(base_vars.keys()),
+                    first_plan_summary,
+                    len(conflict_episodes) if isinstance(conflict_episodes, list) else 0,
+                    stage_names,
+                )
+                failed_sub_stage = "script_write"
                 write_output = fastgpt_client.run_stage(STAGE_FRAMEWORK_SCRIPT_WRITE, base_vars)
-                batch_script = str(write_output.get("batchScriptText") or "")
+                write_keys = sorted(write_output.keys()) if isinstance(write_output, dict) else []
+                batch_script_value = write_output.get("batchScriptText") if isinstance(write_output, dict) else None
+                batch_script = str(batch_script_value or "")
+                logger.info(
+                    "framework-to-script stage12 script_write output write_output_keys=%s batchScriptText_type=%s "
+                    "batchScriptText_length=%s batchScriptText_empty=%s",
+                    write_keys,
+                    type(batch_script_value).__name__,
+                    len(batch_script),
+                    not bool(batch_script.strip()),
+                )
+                if not batch_script.strip():
+                    return jsonify(
+                        {
+                            "success": False,
+                            "message": "12 正文对白批次调用失败",
+                            "detail": {
+                                "failed_sub_stage": "script_write",
+                                "error_message": "12 write 阶段未返回 batchScriptText",
+                                "write_output_keys": write_keys,
+                            },
+                        }
+                    ), 500
+                failed_sub_stage = "script_review"
                 review_output = fastgpt_client.run_stage(
                     STAGE_FRAMEWORK_SCRIPT_REVIEW,
                     {
@@ -2343,12 +2420,38 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         "batchScriptText": batch_script,
                     },
                 )
+                review_keys = sorted(review_output.keys()) if isinstance(review_output, dict) else []
+                if not isinstance(review_output, dict):
+                    review_output = {}
+                missing_review_keys = [
+                    key for key in ("reviewPassed", "rewriteRequired") if key not in review_output
+                ]
+                if missing_review_keys:
+                    logger.warning(
+                        "framework-to-script stage12 script_review missing keys=%s, defaulting reviewPassed=True rewriteRequired=False",
+                        missing_review_keys,
+                    )
+                    review_output["reviewPassed"] = True
+                    review_output["rewriteRequired"] = False
+                    review_output["blockingIssues"] = []
                 script_review = {
                     "reviewPassed": review_output.get("reviewPassed"),
                     "rewriteRequired": review_output.get("rewriteRequired"),
                     "blockingIssues": review_output.get("blockingIssues") or [],
                 }
+                logger.info(
+                    "framework-to-script stage12 script_review output review_output_keys=%s batchScriptReview_type=%s "
+                    "reviewPassed=%s rewriteRequired=%s blockingIssues_summary=%s",
+                    review_keys,
+                    type(script_review).__name__,
+                    script_review.get("reviewPassed"),
+                    script_review.get("rewriteRequired"),
+                    script_review.get("blockingIssues")[:3]
+                    if isinstance(script_review.get("blockingIssues"), list)
+                    else script_review.get("blockingIssues"),
+                )
                 if _framework_review_needs_rewrite(script_review):
+                    failed_sub_stage = "script_rewrite"
                     rewrite_output = fastgpt_client.run_stage(
                         STAGE_FRAMEWORK_SCRIPT_REWRITE,
                         {
@@ -2357,7 +2460,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "batchScriptReview": script_review,
                         },
                     )
-                    batch_script = str(rewrite_output.get("batchScriptText") or batch_script)
+                    rewrite_keys = sorted(rewrite_output.keys()) if isinstance(rewrite_output, dict) else []
+                    rewrite_script_value = rewrite_output.get("batchScriptText") if isinstance(rewrite_output, dict) else None
+                    batch_script = str(rewrite_script_value or batch_script)
+                    logger.info(
+                        "framework-to-script stage12 script_rewrite output rewrite_output_keys=%s batchScriptText_length=%s",
+                        rewrite_keys,
+                        len(batch_script),
+                    )
+                failed_sub_stage = "script_memory"
                 memory_output = fastgpt_client.run_stage(
                     STAGE_FRAMEWORK_SCRIPT_MEMORY,
                     {
@@ -2366,13 +2477,49 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         "scriptStartEpisode": start_episode,
                     },
                 )
-                script_memory = str(memory_output.get("scriptMemory") or script_memory)
-            except Exception as exc:
-                return _json_error(
-                    str(exc),
-                    status=500,
-                    fallback="12 正文批次调用失败，请检查对应 FastGPT API Key 和工作流变量。",
+                memory_keys = sorted(memory_output.keys()) if isinstance(memory_output, dict) else []
+                memory_value = memory_output.get("scriptMemory") if isinstance(memory_output, dict) else None
+                if memory_value is None:
+                    logger.warning(
+                        "framework-to-script stage12 script_memory missing scriptMemory, keeping previous memory memory_output_keys=%s",
+                        memory_keys,
+                    )
+                else:
+                    script_memory = str(memory_value)
+                logger.info(
+                    "framework-to-script stage12 script_memory output memory_output_keys=%s scriptMemory_length=%s",
+                    memory_keys,
+                    len(script_memory),
                 )
+            except Exception as exc:
+                logger.exception(
+                    "framework-to-script stage12 failed failed_sub_stage=%s asset_id=%s start_episode=%s "
+                    "end_episode=%s batch_plan_count=%s base_vars_keys=%s error_type=%s error_message=%s",
+                    failed_sub_stage,
+                    asset_id,
+                    start_episode,
+                    end_episode,
+                    len(batch_plan),
+                    sorted(base_vars.keys()),
+                    type(exc).__name__,
+                    str(exc),
+                )
+                return jsonify(
+                    {
+                        "success": False,
+                        "message": "12 正文对白批次调用失败",
+                        "detail": {
+                            "failed_sub_stage": failed_sub_stage,
+                            "error_type": type(exc).__name__,
+                            "error_message": str(exc),
+                            "asset_id": asset_id,
+                            "start_episode": start_episode,
+                            "end_episode": end_episode,
+                            "batch_plan_count": len(batch_plan),
+                            "base_var_keys": sorted(base_vars.keys()),
+                        },
+                    }
+                ), 500
 
             batches = dict(existing_batches)
             batch_output = {
