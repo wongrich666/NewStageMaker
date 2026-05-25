@@ -123,6 +123,7 @@ from .stage_output_repair import (
     is_repairable_stage_output,
     normalize_appearanceMapping_candidate,
     repair_stage_output_candidate,
+    validate_appearanceMapping_output,
     validate_scenes_output,
 )
 
@@ -566,6 +567,8 @@ class FastGPTClient:
                 last_failure_reason=str(exc),
             )
             raise failure from exc
+        if stage_name == STAGE_FRAMEWORK_APPEARANCE_MAPPING and isinstance(raw_output, dict):
+            validated_output = raw_output
 
         auxiliary_output = _extract_stage_auxiliary_outputs(data, stage_name)
         if auxiliary_output:
@@ -1029,24 +1032,27 @@ class FastGPTClient:
                     appearance_selected_candidate_source=appearance_output.selected_source,
                     appearance_selected_candidate_preview=appearance_output.selected_preview,
                 )
-                logger.info(
-                    "FastGPT 阶段 %s 选中 appearance 候选，来源=%s，匹配字段=%s，候选摘要=%s，payload=%s",
-                    contract.stage_name,
-                    appearance_output.selected.source,
-                    appearance_output.selected.matched_keys,
-                    [
-                        {
-                            "source": item.get("source"),
-                            "status": item.get("status"),
-                            "reason": item.get("reason"),
-                        }
-                        for item in appearance_output.candidate_summaries[:4]
-                    ],
-                    _truncate_log_text(
-                        _json_for_log(appearance_output.selected.validated_payload),
-                        limit=500,
-                    ),
-                )
+                if contract.stage_name != STAGE_FRAMEWORK_APPEARANCE_MAPPING:
+                    logger.info(
+                        "FastGPT 阶段 %s 选中 appearance 候选，来源=%s，匹配字段=%s，候选摘要=%s，payload=%s",
+                        contract.stage_name,
+                        appearance_output.selected.source,
+                        appearance_output.selected.matched_keys,
+                        [
+                            {
+                                "source": item.get("source"),
+                                "status": item.get("status"),
+                                "reason": item.get("reason"),
+                            }
+                            for item in appearance_output.candidate_summaries[:4]
+                        ],
+                        _truncate_log_text(
+                            _json_for_log(appearance_output.selected.validated_payload),
+                            limit=500,
+                        ),
+                    )
+                if contract.stage_name == STAGE_FRAMEWORK_APPEARANCE_MAPPING:
+                    return appearance_output.selected.payload
                 return appearance_output.selected.validated_payload
 
         if contract.stage_name in TEXT_FIRST_MULTI_FIELD_STAGES:
@@ -2260,6 +2266,12 @@ def _stage_specific_candidate_issue(
     payload: dict[str, Any],
     candidate: Any | None = None,
 ) -> str | None:
+    if (
+        contract.stage_name in APPEARANCE_MAPPING_OUTPUT_STAGES
+        and contract.stage_name != STAGE_FRAMEWORK_APPEARANCE_MAPPING
+    ):
+        issues = validate_appearanceMapping_output(payload.get(APPEARANCE_MAPPING))
+        return issues[0] if issues else None
     if contract.stage_name != STAGE_SCENES:
         return None
     if _scene_formal_source_blocked(source):
@@ -2401,6 +2413,8 @@ def _payload_source_priority(source: str) -> int:
         return 80
     if lowered.startswith("responsedata.variableupdate"):
         return 70
+    if "answernode" in lowered:
+        return 65
     if "textoutput" in lowered:
         return 60
     if "answertext" in lowered:
@@ -2676,6 +2690,18 @@ def _extract_appearance_stage_output(
             or counts["alias_rules"] > 0
             or counts["scene_trigger_rules"] > 0
             or counts["episode_usage_plan"] > 0
+            or counts["global_alias_rules"] > 0
+        )
+
+    def _raw_rich_appearance_match(value: Any) -> StageOutputMatch | None:
+        mapping = _unwrap_mapping_from_any(value)
+        if not isinstance(mapping, dict) or not isinstance(mapping.get("characters"), list):
+            return None
+        return StageOutputMatch(
+            payload={APPEARANCE_MAPPING: mapping},
+            matched_keys={APPEARANCE_MAPPING: APPEARANCE_MAPPING},
+            canonical_hits=1,
+            alias_hits=0,
         )
 
     def _normalize_rich_appearance_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2837,7 +2863,12 @@ def _extract_appearance_stage_output(
         any_valid_for_source = False
 
         for variant_source, variant_candidate in candidates_to_check:
-            match = _payload_from_candidate(variant_candidate, contract)
+            match = (
+                _raw_rich_appearance_match(variant_candidate)
+                if contract.stage_name == "framework_appearanceMapping"
+                and _is_rich_appearance_candidate(variant_candidate)
+                else _payload_from_candidate(variant_candidate, contract)
+            )
             if match is None:
                 last_reason = "??????? appearanceMapping ??"
                 rejected_candidates.append((variant_source, last_reason, None))
@@ -2849,26 +2880,29 @@ def _extract_appearance_stage_output(
                 last_reason = str(exc)
                 rejected_candidates.append((variant_source, last_reason, match.payload))
                 continue
+            stage_issue = _stage_specific_candidate_issue(
+                contract=contract,
+                source=variant_source,
+                payload=validated_payload,
+                candidate=variant_candidate,
+            )
+            if stage_issue is not None:
+                last_reason = stage_issue
+                rejected_candidates.append((variant_source, last_reason, match.payload))
+                continue
 
             normalized_payload = _normalize_rich_appearance_payload(match.payload)
-            normalized_validated_payload = _normalize_rich_appearance_payload(validated_payload)
+
+            # framework-to-script ? 09 ??????? textOutput / message.content ??
+            # contract.validate_output_payload ??? appearanceMapping ? object?
+            # ???? outfit_versions / alias_rules / scene_trigger_rules ?????????
+            # ??????????????????????????? raw match.payload ???????
+            if contract.stage_name == "framework_appearanceMapping" and _is_rich_appearance_candidate(match.payload):
+                normalized_validated_payload = normalized_payload
+            else:
+                normalized_validated_payload = _normalize_rich_appearance_payload(validated_payload)
 
             score = _appearance_richness_score(normalized_validated_payload, variant_source, match)
-
-            # framework-to-script ? 09 ???FastGPT ? newVariables.appearanceMapping
-            # ???????????????? choices/message.content ? responseData.textOutput
-            # ?? AI ??????????????????????????????? root.newVariables?
-            if contract.stage_name == "framework_appearanceMapping":
-                _source_lower = str(variant_source or "").lower()
-                if (
-                    "choices" in _source_lower
-                    or "message.content" in _source_lower
-                    or "textoutput" in _source_lower
-                    or "answertext" in _source_lower
-                ):
-                    score = (1000000000, *score)
-                elif _source_lower.startswith("root.newvariables") or _source_lower.startswith("root.updatevarresult"):
-                    score = (-1000000000, *score)
 
             any_valid_for_source = True
 
@@ -2944,28 +2978,39 @@ def _iter_appearance_output_candidates(
     ????????? JSON ??????????? newVariables/updateVarResult?
     """
 
-    # 1. ??????????? JSON ??????
-    # ????????? AI ????????? outfit_versions / alias_rules ?????
-    for source, text in _iter_named_text_candidates(data):
-        if not isinstance(text, str) or not text.strip():
-            continue
+    if contract.stage_name == STAGE_FRAMEWORK_APPEARANCE_MAPPING:
+        for source, text in _iter_named_text_candidates(data):
+            if not isinstance(text, str) or not text.strip():
+                continue
 
-        parsed_text = _try_parse_json(text)
-        if parsed_text is not None:
-            yield (f"{source}(json)", parsed_text)
+            parsed_text = _try_parse_json(text)
+            if parsed_text is not None:
+                yield (f"{source}(json)", parsed_text)
 
-        try:
-            json_candidates = extract_json_object_candidates(text)
-        except Exception:
-            json_candidates = []
+            try:
+                json_candidates = extract_json_object_candidates(text)
+            except Exception:
+                json_candidates = []
 
-        for index, candidate in enumerate(json_candidates):
-            if isinstance(candidate, dict):
-                yield (f"{source}[json_object:{index}]", candidate)
+            for index, candidate in enumerate(json_candidates):
+                if isinstance(candidate, dict):
+                    yield (f"{source}[json_object:{index}]", candidate)
+    else:
+        for output_alias in (APPEARANCE_MAPPING, *contract.aliases_for_output(APPEARANCE_MAPPING)):
+            yield from _iter_appearance_answer_node_candidates(data, output_alias)
+        yield from _iter_appearance_choice_json_candidates(data)
 
     # 2. ?????????
     # ???? newVariables / updateVarResult / responseData ??????
     for source, candidate in _iter_named_structured_candidates(data):
+        if contract.stage_name != STAGE_FRAMEWORK_APPEARANCE_MAPPING:
+            lowered_source = str(source or "").lower()
+            if (
+                lowered_source == "root"
+                or lowered_source.startswith("root.answertext")
+                or lowered_source.startswith("root.textoutput")
+            ):
+                continue
         yield (source, candidate)
 
         # ??????????? textOutput / answerText???????
@@ -3035,6 +3080,37 @@ def _iter_appearance_choice_json_candidates(
                 )
             ):
                 yield (f"choices[{index}].message.content[json_object:{candidate_index}]", candidate)
+
+
+def _iter_framework_scored_candidates(
+    data: dict[str, Any],
+    contract: FastGPTStageContract,
+) -> Iterable[FrameworkScoredCandidate]:
+    seen: set[str] = set()
+
+    def emit(source: str, candidate: Any) -> Iterable[FrameworkScoredCandidate]:
+        for variant_source, variant_candidate in _iter_framework_wrapped_candidates(
+            source,
+            candidate,
+        ):
+            if not isinstance(variant_candidate, dict):
+                continue
+            fingerprint = f"{variant_source}:{_stable_candidate_fingerprint(variant_candidate)}"
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            yield FrameworkScoredCandidate(
+                source=variant_source,
+                candidate=variant_candidate,
+                preview=_truncate_log_text(_json_for_log(variant_candidate), limit=260),
+                score=_score_framework_candidate(variant_candidate, variant_source, contract),
+            )
+
+    for source, text in _iter_named_text_candidates(data):
+        yield from emit(source, text)
+
+    for source, candidate in _iter_named_structured_candidates(data):
+        yield from emit(source, candidate)
 
 
 def _is_appearance_answer_node_source(source: str) -> bool:

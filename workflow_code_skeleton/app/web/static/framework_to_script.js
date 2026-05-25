@@ -740,7 +740,7 @@
                   ${renderTree(stage11.conflictMemory, "conflictMemory")}
                 </details>
               ` : ""}
-            ` : `<p class="wts-hint">将按 10 输出每 5 集切分 batchEnrichedEpisodePlan。</p>`
+            ` : `<p class="wts-hint"></p>`
           )}
           ${renderStageCard(
             "12",
@@ -764,7 +764,7 @@
                   ${renderTree(stage12.scriptMemory, "scriptMemory")}
                 </details>
               ` : ""}
-            ` : `<p class="wts-hint">将使用 11 当前批次因果冲突计划生成正文及对话。</p>`
+            ` : `<p class="wts-hint"></p>`
           )}
         </div>
       </section>

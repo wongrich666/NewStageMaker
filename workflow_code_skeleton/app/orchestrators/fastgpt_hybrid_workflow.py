@@ -930,21 +930,33 @@ def _run_batched_generation(
 
 
 def _is_framework_to_script_payload(payload: WorkflowInput, variables: dict[str, Any]) -> bool:
-    mode = str(
-        getattr(payload, "script_format_mode", "")
-        or variables.get("script_format_mode")
-        or ""
-    ).strip()
-    return mode in {"framework_to_script", "better_framework_script"}
+    """判断是否走“框架策划包 -> 正式剧本”专用链路。"""
 
+    candidates = (
+        getattr(payload, "script_format_mode", ""),
+        variables.get("script_format_mode"),
+        getattr(payload, "workflow_mode", ""),
+        variables.get("workflow_mode"),
+        getattr(payload, "generation_chain", ""),
+        variables.get("generation_chain"),
+    )
+    normalized = {str(item or "").strip().lower() for item in candidates}
+    if normalized.intersection({"framework_to_script", "better_framework_script"}):
+        return True
+
+    flag_candidates = (
+        getattr(payload, "framework_to_script", False),
+        variables.get("framework_to_script"),
+        getattr(payload, "framework_planner_source", False),
+        variables.get("framework_planner_source"),
+    )
+    return any(str(item).strip().lower() in {"1", "true", "yes", "y"} for item in flag_candidates)
 
 
 _FRAMEWORK_TO_SCRIPT_OBJECT_TARGET_FIELDS = (
     SCENE_DICTIONARY,
-    "sceneDictionary",
     "scene_dictionary",
     SCRIPT_WORLD_RULES_DIGEST,
-    "scriptWorldRulesDigest",
     "script_world_rules_digest",
     APPEARANCE_MAPPING,
     "appearance_mapping",
@@ -952,27 +964,39 @@ _FRAMEWORK_TO_SCRIPT_OBJECT_TARGET_FIELDS = (
     "appearance_mapping_result",
     ALL_ENRICHED_EPISODE_PLAN,
     "all_enriched_episode_plan",
+    "allEnrichedEpisodePlan",
     "enrichedEpisodePlanResult",
     "enriched_episode_plan_result",
 )
 
 
 def _scan_framework_to_script_json_objects(raw: str) -> list[dict[str, Any]]:
+    text = str(raw or "").strip()
+    if not text:
+        return []
+
     decoder = json.JSONDecoder()
     objects: list[dict[str, Any]] = []
+    seen: set[str] = set()
     index = 0
-    while index < len(raw):
-        brace_index = raw.find("{", index)
-        if brace_index < 0:
-            break
+    while index < len(text):
+        if text[index].isspace():
+            index += 1
+            continue
+        if text[index] != "{":
+            index += 1
+            continue
         try:
-            parsed, end_index = decoder.raw_decode(raw, brace_index)
+            parsed, end = decoder.raw_decode(text, index)
         except Exception:
-            index = brace_index + 1
+            index += 1
             continue
         if isinstance(parsed, dict):
-            objects.append(parsed)
-        index = max(end_index, brace_index + 1)
+            fingerprint = json.dumps(parsed, ensure_ascii=False, sort_keys=True, default=str)
+            if fingerprint not in seen:
+                seen.add(fingerprint)
+                objects.append(parsed)
+        index = max(end, index + 1)
     return objects
 
 

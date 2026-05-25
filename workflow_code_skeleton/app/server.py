@@ -1399,15 +1399,71 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             except Exception:
                 return None
 
+        def _extract_json_object_candidates(value):
+            if not isinstance(value, str):
+                return []
+            text = value.strip()
+            if not text:
+                return []
+            parsed = _try_parse_json_text(text)
+            candidates = []
+            seen = set()
+            if isinstance(parsed, dict):
+                fingerprint = _json.dumps(parsed, ensure_ascii=False, sort_keys=True, default=str)
+                seen.add(fingerprint)
+                candidates.append(parsed)
+
+            in_string = False
+            escaping = False
+            depth = 0
+            start = None
+            for index, char in enumerate(text):
+                if depth > 0:
+                    if escaping:
+                        escaping = False
+                        continue
+                    if char == "\\":
+                        escaping = True
+                        continue
+                    if char == '"':
+                        in_string = not in_string
+                        continue
+                    if in_string:
+                        continue
+                    if char == "{":
+                        depth += 1
+                        continue
+                    if char == "}":
+                        depth -= 1
+                        if depth == 0 and start is not None:
+                            parsed = _try_parse_json_text(text[start : index + 1])
+                            if isinstance(parsed, dict):
+                                fingerprint = _json.dumps(parsed, ensure_ascii=False, sort_keys=True, default=str)
+                                if fingerprint not in seen:
+                                    seen.add(fingerprint)
+                                    candidates.append(parsed)
+                            start = None
+                        continue
+                elif char == "{":
+                    depth = 1
+                    start = index
+                    in_string = False
+                    escaping = False
+            return candidates
+
         def _extract_update_vars(payload):
             found = {}
+            if isinstance(payload, list):
+                for item in payload:
+                    found.update(_extract_update_vars(item))
+                return found
             if not isinstance(payload, dict):
                 return found
-            response_data = payload.get("responseData")
-            if not isinstance(response_data, dict):
-                return found
-            update_results = response_data.get("updateVarResult")
+            update_results = payload.get("updateVarResult")
             if not isinstance(update_results, list):
+                response_data = payload.get("responseData")
+                if isinstance(response_data, (dict, list)):
+                    found.update(_extract_update_vars(response_data))
                 return found
             for item in update_results:
                 if not isinstance(item, dict):
@@ -1426,57 +1482,239 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         def _extract_appearance_payload(payload):
             candidates = []
 
-            def visit(obj):
+            def _list_count(value):
+                return len(value) if isinstance(value, list) else 0
+
+            def _mapping_from_candidate(item):
+                if not isinstance(item, dict):
+                    return None
+                mapping = (
+                    item.get("appearanceMapping")
+                    or item.get("appearance_mapping")
+                    or item.get("appearanceMappingResult")
+                    or item.get("appearance_mapping_result")
+                )
+                if isinstance(mapping, str):
+                    parsed = _try_parse_json_text(mapping)
+                    mapping = parsed if isinstance(parsed, dict) else mapping
+                if isinstance(mapping, dict) and isinstance(mapping.get("appearanceMapping"), dict):
+                    mapping = mapping.get("appearanceMapping")
+                if isinstance(mapping, dict):
+                    return mapping
+                if isinstance(item.get("characters"), list):
+                    return item
+                return None
+
+            def _rich_counts(mapping):
+                if not isinstance(mapping, dict):
+                    return {
+                        "characters": 0,
+                        "outfit_versions": 0,
+                        "outfit_variants": 0,
+                        "alias_rules": 0,
+                        "scene_trigger_rules": 0,
+                        "episode_usage_plan": 0,
+                        "episode_level_usage_plan": 0,
+                        "global_alias_rules": 0,
+                    }
+
+                counts = {
+                    "characters": 0,
+                    "outfit_versions": 0,
+                    "outfit_variants": 0,
+                    "alias_rules": 0,
+                    "scene_trigger_rules": _list_count(mapping.get("scene_level_usage_plan")),
+                    "episode_usage_plan": _list_count(mapping.get("episode_level_usage_plan")),
+                    "episode_level_usage_plan": _list_count(mapping.get("episode_level_usage_plan")),
+                    "global_alias_rules": _list_count(mapping.get("global_alias_rules")),
+                }
+
+                characters = mapping.get("characters")
+                if isinstance(characters, list):
+                    counts["characters"] = len(characters)
+                    for character in characters:
+                        if not isinstance(character, dict):
+                            continue
+                        counts["outfit_versions"] += _list_count(character.get("outfit_versions"))
+                        counts["outfit_variants"] += _list_count(character.get("outfit_variants"))
+                        counts["alias_rules"] += _list_count(character.get("alias_rules"))
+                        counts["scene_trigger_rules"] += _list_count(character.get("scene_trigger_rules"))
+                        counts["episode_usage_plan"] += _list_count(character.get("episode_usage_plan"))
+                        counts["episode_level_usage_plan"] += _list_count(character.get("episode_level_usage_plan"))
+
+                return counts
+
+            def _score_mapping(mapping, source):
+                counts = _rich_counts(mapping)
+                return (
+                    counts["outfit_versions"] + counts["outfit_variants"],
+                    counts["outfit_versions"],
+                    counts["outfit_variants"],
+                    counts["alias_rules"],
+                    counts["scene_trigger_rules"],
+                    counts["episode_usage_plan"] + counts["episode_level_usage_plan"],
+                    counts["global_alias_rules"],
+                    counts["characters"],
+                    1 if any(key in str(source).lower() for key in ("textoutput", "answertext", "choices")) else 0,
+                )
+
+            def _normalize_mapping(mapping):
+                if not isinstance(mapping, dict):
+                    return mapping
+
+                normalized = copy.deepcopy(mapping)
+                characters = normalized.get("characters")
+                if not isinstance(characters, list):
+                    return normalized
+
+                normalized_characters = []
+                for character in characters:
+                    if not isinstance(character, dict):
+                        normalized_characters.append(character)
+                        continue
+
+                    item = copy.deepcopy(character)
+                    outfit_versions = item.get("outfit_versions")
+                    outfit_variants = item.get("outfit_variants")
+
+                    # 09 ???????? outfit_versions?
+                    # ???????? outfit_variants?????????????????????
+                    if isinstance(outfit_versions, list) and outfit_versions and not outfit_variants:
+                        converted = []
+                        default_name = (
+                            item.get("default_name")
+                            or item.get("name")
+                            or item.get("canonical_name")
+                            or item.get("character_id")
+                            or ""
+                        )
+                        for version in outfit_versions:
+                            if isinstance(version, dict):
+                                version_item = copy.deepcopy(version)
+                                version_id = (
+                                    version_item.get("variant_id")
+                                    or version_item.get("version_id")
+                                    or version_item.get("linked_outfit_version")
+                                    or ""
+                                )
+                                version_item.setdefault("variant_id", version_id)
+                                version_item.setdefault("linked_outfit_version", version_id)
+                                version_item.setdefault("alias_name", version_item.get("alias_name") or default_name)
+                                version_item.setdefault(
+                                    "outfit_description",
+                                    version_item.get("outfit_description")
+                                    or version_item.get("clothing")
+                                    or version_item.get("description")
+                                    or "",
+                                )
+                                version_item.setdefault(
+                                    "usage_rule",
+                                    version_item.get("usage_rule")
+                                    or version_item.get("trigger_condition")
+                                    or "",
+                                )
+                                if "scene_trigger_rules" not in version_item:
+                                    scene_refs = version_item.get("scene_refs")
+                                    version_item["scene_trigger_rules"] = scene_refs if isinstance(scene_refs, list) else []
+                                converted.append(version_item)
+                            elif isinstance(version, str) and version.strip():
+                                converted.append({
+                                    "variant_id": version.strip(),
+                                    "linked_outfit_version": version.strip(),
+                                    "alias_name": default_name,
+                                    "outfit_description": "",
+                                    "usage_rule": "",
+                                    "scene_trigger_rules": [],
+                                })
+                        item["outfit_variants"] = converted
+
+                    if "episode_level_usage_plan" not in item and isinstance(item.get("episode_usage_plan"), list):
+                        item["episode_level_usage_plan"] = item.get("episode_usage_plan")
+
+                    normalized_characters.append(item)
+
+                normalized["characters"] = normalized_characters
+                return normalized
+
+            def _add_candidate(source, obj):
+                mapping = _mapping_from_candidate(obj)
+                if isinstance(mapping, dict) and mapping:
+                    candidates.append((source, mapping))
+
+            def visit(obj, source="root"):
                 if isinstance(obj, dict):
-                    candidates.append(obj)
+                    _add_candidate(source, obj)
 
-                    parsed_answer = _try_parse_json_text(obj.get("answerText"))
-                    if parsed_answer is not None:
-                        visit(parsed_answer)
+                    for text_key in ("textOutput", "answerText", "text", "content"):
+                        text_value = obj.get(text_key)
+                        for candidate_index, parsed in enumerate(_extract_json_object_candidates(text_value)):
+                            visit(parsed, f"{source}.{text_key}" if candidate_index == 0 else f"{source}.{text_key}[json_object:{candidate_index}]")
 
-                    parsed_text = _try_parse_json_text(obj.get("text"))
-                    if parsed_text is not None:
-                        visit(parsed_text)
+                    choices = obj.get("choices")
+                    if isinstance(choices, list):
+                        for index, choice in enumerate(choices):
+                            if not isinstance(choice, dict):
+                                continue
+                            message = choice.get("message")
+                            if isinstance(message, dict):
+                                for candidate_index, parsed in enumerate(_extract_json_object_candidates(message.get("content"))):
+                                    visit(parsed, f"{source}.choices[{index}].message.content" if candidate_index == 0 else f"{source}.choices[{index}].message.content[json_object:{candidate_index}]")
 
                     update_vars = _extract_update_vars(obj)
                     if update_vars:
-                        candidates.append(update_vars)
-                        for val in update_vars.values():
-                            parsed = _try_parse_json_text(val)
-                            if parsed is not None:
-                                visit(parsed)
+                        _add_candidate(f"{source}.updateVars", update_vars)
+                        for key, val in update_vars.items():
+                            for candidate_index, parsed in enumerate(_extract_json_object_candidates(val)):
+                                visit(parsed, f"{source}.updateVars.{key}" if candidate_index == 0 else f"{source}.updateVars.{key}[json_object:{candidate_index}]")
 
-                    for key in ("data", "result", "output", "response", "responseData"):
+                    for key in (
+                        "data",
+                        "result",
+                        "output",
+                        "outputs",
+                        "response",
+                        "responseData",
+                        "newVariables",
+                        "updateVarResult",
+                    ):
                         val = obj.get(key)
                         if isinstance(val, (dict, list)):
-                            visit(val)
+                            visit(val, f"{source}.{key}")
                         else:
-                            parsed = _try_parse_json_text(val)
-                            if parsed is not None:
-                                visit(parsed)
+                            for candidate_index, parsed in enumerate(_extract_json_object_candidates(val)):
+                                visit(parsed, f"{source}.{key}" if candidate_index == 0 else f"{source}.{key}[json_object:{candidate_index}]")
 
                 elif isinstance(obj, list):
-                    for item in obj:
-                        visit(item)
+                    for index, item in enumerate(obj):
+                        visit(item, f"{source}[{index}]")
                 else:
-                    parsed = _try_parse_json_text(obj)
-                    if parsed is not None:
-                        visit(parsed)
+                    for parsed in _extract_json_object_candidates(obj):
+                        visit(parsed, source)
 
             visit(payload)
 
-            for item in candidates:
-                if not isinstance(item, dict):
-                    continue
-                appearanceMapping = (
-                    item.get("appearanceMapping")
-                    or item.get("appearanceMapping")
-                    or item.get("appearanceMappingResult")
-                )
-                if isinstance(appearanceMapping, dict) and appearanceMapping:
-                    return appearanceMapping
+            if not candidates:
+                return None
 
-            return None
+            scored = []
+            for source, mapping in candidates:
+                normalized = _normalize_mapping(mapping)
+                counts = _rich_counts(normalized)
+                score = _score_mapping(normalized, source)
+                scored.append((score, source, counts, normalized))
+
+            scored.sort(key=lambda item: item[0], reverse=True)
+            best_score, best_source, best_counts, best_mapping = scored[0]
+
+            logger.info(
+                "stage09 appearanceMapping selected source=%s counts=%s",
+                best_source,
+                best_counts,
+            )
+
+            return best_mapping
+
+
 
         asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
         if not _try_begin_framework_stage(user_id, asset_id, "09"):
@@ -2174,6 +2412,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "workflow_mode": "framework_to_script",
             "generation_chain": "framework_to_script",
             "framework_to_script": True,
+        "script_format_mode": "framework_to_script",
             "framework_planner_source": True,
         }
         if isinstance(data.get("user_knowledge_step_prompts"), dict):
