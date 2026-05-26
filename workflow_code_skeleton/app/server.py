@@ -2337,8 +2337,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 )
                 script_memory = str(data.get("scriptMemory") or existing_stage12.get("scriptMemory") or "")
                 base_vars = {
+                    "totalEpisodes": total_episodes,
                     "total_episodes": total_episodes,
                     "scriptStartEpisode": start_episode,
+                    "episodeWordCount": episode_word_count,
                     "episode_word_count": episode_word_count,
                     "batchEnrichedEpisodePlan": batch_plan,
                     "batchCausalConflictPlan": conflict_plan,
