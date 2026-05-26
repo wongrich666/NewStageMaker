@@ -1,11 +1,18 @@
 :root {
-  --wts-bg: #f5f6f8;
-  --wts-panel: #ffffff;
+  --color-bg: #f5f7fb;
+  --color-panel: #ffffff;
+  --color-primary: #3f5fe3;
+  --color-primary-soft: #edf1ff;
+  --color-border: #d8deea;
+  --color-text: #172033;
+  --color-muted: #667085;
+  --wts-bg: var(--color-bg);
+  --wts-panel: var(--color-panel);
   --wts-soft: #f8fafc;
-  --wts-border: #e5e7eb;
-  --wts-strong: #111827;
-  --wts-text: #1f2937;
-  --wts-muted: #6b7280;
+  --wts-border: var(--color-border);
+  --wts-strong: var(--color-primary);
+  --wts-text: var(--color-text);
+  --wts-muted: var(--color-muted);
   --wts-ok: #16803c;
   --wts-danger: #991b1b;
   --wts-radius: 16px;
@@ -16,7 +23,7 @@
 body {
   margin: 0;
   color: var(--wts-text);
-  background: linear-gradient(180deg, #fafafa 0%, var(--wts-bg) 100%);
+  background: linear-gradient(180deg, #f8fbff 0%, var(--wts-bg) 100%);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
   font-size: 14px;
 }
@@ -115,6 +122,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   color: var(--wts-danger);
 }
 .wts-error.hidden { display: none; }
+.wts-error-inline {
+  color: var(--wts-danger);
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
 .wts-empty,
 .wts-empty-state,
 .wts-loading {

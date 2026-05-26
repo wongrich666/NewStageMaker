@@ -143,6 +143,8 @@
     editingProjectStatus: null,
     editingAssetKind: "",
     editingAssetLocked: false,
+    assetEditMode: "view",
+    assetDirty: false,
     assetDeleteConfirmResolver: null,
     assetDeleteHideTimer: null,
     toolDefinitions: {},
@@ -2153,7 +2155,7 @@ startRuntimeDebugPolling();
 
   function renderToolList() {
     if (!els.toolList) return;
-    const definitions = Object.values(toolDefinitions());
+    const definitions = Object.values(toolDefinitions()).filter((tool) => tool.key !== "new_framework");
     els.toolList.innerHTML = definitions.map((tool) => `
       <button
         class="tool-shortcut${tool.key === state.activeTool ? " active" : ""}"
@@ -3194,8 +3196,15 @@ startRuntimeDebugPolling();
       els.assetsList.innerHTML = emptyCard("还没有用户资产");
       return;
     }
-    const { visibleItems, hasMore } = paginateItems(assets, state.assetsPage, 6);
-    els.assetsList.innerHTML = visibleItems.map((item) => `
+    const categories = [
+      ["老剧本平台资产", assets.filter((item) => !["framework_planner", "framework_to_script"].includes(String(item.asset_kind || "")))],
+      ["框架资产", assets.filter((item) => String(item.asset_kind || "") === "framework_planner")],
+      ["新剧本资产", assets.filter((item) => String(item.asset_kind || "") === "framework_to_script" || String(item.script_format_mode || "") === "framework_to_script")],
+    ];
+    els.assetsList.innerHTML = categories.map(([title, items]) => `
+      <section class="asset-category">
+        <div class="asset-category-head">${escapeHtml(title)}</div>
+        ${items.length ? items.map((item) => `
       <article class="asset-tile">
         <div class="asset-topline">
           <span class="status-pill ${item.status === "completed" ? "status-pill-completed" : ""}">${escapeHtml(statusLabel(item.status))}</span>
@@ -3217,19 +3226,18 @@ startRuntimeDebugPolling();
           <div class="asset-action-group">
             <span class="asset-action-label">资产操作</span>
             ${isToolAsset(item) ? "" : `<button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>`}
-            ${isToolAsset(item) ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">新页面打开</button>`}
-            ${item.completion_confirmed && !isToolAsset(item) ? "" : `<button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">${isToolAsset(item) ? "查看结果" : "修改资产"}</button>`}
+            ${isToolAsset(item) ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>`}
+            <button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>
+            ${String(item.asset_kind || "") === "framework_planner" ? `<a class="btn btn-secondary" href="/framework-to-script?framework_asset_id=${encodeURIComponent(item.project_id)}${currentAuthToken() ? `&auth_token=${encodeURIComponent(currentAuthToken())}` : ""}">进入框架到剧本</a>` : ""}
             <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : (isToolAsset(item) ? "公开结果" : "公开成品")}</button>
             <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除资产</button>
           </div>
           ${renderAssetTaskActions(item)}
         </div>
       </article>
-    `).join("") + (hasMore ? `
-      <div class="list-more-row">
-        <button class="btn btn-secondary" type="button" data-action="load-more-assets">加载更多资产</button>
-      </div>
-    ` : "");
+    `).join("") : emptyCard(`暂无${title}`)}
+      </section>
+    `).join("");
   }
 
   function renderAssetTaskActions(item) {
@@ -3290,7 +3298,9 @@ startRuntimeDebugPolling();
     state.editingProjectStatus = String(project.status || "");
     state.editingAssetKind = String(project.asset_kind || "").trim();
     state.editingAssetLocked = Boolean(project.completion_confirmed && state.editingAssetKind !== "tool_result");
-    const locked = state.editingAssetLocked;
+    state.assetEditMode = "view";
+    state.assetDirty = false;
+    const locked = true;
     els.editAssetTitle.value = project.title || input.title || "";
     els.editAssetSummary.value = input.story_outline || artifacts.story_outline || "";
     els.editAssetPrivacy.value = project.visibility || "private";
@@ -3300,10 +3310,10 @@ startRuntimeDebugPolling();
     if (els.editAssetTitle) els.editAssetTitle.disabled = locked;
     if (els.editAssetSummary) els.editAssetSummary.disabled = locked;
     if (els.editAssetFinal) els.editAssetFinal.disabled = locked;
-    if (els.editAssetPrivacy) els.editAssetPrivacy.disabled = false;
+    if (els.editAssetPrivacy) els.editAssetPrivacy.disabled = true;
     if (els.saveAssetEditBtn) {
       els.saveAssetEditBtn.disabled = false;
-      els.saveAssetEditBtn.textContent = locked ? "仅保存公开设置" : "保存修改";
+      els.saveAssetEditBtn.textContent = "修改";
     }
     els.assetEditor.classList.remove("hidden");
     els.assetEditor.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -3311,6 +3321,15 @@ startRuntimeDebugPolling();
 
   async function saveAssetEdit() {
     if (!requireLogin() || !state.editingProjectId) return;
+    if (state.assetEditMode !== "edit") {
+      state.assetEditMode = "edit";
+      state.assetDirty = false;
+      [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].forEach((field) => {
+        if (field) field.disabled = false;
+      });
+      if (els.saveAssetEditBtn) els.saveAssetEditBtn.textContent = "应用修改";
+      return;
+    }
     const payload = {
       visibility: els.editAssetPrivacy.value
     };
@@ -3341,6 +3360,8 @@ startRuntimeDebugPolling();
     state.editingProjectStatus = null;
     state.editingAssetKind = "";
     state.editingAssetLocked = false;
+    state.assetEditMode = "view";
+    state.assetDirty = false;
     [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].forEach((field) => {
       if (field) field.disabled = false;
     });
@@ -3350,7 +3371,7 @@ startRuntimeDebugPolling();
     if (els.editAssetFinal) els.editAssetFinal.value = "";
     if (els.saveAssetEditBtn) {
       els.saveAssetEditBtn.disabled = false;
-      els.saveAssetEditBtn.textContent = "保存修改";
+      els.saveAssetEditBtn.textContent = "修改";
     }
     els.assetEditor.classList.add("hidden");
     syncButtons();

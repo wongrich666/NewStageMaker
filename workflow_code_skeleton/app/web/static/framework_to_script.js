@@ -28,21 +28,6 @@
     batchScriptReview: "正文审核",
     scriptMemory: "正文记忆",
   };
-  const SCRIPT_STAGE_PREFERENCE_KEYS = {
-    "08": "scene",
-    "09": "appearance",
-    "10": "episode",
-    "11": "conflict",
-    "12": "script_text",
-  };
-  const SCRIPT_STAGE_PREFERENCE_LABELS = {
-    scene: "08 场景字典偏好",
-    appearance: "09 角色外观映射偏好",
-    episode: "10 分集细化偏好",
-    conflict: "11 开头冲突钩子偏好",
-    script_text: "12 正文写作偏好",
-  };
-
   const state = Object.assign({
     frameworkAssetId: null,
     projectId: null,
@@ -59,12 +44,20 @@
     runningStartedAt: "",
     error: null,
     importStatus: "",
+    frameworkSource: "",
   }, loadWorkspace());
 
   const urlAssetId = params.get("framework_asset_id") || params.get("asset_id") || "";
   if (urlAssetId && String(urlAssetId) !== String(state.frameworkAssetId || "")) {
+    window.localStorage.removeItem(STORAGE_KEY);
     state.frameworkAssetId = urlAssetId;
-  } else if (!urlAssetId && (!state.importedFrameworkAsset || state.importedFrameworkAsset.import_source !== "structured_json")) {
+    state.frameworkSource = "刚刚完成";
+    state.projectId = null;
+    state.importedFrameworkAsset = null;
+    state.frameworkPlanPackage = null;
+    state.stageOutputs = {};
+    state.scriptStages = {};
+  } else if (!urlAssetId) {
     state.frameworkAssetId = null;
     state.projectId = null;
     state.importedFrameworkAsset = null;
@@ -72,6 +65,7 @@
     state.stageOutputs = {};
     state.scriptStages = {};
     state.assetPanelOpen = true;
+    state.frameworkSource = "";
   }
 
   function headers() {
@@ -134,89 +128,13 @@
         stageOutputs: state.stageOutputs,
         settings: state.settings,
         scriptStages: state.scriptStages,
+        frameworkSource: state.frameworkSource,
       })));
     } catch (error) {}
   }
 
-  function normalizeStagePrompts(value) {
-    const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-    return {
-      basic: String(source.basic || ""),
-      worldview: String(source.worldview || ""),
-      character: String(source.character || ""),
-      beat: String(source.beat || ""),
-      storylines: String(source.storylines || ""),
-      guide: String(source.guide || ""),
-      package: String(source.package || ""),
-      scene: String(source.scene || ""),
-      appearance: String(source.appearance || ""),
-      episode: String(source.episode || ""),
-      conflict: String(source.conflict || ""),
-      script_text: String(source.script_text || ""),
-    };
-  }
-
-  function selectedKnowledgeTags() {
-    const selected = new Set((state.selectedKnowledgeTagIds || []).map(String));
-    return (state.knowledgeTags || []).filter((tag) => selected.has(String(tag.id || "")));
-  }
-
-  function stagePreferenceInfo(stageNo) {
-    const stageKey = SCRIPT_STAGE_PREFERENCE_KEYS[String(stageNo).padStart(2, "0")] || "";
-    const tags = selectedKnowledgeTags();
-    const withPreference = tags.filter((tag) => {
-      const prompts = normalizeStagePrompts(tag.stage_prompts || {});
-      return Boolean(String(prompts[stageKey] || "").trim());
-    });
-    return { stageKey, tags, withPreference };
-  }
-
-  function userKnowledgePayload(stageNo) {
-    const info = stagePreferenceInfo(stageNo);
-    const selectedTags = selectedKnowledgeTags().map((tag) => ({
-      id: String(tag.id || ""),
-      name: String(tag.name || ""),
-      category: String(tag.category || ""),
-      builtin: Boolean(tag.builtin),
-      description: String(tag.description || ""),
-      prompt_text: String(tag.prompt_text || ""),
-      stage_prompts: normalizeStagePrompts(tag.stage_prompts || {}),
-    }));
-    return {
-      selected_preference_tag_ids: (state.selectedKnowledgeTagIds || []).map(String),
-      selected_preference_tags: selectedTags,
-      stage_preference_prompt: info.withPreference.map((tag) => {
-        const prompts = normalizeStagePrompts(tag.stage_prompts || {});
-        const label = SCRIPT_STAGE_PREFERENCE_LABELS[info.stageKey] || info.stageKey;
-        return `【智慧库标签偏好：${tag.name || tag.id} / ${label}】\n${prompts[info.stageKey] || ""}`;
-      }).filter(Boolean).join("\n\n"),
-    };
-  }
-
   function attachKnowledgePayload(payload, stageNo) {
     return Object.assign({}, payload || {});
-  }
-
-  async function loadKnowledgePreferences() {
-    try {
-      const [tagsData, preferencesData] = await Promise.all([
-        requestJson("/api/user-knowledge/tags"),
-        requestJson("/api/user-knowledge/preferences"),
-      ]);
-      state.knowledgeTags = Array.isArray(tagsData.tags) ? tagsData.tags : [];
-      const preferences = preferencesData.preferences || {};
-      if (Array.isArray(preferences.selected_preference_tag_ids)) {
-        state.selectedKnowledgeTagIds = preferences.selected_preference_tag_ids.map(String);
-      }
-      state.knowledgeStatus = state.selectedKnowledgeTagIds.length
-        ? `已沿用 ${state.selectedKnowledgeTagIds.length} 个智慧库标签`
-        : "当前未选择智慧库标签";
-      saveWorkspace();
-      render();
-    } catch (error) {
-      state.knowledgeStatus = "智慧库偏好加载失败，将使用默认策略。";
-      render();
-    }
   }
 
   function outputDetailsStorageKey(id) {
@@ -472,6 +390,99 @@
     return value.allEnrichedEpisodePlanText || value.enrichedEpisodePlanText || "";
   }
 
+  function chineseNumberToInt(text) {
+    const map = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+    const value = String(text || "").trim();
+    if (/^\d+$/.test(value)) return Number(value);
+    if (value === "十") return 10;
+    const tenIndex = value.indexOf("十");
+    if (tenIndex >= 0) {
+      const left = value.slice(0, tenIndex);
+      const right = value.slice(tenIndex + 1);
+      return (left ? map[left] || 0 : 1) * 10 + (right ? map[right] || 0 : 0);
+    }
+    return map[value] || 0;
+  }
+
+  function episodeNumberFromValue(value) {
+    if (Number.isFinite(Number(value)) && Number(value) > 0) return Number(value);
+    const text = String(value || "");
+    const match = text.match(/(?:第\s*)?([0-9]+|[一二两三四五六七八九十]{1,4})\s*(?:集|话|episode)?/i);
+    return match ? chineseNumberToInt(match[1]) : 0;
+  }
+
+  function normalizeEpisodePlanItems(plan) {
+    return (Array.isArray(plan) ? plan : []).map((item, index) => {
+      const source = item && typeof item === "object" ? item : { title: String(item || "") };
+      const episode = episodeNumberFromValue(
+        source.episode ?? source.episodeNumber ?? source.episode_number ?? source.index ?? source.title ?? index + 1
+      );
+      return Object.assign({}, source, { episode });
+    });
+  }
+
+  function inferTotalEpisodes(plan, asset) {
+    const fromAsset = Number((asset || {}).episodes_per_season || (asset || {}).total_episodes || 0);
+    if (Number.isFinite(fromAsset) && fromAsset > 0) return fromAsset;
+    const numbers = normalizeEpisodePlanItems(plan).map((item) => item.episode).filter(Boolean);
+    return numbers.length ? Math.max(...numbers) : 0;
+  }
+
+  function findDuplicateNumbers(numbers) {
+    const seen = new Set();
+    const dup = new Set();
+    numbers.forEach((number) => {
+      if (seen.has(number)) dup.add(number);
+      seen.add(number);
+    });
+    return Array.from(dup).sort((a, b) => a - b);
+  }
+
+  function episodeNumbersFromText(text) {
+    const numbers = [];
+    const pattern = /(?:第\s*)?([0-9]+|[一二两三四五六七八九十]{1,4})\s*集|episode\s*([0-9]+)|Episode\s*([0-9]+)/g;
+    String(text || "").replace(pattern, (_, cnOrNum, ep1, ep2) => {
+      const value = cnOrNum || ep1 || ep2;
+      const number = episodeNumberFromValue(value);
+      if (number > 0) numbers.push(number);
+      return "";
+    });
+    return numbers;
+  }
+
+  function validateStage10Completeness(plan, text, totalEpisodes) {
+    const normalizedPlan = normalizeEpisodePlanItems(plan);
+    const numbers = normalizedPlan.map((item) => item.episode).filter((number) => number > 0);
+    const expected = Array.from({ length: Math.max(0, Number(totalEpisodes) || 0) }, (_, index) => index + 1);
+    const missing = expected.filter((number) => !numbers.includes(number));
+    const duplicates = findDuplicateNumbers(numbers);
+    const outOfRange = numbers.filter((number) => number < 1 || (totalEpisodes && number > totalEpisodes));
+    const textNumbers = episodeNumbersFromText(text);
+    const textMissing = expected.filter((number) => !textNumbers.includes(number));
+    const textExtra = textNumbers.filter((number) => totalEpisodes && (number < 1 || number > totalEpisodes));
+    const textDuplicates = findDuplicateNumbers(textNumbers);
+    const issues = [];
+    if (!normalizedPlan.length) issues.push("缺少 allEnrichedEpisodePlan");
+    if (expected.length && numbers[0] !== 1) issues.push("结构化计划未从第 1 集开始");
+    if (missing.length) issues.push(`结构化计划缺集：${missing.join("、")}`);
+    if (duplicates.length) issues.push(`结构化计划重复：${duplicates.join("、")}`);
+    if (outOfRange.length) issues.push(`结构化计划越界：${Array.from(new Set(outOfRange)).join("、")}`);
+    if (text && textMissing.length) issues.push(`文本计划少写：${textMissing.join("、")}`);
+    if (textExtra.length) issues.push(`文本计划多写/越界：${Array.from(new Set(textExtra)).join("、")}`);
+    if (textDuplicates.length) issues.push(`文本计划重复：${textDuplicates.join("、")}`);
+    return {
+      ok: issues.length === 0,
+      issues,
+      missing,
+      duplicates,
+      outOfRange,
+      textMissing,
+      textExtra,
+      textDuplicates,
+      normalizedPlan,
+    };
+  }
+
   function textOrEmpty(value) {
     if (Array.isArray(value)) return value.filter(Boolean).join("、");
     if (value && typeof value === "object") {
@@ -667,6 +678,7 @@
       state.frameworkPlanPackage = asset.framework_plan_package || {};
       state.stageOutputs = asset.stage_outputs || {};
       state.scriptStages = asset.scriptStages || (asset.framework_to_script_state || {}).scriptStages || {};
+      state.frameworkSource = state.frameworkSource === "刚刚完成" ? "刚刚完成" : "我的资产";
       const stage10 = state.scriptStages.stage10 || {};
       const allEnrichedEpisodePlan = stage10Plan(stage10);
       const allEnrichedEpisodePlanText = stage10Text(stage10);
@@ -714,10 +726,22 @@
       };
     }
     const basic = data.basic_config || data.basicConfig || {};
-    const title = data.project_title || data.source_title || data.title || basic.project_title || basic.source_title || "导入的结构化框架";
+    const title = data.project_title || data.source_title || data.title || basic.project_title || basic.source_title || frameworkPlanPackage.project_title || "";
     const episodes = Number(data.episodes_per_season || data.total_episodes || basic.episodes_per_season || basic.total_episodes || frameworkPlanPackage.episodes_per_season || 0);
-    if (!episodes && !hasObject(frameworkPlanPackage)) {
-      throw new Error("导入失败：无法推断基本集数和核心框架内容。");
+    if (!String(title || "").trim()) {
+      throw new Error("导入失败：无法确定项目标题。");
+    }
+    if (!episodes) {
+      throw new Error("导入失败：无法确定总集数。");
+    }
+    if (!hasObject(frameworkPlanPackage)) {
+      throw new Error("导入失败：无法确定框架核心内容。");
+    }
+    const allEnrichedEpisodePlan = data.allEnrichedEpisodePlan || data.all_enriched_episode_plan || stageOutputs.allEnrichedEpisodePlan || stageOutputs.all_enriched_episode_plan || [];
+    const normalizedEpisodePlan = normalizeEpisodePlanItems(allEnrichedEpisodePlan);
+    if (normalizedEpisodePlan.length) {
+      const validation = validateStage10Completeness(normalizedEpisodePlan, data.allEnrichedEpisodePlanText || data.all_enriched_episode_plan_text || "", episodes);
+      if (!validation.ok) throw new Error(`导入失败：${validation.issues.join("；")}`);
     }
     return {
       title,
@@ -742,6 +766,14 @@
         adaptation_guide: stageOutputs.adaptation_guide || data.adaptation_guide || frameworkPlanPackage.adaptation_guide || {},
         framework_plan_package: frameworkPlanPackage,
       },
+      scriptStages: normalizedEpisodePlan.length ? {
+        stage10: {
+          allEnrichedEpisodePlan: normalizedEpisodePlan,
+          enrichedEpisodePlan: normalizedEpisodePlan,
+          allEnrichedEpisodePlanText: data.allEnrichedEpisodePlanText || data.all_enriched_episode_plan_text || "",
+          episodeValidation: { ok: true, issues: [] },
+        },
+      } : {},
     };
   }
 
@@ -757,7 +789,8 @@
       state.importedFrameworkAsset = asset;
       state.frameworkPlanPackage = asset.framework_plan_package || {};
       state.stageOutputs = asset.stage_outputs || {};
-      state.scriptStages = {};
+      state.scriptStages = asset.scriptStages || {};
+      state.frameworkSource = "导入 JSON";
       state.assetPanelOpen = false;
       state.importStatus = `导入成功：${asset.title || "未命名框架"} · ${asset.episodes_per_season || "未知"} 集 · ${asset.minutes_per_episode || "未知"} 分钟/集`;
       try {
@@ -867,33 +900,58 @@
     render();
 
     try {
-      const data = await requestJson("/api/framework-to-script/stage/10", {
-        method: "POST",
-        body: JSON.stringify(attachKnowledgePayload({
-          ...frameworkRequestBase(),
-          sceneDictionary: stage08.sceneDictionary,
-          scriptWorldRulesDigest: stage08.scriptWorldRulesDigest,
-          appearanceMapping: stage09.appearanceMapping,
-        }, "10")),
-      });
+      let data = null;
+      let validation = null;
+      let lastIssues = [];
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        data = await requestJson("/api/framework-to-script/stage/10", {
+          method: "POST",
+          body: JSON.stringify({
+            ...frameworkRequestBase(),
+            sceneDictionary: stage08.sceneDictionary,
+            scriptWorldRulesDigest: stage08.scriptWorldRulesDigest,
+            appearanceMapping: stage09.appearanceMapping,
+            retry_reason: lastIssues.join("；"),
+          }),
+        });
+
+        const enrichedEpisodePlan =
+          data.enrichedEpisodePlan ||
+          data.allEnrichedEpisodePlan ||
+          data.enriched_episode_plan ||
+          null;
+
+        const enrichedEpisodePlanText =
+          data.enrichedEpisodePlanText ||
+          data.allEnrichedEpisodePlanText ||
+          data.enriched_episode_plan_text ||
+          "";
+        const totalEpisodes = inferTotalEpisodes(enrichedEpisodePlan, state.importedFrameworkAsset);
+        validation = validateStage10Completeness(enrichedEpisodePlan, enrichedEpisodePlanText, totalEpisodes);
+        if (validation.ok) break;
+        lastIssues = validation.issues;
+      }
 
       const enrichedEpisodePlan =
         data.enrichedEpisodePlan ||
         data.allEnrichedEpisodePlan ||
         data.enriched_episode_plan ||
         null;
-
       const enrichedEpisodePlanText =
         data.enrichedEpisodePlanText ||
         data.allEnrichedEpisodePlanText ||
         data.enriched_episode_plan_text ||
         "";
+      if (!validation || !validation.ok) {
+        throw new Error(`10 分集细化校验失败：${(validation && validation.issues || []).join("；")}`);
+      }
 
       state.scriptStages.stage10 = {
-        enrichedEpisodePlan,
+        enrichedEpisodePlan: validation.normalizedPlan,
         enrichedEpisodePlanText,
-        allEnrichedEpisodePlan: data.allEnrichedEpisodePlan || enrichedEpisodePlan,
+        allEnrichedEpisodePlan: validation.normalizedPlan,
         allEnrichedEpisodePlanText: data.allEnrichedEpisodePlanText || enrichedEpisodePlanText,
+        episodeValidation: validation,
         updated_at: new Date().toISOString(),
       };
       clearDownstreamStages("stage10");
@@ -905,6 +963,19 @@
       clearRunningStage("10");
       render();
     }
+  }
+
+  async function prepareScriptMaterials() {
+    if (!currentAssetReady()) {
+      state.error = "请先选择框架资产或导入结构化框架 JSON。";
+      render();
+      return;
+    }
+    await runStage08();
+    if (state.error) return;
+    await runStage09();
+    if (state.error) return;
+    await runStage10();
   }
 
   async function runStage11(options = {}) {
@@ -920,6 +991,12 @@
     const allEnrichedEpisodePlan = stage10Plan(stage10);
     if (!hasContent(allEnrichedEpisodePlan)) {
       state.error = "缺少第10阶段结构化分集计划，请先重新运行10。";
+      render();
+      return;
+    }
+    const validation = validateStage10Completeness(allEnrichedEpisodePlan, stage10Text(stage10), inferTotalEpisodes(allEnrichedEpisodePlan, state.importedFrameworkAsset));
+    if (!validation.ok) {
+      state.error = `10 分集细化校验未通过，不能进入 11：${validation.issues.join("；")}`;
       render();
       return;
     }
@@ -970,7 +1047,6 @@
         firstRequest = false;
       }
       saveWorkspace();
-      await runStage12({ resetStage12: resetStage11, autoFromStage11: true });
     } catch (error) {
       state.error = error.message || "11 开头冲突钩子失败";
     } finally {
@@ -1197,6 +1273,8 @@
           </div>
           <div class="wts-version">
             <span>当前框架版本：${escapeHtml(state.frameworkAssetId)}</span>
+            <span>框架来源：${escapeHtml(state.frameworkSource || "未选择")}</span>
+            <span>当前阶段：08-12</span>
             <span>保存时间：${escapeHtml(formatDate(asset.updated_at || asset.created_at))}</span>
             <button type="button" class="wts-btn ghost" data-action="save-workspace">保存当前版本</button>
           </div>
@@ -1238,7 +1316,7 @@
             <button type="button" data-action="${escapeHtml(action)}" ${disabled ? "disabled" : ""}>${escapeHtml(buttonText)}</button>
             ${extraActions}
           </div>
-          <p class="wts-hint">输入来源：已导入的 01-07 框架、上游阶段结果和本页显式参数。</p>
+          <p class="wts-hint">输入来源：已导入的框架和已完成内容</p>
           ${body || ""}
         </div>
       </article>
@@ -1284,16 +1362,18 @@
     const reset08Button = `<button type="button" data-action="rerun-stage-08" ${locked ? "disabled" : ""}>重新运行08阶段</button>`;
     const reset09Button = `<button type="button" data-action="rerun-stage-09" ${locked || !has08 ? "disabled" : ""}>重新运行09阶段</button>`;
     const reset10Button = `<button type="button" data-action="rerun-stage-10" ${locked || !has09 ? "disabled" : ""}>重新运行10阶段</button>`;
-    const reset11Button = `<button type="button" data-action="rerun-stage-11" ${locked || !has10Output ? "disabled" : ""}>重新运行11阶段</button>`;
+    const stage10Validation = stage10.episodeValidation || validateStage10Completeness(stage10Plan(stage10), stage10Text(stage10), inferTotalEpisodes(stage10Plan(stage10), state.importedFrameworkAsset));
+    const stage10Valid = has10 && stage10Validation.ok;
+    const reset11Button = `<button type="button" data-action="rerun-stage-11" ${locked || !stage10Valid ? "disabled" : ""}>重新运行11阶段</button>`;
     const reset12Button = `<button type="button" data-action="rerun-stage-12" ${locked || !has11Complete ? "disabled" : ""}>重新运行12阶段</button>`;
     return `
       <section class="wts-card" id="scriptStageArea">
         <div class="wts-card-head">
           <div>
             <h2>框架到剧本链路</h2>
-            <p>未导入框架前，阶段按钮会保持禁用。08-12 当前不使用智慧库偏好，只使用框架资产和上游阶段结果。</p>
+            <p>未导入框架前，阶段按钮会保持禁用。08-12 只使用框架资产和上游阶段结果。</p>
           </div>
-          <button type="button" class="wts-btn ghost" data-action="show-version-history">版本历史</button>
+          <button type="button" class="wts-btn" data-action="prepare-script-materials" ${locked ? "disabled" : ""}>一键准备正文素材</button>
         </div>
                <div class="wts-steps">
           ${renderStageCard(
@@ -1338,6 +1418,7 @@
                   "enrichedEpisodePlanText"
                 )}
               </details>
+              ${stage10Validation.ok ? `<p class="wts-hint">集数完整性校验通过。</p>` : `<p class="wts-error-inline">集数完整性校验失败：${escapeHtml(stage10Validation.issues.join("；"))}</p>`}
             ` : `<p class="wts-hint">将沿用当前导入的框架资产和已完成的 08/09 输出。</p>`,
             reset10Button
           )}
@@ -1345,9 +1426,9 @@
             "11",
             "开头冲突钩子",
             stage11Status,
-            has11Complete ? "重新补跑 11→12" : has11 ? "继续运行" : "运行 11",
+            has11Complete ? "重新运行 11" : has11 ? "继续运行 11" : "运行 11",
             "run-stage-11",
-            locked || !has10Output,
+            locked || !stage10Valid,
             has11 ? renderStage11Batches(stage11) : `<p class="wts-hint">${state.runningStage ? `当前 ${escapeHtml(state.runningStage)} 阶段运行态锁定，完成或超时后可继续。` : ""}</p>`,
             reset11Button
           )}
@@ -1416,6 +1497,8 @@
       runStage10();
     } else if (action === "rerun-stage-10") {
       runStage10();
+    } else if (action === "prepare-script-materials") {
+      prepareScriptMaterials();
     } else if (action === "run-stage-11") {
       runStage11();
     } else if (action === "rerun-stage-11") {
@@ -1430,9 +1513,6 @@
       saveWorkspace();
       state.error = null;
       render();
-    } else if (action === "show-version-history") {
-      state.assetPanelOpen = true;
-      loadAssets();
     } else if (action === "collapse-tree-node") {
       const detail = target.closest("details.wts-tree-node");
       if (detail) detail.open = false;

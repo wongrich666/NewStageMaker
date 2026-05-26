@@ -1,4 +1,12 @@
 :root {
+  --color-bg: #f5f7fb;
+  --color-panel: #ffffff;
+  --color-primary: #3f5fe3;
+  --color-primary-strong: #2747cc;
+  --color-primary-soft: #edf1ff;
+  --color-border: #d8deea;
+  --color-text: #172033;
+  --color-muted: #667085;
   --c-cyan: #00d0ff;
   --c-blue: #31b5fd;
   --c-peri: #6796ee;
@@ -1322,10 +1330,8 @@ a {
 }
 
 .workspace-body {
-  color: #e6edf6;
-  background:
-    radial-gradient(circle at top right, rgba(64, 92, 138, 0.22), transparent 28%),
-    linear-gradient(180deg, #12161d 0%, #171c24 100%);
+  color: var(--color-text);
+  background: linear-gradient(180deg, #f8fbff 0%, var(--color-bg) 100%);
 }
 
 .workspace-body .profile-drawer,
@@ -2406,14 +2412,14 @@ a {
 
 /* Framework planner visual alignment for the main script workspace. */
 .workspace-body {
-  --mono-bg: #f4f6fb;
-  --mono-surface: #ffffff;
+  --mono-bg: var(--color-bg);
+  --mono-surface: var(--color-panel);
   --mono-surface-soft: #f8fafc;
-  --mono-border: #d8deea;
-  --mono-text: #172033;
-  --mono-muted: #667085;
-  --mono-accent: #3f5fe3;
-  --mono-accent-strong: #2747cc;
+  --mono-border: var(--color-border);
+  --mono-text: var(--color-text);
+  --mono-muted: var(--color-muted);
+  --mono-accent: var(--color-primary);
+  --mono-accent-strong: var(--color-primary-strong);
   --mono-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
   color: var(--mono-text);
   background: #f4f6fb;
@@ -4436,9 +4442,9 @@ a {
 .workspace-body .sidebar-create-btn,
 .mono-page .btn-public,
 .workspace-body .btn-public {
-  color: var(--mono-accent, #c5a24f);
-  background: var(--mono-surface, #1f1f1f);
-  border-color: rgba(197, 162, 79, 0.28);
+  color: #ffffff;
+  background: var(--mono-accent, #3f5fe3);
+  border-color: var(--mono-accent, #3f5fe3);
   box-shadow: var(--mono-shadow, none);
 }
 
@@ -4449,16 +4455,62 @@ a {
 .workspace-body .btn-public:hover:not(:disabled),
 .status-pill-public:hover,
 .status-pill-pending:hover {
-  color: var(--mono-accent-strong, #d1b06a);
-  background: var(--mono-surface-soft, #2a2a2a);
-  border-color: rgba(197, 162, 79, 0.38);
+  color: #ffffff;
+  background: var(--mono-accent-strong, #2747cc);
+  border-color: var(--mono-accent-strong, #2747cc);
+}
+
+.workspace-body .sidebar-primary {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-body .sidebar-create-btn {
+  width: 100%;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  border-radius: 10px;
+  text-decoration: none;
+}
+
+.workspace-body .sidebar-section-entry {
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 38px;
+  border-radius: 10px;
+}
+
+.workspace-empty-link {
+  display: block;
+  color: var(--mono-muted);
+  text-decoration: none;
+  padding: 10px;
+}
+
+.asset-category {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.asset-category-head {
+  font-weight: 700;
+  color: var(--mono-text);
+  padding: 8px 2px 0;
 }
 
 .platform-entry-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
   margin: 14px 0;
+}
+
+.platform-entry-grid-muted {
+  margin-bottom: 8px;
 }
 
 .platform-flow-note {

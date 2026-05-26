@@ -31,11 +31,13 @@
 
       <div class="sidebar-primary">
         <button id="newScriptBtn" class="sidebar-create-btn" type="button">＋ 新建剧本</button>
+        <a class="sidebar-create-btn" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">＋ 新建框架</a>
+        <a class="sidebar-create-btn" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">＋ 框架到剧本</a>
       </div>
 
       <div class="sidebar-nav">
         <section class="sidebar-group">
-          <div class="sidebar-group-label">我的剧本</div>
+          <div class="sidebar-group-label">我的资产</div>
           <div class="sidebar-section-head sidebar-section-head-compact">
             <span>资产会话</span>
             <button id="refreshProjectsBtn" class="sidebar-refresh-btn" type="button">刷新</button>
@@ -43,15 +45,23 @@
           <div class="sidebar-folders">
             <details id="activeWorkspaceFolder" class="workspace-folder" open>
               <summary>
-                <span>生成中的剧本</span>
+                <span>老剧本平台资产</span>
               </summary>
               <div id="activeProjectList" class="workspace-compact-list"></div>
             </details>
             <details id="completedWorkspaceFolder" class="workspace-folder">
               <summary>
-                <span>已完成剧本</span>
+                <span>框架资产</span>
               </summary>
               <div id="completedProjectList" class="workspace-compact-list"></div>
+            </details>
+            <details class="workspace-folder">
+              <summary>
+                <span>新剧本资产</span>
+              </summary>
+              <div class="workspace-compact-list">
+                <a class="workspace-empty-link" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">从框架生成后在这里管理</a>
+              </div>
             </details>
           </div>
         </section>
@@ -63,7 +73,10 @@
             </summary>
             <div id="toolList" class="tool-shortcut-list"></div>
           </details>
-          <button id="waibaoScriptBtn" class="sidebar-profile-btn" type="button">外包专属格式</button>
+        </section>
+
+        <section class="sidebar-group sidebar-tools-section">
+          <button id="waibaoScriptBtn" class="sidebar-profile-btn sidebar-section-entry" type="button">外包专属格式</button>
         </section>
 
         <div class="sidebar-group sidebar-links">
@@ -72,10 +85,6 @@
             class="sidebar-text-link"
             href="{{ url_for('workspace_page', auth_token=current_auth_token, section='community') }}"
           >社区好剧</a>
-          <a
-            class="sidebar-text-link"
-            href="{{ url_for('framework_planner_page', auth_token=current_auth_token) }}"
-          >框架策划工作台</a>
         </div>
       </div>
 
@@ -136,23 +145,11 @@
         </div>
       </header>
 
-      <section class="platform-entry-grid" aria-label="平台主流程入口">
+      <section class="platform-entry-grid platform-entry-grid-muted" aria-label="平台状态说明">
         <div class="platform-flow-note">
-          <strong>当前可选路径</strong>
-          <span>写剧本正文：直接填写下方输入并开始；写剧本框架：先完成 01-07 并保存框架资产；从框架写剧本：选择资产或导入结构化框架 JSON 后继续 08-12。</span>
+          <strong>当前工作台</strong>
+          <span>主流程入口已统一放在左侧栏。这里保留当前剧本状态、最近项目和生成进度，避免重复导航。</span>
         </div>
-        <a class="platform-entry-card" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">
-          <strong>写剧本框架</strong>
-          <span>当前流程：写框架。完成后可保存为框架资产，再进入剧本正文阶段。</span>
-        </a>
-        <a class="platform-entry-card" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">
-          <strong>从已有框架写剧本</strong>
-          <span>当前流程：从框架写剧本。请先选择已有框架资产，或导入结构化框架 JSON。</span>
-        </a>
-        <a class="platform-entry-card" href="{{ url_for('framework_planner_page', auth_token=current_auth_token) }}">
-          <strong>继续编辑已有项目</strong>
-          <span>打开已有项目并恢复上次框架策划状态。</span>
-        </a>
       </section>
 
       <section id="toolPanel" class="tool-panel hidden">
@@ -320,7 +317,7 @@
 
       <div id="assetEditor" class="asset-editor hidden">
         <div class="card-head">
-          <h3>修改资产</h3>
+          <h3>资产详情</h3>
         </div>
         <div class="field-grid compact-grid">
           <label class="field">
@@ -344,7 +341,7 @@
           <textarea id="editAssetFinal" class="tall-textarea"></textarea>
         </label>
         <div class="control-row">
-          <button id="saveAssetEditBtn" class="btn btn-primary" type="button">保存修改</button>
+          <button id="saveAssetEditBtn" class="btn btn-primary" type="button">修改</button>
           <button id="cancelAssetEditBtn" class="btn btn-ghost" type="button">取消</button>
         </div>
       </div>

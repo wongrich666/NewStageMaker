@@ -1171,7 +1171,8 @@
     const prerequisite = prerequisiteStageKey(stageKey);
     if (!prerequisite) return true;
     const stageState = targetState && targetState.stage_state ? targetState.stage_state : {};
-    return Boolean((stageState[prerequisite] || {}).confirmed);
+    const upstream = stageState[prerequisite] || {};
+    return Boolean(upstream.confirmed || upstream.stageCommitted);
   }
 
   function viewUnlockedFor(targetState, viewId) {
@@ -1179,7 +1180,7 @@
     const stageKey = stageKeyForView(viewId);
     if (stageKey === "basic") return true;
     if (!prerequisiteConfirmedFor(targetState, stageKey)) return false;
-    if ((stageState[stageKey] || {}).confirmed) return true;
+    if ((stageState[stageKey] || {}).confirmed || (stageState[stageKey] || {}).stageCommitted) return true;
     return prerequisiteConfirmedFor(targetState, stageKey);
   }
 
@@ -1189,7 +1190,7 @@
 
   function setCurrentView(viewId) {
     if (!viewUnlocked(viewId)) {
-      showToast("请先确认上游阶段");
+      showToast("请先生成并应用上游阶段");
       return;
     }
     state.current_view = viewId;
@@ -2126,8 +2127,7 @@
         </div>
         <div class="fp-side-note">
           <div class="fp-side-line"><span class="fp-tag ${modeClass}">${escapeHtml(modeLabel)}</span></div>
-          <div>上游阶段确认并锁定后，下游阶段内容不能直接修改。
-如需更改上游内容，必须先点击“回退”按钮，这会自动清空下游阶段的确认状态，再进行修改。</div>
+          <div>每个阶段都需要手动生成、审阅结果；编辑后点击“应用修改”，下游阶段才会读取新版结果。</div>
         </div>
         <div class="fp-side-note">
           <strong>本地保存：</strong>状态会自动保存
@@ -2152,7 +2152,7 @@
           <button class="fp-btn small primary" data-action="open-new-script">新建框架项目</button>
           ${renderSaveFrameworkButton("small")}
           ${renderFrameworkScriptButton("small")}
-          <button class="fp-btn small" data-action="toggle-assets">${ui.assetsOpen ? "收起已有项目" : "继续上次项目"}</button>
+          <button class="fp-btn small" data-action="toggle-assets">${ui.assetsOpen ? "收起框架资产" : "我的框架资产"}</button>
           <a class="fp-btn small ghost" data-guard-nav="workspace" href="${escapeHtml(config.workspaceUrl || "/workspace")}">返回主工作台</a>
           <button class="fp-btn small danger" data-action="reset-state" ${canClearFrameworkInput() ? "" : "disabled"}>清空输入</button>
         </div>
@@ -2170,8 +2170,8 @@
       <section class="fp-card fp-asset-manager">
         <div class="fp-card-title-row">
           <div>
-            <h2 class="fp-card-title">继续编辑已有项目</h2>
-            <p class="fp-card-sub">打开已保存的框架项目并恢复上次状态。新建框架项目不会自动带入这里的历史内容。</p>
+            <h2 class="fp-card-title">我的框架资产</h2>
+            <p class="fp-card-sub">从这里手动打开已保存的框架资产。新建框架不会自动恢复旧资产。</p>
           </div>
           <button class="fp-btn small" data-action="refresh-assets" ${ui.assetsLoading ? "disabled" : ""}>${ui.assetsLoading ? "刷新中..." : "刷新"}</button>
         </div>
@@ -2500,7 +2500,7 @@
           </div>
           ${stageStatusTag("basic")}
         </div>
-        ${locked ? `<div class="fp-inline-warning">基础配置已确认并锁定。如需修改，请显式回退到该阶段，系统会清空下游确认状态。</div>` : ""}
+        ${locked ? `<div class="fp-inline-warning">基础配置已应用。后续阶段会读取当前 01 输出。</div>` : ""}
         <div class="fp-grid two">
           <div class="fp-field">
             <label>项目标题</label>
@@ -2567,9 +2567,7 @@
         ${renderApplyStageChangesPanel("basic")}
         ${renderStageHistoryPanel("basic")}
         ${isStageLoading("basic") ? renderProcessingBanner("正在提取原文信息，请稍候。") : ""}
-        <div class="fp-actions">
-          ${locked ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="basic">回退到此阶段并清空下游</button>` : ""}
-        </div>
+        ${renderStageBottomActions("basic")}
       </section>
     `;
   }
@@ -2666,12 +2664,13 @@
           <strong>${dirty ? "当前阶段有未应用的修改" : "当前阶段结果已应用"}</strong>
           <p>${dirty ? "请先点击“应用修改”，否则下游仍会使用旧结果。" : "已应用的结果会作为下一阶段输入，并写入 localStorage / 后端框架资产。"}</p>
         </div>
-        <button class="fp-btn ${dirty ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="${escapeHtml(stageKey)}">应用修改</button>
+        <button class="fp-btn ${dirty ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="${escapeHtml(stageKey)}" ${dirty ? "" : "disabled"}>应用修改</button>
       </div>
     `;
   }
 
   function renderStageHistoryPanel(stageKey) {
+    if (!DEV_LOG_ENABLED) return "";
     const stageNo = stageNoForKey(stageKey);
     if (!stageNo) return "";
     const entries = ui.stageHistory[stageKey] || [];
@@ -2721,6 +2720,29 @@
     return date.toLocaleString();
   }
 
+  function renderStageBottomActions(stageKey) {
+    const stageNo = stageNoForKey(stageKey);
+    const index = STAGE_SEQUENCE.indexOf(stageKey);
+    const previousStage = STAGE_SEQUENCE[index - 1];
+    const nextStage = STAGE_SEQUENCE[index + 1];
+    const previousView = previousStage ? firstViewForStage(previousStage) : "";
+    const nextView = nextStage ? firstViewForStage(nextStage) : "";
+    const hasOutput = hasStageData(stageKey);
+    const running = isStageLoading(stageKey);
+    const dirty = stageDraftDirty(stageKey);
+    const blockReason = stageRunBlockReason(stageKey);
+    const canNext = Boolean(nextView && hasOutput && !dirty && viewUnlocked(nextView));
+    return `
+      <div class="fp-actions fp-stage-bottom-actions">
+        <button class="fp-btn" data-action="go-view" data-view="${escapeHtml(previousView)}" ${previousView ? "" : "disabled"}>上一步</button>
+        <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="${escapeHtml(stageKey)}" ${running || blockReason ? "disabled" : ""}>${hasOutput ? `重新生成 ${escapeHtml(stageNo)}` : "生成本阶段"}</button>
+        <button class="fp-btn ${dirty ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="${escapeHtml(stageKey)}" ${dirty ? "" : "disabled"}>应用修改</button>
+        <button class="fp-btn ${canNext ? "primary" : ""}" data-action="go-next-stage" data-view="${escapeHtml(nextView)}" ${canNext ? "" : "disabled"}>下一步</button>
+        ${stageKey === "package" ? `${renderSaveFrameworkButton("")}${renderFrameworkScriptButton("")}` : ""}
+      </div>
+    `;
+  }
+
   function renderPlanStageView(options) {
     const stage = state.stage_state[options.stageKey];
     const data = state[options.dataKey];
@@ -2743,11 +2765,7 @@
         ${renderStageHistoryPanel(options.stageKey)}
         ${renderStageError(options.stageKey)}
         <div class="fp-lock-note">本阶段不会自动生成下游。确认偏好后手动生成，编辑结果后点击“应用修改”才会传给下一阶段。</div>
-        <div class="fp-actions">
-          ${renderUpstreamRollbackButton(options.stageKey)}
-          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="${options.stageKey}">回退 ${escapeHtml(realStageDisplayTitle(options.stageKey))}</button>` : ""}
-          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="${options.stageKey}" ${blocked || confirmed || stageDraftDirty(options.stageKey) || isEmptyValue(data) ? "disabled" : ""}>进入${escapeHtml(options.nextTitle)}</button>
-        </div>
+        ${renderStageBottomActions(options.stageKey)}
       </section>
     `;
   }
@@ -2776,11 +2794,7 @@
         ${renderStageHistoryPanel("beat")}
         ${renderStageError("beat")}
         <div class="fp-lock-note">时间轴可直接编辑；修改节拍后会同步卡点说明，并清空已失效的 05 人物故事线。</div>
-        <div class="fp-actions">
-          ${renderUpstreamRollbackButton("beat")}
-          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="beat">回退 04 三幕十五节拍阶段</button>` : ""}
-          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="beat" ${blocked || confirmed || stageDraftDirty("beat") || !canConfirm ? "disabled" : ""}>进入人物故事线</button>
-        </div>
+        ${renderStageBottomActions("beat")}
       </section>
     `;
   }
@@ -2927,10 +2941,7 @@
         ${renderStagePreRunPanel("beat")}
         ${renderApplyStageChangesPanel("beat")}
         ${renderStageHistoryPanel("beat")}
-        <div class="fp-actions">
-          ${renderUpstreamRollbackButton("beat")}
-          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="beat" ${blocked || confirmed || stageDraftDirty("beat") || state.beat_checkpoint_timeline.length !== 15 || isEmptyValue(state.checkpoint_explanation) ? "disabled" : ""}>进入人物故事线</button>
-        </div>
+        ${renderStageBottomActions("beat")}
       </section>
     `;
   }
@@ -2957,11 +2968,7 @@
         ${renderStageHistoryPanel("storylines")}
         ${renderStageError("storylines")}
         <div class="fp-lock-note">05 阶段不会自动生成。请先确认本阶段智慧库偏好，再手动点击生成。</div>
-        <div class="fp-actions">
-          ${renderUpstreamRollbackButton("storylines")}
-          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="storylines">回退 05 人物故事线阶段</button>` : ""}
-          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="storylines" ${blocked || confirmed || stageDraftDirty("storylines") || !state.character_storylines.length ? "disabled" : ""}>进入整体改编指引</button>
-        </div>
+        ${renderStageBottomActions("storylines")}
       </section>
     `;
   }
@@ -3011,12 +3018,7 @@
         ${renderStagePreRunPanel("storylines")}
         ${renderApplyStageChangesPanel("storylines")}
         ${renderStageHistoryPanel("storylines")}
-        <div class="fp-actions">
-          ${renderUpstreamRollbackButton("storylines")}
-          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="storylines">回退 05 人物故事线阶段</button>` : ""}
-          <button class="fp-btn" data-action="go-view" data-view="storyline_details" ${!state.character_storylines.length ? "disabled" : ""}>返回详情查看</button>
-          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="storylines" ${blocked || confirmed || stageDraftDirty("storylines") || !canConfirm ? "disabled" : ""}>进入整体改编指引</button>
-        </div>
+        ${renderStageBottomActions("storylines")}
       </section>
     `;
   }
@@ -3041,11 +3043,7 @@
         ${renderApplyStageChangesPanel("guide")}
         ${renderStageHistoryPanel("guide")}
         ${renderStageError("guide")}
-        <div class="fp-actions">
-          ${renderUpstreamRollbackButton("guide")}
-          ${confirmed ? `<button class="fp-btn danger" data-action="rollback-stage" data-stage-key="guide">回退 ${escapeHtml(realStageDisplayTitle("guide"))}</button>` : ""}
-          <button class="fp-btn primary" data-action="confirm-stage" data-stage-key="guide" ${blocked || confirmed || stageDraftDirty("guide") || isEmptyValue(state.adaptation_guide) ? "disabled" : ""}>进入最终输出</button>
-        </div>
+        ${renderStageBottomActions("guide")}
       </section>
     `;
   }
@@ -3070,8 +3068,10 @@
         ${renderStagePreRunPanel("package")}
         ${renderApplyStageChangesPanel("package")}
         ${renderStageHistoryPanel("package")}
-        <div class="fp-actions">
-          ${renderUpstreamRollbackButton("package")}
+        <div class="fp-actions fp-stage-bottom-actions">
+          <button class="fp-btn" data-action="go-view" data-view="guide">上一步</button>
+          <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="package" ${locked || isStageLoading("package") ? "disabled" : ""}>${hasOutput ? "重新生成 07" : "生成本阶段"}</button>
+          <button class="fp-btn ${stageDraftDirty("package") ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="package" ${stageDraftDirty("package") ? "" : "disabled"}>应用修改</button>
           ${renderSaveFrameworkButton("")}
           <button class="fp-btn primary" data-action="download-readable-framework" ${locked || !hasOutput ? "disabled" : ""}>下载可读框架</button>
           <button class="fp-btn" data-action="download-structured-framework" ${locked || !hasOutput ? "disabled" : ""}>下载结构化框架</button>
@@ -3088,12 +3088,12 @@
     return `
       <div class="fp-grid two">
         <div class="fp-panel-card">
-          <h3 class="fp-panel-title">最终策划包</h3>
+          <h3 class="fp-panel-title">框架确认</h3>
           ${renderDataBlock(state.framework_plan_package, { dataKey: "framework_plan_package", stageKey: "package", editable: false })}
         </div>
         <div class="fp-panel-card">
-          <h3 class="fp-panel-title">校验报告</h3>
-          ${renderDataBlock(state.validation_report, { dataKey: "validation_report", stageKey: "package", editable: false })}
+          <h3 class="fp-panel-title">进入剧本阶段检查</h3>
+          ${renderWhitelistFields("package", state.framework_plan_package || {})}
         </div>
       </div>
       <div class="fp-stage-note">
@@ -3356,6 +3356,7 @@
   }
 
   function renderRawDebugBlock(data, options) {
+    if (!DEV_LOG_ENABLED) return "";
     const dataKey = (options && options.dataKey) || "stage_output";
     return `
       <details class="fp-debug-raw">
@@ -3859,7 +3860,7 @@
           </div>
           <div class="fp-actions">
             <button class="fp-btn" data-action="close-storyline-modal">关闭</button>
-            <button class="fp-btn primary" data-action="save-storyline-modal" data-storyline-id="${escapeHtml(storyline.id)}">更新故事线</button>
+            <button class="fp-btn primary" data-action="save-storyline-modal" data-storyline-id="${escapeHtml(storylineId)}">更新故事线</button>
           </div>
         </div>
       </div>
@@ -3905,16 +3906,9 @@
   }
 
   function renderFooter() {
-    const currentIndex = VIEW_DEFS.findIndex((item) => item.id === state.current_view);
-    const previous = VIEW_DEFS[currentIndex - 1];
-    const next = VIEW_DEFS[currentIndex + 1];
     return `
       <div class="fp-footer">
-        <div class="fp-footer-note">localStorage 自动保存已开启。上游确认后不能直接改；如需修改，请使用显式回退。</div>
-        <div class="fp-top-actions">
-          <button class="fp-btn" data-action="go-view" data-view="${previous ? previous.id : ""}" ${previous && viewUnlocked(previous.id) ? "" : "disabled"}>上一步</button>
-          <button class="fp-btn primary" data-action="go-next-stage" data-view="${next ? next.id : ""}" ${next && viewUnlocked(next.id) ? "" : "disabled"}>下一步</button>
-        </div>
+        <div class="fp-footer-note">阶段结果会自动保存为草稿；用户编辑后，点击“应用修改”才会影响下游。</div>
       </div>
     `;
   }
@@ -3932,7 +3926,7 @@
     }
     state.current_view = nextView.id;
     render();
-    loadStageHistory(nextView.stageKey).catch(() => {});
+    if (DEV_LOG_ENABLED) loadStageHistory(nextView.stageKey).catch(() => {});
   }
 
   async function autoGenerateCurrentStage() {
@@ -4367,8 +4361,13 @@
       }
       state.stage_state[stageKey].status = options && options.revise ? "updated" : "generated";
       state.stage_state[stageKey].confirmed = false;
-      state.stage_state[stageKey].stageCommitted = false;
-      state.stage_state[stageKey].stageDraftDirty = true;
+      state.stage_state[stageKey].stageCommitted = true;
+      state.stage_state[stageKey].stageDraftDirty = false;
+      const next = STAGE_SEQUENCE[STAGE_SEQUENCE.indexOf(stageKey) + 1];
+      if (next) unlockStage(next);
+      syncFrameworkAssetState(state, `generate:${stageKey}`);
+      saveState();
+      saveFrameworkAsset({ silent: true, skipDirtyCheck: true }).catch(() => {});
       recordHistory(options && options.revise ? "revise_stage" : "generate_stage", { stageKey, stageNo });
       return response;
     } catch (error) {
@@ -6046,10 +6045,12 @@
       return;
     }
     if (action === "download-readable-framework") {
+      if (anyStageDraftDirty()) showToast("当前有未应用修改，下载将使用旧版本。建议先应用修改。");
       downloadTextFile(`${frameworkDownloadBaseName()}_可读框架.txt`, buildReadableFrameworkText(), "text/plain;charset=utf-8");
       return;
     }
     if (action === "download-structured-framework") {
+      if (anyStageDraftDirty()) showToast("当前有未应用修改，下载将使用旧版本。建议先应用修改。");
       downloadTextFile(`${frameworkDownloadBaseName()}_结构化框架.json`, JSON.stringify(buildStructuredFrameworkExport(), null, 2), "application/json;charset=utf-8");
       return;
     }
@@ -6171,5 +6172,5 @@
   render();
   loadKnowledgePreferences().catch(() => {});
   loadAssets().catch(() => {});
-  loadStageHistory(stageKeyForView(state.current_view || "basic")).catch(() => {});
+  if (DEV_LOG_ENABLED) loadStageHistory(stageKeyForView(state.current_view || "basic")).catch(() => {});
 })();
