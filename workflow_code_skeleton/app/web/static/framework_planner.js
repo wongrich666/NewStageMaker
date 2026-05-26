@@ -7,6 +7,14 @@
   const API_BASE = config.apiBase || "/api/framework-planner";
   const authToken = String(config.authToken || "").trim();
   const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "choices", "usage", "updateVarResult", "newVariables"];
+  const TECHNICAL_FIELD_KEYS = new Set(RAW_RESPONSE_KEYS.concat([
+    "id", "nodeId", "moduleName", "moduleType", "moduleLogo",
+    "runningTime", "inputTokens", "outputTokens", "totalPoints",
+    "model", "query", "contextTotalLen", "finishReason", "llmRequestIds",
+    "mapping_version", "schema_version", "version", "debug", "metadata",
+    "cache", "logs", "_meta", "asset_state", "stage_state", "raw_stage_responses",
+  ]));
+  const UNSAVED_MESSAGE = "当前框架尚未保存，直接退出会丢失本次生成结果。";
   const BUSINESS_FIELD_KEYS = [
     "source_brief",
     "worldview_plan",
@@ -188,6 +196,12 @@
     expandedBeats: {},
     expandedStorylines: {},
     expandedBusinessPanels: {},
+    expandedRawTree: {},
+    rawTreeAllOpen: false,
+    rawTreeAllCollapsed: false,
+    dirty: false,
+    suppressBeforeUnload: false,
+    unsavedPrompt: null,
     lastStagePayloadPreview: {},
     stageHistory: {},
     stageHistoryLoading: {},
@@ -660,6 +674,14 @@
   }
 
   function loadState() {
+    const params = new URLSearchParams(window.location.search || "");
+    if (params.get("new") === "1" || params.get("new_framework") === "1") {
+      storageRemove(STORAGE_KEY);
+      storageRemove(LEGACY_STORAGE_KEY);
+      const fresh = normalizeState(null);
+      persistLoadedState(fresh);
+      return fresh;
+    }
     const saved = readStorage(STORAGE_KEY) || readStorage(LEGACY_STORAGE_KEY);
     const normalized = normalizeState(sanitizeLoadedState(saved));
     persistLoadedState(normalized);
@@ -813,6 +835,79 @@
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (error) {
       // ignore storage write errors
+    }
+  }
+
+  function markDirty() {
+    ui.dirty = true;
+  }
+
+  function clearDirty() {
+    ui.dirty = false;
+  }
+
+  function hasUnsavedChanges() {
+    return Boolean(ui.dirty);
+  }
+
+  function confirmDiscardUnsaved() {
+    if (!hasUnsavedChanges()) return true;
+    return window.confirm(UNSAVED_MESSAGE);
+  }
+
+  function promptUnsaved(label, handlers) {
+    if (!hasUnsavedChanges()) {
+      if (handlers && typeof handlers.discard === "function") handlers.discard();
+      return false;
+    }
+    ui.unsavedPrompt = {
+      label,
+      save: handlers && handlers.save,
+      discard: handlers && handlers.discard,
+    };
+    render();
+    return true;
+  }
+
+  async function runUnsavedPrompt(choice) {
+    const prompt = ui.unsavedPrompt;
+    ui.unsavedPrompt = null;
+    if (!prompt) {
+      render();
+      return;
+    }
+    if (choice === "cancel") {
+      render();
+      return;
+    }
+    if (choice === "discard") {
+      clearDirty();
+      if (typeof prompt.discard === "function") await prompt.discard();
+      else render();
+      return;
+    }
+    if (choice === "save") {
+      try {
+        await saveFrameworkAsset({ silent: true });
+        clearDirty();
+        if (typeof prompt.save === "function") await prompt.save();
+        else if (typeof prompt.discard === "function") await prompt.discard();
+        else render();
+      } catch (error) {
+        showToast((error && error.message) || "保存失败，已取消操作");
+        render();
+      }
+    }
+  }
+
+  async function saveAndLeave(targetUrl) {
+    try {
+      await saveFrameworkAsset({ silent: true });
+      clearDirty();
+      ui.suppressBeforeUnload = true;
+      window.location.href = targetUrl;
+    } catch (error) {
+      showToast((error && error.message) || "保存失败，已取消跳转");
     }
   }
 
@@ -1047,14 +1142,14 @@
   function renderFrameworkScriptButton(sizeClass) {
     const className = sizeClass ? ` ${sizeClass}` : "";
     const disabled = canStartFrameworkScript() ? "" : "disabled";
-    const label = ui.loading.framework_script ? "正在保存并进入剧本阶段..." : "进入剧本阶段";
+    const label = ui.loading.framework_script ? "正在保存并进入剧本正文阶段..." : "保存框架并进入剧本正文阶段";
     return `<button class="fp-btn${className} primary" data-action="start-framework-script" ${disabled}>${label}</button>`;
   }
 
   function renderSaveFrameworkButton(sizeClass) {
     const className = sizeClass ? ` ${sizeClass}` : "";
     const disabled = runningStageKey() || ui.loading.framework_save || ui.loading.framework_script ? "disabled" : "";
-    const label = ui.loading.framework_save ? "正在保存..." : "保存当前框架";
+    const label = ui.loading.framework_save ? "正在保存..." : "保存框架";
     return `<button class="fp-btn${className}" data-action="save-framework-asset" ${disabled}>${label}</button>`;
   }
 
@@ -1377,6 +1472,7 @@
     syncStageFlow(state);
     syncFrameworkAssetState(state, `rollback:${stageKey}`);
     recordHistory("rollback", { stageKey });
+    markDirty();
     showToast("已回退并清空下游确认状态");
     render();
   }
@@ -1590,20 +1686,70 @@
     appearanceMapping: "人设服装 alias 映射",
     allEnrichedEpisodePlan: "丰富分集计划",
     allEnrichedEpisodePlanText: "丰富分集计划文本",
+    worldviewPlan: "世界观方案",
+    core_rules: "核心规则",
+    coreRules: "核心规则",
+    forbidden_rules: "禁忌与代价",
+    taboos_and_costs: "禁忌与代价",
+    narrative_risks: "叙事风险",
+    characterPlan: "人物方案",
+    character_arc: "人物成长线",
+    characterArc: "人物成长线",
+    character_goals: "人物目标",
+    characterGoals: "人物目标",
+    beatCheckpointTimeline: "节拍卡点规划",
+    characterStorylines: "人物故事线",
+    overallAdaptationGuide: "整体改编指引",
+    frameworkPlanPackage: "框架策划包",
+    adaptation_guide: "整体改编指引",
+    adaptationGuide: "整体改编指引",
+    world_setting: "世界设定",
+    worldSetting: "世界设定",
+    main_relationships: "人物关系",
+    reversals: "反转与钩子",
+    hooks: "钩子",
+    three_act_structure: "三幕结构",
+    key_nodes: "关键节点",
+    integrity_check: "完整性检查",
   };
 
   function fieldLabel(key) {
     const normalized = String(key || "");
     if (FIELD_LABELS[normalized]) return FIELD_LABELS[normalized];
-    return normalized
-      .replace(/_/g, " ")
-      .replace(/([a-z])([A-Z])/g, "$1 $2")
-      .trim()
-      || "补充信息";
+    return friendlyFallbackLabel(normalized);
   }
 
   function isHiddenTechnicalKey(key) {
-    return RAW_RESPONSE_KEYS.includes(String(key || ""));
+    return TECHNICAL_FIELD_KEYS.has(String(key || ""));
+  }
+
+  function friendlyFallbackLabel(key) {
+    const text = String(key || "")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/[_-]+/g, " ")
+      .trim();
+    if (!text) return "补充信息";
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length > 1) {
+      return words.map((word) => FIELD_LABELS[word] || fallbackWordLabel(word)).join(" / ");
+    }
+    return fallbackWordLabel(text);
+  }
+
+  function fallbackWordLabel(word) {
+    const lower = String(word || "").toLowerCase();
+    const map = {
+      world: "世界", worldview: "世界观", plan: "方案", summary: "概述", core: "核心",
+      rules: "规则", rule: "规则", taboo: "禁忌", taboos: "禁忌", cost: "代价",
+      risk: "风险", risks: "风险", narrative: "叙事", character: "人物", characters: "人物",
+      arc: "成长线", storylines: "故事线", storyline: "故事线", beat: "节拍",
+      checkpoint: "卡点", timeline: "时间轴", guide: "指引", adaptation: "改编",
+      overall: "整体", package: "策划包", validation: "校验", report: "报告",
+      relation: "关系", relationships: "关系", goal: "目标", goals: "目标",
+      change: "变化", changes: "变化", direction: "方向", style: "风格",
+      warning: "提醒", warnings: "提醒", issue: "问题", issues: "问题",
+    };
+    return map[lower] || String(word || "补充信息");
   }
 
   function isRenderableValue(value) {
@@ -1674,9 +1820,35 @@
         ${ui.toast ? `<div class="fp-toast">${escapeHtml(ui.toast)}</div>` : ""}
         ${ui.showNewScriptModal ? renderNewScriptModal() : ""}
         ${ui.modalStorylineId ? renderStorylineModal(ui.modalStorylineId) : ""}
+        ${ui.unsavedPrompt ? renderUnsavedPrompt() : ""}
       </div>
     `;
     restoreFocusedControl(focusedControl);
+  }
+
+  function renderUnsavedPrompt() {
+    const target = ui.unsavedPrompt || {};
+    return `
+      <div class="fp-modal-mask" data-action="cancel-unsaved-prompt">
+        <div class="fp-modal fp-unsaved-modal" data-modal-content="unsaved">
+          <div class="fp-modal-head">
+            <div>
+              <h2>当前框架尚未保存</h2>
+              <p class="fp-modal-sub">${escapeHtml(UNSAVED_MESSAGE)}</p>
+            </div>
+          </div>
+          <div class="fp-stage-note">
+            <strong>即将执行</strong>
+            <span>${escapeHtml(target.label || "离开当前框架")}</span>
+          </div>
+          <div class="fp-actions">
+            <button class="fp-btn primary" data-action="save-unsaved-prompt">保存并退出</button>
+            <button class="fp-btn danger subtle" data-action="discard-unsaved-prompt">不保存，直接退出</button>
+            <button class="fp-btn" data-action="cancel-unsaved-prompt">取消，继续编辑</button>
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   function renderNewScriptModal() {
@@ -1686,13 +1858,13 @@
         <div class="fp-modal" data-modal-content="new-script">
           <div class="fp-card-title-row">
             <div>
-              <h2 class="fp-card-title">新建剧本</h2>
-              <p class="fp-card-sub">填写基础信息后会创建资产，并自动回到第一阶段。</p>
+            <h2 class="fp-card-title">新建框架项目</h2>
+              <p class="fp-card-sub">创建全新的 01-07 框架策划上下文，不会带入旧项目历史版本。</p>
             </div>
             <button class="fp-btn small" data-action="close-new-script">关闭</button>
           </div>
           <div class="fp-grid two">
-            <label class="fp-field"><span>剧本名称</span><input data-new-script-field="title" value="${escapeHtml(form.title)}" /></label>
+            <label class="fp-field"><span>框架项目名称</span><input data-new-script-field="title" value="${escapeHtml(form.title)}" /></label>
             <label class="fp-field"><span>类型 / 风格</span><input data-new-script-field="target_format" value="${escapeHtml(form.target_format)}" /></label>
           </div>
           <div class="fp-grid two" style="margin-top:12px">
@@ -1703,7 +1875,7 @@
           <label class="fp-field" style="margin-top:12px"><span>简短描述</span><textarea data-new-script-field="description" placeholder="一句话写清故事方向、主角或核心冲突。">${escapeHtml(form.description)}</textarea></label>
           <div class="fp-actions">
             <button class="fp-btn" data-action="close-new-script">取消</button>
-            <button class="fp-btn primary" data-action="submit-new-script">创建并进入第一阶段</button>
+            <button class="fp-btn primary" data-action="submit-new-script">创建并进入 01 阶段</button>
           </div>
         </div>
       </div>
@@ -1748,18 +1920,22 @@
   }
 
   function renderTopbar() {
+    const projectId = currentProjectId();
+    const stageTitle = realStageDisplayTitle(stageKeyForView(state.current_view || "basic"));
+    const assetId = hasSavedFrameworkProjectId() ? projectId : "尚未保存";
     return `
       <div class="fp-top">
         <div>
-          <div class="fp-kicker">7 STAGES Framework Planner</div>
+          <div class="fp-kicker">01-07 框架策划阶段</div>
           <h1 class="fp-title">${escapeHtml(state.basic_config.project_title || "未命名框架策划")}</h1>
+          <p class="fp-top-sub">目标：产出可保存的框架资产。当前阶段：${escapeHtml(stageTitle)} · 框架资产 ID：${escapeHtml(assetId)}</p>
         </div>
         <div class="fp-top-actions">
-          <button class="fp-btn small primary" data-action="open-new-script">新建剧本</button>
+          <button class="fp-btn small primary" data-action="open-new-script">新建框架项目</button>
           ${renderSaveFrameworkButton("small")}
           ${renderFrameworkScriptButton("small")}
-          <button class="fp-btn small" data-action="toggle-assets">${ui.assetsOpen ? "收起版本历史" : "版本历史"}</button>
-          <a class="fp-btn small ghost" href="${escapeHtml(config.workspaceUrl || "/workspace")}">返回主工作台</a>
+          <button class="fp-btn small" data-action="toggle-assets">${ui.assetsOpen ? "收起已有项目" : "继续上次项目"}</button>
+          <a class="fp-btn small ghost" data-guard-nav="workspace" href="${escapeHtml(config.workspaceUrl || "/workspace")}">返回主工作台</a>
           <button class="fp-btn small danger" data-action="reset-state" ${canClearFrameworkInput() ? "" : "disabled"}>清空输入</button>
         </div>
       </div>
@@ -1776,8 +1952,8 @@
       <section class="fp-card fp-asset-manager">
         <div class="fp-card-title-row">
           <div>
-            <h2 class="fp-card-title">版本历史</h2>
-            <p class="fp-card-sub">查看已保存的框架资产与剧本资产。恢复操作不会删除其他版本。</p>
+            <h2 class="fp-card-title">继续编辑已有项目</h2>
+            <p class="fp-card-sub">打开已保存的框架项目并恢复上次状态。新建框架项目不会自动带入这里的历史内容。</p>
           </div>
           <button class="fp-btn small" data-action="refresh-assets" ${ui.assetsLoading ? "disabled" : ""}>${ui.assetsLoading ? "刷新中..." : "刷新"}</button>
         </div>
@@ -1801,7 +1977,7 @@
         </div>
         ${ui.assetsLoading ? renderProcessingBanner("正在刷新资产列表...") : ""}
         <div class="fp-asset-list">
-          ${assets.length ? assets.map(renderAssetItem).join("") : `<div class="fp-empty">暂无匹配资产。可以点击“新建剧本”开始一个新的框架策划。</div>`}
+          ${assets.length ? assets.map(renderAssetItem).join("") : `<div class="fp-empty">暂无匹配资产。可以点击“新建框架项目”开始一个新的 01-07 框架策划。</div>`}
         </div>
       </section>
     `;
@@ -2229,11 +2405,15 @@
     const entries = ui.stageHistory[stageKey] || [];
     const loading = ui.stageHistoryLoading[stageKey];
     return `
-      <div class="fp-history-panel">
+      <details class="fp-history-panel fp-advanced-panel">
+        <summary>
+          <span>高级 / 版本记录 / 回滚记录</span>
+          <small>默认隐藏，避免与当前阶段结果混淆</small>
+        </summary>
         <div class="fp-preference-head">
           <div>
-            <strong>历史版本</strong>
-            <p>每次生成都会保留独立版本，成功版本会同步为本阶段最新有效版本。</p>
+            <strong>${escapeHtml(stageDisplayTitle(stageKey))}版本记录</strong>
+            <p>这里仅用于排查和回滚。恢复旧版本会覆盖当前 ${escapeHtml(stageDisplayTitle(stageKey))} 结果，并可能要求重新运行后续阶段；不会删除已保存资产。</p>
           </div>
           <button class="fp-btn small" data-action="refresh-stage-history" data-stage-key="${escapeHtml(stageKey)}" ${loading ? "disabled" : ""}>${loading ? "刷新中..." : "查看历史版本"}</button>
         </div>
@@ -2247,12 +2427,12 @@
               </div>
               <div class="fp-history-actions">
                 <span class="fp-tag ${entry.status === "success" ? "ok" : "red"}">${entry.status === "success" ? "成功" : "失败"}</span>
-                <button class="fp-btn small" data-action="load-stage-history" data-stage-key="${escapeHtml(stageKey)}" data-history-file="${escapeHtml(entry.filename)}" ${entry.status !== "success" ? "disabled" : ""}>恢复到此版本</button>
+                <button class="fp-btn small" title="会覆盖当前${escapeHtml(stageDisplayTitle(stageKey))}结果；后续阶段可能需要重新运行；不会删除已保存资产。" data-action="load-stage-history" data-stage-key="${escapeHtml(stageKey)}" data-history-file="${escapeHtml(entry.filename)}" ${entry.status !== "success" ? "disabled" : ""}>恢复到此版本</button>
               </div>
             </div>
           `).join("") : `<div class="fp-empty small">暂无历史版本。生成本阶段后会自动保存。</div>`}
         </div>
-      </div>
+      </details>
     `;
   }
 
@@ -2595,6 +2775,7 @@
   function renderPackageView() {
     const locked = state.stage_state.package.locked;
     const hasOutput = !isEmptyValue(state.framework_plan_package);
+    const completed = hasOutput && !locked;
     return `
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
@@ -2604,6 +2785,7 @@
           ${locked ? `<span class="fp-tag lock">待上游确认</span>` : hasOutput ? `<span class="fp-tag ok">07 输出已生成</span>` : `<span class="fp-tag blue">等待生成</span>`}
         </div>
         ${isStageLoading("package") ? renderProcessingBanner("正在生成最终策划包，请稍候...") : ""}
+        ${completed ? `<div class="fp-complete-banner">框架已完成，可以进入剧本正文阶段。</div>` : ""}
         ${locked && !hasOutput ? `<div class="fp-empty">请先确认 06 阶段。</div>` : `
           ${renderPackageBlocks()}
         `}
@@ -2659,10 +2841,72 @@
       editable: Boolean(options && options.editable),
       forceOpen: true,
     });
+    const rawTree = renderRawDebugBlock(data, options || {});
     return `
       <div class="fp-business-form" data-business-form="${escapeHtml((options && options.dataKey) || "")}">
         ${overview}
         ${form}
+        ${rawTree}
+      </div>
+    `;
+  }
+
+  function renderRawDebugBlock(data, options) {
+    const dataKey = (options && options.dataKey) || "stage_output";
+    return `
+      <details class="fp-debug-raw">
+        <summary>调试原始数据</summary>
+        <div class="fp-tree-toolbar">
+          <button class="fp-btn small" data-action="tree-expand-all">全部展开</button>
+          <button class="fp-btn small" data-action="tree-collapse-all">全部收起</button>
+        </div>
+        ${renderTree(data, dataKey, 0, [dataKey])}
+      </details>
+    `;
+  }
+
+  function renderTree(value, keyName = "root", depth = 0, path = []) {
+    const clean = stripRawResponseKeys(value);
+    if (!isRenderableValue(clean)) return `<div class="fp-empty small">暂无内容</div>`;
+    const treeId = encodeBusinessPath(path.length ? path : [keyName]);
+    const forcedOpen = ui.rawTreeAllOpen || ui.expandedRawTree[treeId] === true || (depth === 0 && !ui.rawTreeAllCollapsed);
+    if (Array.isArray(clean)) {
+      const items = clean.filter(isRenderableValue);
+      if (!items.length) return `<div class="fp-empty small">暂无条目</div>`;
+      return `
+        <details class="fp-tree-node" data-tree-node="${escapeHtml(treeId)}" ${forcedOpen ? "open" : ""}>
+          <summary><span class="fp-tree-arrow"></span><strong>${escapeHtml(fieldLabel(keyName))}</strong><small>${items.length} 条</small></summary>
+          <div class="fp-tree-body">
+            ${items.map((item, index) => renderTree(item, `${fieldLabel(keyName)} ${index + 1}`, depth + 1, path.concat(index))).join("")}
+            <button type="button" class="fp-btn small ghost fp-collapse-local" data-action="collapse-tree-node">收起本层</button>
+          </div>
+        </details>
+      `;
+    }
+    if (clean && typeof clean === "object") {
+      const entries = Object.keys(clean).filter((key) => !isHiddenTechnicalKey(key) && isRenderableValue(clean[key]));
+      if (!entries.length) return `<div class="fp-empty small">暂无内容</div>`;
+      return `
+        <details class="fp-tree-node" data-tree-node="${escapeHtml(treeId)}" ${forcedOpen ? "open" : ""}>
+          <summary><span class="fp-tree-arrow"></span><strong>${escapeHtml(fieldLabel(keyName))}</strong><small>${escapeHtml(summarizeBusinessValue(clean))}</small></summary>
+          <div class="fp-tree-body">
+            ${entries.map((key) => renderTree(clean[key], key, depth + 1, path.concat(key))).join("")}
+            <button type="button" class="fp-btn small ghost fp-collapse-local" data-action="collapse-tree-node">收起本层</button>
+          </div>
+        </details>
+      `;
+    }
+    const text = String(clean == null ? "" : clean);
+    const long = text.length > 420;
+    return `
+      <div class="fp-tree-leaf">
+        <strong>${escapeHtml(fieldLabel(keyName))}</strong>
+        ${long ? `
+          <details class="fp-tree-text-more">
+            <summary>${escapeHtml(truncateText(text, 420))} <span>展开全文</span></summary>
+            <div>${formatText(text)}</div>
+          </details>
+        ` : `<span>${formatText(text)}</span>`}
       </div>
     `;
   }
@@ -3527,6 +3771,7 @@
         : {};
     }
     syncStageFlow(state);
+    markDirty();
   }
 
   function syncStorylineDecisions(targetState) {
@@ -3640,6 +3885,7 @@
       syncStageFlow(state);
       syncFrameworkAssetState(state, "confirm:basic");
       recordHistory("confirm_stage", { stageKey: "basic", stageNo: "01", sourceBrief: !isEmptyValue(state.source_brief) });
+      markDirty();
       showToast("基础配置已确认，并已生成 source_brief");
       render();
       await autoGenerateCurrentStage();
@@ -3687,6 +3933,7 @@
     syncStageFlow(state);
     syncFrameworkAssetState(state, `confirm:${stageKey}`);
     recordHistory("confirm_stage", { stageKey, stageNo: stageNoForKey(stageKey) });
+    markDirty();
     showToast("已确认并锁定，已解锁下游阶段");
     render();
     await autoGenerateCurrentStage();
@@ -3728,6 +3975,7 @@
       if (stageKey === "guide") ui.editMode.guide = false;
       syncStageFlow(state);
       recordHistory("save_editor", { stageKey, editorKey });
+      markDirty();
       showToast("已更新，确认后才会解锁下游");
       render();
     } catch (error) {
@@ -3756,6 +4004,7 @@
       syncBeatCheckpointData({ clearStorylines: true });
     }
     syncStageFlow(state);
+    markDirty();
     saveState();
     debugStageSummary("business form updated", {
       rootKey,
@@ -3819,6 +4068,7 @@
     state.stage_state.storylines.confirmed = false;
     syncStageFlow(state);
     recordHistory("storyline_decision", { storylineId, decision });
+    markDirty();
     saveState();
     render();
   }
@@ -3859,6 +4109,7 @@
     syncStageFlow(state);
     recordHistory("update_storyline_detail", { storylineId });
     ui.modalStorylineId = null;
+    markDirty();
     showToast("故事线已更新，仍需确认");
     render();
   }
@@ -3881,6 +4132,7 @@
     state.stage_state.storylines.confirmed = false;
     syncStageFlow(state);
     recordHistory("add_storyline", { storylineId: id });
+    markDirty();
     ui.modalStorylineId = id;
     render();
   }
@@ -3910,6 +4162,7 @@
     state.stage_state.beat.confirmed = false;
     syncBeatCheckpointData({ clearStorylines: true });
     syncStageFlow(state);
+    markDirty();
     saveState();
   }
 
@@ -3931,6 +4184,7 @@
     state.stage_state.beat.confirmed = false;
     syncBeatCheckpointData({ clearStorylines: false });
     syncStageFlow(state);
+    markDirty();
     saveState();
   }
 
@@ -3949,6 +4203,7 @@
     state.stage_state.beat.confirmed = false;
     syncBeatCheckpointData({ clearStorylines: false });
     syncStageFlow(state);
+    markDirty();
     saveState();
   }
 
@@ -4121,7 +4376,7 @@
 
   function resetState() {
     if (!canClearFrameworkInput()) {
-      showToast("当前策划已开始，不能清空输入；如需新建，请点击新建剧本");
+      showToast("当前策划已开始，不能清空输入；如需新建，请点击新建框架项目");
       return;
     }
     const proceed = window.confirm("确认清空当前输入吗？已保存的资产和历史版本会保留。");
@@ -4156,14 +4411,12 @@
       showToast("请先完成并确认 07 最终策划包输出");
       return;
     }
-    const confirmed = window.confirm("确认进入框架转剧本工作台吗？本操作只会保存当前框架并跳转，不会自动开始生成剧本。");
-    if (!confirmed) return;
 
     ui.loading.framework_script = true;
     render();
 
     try {
-      if (!hasSavedFrameworkProjectId()) {
+      if (!hasSavedFrameworkProjectId() || hasUnsavedChanges()) {
         try {
           await saveFrameworkAsset({ silent: true });
         } catch (error) {
@@ -4206,6 +4459,7 @@
         workspaceUrl.searchParams.set("auth_token", authToken);
       }
 
+      clearDirty();
       window.location.href = workspaceUrl.pathname + workspaceUrl.search + workspaceUrl.hash;
     } catch (error) {
       showToast((error && error.message) || "进入框架转剧本工作台失败");
@@ -4235,6 +4489,7 @@
       });
       syncStageFlow(state);
       saveState();
+      clearDirty();
       if (!options || !options.silent) {
         showToast("当前框架已保存");
       }
@@ -4446,7 +4701,7 @@
       user_requirements: form.style || "",
     }, {
       form,
-      note: "新建剧本提交时从当前 DOM 重新收集的表单值",
+      note: "新建框架项目提交时从当前 DOM 重新收集的表单值",
     });
     const data = await requestJson("/api/framework-planner/assets", {
       method: "POST",
@@ -4470,6 +4725,7 @@
     ui.assetsOpen = true;
     syncStageFlow(state);
     saveState();
+    clearDirty();
     debugFrontendEvent("new_script_created", {
       project_id: state.asset_state.asset_id,
       project_title: state.basic_config.project_title,
@@ -4485,7 +4741,7 @@
     });
     await loadAssets();
     await loadStageHistory("basic");
-    showToast("新剧本已创建，已进入第一阶段");
+    showToast("新框架项目已创建，已进入 01 阶段");
   }
 
   async function deleteAsset(projectId) {
@@ -4573,6 +4829,10 @@
   }
 
   async function openAsset(projectId) {
+    if (promptUnsaved("切换到已有项目", {
+      save: async () => openAsset(projectId),
+      discard: async () => openAsset(projectId),
+    })) return;
     const data = await requestJson(`/api/projects/${projectId}`);
     const project = data.project || {};
     if (String(project.asset_kind || "") === "framework_planner") {
@@ -4587,6 +4847,7 @@
       await loadStageHistory(stageKeyForView(state.current_view || "basic"));
       showToast("已恢复框架策划资产，可继续生成或进入下游剧本");
       render();
+      clearDirty();
       return;
     }
     const input = project.input_payload || {};
@@ -4606,6 +4867,7 @@
     ui.stageHistoryLoading = {};
     syncStageFlow(state);
     saveState();
+    clearDirty();
     await loadStageHistory("basic");
     showToast("已打开资产，可从第一阶段查看和继续策划");
     render();
@@ -4828,6 +5090,7 @@
     if (target.matches("[data-config-key]")) {
       const key = target.dataset.configKey;
       state.basic_config[key] = target.type === "number" ? Number(target.value) : target.value;
+      markDirty();
       debugStageSummary("basic_config_input", {
         key,
         value_length: String(target.value || "").length,
@@ -4840,6 +5103,7 @@
     if (target.matches("[data-script-preference]")) {
       state.prompt_preferences.script_preference = target.value;
       state.prompt_preferences.active_template_id = "custom";
+      markDirty();
       savePromptPreferences("script_preference");
       saveState();
       return;
@@ -4847,6 +5111,7 @@
     if (target.matches("[data-stage-preference-key]")) {
       const stageKey = target.dataset.stagePreferenceKey;
       state.prompt_preferences.stage_prompts[stageKey] = target.value;
+      markDirty();
       savePromptPreferences(`stage_preference:${stageKey}`);
       saveState();
       return;
@@ -4878,12 +5143,14 @@
     }
     if (target.matches("[data-feedback-key]")) {
       state.feedback[target.dataset.feedbackKey] = target.value;
+      markDirty();
       savePromptPreferences(`feedback:${target.dataset.feedbackKey}`);
       saveState();
       return;
     }
     if (target.matches("[data-editor-key]")) {
       state.editors[target.dataset.editorKey] = target.value;
+      markDirty();
       savePromptPreferences(`editor:${target.dataset.editorKey}`);
       saveState();
       return;
@@ -4917,6 +5184,7 @@
     if (target.matches("[data-config-key]")) {
       const key = target.dataset.configKey;
       state.basic_config[key] = target.type === "number" ? Number(target.value) : target.value;
+      markDirty();
       debugStageSummary("basic_config_change", {
         key,
         value_length: String(target.value || "").length,
@@ -4988,17 +5256,58 @@
     if (!detail || !detail.matches || !detail.matches("[data-business-panel]")) return;
     ui.expandedBusinessPanels[String(detail.dataset.businessPanel || "")] = Boolean(detail.open);
   }, true);
+  app.addEventListener("toggle", (event) => {
+    const detail = event.target;
+    if (!detail || !detail.matches || !detail.matches("[data-tree-node]")) return;
+    ui.expandedRawTree[String(detail.dataset.treeNode || "")] = Boolean(detail.open);
+  }, true);
 
   app.addEventListener("click", async (event) => {
+    const guardedLink = event.target.closest && event.target.closest("a[data-guard-nav]");
+    if (guardedLink && hasUnsavedChanges()) {
+      event.preventDefault();
+      const targetUrl = guardedLink.href;
+      promptUnsaved("返回主工作台", {
+        save: async () => saveAndLeave(targetUrl),
+        discard: () => {
+          ui.suppressBeforeUnload = true;
+          window.location.href = targetUrl;
+        },
+      });
+      return;
+    }
     const actionElement = event.target.closest("[data-action]");
     if (!actionElement) return;
     const action = actionElement.dataset.action;
 
+    if (action === "save-unsaved-prompt") {
+      await runUnsavedPrompt("save");
+      return;
+    }
+    if (action === "discard-unsaved-prompt") {
+      await runUnsavedPrompt("discard");
+      return;
+    }
+    if (action === "cancel-unsaved-prompt") {
+      if (actionElement.matches(".fp-modal-mask") && event.target !== actionElement) return;
+      await runUnsavedPrompt("cancel");
+      return;
+    }
     if (action === "go-view") {
       setCurrentView(actionElement.dataset.view);
       return;
     }
     if (action === "open-new-script") {
+      if (promptUnsaved("新建框架项目", {
+        save: () => {
+          ui.showNewScriptModal = true;
+          render();
+        },
+        discard: () => {
+          ui.showNewScriptModal = true;
+          render();
+        },
+      })) return;
       ui.showNewScriptModal = true;
       render();
       return;
@@ -5015,7 +5324,7 @@
       try {
         await createNewScript();
       } catch (error) {
-        showToast(error.message || "新建剧本失败");
+        showToast(error.message || "新建框架项目失败");
       }
       return;
     }
@@ -5099,6 +5408,27 @@
     }
     if (action === "load-stage-history") {
       await loadHistoryVersion(actionElement.dataset.stageKey, actionElement.dataset.historyFile);
+      return;
+    }
+    if (action === "tree-expand-all") {
+      ui.rawTreeAllOpen = true;
+      ui.rawTreeAllCollapsed = false;
+      render();
+      return;
+    }
+    if (action === "tree-collapse-all") {
+      ui.rawTreeAllOpen = false;
+      ui.rawTreeAllCollapsed = true;
+      ui.expandedRawTree = {};
+      render();
+      return;
+    }
+    if (action === "collapse-tree-node") {
+      const detail = actionElement.closest("details[data-tree-node]");
+      if (detail) {
+        ui.expandedRawTree[String(detail.dataset.treeNode || "")] = false;
+        detail.open = false;
+      }
       return;
     }
     if (action === "go-next-stage") {
@@ -5215,6 +5545,12 @@
     getLastStagePayloadPreview: () => clone(ui.lastStagePayloadPreview),
     runBeatScoreLoop,
   };
+
+  window.addEventListener("beforeunload", (event) => {
+    if (ui.suppressBeforeUnload || !hasUnsavedChanges()) return;
+    event.preventDefault();
+    event.returnValue = UNSAVED_MESSAGE;
+  });
 
   render();
   loadKnowledgePreferences().catch(() => {});

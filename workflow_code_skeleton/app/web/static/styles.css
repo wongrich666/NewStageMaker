@@ -4453,3 +4453,43 @@ a {
   background: var(--mono-surface-soft, #2a2a2a);
   border-color: rgba(197, 162, 79, 0.38);
 }
+
+.platform-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.platform-entry-card {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--mono-border, rgba(24, 24, 24, 0.08));
+  border-radius: 10px;
+  background: var(--mono-surface, #fff);
+  color: var(--mono-text, #171717);
+  padding: 14px;
+  text-decoration: none;
+  box-shadow: var(--mono-shadow, none);
+}
+
+.platform-entry-card:hover {
+  background: var(--mono-surface-soft, #f6f2e8);
+  border-color: rgba(197, 162, 79, 0.35);
+}
+
+.platform-entry-card strong {
+  font-size: 15px;
+}
+
+.platform-entry-card span {
+  color: var(--mono-muted, #667085);
+  line-height: 1.55;
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .platform-entry-grid {
+    grid-template-columns: 1fr;
+  }
+}

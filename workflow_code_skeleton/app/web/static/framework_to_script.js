@@ -49,6 +49,14 @@
   const urlAssetId = params.get("framework_asset_id") || params.get("asset_id") || "";
   if (urlAssetId && String(urlAssetId) !== String(state.frameworkAssetId || "")) {
     state.frameworkAssetId = urlAssetId;
+  } else if (!urlAssetId) {
+    state.frameworkAssetId = null;
+    state.projectId = null;
+    state.importedFrameworkAsset = null;
+    state.frameworkPlanPackage = null;
+    state.stageOutputs = {};
+    state.scriptStages = {};
+    state.assetPanelOpen = true;
   }
 
   function headers() {
@@ -113,6 +121,36 @@
         scriptStages: state.scriptStages,
       })));
     } catch (error) {}
+  }
+
+  function outputDetailsStorageKey(id) {
+    return [state.frameworkAssetId || "no-asset", id].join(":");
+  }
+
+  function isOutputDetailsOpen(id) {
+    const map = (state.settings && state.settings.outputDetailsOpen) || {};
+    return Boolean(map[outputDetailsStorageKey(id)]);
+  }
+
+  function outputDetailsAttrs(id) {
+    return `data-output-details-id="${escapeHtml(id)}"${isOutputDetailsOpen(id) ? " open" : ""}`;
+  }
+
+  function setOutputDetailsOpen(id, isOpen) {
+    if (!state.settings || typeof state.settings !== "object") {
+      state.settings = {};
+    }
+    const map = state.settings.outputDetailsOpen && typeof state.settings.outputDetailsOpen === "object"
+      ? state.settings.outputDetailsOpen
+      : {};
+    const key = outputDetailsStorageKey(id);
+    if (isOpen) {
+      map[key] = true;
+    } else {
+      delete map[key];
+    }
+    state.settings.outputDetailsOpen = map;
+    saveWorkspace();
   }
 
     const RUNNING_STAGE_STORAGE_KEY = "frameworkToScriptRunningStage.v1";
@@ -311,7 +349,11 @@
   }
 
   function labelFor(key) {
-    return FIELD_LABELS[key] || String(key || "").replaceAll("_", " ");
+    if (FIELD_LABELS[key]) return FIELD_LABELS[key];
+    return String(key || "")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replaceAll("_", " ")
+      .trim() || "内容";
   }
 
   function hasObject(value) {
@@ -430,7 +472,7 @@
     const keys = numericKeys(batches);
     if (!keys.length && hasContent(stage11.batchCausalConflictPlan)) {
       return `
-        <details class="wts-output" open>
+        <details class="wts-output" ${outputDetailsAttrs(`stage11:${stage11.batchStartEpisode || "single"}:conflict`)}>
           <summary>第 ${escapeHtml(stage11.batchStartEpisode || "")}-${escapeHtml(stage11.batchEndEpisode || "")} 集因果冲突</summary>
           ${renderConflictSummary(stage11)}
         </details>
@@ -439,7 +481,7 @@
     return keys.map((key) => {
       const batch = batches[key] || {};
       return `
-        <details class="wts-output" open>
+        <details class="wts-output" ${outputDetailsAttrs(`stage11:${key}:conflict`)}>
           <summary>第 ${escapeHtml(batch.batchStartEpisode || key)}-${escapeHtml(batch.batchEndEpisode || "")} 集因果冲突</summary>
           ${renderConflictSummary(batch.batchCausalConflictPlan || batch.batch_causal_conflict_plan)}
         </details>
@@ -452,7 +494,7 @@
     const keys = numericKeys(batches);
     if (!keys.length && hasContent(stage12.batchScriptText || stage12.batch_script_text)) {
       return `
-        <details class="wts-output" open>
+        <details class="wts-output" ${outputDetailsAttrs(`stage12:${stage12.batchStartEpisode || "single"}:script`)}>
           <summary>第 ${escapeHtml(stage12.batchStartEpisode || "")}-${escapeHtml(stage12.batchEndEpisode || "")} 集正文</summary>
           ${renderTree(stage12.batchScriptText || stage12.batch_script_text, "batchScriptText")}
         </details>
@@ -461,7 +503,7 @@
     return keys.map((key) => {
       const batch = batches[key] || {};
       return `
-        <details class="wts-output" open>
+        <details class="wts-output" ${outputDetailsAttrs(`stage12:${key}:script`)}>
           <summary>第 ${escapeHtml(batch.batchStartEpisode || key)}-${escapeHtml(batch.batchEndEpisode || "")} 集正文</summary>
           ${renderTree(batch.batchScriptText || batch.batch_script_text || "暂无", "batchScriptText")}
         </details>
@@ -857,8 +899,8 @@
       if (!clean.length) return `<div class="wts-empty-inline">暂无条目</div>`;
       return `<div class="wts-tree-list">${clean.map((item, index) => `
         <details class="wts-tree-node" ${depth < 1 ? "open" : ""}>
-          <summary>${escapeHtml(labelFor(keyName))} ${index + 1}</summary>
-          <div>${renderTree(item, keyName, depth + 1)}</div>
+          <summary><span class="wts-tree-arrow"></span>${escapeHtml(labelFor(keyName))} ${index + 1}</summary>
+          <div>${renderTree(item, keyName, depth + 1)}<button type="button" class="wts-btn ghost wts-collapse-local" data-action="collapse-tree-node">收起本层</button></div>
         </details>
       `).join("")}</div>`;
     }
@@ -869,18 +911,29 @@
         const complex = item && typeof item === "object";
         return complex ? `
           <details class="wts-tree-node" ${depth < 1 ? "open" : ""}>
-            <summary>${escapeHtml(labelFor(key))}</summary>
-            <div>${renderTree(item, key, depth + 1)}</div>
+            <summary><span class="wts-tree-arrow"></span>${escapeHtml(labelFor(key))}</summary>
+            <div>${renderTree(item, key, depth + 1)}<button type="button" class="wts-btn ghost wts-collapse-local" data-action="collapse-tree-node">收起本层</button></div>
           </details>
         ` : `
           <div class="wts-tree-leaf">
             <b>${escapeHtml(labelFor(key))}</b>
-            <span>${escapeHtml(item)}</span>
+            ${renderTreeText(item)}
           </div>
         `;
       }).join("")}</div>`;
     }
-    return `<div class="wts-tree-text">${escapeHtml(clean)}</div>`;
+    return `<div class="wts-tree-text">${renderTreeText(clean)}</div>`;
+  }
+
+  function renderTreeText(value) {
+    const text = String(value ?? "");
+    if (text.length <= 420) return `<span>${escapeHtml(text)}</span>`;
+    return `
+      <details class="wts-tree-more">
+        <summary>${escapeHtml(text.slice(0, 420))}... <span>展开全文</span></summary>
+        <div>${escapeHtml(text)}</div>
+      </details>
+    `;
   }
 
   function renderAssetPanel() {
@@ -890,7 +943,7 @@
         <div class="wts-card-head">
           <div>
             <h2>导入框架资产</h2>
-            <p>选择已完成 07 最终策划包的框架资产，导入后即可执行 08+ 链路。</p>
+            <p>从已有框架写剧本必须先选择已保存框架资产；本页不会自动使用旧缓存。</p>
           </div>
           <button type="button" class="wts-btn ghost" data-action="close-asset-panel">收起</button>
         </div>
@@ -951,6 +1004,11 @@
           </div>
         </div>
         <div class="wts-summary-grid">
+          <div class="wts-asset-current">
+            <strong>当前使用的框架资产</strong>
+            <span>名称：${escapeHtml(asset.title || "未命名框架资产")}</span>
+            <span>ID：${escapeHtml(state.frameworkAssetId || "未记录")}</span>
+          </div>
           ${[
             ["worldview_plan", "世界观"],
             ["character_plan", "人物"],
@@ -1072,7 +1130,7 @@
             "run-stage-10",
             locked || !has09,
             has10 ? `
-              <details class="wts-output" open>
+              <details class="wts-output" ${outputDetailsAttrs("stage10:enrichedEpisodePlanText")}>
                 <summary>分集细化文本</summary>
                 ${renderTree(
                   stage10.enrichedEpisodePlanText ||
@@ -1116,9 +1174,9 @@
       <main class="wts-shell">
         <header class="wts-header">
           <div>
-            <div class="wts-eyebrow">Framework Asset to Script</div>
+            <div class="wts-eyebrow">08-12 Framework Asset to Script</div>
             <h1>框架转剧本</h1>
-            <p>导入剧本框架，进行剧本创作。</p>
+            <p>从已有框架写剧本。请先选择已保存框架资产，再执行 08-12 正文链路。</p>
           </div>
           <div class="wts-actions">
             <button type="button" class="wts-btn" data-action="open-asset-panel">导入框架资产</button>
@@ -1176,8 +1234,17 @@
     } else if (action === "show-version-history") {
       state.assetPanelOpen = true;
       loadAssets();
+    } else if (action === "collapse-tree-node") {
+      const detail = target.closest("details.wts-tree-node");
+      if (detail) detail.open = false;
     }
   });
+
+  app.addEventListener("toggle", (event) => {
+    const target = event.target;
+    if (!target || !target.matches || !target.matches("details[data-output-details-id]")) return;
+    setOutputDetailsOpen(target.dataset.outputDetailsId, target.open);
+  }, true);
 
   restoreRunningStage();
   reconcileRunningStageResult();
@@ -1185,5 +1252,7 @@
 
   if (state.frameworkAssetId && (state.runningStage || !currentAssetReady())) {
     importAsset(state.frameworkAssetId, { skipConfirm: true });
+  } else if (!state.frameworkAssetId) {
+    loadAssets();
   }
 })();

@@ -2532,72 +2532,122 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         {
                             "success": False,
                             "message": "11 write 阶段未返回可用的 batchCausalConflictPlan，已自动重试 3 次；请查看后端调试终端日志。",
+                            "detail": {
+                                "failed_sub_stage": "causal_conflict_write",
+                                "retry_count": write_retry_count,
+                                "max_write_retries": max_write_retries,
+                                "start_episode": start_episode,
+                                "end_episode": end_episode,
+                                "write_failure_reason": write_failure_reason,
+                                "write_output_keys": write_output_keys,
+                            },
                         }
                     ), 500
-                failed_sub_stage = "causal_conflict_review"
-                try:
-                    review_output = fastgpt_client.run_stage(
-                        STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
-                        {
-                            **base_vars,
-                            "batchCausalConflictPlan": conflict_plan,
-                        },
-                    )
-                except FastGPTStageFormatError as exc:
-                    logger.warning(
-                        "framework-to-script stage11 review missing fields, using defaults: "
-                        "asset_id=%s missing_fields=%s error=%s",
-                        asset_id,
-                        list(exc.missing_fields),
-                        str(exc),
-                    )
-                    review_output = {}
-                review_output_data = review_output if isinstance(review_output, dict) else {}
-                review_passed = _get_bool_alias(review_output_data, "reviewPassed", "passed", default=None)
-                rewrite_required = _get_bool_alias(review_output_data, "rewriteRequired", "rewrite_required", default=None)
-                blocking_issues = _get_list_alias(review_output_data, "blockingIssues", "blocking_issues")
-                non_blocking_issues = _get_list_alias(review_output_data, "nonBlockingIssues", "non_blocking_issues")
-                rewrite_brief = _first_present(review_output_data, "rewriteBrief", "rewrite_brief", default="")
-                if review_passed is None and rewrite_required is None:
-                    logger.warning(
-                        "framework-to-script stage11 review output missing reviewPassed/passed and rewriteRequired/rewrite_required; "
-                        "treating as rewrite needed: "
-                        "asset_id=%s review_output_keys=%s",
+                max_review_rounds = 5
+                conflict_review = {}
+                rewrite_round = 0
+                for review_round in range(1, max_review_rounds + 1):
+                    failed_sub_stage = "causal_conflict_review"
+                    try:
+                        review_output = fastgpt_client.run_stage(
+                            STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+                            {
+                                **base_vars,
+                                "batchCausalConflictPlan": conflict_plan,
+                            },
+                        )
+                    except FastGPTStageFormatError as exc:
+                        logger.warning(
+                            "framework-to-script stage11 review missing fields, using defaults: "
+                            "asset_id=%s missing_fields=%s error=%s",
+                            asset_id,
+                            list(exc.missing_fields),
+                            str(exc),
+                        )
+                        review_output = {}
+                    review_output_data = review_output if isinstance(review_output, dict) else {}
+                    review_passed = _get_bool_alias(review_output_data, "reviewPassed", "passed", default=None)
+                    rewrite_required = _get_bool_alias(review_output_data, "rewriteRequired", "rewrite_required", default=None)
+                    blocking_issues = _get_list_alias(review_output_data, "blockingIssues", "blocking_issues")
+                    non_blocking_issues = _get_list_alias(review_output_data, "nonBlockingIssues", "non_blocking_issues")
+                    rewrite_brief = _first_present(review_output_data, "rewriteBrief", "rewrite_brief", default="")
+                    if review_passed is None and rewrite_required is None:
+                        logger.warning(
+                            "framework-to-script stage11 review output missing reviewPassed/passed and rewriteRequired/rewrite_required; "
+                            "treating as rewrite needed: "
+                            "asset_id=%s review_output_keys=%s",
+                            asset_id,
+                            sorted(review_output_data.keys()),
+                        )
+                        review_passed = False
+                        rewrite_required = True
+                        blocking_issues = []
+                    conflict_review = {
+                        "reviewPassed": review_passed,
+                        "passed": review_passed,
+                        "rewriteRequired": rewrite_required,
+                        "rewrite_required": rewrite_required,
+                        "blockingIssues": blocking_issues,
+                        "blocking_issues": blocking_issues,
+                        "nonBlockingIssues": non_blocking_issues,
+                        "non_blocking_issues": non_blocking_issues,
+                        "rewriteBrief": rewrite_brief,
+                        "rewrite_brief": rewrite_brief,
+                    }
+                    rewrite_triggered = _framework_review_needs_rewrite(conflict_review)
+                    logger.info(
+                        "framework-to-script stage11 review loop: stage=%s batchStartEpisode=%s review_round=%s "
+                        "rewrite_round=%s reviewPassed=%s rewriteRequired=%s blockingIssues_count=%s "
+                        "asset_id=%s review_output_keys=%s nonBlockingIssues_count=%s rewriteBrief_length=%s "
+                        "rewrite_triggered=%s input_keys=%s",
+                        "stage11",
+                        start_episode,
+                        review_round,
+                        rewrite_round,
+                        review_passed,
+                        rewrite_required,
+                        len(blocking_issues),
                         asset_id,
                         sorted(review_output_data.keys()),
+                        len(non_blocking_issues),
+                        len(str(rewrite_brief or "")),
+                        rewrite_triggered,
+                        sorted(base_vars.keys()),
                     )
-                    review_passed = False
-                    rewrite_required = True
-                    blocking_issues = []
-                conflict_review = {
-                    "reviewPassed": review_passed,
-                    "passed": review_passed,
-                    "rewriteRequired": rewrite_required,
-                    "rewrite_required": rewrite_required,
-                    "blockingIssues": blocking_issues,
-                    "blocking_issues": blocking_issues,
-                    "nonBlockingIssues": non_blocking_issues,
-                    "non_blocking_issues": non_blocking_issues,
-                    "rewriteBrief": rewrite_brief,
-                    "rewrite_brief": rewrite_brief,
-                }
-                logger.info(
-                    "framework-to-script stage11 review done: asset_id=%s review_output_keys=%s normalized=%s "
-                    "rewrite_triggered=%s input_keys=%s",
-                    asset_id,
-                    sorted(review_output_data.keys()),
-                    {
-                        "reviewPassed": review_passed,
-                        "rewriteRequired": rewrite_required,
-                        "blockingIssues_count": len(blocking_issues),
-                        "nonBlockingIssues_count": len(non_blocking_issues),
-                        "rewriteBrief_length": len(str(rewrite_brief or "")),
-                    },
-                    _framework_review_needs_rewrite(conflict_review),
-                    sorted(base_vars.keys()),
-                )
-                if _framework_review_needs_rewrite(conflict_review):
+                    if review_passed is True and rewrite_required is False:
+                        break
+                    if review_round >= max_review_rounds:
+                        return jsonify(
+                            {
+                                "success": False,
+                                "message": "11 因果冲突审核修订 5 轮后仍未通过，已停止保存当前批次。",
+                                "detail": {
+                                    "failed_sub_stage": "causal_conflict_review",
+                                    "max_review_rounds": max_review_rounds,
+                                    "review_round": review_round,
+                                    "rewrite_round": rewrite_round,
+                                    "start_episode": start_episode,
+                                    "end_episode": end_episode,
+                                    "last_review": conflict_review,
+                                    "blockingIssues": blocking_issues,
+                                    "blocking_issues": blocking_issues,
+                                },
+                            }
+                        ), 422
                     failed_sub_stage = "causal_conflict_rewrite"
+                    rewrite_round += 1
+                    logger.info(
+                        "framework-to-script stage11 rewrite loop: stage=%s batchStartEpisode=%s review_round=%s "
+                        "rewrite_round=%s reviewPassed=%s rewriteRequired=%s blockingIssues_count=%s asset_id=%s",
+                        "stage11",
+                        start_episode,
+                        review_round,
+                        rewrite_round,
+                        review_passed,
+                        rewrite_required,
+                        len(blocking_issues),
+                        asset_id,
+                    )
                     rewrite_output = fastgpt_client.run_stage(
                         STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
                         {
@@ -2916,61 +2966,98 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             },
                         }
                     ), 500
-                failed_sub_stage = "script_review"
-                review_output = fastgpt_client.run_stage(
-                    STAGE_FRAMEWORK_SCRIPT_REVIEW,
-                    {
-                        **base_vars,
-                        "batchScriptText": batch_script,
-                    },
-                )
-                review_keys = sorted(review_output.keys()) if isinstance(review_output, dict) else []
-                if not isinstance(review_output, dict):
-                    review_output = {}
-                review_passed = _get_bool_alias(review_output, "reviewPassed", "passed", default=None)
-                rewrite_required = _get_bool_alias(review_output, "rewriteRequired", "rewrite_required", default=None)
-                blocking_issues = _get_list_alias(review_output, "blockingIssues", "blocking_issues")
-                non_blocking_issues = _get_list_alias(review_output, "nonBlockingIssues", "non_blocking_issues")
-                rewrite_brief = _first_present(review_output, "rewriteBrief", "rewrite_brief", default="")
-                if review_passed is None and rewrite_required is None:
-                    logger.warning(
-                        "framework-to-script stage12 script_review missing reviewPassed/passed and rewriteRequired/rewrite_required; "
-                        "treating as rewrite needed review_output_keys=%s",
-                        review_keys,
+                max_review_rounds = 5
+                script_review = {}
+                rewrite_round = 0
+                for review_round in range(1, max_review_rounds + 1):
+                    failed_sub_stage = "script_review"
+                    review_output = fastgpt_client.run_stage(
+                        STAGE_FRAMEWORK_SCRIPT_REVIEW,
+                        {
+                            **base_vars,
+                            "batchScriptText": batch_script,
+                        },
                     )
-                    review_passed = False
-                    rewrite_required = True
-                script_review = {
-                    "reviewPassed": review_passed,
-                    "passed": review_passed,
-                    "rewriteRequired": rewrite_required,
-                    "rewrite_required": rewrite_required,
-                    "blockingIssues": blocking_issues,
-                    "blocking_issues": blocking_issues,
-                    "nonBlockingIssues": non_blocking_issues,
-                    "non_blocking_issues": non_blocking_issues,
-                    "rewriteBrief": rewrite_brief,
-                    "rewrite_brief": rewrite_brief,
-                }
-                logger.info(
-                    "framework-to-script stage12 script_review output review_output_keys=%s batchScriptReview_type=%s "
-                    "reviewPassed=%s rewriteRequired=%s blockingIssues_count=%s nonBlockingIssues_count=%s "
-                    "rewriteBrief_length=%s rewrite_triggered=%s",
-                    review_keys,
-                    type(script_review).__name__,
-                    script_review.get("reviewPassed"),
-                    script_review.get("rewriteRequired"),
-                    len(script_review.get("blockingIssues"))
-                    if isinstance(script_review.get("blockingIssues"), list)
-                    else 0,
-                    len(script_review.get("nonBlockingIssues"))
-                    if isinstance(script_review.get("nonBlockingIssues"), list)
-                    else 0,
-                    len(str(script_review.get("rewriteBrief") or "")),
-                    _framework_review_needs_rewrite(script_review),
-                )
-                if _framework_review_needs_rewrite(script_review):
+                    review_keys = sorted(review_output.keys()) if isinstance(review_output, dict) else []
+                    if not isinstance(review_output, dict):
+                        review_output = {}
+                    review_passed = _get_bool_alias(review_output, "reviewPassed", "passed", default=None)
+                    rewrite_required = _get_bool_alias(review_output, "rewriteRequired", "rewrite_required", default=None)
+                    blocking_issues = _get_list_alias(review_output, "blockingIssues", "blocking_issues")
+                    non_blocking_issues = _get_list_alias(review_output, "nonBlockingIssues", "non_blocking_issues")
+                    rewrite_brief = _first_present(review_output, "rewriteBrief", "rewrite_brief", default="")
+                    if review_passed is None and rewrite_required is None:
+                        logger.warning(
+                            "framework-to-script stage12 script_review missing reviewPassed/passed and rewriteRequired/rewrite_required; "
+                            "treating as rewrite needed review_output_keys=%s",
+                            review_keys,
+                        )
+                        review_passed = False
+                        rewrite_required = True
+                    script_review = {
+                        "reviewPassed": review_passed,
+                        "passed": review_passed,
+                        "rewriteRequired": rewrite_required,
+                        "rewrite_required": rewrite_required,
+                        "blockingIssues": blocking_issues,
+                        "blocking_issues": blocking_issues,
+                        "nonBlockingIssues": non_blocking_issues,
+                        "non_blocking_issues": non_blocking_issues,
+                        "rewriteBrief": rewrite_brief,
+                        "rewrite_brief": rewrite_brief,
+                    }
+                    rewrite_triggered = _framework_review_needs_rewrite(script_review)
+                    logger.info(
+                        "framework-to-script stage12 review loop: stage=%s batchStartEpisode=%s review_round=%s "
+                        "rewrite_round=%s reviewPassed=%s rewriteRequired=%s blockingIssues_count=%s "
+                        "review_output_keys=%s batchScriptReview_type=%s nonBlockingIssues_count=%s "
+                        "rewriteBrief_length=%s rewrite_triggered=%s",
+                        "stage12",
+                        start_episode,
+                        review_round,
+                        rewrite_round,
+                        review_passed,
+                        rewrite_required,
+                        len(blocking_issues),
+                        review_keys,
+                        type(script_review).__name__,
+                        len(non_blocking_issues),
+                        len(str(rewrite_brief or "")),
+                        rewrite_triggered,
+                    )
+                    if review_passed is True and rewrite_required is False:
+                        break
+                    if review_round >= max_review_rounds:
+                        return jsonify(
+                            {
+                                "success": False,
+                                "message": "12 正文对白审核修订 5 轮后仍未通过，已停止保存当前批次。",
+                                "detail": {
+                                    "failed_sub_stage": "script_review",
+                                    "max_review_rounds": max_review_rounds,
+                                    "review_round": review_round,
+                                    "rewrite_round": rewrite_round,
+                                    "start_episode": start_episode,
+                                    "end_episode": end_episode,
+                                    "last_review": script_review,
+                                    "blockingIssues": blocking_issues,
+                                    "blocking_issues": blocking_issues,
+                                },
+                            }
+                        ), 422
                     failed_sub_stage = "script_rewrite"
+                    rewrite_round += 1
+                    logger.info(
+                        "framework-to-script stage12 rewrite loop: stage=%s batchStartEpisode=%s review_round=%s "
+                        "rewrite_round=%s reviewPassed=%s rewriteRequired=%s blockingIssues_count=%s",
+                        "stage12",
+                        start_episode,
+                        review_round,
+                        rewrite_round,
+                        review_passed,
+                        rewrite_required,
+                        len(blocking_issues),
+                    )
                     rewrite_output = fastgpt_client.run_stage(
                         STAGE_FRAMEWORK_SCRIPT_REWRITE,
                         {

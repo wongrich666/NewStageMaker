@@ -227,6 +227,22 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   background: #fff;
   overflow: hidden;
 }
+.wts-tree-node summary { display: flex; align-items: center; gap: 8px; }
+.wts-tree-arrow:before { content: "⌄"; color: var(--wts-strong); }
+.wts-tree-node[open] > summary .wts-tree-arrow:before { content: "⌃"; }
+.wts-collapse-local { justify-self: end; margin-top: 8px; }
+.wts-tree-more summary { padding: 0; font-weight: 400; color: #374151; }
+.wts-tree-more summary span { color: var(--wts-strong); font-weight: 700; }
+.wts-tree-more div { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wts-asset-current {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--wts-border);
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+}
+.wts-asset-current span { color: var(--wts-muted); overflow-wrap: anywhere; }
 .wts-tree-leaf {
   display: grid;
   grid-template-columns: minmax(120px, 220px) minmax(0, 1fr);

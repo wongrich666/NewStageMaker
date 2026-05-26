@@ -136,6 +136,21 @@
         </div>
       </header>
 
+      <section class="platform-entry-grid" aria-label="平台主流程入口">
+        <a class="platform-entry-card" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">
+          <strong>写剧本框架</strong>
+          <span>新建框架项目，进入 01-07 框架策划。</span>
+        </a>
+        <a class="platform-entry-card" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">
+          <strong>从已有框架写剧本</strong>
+          <span>先选择已保存框架资产，再进入 08-12 正文阶段。</span>
+        </a>
+        <a class="platform-entry-card" href="{{ url_for('framework_planner_page', auth_token=current_auth_token) }}">
+          <strong>继续编辑已有项目</strong>
+          <span>打开已有项目并恢复上次框架策划状态。</span>
+        </a>
+      </section>
+
       <section id="toolPanel" class="tool-panel hidden">
         <div class="tool-panel-head">
           <div>
