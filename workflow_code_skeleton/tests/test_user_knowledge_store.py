@@ -31,6 +31,7 @@ class UserKnowledgeStoreTests(unittest.TestCase):
         rule_tag = next(tag for tag in tags if tag["name"] == "规则怪谈")
         self.assertIn("stage_prompts", rule_tag)
         self.assertIn("worldview", rule_tag["stage_prompts"])
+        self.assertIn("script_text", rule_tag["stage_prompts"])
         self.assertNotEqual(rule_tag["stage_prompts"]["basic"], rule_tag["stage_prompts"]["worldview"])
 
     def test_migrates_legacy_prompt_text_to_stage_prompts(self) -> None:
@@ -50,8 +51,10 @@ class UserKnowledgeStoreTests(unittest.TestCase):
             store = UserKnowledgeStore(temp_dir)
             tag = next(item for item in store.list_tags() if item["id"] == "custom-legacy")
 
-        self.assertEqual(tag["stage_prompts"]["basic"], "旧版通用偏好")
-        self.assertEqual(tag["stage_prompts"]["package"], "旧版通用偏好")
+        self.assertEqual(tag["prompt_text"], "旧版通用偏好")
+        self.assertEqual(tag["stage_prompts"]["basic"], "")
+        self.assertEqual(tag["stage_prompts"]["package"], "")
+        self.assertEqual(tag["stage_prompts"]["script_text"], "")
 
     def test_apply_tags_allows_empty_selection(self) -> None:
         with workspace_tempdir("knowledge-store-") as temp_dir:
@@ -121,6 +124,7 @@ class UserKnowledgeApiTests(unittest.TestCase):
         self.assertFalse(tag["builtin"])
         self.assertEqual(tag["name"], "我的爽点")
         self.assertIn("stage_prompts", tag)
+        self.assertEqual(tag["stage_prompts"]["script_text"], "")
 
     def test_update_custom_tag(self) -> None:
         created = self.client.post(

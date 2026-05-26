@@ -137,13 +137,17 @@
       </header>
 
       <section class="platform-entry-grid" aria-label="平台主流程入口">
+        <div class="platform-flow-note">
+          <strong>当前可选路径</strong>
+          <span>写剧本正文：直接填写下方输入并开始；写剧本框架：先完成 01-07 并保存框架资产；从框架写剧本：选择资产或导入结构化框架 JSON 后继续 08-12。</span>
+        </div>
         <a class="platform-entry-card" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">
           <strong>写剧本框架</strong>
-          <span>新建框架项目，进入 01-07 框架策划。</span>
+          <span>当前流程：写框架。完成后可保存为框架资产，再进入剧本正文阶段。</span>
         </a>
         <a class="platform-entry-card" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">
           <strong>从已有框架写剧本</strong>
-          <span>先选择已保存框架资产，再进入 08-12 正文阶段。</span>
+          <span>当前流程：从框架写剧本。请先选择已有框架资产，或导入结构化框架 JSON。</span>
         </a>
         <a class="platform-entry-card" href="{{ url_for('framework_planner_page', auth_token=current_auth_token) }}">
           <strong>继续编辑已有项目</strong>
@@ -231,7 +235,7 @@
           </div>
         </section>
 
-        <p id="formHint" class="composer-hint">只需要填写故事期待、角色数量和总集数。</p>
+        <p id="formHint" class="composer-hint">当前流程：写剧本正文。先填写故事期待、角色数量和总集数；生成结果会保存在你的项目列表。</p>
         <p class="composer-mode-note">当前创作模式：<strong id="composerModeText">标准格式</strong></p>
 
         <div id="completionPanel" class="completion-panel compact-completion">

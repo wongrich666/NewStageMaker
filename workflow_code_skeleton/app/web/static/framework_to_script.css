@@ -131,6 +131,18 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   display: grid;
   gap: 10px;
 }
+.wts-import-json {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  border: 1px solid var(--wts-border);
+  border-radius: 12px;
+  background: var(--wts-soft);
+  padding: 12px;
+  margin-bottom: 12px;
+  color: var(--wts-muted);
+}
 .wts-asset-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

@@ -750,11 +750,26 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     result.append({"id": text, "name": text, "category": "", "builtin": False, "description": "", "prompt_text": "", "stage_prompts": _coerce_stage_prompts({})})
         return result
 
+    _USER_KNOWLEDGE_STAGE_LABELS = {
+        "basic": "01 原文提取偏好",
+        "worldview": "02 世界观偏好",
+        "character": "03 人设偏好",
+        "beat": "04 节拍规划偏好",
+        "storylines": "05 人物故事线偏好",
+        "guide": "06 改编指引偏好",
+        "package": "07 框架校验偏好",
+        "scene": "08 场景字典偏好",
+        "appearance": "09 角色外观映射偏好",
+        "episode": "10 分集细化偏好",
+        "conflict": "11 开头冲突钩子偏好",
+        "script_text": "12 正文写作偏好",
+    }
+
     def _coerce_stage_prompts(value) -> dict:
         source = value if isinstance(value, dict) else {}
         return {
             key: _coerce_prompt_text(source.get(key))
-            for key in ("basic", "worldview", "character", "beat", "storylines", "guide", "package")
+            for key in _USER_KNOWLEDGE_STAGE_LABELS
         }
 
     def _coerce_prompt_text(value) -> str:
@@ -776,6 +791,98 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "06": "guide",
             "07": "package",
         }.get(str(stage or "").zfill(2), "")
+
+    def _user_knowledge_stage_key(stage) -> str:
+        return {
+            "01": "basic",
+            "02": "worldview",
+            "03": "character",
+            "04": "beat",
+            "05": "storylines",
+            "06": "guide",
+            "07": "package",
+            "08": "scene",
+            "09": "appearance",
+            "10": "episode",
+            "11": "conflict",
+            "12": "script_text",
+        }.get(str(stage or "").zfill(2), "")
+
+    def _stage_preference_from_tags(stage: str, selected_tags: list[dict]) -> tuple[str, int]:
+        stage_key = _user_knowledge_stage_key(stage)
+        if not stage_key:
+            return "", 0
+        sections = []
+        for tag in selected_tags or []:
+            prompts = tag.get("stage_prompts") if isinstance(tag.get("stage_prompts"), dict) else {}
+            text = _coerce_prompt_text(prompts.get(stage_key))
+            if not text:
+                continue
+            name = str(tag.get("name") or tag.get("id") or "").strip()
+            label = _USER_KNOWLEDGE_STAGE_LABELS.get(stage_key, stage_key)
+            sections.append(f"【智慧库标签偏好：{name} / {label}】\n{text}")
+        return "\n\n".join(sections), len(sections)
+
+    def _resolve_saved_preference_tags(user_id: int | str, selected_ids: list[str]) -> list[dict]:
+        if not selected_ids:
+            try:
+                selected_ids = _coerce_string_list(
+                    user_knowledge_store.get_preferences(user_id).get("selected_preference_tag_ids")
+                )
+            except Exception:
+                selected_ids = []
+        if not selected_ids:
+            return []
+        tags_by_id = {str(tag.get("id") or ""): tag for tag in user_knowledge_store.list_tags(enabled_only=True)}
+        result = []
+        for tag_id in selected_ids:
+            tag = tags_by_id.get(str(tag_id))
+            if tag:
+                result.append(tag)
+        return result
+
+    def _inject_stage_preference_variables(variables: dict, data: dict, stage: str, *, user_id: int | str) -> dict:
+        selected_tags = _coerce_tag_list(data.get("selected_preference_tags"))
+        selected_ids = _coerce_string_list(data.get("selected_preference_tag_ids"))
+        if selected_tags and not selected_ids:
+            selected_ids = [tag["id"] for tag in selected_tags if tag.get("id")]
+        if not selected_tags:
+            selected_tags = _resolve_saved_preference_tags(user_id, selected_ids)
+            if not selected_ids:
+                selected_ids = [tag["id"] for tag in selected_tags if tag.get("id")]
+        stage_key = _user_knowledge_stage_key(stage)
+        stage_label = _USER_KNOWLEDGE_STAGE_LABELS.get(stage_key, "")
+        stage_preference_prompt, tags_with_preference_count = _stage_preference_from_tags(stage, selected_tags)
+        if stage_preference_prompt:
+            source_names = "、".join(str(tag.get("name") or tag.get("id") or "").strip() for tag in selected_tags if tag.get("id"))
+            header = f"【当前阶段智慧库偏好：{stage_label}】\n来源标签：{source_names}\n"
+            stage_preference_prompt = header + stage_preference_prompt
+            for key in (
+                "stagePreference",
+                "stage_preference",
+                "stage_preference_prompt",
+                "user_stage_preference_prompt",
+                "user_preferences",
+                "userPreferences",
+                "userRequirements",
+                "user_constraints",
+            ):
+                if key not in variables or not _coerce_prompt_text(variables.get(key)):
+                    variables[key] = stage_preference_prompt
+                elif key in {"user_preferences", "userPreferences", "userRequirements", "user_constraints"}:
+                    variables[key] = f"{_coerce_prompt_text(variables.get(key))}\n\n{stage_preference_prompt}"
+        logger.info(
+            "stage preference injection: stage_key=%s stage_name=%s preference_source=智慧库标签 preference_stage_key=%s preference_stage_label=%s selected_tag_count=%s tags_with_stage_preference_count=%s has_stage_preference=%s preference_length=%s",
+            str(stage or "").zfill(2),
+            stage_label,
+            stage_key,
+            stage_label,
+            len(selected_tags or selected_ids),
+            tags_with_preference_count,
+            bool(stage_preference_prompt),
+            len(stage_preference_prompt),
+        )
+        return variables
 
     def _attach_user_knowledge_payload(payload: dict, data: dict, stage: str | None = None) -> None:
         selected_tags = _coerce_tag_list(data.get("selected_preference_tags"))
@@ -801,12 +908,17 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             payload["user_stage_preference_prompt"] = current_stage_prompt
             payload["user_preference_prompt"] = current_stage_prompt
         if any(key in data for key in ("selected_preference_tags", "selected_preference_tag_ids", "user_preference_prompt", "user_knowledge_tag_prompt", "user_knowledge_stage_prompts", "prompt_preferences")):
+            selected_prompt, tags_with_preference_count = _stage_preference_from_tags(stage or "", selected_tags)
             logger.info(
-                "workflow user knowledge fields: stage=%s selected_preference_tag_ids_count=%s current_stage_key=%s current_stage_preference_prompt_length=%s",
+                "workflow user knowledge fields: stage_key=%s stage_name=%s preference_source=智慧库标签 preference_stage_key=%s preference_stage_label=%s selected_tag_count=%s tags_with_stage_preference_count=%s has_stage_preference=%s preference_length=%s",
                 str(stage or "").zfill(2) if stage else "",
-                len(selected_ids),
+                _USER_KNOWLEDGE_STAGE_LABELS.get(_user_knowledge_stage_key(stage), ""),
                 stage_key,
-                len(current_stage_prompt),
+                _USER_KNOWLEDGE_STAGE_LABELS.get(stage_key, ""),
+                len(selected_tags or selected_ids),
+                tags_with_preference_count,
+                bool(current_stage_prompt or selected_prompt),
+                len(current_stage_prompt or selected_prompt),
             )
 
     @app.get("/")
@@ -1463,7 +1575,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "character_storylines": character_storylines,
             "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
         }
-
         def _try_parse_json_text(value):
             if not isinstance(value, str):
                 return None
@@ -1680,7 +1791,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "beat_checkpoint_timeline": beat_checkpoint_timeline,
             "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
         }
-
         def _try_parse_json_text(value):
             if not isinstance(value, str):
                 return None
@@ -2118,7 +2228,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "appearance_mapping": appearance_mapping,
             "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
         }
-
         def _try_parse_json_text(value):
             if not isinstance(value, str):
                 return None
@@ -2784,11 +2893,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         except ValueError as exc:
             return _json_error(str(exc), status=400)
 
-        stage08 = _framework_script_stage_cache(framework_asset, "stage08")
-        stage09 = _framework_script_stage_cache(framework_asset, "stage09")
-        stage11 = _framework_script_stage_cache(framework_asset, "stage11")
+        stage08 = data.get("stage08") if isinstance(data.get("stage08"), dict) else _framework_script_stage_cache(framework_asset, "stage08")
+        stage09 = data.get("stage09") if isinstance(data.get("stage09"), dict) else _framework_script_stage_cache(framework_asset, "stage09")
+        stage11 = data.get("stage11") if isinstance(data.get("stage11"), dict) else _framework_script_stage_cache(framework_asset, "stage11")
         stage11_batches = stage11.get("batches") if isinstance(stage11.get("batches"), dict) else {}
-        existing_stage12 = _framework_script_stage_cache(framework_asset, "stage12")
+        existing_stage12 = data.get("stage12") if isinstance(data.get("stage12"), dict) else _framework_script_stage_cache(framework_asset, "stage12")
         existing_batches = existing_stage12.get("batches") if isinstance(existing_stage12.get("batches"), dict) else {}
         reset_stage12 = bool(data.get("reset_stage12") or data.get("resetStage12"))
         if reset_stage12:

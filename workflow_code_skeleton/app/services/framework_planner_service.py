@@ -1567,7 +1567,20 @@ def _normalize_stage_prompt_payload(value: Any) -> dict[str, str]:
     source = value if isinstance(value, dict) else {}
     return {
         key: _coerce_text_payload(source.get(key))
-        for key in ("basic", "worldview", "character", "beat", "storylines", "guide", "package")
+        for key in (
+            "basic",
+            "worldview",
+            "character",
+            "beat",
+            "storylines",
+            "guide",
+            "package",
+            "scene",
+            "appearance",
+            "episode",
+            "conflict",
+            "script_text",
+        )
     }
 
 
@@ -1662,11 +1675,21 @@ def _build_stage_request_variables(
     stage_preference_prompt = resolve_stage_preference_prompt(definition.stage, payload)
     if stage_preference_prompt:
         for preference_key in (
+            "stagePreference",
+            "stage_preference",
             "stage_preference_prompt",
             "user_stage_preference_prompt",
             "user_preference_prompt",
+            "user_preferences",
+            "userPreferences",
+            "userRequirements",
+            "user_constraints",
         ):
-            variables[preference_key] = _wire_value(stage_preference_prompt)
+            existing = _coerce_text_payload(variables.get(preference_key))
+            if existing and preference_key in {"user_preferences", "userPreferences", "userRequirements", "user_constraints"}:
+                variables[preference_key] = _wire_value(f"{existing}\n\n{stage_preference_prompt}")
+            elif not existing:
+                variables[preference_key] = _wire_value(stage_preference_prompt)
 
     for key, value in payload.items():
         if key in variables or _is_blank(value):
@@ -1685,12 +1708,39 @@ def _build_stage_request_variables(
         variables[key] = _wire_value(value)
 
     stage_key = framework_planner_stage_key(definition.stage)
+    selected_tags = payload.get("selected_preference_tags") if isinstance(payload.get("selected_preference_tags"), list) else []
+    tags_with_stage_preference_count = 0
+    for tag in selected_tags:
+        if not isinstance(tag, dict):
+            continue
+        prompts = tag.get("stage_prompts") if isinstance(tag.get("stage_prompts"), dict) else {}
+        if _coerce_text_payload(prompts.get(stage_key)):
+            tags_with_stage_preference_count += 1
     logger.info(
-        "framework planner user knowledge fields: stage=%s selected_preference_tags_count=%s selected_preference_tag_ids_count=%s current_stage_key=%s current_stage_preference_prompt_length=%s",
+        "framework planner user knowledge fields: stage_key=%s stage_name=%s preference_source=智慧库标签 preference_stage_key=%s preference_stage_label=%s selected_tag_count=%s tags_with_stage_preference_count=%s has_stage_preference=%s preference_length=%s",
         definition.stage,
-        len(payload.get("selected_preference_tags") or []),
-        len(payload.get("selected_preference_tag_ids") or []),
+        {
+            "basic": "01 原文提取偏好",
+            "worldview": "02 世界观偏好",
+            "character": "03 人设偏好",
+            "beat": "04 节拍规划偏好",
+            "storylines": "05 人物故事线偏好",
+            "guide": "06 改编指引偏好",
+            "package": "07 框架校验偏好",
+        }.get(stage_key, ""),
         stage_key,
+        {
+            "basic": "01 原文提取偏好",
+            "worldview": "02 世界观偏好",
+            "character": "03 人设偏好",
+            "beat": "04 节拍规划偏好",
+            "storylines": "05 人物故事线偏好",
+            "guide": "06 改编指引偏好",
+            "package": "07 框架校验偏好",
+        }.get(stage_key, ""),
+        len(selected_tags or payload.get("selected_preference_tag_ids") or []),
+        tags_with_stage_preference_count,
+        bool(stage_preference_prompt),
         len(stage_preference_prompt),
     )
 

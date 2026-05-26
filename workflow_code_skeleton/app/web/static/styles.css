@@ -4461,6 +4461,22 @@ a {
   margin: 14px 0;
 }
 
+.platform-flow-note {
+  grid-column: 1 / -1;
+  border: 1px solid var(--mono-border, rgba(24, 24, 24, 0.08));
+  border-radius: 10px;
+  background: var(--mono-surface, #fff);
+  padding: 12px 14px;
+  display: grid;
+  gap: 4px;
+}
+
+.platform-flow-note span {
+  color: var(--mono-muted, #667085);
+  line-height: 1.6;
+  font-size: 13px;
+}
+
 .platform-entry-card {
   display: grid;
   gap: 6px;

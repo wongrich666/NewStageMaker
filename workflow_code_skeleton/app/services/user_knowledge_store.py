@@ -11,7 +11,20 @@ from typing import Any
 from .runtime_paths import get_runtime_data_dir
 
 
-STAGE_PROMPT_KEYS = ("basic", "worldview", "character", "beat", "storylines", "guide", "package")
+STAGE_PROMPT_KEYS = (
+    "basic",
+    "worldview",
+    "character",
+    "beat",
+    "storylines",
+    "guide",
+    "package",
+    "scene",
+    "appearance",
+    "episode",
+    "conflict",
+    "script_text",
+)
 
 
 def _now_iso() -> str:
@@ -33,6 +46,11 @@ def _stage_prompt(base: str, stage: str) -> str:
         "storylines": "05 人物故事线：让主要人物线各自有目标和变化，并与关键节拍交叉，不生成游离支线。",
         "guide": "06 改编指引：输出可执行的删改、视觉化、节奏和人物情绪策略，说明保留与调整理由。",
         "package": "07 最终策划包：校验结构完整、字段为对象/数组、偏好已落实，避免把 JSON 字符串当成结构化结果。",
+        "scene": "08 场景字典：提炼可复用、可拍摄的场景空间和世界观规则摘要，避免场景命名混乱。",
+        "appearance": "09 角色外观映射：固定角色外观、服装、身份识别点和别名映射，保证后续正文一致。",
+        "episode": "10 分集细化：按集拆解剧情推进、情绪回报和可拍动作，避免空泛梗概。",
+        "conflict": "11 开头冲突钩子：强化每批次开头冲突、因果推进和结尾牵引。",
+        "script_text": "12 正文写作：控制正文对白、动作、节奏、可视化表达和角色语气一致性。",
     }[stage]
     return f"{base}\n{stage_focus}"
 
@@ -135,7 +153,7 @@ class UserKnowledgeStore:
                 "builtin": False,
                 "description": str(payload.get("description") or "").strip(),
                 "prompt_text": _coerce_prompt_text(payload.get("prompt_text")),
-                "stage_prompts": _normalize_stage_prompts(payload.get("stage_prompts"), _coerce_prompt_text(payload.get("prompt_text"))),
+                "stage_prompts": _normalize_stage_prompts(payload.get("stage_prompts")),
                 "created_at": now,
                 "updated_at": now,
                 "enabled": payload.get("enabled") is not False,
@@ -160,7 +178,7 @@ class UserKnowledgeStore:
                 else:
                     tag[key] = _coerce_prompt_text(changes[key]) if key == "prompt_text" else str(changes[key] or "").strip()
             if "stage_prompts" in changes:
-                tag["stage_prompts"] = _normalize_stage_prompts(changes.get("stage_prompts"), str(tag.get("prompt_text") or ""))
+                tag["stage_prompts"] = _normalize_stage_prompts(changes.get("stage_prompts"))
             if not str(tag.get("name") or "").strip():
                 raise ValueError("标签名称不能为空")
             tag["updated_at"] = _now_iso()
@@ -185,7 +203,7 @@ class UserKnowledgeStore:
         data = self._read_preferences()
         record = dict(data.get(str(user_id)) or {})
         record["selected_preference_tag_ids"] = _coerce_string_list(record.get("selected_preference_tag_ids"))
-        record["stage_prompts"] = _normalize_stage_prompts(record.get("stage_prompts"), "")
+        record["stage_prompts"] = _normalize_stage_prompts(record.get("stage_prompts"))
         return record
 
     def save_preferences(self, user_id: int | str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -193,7 +211,7 @@ class UserKnowledgeStore:
         record = {
             "user_preference_prompt": _coerce_prompt_text(payload.get("user_preference_prompt")),
             "selected_preference_tag_ids": _coerce_string_list(payload.get("selected_preference_tag_ids")),
-            "stage_prompts": _normalize_stage_prompts(payload.get("stage_prompts"), ""),
+            "stage_prompts": _normalize_stage_prompts(payload.get("stage_prompts")),
             "updated_at": _now_iso(),
         }
         data[str(user_id)] = record
@@ -276,7 +294,7 @@ class UserKnowledgeStore:
             "builtin": bool(tag.get("builtin")),
             "description": str(tag.get("description") or "").strip(),
             "prompt_text": prompt_text,
-            "stage_prompts": _normalize_stage_prompts(tag.get("stage_prompts"), prompt_text),
+            "stage_prompts": _normalize_stage_prompts(tag.get("stage_prompts")),
             "created_at": str(tag.get("created_at") or now),
             "updated_at": str(tag.get("updated_at") or now),
             "enabled": tag.get("enabled") is not False,
@@ -324,7 +342,21 @@ def _format_tag_section(tag: dict[str, Any], key: str) -> str:
 
 def _format_stage_section(tag: dict[str, Any], stage_key: str) -> str:
     stage_prompts = tag.get("stage_prompts") if isinstance(tag.get("stage_prompts"), dict) else {}
-    return f"【{tag.get('name') or tag.get('id')}】\n{str(stage_prompts.get(stage_key) or '').strip()}"
+    label = {
+        "basic": "01 原文提取偏好",
+        "worldview": "02 世界观偏好",
+        "character": "03 人设偏好",
+        "beat": "04 节拍规划偏好",
+        "storylines": "05 人物故事线偏好",
+        "guide": "06 改编指引偏好",
+        "package": "07 框架校验偏好",
+        "scene": "08 场景字典偏好",
+        "appearance": "09 角色外观映射偏好",
+        "episode": "10 分集细化偏好",
+        "conflict": "11 开头冲突钩子偏好",
+        "script_text": "12 正文写作偏好",
+    }.get(stage_key, stage_key)
+    return f"【智慧库标签偏好：{tag.get('name') or tag.get('id')} / {label}】\n{str(stage_prompts.get(stage_key) or '').strip()}"
 
 
 def _merge_preference_prompt(existing: str, tag_prompt_text: str) -> str:

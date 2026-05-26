@@ -1814,7 +1814,7 @@ startRuntimeDebugPolling();
     if (!hasProject && !state.taskId && !hasConfiguredModel && els.formHint) {
       els.formHint.textContent = "当前没有可用模型。";
     } else if (!formValidation.valid && !hasProject && !RUNNING_STATUSES.has(state.status) && els.formHint) {
-      els.formHint.textContent = formValidation.message || "请先完善输入。";
+      els.formHint.textContent = formValidation.message || "当前流程：写剧本正文。请先填写故事期待、角色数量和总集数。";
     }
   }
 
@@ -2388,7 +2388,12 @@ startRuntimeDebugPolling();
       beat: String(source.beat || ""),
       storylines: String(source.storylines || ""),
       guide: String(source.guide || ""),
-      package: String(source.package || "")
+      package: String(source.package || ""),
+      scene: String(source.scene || ""),
+      appearance: String(source.appearance || ""),
+      episode: String(source.episode || ""),
+      conflict: String(source.conflict || ""),
+      script_text: String(source.script_text || "")
     };
   }
 
@@ -2400,7 +2405,7 @@ startRuntimeDebugPolling();
       Object.keys(result).forEach((stageKey) => {
         const text = String(prompts[stageKey] || "").trim();
         if (!text) return;
-        const section = `【${name}】\n${text}`;
+        const section = `【智慧库标签偏好：${name}】\n${text}`;
         result[stageKey] = result[stageKey] ? `${result[stageKey]}\n\n${section}` : section;
       });
     });
@@ -2790,7 +2795,7 @@ startRuntimeDebugPolling();
     );
     els.formHint.textContent = restartingCurrentProject
       ? "正在基于当前资产重新开始生成。"
-      : "正在创建任务。";
+      : "当前流程：写剧本正文。正在创建任务，结果会保存到项目列表。";
     const endpoint = restartingCurrentProject
       ? `/api/projects/${state.projectId}/restart`
       : window.scriptMakerConfig.startUrl;
@@ -4036,7 +4041,7 @@ startRuntimeDebugPolling();
       await loadAssets();
       await loadCommunity();
       if (hasConfiguredModel()) {
-        els.formHint.textContent = `已登录 ${window.scriptMakerConfig.username}。`;
+        els.formHint.textContent = `当前流程：写剧本正文。已登录 ${window.scriptMakerConfig.username}，请先填写故事期待、角色数量和总集数。`;
       } else if (!isAuthenticated()) {
         els.formHint.textContent = "登录后即可开始创作。";
       } else {

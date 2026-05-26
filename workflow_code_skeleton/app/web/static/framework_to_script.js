@@ -28,6 +28,20 @@
     batchScriptReview: "正文审核",
     scriptMemory: "正文记忆",
   };
+  const SCRIPT_STAGE_PREFERENCE_KEYS = {
+    "08": "scene",
+    "09": "appearance",
+    "10": "episode",
+    "11": "conflict",
+    "12": "script_text",
+  };
+  const SCRIPT_STAGE_PREFERENCE_LABELS = {
+    scene: "08 场景字典偏好",
+    appearance: "09 角色外观映射偏好",
+    episode: "10 分集细化偏好",
+    conflict: "11 开头冲突钩子偏好",
+    script_text: "12 正文写作偏好",
+  };
 
   const state = Object.assign({
     frameworkAssetId: null,
@@ -44,12 +58,13 @@
     runningStage: "",
     runningStartedAt: "",
     error: null,
+    importStatus: "",
   }, loadWorkspace());
 
   const urlAssetId = params.get("framework_asset_id") || params.get("asset_id") || "";
   if (urlAssetId && String(urlAssetId) !== String(state.frameworkAssetId || "")) {
     state.frameworkAssetId = urlAssetId;
-  } else if (!urlAssetId) {
+  } else if (!urlAssetId && (!state.importedFrameworkAsset || state.importedFrameworkAsset.import_source !== "structured_json")) {
     state.frameworkAssetId = null;
     state.projectId = null;
     state.importedFrameworkAsset = null;
@@ -121,6 +136,87 @@
         scriptStages: state.scriptStages,
       })));
     } catch (error) {}
+  }
+
+  function normalizeStagePrompts(value) {
+    const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    return {
+      basic: String(source.basic || ""),
+      worldview: String(source.worldview || ""),
+      character: String(source.character || ""),
+      beat: String(source.beat || ""),
+      storylines: String(source.storylines || ""),
+      guide: String(source.guide || ""),
+      package: String(source.package || ""),
+      scene: String(source.scene || ""),
+      appearance: String(source.appearance || ""),
+      episode: String(source.episode || ""),
+      conflict: String(source.conflict || ""),
+      script_text: String(source.script_text || ""),
+    };
+  }
+
+  function selectedKnowledgeTags() {
+    const selected = new Set((state.selectedKnowledgeTagIds || []).map(String));
+    return (state.knowledgeTags || []).filter((tag) => selected.has(String(tag.id || "")));
+  }
+
+  function stagePreferenceInfo(stageNo) {
+    const stageKey = SCRIPT_STAGE_PREFERENCE_KEYS[String(stageNo).padStart(2, "0")] || "";
+    const tags = selectedKnowledgeTags();
+    const withPreference = tags.filter((tag) => {
+      const prompts = normalizeStagePrompts(tag.stage_prompts || {});
+      return Boolean(String(prompts[stageKey] || "").trim());
+    });
+    return { stageKey, tags, withPreference };
+  }
+
+  function userKnowledgePayload(stageNo) {
+    const info = stagePreferenceInfo(stageNo);
+    const selectedTags = selectedKnowledgeTags().map((tag) => ({
+      id: String(tag.id || ""),
+      name: String(tag.name || ""),
+      category: String(tag.category || ""),
+      builtin: Boolean(tag.builtin),
+      description: String(tag.description || ""),
+      prompt_text: String(tag.prompt_text || ""),
+      stage_prompts: normalizeStagePrompts(tag.stage_prompts || {}),
+    }));
+    return {
+      selected_preference_tag_ids: (state.selectedKnowledgeTagIds || []).map(String),
+      selected_preference_tags: selectedTags,
+      stage_preference_prompt: info.withPreference.map((tag) => {
+        const prompts = normalizeStagePrompts(tag.stage_prompts || {});
+        const label = SCRIPT_STAGE_PREFERENCE_LABELS[info.stageKey] || info.stageKey;
+        return `【智慧库标签偏好：${tag.name || tag.id} / ${label}】\n${prompts[info.stageKey] || ""}`;
+      }).filter(Boolean).join("\n\n"),
+    };
+  }
+
+  function attachKnowledgePayload(payload, stageNo) {
+    return Object.assign({}, payload || {});
+  }
+
+  async function loadKnowledgePreferences() {
+    try {
+      const [tagsData, preferencesData] = await Promise.all([
+        requestJson("/api/user-knowledge/tags"),
+        requestJson("/api/user-knowledge/preferences"),
+      ]);
+      state.knowledgeTags = Array.isArray(tagsData.tags) ? tagsData.tags : [];
+      const preferences = preferencesData.preferences || {};
+      if (Array.isArray(preferences.selected_preference_tag_ids)) {
+        state.selectedKnowledgeTagIds = preferences.selected_preference_tag_ids.map(String);
+      }
+      state.knowledgeStatus = state.selectedKnowledgeTagIds.length
+        ? `已沿用 ${state.selectedKnowledgeTagIds.length} 个智慧库标签`
+        : "当前未选择智慧库标签";
+      saveWorkspace();
+      render();
+    } catch (error) {
+      state.knowledgeStatus = "智慧库偏好加载失败，将使用默认策略。";
+      render();
+    }
   }
 
   function outputDetailsStorageKey(id) {
@@ -512,13 +608,24 @@
   }
 
   function currentAssetReady() {
-    return Boolean(state.frameworkAssetId && hasObject(state.frameworkPlanPackage));
+    return Boolean(hasObject(state.frameworkPlanPackage) || hasObject(state.stageOutputs));
   }
 
   function frameworkStageValue(key) {
     const packageValue = state.frameworkPlanPackage || {};
     const outputs = state.stageOutputs || {};
     return outputs[key] || packageValue[key] || {};
+  }
+
+  function frameworkRequestBase() {
+    const payload = {
+      framework_plan_package: state.frameworkPlanPackage || {},
+      frameworkPlanPackage: state.frameworkPlanPackage || {},
+      source_framework_project_id: state.frameworkAssetId || state.projectId || "",
+    };
+    if (state.frameworkAssetId) payload.framework_asset_id = state.frameworkAssetId;
+    Object.assign(payload, state.stageOutputs || {});
+    return payload;
   }
 
   async function loadAssets() {
@@ -583,6 +690,86 @@
     }
   }
 
+  function normalizeImportedFrameworkJson(source) {
+    const data = source && typeof source === "object" ? source : {};
+    const stageOutputs = data.stageOutputs || data.stage_outputs || {};
+    let frameworkPlanPackage =
+      data.frameworkPlanPackage ||
+      data.framework_plan_package ||
+      stageOutputs.framework_plan_package ||
+      data.framework_plan ||
+      {};
+    if (!hasObject(frameworkPlanPackage) && !hasObject(stageOutputs)) {
+      throw new Error("导入失败：缺少 frameworkPlanPackage 或 stageOutputs，无法进入框架到剧本阶段。");
+    }
+    if (!hasObject(frameworkPlanPackage) && hasObject(stageOutputs)) {
+      frameworkPlanPackage = {
+        source_brief: stageOutputs.source_brief || {},
+        worldview_plan: stageOutputs.worldview_plan || {},
+        character_plan: stageOutputs.character_plan || {},
+        beat_checkpoint_timeline: stageOutputs.beat_checkpoint_timeline || [],
+        checkpoint_explanation: stageOutputs.checkpoint_explanation || {},
+        character_storylines: stageOutputs.character_storylines || [],
+        adaptation_guide: stageOutputs.adaptation_guide || {},
+      };
+    }
+    const basic = data.basic_config || data.basicConfig || {};
+    const title = data.project_title || data.source_title || data.title || basic.project_title || basic.source_title || "导入的结构化框架";
+    const episodes = Number(data.episodes_per_season || data.total_episodes || basic.episodes_per_season || basic.total_episodes || frameworkPlanPackage.episodes_per_season || 0);
+    if (!episodes && !hasObject(frameworkPlanPackage)) {
+      throw new Error("导入失败：无法推断基本集数和核心框架内容。");
+    }
+    return {
+      title,
+      summary: "来自结构化框架 JSON，可继续运行 08-12。",
+      import_source: "structured_json",
+      asset_id: "",
+      project_id: "",
+      source_title: data.source_title || basic.source_title || title,
+      target_format: data.target_format || basic.target_format || "",
+      episodes_per_season: episodes || "",
+      minutes_per_episode: data.minutes_per_episode || basic.minutes_per_episode || "",
+      updated_at: data.exported_at || data.updated_at || new Date().toISOString(),
+      framework_plan_package: frameworkPlanPackage,
+      stage_outputs: {
+        source_brief: stageOutputs.source_brief || data.source_brief || {},
+        worldview_plan: stageOutputs.worldview_plan || data.worldview_plan || frameworkPlanPackage.worldview_plan || {},
+        character_plan: stageOutputs.character_plan || data.character_plan || frameworkPlanPackage.character_plan || {},
+        beat_checkpoint_timeline: stageOutputs.beat_checkpoint_timeline || data.beat_checkpoint_timeline || frameworkPlanPackage.beat_checkpoint_timeline || [],
+        checkpoint_explanation: stageOutputs.checkpoint_explanation || data.checkpoint_explanation || frameworkPlanPackage.checkpoint_explanation || {},
+        character_storylines: stageOutputs.character_storylines || data.character_storylines || frameworkPlanPackage.character_storylines || [],
+        storyline_decisions: stageOutputs.storyline_decisions || data.storyline_decisions || frameworkPlanPackage.storyline_decisions || [],
+        adaptation_guide: stageOutputs.adaptation_guide || data.adaptation_guide || frameworkPlanPackage.adaptation_guide || {},
+        framework_plan_package: frameworkPlanPackage,
+      },
+    };
+  }
+
+  async function importStructuredFrameworkFile(file) {
+    if (!file) return;
+    state.error = null;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const asset = normalizeImportedFrameworkJson(parsed);
+      state.frameworkAssetId = "";
+      state.projectId = "";
+      state.importedFrameworkAsset = asset;
+      state.frameworkPlanPackage = asset.framework_plan_package || {};
+      state.stageOutputs = asset.stage_outputs || {};
+      state.scriptStages = {};
+      state.assetPanelOpen = false;
+      state.importStatus = `导入成功：${asset.title || "未命名框架"} · ${asset.episodes_per_season || "未知"} 集 · ${asset.minutes_per_episode || "未知"} 分钟/集`;
+      try {
+        window.localStorage.removeItem("frameworkToScriptSource");
+      } catch (error) {}
+      saveWorkspace();
+    } catch (error) {
+      state.error = error.message || "导入失败：JSON 格式不正确。";
+    }
+    render();
+  }
+
   async function runStage08() {
     if (!currentAssetReady()) {
       state.error = "请先导入框架资产，或从框架生成页面一键进入。";
@@ -596,9 +783,9 @@
     try {
       const data = await requestJson("/api/framework-to-script/stage/08", {
         method: "POST",
-        body: JSON.stringify({
-          framework_asset_id: state.frameworkAssetId,
-        }),
+        body: JSON.stringify(attachKnowledgePayload({
+          ...frameworkRequestBase(),
+        }, "08")),
       });
       state.scriptStages.stage08 = {
         sceneDictionary: data.sceneDictionary,
@@ -634,10 +821,10 @@
     try {
       const data = await requestJson("/api/framework-to-script/stage/09", {
         method: "POST",
-        body: JSON.stringify({
-          framework_asset_id: state.frameworkAssetId,
+        body: JSON.stringify(attachKnowledgePayload({
+          ...frameworkRequestBase(),
           sceneDictionary: stage08.sceneDictionary,
-        }),
+        }, "09")),
       });
       state.scriptStages.stage09 = {
         appearanceMapping: data.appearanceMapping,
@@ -682,12 +869,12 @@
     try {
       const data = await requestJson("/api/framework-to-script/stage/10", {
         method: "POST",
-        body: JSON.stringify({
-          framework_asset_id: state.frameworkAssetId,
+        body: JSON.stringify(attachKnowledgePayload({
+          ...frameworkRequestBase(),
           sceneDictionary: stage08.sceneDictionary,
           scriptWorldRulesDigest: stage08.scriptWorldRulesDigest,
           appearanceMapping: stage09.appearanceMapping,
-        }),
+        }, "10")),
       });
 
       const enrichedEpisodePlan =
@@ -765,15 +952,15 @@
         if (expectedStarts.length && beforeCount >= expectedStarts.length) break;
         const data = await requestJson("/api/framework-to-script/stage/11", {
           method: "POST",
-          body: JSON.stringify({
-            framework_asset_id: state.frameworkAssetId,
+          body: JSON.stringify(attachKnowledgePayload({
+            ...frameworkRequestBase(),
             allEnrichedEpisodePlan,
             sceneDictionary: stage08.sceneDictionary,
             scriptWorldRulesDigest: stage08.scriptWorldRulesDigest,
             appearanceMapping: stage09.appearanceMapping,
             reset_stage11: resetStage11 && firstRequest,
             conflictMemory: resetStage11 && firstRequest ? "" : (currentStage11.conflictMemory || ""),
-          }),
+          }, "11")),
         });
         mergeStage11(data);
         saveWorkspace();
@@ -825,10 +1012,14 @@
         if (expectedCount && beforeCount >= expectedCount) break;
         const data = await requestJson("/api/framework-to-script/stage/12", {
           method: "POST",
-          body: JSON.stringify({
-            framework_asset_id: state.frameworkAssetId,
+          body: JSON.stringify(attachKnowledgePayload({
+            ...frameworkRequestBase(),
+            stage08: state.scriptStages.stage08 || {},
+            stage09: state.scriptStages.stage09 || {},
+            stage11: currentStage11,
+            stage12: currentStage12,
             reset_stage12: resetStage12 && firstRequest,
-          }),
+          }, "12")),
         });
         mergeStage12(data);
         saveWorkspace();
@@ -943,11 +1134,18 @@
         <div class="wts-card-head">
           <div>
             <h2>导入框架资产</h2>
-            <p>从已有框架写剧本必须先选择已保存框架资产；本页不会自动使用旧缓存。</p>
+            <p>当前流程：从框架写剧本。请选择已保存框架资产，或导入结构化框架 JSON。</p>
           </div>
           <button type="button" class="wts-btn ghost" data-action="close-asset-panel">收起</button>
         </div>
         ${state.isLoadingAsset ? `<div class="wts-loading">正在读取框架资产...</div>` : ""}
+        <div class="wts-import-json">
+          <label class="wts-btn">
+            导入结构化框架 JSON
+            <input type="file" accept="application/json,.json" data-import-framework-json hidden />
+          </label>
+          <span>${escapeHtml(state.importStatus || "支持 07 页下载的结构化框架 JSON。")}</span>
+        </div>
         <div class="wts-asset-list">
           ${state.assets.length ? state.assets.map(renderAssetItem).join("") : `<div class="wts-empty">暂无可导入框架资产。请先在框架生成页面完成 01-07 并保存。</div>`}
         </div>
@@ -983,8 +1181,8 @@
     if (!currentAssetReady()) {
       return `
         <section class="wts-card wts-empty-state">
-          <h2>请先导入框架资产，或从框架生成页面一键进入。</h2>
-          <p>框架生成与框架转剧本是两个独立工作区；这里会从已保存的框架资产继续 08+。</p>
+          <h2>当前流程：从框架写剧本</h2>
+          <p>请先选择已有框架资产，或导入结构化框架 JSON。导入后会从 08 场景字典开始继续生成正文。</p>
         </section>
       `;
     }
@@ -993,9 +1191,9 @@
       <section class="wts-card">
         <div class="wts-card-head">
           <div>
-            <span class="wts-label">已导入框架资产</span>
+            <span class="wts-label">当前流程：从框架写剧本</span>
             <h2>${escapeHtml(asset.title || "未命名框架资产")}</h2>
-            <p>${escapeHtml(asset.summary || "已导入，可以执行 08+ 链路。")}</p>
+            <p>${escapeHtml(asset.summary || "已导入，可以执行 08-12 正文链路。结果会保存在当前浏览器工作区；已保存资产会同步到后端。")}</p>
           </div>
           <div class="wts-version">
             <span>当前框架版本：${escapeHtml(state.frameworkAssetId)}</span>
@@ -1040,6 +1238,7 @@
             <button type="button" data-action="${escapeHtml(action)}" ${disabled ? "disabled" : ""}>${escapeHtml(buttonText)}</button>
             ${extraActions}
           </div>
+          <p class="wts-hint">输入来源：已导入的 01-07 框架、上游阶段结果和本页显式参数。</p>
           ${body || ""}
         </div>
       </article>
@@ -1092,7 +1291,7 @@
         <div class="wts-card-head">
           <div>
             <h2>框架到剧本链路</h2>
-            <p>未导入框架前，阶段按钮会保持禁用。</p>
+            <p>未导入框架前，阶段按钮会保持禁用。08-12 当前不使用智慧库偏好，只使用框架资产和上游阶段结果。</p>
           </div>
           <button type="button" class="wts-btn ghost" data-action="show-version-history">版本历史</button>
         </div>
@@ -1176,7 +1375,7 @@
           <div>
             <div class="wts-eyebrow">08-12 Framework Asset to Script</div>
             <h1>框架转剧本</h1>
-            <p>从已有框架写剧本。请先选择已保存框架资产，再执行 08-12 正文链路。</p>
+            <p>当前流程：从框架写剧本。先选择已保存框架资产，或导入结构化框架 JSON；生成结果保存在当前工作区。</p>
           </div>
           <div class="wts-actions">
             <button type="button" class="wts-btn" data-action="open-asset-panel">导入框架资产</button>
@@ -1246,13 +1445,21 @@
     setOutputDetailsOpen(target.dataset.outputDetailsId, target.open);
   }, true);
 
+  app.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!target || !target.matches || !target.matches("[data-import-framework-json]")) return;
+    const file = target.files && target.files[0];
+    importStructuredFrameworkFile(file);
+    target.value = "";
+  });
+
   restoreRunningStage();
   reconcileRunningStageResult();
   render();
 
   if (state.frameworkAssetId && (state.runningStage || !currentAssetReady())) {
     importAsset(state.frameworkAssetId, { skipConfirm: true });
-  } else if (!state.frameworkAssetId) {
+  } else if (!state.frameworkAssetId && !currentAssetReady()) {
     loadAssets();
   }
 })();

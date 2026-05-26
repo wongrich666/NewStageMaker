@@ -81,6 +81,60 @@ http://127.0.0.1:5000
 
 ## 网页端当前怎么用
 
+### 智慧库标签阶段偏好
+
+智慧库标签现在也是“阶段偏好包”。标签仍保存在现有智慧库数据里，不单独建立另一套偏好系统：
+
+- 标签通用偏好继续保存在 `prompt_text`，用于兼容旧数据。
+- 标签阶段偏好保存在同一个标签对象的 `stage_prompts` 字段，覆盖 01-07 框架阶段，并预留 08-12 框架转剧本阶段。
+- 01-07 键名沿用 `basic / worldview / character / beat / storylines / guide / package`。
+- 08-12 键名为 `scene / appearance / episode / conflict / script_text`。
+
+在框架策划工作台的“智慧库 / 阶段偏好”里，每个标签旁边有 `✍️` 按钮。点击后可以编辑该标签下的阶段提示词，至少包括 01 原文提取、02 世界观、03 人设、04 节拍规划、05 人物故事线、06 改编指引、07 框架校验，同时保留 08 场景字典、09 角色外观映射、10 分集细化、11 开头冲突钩子、12 正文写作的输入结构。
+
+新建标签仍使用原有智慧库新建入口；创建后会自动选中，之后点击标签旁的 `✍️` 即可补充 01-07 / 08-12 阶段偏好。已有旧标签没有 `stage_prompts` 时不会报错，阶段偏好显示为空，旧的一段式 `prompt_text` 会继续保留。
+
+阶段运行时只注入当前阶段对应的标签偏好：例如运行 02 只读取选中标签的 `worldview`，运行 12 只读取 `script_text`。后端会把当前阶段偏好写入 FastGPT variables 的 `stagePreference / stage_preference / stage_preference_prompt / user_stage_preference_prompt`，并兼容追加到 `user_preferences / userPreferences / userRequirements / user_constraints`。日志会输出 `preference_source=智慧库标签`、`preference_stage_key`、`selected_tag_count`、`has_stage_preference`、`preference_length` 等字段，但不会打印完整偏好正文。
+
+### framework-planner 01-07 手动阶段流
+
+01-07 不再自动连跑。每个阶段运行前都会先显示“运行前确认区”：即将生成的阶段、已应用上游、当前阶段智慧库偏好状态，以及“编辑阶段偏好 ✍️ / 生成本阶段”按钮。偏好为空可以运行，但界面会明确显示“未设置该阶段偏好，将使用默认策略”。
+
+阶段输出生成后只代表草稿。用户编辑主展示字段后，阶段会标记 `stageDraftDirty=true`，下一阶段生成、保存框架、进入剧本阶段都会被拦截，并提示先点击“应用修改”。点击“应用修改”后才会校验并写回真实阶段状态、`localStorage`、后端框架资产；此时 `stageCommitted=true`，下游 payload 才会读取这份已应用结果。
+
+主展示不再默认展示完整复杂 JSON。01-07 使用中文白名单视图：
+
+- 01：故事核心、关键人物、关键场景、关键事件、重要道具、核心冲突、改编风险。
+- 02：世界观概述、核心规则、禁忌与代价、冲突压力、视觉与氛围、下游写作要求。
+- 03：人物卡片，展示姓名 / 合法称呼、身份定位、人物目标、核心欲望、弱点 / 恐惧、人物关系、人物变化线、说话风格、下游注意事项。
+- 04：节拍时间轴 / 表格化字段，包括节拍名、集数范围、剧情功能、关键事件、反转 / 钩子、下游分集约束。
+- 05：按人物线展示起点状态、阶段目标、关键转折、关系变化、失败 / 代价、终点状态、与主线关系。
+- 06：改编方向、原文保留内容、本次重点改变、风格要求、风险提醒、给后续写作的硬要求。
+- 07：框架完成状态、核心框架摘要、缺失项检查、下游生成准备、进入下一阶段建议。
+
+完整原始数据仍保留在“调试原始数据”折叠区；`id / nodeId / moduleName / moduleType / moduleLogo / runningTime / totalPoints / model / inputTokens / outputTokens / query / maxToken / reasoningText / historyPreview / contextTotalLen / finishReason / llmRequestIds / updateVarResult / responseData / raw / debug / metadata / schema_version / mapping_version / contract_version / validation_status / source_path / source_ref / payload_keys` 等内部字段不进入主展示。
+
+取消自动连跑的原因是避免“02 刚完成就自动跑 03，用户还没确认 03 偏好或应用 02 修改”的竞态。现在 02 完成后只展示 02 结果；用户应用修改后，03 页面先显示 03 人设偏好状态，只有用户点击“生成 03 人设方案”才请求 `/api/framework-planner/stage/03`。
+
+### 框架导出与框架转剧本输入
+
+07 完成页提供两个框架导出按钮：
+
+- `下载可读框架`：导出 `.txt`，将 01-07 的结构化结果整理成分段中文说明，字段缺失显示“暂无”，不直接暴露原始 JSON key。
+- `下载结构化框架`：导出 `.json`，用于导入框架到剧本工作台。内容包含 `frameworkPlanPackage / framework_plan_package`、`stageOutputs`、标题、集数、分钟数、目标形式、改编方向，以及 `export_version / exported_at` 等元数据；调试 raw、token、nodeId 等字段会被清理。
+
+框架到剧本工作台支持三种输入方式：
+
+- 从 01-07 框架阶段完成后直接跳转，URL 携带 `framework_asset_id`。
+- 在 08-12 页面选择一个已保存框架资产。
+- 在 08-12 页面导入“结构化框架 JSON”。导入会校验 `frameworkPlanPackage` 或 `stageOutputs`，失败时给出明确提示，不静默沿用旧缓存。
+
+05 阶段 UI 已收口为一个“人物故事线”入口，不再把 05 / 05b / 05c 暴露成三个步骤。旧缓存中的详情或处理字段仍按同一份 `character_storylines / storyline_decisions` 兼容读取；人物线卡片里可展开查看对应集数、节拍和剧情节点。
+
+06 “整体改编指引”支持字段化编辑：改编方向、原文保留内容、本次重点改变、风格要求、风险提醒、后续写作硬要求。修改后必须点击“应用修改”，否则 07 生成和保存会被拦截。
+
+08-12 当前不使用智慧库偏好。框架到剧本阶段只使用 01-07 框架资产、08-12 上游阶段结果和页面显式参数；UI 不显示智慧库偏好，后端也不对 08-12 注入智慧库阶段偏好。
+
 ### 新建剧本输入
 
 当前网页端新建剧本只要求用户输入：
