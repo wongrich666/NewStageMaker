@@ -1238,7 +1238,7 @@
             <button type="button" data-action="${escapeHtml(action)}" ${disabled ? "disabled" : ""}>${escapeHtml(buttonText)}</button>
             ${extraActions}
           </div>
-          <p class="wts-hint">输入来源：已导入的 01-07 框架、上游阶段结果和本页显式参数。</p>
+          <p class="wts-hint">输入来源：已导入的框架和已完成内容</p>
           ${body || ""}
         </div>
       </article>
