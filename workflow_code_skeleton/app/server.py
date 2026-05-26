@@ -7,9 +7,11 @@ from functools import wraps
 import os
 from pathlib import Path
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from flask import (
     Flask,
+    Response,
     jsonify,
     redirect,
     render_template,
@@ -285,6 +287,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         script_stages = workspace_state.get("scriptStages")
         if not isinstance(script_stages, dict):
             script_stages = {}
+        cascade = {
+            "stage08": ("stage09", "stage10", "stage11", "stage12"),
+            "stage09": ("stage10", "stage11", "stage12"),
+            "stage10": ("stage11", "stage12"),
+            "stage11": ("stage12",),
+        }
+        for downstream_stage in cascade.get(str(stage_key), ()):
+            script_stages.pop(downstream_stage, None)
         clean_output["updated_at"] = now
         script_stages[str(stage_key)] = clean_output
         workspace_state["scriptStages"] = script_stages
@@ -340,34 +350,321 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         except Exception:
             return default
 
+    def _first_present(mapping, *keys, default=None):
+        if not isinstance(mapping, dict):
+            return default
+        for key in keys:
+            if key in mapping and mapping.get(key) is not None:
+                return mapping.get(key)
+        return default
+
+    def _get_bool_alias(mapping, *keys, default=None):
+        value = _first_present(mapping, *keys, default=default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "y", "passed", "pass", "通过", "是"}:
+                return True
+            if normalized in {"false", "0", "no", "n", "failed", "fail", "不通过", "否"}:
+                return False
+        return default if value is None else bool(value)
+
+    def _get_list_alias(mapping, *keys):
+        value = _first_present(mapping, *keys, default=[])
+        return value if isinstance(value, list) else []
+
+    def _get_dict_alias(mapping, *keys):
+        value = _first_present(mapping, *keys, default={})
+        return value if isinstance(value, dict) else {}
+
+    def _merge_aliases(base_vars, aliases):
+        if not isinstance(base_vars, dict) or not isinstance(aliases, dict):
+            return base_vars
+        for source_key, alias_keys in aliases.items():
+            if source_key not in base_vars:
+                continue
+            for alias_key in alias_keys:
+                base_vars.setdefault(alias_key, base_vars[source_key])
+        return base_vars
+
+    def _unwrap_dict_alias(mapping, *keys):
+        value = _get_dict_alias(mapping, *keys)
+        for key in keys:
+            if isinstance(value, dict) and isinstance(value.get(key), dict):
+                return value.get(key), True
+        return value, False
+
+    def _normalize_dict_output_alias(mapping, *keys):
+        value = _first_present(mapping, *keys, default=None)
+        unwrapped = False
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("```"):
+                text = text.strip("`").strip()
+                if text.lower().startswith("json"):
+                    text = text[4:].strip()
+            try:
+                value = json.loads(text)
+            except Exception as exc:
+                return {}, unwrapped, f"string JSON parse failed: {exc}"
+        for key in keys:
+            if isinstance(value, dict) and isinstance(value.get(key), dict):
+                value = value.get(key)
+                unwrapped = True
+                break
+            if isinstance(value, dict) and isinstance(value.get(key), str):
+                try:
+                    value = json.loads(value.get(key).strip())
+                    unwrapped = True
+                    break
+                except Exception as exc:
+                    return {}, unwrapped, f"wrapped string JSON parse failed: {exc}"
+        if isinstance(value, dict) and value:
+            return value, unwrapped, ""
+        if value is None:
+            return {}, unwrapped, "missing output alias"
+        return {}, unwrapped, f"output alias is {type(value).__name__}, expected object"
+
+    def _validate_stage11_causal_conflict_plan(plan, *, start_episode: int, end_episode: int) -> list[str]:
+        if not isinstance(plan, dict) or not plan:
+            return ["batchCausalConflictPlan must be a non-empty JSON object"]
+        issues = []
+        required_root = ("batch_meta", "global_conflict_engine", "episodes")
+        missing_root = [key for key in required_root if key not in plan]
+        if missing_root:
+            issues.append(f"batchCausalConflictPlan missing root fields: {', '.join(missing_root)}")
+        episodes = plan.get("episodes")
+        if not isinstance(episodes, list) or not episodes:
+            issues.append("batchCausalConflictPlan.episodes must be a non-empty array")
+            return issues
+        expected_episodes = set(range(int(start_episode), int(end_episode) + 1))
+        actual_episodes = set()
+        required_episode_fields = (
+            "episode",
+            "episode_title",
+            "active_characters",
+            "scene_refs",
+            "carry_in",
+            "why_now",
+            "character_motivation",
+            "emotional_precondition",
+            "scene_cause_chain",
+            "non_conflict_moment",
+            "natural_transition",
+            "opening_image",
+            "opening_action",
+            "current_goal",
+            "core_obstacle",
+            "episode_state_change",
+            "ending_hook",
+            "dialogue_strategy",
+        )
+        if len(episodes) != len(expected_episodes) and len(episodes) > 5:
+            issues.append("batchCausalConflictPlan.episodes count must match the current batch or be no more than 5")
+        for index, episode_payload in enumerate(episodes, start=1):
+            if not isinstance(episode_payload, dict):
+                issues.append(f"batchCausalConflictPlan.episodes[{index}] must be an object")
+                continue
+            episode_no = _positive_int(episode_payload.get("episode"), 0)
+            if episode_no > 0:
+                actual_episodes.add(episode_no)
+            missing_fields = [key for key in required_episode_fields if key not in episode_payload]
+            if missing_fields:
+                issues.append(
+                    f"batchCausalConflictPlan.episodes[{index}] missing fields: {', '.join(missing_fields)}"
+                )
+        missing_episodes = sorted(expected_episodes - actual_episodes)
+        if missing_episodes:
+            issues.append(f"batchCausalConflictPlan missing episodes: {missing_episodes}")
+        return issues
+
     def _framework_batch_from_plan(plan: list, requested_start=None, completed_starts=None) -> tuple[int, int, list]:
         completed = {int(item) for item in (completed_starts or []) if str(item).strip().isdigit()}
-        episode_numbers = [
-            _positive_int(item.get("episode"), 0)
-            for item in plan
-            if isinstance(item, dict)
-        ]
+        episode_numbers = []
+        for index, item in enumerate(plan, start=1):
+            if not isinstance(item, dict):
+                continue
+            episode_numbers.append(
+                _positive_int(
+                    item.get("episode")
+                    or item.get("episodeNumber")
+                    or item.get("episode_number")
+                    or item.get("ep")
+                    or index,
+                    index,
+                )
+            )
         if requested_start:
             start_episode = _positive_int(requested_start, 1)
         else:
             starts = sorted({((episode - 1) // 5) * 5 + 1 for episode in episode_numbers if episode > 0})
             start_episode = next((start for start in starts if start not in completed), starts[0] if starts else 1)
         end_episode = start_episode + 4
-        batch = [
-            item for item in plan
-            if isinstance(item, dict)
-            and start_episode <= _positive_int(item.get("episode"), 0) <= end_episode
-        ]
+        batch = []
+        batch_episode_numbers = []
+        for index, item in enumerate(plan, start=1):
+            if not isinstance(item, dict):
+                continue
+            episode = _positive_int(
+                item.get("episode")
+                or item.get("episodeNumber")
+                or item.get("episode_number")
+                or item.get("ep")
+                or index,
+                index,
+            )
+            if start_episode <= episode <= end_episode:
+                batch.append(item)
+                batch_episode_numbers.append(episode)
         if batch:
-            end_episode = max(_positive_int(item.get("episode"), start_episode) for item in batch)
+            end_episode = max(batch_episode_numbers)
         return start_episode, end_episode, batch
+
+    def _sorted_numeric_batch_keys(batches: dict) -> list[str]:
+        if not isinstance(batches, dict):
+            return []
+        return sorted(
+            [str(key) for key in batches.keys() if str(key).strip().isdigit()],
+            key=lambda item: int(item),
+        )
+
+    def _txt_label(key) -> str:
+        labels = {
+            "story_synopsis": "故事梗概",
+            "synopsis": "故事梗概",
+            "summary": "摘要",
+            "characterPlan": "人物小传",
+            "character_plan": "人物小传",
+            "sceneDictionary": "场景字典",
+            "coreScenes": "核心场景",
+            "overallAdaptationGuide": "整体改编指引",
+            "episode": "集数",
+            "title": "标题",
+            "name": "名称",
+            "characters": "人物",
+            "description": "说明",
+        }
+        return labels.get(str(key), str(key))
+
+    def _txt_scalar(value) -> str:
+        if value is None:
+            return "暂无"
+        if isinstance(value, bool):
+            return "是" if value else "否"
+        text = str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
+        return text or "暂无"
+
+    def _txt_readable(value, indent: int = 0) -> str:
+        pad = " " * indent
+        if value is None or value == "":
+            return "暂无"
+        if isinstance(value, (str, int, float, bool)):
+            return _txt_scalar(value)
+        if isinstance(value, list):
+            if not value:
+                return "暂无"
+            lines = []
+            for index, item in enumerate(value, start=1):
+                if isinstance(item, dict):
+                    heading = item.get("title") or item.get("name") or item.get("episode") or f"条目{index}"
+                    lines.append(f"{pad}{index}. {_txt_scalar(heading)}")
+                    nested = _txt_readable(item, indent + 2)
+                    if nested and nested != "暂无":
+                        lines.append(nested)
+                elif isinstance(item, list):
+                    lines.append(f"{pad}{index}.")
+                    lines.append(_txt_readable(item, indent + 2))
+                else:
+                    lines.append(f"{pad}{index}. {_txt_scalar(item)}")
+            return "\n".join(line for line in lines if str(line).strip())
+        if isinstance(value, dict):
+            if not value:
+                return "暂无"
+            lines = []
+            for key, item in value.items():
+                if str(key) in raw_fastgpt_response_keys:
+                    continue
+                label = _txt_label(key)
+                if isinstance(item, (dict, list)):
+                    lines.append(f"{pad}{label}：")
+                    lines.append(_txt_readable(item, indent + 2))
+                else:
+                    lines.append(f"{pad}{label}：{_txt_scalar(item)}")
+            return "\n".join(line for line in lines if str(line).strip()) or "暂无"
+        return _txt_scalar(value)
+
+    def _framework_script_text_from_batches(stage12: dict) -> str:
+        if not isinstance(stage12, dict):
+            return ""
+        batches = stage12.get("batches") if isinstance(stage12.get("batches"), dict) else {}
+        parts = []
+        for key in _sorted_numeric_batch_keys(batches):
+            batch = batches.get(key)
+            if not isinstance(batch, dict):
+                continue
+            text = _first_present(batch, "batchScriptText", "batch_script_text", default="")
+            if str(text or "").strip():
+                parts.append(str(text).replace("\r\n", "\n").replace("\r", "\n").strip())
+        if parts:
+            return "\n\n".join(parts)
+        return str(_first_present(stage12, "batchScriptText", "batch_script_text", default="") or "").strip()
+
+    def _framework_to_script_txt(asset: dict) -> str:
+        package = asset.get("framework_plan_package") if isinstance(asset.get("framework_plan_package"), dict) else {}
+        stage_outputs = asset.get("stage_outputs") if isinstance(asset.get("stage_outputs"), dict) else {}
+        workspace_state = asset.get("framework_to_script_state") if isinstance(asset.get("framework_to_script_state"), dict) else {}
+        script_stages = asset.get("scriptStages") if isinstance(asset.get("scriptStages"), dict) else {}
+        if not script_stages and isinstance(workspace_state.get("scriptStages"), dict):
+            script_stages = workspace_state.get("scriptStages")
+        stage03 = _get_dict_alias(stage_outputs, "stage03")
+        stage06 = _get_dict_alias(stage_outputs, "stage06")
+        stage07 = _get_dict_alias(stage_outputs, "stage07")
+        stage08 = _get_dict_alias(script_stages, "stage08")
+        stage12 = _get_dict_alias(script_stages, "stage12")
+
+        stage07_package = _get_dict_alias(stage07, "frameworkPlanPackage", "framework_plan_package")
+        story = (
+            _first_present(package, "story_synopsis", "synopsis", "summary", default=None)
+            or _first_present(stage07_package, "story_synopsis", "synopsis", "summary", default=None)
+            or _first_present(stage06, "overallAdaptationGuide", "overall_adaptation_guide", default=None)
+            or _first_present(stage_outputs, "overallAdaptationGuide", "overall_adaptation_guide", "adaptation_guide", default=None)
+            or "暂无"
+        )
+        characters = (
+            _first_present(package, "characterPlan", "character_plan", default=None)
+            or _first_present(stage03, "characterPlan", "character_plan", default=None)
+            or _first_present(stage_outputs, "characterPlan", "character_plan", default=None)
+            or "暂无"
+        )
+        scenes = (
+            _first_present(stage08, "sceneDictionary", "scene_dictionary", default=None)
+            or _first_present(package, "sceneDictionary", "scene_dictionary", "coreScenes", "core_scenes", default=None)
+            or _first_present(stage_outputs, "sceneDictionary", "scene_dictionary", "coreScenes", "core_scenes", default=None)
+            or "暂无"
+        )
+        script_text = _framework_script_text_from_batches(stage12) or "暂无"
+        title = _txt_scalar(asset.get("title") or package.get("title") or package.get("project_title") or "未命名框架剧本")
+        return "\n\n".join(
+            [
+                f"《{title}》",
+                "一、故事梗概\n" + _txt_readable(story),
+                "二、人物小传\n" + _txt_readable(characters),
+                "三、核心场景\n" + _txt_readable(scenes),
+                "四、剧本正文\n" + script_text,
+            ]
+        ) + "\n"
 
     def _framework_review_needs_rewrite(review: dict) -> bool:
         if not isinstance(review, dict):
             return False
         if bool(review.get("rewriteRequired") or review.get("rewrite_required")):
             return True
-        if review.get("reviewPassed") is False or review.get("approved") is False:
+        if (
+            review.get("reviewPassed") is False
+            or review.get("passed") is False
+            or review.get("approved") is False
+        ):
             return True
         return False
 
@@ -2018,6 +2315,50 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         existing_stage11 = _framework_script_stage_cache(framework_asset, "stage11")
         existing_batches = existing_stage11.get("batches") if isinstance(existing_stage11.get("batches"), dict) else {}
+        reset_stage11 = bool(data.get("reset_stage11") or data.get("resetStage11"))
+        if reset_stage11:
+            existing_batches = {}
+            existing_stage11 = {}
+            reset_asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
+            if reset_asset_id:
+                _save_framework_to_script_stage(
+                    user_id=user_id,
+                    asset_id=reset_asset_id,
+                    stage_key="stage12",
+                    output={"batches": {}},
+                )
+        else:
+            valid_existing_batches = {}
+            for existing_key, existing_batch in existing_batches.items():
+                if not isinstance(existing_batch, dict):
+                    continue
+                existing_start = _positive_int(
+                    existing_batch.get("batchStartEpisode") or existing_key,
+                    _positive_int(existing_key, 1),
+                )
+                existing_end = _positive_int(existing_batch.get("batchEndEpisode"), existing_start + 4)
+                existing_plan, _ = _unwrap_dict_alias(
+                    existing_batch,
+                    "batchCausalConflictPlan",
+                    "batch_causal_conflict_plan",
+                )
+                existing_issues = _validate_stage11_causal_conflict_plan(
+                    existing_plan,
+                    start_episode=existing_start,
+                    end_episode=existing_end,
+                )
+                if existing_issues:
+                    logger.warning(
+                        "framework-to-script stage11 dropping invalid cached batch before retry: "
+                        "asset_id=%s batchStartEpisode=%s batchEndEpisode=%s reason=%s",
+                        str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip(),
+                        existing_start,
+                        existing_end,
+                        "; ".join(existing_issues[:8]),
+                    )
+                    continue
+                valid_existing_batches[str(existing_start)] = existing_batch
+            existing_batches = valid_existing_batches
         start_episode, end_episode, batch_plan = _framework_batch_from_plan(
             plan,
             data.get("batchStartEpisode") or data.get("batch_start_episode"),
@@ -2046,10 +2387,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     data.get("total_episodes") or (framework_asset or {}).get("episodes_per_season"),
                     len(plan),
                 )
-                conflict_memory = str(data.get("conflictMemory") or existing_stage11.get("conflictMemory") or "")
+                conflict_memory = str(
+                    _first_present(data, "conflictMemory", "conflict_memory", default=None)
+                    or _first_present(existing_stage11, "conflictMemory", "conflict_memory", default="")
+                    or ""
+                )
+                if reset_stage11:
+                    conflict_memory = ""
                 base_vars = {
                     "totalEpisodes": total_episodes,
-                    "total_episodes": total_episodes,
                     "conflictStartEpisode": start_episode,
                     "batchEnrichedEpisodePlan": batch_plan,
                     "sceneDictionary": scene_dictionary,
@@ -2057,6 +2403,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "scriptWorldRulesDigest": rules_digest,
                     "conflictMemory": conflict_memory,
                 }
+                _merge_aliases(base_vars, {"totalEpisodes": ("total_episodes",), "conflictMemory": ("conflict_memory",)})
                 first_batch_item = batch_plan[0] if batch_plan and isinstance(batch_plan[0], dict) else {}
                 appearance_characters = appearance_mapping.get("characters") if isinstance(appearance_mapping, dict) else []
                 appearance_character_count = (
@@ -2091,27 +2438,100 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     },
                 )
                 failed_sub_stage = "causal_conflict_write"
-                write_output = fastgpt_client.run_stage(STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE, base_vars)
-                write_output_data = write_output if isinstance(write_output, dict) else {}
-                conflict_plan = write_output_data.get("batchCausalConflictPlan")
+                write_output_data = {}
+                conflict_plan = {}
+                conflict_plan_unwrapped = False
+                write_failure_reason = ""
+                write_output_keys = []
+                write_retry_count = 0
+                max_write_retries = 3
+                for retry_count in range(max_write_retries + 1):
+                    write_retry_count = retry_count
+                    if retry_count:
+                        logger.warning(
+                            "framework-to-script stage11 causal_conflict_write retry: asset_id=%s retry_count=%s "
+                            "start_episode=%s end_episode=%s reason=%s",
+                            asset_id,
+                            retry_count,
+                            start_episode,
+                            end_episode,
+                            write_failure_reason,
+                        )
+                    try:
+                        write_output = fastgpt_client.run_stage(STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE, base_vars)
+                        write_output_data = write_output if isinstance(write_output, dict) else {}
+                        write_output_keys = sorted(write_output_data.keys())
+                        conflict_plan, conflict_plan_unwrapped, write_failure_reason = _normalize_dict_output_alias(
+                            write_output_data,
+                            "batchCausalConflictPlan",
+                            "batch_causal_conflict_plan",
+                        )
+                    except FastGPTStageFormatError as exc:
+                        write_output_data = {}
+                        write_output_keys = []
+                        write_failure_reason = (
+                            f"{exc.failure_reason}; missing_fields={list(exc.missing_fields)}; "
+                            f"probable_truncated_json={exc.probable_truncated_json}; "
+                            f"raw_output_source={exc.raw_output_source}"
+                        )
+                        if retry_count >= max_write_retries:
+                            break
+                        continue
+                    except Exception as exc:
+                        write_failure_reason = f"{type(exc).__name__}: {exc}"
+                        if retry_count >= max_write_retries:
+                            break
+                        continue
+                    if isinstance(conflict_plan, dict) and conflict_plan:
+                        contract_issues = _validate_stage11_causal_conflict_plan(
+                            conflict_plan,
+                            start_episode=start_episode,
+                            end_episode=end_episode,
+                        )
+                        if not contract_issues:
+                            break
+                        write_failure_reason = "contract validation failed: " + "; ".join(contract_issues[:8])
+                        conflict_plan = {}
+                        if retry_count >= max_write_retries:
+                            break
+                        continue
+                    if not write_failure_reason:
+                        write_failure_reason = "normalized batchCausalConflictPlan is empty"
+                    if retry_count >= max_write_retries:
+                        break
+                conflict_episodes = conflict_plan.get("episodes") if isinstance(conflict_plan, dict) else []
                 logger.info(
                     "framework-to-script stage11 write done: asset_id=%s write_output_keys=%s "
-                    "conflict_plan_type=%s conflict_plan_empty=%s",
+                    "conflict_plan_type=%s conflict_plan_empty=%s normalized_keys=%s unwrapped=%s "
+                    "batchCausalConflictPlan_episodes_count=%s input_keys=%s write_failure_reason=%s",
                     asset_id,
-                    sorted(write_output_data.keys()),
+                    write_output_keys,
                     type(conflict_plan).__name__,
                     not bool(conflict_plan),
+                    sorted(conflict_plan.keys()) if isinstance(conflict_plan, dict) else [],
+                    conflict_plan_unwrapped,
+                    len(conflict_episodes) if isinstance(conflict_episodes, list) else 0,
+                    sorted(base_vars.keys()),
+                    write_failure_reason,
                 )
                 if not isinstance(conflict_plan, dict) or not conflict_plan:
+                    logger.error(
+                        "framework-to-script stage11 causal_conflict_write failed after retries: asset_id=%s "
+                        "start_episode=%s end_episode=%s retry_count=%s max_write_retries=%s "
+                        "reason=%s write_output_keys=%s input_keys=%s",
+                        asset_id,
+                        start_episode,
+                        end_episode,
+                        write_retry_count,
+                        max_write_retries,
+                        write_failure_reason,
+                        write_output_keys,
+                        sorted(base_vars.keys()),
+                    )
                     return jsonify(
                         {
                             "success": False,
-                            "message": "11 write 阶段未返回 batchCausalConflictPlan",
-                            "detail": {
-                                "failed_sub_stage": "causal_conflict_write",
-                                "error_message": "11 write 阶段未返回 batchCausalConflictPlan",
-                                "write_output_keys": sorted(write_output_data.keys()),
-                            },
+                            "message": "11 write 阶段未返回可用的 batchCausalConflictPlan，已自动重试 3 次；请查看后端调试终端日志。",
                         }
                     ), 500
                 failed_sub_stage = "causal_conflict_review"
@@ -2133,33 +2553,48 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     )
                     review_output = {}
                 review_output_data = review_output if isinstance(review_output, dict) else {}
-                review_passed = review_output_data.get("reviewPassed")
-                rewrite_required = review_output_data.get("rewriteRequired")
-                blocking_issues = (
-                    review_output_data.get("blockingIssues")
-                    if isinstance(review_output_data.get("blockingIssues"), list)
-                    else []
-                )
+                review_passed = _get_bool_alias(review_output_data, "reviewPassed", "passed", default=None)
+                rewrite_required = _get_bool_alias(review_output_data, "rewriteRequired", "rewrite_required", default=None)
+                blocking_issues = _get_list_alias(review_output_data, "blockingIssues", "blocking_issues")
+                non_blocking_issues = _get_list_alias(review_output_data, "nonBlockingIssues", "non_blocking_issues")
+                rewrite_brief = _first_present(review_output_data, "rewriteBrief", "rewrite_brief", default="")
                 if review_passed is None and rewrite_required is None:
                     logger.warning(
-                        "framework-to-script stage11 review output missing reviewPassed/rewriteRequired, using pass defaults: "
+                        "framework-to-script stage11 review output missing reviewPassed/passed and rewriteRequired/rewrite_required; "
+                        "treating as rewrite needed: "
                         "asset_id=%s review_output_keys=%s",
                         asset_id,
                         sorted(review_output_data.keys()),
                     )
-                    review_passed = True
-                    rewrite_required = False
+                    review_passed = False
+                    rewrite_required = True
                     blocking_issues = []
                 conflict_review = {
                     "reviewPassed": review_passed,
+                    "passed": review_passed,
                     "rewriteRequired": rewrite_required,
+                    "rewrite_required": rewrite_required,
                     "blockingIssues": blocking_issues,
+                    "blocking_issues": blocking_issues,
+                    "nonBlockingIssues": non_blocking_issues,
+                    "non_blocking_issues": non_blocking_issues,
+                    "rewriteBrief": rewrite_brief,
+                    "rewrite_brief": rewrite_brief,
                 }
                 logger.info(
-                    "framework-to-script stage11 review done: asset_id=%s review_output_keys=%s conflict_review=%s",
+                    "framework-to-script stage11 review done: asset_id=%s review_output_keys=%s normalized=%s "
+                    "rewrite_triggered=%s input_keys=%s",
                     asset_id,
                     sorted(review_output_data.keys()),
-                    conflict_review,
+                    {
+                        "reviewPassed": review_passed,
+                        "rewriteRequired": rewrite_required,
+                        "blockingIssues_count": len(blocking_issues),
+                        "nonBlockingIssues_count": len(non_blocking_issues),
+                        "rewriteBrief_length": len(str(rewrite_brief or "")),
+                    },
+                    _framework_review_needs_rewrite(conflict_review),
+                    sorted(base_vars.keys()),
                 )
                 if _framework_review_needs_rewrite(conflict_review):
                     failed_sub_stage = "causal_conflict_rewrite"
@@ -2177,7 +2612,21 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         sorted(rewrite_output.keys()) if isinstance(rewrite_output, dict) else [],
                     )
                     rewrite_output_data = rewrite_output if isinstance(rewrite_output, dict) else {}
-                    conflict_plan = rewrite_output_data.get("batchCausalConflictPlan") or conflict_plan
+                    rewrite_conflict_plan, rewrite_unwrapped = _unwrap_dict_alias(
+                        rewrite_output_data,
+                        "batchCausalConflictPlan",
+                        "batch_causal_conflict_plan",
+                    )
+                    conflict_plan = rewrite_conflict_plan or conflict_plan
+                    rewrite_episodes = conflict_plan.get("episodes") if isinstance(conflict_plan, dict) else []
+                    logger.info(
+                        "framework-to-script stage11 rewrite normalized: asset_id=%s normalized_keys=%s "
+                        "unwrapped=%s batchCausalConflictPlan_episodes_count=%s",
+                        asset_id,
+                        sorted(conflict_plan.keys()) if isinstance(conflict_plan, dict) else [],
+                        rewrite_unwrapped,
+                        len(rewrite_episodes) if isinstance(rewrite_episodes, list) else 0,
+                    )
                 failed_sub_stage = "causal_conflict_memory"
                 try:
                     memory_output = fastgpt_client.run_stage(
@@ -2198,18 +2647,21 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     )
                     memory_output = {}
                 memory_output_data = memory_output if isinstance(memory_output, dict) else {}
-                if "conflictMemory" not in memory_output_data:
+                memory_value = _first_present(memory_output_data, "conflictMemory", "conflict_memory", default=None)
+                if memory_value is None:
                     logger.warning(
-                        "framework-to-script stage11 memory output missing conflictMemory, keeping previous memory: "
+                        "framework-to-script stage11 memory output missing conflictMemory/conflict_memory, keeping previous memory: "
                         "asset_id=%s memory_output_keys=%s",
                         asset_id,
                         sorted(memory_output_data.keys()),
                     )
-                conflict_memory = str(memory_output_data.get("conflictMemory") or conflict_memory)
+                else:
+                    conflict_memory = str(memory_value)
                 logger.info(
-                    "framework-to-script stage11 memory done: asset_id=%s memory_output_keys=%s conflictMemory_length=%s",
+                    "framework-to-script stage11 memory done: asset_id=%s memory_output_keys=%s normalized_keys=%s conflictMemory_length=%s",
                     asset_id,
                     sorted(memory_output_data.keys()),
+                    ["conflictMemory", "conflict_memory"],
                     len(conflict_memory),
                 )
             except Exception as exc:
@@ -2249,8 +2701,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 "batchEndEpisode": end_episode,
                 "batchEnrichedEpisodePlan": batch_plan,
                 "batchCausalConflictPlan": conflict_plan,
+                "batch_causal_conflict_plan": conflict_plan,
                 "batchCausalConflictReview": conflict_review,
+                "batch_causal_conflict_review": conflict_review,
                 "conflictMemory": conflict_memory,
+                "conflict_memory": conflict_memory,
             }
             batches[batch_key] = batch_output
             output = {**batch_output, "batches": batches}
@@ -2285,19 +2740,55 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         stage11_batches = stage11.get("batches") if isinstance(stage11.get("batches"), dict) else {}
         existing_stage12 = _framework_script_stage_cache(framework_asset, "stage12")
         existing_batches = existing_stage12.get("batches") if isinstance(existing_stage12.get("batches"), dict) else {}
+        reset_stage12 = bool(data.get("reset_stage12") or data.get("resetStage12"))
+        if reset_stage12:
+            existing_stage12 = {}
+            existing_batches = {}
         requested_start = data.get("batchStartEpisode") or data.get("batch_start_episode")
+        selected_batch_source = ""
         if requested_start:
             batch_key = str(_positive_int(requested_start, 1))
+            selected_batch_source = "explicit_request"
+            if not stage11_batches and _first_present(stage11, "batchCausalConflictPlan", "batch_causal_conflict_plan", default=None):
+                stage11_batches = {batch_key: stage11}
+                logger.warning(
+                    "framework-to-script stage12 stage11.batches empty, falling back to top-level stage11 batch: "
+                    "asset_id=%s batchStartEpisode=%s",
+                    str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip(),
+                    batch_key,
+                )
         else:
-            batch_key = next((key for key in sorted(stage11_batches, key=lambda item: int(item)) if key not in existing_batches), "")
-            if not batch_key and stage11_batches:
-                batch_key = sorted(stage11_batches, key=lambda item: int(item))[0]
+            stage11_batch_keys = _sorted_numeric_batch_keys(stage11_batches)
+            existing_stage12_keys = set(_sorted_numeric_batch_keys(existing_batches))
+            batch_key = next((key for key in stage11_batch_keys if key not in existing_stage12_keys), "")
+            selected_batch_source = "first_missing_from_stage11_batches"
+            if not batch_key and not stage11_batch_keys and _first_present(stage11, "batchCausalConflictPlan", "batch_causal_conflict_plan", default=None):
+                batch_key = str(_positive_int(stage11.get("batchStartEpisode"), 1))
+                stage11_batches = {batch_key: stage11}
+                selected_batch_source = "fallback_top_level"
+                logger.warning(
+                    "framework-to-script stage12 stage11.batches empty, falling back to top-level stage11 batch: "
+                    "asset_id=%s batchStartEpisode=%s",
+                    str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip(),
+                    batch_key,
+                )
         stage11_batch = stage11_batches.get(batch_key) if isinstance(stage11_batches, dict) else None
+        logger.info(
+            "framework-to-script stage12 selected batchStartEpisode=%s source=%s stage11_batch_keys=%s stage12_batch_keys=%s",
+            batch_key,
+            selected_batch_source,
+            _sorted_numeric_batch_keys(stage11_batches),
+            _sorted_numeric_batch_keys(existing_batches),
+        )
         if not isinstance(stage11_batch, dict):
             return _json_error("请先完成 11 当前批次因果冲突。", status=400)
 
-        batch_plan = stage11_batch.get("batchEnrichedEpisodePlan") or []
-        conflict_plan = stage11_batch.get("batchCausalConflictPlan") or {}
+        batch_plan = _first_present(stage11_batch, "batchEnrichedEpisodePlan", "batch_enriched_episode_plan", default=[]) or []
+        conflict_plan, conflict_plan_unwrapped = _unwrap_dict_alias(
+            stage11_batch,
+            "batchCausalConflictPlan",
+            "batch_causal_conflict_plan",
+        )
         scene_dictionary = stage08.get("sceneDictionary") or {}
         appearance_mapping = stage09.get("appearanceMapping") or {}
         if not isinstance(batch_plan, list) or not batch_plan:
@@ -2335,13 +2826,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     data.get("total_episodes") or (framework_asset or {}).get("episodes_per_season"),
                     end_episode,
                 )
-                script_memory = str(data.get("scriptMemory") or existing_stage12.get("scriptMemory") or "")
+                script_memory = str(
+                    _first_present(data, "scriptMemory", "script_memory", default=None)
+                    or _first_present(existing_stage12, "scriptMemory", "script_memory", default="")
+                    or ""
+                )
                 base_vars = {
                     "totalEpisodes": total_episodes,
-                    "total_episodes": total_episodes,
                     "scriptStartEpisode": start_episode,
                     "episodeWordCount": episode_word_count,
-                    "episode_word_count": episode_word_count,
                     "batchEnrichedEpisodePlan": batch_plan,
                     "batchCausalConflictPlan": conflict_plan,
                     "sceneDictionary": scene_dictionary,
@@ -2349,6 +2842,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "scriptWorldRulesDigest": stage08.get("scriptWorldRulesDigest") or {},
                     "scriptMemory": script_memory,
                 }
+                _merge_aliases(
+                    base_vars,
+                    {
+                        "totalEpisodes": ("total_episodes",),
+                        "episodeWordCount": ("episode_word_count",),
+                        "scriptMemory": ("script_memory",),
+                    },
+                )
                 first_plan = batch_plan[0] if isinstance(batch_plan[0], dict) else {}
                 first_plan_summary = {
                     "episode": first_plan.get("episode"),
@@ -2360,11 +2861,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     if isinstance(appearance_mapping, dict)
                     else []
                 )
-                conflict_episodes = (
-                    conflict_plan.get("episodes")
-                    or conflict_plan.get("batchCausalConflictPlan")
-                    or []
-                )
+                conflict_episodes = conflict_plan.get("episodes") if isinstance(conflict_plan, dict) else []
                 stage_names = {
                     "script_write": getattr(STAGE_CONTRACTS.get(STAGE_FRAMEWORK_SCRIPT_WRITE), "stage_name", STAGE_FRAMEWORK_SCRIPT_WRITE),
                     "script_review": getattr(STAGE_CONTRACTS.get(STAGE_FRAMEWORK_SCRIPT_REVIEW), "stage_name", STAGE_FRAMEWORK_SCRIPT_REVIEW),
@@ -2375,7 +2872,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "framework-to-script stage12 entering FastGPT asset_id=%s start_episode=%s end_episode=%s "
                     "batch_plan_count=%s has_batchCausalConflictPlan=%s has_sceneDictionary=%s "
                     "has_appearanceMapping=%s appearanceMapping.characters_count=%s base_vars_keys=%s "
-                    "first_batchEnrichedEpisodePlan=%s batchCausalConflictPlan_episodes_count=%s stage_names=%s",
+                    "first_batchEnrichedEpisodePlan=%s batchCausalConflictPlan_episodes_count=%s "
+                    "batchCausalConflictPlan_unwrapped=%s normalized_conflict_keys=%s stage_names=%s",
                     asset_id,
                     start_episode,
                     end_episode,
@@ -2387,20 +2885,24 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     sorted(base_vars.keys()),
                     first_plan_summary,
                     len(conflict_episodes) if isinstance(conflict_episodes, list) else 0,
+                    conflict_plan_unwrapped,
+                    sorted(conflict_plan.keys()) if isinstance(conflict_plan, dict) else [],
                     stage_names,
                 )
                 failed_sub_stage = "script_write"
                 write_output = fastgpt_client.run_stage(STAGE_FRAMEWORK_SCRIPT_WRITE, base_vars)
                 write_keys = sorted(write_output.keys()) if isinstance(write_output, dict) else []
-                batch_script_value = write_output.get("batchScriptText") if isinstance(write_output, dict) else None
+                batch_script_value = _first_present(write_output, "batchScriptText", "batch_script_text", default=None)
                 batch_script = str(batch_script_value or "")
                 logger.info(
                     "framework-to-script stage12 script_write output write_output_keys=%s batchScriptText_type=%s "
-                    "batchScriptText_length=%s batchScriptText_empty=%s",
+                    "batchScriptText_length=%s batchScriptText_empty=%s normalized_keys=%s input_keys=%s",
                     write_keys,
                     type(batch_script_value).__name__,
                     len(batch_script),
                     not bool(batch_script.strip()),
+                    ["batchScriptText", "batch_script_text"],
+                    sorted(base_vars.keys()),
                 )
                 if not batch_script.strip():
                     return jsonify(
@@ -2409,7 +2911,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "message": "12 正文对白批次调用失败",
                             "detail": {
                                 "failed_sub_stage": "script_write",
-                                "error_message": "12 write 阶段未返回 batchScriptText",
+                                "error_message": "12 write/rewrite 阶段未返回 batchScriptText",
                                 "write_output_keys": write_keys,
                             },
                         }
@@ -2425,25 +2927,35 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 review_keys = sorted(review_output.keys()) if isinstance(review_output, dict) else []
                 if not isinstance(review_output, dict):
                     review_output = {}
-                missing_review_keys = [
-                    key for key in ("reviewPassed", "rewriteRequired") if key not in review_output
-                ]
-                if missing_review_keys:
+                review_passed = _get_bool_alias(review_output, "reviewPassed", "passed", default=None)
+                rewrite_required = _get_bool_alias(review_output, "rewriteRequired", "rewrite_required", default=None)
+                blocking_issues = _get_list_alias(review_output, "blockingIssues", "blocking_issues")
+                non_blocking_issues = _get_list_alias(review_output, "nonBlockingIssues", "non_blocking_issues")
+                rewrite_brief = _first_present(review_output, "rewriteBrief", "rewrite_brief", default="")
+                if review_passed is None and rewrite_required is None:
                     logger.warning(
-                        "framework-to-script stage12 script_review missing keys=%s, defaulting reviewPassed=True rewriteRequired=False",
-                        missing_review_keys,
+                        "framework-to-script stage12 script_review missing reviewPassed/passed and rewriteRequired/rewrite_required; "
+                        "treating as rewrite needed review_output_keys=%s",
+                        review_keys,
                     )
-                    review_output["reviewPassed"] = True
-                    review_output["rewriteRequired"] = False
-                    review_output["blockingIssues"] = []
+                    review_passed = False
+                    rewrite_required = True
                 script_review = {
-                    "reviewPassed": review_output.get("reviewPassed"),
-                    "rewriteRequired": review_output.get("rewriteRequired"),
-                    "blockingIssues": review_output.get("blockingIssues") or [],
+                    "reviewPassed": review_passed,
+                    "passed": review_passed,
+                    "rewriteRequired": rewrite_required,
+                    "rewrite_required": rewrite_required,
+                    "blockingIssues": blocking_issues,
+                    "blocking_issues": blocking_issues,
+                    "nonBlockingIssues": non_blocking_issues,
+                    "non_blocking_issues": non_blocking_issues,
+                    "rewriteBrief": rewrite_brief,
+                    "rewrite_brief": rewrite_brief,
                 }
                 logger.info(
                     "framework-to-script stage12 script_review output review_output_keys=%s batchScriptReview_type=%s "
-                    "reviewPassed=%s rewriteRequired=%s blockingIssues_count=%s",
+                    "reviewPassed=%s rewriteRequired=%s blockingIssues_count=%s nonBlockingIssues_count=%s "
+                    "rewriteBrief_length=%s rewrite_triggered=%s",
                     review_keys,
                     type(script_review).__name__,
                     script_review.get("reviewPassed"),
@@ -2451,6 +2963,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     len(script_review.get("blockingIssues"))
                     if isinstance(script_review.get("blockingIssues"), list)
                     else 0,
+                    len(script_review.get("nonBlockingIssues"))
+                    if isinstance(script_review.get("nonBlockingIssues"), list)
+                    else 0,
+                    len(str(script_review.get("rewriteBrief") or "")),
+                    _framework_review_needs_rewrite(script_review),
                 )
                 if _framework_review_needs_rewrite(script_review):
                     failed_sub_stage = "script_rewrite"
@@ -2463,13 +2980,27 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         },
                     )
                     rewrite_keys = sorted(rewrite_output.keys()) if isinstance(rewrite_output, dict) else []
-                    rewrite_script_value = rewrite_output.get("batchScriptText") if isinstance(rewrite_output, dict) else None
-                    batch_script = str(rewrite_script_value or batch_script)
+                    rewrite_script_value = _first_present(rewrite_output, "batchScriptText", "batch_script_text", default=None)
+                    batch_script = str(rewrite_script_value or "")
                     logger.info(
-                        "framework-to-script stage12 script_rewrite output rewrite_output_keys=%s batchScriptText_length=%s",
+                        "framework-to-script stage12 script_rewrite output rewrite_output_keys=%s batchScriptText_length=%s "
+                        "normalized_keys=%s",
                         rewrite_keys,
                         len(batch_script),
+                        ["batchScriptText", "batch_script_text"],
                     )
+                    if not batch_script.strip():
+                        return jsonify(
+                            {
+                                "success": False,
+                                "message": "12 正文对白批次调用失败",
+                                "detail": {
+                                    "failed_sub_stage": "script_rewrite",
+                                    "error_message": "12 write/rewrite 阶段未返回 batchScriptText",
+                                    "rewrite_output_keys": rewrite_keys,
+                                },
+                            }
+                        ), 500
                 failed_sub_stage = "script_memory"
                 memory_output = fastgpt_client.run_stage(
                     STAGE_FRAMEWORK_SCRIPT_MEMORY,
@@ -2480,17 +3011,18 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     },
                 )
                 memory_keys = sorted(memory_output.keys()) if isinstance(memory_output, dict) else []
-                memory_value = memory_output.get("scriptMemory") if isinstance(memory_output, dict) else None
+                memory_value = _first_present(memory_output, "scriptMemory", "script_memory", default=None)
                 if memory_value is None:
                     logger.warning(
-                        "framework-to-script stage12 script_memory missing scriptMemory, keeping previous memory memory_output_keys=%s",
+                        "framework-to-script stage12 script_memory missing scriptMemory/script_memory, keeping previous memory memory_output_keys=%s",
                         memory_keys,
                     )
                 else:
                     script_memory = str(memory_value)
                 logger.info(
-                    "framework-to-script stage12 script_memory output memory_output_keys=%s scriptMemory_length=%s",
+                    "framework-to-script stage12 script_memory output memory_output_keys=%s normalized_keys=%s scriptMemory_length=%s",
                     memory_keys,
+                    ["scriptMemory", "script_memory"],
                     len(script_memory),
                 )
             except Exception as exc:
@@ -2529,9 +3061,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 "batchEndEpisode": end_episode,
                 "batchEnrichedEpisodePlan": batch_plan,
                 "batchCausalConflictPlan": conflict_plan,
+                "batch_causal_conflict_plan": conflict_plan,
                 "batchScriptText": batch_script,
+                "batch_script_text": batch_script,
                 "batchScriptReview": script_review,
+                "batch_script_review": script_review,
                 "scriptMemory": script_memory,
+                "script_memory": script_memory,
             }
             batches[str(start_episode)] = batch_output
             output = {**batch_output, "batches": batches}
@@ -2546,6 +3082,33 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             _end_framework_stage(user_id, asset_id, "12")
 
         return _json_ok(stage="12", framework_asset_id=asset_id, **output)
+
+
+    @app.route("/api/framework-to-script/export/txt", methods=["GET", "POST"])
+    @_login_required
+    def export_framework_to_script_txt_api():
+        data = request.get_json(silent=True) if request.method == "POST" else {}
+        data = data if isinstance(data, dict) else {}
+        asset_id = str(
+            request.args.get("framework_asset_id")
+            or data.get("framework_asset_id")
+            or request.args.get("asset_id")
+            or data.get("asset_id")
+            or ""
+        ).strip()
+        if not asset_id:
+            return _json_error("缺少 framework_asset_id。", status=400)
+        asset = _load_framework_asset_for_user(asset_id, _require_user_id())
+        if not asset:
+            return _json_error("框架资产不存在、无权访问，或尚未生成 07 最终策划包。", status=404)
+        text = _framework_to_script_txt(asset)
+        filename_title = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(asset.get("title") or "framework_script_txt"))
+        filename = f"{filename_title[:48] or 'framework_script'}.txt"
+        return Response(
+            text,
+            content_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+        )
 
 
     @app.get("/framework-to-script")
