@@ -48,16 +48,18 @@
   }, loadWorkspace());
 
   const urlAssetId = params.get("framework_asset_id") || params.get("asset_id") || "";
-  if (urlAssetId && String(urlAssetId) !== String(state.frameworkAssetId || "")) {
+  const directFromPlanner = Boolean(urlAssetId && (params.has("source_framework_project_id") || params.has("project_id")));
+  if (urlAssetId && (directFromPlanner || String(urlAssetId) !== String(state.frameworkAssetId || ""))) {
     window.localStorage.removeItem(STORAGE_KEY);
     state.frameworkAssetId = urlAssetId;
-    state.frameworkSource = "刚刚完成";
+    state.frameworkSource = "刚刚完成的框架";
     state.projectId = null;
     state.importedFrameworkAsset = null;
     state.frameworkPlanPackage = null;
     state.stageOutputs = {};
     state.scriptStages = {};
   } else if (!urlAssetId) {
+    window.localStorage.removeItem(STORAGE_KEY);
     state.frameworkAssetId = null;
     state.projectId = null;
     state.importedFrameworkAsset = null;
@@ -412,7 +414,11 @@
   }
 
   function normalizeEpisodePlanItems(plan) {
-    return (Array.isArray(plan) ? plan : []).map((item, index) => {
+    let sourcePlan = plan;
+    if (sourcePlan && typeof sourcePlan === "object" && !Array.isArray(sourcePlan)) {
+      sourcePlan = sourcePlan.allEnrichedEpisodePlan || sourcePlan.enrichedEpisodePlan || sourcePlan.episodes || sourcePlan.items || [];
+    }
+    return (Array.isArray(sourcePlan) ? sourcePlan : []).map((item, index) => {
       const source = item && typeof item === "object" ? item : { title: String(item || "") };
       const episode = episodeNumberFromValue(
         source.episode ?? source.episodeNumber ?? source.episode_number ?? source.index ?? source.title ?? index + 1
@@ -461,8 +467,11 @@
     const textMissing = expected.filter((number) => !textNumbers.includes(number));
     const textExtra = textNumbers.filter((number) => totalEpisodes && (number < 1 || number > totalEpisodes));
     const textDuplicates = findDuplicateNumbers(textNumbers);
+    const textMissingFromPlan = numbers.filter((number) => !textNumbers.includes(number));
+    const textNotInPlan = textNumbers.filter((number) => !numbers.includes(number));
     const issues = [];
     if (!normalizedPlan.length) issues.push("缺少 allEnrichedEpisodePlan");
+    if (!String(text || "").trim()) issues.push("缺少 allEnrichedEpisodePlanText");
     if (expected.length && numbers[0] !== 1) issues.push("结构化计划未从第 1 集开始");
     if (missing.length) issues.push(`结构化计划缺集：${missing.join("、")}`);
     if (duplicates.length) issues.push(`结构化计划重复：${duplicates.join("、")}`);
@@ -470,6 +479,8 @@
     if (text && textMissing.length) issues.push(`文本计划少写：${textMissing.join("、")}`);
     if (textExtra.length) issues.push(`文本计划多写/越界：${Array.from(new Set(textExtra)).join("、")}`);
     if (textDuplicates.length) issues.push(`文本计划重复：${textDuplicates.join("、")}`);
+    if (text && textMissingFromPlan.length) issues.push(`文本计划缺少结构化集数：${textMissingFromPlan.join("、")}`);
+    if (text && textNotInPlan.length) issues.push(`文本计划存在结构化计划外集数：${Array.from(new Set(textNotInPlan)).join("、")}`);
     return {
       ok: issues.length === 0,
       issues,
@@ -479,6 +490,8 @@
       textMissing,
       textExtra,
       textDuplicates,
+      textMissingFromPlan,
+      textNotInPlan,
       normalizedPlan,
     };
   }
@@ -678,7 +691,7 @@
       state.frameworkPlanPackage = asset.framework_plan_package || {};
       state.stageOutputs = asset.stage_outputs || {};
       state.scriptStages = asset.scriptStages || (asset.framework_to_script_state || {}).scriptStages || {};
-      state.frameworkSource = state.frameworkSource === "刚刚完成" ? "刚刚完成" : "我的资产";
+      state.frameworkSource = state.frameworkSource === "刚刚完成的框架" ? "刚刚完成的框架" : "我的资产 / 框架资产";
       const stage10 = state.scriptStages.stage10 || {};
       const allEnrichedEpisodePlan = stage10Plan(stage10);
       const allEnrichedEpisodePlanText = stage10Text(stage10);
@@ -784,6 +797,10 @@
       const text = await file.text();
       const parsed = JSON.parse(text);
       const asset = normalizeImportedFrameworkJson(parsed);
+      try {
+        window.localStorage.removeItem(STORAGE_KEY);
+        window.localStorage.removeItem("frameworkToScriptSource");
+      } catch (error) {}
       state.frameworkAssetId = "";
       state.projectId = "";
       state.importedFrameworkAsset = asset;
@@ -793,9 +810,6 @@
       state.frameworkSource = "导入 JSON";
       state.assetPanelOpen = false;
       state.importStatus = `导入成功：${asset.title || "未命名框架"} · ${asset.episodes_per_season || "未知"} 集 · ${asset.minutes_per_episode || "未知"} 分钟/集`;
-      try {
-        window.localStorage.removeItem("frameworkToScriptSource");
-      } catch (error) {}
       saveWorkspace();
     } catch (error) {
       state.error = error.message || "导入失败：JSON 格式不正确。";
@@ -1537,7 +1551,7 @@
   reconcileRunningStageResult();
   render();
 
-  if (state.frameworkAssetId && (state.runningStage || !currentAssetReady())) {
+  if (state.frameworkAssetId && (directFromPlanner || state.runningStage || !currentAssetReady())) {
     importAsset(state.frameworkAssetId, { skipConfirm: true });
   } else if (!state.frameworkAssetId && !currentAssetReady()) {
     loadAssets();

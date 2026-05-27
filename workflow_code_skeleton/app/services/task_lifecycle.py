@@ -52,6 +52,11 @@ class TaskLifecycleMixin:
             "updated_at": now_iso(),
             "workflow_spec_path": workflow_spec_path,
             "visibility": "private",
+            "asset_type": "new_script" if (
+                str(input_payload.get("script_format_mode") or "").strip() == "framework_to_script"
+                or str(input_payload.get("workflow_mode") or "").strip() == "framework_to_script"
+                or bool(input_payload.get("framework_to_script"))
+            ) else "old_script",
             "model_option": {
                 "id": model_option.id,
                 "label": self._model_alias(model_option.provider),
@@ -211,6 +216,7 @@ class TaskLifecycleMixin:
             "visibility": "private",
             "model_option": None,
             "asset_kind": AUXILIARY_TOOL_ASSET_KIND,
+            "asset_type": "old_script",
             "tool_key": str(tool_key or "").strip(),
             "tool_label": tool_label,
             "tool_request_payload": copy.deepcopy(request_payload or {}),
@@ -292,6 +298,7 @@ class TaskLifecycleMixin:
             "visibility": "private",
             "model_option": None,
             "asset_kind": "framework_planner",
+            "asset_type": "framework",
             "input_payload": input_payload,
             "artifacts": {
                 "story_outline": clean_description,
@@ -406,6 +413,7 @@ class TaskLifecycleMixin:
             "updated_at": now,
         }
         framework_state["asset_state"]["asset_kind"] = "framework_planner"
+        framework_state["asset_state"]["asset_type"] = "framework"
         framework_state["asset_state"]["asset_id"] = project_id
         framework_state["asset_state"]["project_id"] = project_id
         framework_state["asset_state"]["status"] = status
@@ -428,6 +436,7 @@ class TaskLifecycleMixin:
                     or ""
                 ).strip(),
                 "asset_kind": "framework_planner",
+                "asset_type": "framework",
                 "framework_planner_state": copy.deepcopy(framework_state),
             }
         )
@@ -446,6 +455,7 @@ class TaskLifecycleMixin:
             "visibility": "private",
             "model_option": None,
             "asset_kind": "framework_planner",
+            "asset_type": "framework",
             "input_payload": input_payload,
             "artifacts": {
                 "story_outline": input_payload.get("story_outline") or "",

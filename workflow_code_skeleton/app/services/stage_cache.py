@@ -767,6 +767,18 @@ class StageCacheMixin:
     def _public_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         """把内部任务快照裁成安全、简洁、适合前端直接消费的公开视图。"""
         artifacts = self._public_artifacts(snapshot)
+        input_payload_for_type = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+        raw_asset_type = str(snapshot.get("asset_type") or input_payload_for_type.get("asset_type") or "").strip()
+        asset_kind_for_type = str(snapshot.get("asset_kind") or input_payload_for_type.get("asset_kind") or "").strip()
+        script_format_mode_for_type = str(input_payload_for_type.get("script_format_mode") or "").strip()
+        if raw_asset_type in {"old_script", "legacy_script", "framework", "new_script"}:
+            asset_type = "old_script" if raw_asset_type == "legacy_script" else raw_asset_type
+        elif asset_kind_for_type == "framework_planner":
+            asset_type = "framework"
+        elif script_format_mode_for_type == "framework_to_script" or bool(input_payload_for_type.get("framework_to_script")):
+            asset_type = "new_script"
+        else:
+            asset_type = "old_script"
         completion_confirmed = _completion_confirmed(snapshot)
         awaiting_confirmation = _awaiting_completion_confirmation(snapshot)
         can_stage_rollback = _can_stage_rollback(snapshot)
@@ -799,6 +811,8 @@ class StageCacheMixin:
             "current_stage_label": snapshot.get("current_stage_label") or "待开始",
             "current_batch": snapshot.get("current_batch"),
             "asset_kind": snapshot.get("asset_kind") or "project",
+            "asset_type": asset_type,
+            "script_format_mode": script_format_mode_for_type,
             "tool_key": str(snapshot.get("tool_key") or "").strip(),
             "tool_label": str(snapshot.get("tool_label") or "").strip(),
             "completion_confirmed": completion_confirmed,

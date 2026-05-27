@@ -87,6 +87,14 @@
       ["recommended_next_action", "进入下一阶段建议"],
     ],
   };
+  const GUIDE_FIELD_DEFS = [
+    ["adaptation_direction", "改编方向", ["adaptation_direction", "direction", "core_setting_adjustments"]],
+    ["original_retention", "原文保留内容", ["original_retention", "keep_from_original", "retained_original_content"]],
+    ["key_changes", "本次重点改变", ["key_changes", "changes", "structure_and_rhythm"]],
+    ["style_requirements", "风格要求", ["style_requirements", "style", "visualization_strategy", "character_emotion_strategy"]],
+    ["risk_warnings", "风险提醒", ["risk_warnings", "risks", "risk_flags"]],
+    ["hard_requirements", "后续写作硬要求", ["hard_requirements", "downstream_requirements", "writing_requirements"]],
+  ];
   const DEBUG_HIDDEN_FIELD_KEYS = [
     "id", "nodeId", "moduleName", "moduleType", "moduleLogo", "runningTime",
     "totalPoints", "model", "inputTokens", "outputTokens", "query", "maxToken",
@@ -107,10 +115,9 @@
     { id: "basic", label: "01. 原文信息提取 / 基础配置", stageKey: "basic" },
     { id: "worldview", label: "02. 世界观方案", stageKey: "worldview" },
     { id: "character", label: "03. 人设方案", stageKey: "character" },
-    { id: "beat_timeline", label: "04. 三幕十五节拍卡点规划时间轴", stageKey: "beat" },
-    { id: "beat_explanation", label: "04b. 三幕十五节拍卡点说明", stageKey: "beat" },
+    { id: "beat_timeline", label: "04. 三幕十五节拍", stageKey: "beat" },
     { id: "storylines", label: "05. 人物故事线", stageKey: "storylines" },
-    { id: "guide", label: "06. 整体改编指引四项", stageKey: "guide" },
+    { id: "guide", label: "06. 整体改编指引", stageKey: "guide" },
     { id: "package", label: "07. 最终策划包输出", stageKey: "package" },
   ];
 
@@ -848,6 +855,7 @@
     next.checkpoint_explanation = next.checkpoint_explanation && typeof next.checkpoint_explanation === "object" && !Array.isArray(next.checkpoint_explanation) ? next.checkpoint_explanation : {};
     next.character_storylines = Array.isArray(next.character_storylines) ? next.character_storylines : [];
     next.storyline_decisions = Array.isArray(next.storyline_decisions) ? next.storyline_decisions : [];
+    next.adaptation_guide = normalizeGuideFields(next.adaptation_guide);
     STAGE_SEQUENCE.forEach((stageKey) => {
       next.stage_state[stageKey] = Object.assign(clone(initialState.stage_state[stageKey]), next.stage_state[stageKey] || {});
     });
@@ -1766,6 +1774,7 @@
   function stageRunBlockReason(stageKey) {
     const stage = stageState(stageKey);
     if (isStageLoading(stageKey) || runningStageKey()) return "当前已有阶段正在运行。";
+    if (stageDraftDirty(stageKey)) return "当前阶段有未应用修改，请先应用修改。";
     if (stage.locked || stageBlockedByUpstream(stage)) return "请先应用并确认上游阶段结果。";
     const upstream = upstreamDirtyStage(stageKey);
     if (upstream === "guide") return "06 改编指引有未应用修改，请先点击‘应用修改’。";
@@ -2956,7 +2965,7 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">不同人物故事线</h2>
-            <p class="fp-card-sub">05 阶段：人物故事线。这里统一查看、编辑和处理保留 / 精简 / 删除，不再拆成 05b / 05c。</p>
+            <p class="fp-card-sub">05 阶段：人物故事线。这里统一查看、编辑和处理保留 / 精简 / 删除。</p>
           </div>
           ${stageStatusTag("storylines")}
         </div>
@@ -3032,7 +3041,8 @@
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
           <div>
-            <h2 class="fp-card-title">整体改编指引四项</h2>
+            <h2 class="fp-card-title">整体改编指引</h2>
+            <p class="fp-card-sub">06 阶段包含六项：改编方向、原文保留内容、本次重点改变、风格要求、风险提醒、后续写作硬要求。</p>
           </div>
           ${stageStatusTag("guide")}
         </div>
@@ -3073,8 +3083,8 @@
           <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="package" ${locked || isStageLoading("package") ? "disabled" : ""}>${hasOutput ? "重新生成 07" : "生成本阶段"}</button>
           <button class="fp-btn ${stageDraftDirty("package") ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="package" ${stageDraftDirty("package") ? "" : "disabled"}>应用修改</button>
           ${renderSaveFrameworkButton("")}
-          <button class="fp-btn primary" data-action="download-readable-framework" ${locked || !hasOutput ? "disabled" : ""}>下载可读框架</button>
-          <button class="fp-btn" data-action="download-structured-framework" ${locked || !hasOutput ? "disabled" : ""}>下载结构化框架</button>
+          <button class="fp-btn primary" data-action="download-readable-framework" ${!hasOutput ? "disabled" : ""}>下载可读框架</button>
+          <button class="fp-btn" data-action="download-structured-framework" ${!hasOutput ? "disabled" : ""}>下载结构化框架</button>
           ${renderFrameworkScriptButton("")}
         </div>
       </section>
@@ -3260,6 +3270,16 @@
       if (Object.prototype.hasOwnProperty.call(data, key) && isRenderableValue(data[key])) return data[key];
     }
     return undefined;
+  }
+
+  function normalizeGuideFields(data) {
+    const source = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+    const result = {};
+    GUIDE_FIELD_DEFS.forEach(([key, , aliases]) => {
+      const value = valueByAliases(source, aliases.concat([key]));
+      result[key] = value === undefined || value === null ? "" : value;
+    });
+    return result;
   }
 
   function renderWhitelistFields(stageKey, data) {
@@ -3817,6 +3837,19 @@
   function renderStorylineModal(storylineId) {
     const storyline = state.character_storylines.find((item, index) => String((item && (item.id || item.title)) || `storyline_${index + 1}`) === String(storylineId));
     if (!storyline) return "";
+    if (!storyline || typeof storyline !== "object" || Array.isArray(storyline)) {
+      return `
+        <div class="fp-modal-mask" data-action="close-storyline-modal">
+          <div class="fp-modal" data-modal-content="storyline">
+            <div class="fp-modal-head">
+              <div><h2>人物故事线编辑异常</h2></div>
+              <button class="fp-btn small" data-action="close-storyline-modal">关闭</button>
+            </div>
+            <div class="fp-inline-warning">当前人物故事线数据结构不符合预期，无法编辑。请重新生成本阶段或恢复历史版本。</div>
+          </div>
+        </div>
+      `;
+    }
     return `
       <div class="fp-modal-mask" data-action="close-storyline-modal">
         <div class="fp-modal" data-modal-content="storyline">
@@ -3872,18 +3905,11 @@
       return `<div class="fp-empty">尚未生成整体改编指引。</div>`;
     }
     const editable = Boolean(options && options.editable);
-    const cards = [
-      ["adaptation_direction", "改编方向", ["adaptation_direction", "direction", "core_setting_adjustments"]],
-      ["original_retention", "原文保留内容", ["original_retention", "keep_from_original", "retained_original_content"]],
-      ["key_changes", "本次重点改变", ["key_changes", "changes", "structure_and_rhythm"]],
-      ["style_requirements", "风格要求", ["style_requirements", "style", "visualization_strategy", "character_emotion_strategy"]],
-      ["risk_warnings", "风险提醒", ["risk_warnings", "risks", "risk_flags"]],
-      ["hard_requirements", "给后续写作的硬要求", ["hard_requirements", "downstream_requirements", "writing_requirements"]],
-    ];
+    const normalized = normalizeGuideFields(data);
     return `
       <div class="fp-guide-grid">
-        ${cards.map(([key, label, aliases]) => {
-          const value = valueByAliases(data, aliases) || "";
+        ${GUIDE_FIELD_DEFS.map(([key, label]) => {
+          const value = normalized[key] || "";
           return `
           <article class="fp-guide-card">
             <h3>${escapeHtml(label)}</h3>
@@ -3899,6 +3925,7 @@
     if (!state.adaptation_guide || typeof state.adaptation_guide !== "object" || Array.isArray(state.adaptation_guide)) {
       state.adaptation_guide = {};
     }
+    state.adaptation_guide = normalizeGuideFields(state.adaptation_guide);
     state.adaptation_guide[key] = value;
     markStageDraftDirty("guide");
     syncStageFlow(state);
@@ -3984,8 +4011,7 @@
     const totalEpisodes = positiveNumber(basic.total_episodes, seasonCount * episodesPerSeason);
     const minutesPerEpisode = positiveNumber(basic.minutes_per_episode, 2);
     const title = String(basic.project_title || basic.source_title || "未命名框架剧本").trim();
-    const knowledgeFields = knowledgePayloadFields("package");
-    const payload = Object.assign({
+    const payload = {
       title,
       project_title: title,
       source_title: String(basic.source_title || title).trim(),
@@ -4014,18 +4040,11 @@
       character_storylines: clone(state.character_storylines),
       storyline_decisions: clone(state.storyline_decisions),
       adaptation_guide: clone(state.adaptation_guide),
-      prompt_preferences: clone(state.prompt_preferences || {}),
       workflow_mode: "framework_to_script",
       generation_chain: "framework_to_script",
       framework_to_script: true,
       framework_planner_source: true,
-    }, knowledgeFields);
-    payload.prompt_preferences = clone(state.prompt_preferences || {});
-    if (state.user_knowledge_step_prompts) {
-      payload.user_knowledge_step_prompts = clone(state.user_knowledge_step_prompts);
-    } else if ((state.prompt_preferences || {}).step_prompts) {
-      payload.user_knowledge_step_prompts = clone(state.prompt_preferences.step_prompts);
-    }
+    };
     return cleanOutgoingPayload(payload, "framework_to_script payload");
   }
 
@@ -4177,6 +4196,7 @@
       });
     }
     if (stageKey === "guide") {
+      state.adaptation_guide = normalizeGuideFields(state.adaptation_guide);
       return {
         mode: revise ? "改写" : "创作",
         source_brief: state.source_brief,
@@ -4193,6 +4213,7 @@
       };
     }
     if (stageKey === "package") {
+      state.adaptation_guide = normalizeGuideFields(state.adaptation_guide);
       return {
         mode: revise ? "改写" : "创作",
         basic_config: state.basic_config,
@@ -4461,6 +4482,9 @@
         return;
       }
     }
+    if (stageKey === "guide") {
+      state.adaptation_guide = normalizeGuideFields(state.adaptation_guide);
+    }
     markStageCommitted(stageKey);
     const next = STAGE_SEQUENCE[STAGE_SEQUENCE.indexOf(stageKey) + 1];
     if (next) unlockStage(next);
@@ -4663,8 +4687,12 @@
   }
 
   function saveStorylineModal(storylineId) {
+    try {
     const storyline = state.character_storylines.find((item, index) => String((item && (item.id || item.title)) || `storyline_${index + 1}`) === String(storylineId));
-    if (!storyline) return;
+    if (!storyline || typeof storyline !== "object" || Array.isArray(storyline)) {
+      showToast("当前人物故事线数据结构不符合预期，无法保存。");
+      return;
+    }
     const title = document.querySelector('[data-modal-field="title"]');
     const summary = document.querySelector('[data-modal-field="summary"]');
     const detailed = document.querySelector('[data-modal-field="detailed_storyline"]');
@@ -4690,6 +4718,9 @@
     markDirty();
     showToast("故事线已更新草稿，请点击“应用修改”");
     render();
+    } catch (error) {
+      showToast((error && error.message) || "人物故事线编辑保存失败，请检查输入格式。");
+    }
   }
 
   function addManualStoryline() {
@@ -5010,18 +5041,10 @@
         || (state.asset_state || {}).asset_id;
 
       try {
-        window.localStorage.setItem("frameworkToScriptSource", JSON.stringify({
-          source_framework_project_id: sourceProjectId,
-          project_id: sourceProjectId,
-          framework_plan_package: state.framework_plan_package || {},
-          worldview_plan: state.worldview_plan || (state.framework_plan_package || {}).worldview_plan || {},
-          beat_checkpoint_timeline: state.beat_checkpoint_timeline || (state.framework_plan_package || {}).beat_checkpoint_timeline || [],
-          character_storylines: state.character_storylines || (state.framework_plan_package || {}).character_storylines || [],
-          character_plan: state.character_plan || (state.framework_plan_package || {}).character_plan || {},
-          saved_at: new Date().toISOString()
-        }));
+        window.localStorage.removeItem("frameworkToScriptSource");
+        window.localStorage.removeItem("frameworkToScriptWorkspace.v1");
       } catch (error) {
-        console.warn("保存框架转剧本本地上下文失败", error);
+        console.warn("清理框架转剧本本地上下文失败", error);
       }
 
       const workspaceUrl = new URL("/framework-to-script", window.location.origin);

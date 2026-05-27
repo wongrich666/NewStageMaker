@@ -3197,9 +3197,9 @@ startRuntimeDebugPolling();
       return;
     }
     const categories = [
-      ["老剧本平台资产", assets.filter((item) => !["framework_planner", "framework_to_script"].includes(String(item.asset_kind || "")))],
-      ["框架资产", assets.filter((item) => String(item.asset_kind || "") === "framework_planner")],
-      ["新剧本资产", assets.filter((item) => String(item.asset_kind || "") === "framework_to_script" || String(item.script_format_mode || "") === "framework_to_script")],
+      ["老剧本平台资产", assets.filter((item) => assetCategory(item) === "old_script")],
+      ["框架资产", assets.filter((item) => assetCategory(item) === "framework")],
+      ["新剧本资产", assets.filter((item) => assetCategory(item) === "new_script")],
     ];
     els.assetsList.innerHTML = categories.map(([title, items]) => `
       <section class="asset-category">
@@ -3228,7 +3228,7 @@ startRuntimeDebugPolling();
             ${isToolAsset(item) ? "" : `<button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>`}
             ${isToolAsset(item) ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>`}
             <button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>
-            ${String(item.asset_kind || "") === "framework_planner" ? `<a class="btn btn-secondary" href="/framework-to-script?framework_asset_id=${encodeURIComponent(item.project_id)}${currentAuthToken() ? `&auth_token=${encodeURIComponent(currentAuthToken())}` : ""}">进入框架到剧本</a>` : ""}
+            ${assetCategory(item) === "framework" ? `<a class="btn btn-secondary" href="/framework-to-script?framework_asset_id=${encodeURIComponent(item.project_id)}${currentAuthToken() ? `&auth_token=${encodeURIComponent(currentAuthToken())}` : ""}">进入框架到剧本</a>` : ""}
             <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : (isToolAsset(item) ? "公开结果" : "公开成品")}</button>
             <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除资产</button>
           </div>
@@ -3238,6 +3238,18 @@ startRuntimeDebugPolling();
     `).join("") : emptyCard(`暂无${title}`)}
       </section>
     `).join("");
+  }
+
+  function assetCategory(item) {
+    const explicit = String(item.asset_type || item.type || "").trim();
+    if (explicit === "legacy_script") return "old_script";
+    if (["old_script", "framework", "new_script"].includes(explicit)) return explicit;
+    const assetKind = String(item.asset_kind || "").trim();
+    const input = item.input_payload && typeof item.input_payload === "object" ? item.input_payload : {};
+    const scriptMode = String(item.script_format_mode || input.script_format_mode || "").trim();
+    if (assetKind === "framework_planner") return "framework";
+    if (assetKind === "framework_to_script" || scriptMode === "framework_to_script" || input.framework_to_script === true) return "new_script";
+    return "old_script";
   }
 
   function renderAssetTaskActions(item) {
@@ -3356,6 +3368,15 @@ startRuntimeDebugPolling();
   }
 
   function closeAssetEditor() {
+    if (state.assetEditMode === "edit" && state.assetDirty) {
+      const action = window.prompt("当前资产有未应用修改。请输入：保存 / 不保存 / 取消", "取消");
+      const normalized = String(action || "取消").trim();
+      if (normalized === "保存") {
+        saveAssetEdit().catch((error) => showToast("资产保存失败", friendlyErrorText(error, "请稍后重试。")));
+        return;
+      }
+      if (normalized !== "不保存") return;
+    }
     state.editingProjectId = null;
     state.editingProjectStatus = null;
     state.editingAssetKind = "";
@@ -3661,8 +3682,14 @@ startRuntimeDebugPolling();
       syncButtons();
     });
     [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].filter(Boolean).forEach((el) => {
-      el.addEventListener("input", syncButtons);
-      el.addEventListener("change", syncButtons);
+      el.addEventListener("input", () => {
+        if (state.assetEditMode === "edit") state.assetDirty = true;
+        syncButtons();
+      });
+      el.addEventListener("change", () => {
+        if (state.assetEditMode === "edit") state.assetDirty = true;
+        syncButtons();
+      });
     });
   }
 
