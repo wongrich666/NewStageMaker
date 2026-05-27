@@ -31,11 +31,13 @@
 
       <div class="sidebar-primary">
         <a class="sidebar-create-btn" href="{{ url_for('workspace_page', auth_token=current_auth_token, mode='new') if current_user else url_for('login_page') }}">＋ 新建剧本</a>
+        <a class="sidebar-create-btn" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') if current_user else url_for('login_page') }}">＋ 新建框架</a>
+        <a class="sidebar-create-btn" href="{{ '/framework-to-script?auth_token=' ~ current_auth_token if current_user and current_auth_token else ('/framework-to-script' if current_user else url_for('login_page')) }}">＋ 框架到剧本</a>
       </div>
 
       <div class="sidebar-nav">
         <section class="sidebar-group">
-          <div class="sidebar-group-label">我的剧本</div>
+          <div class="sidebar-group-label">我的资产</div>
           <div class="sidebar-section-head sidebar-section-head-compact">
             <span>资产会话</span>
             <a class="sidebar-refresh-btn prelogin-inline-link" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token) }}">刷新</a>
@@ -43,18 +45,26 @@
           <div class="sidebar-folders">
             <details class="workspace-folder" open>
               <summary>
-                <span>生成中的剧本</span>
+                <span>老剧本平台资产</span>
               </summary>
               <div class="workspace-compact-list">
-                <div class="workspace-empty">登录后查看正在生成的剧本。</div>
+                <div class="workspace-empty">登录后查看老剧本平台资产。</div>
               </div>
             </details>
             <details class="workspace-folder">
               <summary>
-                <span>已完成剧本</span>
+                <span>框架资产</span>
               </summary>
               <div class="workspace-compact-list">
-                <div class="workspace-empty">登录后查看已完成成品。</div>
+                <div class="workspace-empty">登录后查看 01-07 框架资产。</div>
+              </div>
+            </details>
+            <details class="workspace-folder">
+              <summary>
+                <span>新剧本资产</span>
+              </summary>
+              <div class="workspace-compact-list">
+                <div class="workspace-empty">登录后查看 08-12 新剧本资产。</div>
               </div>
             </details>
           </div>
@@ -84,8 +94,11 @@
               </a>
             </div>
           </details>
+        </section>
+
+        <section class="sidebar-group sidebar-tools-section">
           <a
-            class="sidebar-profile-btn prelogin-inline-link"
+            class="sidebar-profile-btn sidebar-section-entry"
             href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, mode='new', script_format_mode='waibao') }}"
           >外包专属格式</a>
         </section>

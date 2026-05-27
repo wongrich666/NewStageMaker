@@ -69,6 +69,7 @@
     completedWorkspaceFolder: $("completedWorkspaceFolder"),
     activeProjectList: $("activeProjectList"),
     completedProjectList: $("completedProjectList"),
+    newScriptProjectList: $("newScriptProjectList"),
     activeProjectCount: $("activeProjectCount"),
     completedProjectCount: $("completedProjectCount"),
 
@@ -1823,7 +1824,8 @@ startRuntimeDebugPolling();
       els.downloadToolBtn.disabled = isActionLoading("runTool") || !downloadToolButtonEnabled();
     }
     if (els.saveAssetEditBtn && state.editingProjectId) {
-      els.saveAssetEditBtn.disabled = isActionLoading("saveAsset") || !assetValidation.valid;
+      const needsAppliedChange = state.assetEditMode === "edit" && !state.assetDirty;
+      els.saveAssetEditBtn.disabled = isActionLoading("saveAsset") || !assetValidation.valid || needsAppliedChange;
     }
     if (!hasProject && !state.taskId && !hasConfiguredModel && els.formHint) {
       els.formHint.textContent = "当前没有可用模型。";
@@ -2655,13 +2657,15 @@ startRuntimeDebugPolling();
       const message = emptyCard("登录后查看任务");
       els.activeProjectList.innerHTML = message;
       els.completedProjectList.innerHTML = message;
+      if (els.newScriptProjectList) els.newScriptProjectList.innerHTML = message;
       if (els.activeProjectCount) els.activeProjectCount.textContent = "0";
       if (els.completedProjectCount) els.completedProjectCount.textContent = "0";
       return;
     }
 
-    const completedProjects = projects.filter((item) => item.status === "completed");
-    const activeProjects = projects.filter((item) => item.status !== "completed");
+    const oldScriptProjects = projects.filter((item) => assetCategory(item) === "old_script");
+    const frameworkProjects = projects.filter((item) => assetCategory(item) === "framework");
+    const newScriptProjects = projects.filter((item) => assetCategory(item) === "new_script");
 
     const renderCompactItems = (items, emptyMessage) => {
       if (!items.length) {
@@ -2702,18 +2706,21 @@ startRuntimeDebugPolling();
       }).join("");
     };
 
-    els.activeProjectList.innerHTML = renderCompactItems(activeProjects, "当前没有未完成剧本。");
-    els.completedProjectList.innerHTML = renderCompactItems(completedProjects, "当前还没有自然完成的剧本。");
+    els.activeProjectList.innerHTML = renderCompactItems(oldScriptProjects, "当前没有老剧本平台资产。");
+    els.completedProjectList.innerHTML = renderCompactItems(frameworkProjects, "当前还没有 01-07 框架资产。");
+    if (els.newScriptProjectList) {
+      els.newScriptProjectList.innerHTML = renderCompactItems(newScriptProjects, "当前还没有 08-12 新剧本资产。");
+    }
     if (els.activeProjectCount) {
-      els.activeProjectCount.textContent = String(activeProjects.length);
+      els.activeProjectCount.textContent = String(oldScriptProjects.length);
     }
     if (els.completedProjectCount) {
-      els.completedProjectCount.textContent = String(completedProjects.length);
+      els.completedProjectCount.textContent = String(frameworkProjects.length);
     }
   }
 
   function workspaceFolders() {
-    return [els.activeWorkspaceFolder, els.completedWorkspaceFolder].filter(Boolean);
+    return [els.activeWorkspaceFolder, els.completedWorkspaceFolder, els.newScriptProjectList?.closest("details")].filter(Boolean);
   }
 
   function cancelWorkspaceAutoCollapse() {
@@ -3324,23 +3331,25 @@ startRuntimeDebugPolling();
     state.editingAssetLocked = Boolean(project.completion_confirmed && state.editingAssetKind !== "tool_result");
     state.assetEditMode = "view";
     state.assetDirty = false;
-    const locked = true;
+    const viewModeLocked = true;
     els.editAssetTitle.value = project.title || input.title || "";
     els.editAssetSummary.value = formatDisplayValue(input.story_outline || artifacts.story_outline || "");
     els.editAssetPrivacy.value = project.visibility || "private";
     els.editAssetFinal.value = state.editingProjectStatus === "completed"
       ? formatDisplayValue(artifacts.final_output_text || artifacts.final_script || "")
       : "";
-    if (els.editAssetTitle) els.editAssetTitle.disabled = locked;
-    if (els.editAssetSummary) els.editAssetSummary.disabled = locked;
-    if (els.editAssetFinal) els.editAssetFinal.disabled = locked;
+    if (els.editAssetTitle) els.editAssetTitle.disabled = viewModeLocked;
+    if (els.editAssetSummary) els.editAssetSummary.disabled = viewModeLocked;
+    if (els.editAssetFinal) els.editAssetFinal.disabled = viewModeLocked;
     if (els.editAssetPrivacy) els.editAssetPrivacy.disabled = true;
     if (els.saveAssetEditBtn) {
       els.saveAssetEditBtn.disabled = false;
       els.saveAssetEditBtn.textContent = "修改";
     }
+    if (els.cancelAssetEditBtn) els.cancelAssetEditBtn.textContent = "取消";
     els.assetEditor.classList.remove("hidden");
     els.assetEditor.scrollIntoView({ behavior: "smooth", block: "center" });
+    syncButtons();
   }
 
   async function saveAssetEdit() {
@@ -3348,10 +3357,13 @@ startRuntimeDebugPolling();
     if (state.assetEditMode !== "edit") {
       state.assetEditMode = "edit";
       state.assetDirty = false;
-      [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].forEach((field) => {
-        if (field) field.disabled = false;
-      });
+      if (els.editAssetTitle) els.editAssetTitle.disabled = state.editingAssetLocked;
+      if (els.editAssetSummary) els.editAssetSummary.disabled = state.editingAssetLocked;
+      if (els.editAssetFinal) els.editAssetFinal.disabled = state.editingAssetLocked;
+      if (els.editAssetPrivacy) els.editAssetPrivacy.disabled = false;
       if (els.saveAssetEditBtn) els.saveAssetEditBtn.textContent = "应用修改";
+      if (els.cancelAssetEditBtn) els.cancelAssetEditBtn.textContent = "取消修改";
+      syncButtons();
       return;
     }
     const payload = {
@@ -3406,6 +3418,7 @@ startRuntimeDebugPolling();
       els.saveAssetEditBtn.disabled = false;
       els.saveAssetEditBtn.textContent = "修改";
     }
+    if (els.cancelAssetEditBtn) els.cancelAssetEditBtn.textContent = "取消";
     els.assetEditor.classList.add("hidden");
     syncButtons();
   }
@@ -3821,7 +3834,7 @@ startRuntimeDebugPolling();
       }
     });
 
-    [els.activeProjectList, els.completedProjectList].forEach((container) => container?.addEventListener("click", async (event) => {
+    [els.activeProjectList, els.completedProjectList, els.newScriptProjectList].forEach((container) => container?.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-action]");
       if (!button) return;
       const projectId = button.dataset.projectId;

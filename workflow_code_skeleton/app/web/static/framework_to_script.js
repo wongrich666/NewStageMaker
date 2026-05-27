@@ -449,9 +449,9 @@
 
   function episodeNumbersFromText(text) {
     const numbers = [];
-    const pattern = /(?:第\s*)?([0-9]+|[一二两三四五六七八九十]{1,4})\s*集|episode\s*([0-9]+)|Episode\s*([0-9]+)/g;
-    String(text || "").replace(pattern, (_, cnOrNum, ep1, ep2) => {
-      const value = cnOrNum || ep1 || ep2;
+    const pattern = /(?:第\s*)?([0-9]+|[一二两三四五六七八九十]{1,4})\s*集|episode\s*([0-9]+)|Episode\s*([0-9]+)|(?:^|[\n\r])\s*([0-9]+|[一二两三四五六七八九十]{1,4})\s*(?:[.、:：\-\)]|\s+episode\b)/g;
+    String(text || "").replace(pattern, (_, cnOrNum, ep1, ep2, lineNumber) => {
+      const value = cnOrNum || ep1 || ep2 || lineNumber;
       const number = episodeNumberFromValue(value);
       if (number > 0) numbers.push(number);
       return "";
@@ -753,10 +753,27 @@
     if (!hasObject(frameworkPlanPackage)) {
       throw new Error("导入失败：无法确定框架核心内容。");
     }
-    const allEnrichedEpisodePlan = data.allEnrichedEpisodePlan || data.all_enriched_episode_plan || stageOutputs.allEnrichedEpisodePlan || stageOutputs.all_enriched_episode_plan || [];
+    const allEnrichedEpisodePlan = data.allEnrichedEpisodePlan
+      || data.all_enriched_episode_plan
+      || stageOutputs.allEnrichedEpisodePlan
+      || stageOutputs.all_enriched_episode_plan
+      || frameworkPlanPackage.allEnrichedEpisodePlan
+      || frameworkPlanPackage.all_enriched_episode_plan
+      || frameworkPlanPackage.enrichedEpisodePlan
+      || frameworkPlanPackage.enriched_episode_plan
+      || [];
+    const allEnrichedEpisodePlanText = data.allEnrichedEpisodePlanText
+      || data.all_enriched_episode_plan_text
+      || stageOutputs.allEnrichedEpisodePlanText
+      || stageOutputs.all_enriched_episode_plan_text
+      || frameworkPlanPackage.allEnrichedEpisodePlanText
+      || frameworkPlanPackage.all_enriched_episode_plan_text
+      || frameworkPlanPackage.enrichedEpisodePlanText
+      || frameworkPlanPackage.enriched_episode_plan_text
+      || "";
     const normalizedEpisodePlan = normalizeEpisodePlanItems(allEnrichedEpisodePlan);
     if (normalizedEpisodePlan.length) {
-      const validation = validateStage10Completeness(normalizedEpisodePlan, data.allEnrichedEpisodePlanText || data.all_enriched_episode_plan_text || "", episodes);
+      const validation = validateStage10Completeness(normalizedEpisodePlan, allEnrichedEpisodePlanText, episodes);
       if (!validation.ok) throw new Error(`导入失败：${validation.issues.join("；")}`);
     }
     return {
@@ -786,7 +803,7 @@
         stage10: {
           allEnrichedEpisodePlan: normalizedEpisodePlan,
           enrichedEpisodePlan: normalizedEpisodePlan,
-          allEnrichedEpisodePlanText: data.allEnrichedEpisodePlanText || data.all_enriched_episode_plan_text || "",
+          allEnrichedEpisodePlanText,
           episodeValidation: { ok: true, issues: [] },
         },
       } : {},
@@ -864,8 +881,7 @@
       render();
       return;
     }
-    state.runningStage = "09";
-    state.isRunning = true;
+    saveRunningStage("09");
     state.error = null;
     render();
     try {
@@ -1184,7 +1200,7 @@
       return `<div class="wts-tree-list">${clean.map((item, index) => `
         <details class="wts-tree-node" ${depth < 1 ? "open" : ""}>
           <summary><span class="wts-tree-arrow"></span>${escapeHtml(labelFor(keyName))} ${index + 1}</summary>
-          <div>${renderTree(item, keyName, depth + 1)}<button type="button" class="wts-btn ghost wts-collapse-local" data-action="collapse-tree-node">收起本层</button></div>
+          <div>${renderTree(item, keyName, depth + 1)}</div>
         </details>
       `).join("")}</div>`;
     }
@@ -1196,7 +1212,7 @@
         return complex ? `
           <details class="wts-tree-node" ${depth < 1 ? "open" : ""}>
             <summary><span class="wts-tree-arrow"></span>${escapeHtml(labelFor(key))}</summary>
-            <div>${renderTree(item, key, depth + 1)}<button type="button" class="wts-btn ghost wts-collapse-local" data-action="collapse-tree-node">收起本层</button></div>
+            <div>${renderTree(item, key, depth + 1)}</div>
           </details>
         ` : `
           <div class="wts-tree-leaf">

@@ -122,7 +122,7 @@
   ];
 
   const STAGE_SEQUENCE = ["basic", "worldview", "character", "beat", "storylines", "guide", "package"];
-  const ALL_STAGE_PREFERENCE_KEYS = STAGE_SEQUENCE.concat(["scene", "appearance", "episode", "conflict", "script_text"]);
+  const ALL_STAGE_PREFERENCE_KEYS = STAGE_SEQUENCE.slice();
   const BEAT_NAMES = [
     "开场",
     "主体呈现",
@@ -2263,7 +2263,7 @@
           <div class="fp-knowledge-body">
             <div class="fp-knowledge-actions">
               <button class="fp-btn small" data-action="refresh-knowledge-tags" ${ui.knowledge.loading ? "disabled" : ""}>${ui.knowledge.loading ? "加载中..." : "刷新标签"}</button>
-              <button class="fp-btn small primary" data-action="apply-knowledge-tags">应用到 01-12 阶段偏好</button>
+              <button class="fp-btn small primary" data-action="apply-knowledge-tags">应用到 01-07 阶段偏好</button>
               <button class="fp-btn small" data-action="new-knowledge-tag">${ui.knowledge.formOpen && !ui.knowledge.editingId ? "收起新建" : "新建自定义标签"}</button>
             </div>
             ${ui.knowledge.status ? `<div class="fp-inline-warning compact">${escapeHtml(ui.knowledge.status)}</div>` : ""}
@@ -2325,7 +2325,7 @@
           <small>${escapeHtml(tag.category || (tag.builtin ? "默认标签" : "自定义"))} · ${tag.builtin ? "默认标签，可编辑" : "自定义标签"} · ${escapeHtml(stageStatus)}</small>
           ${tag.description ? `<em>${escapeHtml(truncateText(tag.description, 90))}</em>` : ""}
           <details class="fp-knowledge-stage-details">
-            <summary>查看 01-12 阶段提示词</summary>
+            <summary>查看 01-07 阶段提示词</summary>
             <div>
               ${ALL_STAGE_PREFERENCE_KEYS.map((stageKey) => `
                 <p><strong>${escapeHtml(stagePromptLabel(stageKey))}</strong><span>${escapeHtml(truncateText(prompts[stageKey] || "", 120) || "暂无")}</span></p>
@@ -2372,7 +2372,7 @@
         <div class="fp-card-title-row">
           <div>
             <h3>${editing ? `编辑标签偏好：${escapeHtml(form.name || "未命名标签")}` : "新建自定义标签"}</h3>
-            <p class="fp-card-sub">通用偏好保留旧逻辑；阶段偏好按 01-07 / 08-12 当前运行阶段注入。</p>
+            <p class="fp-card-sub">通用偏好保留旧逻辑；阶段偏好只注入 01-07 框架策划阶段。</p>
           </div>
           <button class="fp-btn small" data-action="cancel-knowledge-edit">取消</button>
         </div>
@@ -5184,7 +5184,7 @@
       ui.knowledge.tagPromptText = String(data.tag_prompt_text || "");
       savePromptPreferences("apply_knowledge_tags");
       saveState();
-      showToast(selectedIds.length ? "智慧库标签已应用到 01-12 阶段提示词" : "已清空智慧库阶段提示词");
+      showToast(selectedIds.length ? "智慧库标签已应用到 01-07 阶段提示词" : "已清空智慧库阶段提示词");
       render();
     } catch (error) {
       ui.knowledge.status = error.message || "智慧库标签应用失败";
