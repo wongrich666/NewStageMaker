@@ -17,6 +17,7 @@ from .unstructured_naturalize import (
     build_unstructured_stage_variables,
     extract_unstructured_stage_output_text,
 )
+from ..utils.readable_labels import readable_text
 class RuntimeExportStoreMixin:
     def _best_final_script_text(self, snapshot: dict[str, Any]) -> str:
         artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
@@ -95,6 +96,8 @@ class RuntimeExportStoreMixin:
         *,
         banned_prefixes: tuple[str, ...] = (),
     ) -> str:
+        if isinstance(value, (dict, list)):
+            return clean_user_visible_text(readable_text(value), banned_prefixes=banned_prefixes)
         readable = clean_export_readable_text(value)
         return clean_user_visible_text(readable, banned_prefixes=banned_prefixes)
 
@@ -810,6 +813,7 @@ class RuntimeExportStoreMixin:
         final_script = self._best_final_script_text(snapshot)
         if not final_script:
             return ""
+        final_script = readable_text(final_script)
 
         parts: list[str] = [title or f"project_{snapshot.get('project_id')}"]
         for heading, section_text in (

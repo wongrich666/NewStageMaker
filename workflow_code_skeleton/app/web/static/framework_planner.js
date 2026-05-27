@@ -1943,11 +1943,15 @@
 
   function fieldLabel(key) {
     const normalized = String(key || "");
+    if (window.fieldLabelsCn && typeof window.fieldLabelsCn.labelFor === "function") {
+      return window.fieldLabelsCn.labelFor(normalized);
+    }
     if (FIELD_LABELS[normalized]) return FIELD_LABELS[normalized];
     return friendlyFallbackLabel(normalized);
   }
 
   function isHiddenTechnicalKey(key) {
+    if (window.fieldLabelsCn && typeof window.fieldLabelsCn.isHiddenKey === "function" && window.fieldLabelsCn.isHiddenKey(key)) return true;
     return TECHNICAL_FIELD_KEYS.has(String(key || "")) || DEBUG_HIDDEN_FIELD_KEYS.includes(String(key || ""));
   }
 
@@ -3252,8 +3256,11 @@
   }
 
   function summarizeReadableValue(value) {
+    if (window.fieldLabelsCn && typeof window.fieldLabelsCn.readableText === "function") {
+      return window.fieldLabelsCn.readableText(value);
+    }
     if (Array.isArray(value)) {
-      return value.map((item) => typeof item === "string" ? item : summarizeBusinessValue(item)).filter(Boolean).join("\n");
+      return value.map((item, index) => `${index + 1}. ${typeof item === "string" ? item : summarizeBusinessValue(item)}`).filter(Boolean).join("\n");
     }
     if (value && typeof value === "object") {
       return Object.keys(value)

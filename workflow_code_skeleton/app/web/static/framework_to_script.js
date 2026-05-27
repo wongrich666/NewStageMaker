@@ -365,6 +365,9 @@
   }
 
   function labelFor(key) {
+    if (window.fieldLabelsCn && typeof window.fieldLabelsCn.labelFor === "function") {
+      return window.fieldLabelsCn.labelFor(key);
+    }
     if (FIELD_LABELS[key]) return FIELD_LABELS[key];
     return String(key || "")
       .replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -1186,7 +1189,7 @@
       `).join("")}</div>`;
     }
     if (typeof clean === "object") {
-      const entries = Object.entries(clean).filter(([key]) => !RAW_KEYS.has(key));
+      const entries = Object.entries(clean).filter(([key]) => !RAW_KEYS.has(key) && !(window.fieldLabelsCn && window.fieldLabelsCn.isHiddenKey && window.fieldLabelsCn.isHiddenKey(key)));
       if (!entries.length) return `<div class="wts-empty-inline">暂无内容</div>`;
       return `<div class="wts-tree-list">${entries.map(([key, item]) => {
         const complex = item && typeof item === "object";

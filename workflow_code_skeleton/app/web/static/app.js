@@ -1214,8 +1214,20 @@ startRuntimeDebugPolling();
 
   function formatDisplayValue(value) {
     if (value === null || value === undefined || value === "") return "";
-    if (typeof value === "string") return value.trim();
+    if (typeof value === "string") {
+      const text = value.trim();
+      if (window.fieldLabelsCn && typeof window.fieldLabelsCn.readableText === "function" && /^[\[{]/.test(text)) {
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed && typeof parsed === "object") return window.fieldLabelsCn.readableText(parsed);
+        } catch (_) {}
+      }
+      return text;
+    }
     if (Array.isArray(value) || typeof value === "object") {
+      if (window.fieldLabelsCn && typeof window.fieldLabelsCn.readableText === "function") {
+        return window.fieldLabelsCn.readableText(value);
+      }
       try {
         return JSON.stringify(value, null, 2).trim();
       } catch (_) {
@@ -3314,10 +3326,10 @@ startRuntimeDebugPolling();
     state.assetDirty = false;
     const locked = true;
     els.editAssetTitle.value = project.title || input.title || "";
-    els.editAssetSummary.value = input.story_outline || artifacts.story_outline || "";
+    els.editAssetSummary.value = formatDisplayValue(input.story_outline || artifacts.story_outline || "");
     els.editAssetPrivacy.value = project.visibility || "private";
     els.editAssetFinal.value = state.editingProjectStatus === "completed"
-      ? (artifacts.final_output_text || artifacts.final_script || "")
+      ? formatDisplayValue(artifacts.final_output_text || artifacts.final_script || "")
       : "";
     if (els.editAssetTitle) els.editAssetTitle.disabled = locked;
     if (els.editAssetSummary) els.editAssetSummary.disabled = locked;

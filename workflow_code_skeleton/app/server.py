@@ -41,6 +41,7 @@ from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools
 from .services.task_manager import task_manager
 from .services.user_knowledge_store import user_knowledge_store
 from .utils.logger import get_logger
+from .utils.readable_labels import readable_label, readable_scalar, readable_text
 
 
 logger = get_logger("server")
@@ -530,69 +531,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
 
     def _txt_label(key) -> str:
-        labels = {
-            "story_synopsis": "故事梗概",
-            "synopsis": "故事梗概",
-            "summary": "摘要",
-            "characterPlan": "人物小传",
-            "character_plan": "人物小传",
-            "sceneDictionary": "场景字典",
-            "coreScenes": "核心场景",
-            "overallAdaptationGuide": "整体改编指引",
-            "episode": "集数",
-            "title": "标题",
-            "name": "名称",
-            "characters": "人物",
-            "description": "说明",
-        }
-        return labels.get(str(key), str(key))
+        return readable_label(key)
 
     def _txt_scalar(value) -> str:
-        if value is None:
-            return "暂无"
-        if isinstance(value, bool):
-            return "是" if value else "否"
-        text = str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
-        return text or "暂无"
+        return readable_scalar(value)
 
     def _txt_readable(value, indent: int = 0) -> str:
-        pad = " " * indent
-        if value is None or value == "":
-            return "暂无"
-        if isinstance(value, (str, int, float, bool)):
-            return _txt_scalar(value)
-        if isinstance(value, list):
-            if not value:
-                return "暂无"
-            lines = []
-            for index, item in enumerate(value, start=1):
-                if isinstance(item, dict):
-                    heading = item.get("title") or item.get("name") or item.get("episode") or f"条目{index}"
-                    lines.append(f"{pad}{index}. {_txt_scalar(heading)}")
-                    nested = _txt_readable(item, indent + 2)
-                    if nested and nested != "暂无":
-                        lines.append(nested)
-                elif isinstance(item, list):
-                    lines.append(f"{pad}{index}.")
-                    lines.append(_txt_readable(item, indent + 2))
-                else:
-                    lines.append(f"{pad}{index}. {_txt_scalar(item)}")
-            return "\n".join(line for line in lines if str(line).strip())
-        if isinstance(value, dict):
-            if not value:
-                return "暂无"
-            lines = []
-            for key, item in value.items():
-                if str(key) in raw_fastgpt_response_keys:
-                    continue
-                label = _txt_label(key)
-                if isinstance(item, (dict, list)):
-                    lines.append(f"{pad}{label}：")
-                    lines.append(_txt_readable(item, indent + 2))
-                else:
-                    lines.append(f"{pad}{label}：{_txt_scalar(item)}")
-            return "\n".join(line for line in lines if str(line).strip()) or "暂无"
-        return _txt_scalar(value)
+        return readable_text(value, indent)
 
     def _framework_script_text_from_batches(stage12: dict) -> str:
         if not isinstance(stage12, dict):
@@ -643,7 +588,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             or _first_present(stage_outputs, "sceneDictionary", "scene_dictionary", "coreScenes", "core_scenes", default=None)
             or "暂无"
         )
-        script_text = _framework_script_text_from_batches(stage12) or "暂无"
+        script_text = _txt_readable(_framework_script_text_from_batches(stage12) or "暂无")
         title = _txt_scalar(asset.get("title") or package.get("title") or package.get("project_title") or "未命名框架剧本")
         return "\n\n".join(
             [
