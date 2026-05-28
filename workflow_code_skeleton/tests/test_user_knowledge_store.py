@@ -33,6 +33,30 @@ class UserKnowledgeStoreTests(unittest.TestCase):
         self.assertIn("worldview", rule_tag["stage_prompts"])
         self.assertIn("script_text", rule_tag["stage_prompts"])
         self.assertNotEqual(rule_tag["stage_prompts"]["basic"], rule_tag["stage_prompts"]["worldview"])
+        self.assertEqual(rule_tag["group"], "default_style")
+
+    def test_initializes_excellent_film_beat_empty_tags_idempotently(self) -> None:
+        with workspace_tempdir("knowledge-store-") as temp_dir:
+            store = UserKnowledgeStore(temp_dir)
+            tags = store.list_tags()
+            film_tags = [tag for tag in tags if tag["group"] == "excellent_film_beat"]
+            first = next(tag for tag in film_tags if tag["id"] == "excellent_film_beat_001")
+            last = next(tag for tag in film_tags if tag["id"] == "excellent_film_beat_050")
+            store.update_tag("excellent_film_beat_001", {"stage_prompts": {"basic": "用户填写内容"}, "name": "用户改名"})
+            store.ensure_initialized()
+            after = store.list_tags()
+            after_film_tags = [tag for tag in after if tag["group"] == "excellent_film_beat"]
+            updated = next(tag for tag in after_film_tags if tag["id"] == "excellent_film_beat_001")
+
+        self.assertEqual(len(film_tags), 50)
+        self.assertEqual(first["name"], "40岁的老处男")
+        self.assertEqual(last["name"], "醉酒俏佳人")
+        self.assertEqual(first["source"], "save_the_cat_film_beat")
+        self.assertTrue(all(value == "" for value in first["stage_prompts"].values()))
+        self.assertEqual(len(after_film_tags), 50)
+        self.assertEqual(updated["name"], "用户改名")
+        self.assertEqual(updated["stage_prompts"]["basic"], "用户填写内容")
+        self.assertIn("script_text", updated["stage_prompts"])
 
     def test_migrates_legacy_prompt_text_to_stage_prompts(self) -> None:
         with workspace_tempdir("knowledge-store-") as temp_dir:
@@ -52,6 +76,7 @@ class UserKnowledgeStoreTests(unittest.TestCase):
             tag = next(item for item in store.list_tags() if item["id"] == "custom-legacy")
 
         self.assertEqual(tag["prompt_text"], "旧版通用偏好")
+        self.assertEqual(tag["group"], "user_custom")
         self.assertEqual(tag["stage_prompts"]["basic"], "")
         self.assertEqual(tag["stage_prompts"]["package"], "")
         self.assertEqual(tag["stage_prompts"]["script_text"], "")

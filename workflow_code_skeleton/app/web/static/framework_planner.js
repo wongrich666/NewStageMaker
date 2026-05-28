@@ -122,7 +122,37 @@
   ];
 
   const STAGE_SEQUENCE = ["basic", "worldview", "character", "beat", "storylines", "guide", "package"];
-  const ALL_STAGE_PREFERENCE_KEYS = STAGE_SEQUENCE.slice();
+  const EDITABLE_STAGE_KEYS = new Set(["worldview", "character", "beat", "storylines", "guide"]);
+  const SOURCE_BRIEF_LABELS = {
+    source_brief: "原始故事信息提取",
+    title: "作品标题",
+    source_type: "原始材料类型",
+    genre: "题材类型",
+    tone: "整体基调",
+    target_format: "目标剧本形式",
+    season_count: "季数",
+    episodes_per_season: "每季集数",
+    minutes_per_episode: "单集分钟数",
+    adaptation_direction: "改编方向",
+    core_logline: "故事核心",
+    protagonist: "主角",
+    main_opposition: "主要阻力 / 对立力量",
+    core_conflict: "核心冲突",
+    must_keep_elements: "必须保留元素",
+    forbidden_deviations: "禁止偏离方向",
+    available_material_summary: "现有材料摘要",
+    missing_information_risks: "缺失信息风险",
+    display_text: "可读摘要",
+  };
+  const SOURCE_BRIEF_GROUPS = [
+    ["基础信息", ["title", "source_type", "genre", "tone", "target_format", "season_count", "episodes_per_season", "minutes_per_episode"]],
+    ["改编方向", ["adaptation_direction", "core_logline"]],
+    ["核心人物与冲突", ["protagonist", "main_opposition", "core_conflict"]],
+    ["保留与禁区", ["must_keep_elements", "forbidden_deviations"]],
+    ["材料情况", ["available_material_summary", "missing_information_risks"]],
+    ["可读摘要", ["display_text"]],
+  ];
+  const ALL_STAGE_PREFERENCE_KEYS = ["basic", "worldview", "character", "beat", "storylines", "guide", "package", "scene", "appearance", "episode", "conflict", "script_text"];
   const KNOWLEDGE_SNAPSHOT_STAGE_KEYS = ["basic", "worldview", "character", "beat", "storylines", "guide", "package", "scene", "appearance", "episode", "conflict", "script_text"];
   const KNOWLEDGE_SNAPSHOT_STAGE_NUMBERS = {
     basic: "01",
@@ -307,6 +337,7 @@
     lastStagePayloadPreview: {},
     stageHistory: {},
     stageHistoryLoading: {},
+    editSnapshots: {},
     assetsOpen: false,
     showNewScriptModal: false,
     assets: [],
@@ -327,9 +358,11 @@
     editMode: {
       worldview: false,
       character: false,
+      beat: false,
+      storylines: false,
+      guide: false,
       beatTimeline: false,
       beatExplanation: false,
-      guide: false,
     },
     knowledge: {
       open: readKnowledgePanelOpen(),
@@ -1359,6 +1392,11 @@
     return hasStageDataFor(state, stageKey);
   }
 
+  function hasStageOutput(stageKey) {
+    if (stageKey === "basic") return !isEmptyValue(state.source_brief) || Boolean(String(state.display_texts["01"] || "").trim());
+    return hasStageData(stageKey);
+  }
+
   function downstreamStages(stageKey) {
     const index = STAGE_SEQUENCE.indexOf(stageKey);
     return index === -1 ? [] : STAGE_SEQUENCE.slice(index + 1);
@@ -1709,6 +1747,23 @@
     };
   }
 
+  function knowledgeTagGroup(tag) {
+    const group = String((tag && tag.group) || "").trim();
+    if (group) return group;
+    if (String((tag && tag.id) || "").startsWith("excellent_film_beat_") || String((tag && tag.source) || "") === "save_the_cat_film_beat") return "excellent_film_beat";
+    return tag && tag.builtin ? "default_style" : "user_custom";
+  }
+
+  function knowledgeTagGroups() {
+    return [
+      { id: "default_style", label: "默认风格分类", emptyText: "暂无系统预设标签。" },
+      { id: "user_custom", label: "用户自定义标签", emptyText: "暂无自定义标签。" },
+      { id: "excellent_film_beat", label: "优秀电影节拍表标签", emptyText: "暂无电影节拍表空标签。" },
+    ].map((group) => Object.assign({}, group, {
+      tags: (ui.knowledge.tags || []).filter((tag) => knowledgeTagGroup(tag) === group.id),
+    }));
+  }
+
   function selectedKnowledgeTags() {
     const byId = new Map((ui.knowledge.tags || []).map((tag) => [String(tag.id || ""), tag]));
     return (ui.knowledge.selectedIds || [])
@@ -1756,6 +1811,47 @@
     return Boolean((state.stage_state && state.stage_state[stageKey] || {}).stageDraftDirty);
   }
 
+  function isStageEditable(stageKey) {
+    return EDITABLE_STAGE_KEYS.has(String(stageKey || ""));
+  }
+
+  function isStageEditMode(stageKey) {
+    return Boolean(ui.editMode && ui.editMode[stageKey]);
+  }
+
+  function setStageEditMode(stageKey, enabled) {
+    if (!ui.editMode) ui.editMode = {};
+    ui.editMode[stageKey] = Boolean(enabled);
+  }
+
+  function stageDataSnapshot(stageKey) {
+    if (stageKey === "worldview") return { worldview_plan: clone(state.worldview_plan || {}) };
+    if (stageKey === "character") return { character_plan: clone(state.character_plan || {}) };
+    if (stageKey === "beat") {
+      return {
+        beat_checkpoint_timeline: clone(state.beat_checkpoint_timeline || []),
+        checkpoint_explanation: clone(state.checkpoint_explanation || {}),
+      };
+    }
+    if (stageKey === "storylines") {
+      return {
+        character_storylines: clone(state.character_storylines || []),
+        storyline_decisions: clone(state.storyline_decisions || []),
+      };
+    }
+    if (stageKey === "guide") return { adaptation_guide: clone(state.adaptation_guide || {}) };
+    return {};
+  }
+
+  function restoreStageDataSnapshot(stageKey, snapshot) {
+    const data = snapshot && typeof snapshot === "object" ? snapshot : {};
+    Object.keys(data).forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(state, key)) state[key] = clone(data[key]);
+    });
+    if (stageKey === "beat") syncBeatCheckpointData({ clearStorylines: false });
+    if (stageKey === "storylines") normalizeStorylinesForCurrentBeats();
+  }
+
   function markStageDraftDirty(stageKey) {
     if (!stageKey) return;
     const stage = stageState(stageKey);
@@ -1772,6 +1868,7 @@
     stage.stageCommitted = hasStageData(stageKey);
     stage.confirmed = stage.stageCommitted;
     stage.status = stage.stageCommitted ? "confirmed" : stage.status;
+    setStageEditMode(stageKey, false);
   }
 
   function stagePreferenceReady(stageKey) {
@@ -1865,6 +1962,14 @@
 
   const FIELD_LABELS = {
     source_brief: "原文信息提取",
+    source_type: "原始材料类型",
+    genre: "题材类型",
+    core_logline: "故事核心",
+    main_opposition: "主要阻力 / 对立力量",
+    must_keep_elements: "必须保留元素",
+    forbidden_deviations: "禁止偏离方向",
+    available_material_summary: "现有材料摘要",
+    missing_information_risks: "缺失信息风险",
     worldview_plan: "世界观方案",
     character_plan: "人物设定",
     beat_checkpoint_timeline: "三幕十五节拍时间轴",
@@ -2283,8 +2388,7 @@
   function renderKnowledgePanel() {
     const selectedTags = selectedKnowledgeTags();
     const missingIds = (ui.knowledge.selectedIds || []).filter((id) => !selectedTags.some((tag) => String(tag.id || "") === String(id)));
-    const builtinTags = (ui.knowledge.tags || []).filter((tag) => tag.builtin);
-    const customTags = (ui.knowledge.tags || []).filter((tag) => !tag.builtin);
+    const groupedTags = knowledgeTagGroups();
     const selectedLabel = selectedTags.length || missingIds.length
       ? `${selectedTags.length + missingIds.length} 个已选`
       : "允许不选择";
@@ -2307,14 +2411,12 @@
             ${ui.knowledge.status ? `<div class="fp-inline-warning compact">${escapeHtml(ui.knowledge.status)}</div>` : ""}
             ${renderKnowledgeSelected(selectedTags, missingIds)}
             <div class="fp-knowledge-grid">
-              <div>
-                <h3>默认标签</h3>
-                ${renderKnowledgeTagGroup(builtinTags, "暂无系统预设标签。")}
-              </div>
-              <div>
-                <h3>用户自定义标签</h3>
-                ${renderKnowledgeTagGroup(customTags, "暂无自定义标签。")}
-              </div>
+              ${groupedTags.map((group) => `
+                <details class="fp-knowledge-group" open>
+                  <summary><h3>${escapeHtml(group.label)}</h3><span class="fp-tag lock">${group.tags.length} 个</span></summary>
+                  ${renderKnowledgeTagGroup(group.tags, group.emptyText)}
+                </details>
+              `).join("")}
             </div>
             ${renderKnowledgeStagePreview()}
             ${ui.knowledge.formOpen ? renderKnowledgeForm() : ""}
@@ -2353,8 +2455,8 @@
     const id = String(tag.id || "");
     const selected = (ui.knowledge.selectedIds || []).includes(id);
     const prompts = normalizeStagePrompts(tag.stage_prompts || {});
-    const frameworkPromptCount = STAGE_SEQUENCE.filter((stageKey) => String(prompts[stageKey] || "").trim()).length;
-    const stageStatus = frameworkPromptCount ? `已设置 ${frameworkPromptCount}/7 个框架阶段偏好` : "未设置阶段偏好";
+    const frameworkPromptCount = ALL_STAGE_PREFERENCE_KEYS.filter((stageKey) => String(prompts[stageKey] || "").trim()).length;
+    const stageStatus = frameworkPromptCount ? `已设置 ${frameworkPromptCount}/12 个阶段偏好` : "未设置阶段偏好";
     return `
       <label class="fp-knowledge-item">
         <input type="checkbox" data-knowledge-tag-id="${escapeHtml(id)}" ${selected ? "checked" : ""} />
@@ -2363,7 +2465,7 @@
           <small>${escapeHtml(tag.category || (tag.builtin ? "默认标签" : "自定义"))} · ${tag.builtin ? "默认标签，可编辑" : "自定义标签"} · ${escapeHtml(stageStatus)}</small>
           ${tag.description ? `<em>${escapeHtml(truncateText(tag.description, 90))}</em>` : ""}
           <details class="fp-knowledge-stage-details">
-            <summary>查看 01-07 阶段提示词</summary>
+            <summary>查看 01-12 阶段提示词</summary>
             <div>
               ${ALL_STAGE_PREFERENCE_KEYS.map((stageKey) => `
                 <p><strong>${escapeHtml(stagePromptLabel(stageKey))}</strong><span>${escapeHtml(truncateText(prompts[stageKey] || "", 120) || "暂无")}</span></p>
@@ -2372,7 +2474,7 @@
           </details>
         </span>
         <span class="fp-knowledge-item-actions">
-          <button class="fp-btn small primary" type="button" data-action="edit-knowledge-stage-prompts" data-tag-id="${escapeHtml(id)}" title="点击编辑该标签下 01-07 阶段提示词">✍️</button>
+          <button class="fp-btn small primary" type="button" data-action="edit-knowledge-stage-prompts" data-tag-id="${escapeHtml(id)}" title="编辑阶段偏好">✍️</button>
           <button class="fp-btn small" type="button" data-action="edit-knowledge-tag" data-tag-id="${escapeHtml(id)}">编辑</button>
           <button class="fp-btn small danger subtle" type="button" data-action="delete-knowledge-tag" data-tag-id="${escapeHtml(id)}">${tag.builtin ? "隐藏" : "删除"}</button>
         </span>
@@ -2410,7 +2512,7 @@
         <div class="fp-card-title-row">
           <div>
             <h3>${editing ? `编辑标签偏好：${escapeHtml(form.name || "未命名标签")}` : "新建自定义标签"}</h3>
-            <p class="fp-card-sub">通用偏好保留旧逻辑；阶段偏好只注入 01-07 框架策划阶段。</p>
+            <p class="fp-card-sub">通用偏好保留旧逻辑；阶段偏好可填写 01-12，框架阶段使用 01-07，后续阶段可从资产快照继承。</p>
           </div>
           <button class="fp-btn small" data-action="cancel-knowledge-edit">取消</button>
         </div>
@@ -2422,10 +2524,10 @@
         <label class="fp-field" style="margin-top:12px"><span>通用偏好 prompt_text</span><textarea data-knowledge-form-key="prompt_text">${escapeHtml(form.prompt_text)}</textarea></label>
         <div class="fp-knowledge-stage-edit-grid">
           ${ALL_STAGE_PREFERENCE_KEYS.map((stageKey) => `
-            <label class="fp-field">
-              <span>${escapeHtml(stagePromptLabel(stageKey))}</span>
+            <details class="fp-field" open>
+              <summary>${escapeHtml(stagePromptLabel(stageKey))}</summary>
               <textarea data-knowledge-stage-key="${escapeHtml(stageKey)}" placeholder="${escapeHtml(stagePreferencePlaceholder(stageKey))}">${escapeHtml((form.stage_prompts || {})[stageKey] || "")}</textarea>
-            </label>
+            </details>
           `).join("")}
         </div>
         <div class="fp-actions">
@@ -2542,7 +2644,7 @@
 
   function renderBasicView() {
     const stage = state.stage_state.basic;
-    const locked = stage.confirmed;
+    const locked = stage.confirmed || hasStageOutput("basic");
     return `
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
@@ -2608,14 +2710,13 @@
           <textarea data-config-key="user_constraints" placeholder="例如：不能改世界观底层逻辑，不能删除某角色。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.user_constraints)}</textarea>
         </div>
         ${renderScriptPreferencePanel(locked)}
-        ${!isEmptyValue(state.source_brief) ? `
-          <div class="fp-stage-note">
-            <strong>01 阶段：用户原始输入</strong>
-            ${renderDataBlock(state.source_brief, { dataKey: "source_brief", stageKey: "basic", editable: false })}
+        ${(!isEmptyValue(state.source_brief) || String(state.display_texts["01"] || "").trim()) ? `
+          <div class="fp-stage-note fp-stage-output applied">
+            <strong>01 阶段：原始故事信息提取</strong>
+            ${renderSourceBriefTree(state.source_brief, state.display_texts["01"] || "")}
           </div>
         ` : ""}
         ${renderStagePreRunPanel("basic")}
-        ${renderApplyStageChangesPanel("basic")}
         ${renderStageHistoryPanel("basic")}
         ${isStageLoading("basic") ? renderProcessingBanner("正在提取原文信息，请稍候。") : ""}
         ${renderStageBottomActions("basic")}
@@ -2707,15 +2808,31 @@
   }
 
   function renderApplyStageChangesPanel(stageKey) {
-    if (!hasStageData(stageKey)) return "";
+    if (!hasStageOutput(stageKey) || !isStageEditable(stageKey)) return "";
     const dirty = stageDraftDirty(stageKey);
+    const applied = Boolean((state.stage_state && state.stage_state[stageKey] || {}).confirmed);
     return `
       <div class="fp-commit-panel ${dirty ? "dirty" : ""}">
         <div>
-          <strong>${dirty ? "当前阶段有未应用的修改" : "当前阶段结果已应用"}</strong>
-          <p>${dirty ? "请先点击“应用修改”，否则下游仍会使用旧结果。" : "已应用的结果会作为下一阶段输入，并写入 localStorage / 后端框架资产。"}</p>
+          <strong>${dirty ? "当前阶段有未应用的修改" : (applied ? "当前阶段结果已应用" : "当前阶段暂无未应用修改")}</strong>
+          <p>${dirty ? "请先点击“应用修改”，否则下游仍会使用旧结果。" : (applied ? "已应用的结果会作为下一阶段输入，并写入 localStorage / 后端框架资产。" : "如需调整，请先点击“修改”；不调整可直接进入下一步。")}</p>
         </div>
         <button class="fp-btn ${dirty ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="${escapeHtml(stageKey)}" ${dirty ? "" : "disabled"}>应用修改</button>
+      </div>
+    `;
+  }
+
+  function renderStageEditControls(stageKey, disabled) {
+    if (!hasStageOutput(stageKey) || !isStageEditable(stageKey)) return "";
+    const editing = isStageEditMode(stageKey);
+    const dirty = stageDraftDirty(stageKey);
+    if (disabled) return "";
+    return `
+      <div class="fp-actions fp-edit-actions">
+        ${editing ? `
+          <span class="fp-inline-hint">当前阶段有未应用修改，请先应用修改。</span>
+          <button class="fp-btn small" data-action="cancel-stage-edit" data-stage-key="${escapeHtml(stageKey)}">取消修改</button>
+        ` : `<button class="fp-btn small" data-action="enter-stage-edit" data-stage-key="${escapeHtml(stageKey)}" ${dirty ? "disabled" : ""}>修改</button>`}
       </div>
     `;
   }
@@ -2778,7 +2895,7 @@
     const nextStage = STAGE_SEQUENCE[index + 1];
     const previousView = previousStage ? firstViewForStage(previousStage) : "";
     const nextView = nextStage ? firstViewForStage(nextStage) : "";
-    const hasOutput = hasStageData(stageKey);
+    const hasOutput = hasStageOutput(stageKey);
     const running = isStageLoading(stageKey);
     const dirty = stageDraftDirty(stageKey);
     const blockReason = stageRunBlockReason(stageKey);
@@ -2787,7 +2904,7 @@
       <div class="fp-actions fp-stage-bottom-actions">
         <button class="fp-btn" data-action="go-view" data-view="${escapeHtml(previousView)}" ${previousView ? "" : "disabled"}>上一步</button>
         <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="${escapeHtml(stageKey)}" ${running || blockReason ? "disabled" : ""}>${hasOutput ? `重新生成 ${escapeHtml(stageNo)}` : "生成本阶段"}</button>
-        <button class="fp-btn ${dirty ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="${escapeHtml(stageKey)}" ${dirty ? "" : "disabled"}>应用修改</button>
+        ${isStageEditable(stageKey) ? `<button class="fp-btn ${dirty ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="${escapeHtml(stageKey)}" ${dirty ? "" : "disabled"}>应用修改</button>` : ""}
         <button class="fp-btn ${canNext ? "primary" : ""}" data-action="go-next-stage" data-view="${escapeHtml(nextView)}" ${canNext ? "" : "disabled"}>下一步</button>
         ${stageKey === "package" ? `${renderSaveFrameworkButton("")}${renderFrameworkScriptButton("")}` : ""}
       </div>
@@ -2799,6 +2916,7 @@
     const data = state[options.dataKey];
     const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
+    const editable = !blocked && !confirmed && isStageEditMode(options.stageKey);
     return `
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
@@ -2811,7 +2929,8 @@
         ${confirmed ? `<div class="fp-inline-warning">${escapeHtml(options.title)}已确认并锁定。下游内容已基于当前版本生成，如需改动请显式回退。</div>` : ""}
         ${isStageLoading(options.stageKey) ? renderProcessingBanner(`正在生成${options.title}，请稍候...`) : ""}
         ${renderStagePreRunPanel(options.stageKey)}
-        ${blocked && isEmptyValue(data) ? `<div class="fp-empty">请先应用上游阶段。</div>` : renderDataBlock(data, { dataKey: options.dataKey, stageKey: options.stageKey, editable: !blocked && !confirmed })}
+        ${blocked && isEmptyValue(data) ? `<div class="fp-empty">请先应用上游阶段。</div>` : renderDataBlock(data, { dataKey: options.dataKey, stageKey: options.stageKey, editable })}
+        ${renderStageEditControls(options.stageKey, blocked || confirmed)}
         ${renderApplyStageChangesPanel(options.stageKey)}
         ${renderStageHistoryPanel(options.stageKey)}
         ${renderStageError(options.stageKey)}
@@ -2839,7 +2958,8 @@
         </div>
         ${confirmed ? `<div class="fp-inline-warning">04 阶段已确认并锁定，05 人物故事线会严格基于这 15 个节拍继续拆解。</div>` : ""}
         ${isStageLoading("beat") ? renderProcessingBanner("正在生成三幕十五节拍时间轴，请稍候...") : ""}
-        ${blocked && !hasTimeline ? `<div class="fp-empty">请先确认人设方案。</div>` : renderBeatTimeline(state.beat_checkpoint_timeline, { editable: !blocked && !confirmed })}
+        ${blocked && !hasTimeline ? `<div class="fp-empty">请先确认人设方案。</div>` : renderBeatTimeline(state.beat_checkpoint_timeline, { editable: !blocked && !confirmed && isStageEditMode("beat") })}
+        ${renderStageEditControls("beat", blocked || confirmed)}
         ${renderStagePreRunPanel("beat")}
         ${renderApplyStageChangesPanel("beat")}
         ${renderStageHistoryPanel("beat")}
@@ -2988,7 +3108,8 @@
           ${stageStatusTag("beat")}
         </div>
         ${isStageLoading("beat") ? renderProcessingBanner("正在生成卡点说明，请稍候...") : ""}
-        ${blocked && !hasExplanation ? `<div class="fp-empty">请先确认人设方案。</div>` : renderCheckpointExplanation(state.checkpoint_explanation, { editable: !blocked && !confirmed })}
+        ${blocked && !hasExplanation ? `<div class="fp-empty">请先确认人设方案。</div>` : renderCheckpointExplanation(state.checkpoint_explanation, { editable: !blocked && !confirmed && isStageEditMode("beat") })}
+        ${renderStageEditControls("beat", blocked || confirmed)}
         ${renderStagePreRunPanel("beat")}
         ${renderApplyStageChangesPanel("beat")}
         ${renderStageHistoryPanel("beat")}
@@ -3014,6 +3135,7 @@
         ${confirmed ? `<div class="fp-inline-warning">人物故事线已确认并锁定。06 阶段的整体改编指引会以当前故事线取舍为准。</div>` : ""}
         ${isStageLoading("storylines") ? renderProcessingBanner("正在生成人物故事线，请稍候...") : ""}
         ${blocked && !hasStorylines ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineDecisionGrid()}
+        ${renderStageEditControls("storylines", blocked || confirmed)}
         ${renderStagePreRunPanel("storylines")}
         ${renderApplyStageChangesPanel("storylines")}
         ${renderStageHistoryPanel("storylines")}
@@ -3090,7 +3212,8 @@
         </div>
         ${confirmed ? `<div class="fp-inline-warning">整体改编指引已确认并锁定。现在可以生成最终策划包。</div>` : ""}
         ${isStageLoading("guide") ? renderProcessingBanner("正在生成整体改编指引，请稍候...") : ""}
-        ${blocked && !hasGuide ? `<div class="fp-empty">请先确认 05 阶段。</div>` : renderGuideCards(state.adaptation_guide, { editable: !blocked && !confirmed })}
+        ${blocked && !hasGuide ? `<div class="fp-empty">请先确认 05 阶段。</div>` : renderGuideCards(state.adaptation_guide, { editable: !blocked && !confirmed && isStageEditMode("guide") })}
+        ${renderStageEditControls("guide", blocked || confirmed)}
         ${renderStagePreRunPanel("guide")}
         ${renderApplyStageChangesPanel("guide")}
         ${renderStageHistoryPanel("guide")}
@@ -3123,7 +3246,6 @@
         <div class="fp-actions fp-stage-bottom-actions">
           <button class="fp-btn" data-action="go-view" data-view="guide">上一步</button>
           <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="package" ${locked || isStageLoading("package") ? "disabled" : ""}>${hasOutput ? "重新生成 07" : "生成本阶段"}</button>
-          <button class="fp-btn ${stageDraftDirty("package") ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="package" ${stageDraftDirty("package") ? "" : "disabled"}>应用修改</button>
           ${renderSaveFrameworkButton("")}
           <button class="fp-btn primary" data-action="download-readable-framework" ${!hasOutput ? "disabled" : ""}>下载可读框架</button>
           <button class="fp-btn" data-action="download-structured-framework" ${!hasOutput ? "disabled" : ""}>下载结构化框架</button>
@@ -3285,6 +3407,125 @@
     return data;
   }
 
+  function safeJsonValue(value) {
+    if (typeof value !== "string") return value;
+    const text = value.trim();
+    if (!text || !/^[\[{]/.test(text)) return value;
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      return value;
+    }
+  }
+
+  function extractSourceBriefPayload(response) {
+    const parsed = safeJsonValue(response);
+    const source = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    const parsedData = safeJsonValue(source.data);
+    const data = parsedData && typeof parsedData === "object" && !Array.isArray(parsedData)
+      ? parsedData
+      : source;
+    const containers = [
+      data,
+      data.frameworkPlanPackage,
+      data.framework_plan_package,
+      data.frameworkPlanPackage && data.frameworkPlanPackage.data,
+      data.framework_plan_package && data.framework_plan_package.data,
+    ].filter((item) => item && typeof item === "object" && !Array.isArray(item));
+    let sourceBrief = {};
+    for (const item of containers) {
+      const candidate = safeJsonValue(item.source_brief || item.sourceBrief);
+      if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+        sourceBrief = candidate;
+        break;
+      }
+    }
+    const displayText = [
+      data.display_text,
+      data.displayText,
+      source.display_text,
+      source.displayText,
+      typeof source.data === "string" ? source.data : "",
+      sourceBrief.display_text,
+      sourceBrief.displayText,
+      typeof parsed === "string" ? parsed : "",
+    ].find((item) => typeof item === "string" && item.trim()) || "";
+    return { source_brief: sourceBrief, display_text: displayText };
+  }
+
+  function sourceBriefValue(sourceBrief, key, displayText) {
+    const value = key === "display_text"
+      ? (displayText || sourceBrief.display_text || sourceBrief.displayText || "")
+      : (sourceBrief[key] === undefined ? "" : sourceBrief[key]);
+    return cleanSourceBriefPlaceholder(value);
+  }
+
+  function cleanSourceBriefPlaceholder(value) {
+    if (typeof value === "string") {
+      const text = value.trim();
+      if (!text || text === "核心故事信息待人工补充") return "";
+      return text.replace(/核心故事信息待人工补充/g, "暂无");
+    }
+    if (Array.isArray(value)) return value.map(cleanSourceBriefPlaceholder);
+    if (value && typeof value === "object") {
+      const result = {};
+      Object.keys(value).forEach((key) => {
+        result[key] = cleanSourceBriefPlaceholder(value[key]);
+      });
+      return result;
+    }
+    return value;
+  }
+
+  function renderSourceBriefTree(sourceBrief, displayText) {
+    const readableText = cleanSourceBriefPlaceholder(displayText);
+    const hasBrief = sourceBrief && typeof sourceBrief === "object" && !Array.isArray(sourceBrief) && Object.keys(sourceBrief).length > 0;
+    if (!hasBrief) {
+      return `
+        <div class="fp-source-brief fp-readonly-output">
+          <div class="fp-empty">暂无结构化提取结果</div>
+          ${readableText ? `<div class="fp-output-overview"><h3>可读摘要</h3><p>${formatText(readableText)}</p></div>` : ""}
+        </div>
+      `;
+    }
+    return `
+      <div class="fp-source-brief fp-readonly-output">
+        <div class="fp-source-brief-title">01 ${escapeHtml(SOURCE_BRIEF_LABELS.source_brief)}</div>
+        ${SOURCE_BRIEF_GROUPS.map(([groupTitle, keys]) => renderSourceBriefGroup(groupTitle, keys, sourceBrief, readableText)).join("")}
+      </div>
+    `;
+  }
+
+  function renderSourceBriefGroup(groupTitle, keys, sourceBrief, displayText) {
+    return `
+      <details class="fp-source-group">
+        <summary><span class="fp-tree-arrow"></span><strong>${escapeHtml(groupTitle)}</strong></summary>
+        <div class="fp-source-group-body">
+          ${keys.map((key) => renderSourceBriefField(key, sourceBriefValue(sourceBrief, key, displayText))).join("")}
+        </div>
+      </details>
+    `;
+  }
+
+  function renderSourceBriefField(key, value) {
+    const label = SOURCE_BRIEF_LABELS[key] || fieldLabel(key);
+    if (Array.isArray(value)) {
+      const items = value.filter((item) => isRenderableValue(item));
+      return `
+        <div class="fp-source-field">
+          <strong>${escapeHtml(label)}</strong>
+          ${items.length ? `<ol>${items.map((item) => `<li>${formatText(summarizeReadableValue(item) || "暂无")}</li>`).join("")}</ol>` : `<span>暂无</span>`}
+        </div>
+      `;
+    }
+    return `
+      <div class="fp-source-field">
+        <strong>${escapeHtml(label)}</strong>
+        <span>${formatText(summarizeReadableValue(value) || "暂无")}</span>
+      </div>
+    `;
+  }
+
   function renderReadableFieldCard(label, value) {
     if (!isRenderableValue(value)) return "";
     return `
@@ -3412,8 +3653,10 @@
       forceOpen: true,
     }) : "";
     const rawTree = renderRawDebugBlock(data, options || {});
+    const stageKey = options && options.stageKey;
+    const outputClass = stageDraftDirty(stageKey) || isStageEditMode(stageKey) ? "editing" : ((state.stage_state && state.stage_state[stageKey] || {}).confirmed ? "applied" : "generated");
     return `
-      <div class="fp-business-form" data-business-form="${escapeHtml((options && options.dataKey) || "")}">
+      <div class="fp-business-form fp-stage-output ${escapeHtml(outputClass)}" data-business-form="${escapeHtml((options && options.dataKey) || "")}">
         ${overview}
         ${form}
         ${editForm ? `<details class="fp-edit-details" open><summary>编辑本阶段字段</summary>${editForm}</details>` : ""}
@@ -3816,6 +4059,7 @@
     if (!Array.isArray(state.character_storylines) || !state.character_storylines.length) {
       return `<div class="fp-empty">尚未生成人物故事线。</div>`;
     }
+    const editable = isStageEditMode("storylines") && !state.stage_state.storylines.confirmed;
     return `
       <div class="fp-story-grid">
         ${state.character_storylines.map((rawItem, index) => {
@@ -3858,7 +4102,7 @@
             <div class="fp-radio-row">
               ${STORYLINE_DECISIONS.map(([value, label]) => `
                 <label>
-                  <input type="radio" name="storyline-${escapeHtml(storylineId)}" data-action="change-storyline-decision" data-storyline-id="${escapeHtml(storylineId)}" value="${value}" ${item.decision === value ? "checked" : ""} ${state.stage_state.storylines.confirmed ? "disabled" : ""} />
+                  <input type="radio" name="storyline-${escapeHtml(storylineId)}" data-action="change-storyline-decision" data-storyline-id="${escapeHtml(storylineId)}" value="${value}" ${item.decision === value ? "checked" : ""} ${editable ? "" : "disabled"} />
                   ${escapeHtml(label)}
                 </label>
               `).join("")}
@@ -3872,7 +4116,7 @@
               </div>
             </details>
             <div class="fp-actions" style="margin-top:0">
-              <button class="fp-btn small" data-action="open-storyline-modal" data-storyline-id="${escapeHtml(storylineId)}">查看并编辑细节</button>
+              <button class="fp-btn small" data-action="open-storyline-modal" data-storyline-id="${escapeHtml(storylineId)}" ${editable ? "" : "disabled"}>查看并编辑细节</button>
             </div>
             </div>
           </details>
@@ -4337,14 +4581,18 @@
   }
 
   function applyStageResponse(stageNo, response) {
-    const safeResponse = response && typeof response === "object" ? response : {};
-    const safeData = safeResponse.data && typeof safeResponse.data === "object" ? safeResponse.data : {};
+    const parsedResponse = safeJsonValue(response);
+    const safeResponse = parsedResponse && typeof parsedResponse === "object" ? parsedResponse : { display_text: String(parsedResponse || "") };
+    const parsedData = safeJsonValue(safeResponse.data);
+    const safeData = parsedData && typeof parsedData === "object" && !Array.isArray(parsedData) ? parsedData : {};
     state.raw_stage_responses[stageNo] = safeResponse.raw || {};
     state.display_texts[stageNo] = safeResponse.display_text || "";
     if (stageNo === "01") {
-      state.source_brief = safeData.source_brief && typeof safeData.source_brief === "object" && !Array.isArray(safeData.source_brief)
-        ? safeData.source_brief
+      const extracted = extractSourceBriefPayload(safeResponse);
+      state.source_brief = extracted.source_brief && typeof extracted.source_brief === "object" && !Array.isArray(extracted.source_brief)
+        ? extracted.source_brief
         : {};
+      state.display_texts[stageNo] = extracted.display_text || state.display_texts[stageNo] || "";
     }
     if (stageNo === "02") {
       state.worldview_plan = safeData.worldview_plan && typeof safeData.worldview_plan === "object" && !Array.isArray(safeData.worldview_plan)
@@ -4432,6 +4680,8 @@
       state.stage_state[stageKey].confirmed = false;
       state.stage_state[stageKey].stageCommitted = true;
       state.stage_state[stageKey].stageDraftDirty = false;
+      setStageEditMode(stageKey, false);
+      delete ui.editSnapshots[stageKey];
       const next = STAGE_SEQUENCE[STAGE_SEQUENCE.indexOf(stageKey) + 1];
       if (next) unlockStage(next);
       syncFrameworkAssetState(state, `generate:${stageKey}`);
@@ -4538,6 +4788,7 @@
     if (next) unlockStage(next);
     syncStageFlow(state);
     syncFrameworkAssetState(state, `apply:${stageKey}`);
+    delete ui.editSnapshots[stageKey];
     recordHistory("apply_stage_changes", { stageKey, stageNo: stageNoForKey(stageKey) });
     saveState();
     try {
@@ -4548,6 +4799,32 @@
       return;
     }
     showToast("本阶段修改已应用，下游会使用当前结果");
+    render();
+  }
+
+  function enterStageEdit(stageKey) {
+    if (!isStageEditable(stageKey) || !hasStageData(stageKey)) return;
+    ui.editSnapshots[stageKey] = stageDataSnapshot(stageKey);
+    setStageEditMode(stageKey, true);
+    markStageDraftDirty(stageKey);
+    syncStageFlow(state);
+    saveState();
+    showToast("当前阶段有未应用修改，请先应用修改。");
+    render();
+  }
+
+  function cancelStageEdit(stageKey) {
+    if (!isStageEditable(stageKey)) return;
+    restoreStageDataSnapshot(stageKey, ui.editSnapshots[stageKey]);
+    delete ui.editSnapshots[stageKey];
+    setStageEditMode(stageKey, false);
+    const stage = stageState(stageKey);
+    stage.stageDraftDirty = false;
+    stage.stageCommitted = hasStageData(stageKey);
+    stage.confirmed = false;
+    stage.status = stage.stageCommitted ? "generated" : stage.status;
+    syncStageFlow(state);
+    saveState();
     render();
   }
 
@@ -5013,6 +5290,8 @@
     ui.editMode = {
       worldview: false,
       character: false,
+      beat: false,
+      storylines: false,
       beatTimeline: false,
       beatExplanation: false,
       guide: false,
@@ -6146,7 +6425,7 @@
           return;
         }
         await runStage(stageKey, { revise: false });
-        showToast("本阶段已生成，请审阅后点击“应用修改”");
+        showToast(stageKey === "basic" ? "01 阶段已生成，可直接进入下一步" : "本阶段已生成，可直接进入下一步；如需调整请先点击“修改”");
       } catch (error) {
         showToast(formatStageError(error, stageNoForKey(stageKey)));
       }
@@ -6172,6 +6451,14 @@
     }
     if (action === "apply-stage-changes") {
       await applyStageChanges(actionElement.dataset.stageKey);
+      return;
+    }
+    if (action === "enter-stage-edit") {
+      enterStageEdit(actionElement.dataset.stageKey);
+      return;
+    }
+    if (action === "cancel-stage-edit") {
+      cancelStageEdit(actionElement.dataset.stageKey);
       return;
     }
     if (action === "confirm-stage") {

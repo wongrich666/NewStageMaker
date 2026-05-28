@@ -26,6 +26,69 @@ STAGE_PROMPT_KEYS = (
     "script_text",
 )
 
+DEFAULT_STYLE_GROUP = "default_style"
+USER_CUSTOM_GROUP = "user_custom"
+EXCELLENT_FILM_BEAT_GROUP = "excellent_film_beat"
+
+GROUP_LABELS = {
+    DEFAULT_STYLE_GROUP: "默认风格分类",
+    USER_CUSTOM_GROUP: "用户自定义标签",
+    EXCELLENT_FILM_BEAT_GROUP: "优秀电影节拍表标签",
+}
+
+EXCELLENT_FILM_BEAT_NAMES = (
+    "40岁的老处男",
+    "阿甘正传",
+    "冰血暴",
+    "颤栗汪洋",
+    "大人物波拿巴",
+    "当哈利碰见萨丽",
+    "电锯惊魂",
+    "断背山",
+    "凡夫俗子",
+    "肥佬教授",
+    "愤怒的公牛",
+    "富贵逼人来",
+    "黑骏马",
+    "黑客帝国",
+    "虎胆龙威",
+    "角斗士",
+    "惊声尖叫",
+    "惊天大阴谋",
+    "克莱默夫妇",
+    "辣妈辣妹",
+    "律政俏佳人",
+    "美丽心灵的永恒阳光",
+    "魔茧",
+    "男人百分百",
+    "上班一条虫",
+    "少棒闯天下",
+    "神秘的河",
+    "狮子王",
+    "十全十美",
+    "十一罗汉",
+    "泰坦尼克号",
+    "天地大冲撞",
+    "秃鹰七十二小时",
+    "万福玛利亚",
+    "为所应为",
+    "午夜凶铃",
+    "训练日",
+    "窈窕淑男",
+    "野战医院",
+    "一路顺风",
+    "异形",
+    "银翼杀手",
+    "与敌共眠",
+    "拯救大兵瑞恩",
+    "蜘蛛侠2",
+    "致命的吸引力",
+    "致命武器",
+    "撞车",
+    "追凶",
+    "醉酒俏佳人",
+)
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat()
@@ -96,12 +159,13 @@ class UserKnowledgeStore:
         self.ensure_initialized()
 
     def ensure_initialized(self) -> None:
+        raw_tags = self._read_json(self.tags_path, [])
         tags = self._read_json(self.tags_path, [])
         if not isinstance(tags, list):
             tags = []
         tags = [self._normalize_tag(item) for item in tags if isinstance(item, dict)]
         by_id = {str(item.get("id") or ""): item for item in tags}
-        changed = not self.tags_path.exists()
+        changed = (not self.tags_path.exists()) or (tags != raw_tags)
         for definition in BUILTIN_TAG_DEFINITIONS:
             tag_id = f"builtin-{_slug(definition['name'])}"
             if tag_id in by_id:
@@ -118,6 +182,12 @@ class UserKnowledgeStore:
                         "name": definition["name"],
                         "category": definition["category"],
                         "builtin": True,
+                        "group": DEFAULT_STYLE_GROUP,
+                        "group_label": GROUP_LABELS[DEFAULT_STYLE_GROUP],
+                        "source": "builtin_default_style",
+                        "type": "stage_preference_template",
+                        "is_default": True,
+                        "is_user_editable": True,
                         "description": definition["description"],
                         "prompt_text": definition["prompt_text"],
                         "stage_prompts": definition["stage_prompts"],
@@ -129,6 +199,36 @@ class UserKnowledgeStore:
                 )
             )
             changed = True
+        for index, name in enumerate(EXCELLENT_FILM_BEAT_NAMES, start=1):
+            tag_id = f"excellent_film_beat_{index:03d}"
+            if tag_id in by_id:
+                changed = self._ensure_excellent_film_beat_fields(by_id[tag_id], name) or changed
+                continue
+            now = _now_iso()
+            tag = self._normalize_tag(
+                {
+                    "id": tag_id,
+                    "name": name,
+                    "category": GROUP_LABELS[EXCELLENT_FILM_BEAT_GROUP],
+                    "builtin": True,
+                    "group": EXCELLENT_FILM_BEAT_GROUP,
+                    "group_label": GROUP_LABELS[EXCELLENT_FILM_BEAT_GROUP],
+                    "source": "save_the_cat_film_beat",
+                    "type": "stage_preference_template",
+                    "is_default": True,
+                    "is_user_editable": True,
+                    "description": "优秀电影节拍表空标签。用户可手动填写 01-12 阶段提示词。",
+                    "prompt_text": "",
+                    "stage_prompts": {key: "" for key in STAGE_PROMPT_KEYS},
+                    "created_at": now,
+                    "updated_at": now,
+                    "enabled": True,
+                    "pinned": False,
+                }
+            )
+            tags.append(tag)
+            by_id[tag_id] = tag
+            changed = True
         if changed:
             self._write_json(self.tags_path, tags)
         if not self.preferences_path.exists():
@@ -138,7 +238,8 @@ class UserKnowledgeStore:
         tags = [self._normalize_tag(item) for item in self._read_tags()]
         if enabled_only:
             tags = [item for item in tags if item.get("enabled") is not False]
-        return sorted(tags, key=lambda item: (not bool(item.get("pinned")), bool(item.get("builtin")), item.get("created_at", "")))
+        group_order = {DEFAULT_STYLE_GROUP: 0, USER_CUSTOM_GROUP: 1, EXCELLENT_FILM_BEAT_GROUP: 2}
+        return sorted(tags, key=lambda item: (group_order.get(str(item.get("group") or ""), 9), not bool(item.get("pinned")), item.get("created_at", "")))
 
     def create_tag(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name") or "").strip()
@@ -151,6 +252,12 @@ class UserKnowledgeStore:
                 "name": name,
                 "category": str(payload.get("category") or "自定义").strip() or "自定义",
                 "builtin": False,
+                "group": USER_CUSTOM_GROUP,
+                "group_label": GROUP_LABELS[USER_CUSTOM_GROUP],
+                "source": "user_created",
+                "type": "stage_preference_template",
+                "is_default": False,
+                "is_user_editable": True,
                 "description": str(payload.get("description") or "").strip(),
                 "prompt_text": _coerce_prompt_text(payload.get("prompt_text")),
                 "stage_prompts": _normalize_stage_prompts(payload.get("stage_prompts")),
@@ -270,6 +377,39 @@ class UserKnowledgeStore:
         return data if isinstance(data, dict) else {}
 
     @staticmethod
+    def _ensure_excellent_film_beat_fields(tag: dict[str, Any], default_name: str) -> bool:
+        changed = False
+        defaults = {
+            "category": GROUP_LABELS[EXCELLENT_FILM_BEAT_GROUP],
+            "builtin": True,
+            "group": EXCELLENT_FILM_BEAT_GROUP,
+            "group_label": GROUP_LABELS[EXCELLENT_FILM_BEAT_GROUP],
+            "source": "save_the_cat_film_beat",
+            "type": "stage_preference_template",
+            "is_default": True,
+            "is_user_editable": True,
+            "enabled": True,
+            "pinned": False,
+        }
+        if not str(tag.get("name") or "").strip():
+            tag["name"] = default_name
+            changed = True
+        if not str(tag.get("description") or "").strip():
+            tag["description"] = "优秀电影节拍表空标签。用户可手动填写 01-12 阶段提示词。"
+            changed = True
+        for key, value in defaults.items():
+            if key not in tag or tag.get(key) in (None, ""):
+                tag[key] = value
+                changed = True
+        prompts = tag.get("stage_prompts") if isinstance(tag.get("stage_prompts"), dict) else {}
+        for stage_key in STAGE_PROMPT_KEYS:
+            if stage_key not in prompts:
+                prompts[stage_key] = ""
+                changed = True
+        tag["stage_prompts"] = prompts
+        return changed
+
+    @staticmethod
     def _read_json(path: Path, default: Any) -> Any:
         if not path.exists():
             return deepcopy(default)
@@ -287,11 +427,32 @@ class UserKnowledgeStore:
     def _normalize_tag(tag: dict[str, Any]) -> dict[str, Any]:
         now = _now_iso()
         prompt_text = _coerce_prompt_text(tag.get("prompt_text"))
+        tag_id = str(tag.get("id") or f"custom-{uuid.uuid4().hex[:12]}")
+        source = str(tag.get("source") or "").strip()
+        group = str(tag.get("group") or "").strip()
+        builtin = bool(tag.get("builtin"))
+        if not group:
+            if tag_id.startswith("excellent_film_beat_") or source == "save_the_cat_film_beat":
+                group = EXCELLENT_FILM_BEAT_GROUP
+                builtin = True
+            elif builtin:
+                group = DEFAULT_STYLE_GROUP
+            else:
+                group = USER_CUSTOM_GROUP
+        group_label = str(tag.get("group_label") or GROUP_LABELS.get(group, "")).strip()
+        if not source:
+            source = "save_the_cat_film_beat" if group == EXCELLENT_FILM_BEAT_GROUP else ("builtin_default_style" if group == DEFAULT_STYLE_GROUP else "user_created")
         return {
-            "id": str(tag.get("id") or f"custom-{uuid.uuid4().hex[:12]}"),
+            "id": tag_id,
             "name": str(tag.get("name") or "").strip(),
             "category": str(tag.get("category") or "自定义").strip() or "自定义",
-            "builtin": bool(tag.get("builtin")),
+            "builtin": builtin,
+            "group": group,
+            "group_label": group_label,
+            "source": source,
+            "type": str(tag.get("type") or "stage_preference_template").strip() or "stage_preference_template",
+            "is_default": bool(tag.get("is_default")) if "is_default" in tag else bool(builtin),
+            "is_user_editable": tag.get("is_user_editable") is not False,
             "description": str(tag.get("description") or "").strip(),
             "prompt_text": prompt_text,
             "stage_prompts": _normalize_stage_prompts(tag.get("stage_prompts")),

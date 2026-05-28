@@ -2377,6 +2377,12 @@ startRuntimeDebugPolling();
       name: String(tag.name || ""),
       category: String(tag.category || ""),
       builtin: Boolean(tag.builtin),
+      group: String(tag.group || ""),
+      group_label: String(tag.group_label || ""),
+      source: String(tag.source || ""),
+      type: String(tag.type || ""),
+      is_default: Boolean(tag.is_default),
+      is_user_editable: tag.is_user_editable !== false,
       pinned: Boolean(tag.pinned),
       description: String(tag.description || ""),
       prompt_text: String(tag.prompt_text || ""),
@@ -2428,6 +2434,23 @@ startRuntimeDebugPolling();
     return result;
   }
 
+  function knowledgeTagGroup(tag) {
+    const group = String((tag && tag.group) || "").trim();
+    if (group) return group;
+    if (String((tag && tag.id) || "").startsWith("excellent_film_beat_") || String((tag && tag.source) || "") === "save_the_cat_film_beat") return "excellent_film_beat";
+    return tag && tag.builtin ? "default_style" : "user_custom";
+  }
+
+  function groupedKnowledgeTags(tags) {
+    return [
+      { id: "default_style", label: "默认风格分类" },
+      { id: "user_custom", label: "用户自定义标签" },
+      { id: "excellent_film_beat", label: "优秀电影节拍表标签" }
+    ].map((group) => Object.assign({}, group, {
+      tags: (tags || []).filter((tag) => knowledgeTagGroup(tag) === group.id)
+    }));
+  }
+
   function attachUserKnowledgePayload(payload) {
     Object.assign(payload, userKnowledgePayload());
     console.debug(`[user-knowledge] selected tags count=${state.selectedKnowledgeTagIds.length}`);
@@ -2444,7 +2467,7 @@ startRuntimeDebugPolling();
         : (tags.length ? `已加载 ${tags.length} 个标签，可不选择。` : "暂无可用标签，可直接创作。");
     }
     if (els.knowledgeTagList) {
-      els.knowledgeTagList.innerHTML = tags.map((tag) => {
+      const renderTag = (tag) => {
         const id = String(tag.id || "");
         const checked = selected.has(id);
         const customActions = tag.builtin ? "" : `
@@ -2459,7 +2482,13 @@ startRuntimeDebugPolling();
             ${customActions}
           </label>
         `;
-      }).join("");
+      };
+      els.knowledgeTagList.innerHTML = groupedKnowledgeTags(tags).map((group) => `
+        <details class="knowledge-tag-group" open>
+          <summary>${escapeHtml(group.label)}（${group.tags.length}）</summary>
+          ${group.tags.length ? group.tags.map(renderTag).join("") : `<div class="empty-hint">暂无标签</div>`}
+        </details>
+      `).join("");
     }
     const selectedNames = selectedKnowledgeTags().map((tag) => tag.name || tag.id).filter(Boolean);
     if (els.selectedKnowledgeTags) {
