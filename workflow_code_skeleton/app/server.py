@@ -175,6 +175,189 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         }
         return _strip_raw_fastgpt_fields(outputs)
 
+    def _framework_value_present(value) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (list, tuple, set, dict)):
+            return bool(value)
+        return True
+
+    def _framework_basic_config_from_stage_payload(data: dict, existing_state: dict) -> dict:
+        basic = data.get("basic_config") if isinstance(data.get("basic_config"), dict) else {}
+        if basic:
+            return copy.deepcopy(basic)
+        existing_basic = existing_state.get("basic_config") if isinstance(existing_state.get("basic_config"), dict) else {}
+        merged = copy.deepcopy(existing_basic)
+        for key in (
+            "project_title",
+            "mode",
+            "source_text",
+            "source_title",
+            "target_format",
+            "season_count",
+            "episodes_per_season",
+            "minutes_per_episode",
+            "adaptation_direction",
+            "user_constraints",
+            "user_requirements",
+        ):
+            if key in data and _framework_value_present(data.get(key)):
+                merged[key] = copy.deepcopy(data.get(key))
+        return merged
+
+    def _framework_stage_output_fields(stage_no: str) -> tuple[str, ...]:
+        return {
+            "01": ("source_brief",),
+            "02": ("worldview_plan",),
+            "03": ("character_plan",),
+            "04": ("beat_checkpoint_timeline", "checkpoint_explanation"),
+            "05": ("character_storylines", "storyline_decisions"),
+            "06": ("adaptation_guide",),
+            "07": ("framework_plan_package", "validation_report"),
+        }.get(str(stage_no or "").zfill(2), ())
+
+    def _merge_framework_stage_state(existing_state: dict, stage_no: str, stage_output: dict) -> dict:
+        stage_key = _framework_planner_stage_key(stage_no)
+        stage_state = copy.deepcopy(existing_state.get("stage_state") if isinstance(existing_state.get("stage_state"), dict) else {})
+        if not stage_key:
+            return stage_state
+        has_output = any(_framework_value_present(stage_output.get(field)) for field in _framework_stage_output_fields(stage_no))
+        if not has_output:
+            return stage_state
+        current = stage_state.get(stage_key) if isinstance(stage_state.get(stage_key), dict) else {}
+        stage_state[stage_key] = {
+            **current,
+            "locked": False,
+            "confirmed": False,
+            "status": "generated",
+            "stageCommitted": True,
+            "stageDraftDirty": False,
+        }
+        sequence = ("basic", "worldview", "character", "beat", "storylines", "guide", "package")
+        if stage_key in sequence:
+            index = sequence.index(stage_key)
+            if index + 1 < len(sequence):
+                next_key = sequence[index + 1]
+                next_stage = stage_state.get(next_key) if isinstance(stage_state.get(next_key), dict) else {}
+                if not next_stage.get("confirmed"):
+                    stage_state[next_key] = {**next_stage, "locked": False, "status": "idle"}
+        return stage_state
+
+    def _autosave_framework_planner_stage(
+        *,
+        user_id: int,
+        stage: str,
+        request_payload: dict,
+        stage_payload: dict,
+    ) -> dict | None:
+        if not isinstance(request_payload, dict) or not isinstance(stage_payload, dict):
+            return None
+        stage_no = str(stage or "").zfill(2)
+        stage_output = stage_payload.get("data") if isinstance(stage_payload.get("data"), dict) else {}
+        if not stage_output:
+            return None
+
+        raw_project_id = (
+            request_payload.get("project_id")
+            or request_payload.get("asset_id")
+            or request_payload.get("source_framework_project_id")
+        )
+        existing_state: dict = {}
+        if raw_project_id:
+            try:
+                snapshot = task_manager.get_project_snapshot(int(raw_project_id), user_id=user_id, public_view=False)
+            except Exception:
+                snapshot = None
+            if snapshot and str(snapshot.get("asset_kind") or "").strip() == "framework_planner":
+                existing_state = _framework_state_from_project(snapshot)
+
+        save_payload: dict = copy.deepcopy(existing_state)
+        if raw_project_id:
+            save_payload["project_id"] = raw_project_id
+        save_payload["basic_config"] = _framework_basic_config_from_stage_payload(request_payload, existing_state)
+        save_payload["project_title"] = (
+            request_payload.get("project_title")
+            or save_payload.get("project_title")
+            or save_payload.get("title")
+            or save_payload.get("basic_config", {}).get("project_title")
+            or save_payload.get("basic_config", {}).get("source_title")
+            or "未命名框架策划"
+        )
+        save_payload["title"] = save_payload["project_title"]
+
+        for field in (
+            "source_brief",
+            "worldview_plan",
+            "character_plan",
+            "beat_checkpoint_timeline",
+            "checkpoint_explanation",
+            "character_storylines",
+            "storyline_decisions",
+            "adaptation_guide",
+            "framework_plan_package",
+            "validation_report",
+        ):
+            if field in request_payload and _framework_value_present(request_payload.get(field)):
+                save_payload[field] = copy.deepcopy(request_payload.get(field))
+            elif field not in save_payload:
+                save_payload[field] = [] if field in {"beat_checkpoint_timeline", "character_storylines", "storyline_decisions"} else {}
+            if field in stage_output and _framework_value_present(stage_output.get(field)):
+                save_payload[field] = copy.deepcopy(stage_output.get(field))
+
+        display_texts = save_payload.get("display_texts") if isinstance(save_payload.get("display_texts"), dict) else {}
+        if isinstance(request_payload.get("display_texts"), dict):
+            display_texts.update(copy.deepcopy(request_payload["display_texts"]))
+        if _framework_value_present(stage_payload.get("display_text")):
+            display_texts[stage_no] = stage_payload.get("display_text")
+        save_payload["display_texts"] = display_texts
+
+        for field in (
+            "prompt_preferences",
+            "preference_snapshot",
+            "selected_preference_tag_ids",
+            "selected_preference_tags",
+            "user_edit_history",
+        ):
+            if field in request_payload and _framework_value_present(request_payload.get(field)):
+                save_payload[field] = copy.deepcopy(request_payload.get(field))
+            elif field not in save_payload:
+                save_payload[field] = [] if field in {"selected_preference_tag_ids", "selected_preference_tags", "user_edit_history"} else {}
+
+        save_payload["stage_state"] = _merge_framework_stage_state(save_payload, stage_no, stage_output)
+        current_view = {
+            "01": "basic",
+            "02": "worldview",
+            "03": "character",
+            "04": "beat_timeline",
+            "05": "storylines",
+            "06": "guide",
+            "07": "package",
+        }.get(stage_no)
+        save_payload["current_view"] = current_view or save_payload.get("current_view") or "basic"
+        asset_state = save_payload.get("asset_state") if isinstance(save_payload.get("asset_state"), dict) else {}
+        save_payload["asset_state"] = {
+            **asset_state,
+            "asset_kind": "framework_planner",
+            "asset_type": "framework",
+            "project_id": raw_project_id or asset_state.get("project_id"),
+            "asset_id": raw_project_id or asset_state.get("asset_id"),
+            "status": "completed" if stage_no == "07" and _framework_value_present(save_payload.get("framework_plan_package")) else "in_progress",
+            "current_stage": _framework_planner_stage_key(stage_no) or asset_state.get("current_stage") or "framework_planner",
+            "last_action": f"autosave:stage{stage_no}",
+        }
+
+        asset = task_manager.save_framework_planner_asset(user_id=user_id, payload=save_payload)
+        logger.info(
+            "framework planner stage autosaved: user_id=%s project_id=%s stage=%s output_fields=%s",
+            user_id,
+            asset.get("project_id") if isinstance(asset, dict) else raw_project_id,
+            stage_no,
+            sorted(stage_output.keys()),
+        )
+        return asset
+
     def _framework_asset_payload(project: dict, *, include_detail: bool) -> dict:
         def _safe_positive_int(value, default=0):
             try:
@@ -1412,6 +1595,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             len(source_text),
         )
         try:
+            user_id = _require_user_id()
             payload = run_framework_planner_stage(stage, data)
             payload["history"] = save_framework_stage_history(
                 project_id=project_id,
@@ -1420,6 +1604,25 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 output=payload.get("data") or {},
                 status="success",
             )
+            try:
+                autosaved_asset = _autosave_framework_planner_stage(
+                    user_id=user_id,
+                    stage=stage,
+                    request_payload=data if isinstance(data, dict) else {},
+                    stage_payload=payload,
+                )
+                if autosaved_asset:
+                    payload["autosaved"] = True
+                    payload["autosaved_asset"] = _strip_raw_fastgpt_fields(autosaved_asset)
+                    payload["project_id"] = autosaved_asset.get("project_id")
+            except Exception as autosave_exc:
+                logger.exception(
+                    "framework planner stage autosave failed: stage=%s project_id=%s",
+                    str(stage).zfill(2),
+                    project_id,
+                )
+                payload["autosaved"] = False
+                payload["autosave_error"] = str(autosave_exc)
         except FrameworkPlannerStageError as exc:
             write_framework_stage_exception_log(
                 project_id=project_id,

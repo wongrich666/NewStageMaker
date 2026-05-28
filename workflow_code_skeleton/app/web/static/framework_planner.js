@@ -1253,7 +1253,7 @@
   }
 
   function stageBlockedByUpstream(stage) {
-    return Boolean(stage && stage.locked && !stage.confirmed);
+    return false;
   }
 
   function prerequisiteStageKey(stageKey) {
@@ -1271,12 +1271,8 @@
   }
 
   function viewUnlockedFor(targetState, viewId) {
-    const stageState = targetState && targetState.stage_state ? targetState.stage_state : {};
     const stageKey = stageKeyForView(viewId);
-    if (stageKey === "basic") return true;
-    if (!prerequisiteConfirmedFor(targetState, stageKey)) return false;
-    if ((stageState[stageKey] || {}).confirmed || (stageState[stageKey] || {}).stageCommitted) return true;
-    return prerequisiteConfirmedFor(targetState, stageKey);
+    return Boolean(stageKey);
   }
 
   function viewUnlocked(viewId) {
@@ -1285,7 +1281,7 @@
 
   function setCurrentView(viewId) {
     if (!viewUnlocked(viewId)) {
-      showToast("请先生成并应用上游阶段");
+      showToast("阶段不存在");
       return;
     }
     state.current_view = viewId;
@@ -1370,7 +1366,7 @@
     if (isStageLoading(stageKey) || stage.status === "running") return `<span class="fp-tag blue fp-processing-dot">处理中</span>`;
     if (stage.stageDraftDirty) return `<span class="fp-tag warn">有未应用修改</span>`;
     if (stage.confirmed) return `<span class="fp-tag ok">已确认并锁定</span>`;
-    if (stage.locked) return `<span class="fp-tag lock">待上游确认</span>`;
+    if (stage.locked) return `<span class="fp-tag lock">待上游结果</span>`;
     if (stage.status === "generated") return `<span class="fp-tag blue">已生成，待确认</span>`;
     if (stage.status === "updated") return `<span class="fp-tag warn">已更新，待确认</span>`;
     if (stage.status === "error") return `<span class="fp-tag red">执行异常</span>`;
@@ -1429,6 +1425,35 @@
 
   function hasStageData(stageKey) {
     return hasStageDataFor(state, stageKey);
+  }
+
+  function stageDependencyIssues(stageKey) {
+    const issues = [];
+    const requireValue = (condition, label) => {
+      if (!condition) issues.push(label);
+    };
+    const hasBasic = !isEmptyValue(state.basic_config)
+      && (String(state.basic_config.project_title || state.basic_config.source_title || "").trim()
+        || String(state.basic_config.source_text || "").trim());
+    const hasBeats = Array.isArray(state.beat_checkpoint_timeline) && state.beat_checkpoint_timeline.length === 15;
+    if (stageKey === "basic") return issues;
+    requireValue(hasBasic, "01 基础配置");
+    requireValue(!isEmptyValue(state.source_brief), "01 原文信息提取结果");
+    if (stageKey === "worldview") return issues;
+    requireValue(!isEmptyValue(state.worldview_plan), "02 世界观方案");
+    if (stageKey === "character") return issues;
+    requireValue(!isEmptyValue(state.character_plan), "03 人设方案");
+    if (stageKey === "beat") return issues;
+    requireValue(hasBeats, "04 三幕十五节拍时间轴");
+    if (stageKey === "storylines") return issues;
+    requireValue(Array.isArray(state.character_storylines) && state.character_storylines.length > 0, "05 人物故事线");
+    if (stageKey === "guide") return issues;
+    requireValue(!isEmptyValue(state.adaptation_guide), "06 整体改编指引");
+    if (stageKey === "package") {
+      requireValue(!isEmptyValue(state.checkpoint_explanation), "04 卡点说明");
+      requireValue(Array.isArray(state.storyline_decisions) && state.storyline_decisions.length > 0, "05 故事线处理决策");
+    }
+    return issues;
   }
 
   function hasStageOutput(stageKey) {
@@ -1909,7 +1934,8 @@
     const stage = stageState(stageKey);
     if (isStageLoading(stageKey) || runningStageKey()) return "当前已有阶段正在运行。";
     if (stageDraftDirty(stageKey)) return "当前阶段有未应用修改，请先应用修改。";
-    if (stage.locked || stageBlockedByUpstream(stage)) return "请先应用并确认上游阶段结果。";
+    const dependencyIssues = stageDependencyIssues(stageKey);
+    if (dependencyIssues.length) return `缺少上游依赖：${dependencyIssues.join("、")}。请先回到对应阶段生成并应用结果。`;
     const upstream = upstreamDirtyStage(stageKey);
     if (upstream === "guide") return "06 改编指引有未应用修改，请先点击‘应用修改’。";
     if (upstream) return `${realStageDisplayTitle(upstream)}有未应用修改，请先点击“应用修改”。`;
@@ -3298,9 +3324,8 @@
   }
 
   function renderPackageView() {
-    const locked = state.stage_state.package.locked;
     const hasOutput = !isEmptyValue(state.framework_plan_package);
-    const completed = hasOutput && !locked;
+    const completed = hasOutput;
     const blockReason = stageRunBlockReason("package");
     return `
       <section class="fp-card fp-section">
@@ -3308,11 +3333,11 @@
           <div>
             <h2 class="fp-card-title">最终策划包输出</h2>
           </div>
-          ${locked ? `<span class="fp-tag lock">待上游确认</span>` : hasOutput ? `<span class="fp-tag ok">07 输出已生成</span>` : `<span class="fp-tag blue">等待生成</span>`}
+          ${stageStatusTag("package")}
         </div>
         ${isStageLoading("package") ? renderProcessingBanner("正在生成最终策划包，请稍候...") : ""}
         ${completed ? `<div class="fp-complete-banner">框架已完成，可以进入剧本正文阶段。</div>` : ""}
-        ${locked && !hasOutput ? `<div class="fp-empty">请先确认 06 阶段。</div>` : `
+        ${!hasOutput ? `<div class="fp-empty">尚未生成 07 最终策划包。若缺少上游依赖，生成按钮会显示具体缺口。</div>` : `
           ${renderPackageBlocks()}
         `}
         ${renderStagePreRunPanel("package")}
@@ -4829,6 +4854,18 @@
         history: response && response.history ? response.history : {},
       });
       applyStageResponse(stageNo, response);
+      const autosavedAsset = response.autosaved_asset || response.asset || response.project || {};
+      const autosavedProjectId = response.project_id || autosavedAsset.project_id || autosavedAsset.asset_id || autosavedAsset.id || "";
+      if (autosavedProjectId !== undefined && autosavedProjectId !== null && String(autosavedProjectId).trim() !== "") {
+        state.project_id = autosavedProjectId;
+        state.asset_state = Object.assign({}, state.asset_state || {}, autosavedAsset.asset_state || {}, {
+          asset_kind: "framework_planner",
+          asset_id: autosavedProjectId,
+          project_id: autosavedProjectId,
+          status: (autosavedAsset.asset_state || {}).status || autosavedAsset.status || (state.asset_state || {}).status || "in_progress",
+          updated_at: autosavedAsset.updated_at || new Date().toISOString(),
+        });
+      }
       if (response.history) {
         ui.stageHistory[stageKey] = [response.history].concat(ui.stageHistory[stageKey] || []).slice(0, 50);
       } else {
@@ -4844,7 +4881,11 @@
       if (next) unlockStage(next);
       syncFrameworkAssetState(state, `generate:${stageKey}`);
       saveState();
-      saveFrameworkAsset({ silent: true, skipDirtyCheck: true }).catch(() => {});
+      try {
+        await saveFrameworkAsset({ silent: true, skipDirtyCheck: true });
+      } catch (saveError) {
+        showToast(`阶段已生成，但前端保存状态同步失败：${(saveError && saveError.message) || "未知错误"}`);
+      }
       recordHistory(options && options.revise ? "revise_stage" : "generate_stage", { stageKey, stageNo });
       return response;
     } catch (error) {

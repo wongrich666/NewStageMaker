@@ -272,6 +272,51 @@ class ServerFrameworkPlannerApiTests(unittest.TestCase):
         self.assertTrue(framework_state["stage_state"]["package"]["confirmed"])
         self.assertEqual(framework_state["asset_state"]["project_id"], project_id)
 
+    def test_stage_success_autosaves_framework_asset_outputs(self) -> None:
+        create_response = self.client.post(
+            "/api/framework-planner/assets",
+            headers=self.headers,
+            json={
+                "title": "夜行审判",
+                "season_count": 1,
+                "episodes_per_season": 60,
+                "target_format": "短剧",
+                "style": "强反转",
+                "description": "一个律师重返故乡调查旧案。",
+            },
+        )
+        self.assertEqual(create_response.status_code, 200)
+        project_id = create_response.get_json()["asset"]["project_id"]
+
+        payload = _planner_payload()
+        payload.update(
+            {
+                "project_id": project_id,
+                "project_title": "夜行审判",
+                "beat_checkpoint_timeline": [{"beat_no": index + 1, "beat_name": f"节拍{index + 1}"} for index in range(15)],
+                "character_storylines": [{"id": "main", "title": "主角成长线", "decision": "keep"}],
+                "storyline_decisions": [{"storyline_id": "main", "decision": "keep"}],
+            }
+        )
+
+        with patch.dict(os.environ, {"FRAMEWORK_PLANNER_USE_MOCK": "true"}, clear=False):
+            response = self.client.post("/api/framework-planner/stage/06", headers=self.headers, json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["ok"])
+        self.assertTrue(data["autosaved"])
+        self.assertEqual(data["project_id"], project_id)
+
+        restored_response = self.client.get(f"/api/projects/{project_id}", headers=self.headers)
+        self.assertEqual(restored_response.status_code, 200)
+        restored = restored_response.get_json()["project"]
+        framework_state = restored["framework_planner_state"]
+        self.assertEqual(framework_state["project_id"], project_id)
+        self.assertIn("core_setting_adjustments", framework_state["adaptation_guide"])
+        self.assertTrue(framework_state["stage_state"]["guide"]["stageCommitted"])
+        self.assertFalse(framework_state["stage_state"]["package"]["locked"])
+
     def test_generate_script_receives_source_framework_project_id(self) -> None:
         fake_snapshot = {
             "project_id": 456,

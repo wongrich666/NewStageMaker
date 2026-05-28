@@ -36,6 +36,12 @@ class ServerToolsApiTests(unittest.TestCase):
         hot_review = next(item for item in tools if item["tool_id"] == "hot_review")
         self.assertEqual(hot_review["workflow_json_file"], "爆款文审核.json")
         self.assertEqual(hot_review["fields"][0]["name"], "text")
+        reskin = next(item for item in tools if item["tool_id"] == "reskin")
+        self.assertEqual(reskin["workflow_json_file"], "换皮.json")
+        self.assertEqual(reskin["fields"][0]["name"], "title")
+        self.assertEqual(reskin["fields"][1]["name"], "source_outline")
+        self.assertEqual(reskin["fields"][3]["name"], "source_characters")
+        self.assertFalse(reskin["fields"][4]["required"])
 
     def test_run_tool_api_returns_user_visible_result_payload(self) -> None:
         fake_result = {

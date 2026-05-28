@@ -70,6 +70,7 @@ class SimpleToolDefinition:
     force_field_overrides: bool = False
     prefer_structured_output: bool = False
     prefer_named_text_over_choices: bool = False
+    output_field_overrides: tuple[str, ...] = ()
     filename_prefix: str | None = None
     run_path: str | None = None
     max_attempts: int = 1
@@ -96,6 +97,7 @@ class ResolvedSimpleTool:
     url_envs: tuple[str, ...]
     prefer_structured_output: bool
     prefer_named_text_over_choices: bool
+    output_field_overrides: tuple[str, ...]
     filename_prefix: str | None
     run_path: str
 
@@ -157,8 +159,121 @@ TOOL_DEFINITIONS: dict[str, SimpleToolDefinition] = {
         key="reskin",
         label="换皮",
         env_prefix="FASTGPT_RESKIN",
-        help_text="保留故事骨架，按目标风格完整换皮。",
+        help_text="保留故事骨架，按目标风格完整换皮，并返回新故事梗概、人设、核心场景和最终剧本。",
         json_name_patterns=("换皮",),
+        field_overrides=(
+            SimpleToolField(
+                name="title",
+                label="剧本标题",
+                input_type="input",
+                placeholder="输入换皮后的剧本标题。",
+                required=True,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="source_outline",
+                label="源剧本梗概",
+                input_type="textarea",
+                placeholder="粘贴源剧本梗概。",
+                required=True,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="core_scenes",
+                label="源剧本核心场景",
+                input_type="textarea",
+                placeholder="可选，粘贴源剧本核心场景。",
+                required=False,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="source_characters",
+                label="源剧本人物小传",
+                input_type="textarea",
+                placeholder="粘贴源剧本人物小传。",
+                required=True,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="source_script",
+                label="源剧本正文",
+                input_type="textarea",
+                placeholder="可选，粘贴源剧本正文。",
+                required=False,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="target_style",
+                label="目标风格",
+                input_type="textarea",
+                placeholder="输入目标题材、风格、爽点方向和改写要求。",
+                required=True,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="total_episodes",
+                label="总集数",
+                input_type="number",
+                placeholder="例如：60。",
+                required=True,
+                source="tool_definition",
+                default_value=60,
+            ),
+            SimpleToolField(
+                name="episode_word_count",
+                label="每集字数",
+                input_type="number",
+                placeholder="例如：600。",
+                required=True,
+                source="tool_definition",
+                default_value=600,
+            ),
+        ),
+        field_aliases=(
+            ("title", "ju_ben_biao_ti"),
+            ("source_outline", "yuan_juben_genggai"),
+            ("core_scenes", "hexin_changjing"),
+            ("source_characters", "renwu_xiaozhuan"),
+            ("source_script", "juben_zhengwen"),
+            ("target_style", "mubiao_fengge"),
+            ("total_episodes", "zong_jishu"),
+            ("episode_word_count", "meiji_zishu"),
+        ),
+        payload_aliases=(
+            ("title", "ju_ben_biao_ti"),
+            ("title", "script_title"),
+            ("source_outline", "yuan_juben_genggai"),
+            ("source_outline", "outline"),
+            ("source_outline", "story_outline"),
+            ("core_scenes", "hexin_changjing"),
+            ("source_characters", "renwu_xiaozhuan"),
+            ("source_characters", "characters"),
+            ("source_script", "juben_zhengwen"),
+            ("source_script", "script"),
+            ("target_style", "mubiao_fengge"),
+            ("target_style", "style"),
+            ("total_episodes", "zong_jishu"),
+            ("episode_word_count", "meiji_zishu"),
+        ),
+        force_field_overrides=True,
+        prefer_structured_output=True,
+        prefer_named_text_over_choices=True,
+        output_field_overrides=(
+            "final_output_text",
+            "tc3kZbQz",
+            "kuLf5sSZ",
+            "m9TAB4GF",
+            "ytCxjd4U",
+            "script_batch_current",
+        ),
+        filename_prefix="换皮剧本",
+        max_attempts=3,
+        retry_instruction="请直接输出完整换皮结果，优先返回最终剧本，不要返回空内容。",
+        empty_output_message=(
+            "换皮工具没有返回可展示结果。可能原因：FASTGPT_RESKIN_API_KEY 未被当前进程读取、"
+            "输入未映射到换皮 workflow 的变量、AI 节点未产生最终输出、或 FastGPT 返回空输出。"
+            "请查看后端 debug 文件。"
+        ),
     ),
     "punchup": SimpleToolDefinition(
         key="punchup",
@@ -452,8 +567,13 @@ def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, An
         status_code = int(response.status_code or 0)
         response_preview = _truncate_text(response.text, limit=1200)
         if status_code >= 400:
-            failure_reason = f"http_{status_code}"
-            final_error_message = f"{definition.label} 请求失败（HTTP {status_code}）。"
+            auth_error_text = _find_auth_error_text(response.text, status_code=status_code)
+            if auth_error_text:
+                failure_reason = "auth_error"
+                final_error_message = _unauthorized_api_key_message(resolved, url_info)
+            else:
+                failure_reason = f"http_{status_code}"
+                final_error_message = f"{definition.label} 请求失败（HTTP {status_code}）。"
             final_failure_reason = failure_reason
             final_status_code = status_code if status_code in RETRYABLE_HTTP_STATUSES else 400
             attempt_debug = _build_attempt_debug(
@@ -525,6 +645,7 @@ def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, An
         candidate_paths = _collect_candidate_paths(data, resolved)
         updated_variables = _collect_updated_variable_values(data, resolved)
         extracted = _extract_tool_output(data, resolved)
+        auth_error_text = _find_auth_error_text(data, status_code=status_code)
         system_error_text = _find_system_error_text(data)
         transient_error_text = _find_transient_error_text(data)
 
@@ -567,7 +688,13 @@ def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, An
                 "schema": _serialize_tool(resolved),
             }
 
-        if system_error_text:
+        if auth_error_text:
+            failure_reason = "auth_error"
+            final_error_message = _unauthorized_api_key_message(resolved, url_info)
+            final_failure_reason = failure_reason
+            final_status_code = 400
+            response_preview = _truncate_text(auth_error_text, limit=1200)
+        elif system_error_text:
             failure_reason = "system_error_text"
             final_error_message = f"{definition.label} 返回了临时错误，请稍后重试。"
             final_failure_reason = failure_reason
@@ -640,10 +767,10 @@ def _prepare_tool_payload(
         raw_value = _payload_value_for_field(payload, field.name, alias_map.get(field.name, ()))
         if field.input_type == "number":
             if _tool_value_is_blank(raw_value):
-                if field.required:
-                    missing_fields.append(field.name)
-                elif _has_meaningful_tool_value(field.default_value):
+                if _has_meaningful_tool_value(field.default_value):
                     prepared[field.name] = _coerce_positive_int(field.default_value)
+                elif field.required:
+                    missing_fields.append(field.name)
                 continue
             number = _coerce_positive_int(raw_value)
             if number is None:
@@ -753,6 +880,8 @@ def _resolved_tool(tool_key: str) -> ResolvedSimpleTool:
     input_variables, internal_variables = _workflow_variables(workflow)
     fields = _infer_fields_from_workflow_json(workflow)
     updated_variables = _infer_updated_variables(workflow)
+    if definition.output_field_overrides:
+        updated_variables = tuple(dict.fromkeys((*definition.output_field_overrides, *updated_variables)))
     answer_node_names = _infer_answer_node_names(workflow)
     visible_output_fields = _visible_output_fields(
         answer_node_names=answer_node_names,
@@ -815,6 +944,7 @@ def _resolved_tool(tool_key: str) -> ResolvedSimpleTool:
         url_envs=(f"{definition.env_prefix}_CHAT_COMPLETIONS_URL", "FASTGPT_CHAT_COMPLETIONS_URL"),
         prefer_structured_output=definition.prefer_structured_output,
         prefer_named_text_over_choices=definition.prefer_named_text_over_choices,
+        output_field_overrides=definition.output_field_overrides,
         filename_prefix=definition.filename_prefix,
         run_path=definition.run_path or f"/api/tools/{definition.key}/run",
     )
@@ -1312,8 +1442,11 @@ def _derive_tool_filename_suffix(
     payload: dict[str, Any],
 ) -> str:
     if resolved.definition.key != "new_framework":
-        project_title = str(payload.get("project_title") or "").strip()
-        return project_title
+        for key in ("project_title", "title", "script_title", "ju_ben_biao_ti"):
+            project_title = str(payload.get(key) or "").strip()
+            if project_title:
+                return project_title
+        return ""
     project_title = str(payload.get("project_title") or "").strip()
     if project_title:
         return project_title
@@ -1473,6 +1606,16 @@ def _find_transient_error_text(data: Any) -> str:
     return ""
 
 
+def _find_auth_error_text(data: Any, *, status_code: int | None = None) -> str:
+    text = _json_text(data)
+    lowered = text.lower()
+    if "unauthapikey" in lowered or "unauthorized" in lowered:
+        return text
+    if status_code in {401, 403}:
+        return text or f"HTTP {status_code}"
+    return ""
+
+
 def _find_named_values(data: Any, target_keys: set[str], *, _depth: int = 0) -> list[Any]:
     if _depth > 5:
         return []
@@ -1602,6 +1745,18 @@ def _missing_api_key_message(resolved: ResolvedSimpleTool) -> str:
     return (
         f"{resolved.definition.label} 还未配置 API Key，请先配置 {resolved.api_key_envs[0]}。"
         "如需兜底，也可以配置 FASTGPT_API_KEY。"
+    )
+
+
+def _unauthorized_api_key_message(
+    resolved: ResolvedSimpleTool,
+    url_info: dict[str, Any],
+) -> str:
+    url_env = str(url_info.get("env") or resolved.url_envs[0])
+    return (
+        f"{resolved.definition.label} 请求已发出，但 FastGPT 返回 unAuthApiKey。"
+        f"这表示当前 {resolved.api_key_envs[0]} 对 {url_env} 指向的 FastGPT 实例或应用没有授权；"
+        f"请换成该换皮应用对应的 API Key，或为本工具单独配置 {resolved.url_envs[0]} 指向匹配的服务地址。"
     )
 
 
