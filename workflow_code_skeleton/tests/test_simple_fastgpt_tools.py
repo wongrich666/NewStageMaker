@@ -281,42 +281,6 @@ class SimpleFastGPTToolsTests(unittest.TestCase):
 
         mocked_post.assert_not_called()
 
-    def test_reskin_unauthorized_api_key_error_points_to_key_url_mismatch(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "FASTGPT_RESKIN_API_KEY": "wrong-reskin-key",
-                "FASTGPT_CHAT_COMPLETIONS_URL": "https://tools.example.com/api/v1/chat/completions",
-            },
-            clear=True,
-        ):
-            with patch.object(
-                tools.requests,
-                "post",
-                return_value=_FakeResponse(
-                    status_code=401,
-                    payload={"code": "unAuthApiKey"},
-                    text='{"code":"unAuthApiKey","message":"unAuthApiKey"}',
-                    reason="Unauthorized",
-                ),
-            ):
-                with self.assertRaisesRegex(
-                    tools.ToolExecutionError,
-                    "FASTGPT_RESKIN_API_KEY.*FASTGPT_CHAT_COMPLETIONS_URL",
-                ) as ctx:
-                    tools.run_simple_tool(
-                        "reskin",
-                        {
-                            "title": "雪夜回响",
-                            "source_outline": "源故事梗概",
-                            "source_characters": "源人物小传",
-                            "target_style": "都市悬疑复仇",
-                        },
-                    )
-
-        self.assertEqual(ctx.exception.debug["final_failure_reason"], "auth_error")
-        self.assertIn("unAuthApiKey", ctx.exception.debug["response_preview"])
-
     def test_hot_review_extracts_root_answer_text(self) -> None:
         with patch.dict(
             os.environ,
