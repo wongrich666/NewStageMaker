@@ -376,6 +376,7 @@
     stageHistory: {},
     stageHistoryLoading: {},
     editSnapshots: {},
+    stagePreferenceEditing: {},
     assetsOpen: false,
     showNewScriptModal: false,
     assets: [],
@@ -2853,6 +2854,7 @@
     const upstreamDirty = upstreamDirtyStage(stageKey);
     const blockReason = stageRunBlockReason(stageKey);
     const preferenceText = String((((state.prompt_preferences || {}).stage_prompts || {})[stageKey]) || "").trim();
+    const editingPreference = Boolean((ui.stagePreferenceEditing || {})[stageKey]);
     const preferenceSummary = info.withPreference.length
       ? `当前智慧库偏好：${stagePromptLabel(stageKey)}偏好，来自 ${info.withPreference.length} 个标签`
       : "当前智慧库偏好：未设置该阶段偏好，将使用默认策略。";
@@ -2863,17 +2865,17 @@
       <div class="fp-preflight-panel">
         <div class="fp-preflight-main">
           <div>
-            <strong>即将生成：${escapeHtml(stageNo)} ${escapeHtml(title)}</strong>
+            <strong>即将生成：${escapeHtml(title)}</strong>
             <p>${escapeHtml(upstreamText)}</p>
             <p>${escapeHtml(preferenceSummary)}</p>
             ${preferenceText ? `<p class="fp-preflight-preview">${escapeHtml(truncateText(preferenceText, 180))}</p>` : ""}
             ${blockReason ? `<div class="fp-inline-warning compact">${escapeHtml(blockReason)}</div>` : ""}
           </div>
           <div class="fp-preflight-actions">
-            <button class="fp-btn small" data-action="edit-current-stage-preference" data-stage-key="${escapeHtml(stageKey)}" title="编辑当前标签下该阶段偏好">编辑阶段偏好 ✍️</button>
-            <button class="fp-btn primary" data-action="run-stage-generate" data-stage-key="${escapeHtml(stageKey)}" ${blockReason ? "disabled" : ""}>生成 ${escapeHtml(stageNo)} ${escapeHtml(title)}</button>
+            <button class="fp-btn small" data-action="edit-current-stage-preference" data-stage-key="${escapeHtml(stageKey)}" title="编辑当前阶段偏好">${editingPreference ? "收起阶段偏好" : "编辑阶段偏好"}</button>
           </div>
         </div>
+        ${editingPreference ? renderStagePreferenceField(stageKey, isStageLoading(stageKey)) : ""}
       </div>
     `;
   }
@@ -2971,10 +2973,11 @@
     const dirty = stageDraftDirty(stageKey);
     const blockReason = stageRunBlockReason(stageKey);
     const canNext = Boolean(nextView && hasOutput && !dirty && viewUnlocked(nextView));
+    const title = realStageDisplayTitle(stageKey);
     return `
       <div class="fp-actions fp-stage-bottom-actions">
         <button class="fp-btn" data-action="go-view" data-view="${escapeHtml(previousView)}" ${previousView ? "" : "disabled"}>上一步</button>
-        <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="${escapeHtml(stageKey)}" ${running || blockReason ? "disabled" : ""}>${hasOutput ? `重新生成 ${escapeHtml(stageNo)}` : "生成本阶段"}</button>
+        <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="${escapeHtml(stageKey)}" ${running || blockReason ? "disabled" : ""}>${hasOutput ? `重新生成 ${escapeHtml(title)}` : "生成本阶段"}</button>
         ${isStageEditable(stageKey) ? `<button class="fp-btn ${dirty ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="${escapeHtml(stageKey)}" ${dirty ? "" : "disabled"}>应用修改</button>` : ""}
         <button class="fp-btn ${canNext ? "primary" : ""}" data-action="go-next-stage" data-view="${escapeHtml(nextView)}" ${canNext ? "" : "disabled"}>下一步</button>
         ${stageKey === "package" ? `${renderSaveFrameworkButton("")}${renderFrameworkScriptButton("")}` : ""}
@@ -6218,6 +6221,8 @@
       markDirty();
       savePromptPreferences(`stage_preference:${stageKey}`);
       saveState();
+      const applyButton = target.closest(".fp-preference-panel")?.querySelector("[data-action='apply-stage-preference']");
+      if (applyButton) applyButton.disabled = !String(target.value || "").trim();
       return;
     }
     if (target.matches("[data-new-script-field]")) {
@@ -6483,6 +6488,14 @@
       openKnowledgeForm(actionElement.dataset.tagId);
       return;
     }
+    if (action === "edit-current-stage-preference") {
+      const stageKey = actionElement.dataset.stageKey || stageKeyForView(state.current_view || "basic");
+      ui.stagePreferenceEditing = Object.assign({}, ui.stagePreferenceEditing || {}, {
+        [stageKey]: !((ui.stagePreferenceEditing || {})[stageKey]),
+      });
+      render();
+      return;
+    }
     if (action === "cancel-knowledge-edit") {
       ui.knowledge.formOpen = false;
       ui.knowledge.editingId = "";
@@ -6608,10 +6621,6 @@
     }
     if (action === "apply-stage-preference") {
       applyStagePreference(actionElement.dataset.stageKey);
-      return;
-    }
-    if (action === "edit-current-stage-preference") {
-      openCurrentStagePreferenceEditor(actionElement.dataset.stageKey);
       return;
     }
     if (action === "apply-stage-changes") {
