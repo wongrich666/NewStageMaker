@@ -47,6 +47,23 @@ class SimpleFastGPTToolsTests(unittest.TestCase):
         self.assertEqual(tool_map["hot_review"]["source"], "tool_definition")
         self.assertEqual(tool_map["hot_review"]["fields"][0]["name"], "review_text")
         self.assertEqual(tool_map["hot_review"]["output_variables"], [])
+        self.assertEqual(tool_map["reskin"]["workflow_json_file"], "换皮.json")
+        self.assertEqual(tool_map["reskin"]["source"], "tool_definition")
+        self.assertEqual(
+            [field["name"] for field in tool_map["reskin"]["fields"]],
+            [
+                "title",
+                "source_outline",
+                "core_scenes",
+                "source_characters",
+                "source_script",
+                "target_style",
+                "total_episodes",
+                "episode_word_count",
+            ],
+        )
+        self.assertEqual(tool_map["reskin"]["output_variables"][0], "final_output_text")
+        self.assertIn("tc3kZbQz", tool_map["reskin"]["output_variables"])
         self.assertEqual(tool_map["new_framework"]["workflow_json_file"], "15内容新框架编写.json")
         self.assertEqual(tool_map["new_framework"]["run_url"], "/api/tools/new-framework")
         self.assertEqual(tool_map["new_framework"]["title"], "15节拍剧本框架")
@@ -155,6 +172,112 @@ class SimpleFastGPTToolsTests(unittest.TestCase):
             with patch.object(tools.requests, "post") as mocked_post:
                 with self.assertRaisesRegex(tools.ToolExecutionError, "缺少必填项"):
                     tools.run_simple_tool("hot_review", {"text": "   "})
+
+        mocked_post.assert_not_called()
+
+    def test_reskin_maps_payload_to_workflow_variables_and_prefers_final_output(self) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            captured["url"] = url
+            captured["headers"] = headers or {}
+            captured["body"] = json or {}
+            captured["timeout"] = timeout
+            return _FakeResponse(
+                payload={
+                    "newVariables": {
+                        "source_dna": "中间过程",
+                        "final_output_text": "最终换皮剧本",
+                        "tc3kZbQz": "备用最终剧本",
+                    },
+                    "answerText": "answerText 兜底",
+                }
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                "FASTGPT_RESKIN_API_KEY": "reskin-key",
+            },
+            clear=True,
+        ):
+            with patch.object(tools.requests, "post", side_effect=_fake_post):
+                result = tools.run_simple_tool(
+                    "reskin",
+                    {
+                        "title": "雪夜回响",
+                        "source_outline": "源故事梗概",
+                        "core_scenes": "源核心场景",
+                        "source_characters": "源人物小传",
+                        "target_style": "都市悬疑复仇",
+                    },
+                )
+
+        variables = captured["body"]["variables"]
+        self.assertEqual(variables["ju_ben_biao_ti"], "雪夜回响")
+        self.assertEqual(variables["yuan_juben_genggai"], "源故事梗概")
+        self.assertEqual(variables["hexin_changjing"], "源核心场景")
+        self.assertEqual(variables["renwu_xiaozhuan"], "源人物小传")
+        self.assertEqual(variables["mubiao_fengge"], "都市悬疑复仇")
+        self.assertEqual(variables["zong_jishu"], 60)
+        self.assertEqual(variables["meiji_zishu"], 600)
+        self.assertNotIn("juben_zhengwen", variables)
+        self.assertEqual(result["text"], "最终换皮剧本")
+        self.assertEqual(result["debug"]["chosen_output_source"], "newVariables.final_output_text")
+        self.assertEqual(result["filename"], "换皮剧本_雪夜回响.txt")
+
+    def test_reskin_accepts_workflow_variable_alias_payload(self) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, timeout
+            captured["body"] = json or {}
+            return _FakeResponse(payload={"newVariables": {"tc3kZbQz": "最终剧本"}})
+
+        with patch.dict(
+            os.environ,
+            {
+                "FASTGPT_RESKIN_API_KEY": "reskin-key",
+            },
+            clear=True,
+        ):
+            with patch.object(tools.requests, "post", side_effect=_fake_post):
+                result = tools.run_simple_tool(
+                    "reskin",
+                    {
+                        "ju_ben_biao_ti": "镜中人",
+                        "yuan_juben_genggai": "旧梗概",
+                        "renwu_xiaozhuan": "旧人设",
+                        "mubiao_fengge": "古装权谋",
+                        "zong_jishu": 24,
+                        "meiji_zishu": 800,
+                    },
+                )
+
+        variables = captured["body"]["variables"]
+        self.assertEqual(variables["ju_ben_biao_ti"], "镜中人")
+        self.assertEqual(variables["zong_jishu"], 24)
+        self.assertEqual(variables["meiji_zishu"], 800)
+        self.assertEqual(result["text"], "最终剧本")
+
+    def test_reskin_missing_required_input_does_not_call_fastgpt(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "FASTGPT_RESKIN_API_KEY": "reskin-key",
+            },
+            clear=True,
+        ):
+            with patch.object(tools.requests, "post") as mocked_post:
+                with self.assertRaisesRegex(tools.ToolExecutionError, "缺少必填项"):
+                    tools.run_simple_tool(
+                        "reskin",
+                        {
+                            "title": "缺少人物",
+                            "source_outline": "源故事梗概",
+                            "target_style": "都市情感",
+                        },
+                    )
 
         mocked_post.assert_not_called()
 
