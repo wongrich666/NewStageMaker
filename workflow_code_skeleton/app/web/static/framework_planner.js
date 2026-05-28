@@ -152,7 +152,7 @@
     ["材料情况", ["available_material_summary", "missing_information_risks"]],
     ["可读摘要", ["display_text"]],
   ];
-  const ALL_STAGE_PREFERENCE_KEYS = ["basic", "worldview", "character", "beat", "storylines", "guide", "package", "scene", "appearance", "episode", "conflict", "script_text"];
+  const ALL_STAGE_PREFERENCE_KEYS = STAGE_SEQUENCE.slice();
   const KNOWLEDGE_SNAPSHOT_STAGE_KEYS = ["basic", "worldview", "character", "beat", "storylines", "guide", "package", "scene", "appearance", "episode", "conflict", "script_text"];
   const KNOWLEDGE_SNAPSHOT_STAGE_NUMBERS = {
     basic: "01",
@@ -1747,23 +1747,6 @@
     };
   }
 
-  function knowledgeTagGroup(tag) {
-    const group = String((tag && tag.group) || "").trim();
-    if (group) return group;
-    if (String((tag && tag.id) || "").startsWith("excellent_film_beat_") || String((tag && tag.source) || "") === "save_the_cat_film_beat") return "excellent_film_beat";
-    return tag && tag.builtin ? "default_style" : "user_custom";
-  }
-
-  function knowledgeTagGroups() {
-    return [
-      { id: "default_style", label: "默认风格分类", emptyText: "暂无系统预设标签。" },
-      { id: "user_custom", label: "用户自定义标签", emptyText: "暂无自定义标签。" },
-      { id: "excellent_film_beat", label: "优秀电影节拍表标签", emptyText: "暂无电影节拍表空标签。" },
-    ].map((group) => Object.assign({}, group, {
-      tags: (ui.knowledge.tags || []).filter((tag) => knowledgeTagGroup(tag) === group.id),
-    }));
-  }
-
   function selectedKnowledgeTags() {
     const byId = new Map((ui.knowledge.tags || []).map((tag) => [String(tag.id || ""), tag]));
     return (ui.knowledge.selectedIds || [])
@@ -2388,7 +2371,8 @@
   function renderKnowledgePanel() {
     const selectedTags = selectedKnowledgeTags();
     const missingIds = (ui.knowledge.selectedIds || []).filter((id) => !selectedTags.some((tag) => String(tag.id || "") === String(id)));
-    const groupedTags = knowledgeTagGroups();
+    const builtinTags = (ui.knowledge.tags || []).filter((tag) => tag.builtin);
+    const customTags = (ui.knowledge.tags || []).filter((tag) => !tag.builtin);
     const selectedLabel = selectedTags.length || missingIds.length
       ? `${selectedTags.length + missingIds.length} 个已选`
       : "允许不选择";
@@ -2411,12 +2395,14 @@
             ${ui.knowledge.status ? `<div class="fp-inline-warning compact">${escapeHtml(ui.knowledge.status)}</div>` : ""}
             ${renderKnowledgeSelected(selectedTags, missingIds)}
             <div class="fp-knowledge-grid">
-              ${groupedTags.map((group) => `
-                <details class="fp-knowledge-group" open>
-                  <summary><h3>${escapeHtml(group.label)}</h3><span class="fp-tag lock">${group.tags.length} 个</span></summary>
-                  ${renderKnowledgeTagGroup(group.tags, group.emptyText)}
-                </details>
-              `).join("")}
+              <div>
+                <h3>默认标签</h3>
+                ${renderKnowledgeTagGroup(builtinTags, "暂无系统预设标签。")}
+              </div>
+              <div>
+                <h3>用户自定义标签</h3>
+                ${renderKnowledgeTagGroup(customTags, "暂无自定义标签。")}
+              </div>
             </div>
             ${renderKnowledgeStagePreview()}
             ${ui.knowledge.formOpen ? renderKnowledgeForm() : ""}
@@ -2455,8 +2441,8 @@
     const id = String(tag.id || "");
     const selected = (ui.knowledge.selectedIds || []).includes(id);
     const prompts = normalizeStagePrompts(tag.stage_prompts || {});
-    const frameworkPromptCount = ALL_STAGE_PREFERENCE_KEYS.filter((stageKey) => String(prompts[stageKey] || "").trim()).length;
-    const stageStatus = frameworkPromptCount ? `已设置 ${frameworkPromptCount}/12 个阶段偏好` : "未设置阶段偏好";
+    const frameworkPromptCount = STAGE_SEQUENCE.filter((stageKey) => String(prompts[stageKey] || "").trim()).length;
+    const stageStatus = frameworkPromptCount ? `已设置 ${frameworkPromptCount}/7 个框架阶段偏好` : "未设置阶段偏好";
     return `
       <label class="fp-knowledge-item">
         <input type="checkbox" data-knowledge-tag-id="${escapeHtml(id)}" ${selected ? "checked" : ""} />
@@ -2465,7 +2451,7 @@
           <small>${escapeHtml(tag.category || (tag.builtin ? "默认标签" : "自定义"))} · ${tag.builtin ? "默认标签，可编辑" : "自定义标签"} · ${escapeHtml(stageStatus)}</small>
           ${tag.description ? `<em>${escapeHtml(truncateText(tag.description, 90))}</em>` : ""}
           <details class="fp-knowledge-stage-details">
-            <summary>查看 01-12 阶段提示词</summary>
+            <summary>查看 01-07 阶段提示词</summary>
             <div>
               ${ALL_STAGE_PREFERENCE_KEYS.map((stageKey) => `
                 <p><strong>${escapeHtml(stagePromptLabel(stageKey))}</strong><span>${escapeHtml(truncateText(prompts[stageKey] || "", 120) || "暂无")}</span></p>
@@ -2474,7 +2460,7 @@
           </details>
         </span>
         <span class="fp-knowledge-item-actions">
-          <button class="fp-btn small primary" type="button" data-action="edit-knowledge-stage-prompts" data-tag-id="${escapeHtml(id)}" title="编辑阶段偏好">✍️</button>
+          <button class="fp-btn small primary" type="button" data-action="edit-knowledge-stage-prompts" data-tag-id="${escapeHtml(id)}" title="点击编辑该标签下 01-07 阶段提示词">✍️</button>
           <button class="fp-btn small" type="button" data-action="edit-knowledge-tag" data-tag-id="${escapeHtml(id)}">编辑</button>
           <button class="fp-btn small danger subtle" type="button" data-action="delete-knowledge-tag" data-tag-id="${escapeHtml(id)}">${tag.builtin ? "隐藏" : "删除"}</button>
         </span>
@@ -2512,7 +2498,7 @@
         <div class="fp-card-title-row">
           <div>
             <h3>${editing ? `编辑标签偏好：${escapeHtml(form.name || "未命名标签")}` : "新建自定义标签"}</h3>
-            <p class="fp-card-sub">通用偏好保留旧逻辑；阶段偏好可填写 01-12，框架阶段使用 01-07，后续阶段可从资产快照继承。</p>
+            <p class="fp-card-sub">通用偏好保留旧逻辑；阶段偏好只注入 01-07 框架策划阶段。</p>
           </div>
           <button class="fp-btn small" data-action="cancel-knowledge-edit">取消</button>
         </div>
@@ -2524,10 +2510,10 @@
         <label class="fp-field" style="margin-top:12px"><span>通用偏好 prompt_text</span><textarea data-knowledge-form-key="prompt_text">${escapeHtml(form.prompt_text)}</textarea></label>
         <div class="fp-knowledge-stage-edit-grid">
           ${ALL_STAGE_PREFERENCE_KEYS.map((stageKey) => `
-            <details class="fp-field" open>
-              <summary>${escapeHtml(stagePromptLabel(stageKey))}</summary>
+            <label class="fp-field">
+              <span>${escapeHtml(stagePromptLabel(stageKey))}</span>
               <textarea data-knowledge-stage-key="${escapeHtml(stageKey)}" placeholder="${escapeHtml(stagePreferencePlaceholder(stageKey))}">${escapeHtml((form.stage_prompts || {})[stageKey] || "")}</textarea>
-            </details>
+            </label>
           `).join("")}
         </div>
         <div class="fp-actions">
