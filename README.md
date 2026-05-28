@@ -308,9 +308,9 @@ http://127.0.0.1:5000
 - `hot_review` -> `爆款文审核.json`
 - `reskin` -> `换皮.json`
 - `punchup` -> `增加爽感.json`
-- `character_reskin` -> `只换人设.json`
+- `character_reskin` -> 后端多阶段 FastGPT 编排链路
 
-工具输入字段以 workflow JSON 的 `chatConfig.variables` 为准；如果 workflow 没有公开输入变量，代码会做最小兜底。
+工具输入字段以 workflow JSON 的 `chatConfig.variables` 为准；如果 workflow 没有公开输入变量，代码会做最小兜底。`character_reskin` 固定兼容现有“只换人设”表单字段和别名。
 
 工具输出展示优先顺序：
 
@@ -432,8 +432,37 @@ FASTGPT_FRAMEWORK_SCRIPT_MEMORY_API_KEY=
 FASTGPT_HOT_REVIEW_API_KEY=
 FASTGPT_RESKIN_API_KEY=
 FASTGPT_PUNCHUP_API_KEY=
-FASTGPT_CHARACTER_RESKIN_API_KEY=
+FASTGPT_NEW_FRAMEWORK_API_KEY=
 ```
+
+`character_reskin / 只换人设` 现在不是单个 FastGPT workflow，而是后端维护中间态并串联多个拆分 workflow。它必须配置以下 11 个专用 key，统一使用 `FASTGPT_CHAT_COMPLETIONS_URL`，不再使用 `FASTGPT_EDIT_*` 和 `FASTGPT_SCRIPT_REWRITE_MEMORY_KEY`：
+
+```env
+FASTGPT_REWRITE_CHARACTER_PROFILE_KEY=
+FASTGPT_REVIEW_CHARACTER_PROFILE_KEY=
+FASTGPT_WRITE_CHARACTER_PROFILE_KEY=
+FASTGPT_SORT_CHARACTER_PROFILE_KEY=
+FASTGPT_WRITE_CHARACTER_DIALOGUE_KEY=
+FASTGPT_REVIEW_CHARACTER_DIALOGUE_KEY=
+FASTGPT_REWRITE_CHARACTER_DIALOGUE_KEY=
+FASTGPT_WRITE_SCRIPT_BODY_KEY=
+FASTGPT_REVIEW_SCRIPT_BODY_KEY=
+FASTGPT_REWRITE_SCRIPT_BODY_KEY=
+FASTGPT_SCRIPT_MEMORY_KEY=
+```
+
+只换人设链路顺序：修订人设 JSON -> 审核人设 JSON -> 必要时修订人设 -> 整理人物小传纯文本 -> 按 5 集一批生成角色对话 -> 审核/必要时修订角色对话 -> 生成正文 -> 审核/必要时修订正文 -> 总结本批剧本记忆 -> 拼接全部正文。
+
+关键桥接规则：
+
+- `target_style` 会拼入 `source_outline`，并传给 `ayxWwSpE`。
+- 人设审核结果由后端从 `profile_review_json` 桥接到修订变量 `va4Et1LA`。
+- 角色对话审核结果由 `dialogue_review_json` 桥接到 `rZL0C6f9`。
+- 角色对话通过后，后端把 `mN7Fh38L` 对应内容同步为正文阶段读取的 `pS7JzosX`。
+- 正文审核结果由 `body_review_json` 桥接到 `gJT2URpY`。
+- 剧本记忆由 `script_memory_json` 分别桥接到下一批正文编写/审核/修订的 `bai4xfdD / ntBQgrAm / mcUdAISf`。
+
+API 完成后会返回 `output / final_output_text` 作为最终剧本正文，同时返回 `character_profile` 和 `character_profile_json`。常见错误包括：某阶段 key 缺失、FastGPT 返回空 `answerText`、短变量 key 与 workflow 不匹配、审核结果没有正确桥接到修订阶段。
 
 ## 导出说明
 

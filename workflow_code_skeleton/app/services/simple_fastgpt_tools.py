@@ -288,6 +288,93 @@ TOOL_DEFINITIONS: dict[str, SimpleToolDefinition] = {
         env_prefix="FASTGPT_CHARACTER_RESKIN",
         help_text="保留主剧情结构，重点替换人物设定与角色表现。",
         json_name_patterns=("只换人设", "换皮只换人设"),
+        field_overrides=(
+            SimpleToolField(
+                name="title",
+                label="剧本标题",
+                input_type="input",
+                placeholder="输入新剧本标题。",
+                required=True,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="source_outline",
+                label="故事大纲",
+                input_type="textarea",
+                placeholder="粘贴原故事大纲。",
+                required=True,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="core_scenes",
+                label="核心场景",
+                input_type="textarea",
+                placeholder="粘贴核心场景。",
+                required=False,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="source_characters",
+                label="人物小传",
+                input_type="textarea",
+                placeholder="粘贴原人物小传。",
+                required=True,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="source_script",
+                label="原剧本正文",
+                input_type="textarea",
+                placeholder="粘贴原剧本正文。",
+                required=True,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="target_style",
+                label="目标风格 / 换人设要求",
+                input_type="textarea",
+                placeholder="输入目标风格、题材、人设替换方向和换人设要求。",
+                required=False,
+                source="tool_definition",
+            ),
+            SimpleToolField(
+                name="total_episodes",
+                label="总集数",
+                input_type="number",
+                placeholder="例如：50。",
+                required=True,
+                source="tool_definition",
+                default_value=50,
+            ),
+            SimpleToolField(
+                name="episode_word_count",
+                label="每集正文字数",
+                input_type="number",
+                placeholder="例如：600。",
+                required=True,
+                source="tool_definition",
+                default_value=600,
+            ),
+        ),
+        payload_aliases=(
+            ("title", "ju_ben_biao_ti"),
+            ("title", "script_title"),
+            ("source_outline", "yuan_juben_genggai"),
+            ("source_outline", "outline"),
+            ("source_outline", "story_outline"),
+            ("core_scenes", "hexin_changjing"),
+            ("source_characters", "renwu_xiaozhuan"),
+            ("source_characters", "characters"),
+            ("source_script", "juben_zhengwen"),
+            ("source_script", "script"),
+            ("target_style", "mubiao_fengge"),
+            ("target_style", "style"),
+            ("total_episodes", "zong_jishu"),
+            ("episode_word_count", "meiji_zishu"),
+        ),
+        force_field_overrides=True,
+        output_field_overrides=("final_output_text", "character_profile"),
+        filename_prefix="只换人设",
     ),
     "new_framework": SimpleToolDefinition(
         key="new_framework",
@@ -390,6 +477,23 @@ def diagnose_simple_tool_environment(
     tool_key: str,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if tool_key == "character_reskin":
+        from .character_reskin_chain import diagnose_character_reskin_environment
+
+        diagnosis = diagnose_character_reskin_environment()
+        if isinstance(payload, dict):
+            diagnosis["request_variable_keys"] = sorted(
+                {
+                    "n5ZHYrj8",
+                    "eBEWC07Q",
+                    "blkSS7dY",
+                    "ayxWwSpE",
+                    "rxmvq2lS",
+                    "yYYOuumm",
+                    "pxtQY7p2",
+                }
+            )
+        return diagnosis
     resolved = _resolved_tool(tool_key)
     api_info = _resolve_api_key_info(resolved)
     url_info = _resolve_url_info(resolved)
@@ -418,6 +522,10 @@ def diagnose_simple_tool_environment(
 
 
 def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, Any]:
+    if tool_key == "character_reskin":
+        from .character_reskin_chain import run_character_reskin_chain
+
+        return run_character_reskin_chain(user_payload)
     resolved = _resolved_tool(tool_key)
     definition = resolved.definition
     payload = user_payload if isinstance(user_payload, dict) else {}
@@ -812,6 +920,27 @@ def _serialize_tool(resolved: ResolvedSimpleTool) -> dict[str, Any]:
     api_info = _resolve_api_key_info(resolved)
     url_info = _resolve_url_info(resolved)
     definition = resolved.definition
+    if definition.key == "character_reskin":
+        from .character_reskin_chain import DEDICATED_API_KEY_ENVS, URL_ENV, diagnose_character_reskin_environment
+
+        chain_diagnosis = diagnose_character_reskin_environment()
+        api_info = {
+            **api_info,
+            "present": not chain_diagnosis["missing_api_key_envs"],
+            "env_used": ",".join(chain_diagnosis["present_api_key_envs"]),
+            "source": "dedicated_multi_stage",
+        }
+        url_info = {
+            **url_info,
+            "env": URL_ENV,
+            "value": os.getenv(URL_ENV) or DEFAULT_FASTGPT_URL,
+            "present": bool(os.getenv(URL_ENV)),
+        }
+        api_key_envs = list(DEDICATED_API_KEY_ENVS)
+        workflow_url_envs = [URL_ENV]
+    else:
+        api_key_envs = list(resolved.api_key_envs)
+        workflow_url_envs = list(resolved.url_envs)
     return {
         "tool_id": definition.key,
         "key": definition.key,
@@ -827,8 +956,8 @@ def _serialize_tool(resolved: ResolvedSimpleTool) -> dict[str, Any]:
         "run_url": resolved.run_path,
         "json_file": resolved.json_path.name if resolved.json_path else None,
         "workflow_json_file": resolved.json_path.name if resolved.json_path else None,
-        "api_key_envs": list(resolved.api_key_envs),
-        "workflow_url_envs": list(resolved.url_envs),
+        "api_key_envs": api_key_envs,
+        "workflow_url_envs": workflow_url_envs,
         "input_variables": list(resolved.input_variables),
         "internal_variables": list(resolved.internal_variables),
         "output_variables": list(resolved.updated_variables),
