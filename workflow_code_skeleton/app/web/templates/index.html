@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>IDEA TO SCRIPT 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260515-uk01">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260528-assets-ui">
 </head>
 <body class="workspace-body">
   <main class="chat-workspace-shell">
@@ -30,7 +30,6 @@
       </div>
 
       <div class="sidebar-primary">
-        <button id="newScriptBtn" class="sidebar-create-btn" type="button">＋ 新建剧本</button>
         <a class="sidebar-create-btn" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">＋ 新建框架</a>
         <a class="sidebar-create-btn" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">＋ 框架到剧本</a>
       </div>
@@ -43,7 +42,7 @@
             <button id="refreshProjectsBtn" class="sidebar-refresh-btn" type="button">刷新</button>
           </div>
           <div class="sidebar-folders">
-            <details id="activeWorkspaceFolder" class="workspace-folder" open>
+            <details id="activeWorkspaceFolder" class="workspace-folder">
               <summary>
                 <span>老剧本平台资产</span>
               </summary>
@@ -74,15 +73,25 @@
         </section>
 
         <section class="sidebar-group sidebar-tools-section">
-          <button id="waibaoScriptBtn" class="sidebar-profile-btn sidebar-section-entry" type="button">外包专属格式</button>
+          <div class="tool-shortcut-list">
+            <button id="waibaoScriptBtn" class="tool-shortcut" type="button">
+              <span>外包专属格式</span>
+              <small>按外包交付格式生成</small>
+            </button>
+          </div>
         </section>
 
-        <div class="sidebar-group sidebar-links">
+        <div class="sidebar-group sidebar-tools-section">
+          <div class="tool-shortcut-list">
           <a
             id="openCommunityPanelLink"
-            class="sidebar-text-link"
+            class="tool-shortcut"
             href="{{ url_for('workspace_page', auth_token=current_auth_token, section='community') }}"
-          >社区好剧</a>
+          >
+            <span>社区好剧</span>
+            <small>查看公开成品</small>
+          </a>
+          </div>
         </div>
       </div>
 
@@ -115,7 +124,7 @@
         <div class="runtime-strip">
           <div class="runtime-brandline">
             <span class="runtime-app-label">IDEA TO SCRIPT 剧本平台</span>
-            <strong id="projectText">当前剧本：未选中</strong>
+            <strong id="projectText" class="hidden" aria-hidden="true">当前剧本：未选中</strong>
           </div>
           <div class="runtime-meta-strip">
             <div class="runtime-pill">
@@ -219,17 +228,6 @@
           </div>
           <button id="startBtn" class="composer-send-btn" type="button" aria-label="开始生成">开始</button>
         </div>
-
-        <section class="user-knowledge-panel compact" aria-label="智慧库提示">
-          <div class="user-knowledge-head">
-            <div>
-              <span class="tool-panel-kicker">用户智慧库</span>
-              <h3>智慧库已移至框架策划工作台</h3>
-            </div>
-            <a class="btn btn-secondary" href="/framework-planner">打开框架策划</a>
-          </div>
-        </section>
-
         <p id="formHint" class="composer-hint">当前流程：写剧本正文。先填写故事期待、角色数量和总集数；生成结果会保存在你的项目列表。</p>
         <p class="composer-mode-note">当前创作模式：<strong id="composerModeText">标准格式</strong></p>
 
@@ -384,6 +382,6 @@
     };
   </script>
   <script src="{{ url_for('static', filename='field_labels_cn.js') }}?v=20260527-readable-labels"></script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260527-readable-labels"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260528-assets-ui"></script>
 </body>
 </html>

@@ -361,10 +361,12 @@ class TaskLifecycleMixin:
                 raise ValueError("该项目不是 framework_planner 资产，不能用框架策划保存接口覆盖")
             created_at = snapshot.get("created_at") or now
             task_id = snapshot.get("task_id") or f"framework-planner-{uuid.uuid4().hex[:10]}"
+            previous_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
         else:
             project_id = self._next_project_id()
             created_at = now
             task_id = f"framework-planner-{uuid.uuid4().hex[:10]}"
+            previous_artifacts = {}
 
         framework_plan_package = payload.get("framework_plan_package") if isinstance(payload.get("framework_plan_package"), dict) else {}
         stage_state = payload.get("stage_state") if isinstance(payload.get("stage_state"), dict) else {}
@@ -443,6 +445,16 @@ class TaskLifecycleMixin:
             }
         )
 
+        artifacts = {
+            "story_outline": input_payload.get("story_outline") or "",
+            "framework_planner_state": copy.deepcopy(framework_state),
+            "framework_plan_package": copy.deepcopy(framework_plan_package),
+            "validation_report": copy.deepcopy(framework_state["validation_report"]),
+            "preference_snapshot": copy.deepcopy(framework_state["preference_snapshot"]),
+        }
+        if isinstance(previous_artifacts.get("framework_to_script_state"), dict):
+            artifacts["framework_to_script_state"] = copy.deepcopy(previous_artifacts["framework_to_script_state"])
+
         snapshot = {
             "user_id": int(user_id),
             "project_id": project_id,
@@ -459,13 +471,7 @@ class TaskLifecycleMixin:
             "asset_kind": "framework_planner",
             "asset_type": "framework",
             "input_payload": input_payload,
-            "artifacts": {
-                "story_outline": input_payload.get("story_outline") or "",
-                "framework_planner_state": copy.deepcopy(framework_state),
-                "framework_plan_package": copy.deepcopy(framework_plan_package),
-                "validation_report": copy.deepcopy(framework_state["validation_report"]),
-                "preference_snapshot": copy.deepcopy(framework_state["preference_snapshot"]),
-            },
+            "artifacts": artifacts,
             "metadata": {
                 "preference_snapshot": copy.deepcopy(framework_state["preference_snapshot"]),
             },

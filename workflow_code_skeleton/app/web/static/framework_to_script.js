@@ -1048,17 +1048,31 @@
     }
   }
 
-  async function prepareScriptMaterials() {
+  async function generateFullScript() {
     if (!currentAssetReady()) {
       state.error = "请先选择框架资产或导入结构化框架 JSON。";
       render();
       return;
     }
-    await runStage08();
-    if (state.error) return;
-    await runStage09();
-    if (state.error) return;
-    await runStage10();
+    if (!hasObject((state.scriptStages.stage08 || {}).sceneDictionary)) {
+      await runStage08();
+      if (state.error) return;
+    }
+    if (!hasObject((state.scriptStages.stage09 || {}).appearanceMapping)) {
+      await runStage09();
+      if (state.error) return;
+    }
+    if (!hasContent(stage10Plan(state.scriptStages.stage10 || {}))) {
+      await runStage10();
+      if (state.error) return;
+    }
+    if (!stage11Completion().complete) {
+      await runStage11();
+      if (state.error) return;
+    }
+    if (!stage12Completion().complete) {
+      await runStage12();
+    }
   }
 
   async function runStage11(options = {}) {
@@ -1157,7 +1171,7 @@
     if (resetStage12) {
       state.scriptStages.stage12 = {};
     }
-    state.runningStage = "12";
+    saveRunningStage("12");
     state.error = null;
     render();
     try {
@@ -1241,6 +1255,51 @@
       render();
     }
   }
+
+  async function downloadDocx() {
+    if (!currentAssetReady()) {
+      state.error = "请先导入框架资产。";
+      render();
+      return;
+    }
+    if (!state.frameworkAssetId) {
+      state.error = "结构化 JSON 导入的临时框架暂不支持 DOCX 导出，请先保存为框架资产。";
+      render();
+      return;
+    }
+    if (!hasStage12ScriptText()) {
+      state.error = "暂无正文，请先运行第12阶段";
+      render();
+      return;
+    }
+    state.error = null;
+    render();
+    try {
+      const response = await fetch(apiUrl(`/api/framework-to-script/export/docx?framework_asset_id=${encodeURIComponent(state.frameworkAssetId)}`), {
+        method: "GET",
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || "DOCX 下载失败，请稍后重试。");
+      }
+      const blob = await response.blob();
+      const asset = state.importedFrameworkAsset || {};
+      const filename = `${String(asset.title || "framework_script").replace(/[\\/:*?"<>|]+/g, "_")}.docx`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      state.error = error.message || "DOCX 下载失败，请稍后重试。";
+      render();
+    }
+  }
+
 
   function renderTree(value, keyName = "root", depth = 0) {
     const clean = stripRaw(value);
@@ -1391,6 +1450,7 @@
 
   function renderStageCard(id, title, status, buttonText, action, disabled, body, options = {}) {
     const secondary = Boolean(options.secondary);
+    const hideAction = Boolean(options.hideAction);
     return `
       <article class="wts-step ${status === "已完成" ? "done" : disabled ? "locked" : ""}">
         <b>${escapeHtml(id)}</b>
@@ -1399,9 +1459,9 @@
             <h3>${escapeHtml(title)}</h3>
             <span>${escapeHtml(status)}</span>
           </div>
-          <div class="wts-step-actions">
+          ${hideAction ? "" : `<div class="wts-step-actions">
             <button class="${secondary ? "secondary" : ""}" type="button" data-action="${escapeHtml(action)}" ${disabled ? "disabled" : ""}>${escapeHtml(buttonText)}</button>
-          </div>
+          </div>`}
           <p class="wts-hint">输入来源：已导入的框架和已完成内容</p>
           ${body || ""}
         </div>
@@ -1456,7 +1516,7 @@
             <h2>框架到剧本链路</h2>
             <p>未导入框架前，阶段按钮会保持禁用。08-12 只使用框架资产和上游阶段结果。</p>
           </div>
-          <button type="button" class="wts-btn" data-action="prepare-script-materials" ${locked ? "disabled" : ""}>一键准备正文素材</button>
+          <button type="button" class="wts-btn" data-action="generate-full-script" ${locked ? "disabled" : ""}>一键生成剧本</button>
         </div>
                <div class="wts-steps">
           ${renderStageCard(
@@ -1469,7 +1529,7 @@
             has08
               ? `<p class="wts-hint">已完成</p>`
               : `<p class="wts-hint">运行完成前不展示输出；结果会自动缓存并供后续阶段使用。</p>`,
-            { secondary: has08 }
+            { secondary: has08, hideAction: true }
           )}
 
           ${renderStageCard(
@@ -1482,7 +1542,7 @@
             has09
               ? `<p class="wts-hint">已完成</p>`
               : `<p class="wts-hint">运行完成前不展示输出；结果会自动缓存并供后续阶段使用。</p>`,
-            { secondary: has09 }
+            { secondary: has09, hideAction: true }
           )}
           ${renderStageCard(
             "10",
@@ -1503,7 +1563,7 @@
               </details>
               ${stage10Validation.ok ? `<p class="wts-hint">集数完整性校验通过。</p>` : `<p class="wts-error-inline">集数完整性校验失败：${escapeHtml(stage10Validation.issues.join("；"))}</p>`}
             ` : `<p class="wts-hint">将沿用当前导入的框架资产和已完成的 08/09 输出。</p>`,
-            { secondary: has10 }
+            { secondary: has10, hideAction: true }
           )}
           ${renderStageCard(
             "11",
@@ -1513,7 +1573,7 @@
             has11Complete ? "rerun-stage-11" : "run-stage-11",
             locked || !stage10Valid,
             has11 ? renderStage11Batches(stage11) : `<p class="wts-hint">${state.runningStage ? `当前 ${escapeHtml(state.runningStage)} 阶段运行态锁定，完成或超时后可继续。` : ""}</p>`,
-            { secondary: has11Complete }
+            { secondary: has11Complete, hideAction: true }
           )}
           ${renderStageCard(
             "12",
@@ -1523,7 +1583,7 @@
             stage12Action,
             locked || !has11Complete,
             has12 ? renderStage12Batches(stage12) : `<p class="wts-hint"></p>`,
-            { secondary: has12Complete }
+            { secondary: has12Complete, hideAction: true }
           )}
         </div>
       </section>
@@ -1544,6 +1604,7 @@
           <div class="wts-actions">
             <button type="button" class="wts-btn" data-action="open-asset-panel">导入框架资产</button>
             <button type="button" class="wts-btn ghost" data-action="download-txt">下载 TXT</button>
+            <button type="button" class="wts-btn ghost" data-action="download-docx">下载 DOCX</button>
             <a class="wts-btn ghost" href="${escapeHtml(plannerUrl)}">返回框架生成</a>
             <a class="wts-btn ghost" href="${escapeHtml(workspaceUrl)}">返回主工作台</a>
           </div>
@@ -1580,8 +1641,8 @@
       runStage10();
     } else if (action === "rerun-stage-10") {
       runStage10();
-    } else if (action === "prepare-script-materials") {
-      prepareScriptMaterials();
+    } else if (action === "generate-full-script") {
+      generateFullScript();
     } else if (action === "run-stage-11") {
       runStage11();
     } else if (action === "rerun-stage-11") {
@@ -1592,6 +1653,8 @@
       runStage12({ resetStage12: true });
     } else if (action === "download-txt") {
       downloadTxt();
+    } else if (action === "download-docx") {
+      downloadDocx();
     } else if (action === "save-workspace") {
       saveWorkspace();
       state.error = null;

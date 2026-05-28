@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>剧本生成平台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260430-01">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260528-assets-ui">
 </head>
 <body class="workspace-body mono-page">
   <main class="chat-workspace-shell prelogin-shell">
@@ -30,7 +30,6 @@
       </div>
 
       <div class="sidebar-primary">
-        <a class="sidebar-create-btn" href="{{ url_for('workspace_page', auth_token=current_auth_token, mode='new') if current_user else url_for('login_page') }}">＋ 新建剧本</a>
         <a class="sidebar-create-btn" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') if current_user else url_for('login_page') }}">＋ 新建框架</a>
         <a class="sidebar-create-btn" href="{{ '/framework-to-script?auth_token=' ~ current_auth_token if current_user and current_auth_token else ('/framework-to-script' if current_user else url_for('login_page')) }}">＋ 框架到剧本</a>
       </div>
@@ -43,7 +42,7 @@
             <a class="sidebar-refresh-btn prelogin-inline-link" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token) }}">刷新</a>
           </div>
           <div class="sidebar-folders">
-            <details class="workspace-folder" open>
+            <details class="workspace-folder">
               <summary>
                 <span>老剧本平台资产</span>
               </summary>
@@ -97,14 +96,24 @@
         </section>
 
         <section class="sidebar-group sidebar-tools-section">
-          <a
-            class="sidebar-profile-btn sidebar-section-entry"
-            href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, mode='new', script_format_mode='waibao') }}"
-          >外包专属格式</a>
+          <div class="tool-shortcut-list">
+            <a
+              class="tool-shortcut"
+              href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, mode='new', script_format_mode='waibao') }}"
+            >
+              <span>外包专属格式</span>
+              <small>按外包交付格式生成</small>
+            </a>
+          </div>
         </section>
 
-        <div class="sidebar-group sidebar-links">
-          <a class="sidebar-text-link" href="{{ url_for('index', auth_token=current_auth_token) }}#community">社区好剧</a>
+        <div class="sidebar-group sidebar-tools-section">
+          <div class="tool-shortcut-list">
+            <a class="tool-shortcut" href="{{ url_for('index', auth_token=current_auth_token) }}#community">
+              <span>社区好剧</span>
+              <small>查看公开成品</small>
+            </a>
+          </div>
         </div>
       </div>
 
@@ -135,7 +144,6 @@
         <div class="runtime-strip">
           <div class="runtime-brandline">
             <span class="runtime-app-label">IDEA TO SCRIPT 剧本平台</span>
-            <strong>当前剧本：未选中</strong>
           </div>
           <div class="runtime-meta-strip">
             <div class="runtime-pill">

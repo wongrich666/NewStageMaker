@@ -63,16 +63,26 @@
       ["writing_requirements", "下游写作要求"],
     ],
     guide: [
-      ["adaptation_direction", "改编方向"],
-      ["direction", "改编方向"],
-      ["original_retention", "原文保留内容"],
-      ["keep_from_original", "原文保留内容"],
-      ["key_changes", "本次重点改变"],
-      ["changes", "本次重点改变"],
-      ["style_requirements", "风格要求"],
-      ["risk_warnings", "风险提醒"],
-      ["hard_requirements", "给后续写作的硬要求"],
-      ["downstream_requirements", "给后续写作的硬要求"],
+      ["core_setting_adjustment", "核心设定调整"],
+      ["core_setting_adjustments", "核心设定调整"],
+      ["adaptation_direction", "核心设定调整"],
+      ["narrative_rhythm_structure", "叙事节奏与结构"],
+      ["narrative_rhythm", "叙事节奏与结构"],
+      ["structure_and_rhythm", "叙事节奏与结构"],
+      ["key_changes", "叙事节奏与结构"],
+      ["visualization", "视觉化呈现"],
+      ["visualization_strategy", "视觉化呈现"],
+      ["visual_style", "视觉化呈现"],
+      ["style_requirements", "视觉化呈现"],
+      ["character_emotion_shaping", "人物情绪塑造"],
+      ["character_emotion_strategy", "人物情绪塑造"],
+      ["hard_constraints_for_script_workflow", "后续剧本硬性约束"],
+      ["hard_constraints", "后续剧本硬性约束"],
+      ["hard_requirements", "后续剧本硬性约束"],
+      ["downstream_requirements", "后续剧本硬性约束"],
+      ["writing_requirements", "后续剧本硬性约束"],
+      ["display_text", "可读摘要"],
+      ["displayText", "可读摘要"],
     ],
     package: [
       ["completion_status", "框架完成状态"],
@@ -88,12 +98,40 @@
     ],
   };
   const GUIDE_FIELD_DEFS = [
-    ["adaptation_direction", "改编方向", ["adaptation_direction", "direction", "core_setting_adjustments"]],
+    ["core_setting_adjustment", "核心设定调整", [
+      "core_setting_adjustment",
+      "core_setting_adjustments",
+      "adaptation_direction",
+      "direction",
+    ]],
+    ["narrative_rhythm_structure", "叙事节奏与结构", [
+      "narrative_rhythm_structure",
+      "narrative_rhythm",
+      "structure_and_rhythm",
+      "key_changes",
+      "changes",
+    ]],
+    ["visualization", "视觉化呈现", [
+      "visualization",
+      "visualization_strategy",
+      "visual_style",
+      "style_requirements",
+    ]],
+    ["character_emotion_shaping", "人物情绪塑造", [
+      "character_emotion_shaping",
+      "character_emotion_strategy",
+    ]],
+    ["hard_constraints_for_script_workflow", "后续剧本硬性约束", [
+      "hard_constraints_for_script_workflow",
+      "hard_constraints",
+      "hard_requirements",
+      "downstream_requirements",
+      "writing_requirements",
+    ]],
+  ];
+  const GUIDE_SUPPLEMENTAL_FIELD_DEFS = [
     ["original_retention", "原文保留内容", ["original_retention", "keep_from_original", "retained_original_content"]],
-    ["key_changes", "本次重点改变", ["key_changes", "changes", "structure_and_rhythm"]],
-    ["style_requirements", "风格要求", ["style_requirements", "style", "visualization_strategy", "character_emotion_strategy"]],
     ["risk_warnings", "风险提醒", ["risk_warnings", "risks", "risk_flags"]],
-    ["hard_requirements", "后续写作硬要求", ["hard_requirements", "downstream_requirements", "writing_requirements"]],
   ];
   const DEBUG_HIDDEN_FIELD_KEYS = [
     "id", "nodeId", "moduleName", "moduleType", "moduleLogo", "runningTime",
@@ -813,7 +851,7 @@
 
   function loadState() {
     const params = new URLSearchParams(window.location.search || "");
-    if (params.get("new") === "1" || params.get("new_framework") === "1") {
+    if (params.get("resume") !== "1") {
       storageRemove(STORAGE_KEY);
       storageRemove(LEGACY_STORAGE_KEY);
       const fresh = normalizeState(null);
@@ -2057,6 +2095,23 @@
     frameworkPlanPackage: "框架策划包",
     adaptation_guide: "整体改编指引",
     adaptationGuide: "整体改编指引",
+    core_setting_adjustment: "核心设定调整",
+    core_setting_adjustments: "核心设定调整",
+    narrative_rhythm_structure: "叙事节奏与结构",
+    narrative_rhythm: "叙事节奏与结构",
+    structure_and_rhythm: "叙事节奏与结构",
+    visualization: "视觉化呈现",
+    visualization_strategy: "视觉化呈现",
+    visual_style: "视觉化呈现",
+    character_emotion_shaping: "人物情绪塑造",
+    character_emotion_strategy: "人物情绪塑造",
+    hard_constraints_for_script_workflow: "后续剧本硬性约束",
+    hard_constraints: "后续剧本硬性约束",
+    hard_requirements: "后续剧本硬性约束",
+    display_text: "可读摘要",
+    displayText: "可读摘要",
+    original_retention: "原文保留内容",
+    risk_warnings: "风险提醒",
     world_setting: "世界设定",
     worldSetting: "世界设定",
     main_relationships: "人物关系",
@@ -2271,6 +2326,11 @@
         <div class="fp-side-note">
           <strong>本地保存：</strong>状态会自动保存
         </div>
+        <div class="fp-side-actions">
+          <button class="fp-btn small primary" data-action="open-new-script">新建框架项目</button>
+          <button class="fp-btn small" data-action="toggle-assets">${ui.assetsOpen ? "收起框架资产" : "框架资产"}</button>
+        </div>
+        ${ui.assetsOpen ? renderAssetManager("side") : ""}
         <nav class="fp-nav">${navItems}</nav>
       </aside>
     `;
@@ -2288,25 +2348,21 @@
           <p class="fp-top-sub">目标：产出可保存的框架资产。当前阶段：${escapeHtml(stageTitle)} · 框架资产 ID：${escapeHtml(assetId)}</p>
         </div>
         <div class="fp-top-actions">
-          <button class="fp-btn small primary" data-action="open-new-script">新建框架项目</button>
           ${renderSaveFrameworkButton("small")}
-          ${renderFrameworkScriptButton("small")}
-          <button class="fp-btn small" data-action="toggle-assets">${ui.assetsOpen ? "收起框架资产" : "我的框架资产"}</button>
           <a class="fp-btn small ghost" data-guard-nav="workspace" href="${escapeHtml(config.workspaceUrl || "/workspace")}">返回主工作台</a>
           <button class="fp-btn small danger" data-action="reset-state" ${canClearFrameworkInput() ? "" : "disabled"}>清空输入</button>
         </div>
       </div>
-      ${ui.assetsOpen ? renderAssetManager() : ""}
-      ${renderKnowledgePanel()}
+      ${state.current_view === "basic" ? renderKnowledgePanel() : ""}
       <div class="fp-card fp-steps">${renderStepRail()}</div>
       ${renderRunningStageStatus()}
     `;
   }
 
-  function renderAssetManager() {
+  function renderAssetManager(mode = "main") {
     const assets = filteredAssets();
     return `
-      <section class="fp-card fp-asset-manager">
+      <section class="fp-card fp-asset-manager ${mode === "side" ? "fp-asset-manager-side" : ""}">
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">我的框架资产</h2>
@@ -2371,8 +2427,9 @@
   function renderKnowledgePanel() {
     const selectedTags = selectedKnowledgeTags();
     const missingIds = (ui.knowledge.selectedIds || []).filter((id) => !selectedTags.some((tag) => String(tag.id || "") === String(id)));
-    const builtinTags = (ui.knowledge.tags || []).filter((tag) => tag.builtin);
-    const customTags = (ui.knowledge.tags || []).filter((tag) => !tag.builtin);
+    const defaultTags = (ui.knowledge.tags || []).filter((tag) => knowledgeTagFolder(tag) === "default");
+    const filmTags = (ui.knowledge.tags || []).filter((tag) => knowledgeTagFolder(tag) === "film");
+    const customTags = (ui.knowledge.tags || []).filter((tag) => knowledgeTagFolder(tag) === "custom");
     const selectedLabel = selectedTags.length || missingIds.length
       ? `${selectedTags.length + missingIds.length} 个已选`
       : "允许不选择";
@@ -2396,11 +2453,15 @@
             ${renderKnowledgeSelected(selectedTags, missingIds)}
             <div class="fp-knowledge-grid">
               <div>
-                <h3>默认标签</h3>
-                ${renderKnowledgeTagGroup(builtinTags, "暂无系统预设标签。")}
+                <h3>默认分类</h3>
+                ${renderKnowledgeTagGroup(defaultTags, "暂无默认分类标签。")}
               </div>
               <div>
-                <h3>用户自定义标签</h3>
+                <h3>优秀电影参考</h3>
+                ${renderKnowledgeTagGroup(filmTags, "暂无优秀电影参考标签。")}
+              </div>
+              <div>
+                <h3>用户自定义</h3>
                 ${renderKnowledgeTagGroup(customTags, "暂无自定义标签。")}
               </div>
             </div>
@@ -2413,14 +2474,38 @@
   }
 
   function renderKnowledgeSelected(tags, missingIds) {
-    const items = tags.map((tag) => `<span class="fp-tag ${tag.builtin ? "blue" : "ok"}">${escapeHtml(tag.name || tag.id)}</span>`)
-      .concat((missingIds || []).map((id) => `<span class="fp-tag red">${escapeHtml(id)}（标签已删除）</span>`));
+    const items = tags.map((tag) => `
+      <button class="fp-tag fp-tag-button ${tag.builtin ? "blue" : "ok"}" type="button" data-action="unselect-knowledge-tag" data-tag-id="${escapeHtml(tag.id || "")}" title="取消选择">
+        ${escapeHtml(tag.name || tag.id)}
+      </button>
+    `).concat((missingIds || []).map((id) => `
+      <button class="fp-tag fp-tag-button red" type="button" data-action="unselect-knowledge-tag" data-tag-id="${escapeHtml(id)}" title="移除失效标签">
+        ${escapeHtml(id)}（标签已删除）
+      </button>
+    `));
     return `
       <div class="fp-knowledge-selected">
         <strong>当前已选择标签</strong>
         <div>${items.length ? items.join("") : `<span class="fp-tag lock">未选择标签</span>`}</div>
       </div>
     `;
+  }
+
+  function knowledgeTagFolder(tag) {
+    const id = String((tag && tag.id) || "");
+    const group = String((tag && tag.group) || "").trim();
+    const source = String((tag && tag.source) || "").trim();
+    const category = String((tag && tag.category) || "").trim();
+    if (
+      group === "excellent_film_beat" ||
+      group === "excellent_film_reference" ||
+      source === "save_the_cat_film_beat" ||
+      id.startsWith("excellent_film_beat_") ||
+      /电影|film/i.test(category)
+    ) {
+      return "film";
+    }
+    return tag && tag.builtin ? "default" : "custom";
   }
 
   function renderKnowledgeTagGroup(tags, emptyText) {
@@ -3192,7 +3277,7 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">整体改编指引</h2>
-            <p class="fp-card-sub">06 阶段包含六项：改编方向、原文保留内容、本次重点改变、风格要求、风险提醒、后续写作硬要求。</p>
+            <p class="fp-card-sub">06 阶段包含：核心设定调整、叙事节奏与结构、视觉化呈现、人物情绪塑造、后续剧本硬性约束和可读摘要。</p>
           </div>
           ${stageStatusTag("guide")}
         </div>
@@ -3213,6 +3298,7 @@
     const locked = state.stage_state.package.locked;
     const hasOutput = !isEmptyValue(state.framework_plan_package);
     const completed = hasOutput && !locked;
+    const blockReason = stageRunBlockReason("package");
     return `
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
@@ -3231,7 +3317,7 @@
         ${renderStageHistoryPanel("package")}
         <div class="fp-actions fp-stage-bottom-actions">
           <button class="fp-btn" data-action="go-view" data-view="guide">上一步</button>
-          <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="package" ${locked || isStageLoading("package") ? "disabled" : ""}>${hasOutput ? "重新生成 07" : "生成本阶段"}</button>
+          <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="package" ${locked || isStageLoading("package") || blockReason ? "disabled" : ""}>${hasOutput ? "重新生成 07" : "生成本阶段"}</button>
           ${renderSaveFrameworkButton("")}
           <button class="fp-btn primary" data-action="download-readable-framework" ${!hasOutput ? "disabled" : ""}>下载可读框架</button>
           <button class="fp-btn" data-action="download-structured-framework" ${!hasOutput ? "disabled" : ""}>下载结构化框架</button>
@@ -3546,14 +3632,71 @@
     return undefined;
   }
 
+  function guideDisplayTextValue(response, guideData) {
+    const source = response && typeof response === "object" && !Array.isArray(response) ? response : {};
+    const data = source.data && typeof source.data === "object" && !Array.isArray(source.data) ? source.data : {};
+    const sourceGuide = source.adaptation_guide && typeof source.adaptation_guide === "object" && !Array.isArray(source.adaptation_guide) ? source.adaptation_guide : {};
+    const guide = guideData && typeof guideData === "object" && !Array.isArray(guideData)
+      ? guideData
+      : (data.adaptation_guide && typeof data.adaptation_guide === "object" && !Array.isArray(data.adaptation_guide) ? data.adaptation_guide : {});
+    return valueByAliases(source, ["display_text", "displayText"])
+      ?? valueByAliases(data, ["display_text", "displayText"])
+      ?? valueByAliases(sourceGuide, ["display_text", "displayText"])
+      ?? valueByAliases(guide, ["display_text", "displayText"]);
+  }
+
+  function normalizeGuideConstraintValue(value) {
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item == null ? "" : item).trim()).filter(Boolean);
+    }
+    if (typeof value === "string") {
+      const lines = value.split(/\r?\n/)
+        .map((line) => line.replace(/^\s*(?:\d+[\.\)、)]|[-*])\s*/, "").trim())
+        .filter(Boolean);
+      return lines.length > 1 ? lines : (lines[0] ? [lines[0]] : []);
+    }
+    if (value == null) return [];
+    return [summarizeReadableValue(value)].filter(Boolean);
+  }
+
+  function parseGuideFieldValue(key, value) {
+    if (key === "hard_constraints_for_script_workflow") return normalizeGuideConstraintValue(value);
+    return String(value == null ? "" : value);
+  }
+
   function normalizeGuideFields(data) {
     const source = data && typeof data === "object" && !Array.isArray(data) ? data : {};
     const result = {};
     GUIDE_FIELD_DEFS.forEach(([key, , aliases]) => {
       const value = valueByAliases(source, aliases.concat([key]));
-      result[key] = value === undefined || value === null ? "" : value;
+      result[key] = key === "hard_constraints_for_script_workflow"
+        ? normalizeGuideConstraintValue(value)
+        : (value === undefined || value === null ? "" : value);
+    });
+    result.display_text = valueByAliases(source, ["display_text", "displayText"]) || "";
+    GUIDE_SUPPLEMENTAL_FIELD_DEFS.forEach(([key, , aliases]) => {
+      const value = valueByAliases(source, aliases.concat([key]));
+      if (value !== undefined && value !== null) result[key] = value;
     });
     return result;
+  }
+
+  function looksLikeGuidePayload(data) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+    return GUIDE_FIELD_DEFS.some(([, , aliases]) => valueByAliases(data, aliases) !== undefined)
+      || GUIDE_SUPPLEMENTAL_FIELD_DEFS.some(([, , aliases]) => valueByAliases(data, aliases) !== undefined)
+      || valueByAliases(data, ["display_text", "displayText"]) !== undefined;
+  }
+
+  function guidePayloadForDownstream(data) {
+    const guide = normalizeGuideFields(data);
+    return Object.assign({}, guide, {
+      adaptation_direction: guide.core_setting_adjustment,
+      key_changes: guide.narrative_rhythm_structure,
+      style_requirements: guide.visualization,
+      hard_requirements: guide.hard_constraints_for_script_workflow,
+      downstream_requirements: guide.hard_constraints_for_script_workflow,
+    });
   }
 
   function renderWhitelistFields(stageKey, data) {
@@ -4183,10 +4326,14 @@
     }
     const editable = Boolean(options && options.editable);
     const normalized = normalizeGuideFields(data);
+    const mainFields = GUIDE_FIELD_DEFS.concat([["display_text", "可读摘要", ["display_text", "displayText"]]]);
+    const supplementalCards = GUIDE_SUPPLEMENTAL_FIELD_DEFS
+      .map(([key, label]) => ({ key, label, value: normalized[key] }))
+      .filter((item) => isRenderableValue(item.value));
     return `
       <div class="fp-guide-grid">
-        ${GUIDE_FIELD_DEFS.map(([key, label]) => {
-          const value = normalized[key] || "";
+        ${mainFields.map(([key, label]) => {
+          const value = normalized[key];
           return `
           <article class="fp-guide-card">
             <h3>${escapeHtml(label)}</h3>
@@ -4194,6 +4341,19 @@
           </article>
         `}).join("")}
       </div>
+      ${supplementalCards.length ? `
+        <details class="fp-guide-supplement">
+          <summary>其他补充信息</summary>
+          <div class="fp-guide-grid">
+            ${supplementalCards.map((item) => `
+              <article class="fp-guide-card">
+                <h3>${escapeHtml(item.label)}</h3>
+                <p>${formatText(summarizeReadableValue(item.value) || "暂无")}</p>
+              </article>
+            `).join("")}
+          </div>
+        </details>
+      ` : ""}
     `;
   }
 
@@ -4203,7 +4363,7 @@
       state.adaptation_guide = {};
     }
     state.adaptation_guide = normalizeGuideFields(state.adaptation_guide);
-    state.adaptation_guide[key] = value;
+    state.adaptation_guide[key] = parseGuideFieldValue(key, value);
     markStageDraftDirty("guide");
     syncStageFlow(state);
     markDirty();
@@ -4492,6 +4652,7 @@
     }
     if (stageKey === "package") {
       state.adaptation_guide = normalizeGuideFields(state.adaptation_guide);
+      const adaptationGuide = guidePayloadForDownstream(state.adaptation_guide);
       return {
         mode: revise ? "改写" : "创作",
         basic_config: state.basic_config,
@@ -4502,7 +4663,7 @@
         checkpoint_explanation: state.checkpoint_explanation,
         character_storylines: state.character_storylines,
         storyline_decisions: state.storyline_decisions,
-        adaptation_guide: state.adaptation_guide,
+        adaptation_guide: adaptationGuide,
         user_edit_history: state.user_edit_history,
         previous_framework_plan_package: revise ? state.framework_plan_package : {},
         user_feedback: stageFeedbackPayload("package"),
@@ -4606,9 +4767,17 @@
       normalizeStorylinesForCurrentBeats();
     }
     if (stageNo === "06") {
-      state.adaptation_guide = safeData.adaptation_guide && typeof safeData.adaptation_guide === "object" && !Array.isArray(safeData.adaptation_guide)
-        ? safeData.adaptation_guide
+      const topGuideData = safeResponse.adaptation_guide && typeof safeResponse.adaptation_guide === "object" && !Array.isArray(safeResponse.adaptation_guide)
+        ? safeResponse.adaptation_guide
         : {};
+      const guideData = safeData.adaptation_guide && typeof safeData.adaptation_guide === "object" && !Array.isArray(safeData.adaptation_guide)
+        ? safeData.adaptation_guide
+        : (!isEmptyValue(topGuideData) ? topGuideData : (looksLikeGuidePayload(safeData) ? safeData : {}));
+      const displayText = guideDisplayTextValue(safeResponse, guideData);
+      state.adaptation_guide = normalizeGuideFields(Object.assign({}, guideData, {
+        display_text: displayText === undefined || displayText === null ? "" : displayText,
+      }));
+      state.display_texts[stageNo] = state.adaptation_guide.display_text || state.display_texts[stageNo] || "";
     }
     if (stageNo === "07") {
       state.framework_plan_package = safeData.framework_plan_package && typeof safeData.framework_plan_package === "object" && !Array.isArray(safeData.framework_plan_package)
@@ -4826,6 +4995,9 @@
     }
     if (stageKey === "storylines" && !state.character_storylines.length) return;
     if (stageKey === "guide" && isEmptyValue(state.adaptation_guide)) return;
+    if (stageKey === "guide") {
+      state.adaptation_guide = normalizeGuideFields(state.adaptation_guide);
+    }
 
     state.stage_state[stageKey].confirmed = true;
     state.stage_state[stageKey].locked = true;
@@ -5738,6 +5910,7 @@
     if (!state.stage_state || typeof state.stage_state !== "object") {
       state.stage_state = clone(initialState.stage_state);
     }
+    state.adaptation_guide = normalizeGuideFields(state.adaptation_guide);
     if (!isEmptyValue(state.framework_plan_package)) {
       STAGE_SEQUENCE.forEach((stageKey) => {
         state.stage_state[stageKey] = Object.assign(clone(initialState.stage_state[stageKey]), state.stage_state[stageKey] || {}, {
@@ -5961,11 +6134,13 @@
     }
     if (stageNo === "06") {
       response.data.adaptation_guide = {
-        core_setting_adjustments: "保留规则对抗骨架。",
-        structure_and_rhythm: "保持强开局、中点反转、后段反攻。",
-        visualization_strategy: "尽量用可拍摄冲突外化信息。",
-        character_emotion_strategy: "强调主角由屈辱到反攻的情绪线。",
+        core_setting_adjustment: "保留规则对抗骨架。",
+        narrative_rhythm_structure: "保持强开局、中点反转、后段反攻。",
+        visualization: "尽量用可拍摄冲突外化信息。",
+        character_emotion_shaping: "强调主角由屈辱到反攻的情绪线。",
+        hard_constraints_for_script_workflow: ["后续正式剧本生成必须延续强钩子和清晰反转。"],
       };
+      response.data.display_text = "整体改编方向已收束为强冲突、强节奏、可拍摄的剧本约束。";
       response.display_text = prettyJson(response.data.adaptation_guide);
       return response;
     }
@@ -6284,6 +6459,10 @@
     }
     if (action === "apply-knowledge-tags") {
       await applyKnowledgeTags();
+      return;
+    }
+    if (action === "unselect-knowledge-tag") {
+      setKnowledgeSelection(actionElement.dataset.tagId, false);
       return;
     }
     if (action === "new-knowledge-tag") {

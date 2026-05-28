@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import copy
 import threading
+import tempfile
+from io import BytesIO
 from functools import wraps
 import os
 from pathlib import Path
@@ -185,6 +187,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         basic = framework_state.get("basic_config") if isinstance(framework_state.get("basic_config"), dict) else {}
         package = framework_state.get("framework_plan_package") if isinstance(framework_state.get("framework_plan_package"), dict) else {}
         stage_outputs = _framework_stage_outputs(framework_state)
+        artifacts = project.get("artifacts") if isinstance(project.get("artifacts"), dict) else {}
+        input_payload = project.get("input_payload") if isinstance(project.get("input_payload"), dict) else {}
         metadata = project.get("metadata") if isinstance(project.get("metadata"), dict) else {}
         preference_snapshot = (
             framework_state.get("preference_snapshot")
@@ -232,7 +236,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "preference_snapshot": _strip_raw_fastgpt_fields(copy.deepcopy(preference_snapshot)),
         }
         if include_detail:
-            artifacts = project.get("artifacts") if isinstance(project.get("artifacts"), dict) else {}
             workspace_state = artifacts.get("framework_to_script_state") if isinstance(artifacts.get("framework_to_script_state"), dict) else {}
             asset.update(
                 {
@@ -324,10 +327,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 record.snapshot = snapshot
             task_manager._persist_snapshot(record)
         else:
-            task_manager._project_path(project_id).write_text(
-                json.dumps(snapshot, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            try:
+                task_manager._project_path(project_id).write_text(
+                    json.dumps(snapshot, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            except Exception:
+                logger.exception("framework-to-script stage snapshot persist failed project_id=%s", project_id)
 
     def _inject_framework_asset(data: dict, user_id: int) -> tuple[dict, dict | None]:
         asset_id = str(data.get("framework_asset_id") or data.get("asset_id") or "").strip()
@@ -3412,6 +3418,49 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             content_type="text/plain; charset=utf-8",
             headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
         )
+
+    @app.route("/api/framework-to-script/export/docx", methods=["GET", "POST"])
+    @_login_required
+    def export_framework_to_script_docx_api():
+        data = request.get_json(silent=True) if request.method == "POST" else {}
+        data = data if isinstance(data, dict) else {}
+        asset_id = str(
+            request.args.get("framework_asset_id")
+            or data.get("framework_asset_id")
+            or request.args.get("asset_id")
+            or data.get("asset_id")
+            or ""
+        ).strip()
+        if not asset_id:
+            return _json_error("缺少 framework_asset_id。", status=400)
+        asset = _load_framework_asset_for_user(asset_id, _require_user_id())
+        if not asset:
+            return _json_error("框架资产不存在、无权访问，或尚未生成 07 最终策划包。", status=404)
+        text = _framework_to_script_txt(asset)
+        filename_title = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(asset.get("title") or "framework_script_docx"))
+        filename = f"{filename_title[:48] or 'framework_script'}.docx"
+        try:
+            from .utils.txt_to_docx import convert as convert_txt_to_docx
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                tmp_path = Path(tmp_dir)
+                txt_path = tmp_path / "framework_script.txt"
+                docx_path = tmp_path / "framework_script.docx"
+                txt_path.write_text(text, encoding="utf-8")
+                convert_txt_to_docx(str(txt_path), str(docx_path))
+                docx_bytes = docx_path.read_bytes()
+                return send_file(
+                    BytesIO(docx_bytes),
+                    as_attachment=True,
+                    download_name=filename,
+                    mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+        except ModuleNotFoundError as exc:
+            if exc.name == "docx":
+                return _json_error("当前环境缺少 python-docx，暂时无法导出 DOCX。", status=500)
+            raise
+        except Exception as exc:
+            logger.exception("framework-to-script docx export failed")
+            return _json_error(str(exc), status=500, fallback="DOCX 导出失败，请稍后重试。")
 
 
     @app.get("/framework-to-script")
