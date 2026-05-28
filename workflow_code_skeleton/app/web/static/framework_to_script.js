@@ -36,6 +36,8 @@
     stageOutputs: {},
     settings: {},
     scriptStages: {},
+    preferenceSnapshot: {},
+    preferenceSource: "none",
     assets: [],
     assetPanelOpen: false,
     isLoadingAsset: false,
@@ -58,6 +60,8 @@
     state.frameworkPlanPackage = null;
     state.stageOutputs = {};
     state.scriptStages = {};
+    state.preferenceSnapshot = {};
+    state.preferenceSource = "none";
   } else if (!urlAssetId) {
     window.localStorage.removeItem(STORAGE_KEY);
     state.frameworkAssetId = null;
@@ -66,6 +70,8 @@
     state.frameworkPlanPackage = null;
     state.stageOutputs = {};
     state.scriptStages = {};
+    state.preferenceSnapshot = {};
+    state.preferenceSource = "none";
     state.assetPanelOpen = true;
     state.frameworkSource = "";
   }
@@ -131,12 +137,48 @@
         settings: state.settings,
         scriptStages: state.scriptStages,
         frameworkSource: state.frameworkSource,
+        preferenceSnapshot: state.preferenceSnapshot,
+        preferenceSource: state.preferenceSource,
       })));
     } catch (error) {}
   }
 
   function attachKnowledgePayload(payload, stageNo) {
-    return Object.assign({}, payload || {});
+    const next = Object.assign({}, payload || {});
+    const snapshot = state.preferenceSnapshot && typeof state.preferenceSnapshot === "object" ? state.preferenceSnapshot : {};
+    const stagePreferences = snapshot.stage_preferences && typeof snapshot.stage_preferences === "object" ? snapshot.stage_preferences : {};
+    const paddedStage = String(stageNo || "").padStart(2, "0");
+    const stageKeyMap = { "08": "scene", "09": "appearance", "10": "episode", "11": "conflict", "12": "script_text" };
+    const preference = String(stagePreferences[paddedStage] || stagePreferences[stageKeyMap[paddedStage]] || "");
+    next.preference_snapshot = snapshot;
+    next.preference_source = state.preferenceSource || (hasObject(snapshot) ? "framework_asset_snapshot" : "none");
+    next.stage_preference_prompt = preference;
+    next.user_stage_preference_prompt = preference;
+    return next;
+  }
+
+  function normalizePreferenceSnapshot(value) {
+    const snapshot = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    const stagePreferences = snapshot.stage_preferences && typeof snapshot.stage_preferences === "object" ? snapshot.stage_preferences : {};
+    return {
+      selected_knowledge_tag_ids: Array.isArray(snapshot.selected_knowledge_tag_ids) ? snapshot.selected_knowledge_tag_ids.map(String) : [],
+      selected_knowledge_tag_names: Array.isArray(snapshot.selected_knowledge_tag_names) ? snapshot.selected_knowledge_tag_names.map(String) : [],
+      stage_preferences: Object.assign({}, stagePreferences),
+      captured_at: String(snapshot.captured_at || ""),
+      source: String(snapshot.source || (hasObject(stagePreferences) ? "knowledge_library" : "")),
+    };
+  }
+
+  function setPreferenceSnapshot(snapshot, source) {
+    const normalized = normalizePreferenceSnapshot(snapshot);
+    state.preferenceSnapshot = normalized;
+    state.preferenceSource = hasObject(normalized.stage_preferences) ? source : "none";
+  }
+
+  function preferenceStatusText() {
+    if (state.preferenceSource === "framework_asset_snapshot") return "当前框架偏好：已继承自框架资产";
+    if (state.preferenceSource === "imported_json") return "当前框架偏好：导入 JSON 中已包含";
+    return "当前框架偏好：未记录，将使用默认策略";
   }
 
   function outputDetailsStorageKey(id) {
@@ -649,6 +691,8 @@
       framework_plan_package: state.frameworkPlanPackage || {},
       frameworkPlanPackage: state.frameworkPlanPackage || {},
       source_framework_project_id: state.frameworkAssetId || state.projectId || "",
+      preference_snapshot: state.preferenceSnapshot || {},
+      preference_source: state.preferenceSource || "none",
     };
     if (state.frameworkAssetId) payload.framework_asset_id = state.frameworkAssetId;
     Object.assign(payload, state.stageOutputs || {});
@@ -695,6 +739,7 @@
       state.stageOutputs = asset.stage_outputs || {};
       state.scriptStages = asset.scriptStages || (asset.framework_to_script_state || {}).scriptStages || {};
       state.frameworkSource = state.frameworkSource === "刚刚完成的框架" ? "刚刚完成的框架" : "我的资产 / 框架资产";
+      setPreferenceSnapshot(asset.preference_snapshot || {}, "framework_asset_snapshot");
       const stage10 = state.scriptStages.stage10 || {};
       const allEnrichedEpisodePlan = stage10Plan(stage10);
       const allEnrichedEpisodePlanText = stage10Text(stage10);
@@ -788,6 +833,7 @@
       minutes_per_episode: data.minutes_per_episode || basic.minutes_per_episode || "",
       updated_at: data.exported_at || data.updated_at || new Date().toISOString(),
       framework_plan_package: frameworkPlanPackage,
+      preference_snapshot: normalizePreferenceSnapshot(data.preference_snapshot || data.preferenceSnapshot || (data.metadata || {}).preference_snapshot || {}),
       stage_outputs: {
         source_brief: stageOutputs.source_brief || data.source_brief || {},
         worldview_plan: stageOutputs.worldview_plan || data.worldview_plan || frameworkPlanPackage.worldview_plan || {},
@@ -827,6 +873,7 @@
       state.frameworkPlanPackage = asset.framework_plan_package || {};
       state.stageOutputs = asset.stage_outputs || {};
       state.scriptStages = asset.scriptStages || {};
+      setPreferenceSnapshot(asset.preference_snapshot || {}, "imported_json");
       state.frameworkSource = "导入 JSON";
       state.assetPanelOpen = false;
       state.importStatus = `导入成功：${asset.title || "未命名框架"} · ${asset.episodes_per_season || "未知"} 集 · ${asset.minutes_per_episode || "未知"} 分钟/集`;
@@ -843,6 +890,7 @@
       render();
       return;
     }
+    if (hasObject((state.scriptStages.stage08 || {}).sceneDictionary) && !window.confirm("重新运行 08 会覆盖 08 输出，并清空后续 09-12 已生成结果。继续吗？")) return;
     saveRunningStage("08");
     state.error = null;
     render();
@@ -881,6 +929,7 @@
       render();
       return;
     }
+    if (hasObject((state.scriptStages.stage09 || {}).appearanceMapping) && !window.confirm("重新运行 09 会覆盖 09 输出，并清空后续 10-12 已生成结果。继续吗？")) return;
     saveRunningStage("09");
     state.error = null;
     render();
@@ -927,6 +976,7 @@
       render();
       return;
     }
+    if (hasContent(stage10Plan(state.scriptStages.stage10 || {})) && !window.confirm("重新运行 10 会覆盖分集细化结果，并清空后续 11-12 已生成结果。继续吗？")) return;
 
     saveRunningStage("10");
     state.error = null;
@@ -1044,6 +1094,7 @@
       return;
     }
     const resetStage11 = Boolean(options.resetStage11);
+    if (resetStage11 && !window.confirm("重新运行 11 会覆盖开头冲突钩子，并清空 12 正文批次。继续吗？")) return;
     const expectedStarts = expectedBatchStartsFromPlan(allEnrichedEpisodePlan);
     if (resetStage11) {
       state.scriptStages.stage11 = {};
@@ -1102,6 +1153,7 @@
       return;
     }
     const resetStage12 = Boolean(options.resetStage12);
+    if (resetStage12 && !window.confirm("重新运行 12 会覆盖已生成的正文批次。继续吗？")) return;
     if (resetStage12) {
       state.scriptStages.stage12 = {};
     }
@@ -1307,6 +1359,7 @@
           <div class="wts-version">
             <span>当前框架版本：${escapeHtml(state.frameworkAssetId)}</span>
             <span>框架来源：${escapeHtml(state.frameworkSource || "未选择")}</span>
+            <span>${escapeHtml(preferenceStatusText())}</span>
             <span>当前阶段：08-12</span>
             <span>保存时间：${escapeHtml(formatDate(asset.updated_at || asset.created_at))}</span>
             <button type="button" class="wts-btn ghost" data-action="save-workspace">保存当前版本</button>
@@ -1336,7 +1389,8 @@
     `;
   }
 
-  function renderStageCard(id, title, status, buttonText, action, disabled, body, extraActions = "") {
+  function renderStageCard(id, title, status, buttonText, action, disabled, body, options = {}) {
+    const secondary = Boolean(options.secondary);
     return `
       <article class="wts-step ${status === "已完成" ? "done" : disabled ? "locked" : ""}">
         <b>${escapeHtml(id)}</b>
@@ -1346,8 +1400,7 @@
             <span>${escapeHtml(status)}</span>
           </div>
           <div class="wts-step-actions">
-            <button type="button" data-action="${escapeHtml(action)}" ${disabled ? "disabled" : ""}>${escapeHtml(buttonText)}</button>
-            ${extraActions}
+            <button class="${secondary ? "secondary" : ""}" type="button" data-action="${escapeHtml(action)}" ${disabled ? "disabled" : ""}>${escapeHtml(buttonText)}</button>
           </div>
           <p class="wts-hint">输入来源：已导入的框架和已完成内容</p>
           ${body || ""}
@@ -1392,13 +1445,10 @@
           : has11Complete
             ? "待运行"
             : "等待 11";
-    const reset08Button = `<button type="button" data-action="rerun-stage-08" ${locked ? "disabled" : ""}>重新运行08阶段</button>`;
-    const reset09Button = `<button type="button" data-action="rerun-stage-09" ${locked || !has08 ? "disabled" : ""}>重新运行09阶段</button>`;
-    const reset10Button = `<button type="button" data-action="rerun-stage-10" ${locked || !has09 ? "disabled" : ""}>重新运行10阶段</button>`;
     const stage10Validation = stage10.episodeValidation || validateStage10Completeness(stage10Plan(stage10), stage10Text(stage10), inferTotalEpisodes(stage10Plan(stage10), state.importedFrameworkAsset));
     const stage10Valid = has10 && stage10Validation.ok;
-    const reset11Button = `<button type="button" data-action="rerun-stage-11" ${locked || !stage10Valid ? "disabled" : ""}>重新运行11阶段</button>`;
-    const reset12Button = `<button type="button" data-action="rerun-stage-12" ${locked || !has11Complete ? "disabled" : ""}>重新运行12阶段</button>`;
+    const stage12ButtonText = has12Complete ? "重新运行 12" : has12 ? "生成下一批正文" : "生成当前批正文";
+    const stage12Action = has12Complete ? "rerun-stage-12" : "run-stage-12";
     return `
       <section class="wts-card" id="scriptStageArea">
         <div class="wts-card-head">
@@ -1419,7 +1469,7 @@
             has08
               ? `<p class="wts-hint">已完成</p>`
               : `<p class="wts-hint">运行完成前不展示输出；结果会自动缓存并供后续阶段使用。</p>`,
-            reset08Button
+            { secondary: has08 }
           )}
 
           ${renderStageCard(
@@ -1432,7 +1482,7 @@
             has09
               ? `<p class="wts-hint">已完成</p>`
               : `<p class="wts-hint">运行完成前不展示输出；结果会自动缓存并供后续阶段使用。</p>`,
-            reset09Button
+            { secondary: has09 }
           )}
           ${renderStageCard(
             "10",
@@ -1453,27 +1503,27 @@
               </details>
               ${stage10Validation.ok ? `<p class="wts-hint">集数完整性校验通过。</p>` : `<p class="wts-error-inline">集数完整性校验失败：${escapeHtml(stage10Validation.issues.join("；"))}</p>`}
             ` : `<p class="wts-hint">将沿用当前导入的框架资产和已完成的 08/09 输出。</p>`,
-            reset10Button
+            { secondary: has10 }
           )}
           ${renderStageCard(
             "11",
             "开头冲突钩子",
             stage11Status,
-            has11Complete ? "重新运行 11" : has11 ? "继续运行 11" : "运行 11",
-            "run-stage-11",
+            has11Complete ? "重新运行 11" : has11 ? "继续运行 11" : "运行 11 开头冲突钩子",
+            has11Complete ? "rerun-stage-11" : "run-stage-11",
             locked || !stage10Valid,
             has11 ? renderStage11Batches(stage11) : `<p class="wts-hint">${state.runningStage ? `当前 ${escapeHtml(state.runningStage)} 阶段运行态锁定，完成或超时后可继续。` : ""}</p>`,
-            reset11Button
+            { secondary: has11Complete }
           )}
           ${renderStageCard(
             "12",
             "正文及对话",
             stage12Status,
-            has12Complete ? "重新补跑 12" : has12 ? "继续运行 12" : "运行 12",
-            "run-stage-12",
+            stage12ButtonText,
+            stage12Action,
             locked || !has11Complete,
             has12 ? renderStage12Batches(stage12) : `<p class="wts-hint"></p>`,
-            reset12Button
+            { secondary: has12Complete }
           )}
         </div>
       </section>

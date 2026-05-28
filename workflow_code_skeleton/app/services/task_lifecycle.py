@@ -404,6 +404,7 @@ class TaskLifecycleMixin:
             "validation_report": copy.deepcopy(payload.get("validation_report") if isinstance(payload.get("validation_report"), dict) else {}),
             "display_texts": copy.deepcopy(payload.get("display_texts") if isinstance(payload.get("display_texts"), dict) else {}),
             "prompt_preferences": copy.deepcopy(payload.get("prompt_preferences") if isinstance(payload.get("prompt_preferences"), dict) else {}),
+            "preference_snapshot": copy.deepcopy(payload.get("preference_snapshot") if isinstance(payload.get("preference_snapshot"), dict) else {}),
             "selected_preference_tag_ids": copy.deepcopy(payload.get("selected_preference_tag_ids") if isinstance(payload.get("selected_preference_tag_ids"), list) else []),
             "selected_preference_tags": copy.deepcopy(payload.get("selected_preference_tags") if isinstance(payload.get("selected_preference_tags"), list) else []),
             "asset_state": copy.deepcopy(asset_state),
@@ -438,6 +439,7 @@ class TaskLifecycleMixin:
                 "asset_kind": "framework_planner",
                 "asset_type": "framework",
                 "framework_planner_state": copy.deepcopy(framework_state),
+                "preference_snapshot": copy.deepcopy(framework_state["preference_snapshot"]),
             }
         )
 
@@ -462,6 +464,10 @@ class TaskLifecycleMixin:
                 "framework_planner_state": copy.deepcopy(framework_state),
                 "framework_plan_package": copy.deepcopy(framework_plan_package),
                 "validation_report": copy.deepcopy(framework_state["validation_report"]),
+                "preference_snapshot": copy.deepcopy(framework_state["preference_snapshot"]),
+            },
+            "metadata": {
+                "preference_snapshot": copy.deepcopy(framework_state["preference_snapshot"]),
             },
             "logs": [],
             "progress_percent": 100 if status == "completed" else 0,

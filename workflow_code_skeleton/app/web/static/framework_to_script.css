@@ -108,6 +108,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   min-height: 36px;
 }
 .wts-btn.ghost,
+.wts-step-actions button.secondary,
 .wts-step-actions button:disabled {
   border-color: var(--wts-border);
   background: #fff;

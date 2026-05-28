@@ -123,6 +123,21 @@
 
   const STAGE_SEQUENCE = ["basic", "worldview", "character", "beat", "storylines", "guide", "package"];
   const ALL_STAGE_PREFERENCE_KEYS = STAGE_SEQUENCE.slice();
+  const KNOWLEDGE_SNAPSHOT_STAGE_KEYS = ["basic", "worldview", "character", "beat", "storylines", "guide", "package", "scene", "appearance", "episode", "conflict", "script_text"];
+  const KNOWLEDGE_SNAPSHOT_STAGE_NUMBERS = {
+    basic: "01",
+    worldview: "02",
+    character: "03",
+    beat: "04",
+    storylines: "05",
+    guide: "06",
+    package: "07",
+    scene: "08",
+    appearance: "09",
+    episode: "10",
+    conflict: "11",
+    script_text: "12",
+  };
   const BEAT_NAMES = [
     "开场",
     "主体呈现",
@@ -1819,6 +1834,29 @@
     return Object.assign({}, payload || {}, knowledgePayloadFields(stageKey || "basic"));
   }
 
+  function buildPreferenceSnapshot() {
+    const tags = selectedKnowledgeTags();
+    const selectedIds = (ui.knowledge.selectedIds || []).map((item) => String(item || "").trim()).filter(Boolean);
+    const tagStagePrompts = mergeSelectedKnowledgeStagePrompts(tags);
+    const manualStagePrompts = normalizeStagePrompts((state.prompt_preferences || {}).stage_prompts || {});
+    const mergedStagePrompts = normalizeStagePrompts(Object.assign({}, manualStagePrompts, tagStagePrompts));
+    const stagePreferences = {};
+    KNOWLEDGE_SNAPSHOT_STAGE_KEYS.forEach((stageKey) => {
+      const stageNo = KNOWLEDGE_SNAPSHOT_STAGE_NUMBERS[stageKey] || stageKey;
+      const label = `${stagePromptLabel(stageKey)}偏好`;
+      stagePreferences[stageNo] = String(mergedStagePrompts[stageKey] || "");
+      stagePreferences[stageKey] = String(mergedStagePrompts[stageKey] || "");
+      stagePreferences[label] = String(mergedStagePrompts[stageKey] || "");
+    });
+    return {
+      selected_knowledge_tag_ids: selectedIds,
+      selected_knowledge_tag_names: tags.map((tag) => String(tag.name || tag.id || "").trim()).filter(Boolean),
+      stage_preferences: stagePreferences,
+      captured_at: new Date().toISOString(),
+      source: "knowledge_library",
+    };
+  }
+
   function truncateText(value, limit) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     const max = Number(limit || 80);
@@ -3219,6 +3257,7 @@
       adaptation_direction: basic.adaptation_direction,
       frameworkPlanPackage: clone(state.framework_plan_package || {}),
       framework_plan_package: clone(state.framework_plan_package || {}),
+      preference_snapshot: buildPreferenceSnapshot(),
       stageOutputs: {
         source_brief: clone(state.source_brief || {}),
         worldview_plan: clone(state.worldview_plan || {}),
@@ -3234,6 +3273,7 @@
       metadata: {
         asset_kind: "framework_planner_export",
         project_id: currentProjectId(),
+        preference_snapshot: buildPreferenceSnapshot(),
       },
     });
   }
@@ -4082,6 +4122,7 @@
       validation_report: clone(state.validation_report),
       display_texts: clone(state.display_texts || {}),
       prompt_preferences: clone(state.prompt_preferences || {}),
+      preference_snapshot: buildPreferenceSnapshot(),
       asset_state: assetState,
       stage_state: clone(state.stage_state || {}),
       current_view: state.current_view || "basic",

@@ -126,6 +126,7 @@ from .stage_output_repair import (
     validate_appearanceMapping_output,
     validate_scenes_output,
 )
+from .workflow_preference_keys import all_preference_wire_keys
 
 logger = get_logger("fastgpt_client")
 
@@ -716,7 +717,9 @@ class FastGPTClient:
         contract: FastGPTStageContract,
     ) -> dict[str, Any]:
         if settings.fastgpt_variable_mode in {"canonical", "english"}:
-            return contract.build_input_payload(variables)
+            payload = contract.build_input_payload(variables)
+            _copy_preference_wire_keys(payload, variables)
+            return payload
 
         if settings.fastgpt_variable_mode not in {"legacy", "legacy_ids"}:
             raise ValueError(
@@ -728,7 +731,9 @@ class FastGPTClient:
         if aliases is None:
             aliases = LEGACY_INPUT_ALIASES.get(stage_name)
         if not aliases:
-            return contract.build_input_payload(variables)
+            payload = contract.build_input_payload(variables)
+            _copy_preference_wire_keys(payload, variables)
+            return payload
 
         wire: dict[str, Any] = {}
         for canonical_name, wire_name in aliases.items():
@@ -772,6 +777,7 @@ class FastGPTClient:
                 _set_wire_values(wire, wire_names, "{}")
             elif canonical_name == MAX_RETRIES:
                 _set_wire_values(wire, wire_names, settings.max_retries_default)
+        _copy_preference_wire_keys(wire, variables)
         return wire
 
     def _endpoint_for(self, stage_name: str) -> FastGPTEndpoint:
@@ -4349,6 +4355,12 @@ def _set_wire_values(wire: dict[str, Any], wire_names: tuple[str, ...], value: A
     formatted = _format_wire_value(value)
     for name in wire_names:
         wire[name] = formatted
+
+
+def _copy_preference_wire_keys(wire: dict[str, Any], variables: dict[str, Any]) -> None:
+    for key in all_preference_wire_keys():
+        if key in variables:
+            wire[key] = _format_wire_value(variables.get(key))
 
 
 def _normalize_payload_candidate(

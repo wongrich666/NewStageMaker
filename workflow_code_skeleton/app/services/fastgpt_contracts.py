@@ -113,6 +113,7 @@ from ..workflow_ids import (
 )
 from .json_utils import parse_json
 from .stage_output_repair import describe_repairable_stage_output_issue
+from .workflow_preference_keys import all_preference_wire_keys
 
 script_title_content = "script_title_content"
 SCRIPT_TITLE = script_title_content
@@ -403,6 +404,9 @@ class FastGPTStageContract:
         if missing:
             joined = ", ".join(missing)
             raise ValueError(f"FastGPT 阶段 {self.stage_name} 缺少输入变量：{joined}")
+        for name in all_preference_wire_keys():
+            if name in variables:
+                payload[name] = variables[name]
         return payload
 
     def validate_output_payload(self, output: Any) -> dict[str, Any]:

@@ -40,6 +40,7 @@ from .services.framework_planner_service import (
 from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
 from .services.task_manager import task_manager
 from .services.user_knowledge_store import user_knowledge_store
+from .services.workflow_preference_keys import preference_keys_for
 from .utils.logger import get_logger
 from .utils.readable_labels import readable_label, readable_scalar, readable_text
 
@@ -184,6 +185,17 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         basic = framework_state.get("basic_config") if isinstance(framework_state.get("basic_config"), dict) else {}
         package = framework_state.get("framework_plan_package") if isinstance(framework_state.get("framework_plan_package"), dict) else {}
         stage_outputs = _framework_stage_outputs(framework_state)
+        metadata = project.get("metadata") if isinstance(project.get("metadata"), dict) else {}
+        preference_snapshot = (
+            framework_state.get("preference_snapshot")
+            or project.get("preference_snapshot")
+            or metadata.get("preference_snapshot")
+            or artifacts.get("preference_snapshot")
+            or input_payload.get("preference_snapshot")
+            or {}
+        )
+        if not isinstance(preference_snapshot, dict):
+            preference_snapshot = {}
         title = str(
             framework_state.get("project_title")
             or project.get("title")
@@ -217,6 +229,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "updated_at": project.get("updated_at") or framework_state.get("updated_at"),
             "summary": summary or "已保存的框架资产，可导入后继续 框架到剧本链路。",
             "can_import": bool(package),
+            "preference_snapshot": _strip_raw_fastgpt_fields(copy.deepcopy(preference_snapshot)),
         }
         if include_detail:
             artifacts = project.get("artifacts") if isinstance(project.get("artifacts"), dict) else {}
@@ -227,6 +240,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "stage_outputs": stage_outputs,
                     "framework_to_script_state": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state)),
                     "scriptStages": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state.get("scriptStages") or {})),
+                    "preference_snapshot": _strip_raw_fastgpt_fields(copy.deepcopy(preference_snapshot)),
                 }
             )
         return asset
@@ -328,6 +342,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         merged["framework_asset_id"] = asset.get("asset_id")
         merged["source_framework_project_id"] = asset.get("project_id")
         merged["framework_plan_package"] = package
+        if not isinstance(merged.get("preference_snapshot"), dict) or not merged.get("preference_snapshot"):
+            merged["preference_snapshot"] = (
+                asset.get("preference_snapshot")
+                if isinstance(asset.get("preference_snapshot"), dict)
+                else {}
+            )
         for key, value in stage_outputs.items():
             merged.setdefault(key, value)
         return merged, asset
@@ -767,6 +787,93 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             label = _USER_KNOWLEDGE_STAGE_LABELS.get(stage_key, stage_key)
             sections.append(f"【智慧库标签偏好：{name} / {label}】\n{text}")
         return "\n\n".join(sections), len(sections)
+
+    def _resolve_stage_preference(data: dict, stage: str, framework_asset: dict | None = None) -> tuple[str, str]:
+        for key in (
+            "stagePreference",
+            "stage_preference",
+            "userPreference",
+            "user_preferences",
+        ):
+            if key in data:
+                preference = _coerce_prompt_text(data.get(key))
+                if preference:
+                    return preference, "request_payload"
+        snapshot = data.get("preference_snapshot") if isinstance(data.get("preference_snapshot"), dict) else {}
+        if not snapshot and isinstance(data.get("preferenceSnapshot"), dict):
+            snapshot = data.get("preferenceSnapshot")
+        if not snapshot and isinstance(data.get("metadata"), dict):
+            metadata_snapshot = data["metadata"].get("preference_snapshot") or data["metadata"].get("preferenceSnapshot")
+            snapshot = metadata_snapshot if isinstance(metadata_snapshot, dict) else {}
+        source = "none"
+        if isinstance(framework_asset, dict) and framework_asset.get("asset_id"):
+            source = "framework_asset_snapshot"
+        elif snapshot:
+            source = "imported_json"
+        if not snapshot:
+            return "", "none"
+        stage_preferences = snapshot.get("stage_preferences") if isinstance(snapshot.get("stage_preferences"), dict) else {}
+        if not stage_preferences and isinstance(snapshot.get("stagePreferences"), dict):
+            stage_preferences = snapshot.get("stagePreferences")
+        stage_no = str(stage or "").zfill(2)
+        stage_key = _user_knowledge_stage_key(stage_no)
+        stage_label = _USER_KNOWLEDGE_STAGE_LABELS.get(stage_key, "")
+        preference = _coerce_prompt_text(
+            stage_preferences.get(stage_no)
+            or stage_preferences.get(stage_key)
+            or stage_preferences.get(stage_label)
+            or stage_preferences.get(str(stage or ""))
+        )
+        return preference, source
+
+    def _inject_snapshot_stage_preference(
+        variables: dict,
+        data: dict,
+        stage: str,
+        *,
+        framework_asset: dict | None,
+        workflow_stage: str | None = None,
+    ) -> dict:
+        preference, source = _resolve_stage_preference(data, stage, framework_asset)
+        stage_no = str(stage or "").zfill(2)
+        stage_key = _user_knowledge_stage_key(stage_no)
+        stage_label = _USER_KNOWLEDGE_STAGE_LABELS.get(stage_key, "")
+        workflow_preference_keys = tuple(preference_keys_for(workflow_stage or stage_no))
+        asset_id = str(
+            (framework_asset or {}).get("asset_id")
+            or data.get("framework_asset_id")
+            or data.get("asset_id")
+            or ""
+        ).strip()
+        for key in (
+            "stagePreference",
+            "stage_preference",
+            "stage_preference_prompt",
+            "userPreference",
+            "user_preferences",
+            "user_stage_preference_prompt",
+        ):
+            variables[key] = preference
+        for key in workflow_preference_keys:
+            variables[key] = preference
+        variables_has_preference_key = (
+            all(key in variables for key in workflow_preference_keys)
+            if workflow_preference_keys
+            else False
+        )
+        logger.info(
+            "framework-to-script stage%s preference resolved asset_id=%s stage_name=%s preference_source=%s preference_label=%s workflow_preference_keys=%s has_stage_preference=%s preference_length=%s variables_has_preference_key=%s",
+            stage_no,
+            asset_id,
+            stage_label,
+            source,
+            stage_label,
+            list(workflow_preference_keys),
+            bool(preference),
+            len(preference),
+            variables_has_preference_key,
+        )
+        return variables
 
     def _resolve_saved_preference_tags(user_id: int | str, selected_ids: list[str]) -> list[dict]:
         if not selected_ids:
@@ -1520,6 +1627,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "character_storylines": character_storylines,
             "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
         }
+        variables = _inject_snapshot_stage_preference(
+            variables,
+            data,
+            "08",
+            framework_asset=framework_asset,
+            workflow_stage="08",
+        )
         def _try_parse_json_text(value):
             if not isinstance(value, str):
                 return None
@@ -1736,6 +1850,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "beat_checkpoint_timeline": beat_checkpoint_timeline,
             "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
         }
+        variables = _inject_snapshot_stage_preference(
+            variables,
+            data,
+            "09",
+            framework_asset=framework_asset,
+            workflow_stage="09",
+        )
         def _try_parse_json_text(value):
             if not isinstance(value, str):
                 return None
@@ -2173,6 +2294,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "appearance_mapping": appearance_mapping,
             "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
         }
+        variables = _inject_snapshot_stage_preference(
+            variables,
+            data,
+            "10",
+            framework_asset=framework_asset,
+            workflow_stage="10",
+        )
         def _try_parse_json_text(value):
             if not isinstance(value, str):
                 return None
@@ -2458,6 +2586,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "conflictMemory": conflict_memory,
                 }
                 _merge_aliases(base_vars, {"totalEpisodes": ("total_episodes",), "conflictMemory": ("conflict_memory",)})
+                base_vars = _inject_snapshot_stage_preference(
+                    base_vars,
+                    data,
+                    "11",
+                    framework_asset=framework_asset,
+                    workflow_stage="11_write",
+                )
                 first_batch_item = batch_plan[0] if batch_plan and isinstance(batch_plan[0], dict) else {}
                 appearance_characters = appearance_mapping.get("characters") if isinstance(appearance_mapping, dict) else []
                 appearance_character_count = (
@@ -2702,13 +2837,20 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         len(blocking_issues),
                         asset_id,
                     )
-                    rewrite_output = fastgpt_client.run_stage(
-                        STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
+                    rewrite_vars = _inject_snapshot_stage_preference(
                         {
                             **base_vars,
                             "batchCausalConflictPlan": conflict_plan,
                             "batchCausalConflictReview": conflict_review,
                         },
+                        data,
+                        "11",
+                        framework_asset=framework_asset,
+                        workflow_stage="11_rewrite",
+                    )
+                    rewrite_output = fastgpt_client.run_stage(
+                        STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
+                        rewrite_vars,
                     )
                     logger.info(
                         "framework-to-script stage11 rewrite done: asset_id=%s rewrite_output_keys=%s",
@@ -2954,6 +3096,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         "scriptMemory": ("script_memory",),
                     },
                 )
+                base_vars = _inject_snapshot_stage_preference(
+                    base_vars,
+                    data,
+                    "12",
+                    framework_asset=framework_asset,
+                    workflow_stage="12_write",
+                )
                 first_plan = batch_plan[0] if isinstance(batch_plan[0], dict) else {}
                 first_plan_summary = {
                     "episode": first_plan.get("episode"),
@@ -3112,13 +3261,20 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         rewrite_required,
                         len(blocking_issues),
                     )
-                    rewrite_output = fastgpt_client.run_stage(
-                        STAGE_FRAMEWORK_SCRIPT_REWRITE,
+                    rewrite_vars = _inject_snapshot_stage_preference(
                         {
                             **base_vars,
                             "batchScriptText": batch_script,
                             "batchScriptReview": script_review,
                         },
+                        data,
+                        "12",
+                        framework_asset=framework_asset,
+                        workflow_stage="12_rewrite",
+                    )
+                    rewrite_output = fastgpt_client.run_stage(
+                        STAGE_FRAMEWORK_SCRIPT_REWRITE,
+                        rewrite_vars,
                     )
                     rewrite_keys = sorted(rewrite_output.keys()) if isinstance(rewrite_output, dict) else []
                     rewrite_script_value = _first_present(rewrite_output, "batchScriptText", "batch_script_text", default=None)
