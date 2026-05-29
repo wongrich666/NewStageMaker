@@ -1,0 +1,38 @@
+            "10",
+            "分集细化方案",
+            state.runningStage === "10" ? "运行中" : has10 ? "已完成" : has09 ? "待运行" : "等待 09",
+            has10 ? "重新运行 10" : "运行 10",
+            "run-stage-10",
+            locked || !has09,
+            has10 ? `
+              <details class="wts-output" open>
+                <summary>分集细化方案</summary>
+                ${renderTree(stage10.enrichedEpisodePlan || stage10.allEnrichedEpisodePlan, "enrichedEpisodePlan")}
+              </details>
+              ${stage10.enrichedEpisodePlanText || stage10.allEnrichedEpisodePlanText ? `
+                <details class="wts-output">
+                  <summary>分集细化文本</summary>
+                  ${renderTree(stage10.enrichedEpisodePlanText || stage10.allEnrichedEpisodePlanText, "enrichedEpisodePlan")}
+                </details>
+              ` : ""}
+            ` : `<p class="wts-hint">将沿用当前导入的框架资产和已完成的 08/09 输出。</p>`
+          )}
+          ${renderStageCard(
+            "11",
+            "开头冲突钩子",
+            state.runningStage === "11" ? "运行中" : has11 ? "已完成" : has10 ? "待运行" : "等待 10",
+            has11 ? "运行下一批 11" : "运行 11",
+            "run-stage-11",
+            locked || !has10,
+            has11 ? `
+              <details class="wts-output" open>
+                <summary>第 ${escapeHtml(stage11.batchStartEpisode || "")}-${escapeHtml(stage11.batchEndEpisode || "")} 集因果冲突</summary>
+                ${renderTree(stage11.batchCausalConflictPlan, "batchCausalConflictPlan")}
+              </details>
+              <details class="wts-output">
+                <summary>因果冲突审核</summary>
+                ${renderTree(stage11.batchCausalConflictReview, "batchCausalConflictReview")}
+              </details>
+              ${stage11.conflictMemory ? `
+                <details class="wts-output">
+        

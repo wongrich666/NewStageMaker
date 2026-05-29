@@ -1,0 +1,563 @@
+{
+  "nodes": [
+    {
+      "nodeId": "userGuide",
+      "name": "common:core.module.template.system_config",
+      "intro": "common:core.module.template.system_config_info",
+      "avatar": "core/workflow/template/systemConfig",
+      "flowNodeType": "userGuide",
+      "position": {
+        "x": -300,
+        "y": -1200
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "welcomeText",
+          "label": "core.app.Welcome Text",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": ""
+        },
+        {
+          "key": "variables",
+          "label": "core.app.Chat Variable",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": []
+        },
+        {
+          "key": "questionGuide",
+          "label": "core.app.Question Guide",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false
+          }
+        },
+        {
+          "key": "tts",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "type": "web"
+          }
+        },
+        {
+          "key": "whisper",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false,
+            "autoSend": false,
+            "autoTTSResponse": false
+          }
+        },
+        {
+          "key": "scheduleTrigger",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": null
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "workflowStart",
+      "name": "common:core.module.template.work_start",
+      "intro": "",
+      "avatar": "core/workflow/template/workflowStart",
+      "flowNodeType": "workflowStart",
+      "position": {
+        "x": 300,
+        "y": -1200
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "toolDescription": "用户问题",
+          "debugLabel": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "userChatInput",
+          "key": "userChatInput",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.input.label.user question",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "01Chat",
+      "name": "续写输入规范化",
+      "intro": "续写输入规范化",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 900,
+        "y": -1200
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": "deepseek-v4-flash"
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": 0.35
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": 64000
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": true
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": "system"
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": true
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": true
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": "json_object"
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "debugLabel": "",
+          "toolDescription": "",
+          "value": "你是“续写工作流输入规范化助手”。\n\n你的唯一任务是读取用户输入，整理成后续节点可直接读取的标准输入包。你不是续写编剧，不做剧情创作，不补写正文。\n\n输入：\n短剧本正文：{{$VARIABLE_NODE_ID.raw_script_body$}}\n短剧本已有集数：{{$VARIABLE_NODE_ID.existing_episode_count$}}\n希望续写到的集数：{{$VARIABLE_NODE_ID.target_episode_count$}}\n希望续写方向：{{$VARIABLE_NODE_ID.continuation_direction$}}\n希望续写的新结局：{{$VARIABLE_NODE_ID.new_ending_request$}}\n允许新增人物：{{$VARIABLE_NODE_ID.allowed_new_characters$}}\n允许新增场景：{{$VARIABLE_NODE_ID.allowed_new_scenes$}}\n每集正文字数：{{$VARIABLE_NODE_ID.episode_word_count$}}\n每批输出集数：{{$VARIABLE_NODE_ID.batch_size$}}\n当前批次起始集：{{$VARIABLE_NODE_ID.current_start_episode$}}\n\n处理原则：\n只做输入整理和风险标记。已有剧本正文是正史材料，不得改写。若允许新增人物或场景为空，记录为空，并在 policy 中说明默认不允许新增持续功能人物或全新核心场景。若目标集数小于或等于已有集数，必须在 risk_flags 中标记为 blocking 风险。若当前批次起始集为空或小于1，建议设为 existing_episode_count + 1。\n\n只输出合法 JSON，不输出解释。\n\n输出结构：\n{\n  \"project_meta\": {\n    \"existing_episode_count\": 0,\n    \"target_episode_count\": 0,\n    \"continuation_start_episode\": 0,\n    \"continuation_end_episode\": 0,\n    \"continuation_episode_count\": 0,\n    \"episode_word_count\": 0,\n    \"batch_size\": 5,\n    \"current_start_episode\": 0\n  },\n  \"source_material\": {\n    \"raw_script_body\": \"\",\n    \"has_script_body\": true\n  },\n  \"user_continuation_request\": {\n    \"continuation_direction\": \"\",\n    \"new_ending_request\": \"\",\n    \"allowed_new_characters_raw\": \"\",\n    \"allowed_new_scenes_raw\": \"\"\n  },\n  \"new_element_policy\": {\n    \"allow_new_named_characters\": false,\n    \"allow_new_core_scenes\": false,\n    \"allowed_character_scope\": \"\",\n    \"allowed_scene_scope\": \"\"\n  },\n  \"source_usage_policy\": {\n    \"existing_script_role\": \"已有剧本正文是续写正史，后续不得推翻已经发生的事件、关系状态、身份状态和结尾钩子。\",\n    \"direction_role\": \"续写方向用于控制后续主线偏移，但不得直接抹除原剧本事实。\",\n    \"ending_role\": \"新结局必须通过兼容策略落地，不能强行覆盖人物逻辑。\"\n  },\n  \"input_quality_report\": {\n    \"missing_fields\": [],\n    \"conflict_flags\": [],\n    \"risk_flags\": []\n  }\n}"
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "workflowStart",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照系统提示词完成当前任务即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "01Update",
+      "name": "更新续写输入规范化包",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 1500,
+        "y": -1200
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "continuation_input_pack"
+              ],
+              "value": [
+                "01Chat",
+                "answerText"
+              ],
+              "valueType": "string",
+              "renderType": "reference"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "workflowStart",
+      "target": "01Chat",
+      "sourceHandle": "workflowStart-source-right",
+      "targetHandle": "01Chat-target-left"
+    },
+    {
+      "source": "01Chat",
+      "target": "01Update",
+      "sourceHandle": "01Chat-source-right",
+      "targetHandle": "01Update-target-left"
+    }
+  ],
+  "chatConfig": {
+    "variables": [
+      {
+        "key": "raw_script_body",
+        "label": "短剧本正文",
+        "valueType": "string",
+        "required": true,
+        "type": "input",
+        "description": "用户提供的已有短剧本正文",
+        "icon": "core/workflow/inputType/input",
+        "defaultValue": ""
+      },
+      {
+        "key": "existing_episode_count",
+        "label": "短剧本已有集数",
+        "valueType": "number",
+        "required": true,
+        "type": "numberInput",
+        "description": "用户声明的已有集数",
+        "icon": "core/workflow/inputType/numberInput",
+        "defaultValue": 0,
+        "min": 0,
+        "max": 500
+      },
+      {
+        "key": "target_episode_count",
+        "label": "希望续写到的集数",
+        "valueType": "number",
+        "required": true,
+        "type": "numberInput",
+        "description": "最终希望达到的总集数",
+        "icon": "core/workflow/inputType/numberInput",
+        "defaultValue": 0,
+        "min": 0,
+        "max": 500
+      },
+      {
+        "key": "continuation_direction",
+        "label": "希望续写方向",
+        "valueType": "string",
+        "required": false,
+        "type": "input",
+        "description": "用户希望后续剧情走向",
+        "icon": "core/workflow/inputType/input",
+        "defaultValue": ""
+      },
+      {
+        "key": "new_ending_request",
+        "label": "希望续写的新结局",
+        "valueType": "string",
+        "required": false,
+        "type": "input",
+        "description": "用户指定的新结局或终局方向",
+        "icon": "core/workflow/inputType/input",
+        "defaultValue": ""
+      },
+      {
+        "key": "allowed_new_characters",
+        "label": "允许新增人物",
+        "valueType": "string",
+        "required": false,
+        "type": "input",
+        "description": "可以为空；为空时默认不允许新增持续功能人物",
+        "icon": "core/workflow/inputType/input",
+        "defaultValue": ""
+      },
+      {
+        "key": "allowed_new_scenes",
+        "label": "允许新增场景",
+        "valueType": "string",
+        "required": false,
+        "type": "input",
+        "description": "可以为空；为空时默认优先复用已有核心场景",
+        "icon": "core/workflow/inputType/input",
+        "defaultValue": ""
+      },
+      {
+        "key": "episode_word_count",
+        "label": "每集正文字数",
+        "valueType": "number",
+        "required": true,
+        "type": "numberInput",
+        "description": "续写正文每集目标字数",
+        "icon": "core/workflow/inputType/numberInput",
+        "defaultValue": 600,
+        "min": 50,
+        "max": 10000
+      },
+      {
+        "key": "batch_size",
+        "label": "每批输出集数",
+        "valueType": "number",
+        "required": false,
+        "type": "numberInput",
+        "description": "默认5",
+        "icon": "core/workflow/inputType/numberInput",
+        "defaultValue": 5,
+        "min": 1,
+        "max": 20
+      },
+      {
+        "key": "current_start_episode",
+        "label": "当前批次起始集",
+        "valueType": "number",
+        "required": false,
+        "type": "numberInput",
+        "description": "代码循环时写入，一般从已有集数+1开始",
+        "icon": "core/workflow/inputType/numberInput",
+        "defaultValue": 1,
+        "min": 1,
+        "max": 500
+      },
+      {
+        "key": "continuation_input_pack",
+        "label": "续写输入规范化包",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "",
+        "icon": "core/workflow/inputType/input"
+      }
+    ],
+    "scheduledTriggerConfig": {
+      "cronString": "",
+      "timezone": "Asia/Shanghai",
+      "defaultPrompt": ""
+    },
+    "_id": "c846c8675752ea666dcfd6d8"
+  }
+}

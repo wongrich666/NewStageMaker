@@ -1,0 +1,211 @@
+﻿    def run_framework_to_script_stage10_api():
+        """鍗曠嫭杩愯 10 鍒嗛泦缁嗗寲鏂规銆傚彧璺?10锛屼笉缁х画鍚庣画鍥犳灉鍐茬獊銆?""
+        import json as _json
+
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return _json_error("璇锋眰浣撳繀椤绘槸 JSON object銆?, status=400)
+        try:
+            user_id = _require_user_id()
+            data, framework_asset = _inject_framework_asset(data, user_id)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+        framework_plan_package = (
+            data.get("framework_plan_package")
+            or data.get("frameworkPlanPackage")
+            or {}
+        )
+        if not isinstance(framework_plan_package, dict) or not framework_plan_package:
+            return _json_error("缂哄皯 framework_plan_package锛岃鍏堝鍏ユ鏋惰祫浜с€?, status=400)
+
+        scene_dictionary = data.get("sceneDictionary") or data.get("scene_dictionary") or {}
+        if not isinstance(scene_dictionary, dict) or not scene_dictionary:
+            return _json_error("缂哄皯 sceneDictionary锛岃鍏堝畬鎴?08 鍦烘櫙瀛楀吀鎻愮偧銆?, status=400)
+
+        rules_digest = (
+            data.get("scriptWorldRulesDigest")
+            or data.get("script_world_rules_digest")
+            or {}
+        )
+        if not isinstance(rules_digest, dict) or not rules_digest:
+            return _json_error("缂哄皯 scriptWorldRulesDigest锛岃鍏堝畬鎴?08 鍦烘櫙瀛楀吀鎻愮偧銆?, status=400)
+
+        appearance_mapping = (
+            data.get("appearanceMapping")
+            or data.get("appearance_mapping")
+            or {}
+        )
+        if not isinstance(appearance_mapping, dict) or not appearance_mapping:
+            return _json_error("缂哄皯 appearanceMapping锛岃鍏堝畬鎴?09 瑙掕壊澶栬鏄犲皠銆?, status=400)
+
+        variables = {
+            "frameworkPlanPackage": framework_plan_package,
+            "framework_plan_package": framework_plan_package,
+            "sceneDictionary": scene_dictionary,
+            "scene_dictionary": scene_dictionary,
+            "scriptWorldRulesDigest": rules_digest,
+            "script_world_rules_digest": rules_digest,
+            "appearanceMapping": appearance_mapping,
+            "appearance_mapping": appearance_mapping,
+            "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
+        }
+
+        def _try_parse_json_text(value):
+            if not isinstance(value, str):
+                return None
+            text = value.strip()
+            if not text:
+                return None
+            if text.startswith("```"):
+                text = text.strip("`").strip()
+                if text.lower().startswith("json"):
+                    text = text[4:].strip()
+            try:
+                return _json.loads(text)
+            except Exception:
+                return None
+
+        def _extract_update_vars(payload):
+            found = {}
+            if not isinstance(payload, dict):
+                return found
+            response_data = payload.get("responseData")
+            if not isinstance(response_data, dict):
+                return found
+            update_results = response_data.get("updateVarResult")
+            if not isinstance(update_results, list):
+                return found
+            for item in update_results:
+                if not isinstance(item, dict):
+                    continue
+                variable = item.get("variable")
+                value = item.get("value")
+                key = ""
+                if isinstance(variable, list) and variable:
+                    key = str(variable[-1] or "")
+                elif isinstance(variable, str):
+                    key = variable
+                if key:
+                    found[key] = value
+            return found
+
+        def _extract_enriched_payload(payload):
+            candidates = []
+
+            def visit(obj):
+                if isinstance(obj, dict):
+                    candidates.append(obj)
+                    for text_key in ("answerText", "text", "content"):
+                        parsed = _try_parse_json_text(obj.get(text_key))
+                        if parsed is not None:
+                            visit(parsed)
+                    update_vars = _extract_update_vars(obj)
+                    if update_vars:
+                        candidates.append(update_vars)
+                        for value in update_vars.values():
+                            parsed = _try_parse_json_text(value)
+                            if parsed is not None:
+                                visit(parsed)
+                    for key in ("data", "result", "output", "response", "responseData", "enrichedEpisodePlanResult", "enriched_episode_plan_result"):
+                        value = obj.get(key)
+                        if isinstance(value, (dict, list)):
+                            visit(value)
+                        else:
+                            parsed = _try_parse_json_text(value)
+                            if parsed is not None:
+                                visit(parsed)
+                elif isinstance(obj, list):
+                    candidates.append({"allEnrichedEpisodePlan": obj})
+                    for item in obj:
+                        visit(item)
+                else:
+                    parsed = _try_parse_json_text(obj)
+                    if parsed is not None:
+                        visit(parsed)
+
+            visit(payload)
+
+            for item in candidates:
+                if not isinstance(item, dict):
+                    continue
+                nested = item.get("enrichedEpisodePlanResult") or item.get("enriched_episode_plan_result")
+                if isinstance(nested, str):
+                    nested = _try_parse_json_text(nested) or {}
+                if isinstance(nested, dict):
+                    candidates.append(nested)
+
+            for item in candidates:
+                if not isinstance(item, dict):
+                    continue
+                plan = (
+                    item.get("allEnrichedEpisodePlan")
+                    or item.get("enrichedEpisodePlan")
+                    or item.get("all_enriched_episode_plan")
+                    or item.get("enriched_episode_plan")
+                )
+                text = (
+                    item.get("allEnrichedEpisodePlanText")
+                    or item.get("enrichedEpisodePlanText")
+                    or item.get("all_enriched_episode_plan_text")
+                    or item.get("enriched_episode_plan_text")
+                    or ""
+                )
+                if isinstance(plan, str):
+                    parsed_plan = _try_parse_json_text(plan)
+                    if isinstance(parsed_plan, list):
+                        plan = parsed_plan
+                if isinstance(plan, list) and plan:
+                    return plan, str(text or "")
+            return None, ""
+
+        asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
+        if not _try_begin_framework_stage(user_id, asset_id, "10"):
+            return _json_error("10 姝ｅ湪杩愯涓紝璇风◢鍚庡埛鏂伴〉闈紝宸插畬鎴愯緭鍑轰細鑷姩鎭㈠銆?, status=409)
+        try:
+            try:
+                from .services.fastgpt_client import fastgpt_client
+                from .services.fastgpt_contracts import STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN
+
+                raw_output = fastgpt_client.run_stage(
+                    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+                    variables,
+                )
+            except Exception as exc:
+                return _json_error(
+                    str(exc),
+                    status=500,
+                    fallback="10 鍒嗛泦缁嗗寲鏂规璋冪敤澶辫触锛岃妫€鏌?FASTGPT_FRAMEWORK_ENRICHED_EPISODE_PLAN_API_KEY 鍜屽伐浣滄祦鍙橀噺銆?,
+                )
+
+            plan, plan_text = _extract_enriched_payload(raw_output)
+            if not plan:
+                return _json_error(
+                    "10 鍒嗛泦缁嗗寲鏂规杈撳嚭缂哄皯 allEnrichedEpisodePlan銆?,
+                    status=500,
+                    fallback="璇锋鏌?10 宸ヤ綔娴佹槸鍚︽妸 allEnrichedEpisodePlan 鍐欏叆鍙橀噺鎴?answerText JSON銆?,
+                )
+            if asset_id:
+                _save_framework_to_script_stage(
+                    user_id=user_id,
+                    asset_id=asset_id,
+                    stage_key="stage10",
+                    output={
+                        "allEnrichedEpisodePlan": plan,
+                        "allEnrichedEpisodePlanText": plan_text,
+                        "enrichedEpisodePlan": plan,
+                        "enrichedEpisodePlanText": plan_text,
+                    },
+                )
+        finally:
+            _end_framework_stage(user_id, asset_id, "10")
+
+        return _json_ok(
+            stage="10",
+            framework_asset_id=asset_id,
+            allEnrichedEpisodePlan=plan,
+            allEnrichedEpisodePlanText=plan_text,
+            enrichedEpisodePlan=plan,
+            enrichedEpisodePlanText=plan_text,
+        )
+

@@ -1,0 +1,442 @@
+﻿        data = request.get_json(silent=True) or {}
+        try:
+            asset = task_manager.create_framework_planner_asset(
+                user_id=_require_user_id(),
+                title=str(data.get("title") or data.get("project_title") or ""),
+                season_count=int(data.get("season_count") or 1),
+                episodes_per_season=int(data.get("episodes_per_season") or data.get("total_episodes") or 60),
+                target_format=str(data.get("target_format") or data.get("genre") or "鐭墽"),
+                style=str(data.get("style") or ""),
+                description=str(data.get("description") or data.get("story_outline") or ""),
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except Exception as exc:
+            logger.exception("framework planner asset create failed")
+            return _json_error(str(exc), status=500, fallback="鏂板缓鍓ф湰澶辫触锛岃绋嶅悗閲嶈瘯銆?)
+        return _json_ok(asset=asset)
+
+
+
+    @app.post("/api/framework-to-script/stage/08")
+    @_login_required
+    def run_framework_to_script_stage08_api():
+        """鍗曠嫭杩愯 08 鍦烘櫙瀛楀吀鎻愮偧銆傚彧璺?08锛屼笉缁х画 09/10銆?""
+        import json as _json
+
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return _json_error("璇锋眰浣撳繀椤绘槸 JSON object銆?, status=400)
+        try:
+            user_id = _require_user_id()
+            data, framework_asset = _inject_framework_asset(data, user_id)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+        framework_plan_package = (
+            data.get("framework_plan_package")
+            or data.get("frameworkPlanPackage")
+            or {}
+        )
+        if not isinstance(framework_plan_package, dict) or not framework_plan_package:
+            return _json_error(
+                "缂哄皯 framework_plan_package锛岃鍏堜粠 07 鏈€缁堢瓥鍒掑寘杩涘叆妗嗘灦杞墽鏈伐浣滃彴銆?,
+                status=400,
+            )
+
+        worldview_plan = (
+            data.get("worldview_plan")
+            or data.get("worldviewPlan")
+            or framework_plan_package.get("worldview_plan")
+            or framework_plan_package.get("worldviewPlan")
+            or {}
+        )
+        beat_checkpoint_timeline = (
+            data.get("beat_checkpoint_timeline")
+            or data.get("beatCheckpointTimeline")
+            or framework_plan_package.get("beat_checkpoint_timeline")
+            or framework_plan_package.get("beatCheckpointTimeline")
+            or []
+        )
+        character_storylines = (
+            data.get("character_storylines")
+            or data.get("characterStorylines")
+            or framework_plan_package.get("character_storylines")
+            or framework_plan_package.get("characterStorylines")
+            or []
+        )
+
+        variables = {
+            "frameworkPlanPackage": framework_plan_package,
+            "framework_plan_package": framework_plan_package,
+            "worldviewPlan": worldview_plan,
+            "worldview_plan": worldview_plan,
+            "beatCheckpointTimeline": beat_checkpoint_timeline,
+            "beat_checkpoint_timeline": beat_checkpoint_timeline,
+            "characterStorylines": character_storylines,
+            "character_storylines": character_storylines,
+            "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
+        }
+
+        def _try_parse_json_text(value):
+            if not isinstance(value, str):
+                return None
+            text = value.strip()
+            if not text:
+                return None
+            if text.startswith("```"):
+                text = text.strip("`").strip()
+                if text.lower().startswith("json"):
+                    text = text[4:].strip()
+            try:
+                return _json.loads(text)
+            except Exception:
+                return None
+
+        def _extract_update_vars(payload):
+            found = {}
+            if not isinstance(payload, dict):
+                return found
+            response_data = payload.get("responseData")
+            if not isinstance(response_data, dict):
+                return found
+            update_results = response_data.get("updateVarResult")
+            if not isinstance(update_results, list):
+                return found
+            for item in update_results:
+                if not isinstance(item, dict):
+                    continue
+                variable = item.get("variable")
+                value = item.get("value")
+                key = ""
+                if isinstance(variable, list) and variable:
+                    key = str(variable[-1] or "")
+                elif isinstance(variable, str):
+                    key = variable
+                if key:
+                    found[key] = value
+            return found
+
+        def _extract_scene_payload(payload):
+            candidates = []
+
+            def visit(obj):
+                if isinstance(obj, dict):
+                    candidates.append(obj)
+
+                    parsed_answer = _try_parse_json_text(obj.get("answerText"))
+                    if parsed_answer is not None:
+                        visit(parsed_answer)
+
+                    parsed_text = _try_parse_json_text(obj.get("text"))
+                    if parsed_text is not None:
+                        visit(parsed_text)
+
+                    update_vars = _extract_update_vars(obj)
+                    if update_vars:
+                        candidates.append(update_vars)
+                        for val in update_vars.values():
+                            parsed = _try_parse_json_text(val)
+                            if parsed is not None:
+                                visit(parsed)
+
+                    for key in ("data", "result", "output", "response", "responseData"):
+                        val = obj.get(key)
+                        if isinstance(val, (dict, list)):
+                            visit(val)
+                        else:
+                            parsed = _try_parse_json_text(val)
+                            if parsed is not None:
+                                visit(parsed)
+
+                elif isinstance(obj, list):
+                    for item in obj:
+                        visit(item)
+                else:
+                    parsed = _try_parse_json_text(obj)
+                    if parsed is not None:
+                        visit(parsed)
+
+            visit(payload)
+
+            for item in candidates:
+                if not isinstance(item, dict):
+                    continue
+                scene_dictionary = (
+                    item.get("sceneDictionary")
+                    or item.get("scene_dictionary")
+                    or item.get("scene_dictionary_result")
+                )
+                rules_digest = (
+                    item.get("scriptWorldRulesDigest")
+                    or item.get("script_world_rules_digest")
+                    or item.get("worldRulesDigest")
+                )
+                if scene_dictionary and rules_digest:
+                    return scene_dictionary, rules_digest
+
+            return None, None
+
+        asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
+        if not _try_begin_framework_stage(user_id, asset_id, "08"):
+            return _json_error("08 姝ｅ湪杩愯涓紝璇风◢鍚庡埛鏂伴〉闈紝宸插畬鎴愯緭鍑轰細鑷姩鎭㈠銆?, status=409)
+        try:
+            try:
+                from .services.fastgpt_client import fastgpt_client
+                from .services.fastgpt_contracts import STAGE_FRAMEWORK_SCENE_DICTIONARY
+
+                raw_output = fastgpt_client.run_stage(
+                    STAGE_FRAMEWORK_SCENE_DICTIONARY,
+                    variables,
+                )
+            except Exception as exc:
+                return _json_error(
+                    str(exc),
+                    status=500,
+                    fallback="08 鍦烘櫙瀛楀吀鎻愮偧璋冪敤澶辫触锛岃妫€鏌?FASTGPT_FRAMEWORK_SCENE_DICTIONARY_API_KEY 鍜屽伐浣滄祦鍙橀噺銆?,
+                )
+
+            scene_dictionary, rules_digest = _extract_scene_payload(raw_output)
+            if not scene_dictionary or not rules_digest:
+                return _json_error(
+                    "08 鍦烘櫙瀛楀吀闃舵杈撳嚭缂哄皯 sceneDictionary 鎴?scriptWorldRulesDigest銆?,
+                    status=500,
+                    fallback="璇锋鏌?08_鍦烘櫙瀛楀吀鎻愮偧.json 鏄惁鎶?sceneDictionary 鍜?scriptWorldRulesDigest 鍐欏叆鍙橀噺鎴?answerText JSON銆?,
+                )
+            if asset_id:
+                _save_framework_to_script_stage(
+                    user_id=user_id,
+                    asset_id=asset_id,
+                    stage_key="stage08",
+                    output={
+                        "sceneDictionary": scene_dictionary,
+                        "scriptWorldRulesDigest": rules_digest,
+                    },
+                )
+        finally:
+            _end_framework_stage(user_id, asset_id, "08")
+
+        return _json_ok(
+            stage="08",
+            framework_asset_id=asset_id,
+            sceneDictionary=scene_dictionary,
+            scriptWorldRulesDigest=rules_digest,
+        )
+
+
+
+    @app.post("/api/framework-to-script/stage/09")
+    @_login_required
+    def run_framework_to_script_stage09_api():
+        """鍗曠嫭杩愯 09 浜鸿鏈嶈 alias 鏄犲皠銆傚彧璺?09锛屼笉缁х画 10銆?""
+        import json as _json
+
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return _json_error("璇锋眰浣撳繀椤绘槸 JSON object銆?, status=400)
+        try:
+            user_id = _require_user_id()
+            data, framework_asset = _inject_framework_asset(data, user_id)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+        framework_plan_package = (
+            data.get("framework_plan_package")
+            or data.get("frameworkPlanPackage")
+            or {}
+        )
+        if not isinstance(framework_plan_package, dict) or not framework_plan_package:
+            return _json_error(
+                "缂哄皯 framework_plan_package锛岃鍏堜粠 07 鏈€缁堢瓥鍒掑寘杩涘叆妗嗘灦杞墽鏈伐浣滃彴銆?,
+                status=400,
+            )
+
+        character_plan = (
+            data.get("character_plan")
+            or data.get("characterPlan")
+            or framework_plan_package.get("character_plan")
+            or framework_plan_package.get("characterPlan")
+            or {}
+        )
+        if not isinstance(character_plan, dict) or not character_plan:
+            return _json_error(
+                "缂哄皯 character_plan锛屾棤娉曡繍琛?09 浜鸿鏈嶈 alias 鏄犲皠銆?,
+                status=400,
+            )
+
+        scene_dictionary = (
+            data.get("sceneDictionary")
+            or data.get("scene_dictionary")
+            or {}
+        )
+        if not isinstance(scene_dictionary, dict) or not scene_dictionary:
+            return _json_error(
+                "缂哄皯 sceneDictionary锛岃鍏堣繍琛屽苟纭 08 鍦烘櫙瀛楀吀鎻愮偧銆?,
+                status=400,
+            )
+
+        beat_checkpoint_timeline = (
+            data.get("beat_checkpoint_timeline")
+            or data.get("beatCheckpointTimeline")
+            or framework_plan_package.get("beat_checkpoint_timeline")
+            or framework_plan_package.get("beatCheckpointTimeline")
+            or []
+        )
+
+        variables = {
+            "frameworkPlanPackage": framework_plan_package,
+            "framework_plan_package": framework_plan_package,
+            "characterPlan": character_plan,
+            "character_plan": character_plan,
+            "sceneDictionary": scene_dictionary,
+            "scene_dictionary": scene_dictionary,
+            "beatCheckpointTimeline": beat_checkpoint_timeline,
+            "beat_checkpoint_timeline": beat_checkpoint_timeline,
+            "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
+        }
+
+        def _try_parse_json_text(value):
+            if not isinstance(value, str):
+                return None
+            text = value.strip()
+            if not text:
+                return None
+            if text.startswith("```"):
+                text = text.strip("`").strip()
+                if text.lower().startswith("json"):
+                    text = text[4:].strip()
+            try:
+                return _json.loads(text)
+            except Exception:
+                return None
+
+        def _extract_update_vars(payload):
+            found = {}
+            if not isinstance(payload, dict):
+                return found
+            response_data = payload.get("responseData")
+            if not isinstance(response_data, dict):
+                return found
+            update_results = response_data.get("updateVarResult")
+            if not isinstance(update_results, list):
+                return found
+            for item in update_results:
+                if not isinstance(item, dict):
+                    continue
+                variable = item.get("variable")
+                value = item.get("value")
+                key = ""
+                if isinstance(variable, list) and variable:
+                    key = str(variable[-1] or "")
+                elif isinstance(variable, str):
+                    key = variable
+                if key:
+                    found[key] = value
+            return found
+
+        def _extract_appearance_payload(payload):
+            candidates = []
+
+            def visit(obj):
+                if isinstance(obj, dict):
+                    candidates.append(obj)
+
+                    parsed_answer = _try_parse_json_text(obj.get("answerText"))
+                    if parsed_answer is not None:
+                        visit(parsed_answer)
+
+                    parsed_text = _try_parse_json_text(obj.get("text"))
+                    if parsed_text is not None:
+                        visit(parsed_text)
+
+                    update_vars = _extract_update_vars(obj)
+                    if update_vars:
+                        candidates.append(update_vars)
+                        for val in update_vars.values():
+                            parsed = _try_parse_json_text(val)
+                            if parsed is not None:
+                                visit(parsed)
+
+                    for key in ("data", "result", "output", "response", "responseData"):
+                        val = obj.get(key)
+                        if isinstance(val, (dict, list)):
+                            visit(val)
+                        else:
+                            parsed = _try_parse_json_text(val)
+                            if parsed is not None:
+                                visit(parsed)
+
+                elif isinstance(obj, list):
+                    for item in obj:
+                        visit(item)
+                else:
+                    parsed = _try_parse_json_text(obj)
+                    if parsed is not None:
+                        visit(parsed)
+
+            visit(payload)
+
+            for item in candidates:
+                if not isinstance(item, dict):
+                    continue
+                appearanceMapping = (
+                    item.get("appearanceMapping")
+                    or item.get("appearanceMapping")
+                    or item.get("appearanceMappingResult")
+                )
+                if isinstance(appearanceMapping, dict) and appearanceMapping:
+                    return appearanceMapping
+
+            return None
+
+        asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
+        if not _try_begin_framework_stage(user_id, asset_id, "09"):
+            return _json_error("09 姝ｅ湪杩愯涓紝璇风◢鍚庡埛鏂伴〉闈紝宸插畬鎴愯緭鍑轰細鑷姩鎭㈠銆?, status=409)
+        try:
+            try:
+                from .services.fastgpt_client import fastgpt_client
+                from .services.fastgpt_contracts import STAGE_FRAMEWORK_APPEARANCE_MAPPING
+
+                raw_output = fastgpt_client.run_stage(
+                    STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+                    variables,
+                )
+            except Exception as exc:
+                return _json_error(
+                    str(exc),
+                    status=500,
+                    fallback="09 浜鸿鏈嶈 alias 鏄犲皠璋冪敤澶辫触锛岃妫€鏌?FASTGPT_FRAMEWORK_APPEARANCE_MAPPING_API_KEY 鍜屽伐浣滄祦鍙橀噺銆?,
+                )
+
+            appearanceMapping = _extract_appearance_payload(raw_output)
+            if not appearanceMapping:
+                return _json_error(
+                    "09 浜鸿鏈嶈 alias 鏄犲皠杈撳嚭缂哄皯 appearanceMapping銆?,
+                    status=500,
+                    fallback="璇锋鏌?09_浜鸿鏈嶈alias鏄犲皠.json 鏄惁鎶?appearanceMapping 鍐欏叆鍙橀噺鎴?answerText JSON銆?,
+                )
+
+            characters = appearanceMapping.get("characters")
+            if not isinstance(characters, list) or not characters:
+                return _json_error(
+                    "09 浜鸿鏈嶈 alias 鏄犲皠杈撳嚭缂哄皯 appearanceMapping.characters銆?,
+                    status=500,
+                    fallback="璇锋鏌?09 宸ヤ綔娴佽緭鍑?schema銆?,
+                )
+            if asset_id:
+                _save_framework_to_script_stage(
+                    user_id=user_id,
+                    asset_id=asset_id,
+                    stage_key="stage09",
+                    output={"appearanceMapping": appearanceMapping},
+                )
+        finally:
+            _end_framework_stage(user_id, asset_id, "09")
+
+        return _json_ok(
+            stage="09",
+            framework_asset_id=asset_id,
+            appearanceMapping=appearanceMapping,
+        )
+
+

@@ -1,0 +1,101 @@
+7bb0c0e 浼樺寲缂撳瓨绗竴鐗?A	cache/999901/latest_stage01.json
+A	cache/999901/stage01_20260514-145301-680.json
+A	cache/999901/stage03_20260514-145301-689.json
+A	cache/unsaved/latest_stage04.json
+A	cache/unsaved/latest_stage04_score.json
+A	cache/unsaved/latest_stage07.json
+A	cache/unsaved/stage01_20260514-144951-571.json
+A	cache/unsaved/stage01_20260514-145055-507.json
+A	cache/unsaved/stage02_20260514-144957-159.json
+A	cache/unsaved/stage02_20260514-145100-828.json
+A	cache/unsaved/stage04_20260514-144951-974.json
+A	cache/unsaved/stage04_20260514-144952-150.json
+A	cache/unsaved/stage04_20260514-145055-670.json
+A	cache/unsaved/stage04_20260514-145055-828.json
+A	cache/unsaved/stage04_score_20260514-144952-155.json
+A	cache/unsaved/stage04_score_20260514-145055-832.json
+A	cache/unsaved/stage05_20260514-144956-845.json
+A	cache/unsaved/stage05_20260514-145100-481.json
+A	cache/unsaved/stage07_20260514-144957-003.json
+A	cache/unsaved/stage07_20260514-145100-646.json
+A	framework_planner_cache_history_verify.png
+A	framework_planner_unified_verify.png
+A	logs/999901/stage03_20260514-145301-687_error.json
+A	logs/unsaved/stage01_20260514-144951-569_error.json
+A	logs/unsaved/stage01_20260514-145055-506_error.json
+A	logs/unsaved/stage02_20260514-144957-157_error.json
+A	logs/unsaved/stage02_20260514-145100-827_error.json
+A	logs/unsaved/stage05_20260514-144956-843_error.json
+A	logs/unsaved/stage05_20260514-145100-480_error.json
+M	workflow_code_skeleton/app/server.py
+M	workflow_code_skeleton/app/services/framework_planner_service.py
+M	workflow_code_skeleton/app/web/static/framework_planner.css
+M	workflow_code_skeleton/app/web/static/framework_planner.js
+35c2f34 涓€旀彁浜?M	workflow_code_skeleton/app/server.py
+M	workflow_code_skeleton/app/services/framework_planner_service.py
+M	workflow_code_skeleton/app/services/task_lifecycle.py
+M	workflow_code_skeleton/app/web/static/framework_planner.css
+M	workflow_code_skeleton/app/web/static/framework_planner.js
+M	workflow_code_skeleton/app/web/static/styles.css
+M	workflow_code_skeleton/app/web/templates/framework_planner.html
+5b2ec45 涓€旀彁浜?M	workflow_code_skeleton/app/server.py
+M	workflow_code_skeleton/app/services/framework_planner_service.py
+M	workflow_code_skeleton/app/services/task_lifecycle.py
+M	workflow_code_skeleton/app/web/static/app.js
+M	workflow_code_skeleton/app/web/static/framework_planner.css
+M	workflow_code_skeleton/app/web/static/framework_planner.js
+M	workflow_code_skeleton/app/web/static/styles.css
+M	workflow_code_skeleton/app/web/templates/framework_planner.html
+19fb9c0 涓€旀彁浜?M	workflow_code_skeleton/app/web/static/framework_planner.js
+M	workflow_code_skeleton/app/web/templates/framework_planner.html
+6f60cda 涓€旀彁浜?M	workflow_code_skeleton/app/services/framework_planner_service.py
+M	workflow_code_skeleton/app/web/static/framework_planner.js
+M	workflow_code_skeleton/tests/test_framework_planner_service.py
+d83f550 涓€旀彁浜?M	workflow_code_skeleton/app/server.py
+M	workflow_code_skeleton/app/services/framework_planner_service.py
+M	workflow_code_skeleton/app/web/static/framework_planner.js
+M	workflow_code_skeleton/tests/test_framework_planner_service.py
+M	workflow_code_skeleton/tests/test_server_framework_planner_api.py
+d2130ed 涓€旀彁浜?M	workflow_code_skeleton/app/services/framework_planner_service.py
+M	workflow_code_skeleton/tests/test_framework_planner_service.py
+7987bfd 涓€旀彁浜?M	workflow_code_skeleton/app/server.py
+M	workflow_code_skeleton/app/services/framework_planner_service.py
+M	workflow_code_skeleton/app/web/static/framework_planner.js
+M	workflow_code_skeleton/app/web/templates/framework_planner.html
+M	workflow_code_skeleton/tests/test_framework_planner_service.py
+M	workflow_code_skeleton/tests/test_server_framework_planner_api.py
+6b666b9 涓€旀彁浜や竴涓?M	workflow_code_skeleton/app/web/static/framework_planner.js
+M	workflow_code_skeleton/app/web/templates/framework_planner.html
+22c7998 淇敼鍚庨潰闃舵瀛楁璇嗗埆闂锛堜腑閫旀彁浜わ級
+M	workflow_code_skeleton/app/services/fastgpt_contracts.py
+M	workflow_code_skeleton/app/services/stage_output_repair.py
+M	workflow_code_skeleton/tests/test_fastgpt_contracts.py
+f8324e2 淇敼鍚庨潰闃舵瀛楁璇嗗埆闂锛堜腑閫旀彁浜わ級
+M	workflow_code_skeleton/app/services/framework_planner_service.py
+M	workflow_code_skeleton/tests/test_framework_planner_service.py
+97384ce 01闃舵閫氳繃
+M	workflow_code_skeleton/app/services/framework_planner_service.py
+M	workflow_code_skeleton/tests/test_framework_planner_service.py
+df8b671 淇敼01闃舵鎶ラ敊
+M	workflow_code_skeleton/app/services/framework_planner_service.py
+M	workflow_code_skeleton/tests/test_framework_planner_service.py
+ffda354 淇敼01闃舵鎶ラ敊
+M	workflow_code_skeleton/app/services/framework_planner_service.py
+2b870c9 绗竴娆℃惌寤轰笁骞曞崄浜旇妭鎷?M	workflow_code_skeleton/app/services/framework_planner_service.py
+M	workflow_code_skeleton/tests/test_framework_planner_service.py
+6f6a6aa 绗竴娆℃惌寤轰笁骞曞崄浜旇妭鎷?M	workflow_code_skeleton/app/services/framework_planner_service.py
+M	workflow_code_skeleton/tests/test_framework_planner_service.py
+01d64b1 绗竴娆℃惌寤轰笁骞曞崄浜旇妭鎷?M	workflow_code_skeleton/app/services/framework_planner_service.py
+M	workflow_code_skeleton/tests/test_framework_planner_service.py
+3c83849 绗竴娆℃惌寤轰笁骞曞崄浜旇妭鎷?A	workflow_code_skeleton/app/services/framework_planner_service.py
+A	workflow_code_skeleton/tests/test_framework_planner_service.py
+A	workflow_code_skeleton/tests/test_server_framework_planner_api.py
+c8caab0 绗竴娆℃惌寤轰笁骞曞崄浜旇妭鎷?M	workflow_code_skeleton/app/server.py
+M	workflow_code_skeleton/app/services/fastgpt_contracts.py
+M	workflow_code_skeleton/app/web/static/framework_planner.css
+M	workflow_code_skeleton/app/web/static/framework_planner.js
+M	workflow_code_skeleton/app/web/templates/framework_planner.html
+2b4a451 add some jsons and web
+A	workflow_code_skeleton/app/web/static/framework_planner.css
+A	workflow_code_skeleton/app/web/static/framework_planner.js
+A	workflow_code_skeleton/app/web/templates/framework_planner.html

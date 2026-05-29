@@ -1,0 +1,256 @@
+﻿            )
+            return _framework_planner_error(
+                "04",
+                "璇勫垎鎺ュ彛鎵ц澶辫触锛岃绋嶅悗閲嶈瘯銆?,
+                status=500,
+                detail={"message": str(exc)},
+            )
+        return jsonify(payload)
+
+    @app.post("/api/framework-planner/stage/<stage>")
+    @_login_required
+    def run_framework_planner_stage_api(stage: str):
+        data = request.get_json(silent=True) or {}
+        if isinstance(data, dict):
+            _attach_user_knowledge_payload(data, data, stage)
+        project_id = data.get("project_id") if isinstance(data, dict) else None
+        source_text = ""
+        if isinstance(data, dict):
+            source_text = str(data.get("source_text") or "")
+            if not source_text and isinstance(data.get("basic_config"), dict):
+                source_text = str(data["basic_config"].get("source_text") or "")
+        logger.info(
+            "framework planner api request: stage=%s payload_keys=%s source_text_length=%s",
+            str(stage).zfill(2),
+            sorted(data.keys()) if isinstance(data, dict) else [],
+            len(source_text),
+        )
+        try:
+            payload = run_framework_planner_stage(stage, data)
+            payload["history"] = save_framework_stage_history(
+                project_id=project_id,
+                stage=str(stage).zfill(2),
+                payload=data,
+                output=payload.get("data") or {},
+                status="success",
+            )
+        except FrameworkPlannerStageError as exc:
+            write_framework_stage_exception_log(
+                project_id=project_id,
+                stage=exc.stage or str(stage).zfill(2),
+                payload=data,
+                exc_type=type(exc).__name__,
+                message=str(exc),
+                status_code=exc.status_code,
+            )
+            save_framework_stage_history(
+                project_id=project_id,
+                stage=exc.stage or str(stage).zfill(2),
+                payload=data,
+                output={},
+                status="failed",
+                error={"type": type(exc).__name__, "message": str(exc)},
+            )
+            return _framework_planner_error(
+                exc.stage,
+                str(exc),
+                status=exc.status_code,
+                detail=exc.detail,
+            )
+        except Exception as exc:
+            logger.exception(
+                "framework planner api unexpected error: stage=%s payload_keys=%s",
+                str(stage).zfill(2),
+                sorted(data.keys()) if isinstance(data, dict) else [],
+            )
+            write_framework_stage_exception_log(
+                project_id=project_id,
+                stage=str(stage).zfill(2),
+                payload=data,
+                exc_type=type(exc).__name__,
+                message=str(exc),
+                status_code=500,
+            )
+            save_framework_stage_history(
+                project_id=project_id,
+                stage=str(stage).zfill(2),
+                payload=data,
+                output={},
+                status="failed",
+                error={"type": type(exc).__name__, "message": str(exc)},
+            )
+            return _framework_planner_error(
+                str(stage).zfill(2),
+                "妯″瀷鏆傛椂涓嶅彲鐢紝璇风◢鍚庨噸璇曘€?,
+                status=500,
+                detail={"message": str(exc)},
+            )
+        return jsonify(payload)
+
+    @app.get("/api/framework-planner/history")
+    @_login_required
+    def list_framework_planner_history_api():
+        # print("[framework-planner-history] route hit", flush=True)
+        project_id = request.args.get("project_id") or "unsaved"
+        stage = request.args.get("stage") or ""
+        return jsonify(list_framework_stage_history(project_id, stage or None))
+
+    @app.get("/api/framework-planner/history/<project_id>/<filename>")
+    @_login_required
+    def load_framework_planner_history_api(project_id: str, filename: str):
+        try:
+            return jsonify(load_framework_stage_history(project_id, filename))
+        except FrameworkPlannerStageError as exc:
+            return _framework_planner_error(
+                exc.stage,
+                str(exc),
+                status=exc.status_code,
+                detail=exc.detail,
+            )
+
+    @app.post("/api/framework-planner/debug/frontend")
+    @_login_required
+    def framework_planner_frontend_debug_api():
+        data = request.get_json(silent=True) or {}
+        project_id = data.get("project_id") if isinstance(data, dict) else None
+        event = str(data.get("event") or "frontend_event") if isinstance(data, dict) else "frontend_event"
+        payload = data.get("payload") if isinstance(data, dict) and isinstance(data.get("payload"), dict) else {}
+        detail = data.get("detail") if isinstance(data, dict) and isinstance(data.get("detail"), dict) else {}
+        try:
+            result = write_framework_frontend_debug_event(
+                project_id=project_id,
+                event=event,
+                payload=payload,
+                detail=detail,
+            )
+            return jsonify(result)
+        except Exception as exc:
+            logger.exception("framework planner frontend debug write failed")
+            return _json_error(str(exc), status=500, fallback="鍓嶇璋冭瘯鏃ュ織鍐欏叆澶辫触")
+
+    @app.get("/api/projects/latest")
+    @_login_required
+    def latest_project():
+        snapshot = task_manager.latest_project_snapshot(user_id=_require_user_id())
+        return _json_ok(project=snapshot)
+
+    @app.get("/api/projects")
+    @_login_required
+    def list_projects():
+        projects = task_manager.list_user_projects(user_id=_require_user_id())
+        return _json_ok(projects=projects)
+
+    @app.get("/api/assets")
+    @_login_required
+    def list_assets():
+        assets = task_manager.list_user_assets(user_id=_require_user_id())
+        return _json_ok(assets=assets)
+
+    @app.get("/api/framework-assets")
+    @_login_required
+    def list_framework_assets_api():
+        user_id = _require_user_id()
+        projects = [
+            task_manager._public_snapshot(snapshot)
+            for snapshot in task_manager._all_project_snapshots()
+            if task_manager._snapshot_belongs_to_user(snapshot, user_id)
+            and str(snapshot.get("asset_kind") or "").strip() == "framework_planner"
+        ]
+        assets = [
+            _framework_asset_payload(project, include_detail=False)
+            for project in projects
+        ]
+        assets.sort(key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+        return _json_ok(assets=_strip_raw_fastgpt_fields(assets))
+
+    @app.get("/api/framework-assets/<asset_id>")
+    @_login_required
+    def get_framework_asset_api(asset_id: str):
+        asset = _load_framework_asset_for_user(asset_id, _require_user_id())
+        if not asset:
+            return _json_error("妗嗘灦璧勪骇涓嶅瓨鍦紝鎴栧皻鏈畬鎴?07 鏈€缁堢瓥鍒掑寘銆?, status=404)
+        return _json_ok(asset=_strip_raw_fastgpt_fields(asset))
+
+    @app.post("/api/framework-planner/assets")
+    @_login_required
+    def create_framework_planner_asset_api():
+        data = request.get_json(silent=True) or {}
+        try:
+            asset = task_manager.create_framework_planner_asset(
+                user_id=_require_user_id(),
+                title=str(data.get("title") or data.get("project_title") or ""),
+                season_count=int(data.get("season_count") or 1),
+                episodes_per_season=int(data.get("episodes_per_season") or data.get("total_episodes") or 60),
+                target_format=str(data.get("target_format") or data.get("genre") or "鐭墽"),
+                style=str(data.get("style") or ""),
+                description=str(data.get("description") or data.get("story_outline") or ""),
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except Exception as exc:
+            logger.exception("framework planner asset create failed")
+            return _json_error(str(exc), status=500, fallback="鏂板缓鍓ф湰澶辫触锛岃绋嶅悗閲嶈瘯銆?)
+        return _json_ok(asset=asset)
+
+
+
+    @app.post("/api/framework-to-script/stage/08")
+    @_login_required
+    def run_framework_to_script_stage08_api():
+        """鍗曠嫭杩愯 08 鍦烘櫙瀛楀吀鎻愮偧銆傚彧璺?08锛屼笉缁х画 09/10銆?""
+        import json as _json
+
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return _json_error("璇锋眰浣撳繀椤绘槸 JSON object銆?, status=400)
+        try:
+            data, framework_asset = _inject_framework_asset(data, _require_user_id())
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+        framework_plan_package = (
+            data.get("framework_plan_package")
+            or data.get("frameworkPlanPackage")
+            or {}
+        )
+        if not isinstance(framework_plan_package, dict) or not framework_plan_package:
+            return _json_error(
+                "缂哄皯 framework_plan_package锛岃鍏堜粠 07 鏈€缁堢瓥鍒掑寘杩涘叆妗嗘灦杞墽鏈伐浣滃彴銆?,
+                status=400,
+            )
+
+        worldview_plan = (
+            data.get("worldview_plan")
+            or data.get("worldviewPlan")
+            or framework_plan_package.get("worldview_plan")
+            or framework_plan_package.get("worldviewPlan")
+            or {}
+        )
+        beat_checkpoint_timeline = (
+            data.get("beat_checkpoint_timeline")
+            or data.get("beatCheckpointTimeline")
+            or framework_plan_package.get("beat_checkpoint_timeline")
+            or framework_plan_package.get("beatCheckpointTimeline")
+            or []
+        )
+        character_storylines = (
+            data.get("character_storylines")
+            or data.get("characterStorylines")
+            or framework_plan_package.get("character_storylines")
+            or framework_plan_package.get("characterStorylines")
+            or []
+        )
+
+        variables = {
+            "frameworkPlanPackage": framework_plan_package,
+            "framework_plan_package": framework_plan_package,
+            "worldviewPlan": worldview_plan,
+            "worldview_plan": worldview_plan,
+            "beatCheckpointTimeline": beat_checkpoint_timeline,
+            "beat_checkpoint_timeline": beat_checkpoint_timeline,
+            "characterStorylines": character_storylines,
+            "character_storylines": character_storylines,
+            "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
+        }
+
+        def _try_parse_json_text(value):

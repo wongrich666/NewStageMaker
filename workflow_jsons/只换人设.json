@@ -1,0 +1,6288 @@
+﻿{
+  "nodes": [
+    {
+      "nodeId": "userGuide",
+      "name": "common:core.module.template.system_config",
+      "intro": "common:core.module.template.system_config_info",
+      "avatar": "core/workflow/template/systemConfig",
+      "flowNodeType": "userGuide",
+      "position": {
+        "x": 7020,
+        "y": -5055
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "welcomeText",
+          "label": "core.app.Welcome Text",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": ""
+        },
+        {
+          "key": "variables",
+          "label": "core.app.Chat Variable",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": []
+        },
+        {
+          "key": "questionGuide",
+          "label": "core.app.Question Guide",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false
+          }
+        },
+        {
+          "key": "tts",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "type": "web"
+          }
+        },
+        {
+          "key": "whisper",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false,
+            "autoSend": false,
+            "autoTTSResponse": false
+          }
+        },
+        {
+          "key": "scheduleTrigger",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": null
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "448745",
+      "name": "common:core.module.template.work_start",
+      "intro": "",
+      "avatar": "core/workflow/template/workflowStart",
+      "flowNodeType": "workflowStart",
+      "position": {
+        "x": 7860,
+        "y": -4935
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "userChatInput",
+          "key": "userChatInput",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.input.label.user question",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "c8dQrGAIwG5dD32J",
+      "name": "人设统筹",
+      "intro": "基于上一阶段输出的世界观、原始故事大纲、核心场景、人物小传和分集计划，统一完成人物设定与场景设定。重点输出人物的性格、家庭、长相、行为，并解释这几个维度之间的因果关系；同时补全核心场景的环境、氛围、视觉元素和戏剧功能，确保人设与场景共同服务后续剧本创作。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 9885,
+        "y": -4125
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“换皮人设重构编剧”。\n\n你的唯一任务：\n阅读【原剧本正文】与【当前故事梗概】，抛开原本已经存在的人设介绍，不沿用原人物的表层设定、既有人设标签和原动机表达方式；\n在“保留故事主线结果、关键事件结果、关系推进结果基本不变”的前提下，重新设计一套新人物设定，使观众会感觉：\n“故事就是因为这些人物的性格、伤口、欲望、误判与选择，才自然发展成现在这样。”\n\n你不是在复述原人设，而是在做“人物因果重构”：\n- 剧情结果尽量不变\n- 关键事件顺序尽量不变\n- 重要爽点、反转点、钩子点尽量不变\n- 但人物为什么做出这些选择，必须改成新的、扎根人物内部的新因果\n\n【核心原则】\n一、锁定“结果”，重写“原因”\n你必须先识别原剧本中不可轻易改动的内容：\n- 主线关系走向\n- 关键事件结果\n- 重要信息揭露节点\n- 核心爽点/反转点\n- 每个阶段必须抵达的剧情状态\n\n这些内容属于“剧情锁点”，应尽量保留。\n你要改写的是：\n- 人物前史\n- 人物创伤\n- 人物核心需求\n- 人物恐惧\n- 人物错误信念\n- 人物关系投射\n- 人物做决定时的内部压力来源\n\n二、不要“换名字不换魂”\n禁止只做以下浅层修改：\n- 只换称呼、年龄、职业、外貌\n- 只把“温柔”改成“高冷”，但行为逻辑没变\n- 只给角色加一句童年创伤，却不影响其选择机制\n- 仍沿用原角色的思维方式、表达方式、情感方式、决策方式\n\n你必须让新角色具备真正不同的：\n- 决策路径\n- 情绪反应方式\n- 关系需求\n- 保护自己或得到他人的方式\n- 推动事件发生的个人原因\n\n三、人物要“推得动同样剧情”\n你设计的新人物，必须能够合理推动原剧情中这些结果继续发生：\n- 为什么会住到一起/绑定在一起\n- 为什么一次次卷入同样的事件\n- 为什么关系持续推进\n- 为什么矛盾不会立刻终止\n- 为什么人物会继续隐瞒、试探、保护、利用、靠近或失控\n- 为什么同样的高潮点仍然能成立\n\n四、人物介绍必须是“能推出故事”的介绍\n你输出的人设不能只是静态介绍，而要体现：\n- 这个人会主动做什么\n- 这个人最怕什么，所以会回避什么\n- 这个人最想抓住什么，所以会不断犯什么错\n- 这个人面对压力时会用什么方式保护自己\n- 这个人为什么会把另一个角色卷进自己的命运\n- 这个人为什么会在关键节点做出与原剧情结果一致的选择\n\n五、重新定义人物之间的关系因果\n你必须重写人物关系，不是只写“他们关系很好/有张力”，而是写清：\n- 他们彼此吸引/依赖/利用/防备的原因\n- 他们最容易踩中彼此哪根神经\n- 他们为什么明明不该靠近却持续靠近\n- 他们为什么明明可以结束关系却没有结束\n- 他们如何把对方当成替代品、镜子、锚点、负担、救命稻草或未完成执念的承接者\n\n六、改人设但不改主线成立条件\n禁止新增或改坏以下内容：\n- 改变主线成立条件的核心设定\n- 改变世界规则\n- 改变关键真相的底层性质\n- 改变关键组织/任务/系统的存在逻辑\n- 把原本必须发生的大事件取消掉\n- 把原本必须成立的关系终点改没\n\n七、请特别关注“事件因果重绑”\n对每个关键人物，你都要回答：\n- 他/她想要什么（desire）\n- 他/她真正缺什么（need）\n- 他/她最怕失去什么（fear）\n- 他/她误以为只要怎样就能解决问题（false_belief）\n- 他/她为什么会把这种需求投射到另一个角色身上（projection）\n- 原剧情中的关键事件，在新设定下会由什么新的内部原因触发（event_binding）\n\n【参考输入】\n【原剧本正文】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n【当前故事梗概】\n{{$VARIABLE_NODE_ID.ayxWwSpE$}}\n【世界观JSON】\n{{$VARIABLE_NODE_ID.yuozoGpo$}}\n\n【输出要求】\n- 只输出合法 JSON\n- 不要输出解释\n- 不要输出 markdown\n- 所有字段必须填写完整\n- 每个角色都必须能解释“为何推动剧情来到既定结果”\n- 输出的人设必须服务后续“角色对话”和“正文重写”\n\n请严格输出为以下 JSON 结构：\n{\n  \"rewrite_strategy\": {\n    \"story_lock_principle\": \"\",\n    \"must_keep_story_results\": [],\n    \"must_keep_relationship_results\": [],\n    \"must_keep_major_reveals\": [],\n    \"forbidden_changes\": []\n  },\n  \"character_setting\": {\n    \"character_design_principle\": \"\",\n    \"core_relation_logic\": \"\",\n    \"characters\": [\n      {\n        \"character_name\": \"\",\n        \"story_role\": \"\",\n        \"public_identity\": \"\",\n        \"core_wound\": \"\",\n        \"false_belief\": \"\",\n        \"desire\": \"\",\n        \"need\": \"\",\n        \"fear\": \"\",\n        \"core_motivation\": \"\",\n        \"personality\": {\n          \"traits\": [],\n          \"surface_impression\": \"\",\n          \"inner_contradiction\": \"\"\n        },\n        \"family\": {\n          \"family_background\": \"\",\n          \"upbringing\": \"\",\n          \"key_family_influence\": \"\"\n        },\n        \"appearance\": {\n          \"overall_look\": \"\",\n          \"recognizable_features\": [],\n          \"external_impression_effect\": \"\"\n        },\n        \"behavior\": {\n          \"habitual_actions\": [],\n          \"emotional_response_pattern\": \"\",\n          \"social_interaction_style\": \"\"\n        },\n        \"relationship_logic\": {\n          \"what_this_character_wants_from_others\": \"\",\n          \"what_this_character_hides\": \"\",\n          \"what_kind_of_person_can_trigger_them\": \"\",\n          \"why_this_character_is_drawn_to_key_person\": \"\",\n          \"why_this_character_cannot_easily_leave\": \"\"\n        },\n        \"dimension_relations\": {\n          \"family_to_personality\": \"\",\n          \"personality_to_behavior\": \"\",\n          \"appearance_to_social_effect\": \"\",\n          \"behavior_to_character_reveal\": \"\"\n        },\n        \"event_binding\": [\n          {\n            \"locked_story_event\": \"\",\n            \"new_internal_cause\": \"\",\n            \"why_this_character_must_push_it\": \"\",\n            \"why_result_still_stays_the_same\": \"\"\n          }\n        ],\n        \"dramatic_value\": \"\"\n      }\n    ]\n  },\n  \"plot_causality_map\": [\n  {\n    \"locked_story_event\": \"例：顾言入住苏晓家\",\n    \"story_function\": \"建立强绑定关系，开启同居主线\",\n    \"new_cause_chain\": \"不是因为原人设里的某种设定，而是因为新角色A出于XX恐惧+XX需求，主动制造绑定；新角色B因为XX现实压力接受这段关系\",\n    \"involved_characters\": [\"苏晓\", \"顾言\"],\n    \"must_arrive_result\": \"两人必须开始同居\"\n  }\n]\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成人设统筹任务即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "rUZ4xLNv2Zw5WoGW",
+      "name": "角色对话编剧",
+      "intro": "负责根据开头钩子方案、人设和场景结果，生成符合人物性格、身份和关系张力的关键对话。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 7545,
+        "y": -810
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“换皮角色对话编剧”。\n\n你的唯一任务：\n基于【人设重构JSON】【原剧本正文】【当前故事梗概】【分集计划】，从第{{$VARIABLE_NODE_ID.sKq9Iyza$}}集开始，为当前五集输出关键对白素材。\n\n注意：\n你不是照着原对话改写措辞，也不是只写“有张力的对白”。\n你必须让每一段对白都体现：\n“同样的剧情结果，现在是由新人物的性格、需求、误判、防御方式和关系投射推出来的。”\n\n【关键要求】\n一、对白服务“同结果新因果”\n每段对白都必须至少完成以下之一：\n- 逼出人物的欲望\n- 暴露人物的误判\n- 触发人物的防御反应\n- 推动人物做出与原剧情结果一致的决定\n- 让关系在新因果下继续推进而不是中断\n\n二、不要照抄原人物思维方式\n- 不要让角色仍像原角色那样说话\n- 不要沿用原角色的价值判断和情绪路径\n- 新人设必须带来新的试探方式、攻击方式、示弱方式、保护方式、回避方式\n\n三、对白必须能落进正文\n- 不要写完整正文\n- 只写可整合的关键对话块\n- 但每个对话块必须写清楚 scene_purpose 和 result_to_preserve\n- 每段对话都要说明：这个对白最终把剧情推向了哪个既定结果\n\n四、潜台词必须来自人物内部\n潜台词不要只是“制造氛围”，而要来自：\n- 害怕失去\n- 想确认自己被需要\n- 不敢暴露真实需求\n- 把对方当成投射对象\n- 想控制局面避免再次受伤\n- 明明在靠近却伪装成利用、玩笑、嫌弃或公事公办\n\n【输入】\n【原剧本正文】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n【当前故事梗概】\n{{$VARIABLE_NODE_ID.ayxWwSpE$}}\n【人设重构JSON】{{$VARIABLE_NODE_ID.fFM0mroW$}}\n【分集计划】{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n\n【输出要求】\n- 只输出合法 JSON\n- 中文\n- 一次最多五集，不足五集写剩余集数\n- 不得扩写超过{{$VARIABLE_NODE_ID.blkSS7dY$}}\n\n输出 JSON 结构：\n{\n  \"dialogue_style_guide\": {\n    \"main_character_voice\": \"\",\n    \"secondary_character_voice\": \"\",\n    \"opposition_voice\": \"\",\n    \"relationship_tension_rules\": []\n  },\n  \"episode_dialogue_blocks\": [\n    {\n      \"episode\": 1,\n      \"locked_story_result\": \"\",\n      \"scene_purpose\": \"\",\n      \"participants\": [],\n      \"triggering_character_need\": \"\",\n      \"dialogue_block\": [\n        {\"speaker\": \"\", \"line\": \"\"}\n      ],\n      \"subtext\": \"\",\n      \"what_this_reveals_about_new_character_logic\": \"\",\n      \"relationship_effect\": \"\",\n      \"why_this_still_pushes_the_original_result\": \"\"\n    }\n  ]\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成角色对话撰写任务即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "riKJtX6mPgdMak9I",
+      "name": "五集剧本正文整撰写编剧",
+      "intro": "负责把开头设计、冲突钩子、关键对话和人设场景结果整合成五集完整正文。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 7230,
+        "y": 3131.5
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "【参考输入】\n【当前故事梗概】\n{{$VARIABLE_NODE_ID.ayxWwSpE$}}\n【人设重构JSON】\n{{$VARIABLE_NODE_ID.fFM0mroW$}}\n【角色对话JSON】\n{{$VARIABLE_NODE_ID.pS7JzosX$}}\n【分集计划】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n【上一批次剧情记忆JSON】\n{{$VARIABLE_NODE_ID.dzt6kORx$}}\n\n【批次承接规则】\n1. 如果【上一批次剧情记忆JSON】不为空，当前批次第一集开场必须优先承接上一批的 final_hook_of_this_turn 或 must_carry_into_next_turn\n2. 不得无视上一批已经形成的人物关系变化、危机状态、任务状态和信息差变化\n3. 不得把上一批已解决的问题当作未解决问题重复写一遍\n4. 不得另起炉灶开启与上一批结尾无关的新冲突，除非分集计划明确要求\n5. 当前批次推进必须建立在上一批已形成的局势基础上继续升级\n\n【写作边界】\n1. 应当从第{{$VARIABLE_NODE_ID.d4sfifeZ$}}集开始写\n2. 一次最多写五集，例如1-5集、6-10集\n3. 如果剩余集数不足五集，则只写剩余集数\n4. 严禁扩写超过{{$VARIABLE_NODE_ID.blkSS7dY$}}\n\n【剧本结构要求】\n1. 每集控制在2-3场\n2. 每集都要有清晰的：目标 -> 阻力 -> 选择 -> 后果\n3. 每集都必须有明确冲突和推进\n4. 每集结尾必须落在具体事件、具体动作或具体新信息点上，形成钩子\n5. 每集字数严格把控在{{$VARIABLE_NODE_ID.eBEWC07Q$}}浮动10%以内\n\n【输出规则】\n1. 只输出本批次剧本正文\n2. 第一行必须从当前批次起始集开始写作“第{{$VARIABLE_NODE_ID.d4sfifeZ$}}集：第{{$VARIABLE_NODE_ID.d4sfifeZ$}}集标题”\n3. 往后的每一集也必须使用同样格式\n4. 每集内部场次头必须清晰标示\n5. 不要输出 JSON、Markdown、解释、总结、审核意见或任何正文之外的文字\n\n现在开始按格式要求输出。",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成当前的剧本正文撰写任务即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "mCJVQGweeCJChKI9",
+      "name": "角色对话审核编剧",
+      "intro": "角色对话审核编剧",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 10035,
+        "y": -810
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“换皮角色对话审核编剧”。\n\n你的任务：\n审核当前角色对话 JSON 是否真正体现了“同样剧情结果、不同人物因果”。\n\n重点检查：\n1. 说话方式是否真的来自新人设，而不是原角色换皮\n2. 对话是否体现人物的 desire / fear / false_belief / 防御机制\n3. 关键对白是否推动剧情去往既定结果\n4. 是否存在“剧情需要这么说，所以角色这么说”\n5. 是否存在表面不同、底层还是原角色思维方式的问题\n6. 潜台词是否来源于人物内部，而不是为了显得高级\n7. 集数是否连续、是否扩写、是否超过五集\n\n【输入】\n【原剧本正文】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n【当前故事梗概】\n{{$VARIABLE_NODE_ID.ayxWwSpE$}}\n【人设重构JSON】{{$VARIABLE_NODE_ID.fFM0mroW$}}\n【当前角色对话JSON】{{$VARIABLE_NODE_ID.mN7Fh38L$}}\n\n【输出 JSON 结构】\n{\n  \"passed\": false,\n  \"rewrite_required\": true,\n  \"summary\": \"\",\n  \"blocking_issues\": [],\n  \"non_blocking_issues\": [],\n  \"same_result_new_causality_check\": {\n    \"dialogue_matches_new_character_logic\": false,\n    \"dialogue_still_pushes_locked_result\": false,\n    \"dialogue_is_not_original_voice_reuse\": false\n  }\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成角色对话审核任务即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "m4DUWvx6WAMtGez0",
+      "name": "角色对话修订编剧",
+      "intro": "根据“角色对话审核编剧”结果，修订当前对话JSON，确保：\n\n对话符合人物身份、性格、压力位置\n对话张力合理、冲突自然\n关键角色动机扎根人物内在\n可以结合网络搜索增加符合人物形象的网络热梗或口头禅",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 14640,
+        "y": -2745
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“换皮角色对话修订编剧”。\n\n你的任务：\n根据【角色对话审核结果JSON】，对【当前角色对话JSON】进行修订。\n\n这不是普通润色，也不是补几句更顺的台词。\n你的修订目标是：\n在不改变既定剧情结果的前提下，让对白真正体现“同样剧情结果、不同人物因果”，让角色说话方式、对抗方式、试探方式、示弱方式、回避方式，都来自新人设，而不是原角色换皮。\n\n【修订原则】\n一、优先级\n1. 先修 blocking_issues\n2. 再修“对白没有体现新人设内部逻辑”\n3. 再修“对白仍然像原角色在说话”\n4. 最后再修表达、节奏、锋利度\n\n二、严格保留\n- 保留当前批次应抵达的剧情结果\n- 保留当前分集计划方向\n- 保留关键冲突功能、关系推进功能、信息揭露功能\n- 不得扩写超过{{$VARIABLE_NODE_ID.blkSS7dY$}}\n- 一次最多修当前这五集，不得越界\n- 如果审核指出集数错误、重复、断档，必须从第{{$VARIABLE_NODE_ID.sKq9Iyza$}}集开始按顺序重写当前应有的集数\n\n三、你真正要修的是\n- 人物为什么这样说\n- 人物为什么不把话说明白\n- 人物为什么要试探、回避、刺人、装轻松、装无所谓、装公事公办\n- 人物为什么在此刻被触发\n- 人物如何通过语言维持控制感、保护自己、争夺关系主动权或避免暴露需求\n\n四、禁止事项\n- 禁止照搬原角色说话习惯\n- 禁止把原对白换几个词就当修订完成\n- 禁止让角色为了推进剧情直接说明自己的真实动机\n- 禁止把潜台词写成作者解释\n- 禁止为了“更有梗”而加入破坏人物身份、世界观、题材气质的网络热梗\n- 除非人物设定、题材调性、时代语境都允许，否则不要硬塞流行口头禅\n- 不要使用网络搜索结果，不需要加热梗\n\n五、对白成立标准\n修订后的每段对白都必须至少完成以下之一：\n- 暴露人物 desire / need / fear / false_belief\n- 触发人物防御机制\n- 推动人物做出与原剧情结果一致的决定\n- 强化关系拉扯但不提前终止关系\n- 为后续正文提供可拍、可演、可推进的对白核心\n\n六、修订方式\n如果某段对白的问题是“剧情需要这么说”，你必须把它改成：\n- 角色因为害怕失去，所以嘴硬\n- 角色因为不敢暴露真实需求，所以转移话题\n- 角色因为误判对方，所以故意试探\n- 角色因为想维持控制，所以打断、反问、冷处理\n- 角色因为把对方当投射对象，所以嘴上拒绝，行为却继续靠近\n\n【输入】\n【原剧本正文】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n【当前故事梗概】\n{{$VARIABLE_NODE_ID.ayxWwSpE$}}\n【人设重构JSON】\n{{$VARIABLE_NODE_ID.fFM0mroW$}}\n【当前角色对话JSON】\n{{$VARIABLE_NODE_ID.mN7Fh38L$}}\n【角色对话审核结果JSON】\n{{$mCJVQGweeCJChKI9.answerText$}}\n【分集计划】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n\n【输出要求】\n- 只输出合法 JSON\n- 中文\n- 不要输出 JSON 之外的任何文字\n- 字段必须完整\n- episode 必须连续\n- 只修当前批次应包含的集数\n\n请严格输出为以下 JSON 结构：\n{\n  \"dialogue_style_guide\": {\n    \"main_character_voice\": \"\",\n    \"secondary_character_voice\": \"\",\n    \"opposition_voice\": \"\",\n    \"relationship_tension_rules\": []\n  },\n  \"episode_dialogue_blocks\": [\n    {\n      \"episode\": 1,\n      \"locked_story_result\": \"\",\n      \"scene_purpose\": \"\",\n      \"participants\": [],\n      \"triggering_character_need\": \"\",\n      \"dialogue_block\": [\n        {\"speaker\": \"\", \"line\": \"\"}\n      ],\n      \"subtext\": \"\",\n      \"what_this_reveals_about_new_character_logic\": \"\",\n      \"relationship_effect\": \"\",\n      \"why_this_still_pushes_the_original_result\": \"\"\n    }\n  ]\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 3,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成角色对话修订任务即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "qsa5jqscPavJr68p",
+      "name": "五集正文连贯性审核编剧",
+      "intro": "对五集正文进行阶段性连贯性总审，识别可能破坏后续剧情推进的关键问题，包括人物动机、逻辑连贯性、时间线和规则一致性。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 9645,
+        "y": 3121.5
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“五集正文连贯性审核编剧”。\n\n你的任务：\n对当前这一批连续剧本正文进行阶段性审核。\n这不是润色，而是判断这批正文是否可以继续进入下一阶段创作。\n\n你必须审核的是：\n这批正文是否同时满足\n1. 原剧情结果被保住\n2. 新人物因果真正成立\n3. 承接关系、局势推进、批次边界没有坏掉\n\n【审核目标】\n你要拦下真正会破坏后续推进的硬伤，不要因为文风还可更强、台词还可更利、镜头还可更炸就随便打回。\n\n只有以下问题才属于 blocking_issues：\n- 破坏剧情锁点\n- 破坏结尾钩子功能\n- 新人物因果没有成立\n- 人物行为明显仍是原角色逻辑\n- 上下批次承接断裂\n- 分集越界、重复、断档\n- 世界规则/任务规则/关系状态冲突\n- 场次结构不成立\n- 字数明显超限或严重失控\n\n其余“还能更好”的问题，默认放到 non_blocking_issues。\n\n【你必须重点检查】\n一、剧情锁点检查\n- 当前正文是否保住了该批次原剧本应有的关键事件结果\n- 当前正文是否保住了该批次原剧本应有的结尾钩子功能\n- 核心爽点、掉马点、反转点、揭示点是否还在正确位置\n- 是否出现剧情结果被误改、爽点位置漂移、关系推进提前或滞后的问题\n\n二、因果重写检查\n- 当前正文是否真的把“原因”换掉了，而不只是把原剧情换种说法重写\n- 当前正文中的人物行为，是否明确来自新人设中的 wound / fear / false_belief / event_binding\n- 是否仍存在“原角色嘴替”或“原角色行为逻辑未改”的情况\n- 是否出现“剧情需要人物这样做，所以人物就这样做”的硬拗\n\n三、连贯性检查\n- 本批次开头是否承接上一批的 final_hook_of_this_turn / current_story_state / unresolved_threads / must_carry_into_next_turn\n- 各集之间是否连续推进，而不是像五个分散短剧\n- 是否把上一批已解决问题又当成未解决问题重新写了一遍\n- 是否另起炉灶开启与上一批结尾无关的新冲突\n- 时间线、世界规则、任务规则是否一致\n- 阶段边界是否符合分集计划\n\n四、格式与批次边界检查\n- 是否以“第X集：第X集标题”开头\n- 是否存在重复的集、集数不连贯、越界扩写\n- 是否每集 2-3 场\n- 场次头是否使用对应集数编号\n- 每集字数是否控制在 {{$VARIABLE_NODE_ID.eBEWC07Q$}} 浮动 10% 以内\n- 若当前集数为“{{$VARIABLE_NODE_ID.d4sfifeZ$}}”减去5的值大于{{$VARIABLE_NODE_ID.blkSS7dY$}}，或一次写超过五集，直接打回\n\n【输入】\n【原剧本正文】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n【当前故事梗概】\n{{$VARIABLE_NODE_ID.ayxWwSpE$}}\n【人设重构JSON】\n{{$VARIABLE_NODE_ID.fFM0mroW$}}\n【当前角色对话JSON】\n{{$VARIABLE_NODE_ID.pS7JzosX$}}\n【分集计划】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n【剧本连贯性记忆存储】\n{{$VARIABLE_NODE_ID.dzt6kORx$}}\n【当前批次剧本正文】\n{{$VARIABLE_NODE_ID.zS2LXibg$}}\n\n【输出要求】\n- 只输出合法 JSON\n- 中文\n- 不要输出 JSON 之外的任何文字\n- 如果通过，passed=true，rewrite_required=false\n- 如果不通过，passed=false，rewrite_required=true\n- rewrite_start_episode 必须尽量指出最早出问题的那一集\n- stage 固定写 \"five_episode_continuity_review\"\n\n请严格输出为以下 JSON 结构：\n{\n  \"passed\": false,\n  \"rewrite_required\": true,\n  \"summary\": \"\",\n  \"blocking_issues\": [],\n  \"non_blocking_issues\": [],\n  \"rewrite_start_episode\": 1,\n  \"stage\": \"five_episode_continuity_review\",\n  \"locked_result_check\": {\n    \"story_results_preserved\": false,\n    \"hook_function_preserved\": false,\n    \"major_reveal_positions_preserved\": false\n  },\n  \"causality_rewrite_check\": {\n    \"new_causality_is_established\": false,\n    \"character_behavior_matches_new_logic\": false,\n    \"still_has_original_character_logic_residue\": true\n  },\n  \"continuity_check\": {\n    \"properly_carries_previous_batch\": false,\n    \"episode_to_episode_progression_is_continuous\": false,\n    \"no_duplicate_or_reset_writing\": false\n  }\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成当前的剧本正文审核任务即可。审核内容：【当前批次剧本正文】\n{{$VARIABLE_NODE_ID.zS2LXibg$}}",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "roBchMnqd4cL3NHh",
+      "name": "五集正文修订编剧",
+      "intro": "根据五集正文审核结果，对当前五集正文进行修订，重点修复：\n\n动机生硬或不扎根\n上下集开头结尾呼应\n字数控制\n保留世界观和分集计划一致性",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 13695,
+        "y": 1859
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“五集正文修订编剧”。\n\n你的任务：\n根据【五集正文审核结果JSON】，对【当前这一批剧本正文】进行修订。\n\n这不是普通润色，也不是只把文字写顺。\n你的修订目标是：\n在保住原剧情锁点和当前批次结果的前提下，把正文重新修到“新人设因果成立、批次承接成立、剧情推进成立”。\n\n应当从第{{$VARIABLE_NODE_ID.d4sfifeZ$}}集开始重写，最多只修订当前这一批次应包含的集数，严禁扩写到计划之外的集数。\n如果原文写的就不是从第{{$VARIABLE_NODE_ID.d4sfifeZ$}}集开始，则你需要从该集开始撰写。\n如果审核认为集数出现问题，就从第{{$VARIABLE_NODE_ID.d4sfifeZ$}}集开始按顺序写当前应有集数，一次最多五集，如果不足五集，就只写剩下的集数，严禁扩写超过{{$VARIABLE_NODE_ID.blkSS7dY$}}。\n\n【修订优先级】\n1. 先修“剧情锁点被破坏”\n2. 再修“人物因果没有换成功”\n3. 再修“对白仍是原角色语气”\n4. 再修“批次承接、节奏、场次结构”问题\n5. 最后再修字数、表达和局部锋利度\n\n【你必须遵守的原则】\n一、严格保留\n- 原剧情该批次必须抵达的关键事件结果\n- 每集结尾钩子功能\n- 核心爽点、掉马点、反转点、揭示点\n- 主线关系推进方向\n- 分集计划边界\n- 世界规则、任务规则、关键真相、关键组织、关键道具\n\n二、优先修“因果”，不是优先修“句子”\n你必须优先修复：\n- 人物为什么会做出这个选择\n- 人物为什么不会离开\n- 人物为什么在此刻推进冲突\n- 人物为什么要隐瞒、试探、靠近、保护、利用、失控\n- 人物如何用新的伤口、误判、需求，把同样结果推出来\n\n三、必须服从新人设因果图\n修订时必须优先参考：\n- rewrite_strategy\n- character_setting.characters[*].event_binding\n- plot_causality_map\n\n如果正文结果与新人设因果之间存在张力：\n你必须通过补动作、补触发事件、补犹豫、补试探、补压抑、补回避、补两难困境来让它成立，而不是直接改结果。\n\n四、承接规则\n如果【上一批次剧情记忆JSON】不为空，当前批次第一集开场必须优先承接：\n- final_hook_of_this_turn\n- current_story_state\n- unresolved_threads\n- must_carry_into_next_turn\n\n不得无视上一批已经形成的人物关系变化、危机状态、任务状态和信息差变化。\n不得把上一批已解决的问题当作未解决问题重复写一遍。\n不得另起炉灶开启与上一批结尾无关的新冲突，除非分集计划明确要求。\n\n五、剧本写法要求\n- 输出的是修订后的本批次剧本正文，不是提纲，不是总结\n- 每集都要有清晰的：目标 -> 阻力 -> 选择 -> 后果\n- 每集都必须有明确冲突和推进\n- 每集结尾必须落在具体事件、具体动作或具体新信息点上\n- 描写必须偏剧本而非小说\n- 用动作、对白、神态、反应、镜头提示推进\n- 动作必须可拍、可演\n- 环境描写只保留必要部分\n- 每集控制在 2-3 场\n- 每集字数严格把控在{{$VARIABLE_NODE_ID.eBEWC07Q$}}浮动10%以内\n\n六、禁止事项\n- 禁止直接新增改变主线成立条件的设定\n- 禁止为了让人物更合理，直接删掉原本必须发生的关键结果\n- 禁止用大段解释替代戏剧行为\n- 禁止让角色直接把“我为什么这样做”完整讲出来\n- 禁止用旁白偷懒补因果\n- 禁止改坏钩子\n\n【输入】\n【原剧本正文】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n【当前故事梗概】\n{{$VARIABLE_NODE_ID.ayxWwSpE$}}\n【人设重构JSON】\n{{$VARIABLE_NODE_ID.fFM0mroW$}}\n【当前角色对话JSON】\n{{$VARIABLE_NODE_ID.pS7JzosX$}}\n【当前批次剧本正文】\n{{$VARIABLE_NODE_ID.zS2LXibg$}}\n【五集正文审核结果JSON】\n{{$qsa5jqscPavJr68p.answerText$}}\n【分集计划】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n【上一批次剧情记忆JSON】\n{{$VARIABLE_NODE_ID.dzt6kORx$}}\n\n【输出规则】\n只输出修订后的本批次剧本正文。\n第一行必须从当前批次起始集开始写作“第{{$VARIABLE_NODE_ID.d4sfifeZ$}}集：第{{$VARIABLE_NODE_ID.d4sfifeZ$}}集标题”\n往后的每一集也是同样格式。\n不要输出 JSON、Markdown、解释、总结、审核意见或任何正文之外的文字。\n\n现在开始按格式要求输出。",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成当前的剧本正文修订任务即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "eJX8Hk9DoSdjACxc",
+      "name": "人设场景循环变量更新",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 10740,
+        "y": -3645
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "fFM0mroW"
+              ],
+              "value": [
+                "c8dQrGAIwG5dD32J",
+                "answerText"
+              ],
+              "valueType": "string",
+              "renderType": "reference"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "prEERTrf3uC9IHpE",
+      "name": "人设场景循环次数更新",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 10860,
+        "y": -4380
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "d9g8vngS"
+              ],
+              "value": [
+                "vOy0RYkuIkUmOMcG",
+                "qLUQfhG0ILRX"
+              ],
+              "valueType": "number",
+              "renderType": "reference"
+            },
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "fFM0mroW"
+              ],
+              "value": [
+                "o30cHJ82gGYhtbbu",
+                "answerText"
+              ],
+              "renderType": "reference",
+              "valueType": "string"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "o30cHJ82gGYhtbbu",
+      "name": "人设修订编剧",
+      "intro": "基于审核结果，对“人设场景统筹编剧”输出进行修订。目标是：\n修复人物动机、行为逻辑或场景承载冲突的硬伤\n保留原有世界观和分集计划\n输出完整可直接使用的人设 + 场景 JSON",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 14670,
+        "y": -5490
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“换皮人设修订编剧”。\n\n你的任务：\n根据【人设审核结果JSON】，修订当前人设重构结果。\n\n修订目标不是普通润色，而是：\n- 修正没有完成“同结果新因果”的地方\n- 修正不能推动剧情锁点成立的人物动机\n- 修正 event_binding 不具体、不成立、不够狠、不够必然的问题\n- 保留已经成立的内容，不做无关修改\n\n【修订原则】\n1. 优先修 blocking_issues\n2. 不得破坏已保留的剧情锁点\n3. 不得为了让人物更“丰富”而改变主线结果\n4. 必须补齐人物如何推动关键事件发生的因果链\n5. 人物前史、误判、恐惧、需求必须能映射到后续关键选择\n6. 修订后的人设要更适合后续写对白和正文，而不是更抽象\n\n【输入】\n【原剧本正文】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n【当前故事梗概】\n{{$VARIABLE_NODE_ID.ayxWwSpE$}}\n【人设审核结果JSON】{{$hkqS87SbnICwToox.answerText$}}\n【当前人设重构JSON】{{$VARIABLE_NODE_ID.fFM0mroW$}}\n\n【输出要求】\n- 只输出合法 JSON\n- 完整保留原 schema\n- 所有字段必须填写\n- 优先最小必要修改，不要大面积推翻已成立内容\n\n输出 JSON 结构：\n{\n  \"rewrite_strategy\": {\n    \"story_lock_principle\": \"\",\n    \"must_keep_story_results\": [],\n    \"must_keep_relationship_results\": [],\n    \"must_keep_major_reveals\": [],\n    \"forbidden_changes\": []\n  },\n  \"character_setting\": {\n    \"character_design_principle\": \"\",\n    \"core_relation_logic\": \"\",\n    \"characters\": []\n  },\n  \"plot_causality_map\": []\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成人设修订任务即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "pZ3OUm2XrNlKbrOB",
+      "name": "过审了没",
+      "intro": "根据一定的条件，执行不同的分支。",
+      "avatar": "core/workflow/template/ifelse",
+      "flowNodeType": "ifElseNode",
+      "showStatus": true,
+      "position": {
+        "x": 12300,
+        "y": -3696
+      },
+      "inputs": [
+        {
+          "key": "ifElseList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "condition": "AND",
+              "list": [
+                {
+                  "variable": [
+                    "hkqS87SbnICwToox",
+                    "answerText"
+                  ],
+                  "condition": "include",
+                  "value": "\"passed\": false",
+                  "valueType": "input"
+                }
+              ]
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "ifElseResult",
+          "key": "ifElseResult",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:judgment_result",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "jMrb0LQJAyOGdnra",
+      "name": "重写轮次有没有超",
+      "intro": "根据一定的条件，执行不同的分支。",
+      "avatar": "core/workflow/template/ifelse",
+      "flowNodeType": "ifElseNode",
+      "showStatus": true,
+      "position": {
+        "x": 13095,
+        "y": -4125
+      },
+      "inputs": [
+        {
+          "key": "ifElseList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "condition": "AND",
+              "list": [
+                {
+                  "variable": [
+                    "VARIABLE_NODE_ID",
+                    "d9g8vngS"
+                  ],
+                  "condition": "lessThanOrEqualTo",
+                  "value": [
+                    "VARIABLE_NODE_ID",
+                    "h3fAdn6f"
+                  ],
+                  "valueType": "reference"
+                }
+              ]
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "ifElseResult",
+          "key": "ifElseResult",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:judgment_result",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "hkqS87SbnICwToox",
+      "name": "人设统筹审核",
+      "intro": "负责审核“人设场景统筹编剧”输出的角色和场景设定，重点检查：\n\n人物行为是否由内部动机自然驱动\n人物性格、家庭、长相、行为四维关系是否清晰\n核心场景是否承载冲突并支撑剧情\n与世界观、一致性和分集计划的匹配性\n潜在问题标注为 blocking 或 non-blocking\n\n输出 JSON，提供审核结果及返工定位。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 11430,
+        "y": -4125
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“换皮人设审核编剧”。\n\n你的任务：\n审核当前人设重构结果是否真正实现了：\n“保留故事关键结果不变，但让人物因果彻底改写，并且由新人物自然推动同样剧情成立”。\n\n你必须重点检查以下问题：\n\n一、是否真的完成“换因果”而不是“换标签”\n- 是否只是换了年龄、职业、外貌、称呼\n- 是否仍在沿用原人物的决策方式和情绪方式\n- 是否只是给人物补了一层创伤说明，但没有真正影响行为机制\n- 是否存在“看起来换了，实际还是原人设”的情况\n\n二、剧情锁点是否被保住\n- 关键事件结果是否仍能成立\n- 重要关系推进结果是否仍能成立\n- 核心反转、爽点、揭示点是否仍可抵达\n- 是否误改了主线成立条件、世界规则或关键真相\n\n三、新人物是否真的能推得动原剧情\n- 每个关键人物是否具备清晰 desire / need / fear / false_belief\n- event_binding 是否具体，不空泛\n- 关键事件是否明确由人物内部原因推动\n- 是否存在“剧情需要他这样做，所以他就这样做”的硬拗情况\n\n四、关系是否有新的因果基础\n- 人物彼此靠近、利用、依赖、误解、保护、失控的原因是否清楚\n- 是否解释了“为什么关系不会在前期就终止”\n- 是否解释了“为什么同样结果还是会发生”\n\n五、输出结构是否完整\n- rewrite_strategy 是否完整\n- character_setting 是否完整\n- plot_causality_map 是否完整\n- 字段是否缺失\n- 是否存在空泛描述、套话、万能词\n\n【输入】\n【原剧本正文】\n{{$VARIABLE_NODE_ID.pxtQY7p2$}}\n【当前故事梗概】\n{{$VARIABLE_NODE_ID.ayxWwSpE$}}\n【世界观JSON】{{$VARIABLE_NODE_ID.yuozoGpo$}}\n【当前人设重构JSON】{{$VARIABLE_NODE_ID.fFM0mroW$}}\n\n【输出要求】\n- 只输出合法 JSON\n- 中文\n- 标明 blocking 与 non_blocking 问题\n\n输出 JSON 结构：\n{\n  \"passed\": false,\n  \"rewrite_required\": true,\n  \"summary\": \"\",\n  \"blocking_issues\": [],\n  \"non_blocking_issues\": [],\n  \"locked_result_check\": {\n    \"story_results_preserved\": false,\n    \"relationship_results_preserved\": false,\n    \"major_reveals_preserved\": false\n  },\n  \"causality_rewrite_check\": {\n    \"is_true_causality_rewrite\": false,\n    \"has_event_binding\": false,\n    \"characters_can_push_plot\": false\n  }\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成人设审核任务即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "oGsGVj6ZLw491pas",
+      "name": "更新角色对话，flag++，集数起点+5",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 9210,
+        "y": -1710
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "mN7Fh38L"
+              ],
+              "value": [
+                "m4DUWvx6WAMtGez0",
+                "answerText"
+              ],
+              "valueType": "string",
+              "renderType": "reference"
+            },
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "llKW3OVX"
+              ],
+              "value": [
+                "b51xw4cWQRq14X3T",
+                "qLUQfhG0ILRX"
+              ],
+              "renderType": "reference",
+              "valueType": "number"
+            },
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "sKq9Iyza"
+              ],
+              "value": [
+                "b51xw4cWQRq14X3T",
+                "etGPbz"
+              ],
+              "renderType": "reference",
+              "valueType": "number"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "lRVZ4j6HTOZbfWul",
+      "name": "更新角色对话",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 9330,
+        "y": -420
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "mN7Fh38L"
+              ],
+              "value": [
+                "rUZ4xLNv2Zw5WoGW",
+                "answerText"
+              ],
+              "valueType": "string",
+              "renderType": "reference"
+            },
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "sKq9Iyza"
+              ],
+              "value": [
+                "rBZHknvDzldkpU0K",
+                "qLUQfhG0ILRX"
+              ],
+              "renderType": "reference",
+              "valueType": "number"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "zA5THhcARqYy5JaQ",
+      "name": "写完了吗",
+      "intro": "根据一定的条件，执行不同的分支。",
+      "avatar": "core/workflow/template/ifelse",
+      "flowNodeType": "ifElseNode",
+      "showStatus": true,
+      "position": {
+        "x": 6525,
+        "y": -2583.5
+      },
+      "inputs": [
+        {
+          "key": "ifElseList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "condition": "AND",
+              "list": [
+                {
+                  "variable": [
+                    "VARIABLE_NODE_ID",
+                    "sKq9Iyza"
+                  ],
+                  "condition": "lessThanOrEqualTo",
+                  "value": [
+                    "VARIABLE_NODE_ID",
+                    "blkSS7dY"
+                  ],
+                  "valueType": "reference"
+                }
+              ]
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "ifElseResult",
+          "key": "ifElseResult",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:judgment_result",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "s1pr9oAXmwJQZmxq",
+      "name": "过审了吗",
+      "intro": "根据一定的条件，执行不同的分支。",
+      "avatar": "core/workflow/template/ifelse",
+      "flowNodeType": "ifElseNode",
+      "showStatus": true,
+      "position": {
+        "x": 10830,
+        "y": -405
+      },
+      "inputs": [
+        {
+          "key": "ifElseList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "condition": "AND",
+              "list": [
+                {
+                  "variable": [
+                    "mCJVQGweeCJChKI9",
+                    "answerText"
+                  ],
+                  "condition": "include",
+                  "value": "\"passed\": false",
+                  "valueType": "input"
+                }
+              ]
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "ifElseResult",
+          "key": "ifElseResult",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:judgment_result",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "o1s9JbiX8OQA87tw",
+      "name": "重写次数超了吗",
+      "intro": "剧本正文重写次数有没有超界",
+      "avatar": "core/workflow/template/ifelse",
+      "flowNodeType": "ifElseNode",
+      "showStatus": true,
+      "position": {
+        "x": 11385,
+        "y": 3195
+      },
+      "inputs": [
+        {
+          "key": "ifElseList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "condition": "AND",
+              "list": [
+                {
+                  "variable": [
+                    "VARIABLE_NODE_ID",
+                    "llKW3OVX"
+                  ],
+                  "condition": "lessThanOrEqualTo",
+                  "value": [
+                    "VARIABLE_NODE_ID",
+                    "essitQMV"
+                  ],
+                  "valueType": "reference"
+                }
+              ]
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "ifElseResult",
+          "key": "ifElseResult",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:judgment_result",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "oZ07Agl8LRh7zPXt",
+      "name": "过审了吗",
+      "intro": "根据一定的条件，执行不同的分支。",
+      "avatar": "core/workflow/template/ifelse",
+      "flowNodeType": "ifElseNode",
+      "showStatus": true,
+      "position": {
+        "x": 10425.5,
+        "y": 3558
+      },
+      "inputs": [
+        {
+          "key": "ifElseList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "condition": "AND",
+              "list": [
+                {
+                  "variable": [
+                    "qsa5jqscPavJr68p",
+                    "answerText"
+                  ],
+                  "condition": "include",
+                  "value": "\"passed\": false",
+                  "valueType": "input"
+                }
+              ]
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "ifElseResult",
+          "key": "ifElseResult",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:judgment_result",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "iZ6GHQ9rru51odcD",
+      "name": "变量更新#9",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 8925,
+        "y": 3541
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "zS2LXibg"
+              ],
+              "value": [
+                "riKJtX6mPgdMak9I",
+                "answerText"
+              ],
+              "valueType": "string",
+              "renderType": "reference"
+            },
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "d4sfifeZ"
+              ],
+              "value": [
+                "e6Ai3BfzPz2e9ht7",
+                "qLUQfhG0ILRX"
+              ],
+              "renderType": "reference",
+              "valueType": "number"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "m20HcueENlYhZJy4",
+      "name": "剧本拼接",
+      "intro": "把五集审核通过的剧本拼在一起形成最终剧本",
+      "avatar": "core/workflow/template/textConcat",
+      "flowNodeType": "textEditor",
+      "position": {
+        "x": 12736,
+        "y": 4575
+      },
+      "inputs": [
+        {
+          "key": "system_textareaInput",
+          "label": "workflow:concatenation_text",
+          "valueType": "string",
+          "required": true,
+          "placeholder": "workflow:input_variable_list",
+          "renderTypeList": [
+            "textarea"
+          ],
+          "value": "{{$VARIABLE_NODE_ID.vI8t3a31$}}\n\n{{$VARIABLE_NODE_ID.zS2LXibg$}}",
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "system_text",
+          "key": "system_text",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:concatenation_result",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "gRGu2yeKM1MwfKBM",
+      "name": "最终输出剧本拼接",
+      "intro": "把标题，故事梗概，人物小传，核心场景，剧本正文拼接起来",
+      "avatar": "core/workflow/template/textConcat",
+      "flowNodeType": "textEditor",
+      "position": {
+        "x": 7290,
+        "y": 5661
+      },
+      "inputs": [
+        {
+          "key": "system_textareaInput",
+          "label": "workflow:concatenation_text",
+          "valueType": "string",
+          "required": true,
+          "placeholder": "workflow:input_variable_list",
+          "renderTypeList": [
+            "textarea"
+          ],
+          "value": "《{{$VARIABLE_NODE_ID.n5ZHYrj8$}}》{{$VARIABLE_NODE_ID.blkSS7dY$}}完整剧本\n\n故事梗概\n{{$VARIABLE_NODE_ID.ayxWwSpE$}}\n\n人物小传\n{{$VARIABLE_NODE_ID.fFM0mroW$}}\n\n核心场景\n{{$VARIABLE_NODE_ID.rxmvq2lS$}}\n\n剧本正文\n{{$VARIABLE_NODE_ID.vI8t3a31$}}",
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "system_text",
+          "key": "system_text",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:concatenation_result",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "zDZkVU7YsbGMtdSD",
+      "name": "变量更新#10",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 8850,
+        "y": 2820
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "zS2LXibg"
+              ],
+              "value": [
+                "roBchMnqd4cL3NHh",
+                "answerText"
+              ],
+              "valueType": "string",
+              "renderType": "reference"
+            },
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "nCZK9S2O"
+              ],
+              "value": [
+                "d9FluEAPFAGLRHTG",
+                "qLUQfhG0ILRX"
+              ],
+              "renderType": "reference",
+              "valueType": "number"
+            },
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "d4sfifeZ"
+              ],
+              "value": [
+                "d9FluEAPFAGLRHTG",
+                "wlLGkx"
+              ],
+              "renderType": "reference",
+              "valueType": "number"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "uCjz4iWKDGDtrorY",
+      "name": "审核通过角色对话就给并入拼接",
+      "intro": "可对固定或传入的文本进行加工后输出，非字符串类型数据最终会转成字符串类型。",
+      "avatar": "core/workflow/template/textConcat",
+      "flowNodeType": "textEditor",
+      "position": {
+        "x": 13455,
+        "y": 735
+      },
+      "inputs": [
+        {
+          "key": "system_textareaInput",
+          "label": "workflow:concatenation_text",
+          "valueType": "string",
+          "required": true,
+          "placeholder": "workflow:input_variable_list",
+          "renderTypeList": [
+            "textarea"
+          ],
+          "value": "{{$VARIABLE_NODE_ID.pS7JzosX$}}\n\n{{$VARIABLE_NODE_ID.mN7Fh38L$}}",
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "system_text",
+          "key": "system_text",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:concatenation_result",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "x7vk8tAbGFXAUivM",
+      "name": "轮次用完了吗",
+      "intro": "根据一定的条件，执行不同的分支。",
+      "avatar": "core/workflow/template/ifelse",
+      "flowNodeType": "ifElseNode",
+      "showStatus": true,
+      "position": {
+        "x": 11760,
+        "y": -750
+      },
+      "inputs": [
+        {
+          "key": "ifElseList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "condition": "AND",
+              "list": [
+                {
+                  "variable": [
+                    "VARIABLE_NODE_ID",
+                    "llKW3OVX"
+                  ],
+                  "condition": "lessThan",
+                  "value": [
+                    "VARIABLE_NODE_ID",
+                    "mQFrT0Al"
+                  ],
+                  "valueType": "reference"
+                }
+              ]
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "ifElseResult",
+          "key": "ifElseResult",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:judgment_result",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "xB6wtw9Hy1O1igYx",
+      "name": "剧本写完了吗",
+      "intro": "根据一定的条件，执行不同的分支。",
+      "avatar": "core/workflow/template/ifelse",
+      "flowNodeType": "ifElseNode",
+      "showStatus": true,
+      "position": {
+        "x": 6405,
+        "y": 1995
+      },
+      "inputs": [
+        {
+          "key": "ifElseList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "condition": "AND",
+              "list": [
+                {
+                  "variable": [
+                    "VARIABLE_NODE_ID",
+                    "d4sfifeZ"
+                  ],
+                  "condition": "lessThanOrEqualTo",
+                  "value": [
+                    "VARIABLE_NODE_ID",
+                    "blkSS7dY"
+                  ],
+                  "valueType": "reference"
+                }
+              ]
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": [
+        {
+          "id": "ifElseResult",
+          "key": "ifElseResult",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:judgment_result",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "wJW28YFDUr95Bfdt",
+      "name": "重置重写轮次",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 6405,
+        "y": 4545
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "nCZK9S2O"
+              ],
+              "value": [
+                "",
+                "0"
+              ],
+              "renderType": "input",
+              "valueType": "number"
+            },
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "vI8t3a31"
+              ],
+              "value": [
+                "m20HcueENlYhZJy4",
+                "system_text"
+              ],
+              "renderType": "reference",
+              "valueType": "string"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "vOy0RYkuIkUmOMcG",
+      "name": "人设场景flag++",
+      "intro": "执行一段简单的脚本代码，通常用于进行复杂的数据处理。",
+      "avatar": "core/workflow/template/codeRun",
+      "flowNodeType": "code",
+      "showStatus": true,
+      "position": {
+        "x": 10005,
+        "y": -5265
+      },
+      "inputs": [
+        {
+          "key": "system_addInputParam",
+          "label": "",
+          "valueType": "dynamic",
+          "required": false,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "addInputParam"
+          ],
+          "debugLabel": "",
+          "description": "workflow:these_variables_will_be_input_parameters_for_code_execution",
+          "toolDescription": ""
+        },
+        {
+          "key": "codeType",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "py",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "code",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "custom"
+          ],
+          "value": "def main(data1):\n    data1+=1\n    return {\"data1\":data1}\n",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "data1",
+          "label": "data1",
+          "valueType": "number",
+          "required": true,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "reference"
+          ],
+          "value": [
+            "VARIABLE_NODE_ID",
+            "d9g8vngS"
+          ],
+          "canEdit": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "system_rawResponse",
+          "key": "system_rawResponse",
+          "type": "static",
+          "valueType": "object",
+          "valueDesc": "",
+          "label": "workflow:full_response_data",
+          "description": ""
+        },
+        {
+          "id": "error",
+          "key": "error",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        },
+        {
+          "id": "system_addOutputParam",
+          "key": "system_addOutputParam",
+          "type": "dynamic",
+          "valueType": "dynamic",
+          "valueDesc": "",
+          "label": "",
+          "description": "将代码中 return 的对象作为输出，传递给后续的节点。变量名需要对应 return 的 key",
+          "customFieldConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDefaultValue": false,
+            "showDescription": false
+          }
+        },
+        {
+          "id": "qLUQfhG0ILRX",
+          "key": "data1",
+          "type": "dynamic",
+          "valueType": "number",
+          "valueDesc": "",
+          "label": "data1",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "b51xw4cWQRq14X3T",
+      "name": "角色对话flag++修订之后从+5集开始",
+      "intro": "执行一段简单的脚本代码，通常用于进行复杂的数据处理。",
+      "avatar": "core/workflow/template/codeRun",
+      "flowNodeType": "code",
+      "showStatus": true,
+      "position": {
+        "x": 7890,
+        "y": -2595
+      },
+      "inputs": [
+        {
+          "key": "system_addInputParam",
+          "label": "",
+          "valueType": "dynamic",
+          "required": false,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "addInputParam"
+          ],
+          "debugLabel": "",
+          "description": "workflow:these_variables_will_be_input_parameters_for_code_execution",
+          "toolDescription": ""
+        },
+        {
+          "key": "codeType",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "py",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "code",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "custom"
+          ],
+          "value": "def main(data1,data2):\n    data1+=1\n    data2+=5\n    return {\"data1\":data1,\"data2\":data2}\n",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "data1",
+          "label": "data1",
+          "valueType": "number",
+          "required": true,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "reference"
+          ],
+          "value": [
+            "VARIABLE_NODE_ID",
+            "llKW3OVX"
+          ],
+          "canEdit": true
+        },
+        {
+          "key": "data2",
+          "label": "data2",
+          "valueType": "number",
+          "required": true,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "reference"
+          ],
+          "value": [
+            "VARIABLE_NODE_ID",
+            "sKq9Iyza"
+          ],
+          "canEdit": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "system_rawResponse",
+          "key": "system_rawResponse",
+          "type": "static",
+          "valueType": "object",
+          "valueDesc": "",
+          "label": "workflow:full_response_data",
+          "description": ""
+        },
+        {
+          "id": "error",
+          "key": "error",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        },
+        {
+          "id": "system_addOutputParam",
+          "key": "system_addOutputParam",
+          "type": "dynamic",
+          "valueType": "dynamic",
+          "valueDesc": "",
+          "label": "",
+          "description": "将代码中 return 的对象作为输出，传递给后续的节点。变量名需要对应 return 的 key",
+          "customFieldConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDefaultValue": false,
+            "showDescription": false
+          }
+        },
+        {
+          "id": "qLUQfhG0ILRX",
+          "key": "data1",
+          "type": "dynamic",
+          "valueType": "number",
+          "valueDesc": "",
+          "label": "data1",
+          "description": ""
+        },
+        {
+          "id": "etGPbz",
+          "key": "data2",
+          "type": "dynamic",
+          "valueType": "number",
+          "valueDesc": "",
+          "label": "data2",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "d9FluEAPFAGLRHTG",
+      "name": "剧本正文循环flag++修订之后从+5集开始",
+      "intro": "执行一段简单的脚本代码，通常用于进行复杂的数据处理。",
+      "avatar": "core/workflow/template/codeRun",
+      "flowNodeType": "code",
+      "showStatus": true,
+      "position": {
+        "x": 8039.5,
+        "y": 2040
+      },
+      "inputs": [
+        {
+          "key": "system_addInputParam",
+          "label": "",
+          "valueType": "dynamic",
+          "required": false,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "addInputParam"
+          ],
+          "debugLabel": "",
+          "description": "workflow:these_variables_will_be_input_parameters_for_code_execution",
+          "toolDescription": ""
+        },
+        {
+          "key": "codeType",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "py",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "code",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "custom"
+          ],
+          "value": "def main(data1,data2):\n    data1+=1\n    data2+=5\n    return {\"data1\":data1,\"data2\":data2}\n",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "data1",
+          "label": "data1",
+          "valueType": "number",
+          "required": true,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "reference"
+          ],
+          "value": [
+            "VARIABLE_NODE_ID",
+            "nCZK9S2O"
+          ],
+          "canEdit": true
+        },
+        {
+          "key": "data2",
+          "label": "data2",
+          "valueType": "number",
+          "required": true,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "reference"
+          ],
+          "value": [
+            "VARIABLE_NODE_ID",
+            "d4sfifeZ"
+          ],
+          "canEdit": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "system_rawResponse",
+          "key": "system_rawResponse",
+          "type": "static",
+          "valueType": "object",
+          "valueDesc": "",
+          "label": "workflow:full_response_data",
+          "description": ""
+        },
+        {
+          "id": "error",
+          "key": "error",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        },
+        {
+          "id": "system_addOutputParam",
+          "key": "system_addOutputParam",
+          "type": "dynamic",
+          "valueType": "dynamic",
+          "valueDesc": "",
+          "label": "",
+          "description": "将代码中 return 的对象作为输出，传递给后续的节点。变量名需要对应 return 的 key",
+          "customFieldConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDefaultValue": false,
+            "showDescription": false
+          }
+        },
+        {
+          "id": "qLUQfhG0ILRX",
+          "key": "data1",
+          "type": "dynamic",
+          "valueType": "number",
+          "valueDesc": "",
+          "label": "data1",
+          "description": ""
+        },
+        {
+          "id": "wlLGkx",
+          "key": "data2",
+          "type": "dynamic",
+          "valueType": "number",
+          "valueDesc": "",
+          "label": "data2",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "rBZHknvDzldkpU0K",
+      "name": "角色对话起点+5",
+      "intro": "执行一段简单的脚本代码，通常用于进行复杂的数据处理。",
+      "avatar": "core/workflow/template/codeRun",
+      "flowNodeType": "code",
+      "showStatus": true,
+      "position": {
+        "x": 8460,
+        "y": -630
+      },
+      "inputs": [
+        {
+          "key": "system_addInputParam",
+          "label": "",
+          "valueType": "dynamic",
+          "required": false,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "addInputParam"
+          ],
+          "debugLabel": "",
+          "description": "workflow:these_variables_will_be_input_parameters_for_code_execution",
+          "toolDescription": ""
+        },
+        {
+          "key": "codeType",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "py",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "code",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "custom"
+          ],
+          "value": "def main(data1):\n    data1+=5\n    return {\"data1\":data1}",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "data1",
+          "label": "data1",
+          "valueType": "number",
+          "required": true,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "reference"
+          ],
+          "value": [
+            "VARIABLE_NODE_ID",
+            "sKq9Iyza"
+          ],
+          "canEdit": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "system_rawResponse",
+          "key": "system_rawResponse",
+          "type": "static",
+          "valueType": "object",
+          "valueDesc": "",
+          "label": "workflow:full_response_data",
+          "description": ""
+        },
+        {
+          "id": "error",
+          "key": "error",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        },
+        {
+          "id": "system_addOutputParam",
+          "key": "system_addOutputParam",
+          "type": "dynamic",
+          "valueType": "dynamic",
+          "valueDesc": "",
+          "label": "",
+          "description": "将代码中 return 的对象作为输出，传递给后续的节点。变量名需要对应 return 的 key",
+          "customFieldConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDefaultValue": false,
+            "showDescription": false
+          }
+        },
+        {
+          "id": "qLUQfhG0ILRX",
+          "key": "data1",
+          "type": "dynamic",
+          "valueType": "number",
+          "valueDesc": "",
+          "label": "data1",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "e6Ai3BfzPz2e9ht7",
+      "name": "剧本正文起点+5",
+      "intro": "执行一段简单的脚本代码，通常用于进行复杂的数据处理。",
+      "avatar": "core/workflow/template/codeRun",
+      "flowNodeType": "code",
+      "showStatus": true,
+      "position": {
+        "x": 8085,
+        "y": 3329.5
+      },
+      "inputs": [
+        {
+          "key": "system_addInputParam",
+          "label": "",
+          "valueType": "dynamic",
+          "required": false,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "addInputParam"
+          ],
+          "debugLabel": "",
+          "description": "workflow:these_variables_will_be_input_parameters_for_code_execution",
+          "toolDescription": ""
+        },
+        {
+          "key": "codeType",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "py",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "code",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "custom"
+          ],
+          "value": "def main(data1):\n    data1+=5\n    return {\"data1\":data1}\n",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "data1",
+          "label": "data1",
+          "valueType": "number",
+          "required": true,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "reference"
+          ],
+          "value": [
+            "VARIABLE_NODE_ID",
+            "d4sfifeZ"
+          ],
+          "canEdit": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "system_rawResponse",
+          "key": "system_rawResponse",
+          "type": "static",
+          "valueType": "object",
+          "valueDesc": "",
+          "label": "workflow:full_response_data",
+          "description": ""
+        },
+        {
+          "id": "error",
+          "key": "error",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        },
+        {
+          "id": "system_addOutputParam",
+          "key": "system_addOutputParam",
+          "type": "dynamic",
+          "valueType": "dynamic",
+          "valueDesc": "",
+          "label": "",
+          "description": "将代码中 return 的对象作为输出，传递给后续的节点。变量名需要对应 return 的 key",
+          "customFieldConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDefaultValue": false,
+            "showDescription": false
+          }
+        },
+        {
+          "id": "qLUQfhG0ILRX",
+          "key": "data1",
+          "type": "dynamic",
+          "valueType": "number",
+          "valueDesc": "",
+          "label": "data1",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "hczpovXq5QjSidXN",
+      "name": "人设场景输出#4",
+      "intro": "该模块可以直接回复一段指定的内容。常用于引导、提示。非字符串内容传入时，会转成字符串进行输出。",
+      "avatar": "core/workflow/template/reply",
+      "flowNodeType": "answerNode",
+      "position": {
+        "x": 13890,
+        "y": -4500
+      },
+      "inputs": [
+        {
+          "key": "text",
+          "label": "common:core.module.input.label.Response content",
+          "valueType": "any",
+          "required": true,
+          "isRichText": false,
+          "placeholder": "common:core.module.input.description.Response content",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "没有超出重写时调试回复：轮次：{{$VARIABLE_NODE_ID.nCZK9S2O$}}",
+          "debugLabel": "",
+          "description": "common:core.module.input.description.Response content",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "jXRpfvNMxP4oj9dD",
+      "name": "最终输出",
+      "intro": "该模块可以直接回复一段指定的内容。常用于引导、提示。非字符串内容传入时，会转成字符串进行输出。",
+      "avatar": "core/workflow/template/reply",
+      "flowNodeType": "answerNode",
+      "position": {
+        "x": 8235,
+        "y": 5835
+      },
+      "inputs": [
+        {
+          "key": "text",
+          "label": "common:core.module.input.label.Response content",
+          "valueType": "any",
+          "required": true,
+          "isRichText": false,
+          "placeholder": "common:core.module.input.description.Response content",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "{{$gRGu2yeKM1MwfKBM.system_text$}}",
+          "debugLabel": "",
+          "description": "common:core.module.input.description.Response content",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "i5jijoDZKCBmNEMz",
+      "name": "#4",
+      "intro": "",
+      "avatar": "",
+      "flowNodeType": "comment",
+      "position": {
+        "x": 12285,
+        "y": -4200
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "commentText",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [],
+          "value": "人物的循环"
+        },
+        {
+          "key": "commentSize",
+          "label": "",
+          "valueType": "object",
+          "renderTypeList": [],
+          "value": {
+            "width": 240,
+            "height": 140
+          }
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "q1pb4IaSOSTJb8b2",
+      "name": "#6",
+      "intro": "",
+      "avatar": "",
+      "flowNodeType": "comment",
+      "position": {
+        "x": 10875,
+        "y": -1425
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "commentText",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [],
+          "value": "角色对话的循环"
+        },
+        {
+          "key": "commentSize",
+          "label": "",
+          "valueType": "object",
+          "renderTypeList": [],
+          "value": {
+            "width": 238,
+            "height": 139
+          }
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "yTTqHVK3SoT5WBIF",
+      "name": "#7",
+      "intro": "",
+      "avatar": "",
+      "flowNodeType": "comment",
+      "position": {
+        "x": 10665,
+        "y": 2910
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "commentText",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [],
+          "value": "剧本正文的循环"
+        },
+        {
+          "key": "commentSize",
+          "label": "",
+          "valueType": "object",
+          "renderTypeList": [],
+          "value": {
+            "width": 238,
+            "height": 139
+          }
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "ms994FsB179YO14h",
+      "name": "角色对话审核没通过要把自增的集数减掉",
+      "intro": "执行一段简单的脚本代码，通常用于进行复杂的数据处理。",
+      "avatar": "core/workflow/template/codeRun",
+      "flowNodeType": "code",
+      "showStatus": true,
+      "position": {
+        "x": 12585,
+        "y": -1365
+      },
+      "inputs": [
+        {
+          "key": "system_addInputParam",
+          "label": "",
+          "valueType": "dynamic",
+          "required": false,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "addInputParam"
+          ],
+          "debugLabel": "",
+          "description": "workflow:these_variables_will_be_input_parameters_for_code_execution",
+          "toolDescription": ""
+        },
+        {
+          "key": "codeType",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "py",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "code",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "custom"
+          ],
+          "value": "def main(data1):\n    data1-=5\n    return {\"data1\": data1}\n",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "data1",
+          "label": "data1",
+          "valueType": "number",
+          "required": true,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "reference"
+          ],
+          "value": [
+            "VARIABLE_NODE_ID",
+            "sKq9Iyza"
+          ],
+          "canEdit": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "system_rawResponse",
+          "key": "system_rawResponse",
+          "type": "static",
+          "valueType": "object",
+          "valueDesc": "",
+          "label": "workflow:full_response_data",
+          "description": ""
+        },
+        {
+          "id": "error",
+          "key": "error",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        },
+        {
+          "id": "system_addOutputParam",
+          "key": "system_addOutputParam",
+          "type": "dynamic",
+          "valueType": "dynamic",
+          "valueDesc": "",
+          "label": "",
+          "description": "将代码中 return 的对象作为输出，传递给后续的节点。变量名需要对应 return 的 key",
+          "customFieldConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDefaultValue": false,
+            "showDescription": false
+          }
+        },
+        {
+          "id": "qLUQfhG0ILRX",
+          "key": "data1",
+          "type": "dynamic",
+          "valueType": "number",
+          "valueDesc": "",
+          "label": "data1",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "kZtzYCPyisjjSKey",
+      "name": "剧本正文审核没通过要把自增的集数减掉",
+      "intro": "执行一段简单的脚本代码，通常用于进行复杂的数据处理。",
+      "avatar": "core/workflow/template/codeRun",
+      "flowNodeType": "code",
+      "showStatus": true,
+      "position": {
+        "x": 12285,
+        "y": 2670
+      },
+      "inputs": [
+        {
+          "key": "system_addInputParam",
+          "label": "",
+          "valueType": "dynamic",
+          "required": false,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "addInputParam"
+          ],
+          "debugLabel": "",
+          "description": "workflow:these_variables_will_be_input_parameters_for_code_execution",
+          "toolDescription": ""
+        },
+        {
+          "key": "codeType",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "py",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "code",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "custom"
+          ],
+          "value": "def main(data1):\n    data1-=5\n    return {\"data1\": data1}\n",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "data1",
+          "label": "data1",
+          "valueType": "number",
+          "required": true,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDescription": false,
+            "showDefaultValue": true
+          },
+          "renderTypeList": [
+            "reference"
+          ],
+          "value": [
+            "VARIABLE_NODE_ID",
+            "d4sfifeZ"
+          ],
+          "canEdit": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "system_rawResponse",
+          "key": "system_rawResponse",
+          "type": "static",
+          "valueType": "object",
+          "valueDesc": "",
+          "label": "workflow:full_response_data",
+          "description": ""
+        },
+        {
+          "id": "error",
+          "key": "error",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        },
+        {
+          "id": "system_addOutputParam",
+          "key": "system_addOutputParam",
+          "type": "dynamic",
+          "valueType": "dynamic",
+          "valueDesc": "",
+          "label": "",
+          "description": "将代码中 return 的对象作为输出，传递给后续的节点。变量名需要对应 return 的 key",
+          "customFieldConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDefaultValue": false,
+            "showDescription": false
+          }
+        },
+        {
+          "id": "qLUQfhG0ILRX",
+          "key": "data1",
+          "type": "dynamic",
+          "valueType": "number",
+          "valueDesc": "",
+          "label": "data1",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "rQroM3hBr5K2BOOw",
+      "name": "重新复制当前开始集",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 13110,
+        "y": 2655
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "d4sfifeZ"
+              ],
+              "value": [
+                "kZtzYCPyisjjSKey",
+                "qLUQfhG0ILRX"
+              ],
+              "valueType": "number",
+              "renderType": "reference"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "ugomnlnnq2p11bn0",
+      "name": "重新复制当前开始集#15",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 13710,
+        "y": -1770
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "sKq9Iyza"
+              ],
+              "value": [
+                "ms994FsB179YO14h",
+                "qLUQfhG0ILRX"
+              ],
+              "valueType": "number",
+              "renderType": "reference"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "lLlkUKV1Sg7TQDA4",
+      "name": "开头冲突从第一集开始",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 16770,
+        "y": -3772.5
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "iJkq6iGe"
+              ],
+              "value": [
+                "",
+                "1"
+              ],
+              "valueType": "number",
+              "renderType": "input"
+            },
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "zkzVCtkm"
+              ],
+              "value": [
+                "",
+                "0"
+              ],
+              "renderType": "input",
+              "valueType": "number"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "ozABbBX2Ocn8VkXI",
+      "name": "角色对话从第一集开始#20",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 5955,
+        "y": -2660.5
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "sKq9Iyza"
+              ],
+              "value": [
+                "",
+                "1"
+              ],
+              "renderType": "input",
+              "valueType": "number"
+            },
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "llKW3OVX"
+              ],
+              "value": [
+                "",
+                "0"
+              ],
+              "renderType": "input",
+              "valueType": "number"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "zdsAYVFNkgIRaaca",
+      "name": "重新赋值当前开始集=1",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 5835,
+        "y": 1935
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "d4sfifeZ"
+              ],
+              "value": [
+                "",
+                "1"
+              ],
+              "valueType": "number",
+              "renderType": "input"
+            },
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "nCZK9S2O"
+              ],
+              "value": [
+                "",
+                "0"
+              ],
+              "renderType": "input",
+              "valueType": "number"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "yIZ5GnFaFW2sQKMZ",
+      "name": "重置重写轮次#22",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 5970,
+        "y": 705
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "llKW3OVX"
+              ],
+              "value": [
+                "",
+                "0"
+              ],
+              "renderType": "input",
+              "valueType": "number"
+            },
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "pS7JzosX"
+              ],
+              "value": [
+                "uCjz4iWKDGDtrorY",
+                "system_text"
+              ],
+              "renderType": "reference",
+              "valueType": "string"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "lSCXeIsaIJiMdID7",
+      "name": "用于最终输出的人设",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 16050,
+        "y": -3675
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "fFM0mroW"
+              ],
+              "value": [
+                "qt2atLmbUoGmVVTz",
+                "answerText"
+              ],
+              "valueType": "string",
+              "renderType": "reference"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "qt2atLmbUoGmVVTz",
+      "name": "整理人物小传",
+      "intro": "AI 大模型对话",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 14460,
+        "y": -4125
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "基于{{$VARIABLE_NODE_ID.fFM0mroW$}}和{{$VARIABLE_NODE_ID.yYYOuumm$}}，生成完整人物小传。每个主要角色和关键配角可以包含：性格家庭长相行为。如果没有交代的可以不写，不要编造。\n格式：\n【女主】名字\n- 性格\n- 家庭\n- 长相\n- 行为\n\n【配角】名字\n- 性格\n- 家庭\n- 长相\n- 行为\n\n...\n\n纯文本格式输出，除了换行和加上最简单的序号不要有其他的格式。不要json，不要markdown。",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词要求完成人物小传生成即可。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "fLkE13kdqyINIYiV",
+      "name": "总结当前五集剧本摘要并且记录集数",
+      "intro": "AI 大模型对话",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 12045,
+        "y": 5445
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-reasoner",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“剧本批次记忆整理器”。\n\n你的任务：\n基于【当前批次剧本正文】，提炼出一个供“下一批正文写作智能体”直接使用的上下文记忆包。\n\n这个记忆包的作用不是复述全文，而是帮助下一批剧本在开头时：\n- 准确承接上一批最后的剧情状态\n- 准确承接最后一个钩子\n- 不丢失人物关系变化、冲突状态和未解决问题\n- 不把已经兑现的剧情结果又重新写一遍\n- 不把已经建立的新人物因果又写回旧逻辑\n\n【当前批次剧本正文】\n{{$VARIABLE_NODE_ID.zS2LXibg$}}\n\n整理要求：\n1. 只基于当前批次正文提炼，不得杜撰正文里没有发生的内容\n2. 摘要必须聚焦“剧情推进结果”，不要写空泛感受\n3. 必须明确指出“最后一集结尾钩子”是什么\n4. 必须提炼“下一批一开场就该承接什么”\n5. 必须提炼人物关系、目标、危机、信息差的变化\n6. 必须额外提炼：本批次已经保住了哪些原剧情锁点\n7. 必须额外提炼：本批次已经建立了哪些新人设因果，下一批不得写回旧逻辑\n8. 输出要短、准、可直接喂给下一轮写作智能体\n9. 所有内容使用中文\n10. 最终只能输出合法 JSON\n11. 不要输出 JSON 之外的任何解释、标题、注释、代码块标记或多余文本\n\n请严格输出为以下 JSON 结构：\n{\n  \"this_turn_episodes\": \"例如 1-5 / 6-10 / 11-15\",\n  \"abstract_of_this_turn\": \"用一段话概括这五集真正推进了什么，重点写局势变化、关系变化、关键事件和结果，不要泛泛而谈。\",\n  \"final_hook_of_this_turn\": \"明确写出本批次最后一集结尾留下的钩子，必须具体到事件、动作、发现、危机、闯入、揭露、决定、反转中的一种或多种。\",\n  \"current_story_state\": [\n    \"当前批次结束后，主角/核心人物所处状态1\",\n    \"当前批次结束后，关系或局势状态2\",\n    \"当前批次结束后，任务或危机状态3\"\n  ],\n  \"relationship_changes\": [\n    \"本批次中形成或加深的关系变化1\",\n    \"关系变化2\"\n  ],\n  \"resolved_threads\": [\n    \"本批次已经解决的问题1\",\n    \"已兑现的结果2\"\n  ],\n  \"unresolved_threads\": [\n    \"还未解决、下一批必须继续推进的问题1\",\n    \"未解决问题2\"\n  ],\n  \"important_information_gains\": [\n    \"本批次新增并成立的重要信息1\",\n    \"重要信息2\"\n  ],\n  \"must_carry_into_next_turn\": [\n    \"下一批一开场必须承接的状态/冲突/关系/信息差1\",\n    \"必须承接内容2\"\n  ],\n  \"locked_results_delivered\": [\n    \"本批次已经保住并兑现的原剧情关键结果1\",\n    \"已兑现结果2\"\n  ],\n  \"new_causality_established\": [\n    \"本批次已经建立成功的新人物因果1\",\n    \"已建立的新因果2\"\n  ],\n  \"do_not_reset_in_next_turn\": [\n    \"下一批禁止重置成未发生状态的问题1\",\n    \"禁止写回旧逻辑的问题2\"\n  ]\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [
+            [
+              "448745",
+              "userFiles"
+            ]
+          ],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": [
+            "448745",
+            "userChatInput"
+          ],
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "b6edy6iMMWzUSacv",
+      "name": "更新连贯记忆",
+      "intro": "可以更新指定节点的输出值或更新全局变量",
+      "avatar": "core/workflow/template/variableUpdate",
+      "flowNodeType": "variableUpdate",
+      "showStatus": false,
+      "position": {
+        "x": 13065,
+        "y": 5910
+      },
+      "inputs": [
+        {
+          "key": "updateList",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": [
+            {
+              "variable": [
+                "VARIABLE_NODE_ID",
+                "dzt6kORx"
+              ],
+              "value": [
+                "fLkE13kdqyINIYiV",
+                "answerText"
+              ],
+              "renderType": "reference",
+              "valueType": "string"
+            }
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "c8dQrGAIwG5dD32J",
+      "target": "eJX8Hk9DoSdjACxc",
+      "sourceHandle": "c8dQrGAIwG5dD32J-source-right",
+      "targetHandle": "eJX8Hk9DoSdjACxc-target-left"
+    },
+    {
+      "source": "eJX8Hk9DoSdjACxc",
+      "target": "hkqS87SbnICwToox",
+      "sourceHandle": "eJX8Hk9DoSdjACxc-source-right",
+      "targetHandle": "hkqS87SbnICwToox-target-left"
+    },
+    {
+      "source": "prEERTrf3uC9IHpE",
+      "target": "hkqS87SbnICwToox",
+      "sourceHandle": "prEERTrf3uC9IHpE-source-right",
+      "targetHandle": "hkqS87SbnICwToox-target-left"
+    },
+    {
+      "source": "lRVZ4j6HTOZbfWul",
+      "target": "mCJVQGweeCJChKI9",
+      "sourceHandle": "lRVZ4j6HTOZbfWul-source-right",
+      "targetHandle": "mCJVQGweeCJChKI9-target-left"
+    },
+    {
+      "source": "iZ6GHQ9rru51odcD",
+      "target": "qsa5jqscPavJr68p",
+      "sourceHandle": "iZ6GHQ9rru51odcD-source-right",
+      "targetHandle": "qsa5jqscPavJr68p-target-left"
+    },
+    {
+      "source": "zDZkVU7YsbGMtdSD",
+      "target": "qsa5jqscPavJr68p",
+      "sourceHandle": "zDZkVU7YsbGMtdSD-source-right",
+      "targetHandle": "qsa5jqscPavJr68p-target-left"
+    },
+    {
+      "source": "mCJVQGweeCJChKI9",
+      "target": "s1pr9oAXmwJQZmxq",
+      "sourceHandle": "mCJVQGweeCJChKI9-source-right",
+      "targetHandle": "s1pr9oAXmwJQZmxq-target-left"
+    },
+    {
+      "source": "m20HcueENlYhZJy4",
+      "target": "wJW28YFDUr95Bfdt",
+      "sourceHandle": "m20HcueENlYhZJy4-source-right",
+      "targetHandle": "wJW28YFDUr95Bfdt-target-left"
+    },
+    {
+      "source": "wJW28YFDUr95Bfdt",
+      "target": "xB6wtw9Hy1O1igYx",
+      "sourceHandle": "wJW28YFDUr95Bfdt-source-right",
+      "targetHandle": "xB6wtw9Hy1O1igYx-target-left"
+    },
+    {
+      "source": "xB6wtw9Hy1O1igYx",
+      "target": "gRGu2yeKM1MwfKBM",
+      "sourceHandle": "xB6wtw9Hy1O1igYx-source-ELSE",
+      "targetHandle": "gRGu2yeKM1MwfKBM-target-left"
+    },
+    {
+      "source": "qsa5jqscPavJr68p",
+      "target": "oZ07Agl8LRh7zPXt",
+      "sourceHandle": "qsa5jqscPavJr68p-source-right",
+      "targetHandle": "oZ07Agl8LRh7zPXt-target-left"
+    },
+    {
+      "source": "o30cHJ82gGYhtbbu",
+      "target": "vOy0RYkuIkUmOMcG",
+      "sourceHandle": "o30cHJ82gGYhtbbu-source-right",
+      "targetHandle": "vOy0RYkuIkUmOMcG-target-left"
+    },
+    {
+      "source": "vOy0RYkuIkUmOMcG",
+      "target": "prEERTrf3uC9IHpE",
+      "sourceHandle": "vOy0RYkuIkUmOMcG-source-right",
+      "targetHandle": "prEERTrf3uC9IHpE-target-left"
+    },
+    {
+      "source": "m4DUWvx6WAMtGez0",
+      "target": "b51xw4cWQRq14X3T",
+      "sourceHandle": "m4DUWvx6WAMtGez0-source-right",
+      "targetHandle": "b51xw4cWQRq14X3T-target-left"
+    },
+    {
+      "source": "d9FluEAPFAGLRHTG",
+      "target": "zDZkVU7YsbGMtdSD",
+      "sourceHandle": "d9FluEAPFAGLRHTG-source-right",
+      "targetHandle": "zDZkVU7YsbGMtdSD-target-left"
+    },
+    {
+      "source": "roBchMnqd4cL3NHh",
+      "target": "d9FluEAPFAGLRHTG",
+      "sourceHandle": "roBchMnqd4cL3NHh-source-right",
+      "targetHandle": "d9FluEAPFAGLRHTG-target-left"
+    },
+    {
+      "source": "hkqS87SbnICwToox",
+      "target": "pZ3OUm2XrNlKbrOB",
+      "sourceHandle": "hkqS87SbnICwToox-source-right",
+      "targetHandle": "pZ3OUm2XrNlKbrOB-target-left"
+    },
+    {
+      "source": "pZ3OUm2XrNlKbrOB",
+      "target": "jMrb0LQJAyOGdnra",
+      "sourceHandle": "pZ3OUm2XrNlKbrOB-source-IF",
+      "targetHandle": "jMrb0LQJAyOGdnra-target-left"
+    },
+    {
+      "source": "jMrb0LQJAyOGdnra",
+      "target": "hczpovXq5QjSidXN",
+      "sourceHandle": "jMrb0LQJAyOGdnra-source-IF",
+      "targetHandle": "hczpovXq5QjSidXN-target-left"
+    },
+    {
+      "source": "hczpovXq5QjSidXN",
+      "target": "o30cHJ82gGYhtbbu",
+      "sourceHandle": "hczpovXq5QjSidXN-source-right",
+      "targetHandle": "o30cHJ82gGYhtbbu-target-left"
+    },
+    {
+      "source": "gRGu2yeKM1MwfKBM",
+      "target": "jXRpfvNMxP4oj9dD",
+      "sourceHandle": "gRGu2yeKM1MwfKBM-source-right",
+      "targetHandle": "jXRpfvNMxP4oj9dD-target-left"
+    },
+    {
+      "source": "kZtzYCPyisjjSKey",
+      "target": "rQroM3hBr5K2BOOw",
+      "sourceHandle": "kZtzYCPyisjjSKey-source-right",
+      "targetHandle": "rQroM3hBr5K2BOOw-target-left"
+    },
+    {
+      "source": "ms994FsB179YO14h",
+      "target": "ugomnlnnq2p11bn0",
+      "sourceHandle": "ms994FsB179YO14h-source-right",
+      "targetHandle": "ugomnlnnq2p11bn0-target-left"
+    },
+    {
+      "source": "x7vk8tAbGFXAUivM",
+      "target": "uCjz4iWKDGDtrorY",
+      "sourceHandle": "x7vk8tAbGFXAUivM-source-ELSE",
+      "targetHandle": "uCjz4iWKDGDtrorY-target-left"
+    },
+    {
+      "source": "s1pr9oAXmwJQZmxq",
+      "target": "uCjz4iWKDGDtrorY",
+      "sourceHandle": "s1pr9oAXmwJQZmxq-source-ELSE",
+      "targetHandle": "uCjz4iWKDGDtrorY-target-left"
+    },
+    {
+      "source": "rUZ4xLNv2Zw5WoGW",
+      "target": "rBZHknvDzldkpU0K",
+      "sourceHandle": "rUZ4xLNv2Zw5WoGW-source-right",
+      "targetHandle": "rBZHknvDzldkpU0K-target-left"
+    },
+    {
+      "source": "rBZHknvDzldkpU0K",
+      "target": "lRVZ4j6HTOZbfWul",
+      "sourceHandle": "rBZHknvDzldkpU0K-source-right",
+      "targetHandle": "lRVZ4j6HTOZbfWul-target-left"
+    },
+    {
+      "source": "oZ07Agl8LRh7zPXt",
+      "target": "m20HcueENlYhZJy4",
+      "sourceHandle": "oZ07Agl8LRh7zPXt-source-ELSE",
+      "targetHandle": "m20HcueENlYhZJy4-target-left"
+    },
+    {
+      "source": "o1s9JbiX8OQA87tw",
+      "target": "m20HcueENlYhZJy4",
+      "sourceHandle": "o1s9JbiX8OQA87tw-source-ELSE",
+      "targetHandle": "m20HcueENlYhZJy4-target-left"
+    },
+    {
+      "source": "riKJtX6mPgdMak9I",
+      "target": "e6Ai3BfzPz2e9ht7",
+      "sourceHandle": "riKJtX6mPgdMak9I-source-right",
+      "targetHandle": "e6Ai3BfzPz2e9ht7-target-left"
+    },
+    {
+      "source": "e6Ai3BfzPz2e9ht7",
+      "target": "iZ6GHQ9rru51odcD",
+      "sourceHandle": "e6Ai3BfzPz2e9ht7-source-right",
+      "targetHandle": "iZ6GHQ9rru51odcD-target-left"
+    },
+    {
+      "source": "b51xw4cWQRq14X3T",
+      "target": "oGsGVj6ZLw491pas",
+      "sourceHandle": "b51xw4cWQRq14X3T-source-right",
+      "targetHandle": "oGsGVj6ZLw491pas-target-left"
+    },
+    {
+      "source": "zA5THhcARqYy5JaQ",
+      "target": "rUZ4xLNv2Zw5WoGW",
+      "sourceHandle": "zA5THhcARqYy5JaQ-source-IF",
+      "targetHandle": "rUZ4xLNv2Zw5WoGW-target-left"
+    },
+    {
+      "source": "ozABbBX2Ocn8VkXI",
+      "target": "zA5THhcARqYy5JaQ",
+      "sourceHandle": "ozABbBX2Ocn8VkXI-source-right",
+      "targetHandle": "zA5THhcARqYy5JaQ-target-left"
+    },
+    {
+      "source": "zA5THhcARqYy5JaQ",
+      "target": "zdsAYVFNkgIRaaca",
+      "sourceHandle": "zA5THhcARqYy5JaQ-source-ELSE",
+      "targetHandle": "zdsAYVFNkgIRaaca-target-left"
+    },
+    {
+      "source": "zdsAYVFNkgIRaaca",
+      "target": "xB6wtw9Hy1O1igYx",
+      "sourceHandle": "zdsAYVFNkgIRaaca-source-right",
+      "targetHandle": "xB6wtw9Hy1O1igYx-target-left"
+    },
+    {
+      "source": "xB6wtw9Hy1O1igYx",
+      "target": "riKJtX6mPgdMak9I",
+      "sourceHandle": "xB6wtw9Hy1O1igYx-source-IF",
+      "targetHandle": "riKJtX6mPgdMak9I-target-left"
+    },
+    {
+      "source": "s1pr9oAXmwJQZmxq",
+      "target": "x7vk8tAbGFXAUivM",
+      "sourceHandle": "s1pr9oAXmwJQZmxq-source-IF",
+      "targetHandle": "x7vk8tAbGFXAUivM-target-left"
+    },
+    {
+      "source": "x7vk8tAbGFXAUivM",
+      "target": "ms994FsB179YO14h",
+      "sourceHandle": "x7vk8tAbGFXAUivM-source-IF",
+      "targetHandle": "ms994FsB179YO14h-target-left"
+    },
+    {
+      "source": "uCjz4iWKDGDtrorY",
+      "target": "yIZ5GnFaFW2sQKMZ",
+      "sourceHandle": "uCjz4iWKDGDtrorY-source-right",
+      "targetHandle": "yIZ5GnFaFW2sQKMZ-target-left"
+    },
+    {
+      "source": "yIZ5GnFaFW2sQKMZ",
+      "target": "zA5THhcARqYy5JaQ",
+      "sourceHandle": "yIZ5GnFaFW2sQKMZ-source-right",
+      "targetHandle": "zA5THhcARqYy5JaQ-target-left"
+    },
+    {
+      "source": "lSCXeIsaIJiMdID7",
+      "target": "lLlkUKV1Sg7TQDA4",
+      "sourceHandle": "lSCXeIsaIJiMdID7-source-right",
+      "targetHandle": "lLlkUKV1Sg7TQDA4-target-left"
+    },
+    {
+      "source": "jMrb0LQJAyOGdnra",
+      "target": "qt2atLmbUoGmVVTz",
+      "sourceHandle": "jMrb0LQJAyOGdnra-source-ELSE",
+      "targetHandle": "qt2atLmbUoGmVVTz-target-left"
+    },
+    {
+      "source": "pZ3OUm2XrNlKbrOB",
+      "target": "qt2atLmbUoGmVVTz",
+      "sourceHandle": "pZ3OUm2XrNlKbrOB-source-ELSE",
+      "targetHandle": "qt2atLmbUoGmVVTz-target-left"
+    },
+    {
+      "source": "qt2atLmbUoGmVVTz",
+      "target": "lSCXeIsaIJiMdID7",
+      "sourceHandle": "qt2atLmbUoGmVVTz-source-right",
+      "targetHandle": "lSCXeIsaIJiMdID7-target-left"
+    },
+    {
+      "source": "oZ07Agl8LRh7zPXt",
+      "target": "o1s9JbiX8OQA87tw",
+      "sourceHandle": "oZ07Agl8LRh7zPXt-source-IF",
+      "targetHandle": "o1s9JbiX8OQA87tw-target-left"
+    },
+    {
+      "source": "o1s9JbiX8OQA87tw",
+      "target": "kZtzYCPyisjjSKey",
+      "sourceHandle": "o1s9JbiX8OQA87tw-source-IF",
+      "targetHandle": "kZtzYCPyisjjSKey-target-left"
+    },
+    {
+      "source": "rQroM3hBr5K2BOOw",
+      "target": "roBchMnqd4cL3NHh",
+      "sourceHandle": "rQroM3hBr5K2BOOw-source-right",
+      "targetHandle": "roBchMnqd4cL3NHh-target-left"
+    },
+    {
+      "source": "oZ07Agl8LRh7zPXt",
+      "target": "fLkE13kdqyINIYiV",
+      "sourceHandle": "oZ07Agl8LRh7zPXt-source-ELSE",
+      "targetHandle": "fLkE13kdqyINIYiV-target-left"
+    },
+    {
+      "source": "o1s9JbiX8OQA87tw",
+      "target": "fLkE13kdqyINIYiV",
+      "sourceHandle": "o1s9JbiX8OQA87tw-source-ELSE",
+      "targetHandle": "fLkE13kdqyINIYiV-target-left"
+    },
+    {
+      "source": "b6edy6iMMWzUSacv",
+      "target": "xB6wtw9Hy1O1igYx",
+      "sourceHandle": "b6edy6iMMWzUSacv-source-right",
+      "targetHandle": "xB6wtw9Hy1O1igYx-target-left"
+    },
+    {
+      "source": "448745",
+      "target": "c8dQrGAIwG5dD32J",
+      "sourceHandle": "448745-source-right",
+      "targetHandle": "c8dQrGAIwG5dD32J-target-left"
+    },
+    {
+      "source": "lLlkUKV1Sg7TQDA4",
+      "target": "ozABbBX2Ocn8VkXI",
+      "sourceHandle": "lLlkUKV1Sg7TQDA4-source-right",
+      "targetHandle": "ozABbBX2Ocn8VkXI-target-left"
+    },
+    {
+      "source": "oGsGVj6ZLw491pas",
+      "target": "mCJVQGweeCJChKI9",
+      "sourceHandle": "oGsGVj6ZLw491pas-source-right",
+      "targetHandle": "mCJVQGweeCJChKI9-target-left"
+    },
+    {
+      "source": "ugomnlnnq2p11bn0",
+      "target": "m4DUWvx6WAMtGez0",
+      "sourceHandle": "ugomnlnnq2p11bn0-source-right",
+      "targetHandle": "m4DUWvx6WAMtGez0-target-left"
+    },
+    {
+      "source": "fLkE13kdqyINIYiV",
+      "target": "b6edy6iMMWzUSacv",
+      "sourceHandle": "fLkE13kdqyINIYiV-source-right",
+      "targetHandle": "b6edy6iMMWzUSacv-target-left"
+    }
+  ],
+  "chatConfig": {
+    "variables": [
+      {
+        "key": "n5ZHYrj8",
+        "label": "剧本标题",
+        "valueType": "string",
+        "required": true,
+        "maxLength": 100,
+        "type": "input",
+        "description": "用户输入剧本标题"
+      },
+      {
+        "key": "eBEWC07Q",
+        "label": "每集正文字数",
+        "valueType": "number",
+        "required": true,
+        "defaultValue": "500",
+        "max": 10000,
+        "min": 50,
+        "type": "numberInput",
+        "description": "用户输入期待的每集正文字数。"
+      },
+      {
+        "key": "blkSS7dY",
+        "label": "总集数",
+        "valueType": "number",
+        "required": true,
+        "defaultValue": 50,
+        "max": 100,
+        "min": 1,
+        "type": "numberInput",
+        "description": "用户要写的剧本一共有多少集"
+      },
+      {
+        "key": "ayxWwSpE",
+        "label": "故事大纲",
+        "valueType": "string",
+        "required": true,
+        "maxLength": 10000,
+        "type": "input",
+        "description": "是全剧核心主线与情节脉络的高度浓缩，完整梳理故事起承转合、关键转折与最终结局，帮助模型快速把握剧本主旨、核心冲突与整体叙事逻辑。"
+      },
+      {
+        "key": "rxmvq2lS",
+        "label": "核心场景",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "input",
+        "description": "明确标注各关键情节的场景地点、空间属性与环境特征，规范剧本场景书写格式，保障场景切换有序、空间逻辑清晰，为剧本场景搭建提供精准依据。"
+      },
+      {
+        "key": "yYYOuumm",
+        "label": "人物小传",
+        "valueType": "string",
+        "required": true,
+        "defaultValue": "",
+        "type": "input",
+        "description": "涵盖主角、配角的外貌特征、性格特质、家庭背景、行为习惯与核心动机，性格决定行为逻辑，背景解释行为动因，多维度信息环环相扣，助力模型精准塑造人物、把握角色行为尺度。"
+      },
+      {
+        "key": "pxtQY7p2",
+        "label": "原剧本正文",
+        "valueType": "string",
+        "required": true,
+        "defaultValue": "",
+        "type": "input",
+        "description": "按剧集拆解开场引入、冲突升级、高潮爆发、结尾留钩的结构设计，明确每集叙事节奏与核心看点，为剧本初稿搭建稳定的框架基础。"
+      },
+      {
+        "key": "fFM0mroW",
+        "label": "人设循环变量",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "写好的人设结果保存在这里"
+      },
+      {
+        "key": "d9g8vngS",
+        "label": "人设循环次数flag",
+        "valueType": "number",
+        "required": false,
+        "defaultValue": 0,
+        "type": "internal",
+        "description": "记录当前人设打回重写次数"
+      },
+      {
+        "key": "h3fAdn6f",
+        "label": "人设最大循环次数",
+        "valueType": "number",
+        "required": false,
+        "defaultValue": "10",
+        "type": "internal",
+        "description": "最多重写10次"
+      },
+      {
+        "key": "sKq9Iyza",
+        "label": "角色对话从这一集开始",
+        "valueType": "number",
+        "required": false,
+        "defaultValue": "1",
+        "type": "internal",
+        "description": "角色对话从这一集开始"
+      },
+      {
+        "key": "mN7Fh38L",
+        "label": "角色对话循环变量",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "角色对话的具体内容"
+      },
+      {
+        "key": "llKW3OVX",
+        "label": "角色对话循环次数flag",
+        "valueType": "number",
+        "required": false,
+        "defaultValue": "0",
+        "type": "internal",
+        "description": "当前大会重写的次数有多少"
+      },
+      {
+        "key": "mQFrT0Al",
+        "label": "角色对话最大循环次数",
+        "valueType": "number",
+        "required": false,
+        "defaultValue": "10",
+        "type": "internal",
+        "description": "角色对话最大循环10次"
+      },
+      {
+        "key": "d4sfifeZ",
+        "label": "剧本从这一集开始",
+        "valueType": "number",
+        "required": false,
+        "defaultValue": "1",
+        "type": "internal",
+        "description": "引导模型从这一集开始写剧本"
+      },
+      {
+        "key": "nCZK9S2O",
+        "label": "剧本正文重写轮次flag",
+        "valueType": "number",
+        "required": false,
+        "defaultValue": "0",
+        "type": "internal",
+        "description": "本轮5集的已经打回重写的次数"
+      },
+      {
+        "key": "essitQMV",
+        "label": "剧本正文最大重写次数",
+        "valueType": "number",
+        "required": false,
+        "defaultValue": "10",
+        "type": "internal",
+        "description": "剧本正文最大重写10次"
+      },
+      {
+        "key": "zS2LXibg",
+        "label": "剧本当前五集内容存储",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": "正文编剧5集5集出，现在的五集的内容存在这里"
+      },
+      {
+        "key": "fuKbtNtY",
+        "label": "生成的核心场景",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": ""
+      },
+      {
+        "key": "hUoaaRhJ",
+        "label": "最终开头冲突钩子",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": ""
+      },
+      {
+        "key": "pS7JzosX",
+        "label": "最终角色对话",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "internal",
+        "description": ""
+      },
+      {
+        "key": "vI8t3a31",
+        "label": "最终剧本",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "internal",
+        "description": ""
+      },
+      {
+        "key": "dzt6kORx",
+        "label": "剧本记忆",
+        "valueType": "string",
+        "required": false,
+        "type": "internal",
+        "description": ""
+      }
+    ],
+    "scheduledTriggerConfig": {
+      "cronString": "",
+      "timezone": "Asia/Shanghai",
+      "defaultPrompt": ""
+    },
+    "_id": "69dc6b56f962df93355c391c"
+  }
+}

@@ -1,0 +1,171 @@
+﻿C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:38: ALL_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:46: BATCH_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:104: STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:190: ALL_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:193: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:953: ALL_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:954: "all_enriched_episode_plan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:955: "enrichedEpisodePlanResult",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:956: "enriched_episode_plan_result",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1034: ALL_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1035: "allEnrichedEpisodePlan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1036: "all_enriched_episode_plan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1037: "enrichedEpisodePlanResult",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1038: "enriched_episode_plan_result",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1041: if isinstance(obj.get(ALL_ENRICHED_EPISODE_PLAN), list):
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1042: return list(obj.get(ALL_ENRICHED_EPISODE_PLAN) or [])
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1043: if isinstance(obj.get("allEnrichedEpisodePlan"), list):
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1044: return list(obj.get("allEnrichedEpisodePlan") or [])
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1045: if isinstance(obj.get("all_enriched_episode_plan"), list):
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1046: return list(obj.get("all_enriched_episode_plan") or [])
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1047: nested = _framework_to_script_json_object(obj.get("enrichedEpisodePlanResult"))
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1048: if isinstance(nested.get(ALL_ENRICHED_EPISODE_PLAN), list):
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1049: return list(nested.get(ALL_ENRICHED_EPISODE_PLAN) or [])
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1050: if isinstance(nested.get("allEnrichedEpisodePlan"), list):
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1051: return list(nested.get("allEnrichedEpisodePlan") or [])
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1052: nested = _framework_to_script_json_object(obj.get("enriched_episode_plan_result"))
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1053: if isinstance(nested.get(ALL_ENRICHED_EPISODE_PLAN), list):
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1054: return list(nested.get(ALL_ENRICHED_EPISODE_PLAN) or [])
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1055: if isinstance(nested.get("all_enriched_episode_plan"), list):
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1056: return list(nested.get("all_enriched_episode_plan") or [])
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1066: allEnrichedEpisodePlan and allEnrichedEpisodePlanText.
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1175: # 10 allEnrichedEpisodePlan + allEnrichedEpisodePlanText
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1177: variables.get("enrichedEpisodePlanResult"),
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1178: variables.get("enriched_episode_plan_result"),
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1179: variables.get(ALL_ENRICHED_EPISODE_PLAN),
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1180: variables.get("allEnrichedEpisodePlan"),
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1181: variables.get("all_enriched_episode_plan"),
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1187: ALL_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1188: "allEnrichedEpisodePlan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1189: "all_enriched_episode_plan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1190: "allEnrichedEpisodePlanText",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1191: "all_enriched_episode_plan_text",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1192: "enrichedEpisodePlanResult",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1193: "enriched_episode_plan_result",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1198: nested_result = _framework_to_script_json_object(obj.get("enrichedEpisodePlanResult"))
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1199: nested_snake_result = _framework_to_script_json_object(obj.get("enriched_episode_plan_result"))
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1201: obj.get(ALL_ENRICHED_EPISODE_PLAN)
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1202: or obj.get("allEnrichedEpisodePlan")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1203: or obj.get("all_enriched_episode_plan")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1204: or nested_result.get(ALL_ENRICHED_EPISODE_PLAN)
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1205: or nested_result.get("allEnrichedEpisodePlan")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1206: or nested_result.get("all_enriched_episode_plan")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1207: or nested_snake_result.get(ALL_ENRICHED_EPISODE_PLAN)
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1208: or nested_snake_result.get("allEnrichedEpisodePlan")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1209: or nested_snake_result.get("all_enriched_episode_plan")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1212: obj.get("allEnrichedEpisodePlanText")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1213: or obj.get("all_enriched_episode_plan_text")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1214: or nested_result.get("allEnrichedEpisodePlanText")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1215: or nested_result.get("all_enriched_episode_plan_text")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1216: or nested_snake_result.get("allEnrichedEpisodePlanText")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1217: or nested_snake_result.get("all_enriched_episode_plan_text")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1220: variables[ALL_ENRICHED_EPISODE_PLAN] = plan_value
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1221: variables["allEnrichedEpisodePlan"] = plan_value
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1222: variables["all_enriched_episode_plan"] = plan_value
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1224: variables["allEnrichedEpisodePlanText"] = text_value
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1225: variables["all_enriched_episode_plan_text"] = text_value
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1227: plan_items = _framework_to_script_json_list(variables.get(ALL_ENRICHED_EPISODE_PLAN))
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1229: variables[ALL_ENRICHED_EPISODE_PLAN] = plan_items
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1230: variables["allEnrichedEpisodePlan"] = plan_items
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1231: variables["all_enriched_episode_plan"] = plan_items
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1236: FRAMEWORK_ENRICHED_PLAN_ERROR = "10 丰富分集计划输出缺少可切片的 allEnrichedEpisodePlan，无法进入因果冲突。"
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1356: def _validate_framework_enriched_episode_plan_assets(
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1362: plan_items = _framework_to_script_json_list(variables.get(ALL_ENRICHED_EPISODE_PLAN))
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1371: issues.append(f"allEnrichedEpisodePlan[{index}] 必须是对象")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1375: issues.append(f"allEnrichedEpisodePlan[{index}].episode 必须是正整数")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1377: issues.append(f"allEnrichedEpisodePlan episode 重复：{episode}")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1386: issues.append("allEnrichedEpisodePlan episode 必须从 1 开始且连续不重复")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1389: issues.append(f"allEnrichedEpisodePlan episode 超出 total_episodes={total_episodes}")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1391: issues.append(f"allEnrichedEpisodePlan 未覆盖 total_episodes={total_episodes}")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1510: ALL_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1511: "allEnrichedEpisodePlan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1512: "allEnrichedEpisodePlanText",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1527: sceneDictionary / appearanceMapping / enrichedEpisodePlan / 因果冲突计划 /
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1598: if _has_value(variables.get(ALL_ENRICHED_EPISODE_PLAN)):
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1601: STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1610: STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1612: stage_key=STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1621: enriched_issues = _validate_framework_enriched_episode_plan_assets(
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1630: stage_name=STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1649: stage_name=STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1653: variables[BATCH_ENRICHED_EPISODE_PLAN] = batch_enriched
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1662: BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1690: BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1701: BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1746: BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1771: BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1779: BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1901: plan_items = _framework_to_script_json_list(variables.get(ALL_ENRICHED_EPISODE_PLAN))
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:1913: cached = slice_object_episodes_for_batch(variables.get(ALL_ENRICHED_EPISODE_PLAN), batch)
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:7661: ALL_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:7662: BATCH_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:7677: ALL_ENRICHED_EPISODE_PLAN: ALL_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\orchestrators\fastgpt_hybrid_workflow.py:7678: BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_client.py:84: STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_client.py:243: STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: "FASTGPT_FRAMEWORK_ENRICHED_EPISODE_PLAN_API_KEY",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:15: ALL_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:18: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:198: STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN = "framework_enriched_episode_plan"
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:240: ALL_ENRICHED_EPISODE_PLAN = "allEnrichedEpisodePlan"
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:241: BATCH_ENRICHED_EPISODE_PLAN = "batchEnrichedEpisodePlan"
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1079: STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: {
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1083: ALL_ENRICHED_EPISODE_PLAN: ALL_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1084: BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1089: BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1098: BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1105: BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1119: BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1130: BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1139: BATCH_ENRICHED_EPISODE_PLAN: BATCH_ENRICHED_EPISODE_PLAN_VAR,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1456: STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1806: STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: FastGPTStageContract(
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1807: stage_name=STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1811: ALL_ENRICHED_EPISODE_PLAN: "array",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1812: "allEnrichedEpisodePlanText": "string",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1815: ALL_ENRICHED_EPISODE_PLAN: (ALL_ENRICHED_EPISODE_PLAN_VAR,),
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1816: BATCH_ENRICHED_EPISODE_PLAN: (BATCH_ENRICHED_EPISODE_PLAN_VAR,),
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1818: fastgpt_responsibility="把 stage07 策划包扩展为可分批写作的 enrichedEpisodePlan。",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1827: BATCH_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1844: BATCH_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1867: BATCH_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1893: BATCH_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1913: BATCH_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\fastgpt_contracts.py:1938: BATCH_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\stage_cache.py:281: if variables.get(ALL_ENRICHED_EPISODE_PLAN):
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\stage_cache.py:282: reached.add("framework_enriched_episode_plan")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\stage_cache.py:343: "framework_enriched_episode_plan": "framework_enriched_episode_plan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\stage_cache.py:539: ("framework_enriched_episode_plan",),
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\stage_cache.py:540: "framework_enriched_episode_plan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\stage_cache.py:542: variables.get("allEnrichedEpisodePlanText")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\stage_cache.py:543: or variables.get("all_enriched_episode_plan_text")
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\stage_cache.py:545: "allEnrichedEpisodePlan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\stage_cache.py:546: variables.get("allEnrichedEpisodePlan") or variables.get("all_enriched_episode_plan"),
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\stage_cache.py:620: if stage_key == "allEnrichedEpisodePlan":
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\stage_cache.py:621: items = payload if isinstance(payload, list) else payload.get("allEnrichedEpisodePlan", [])
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:21: ALL_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:28: BATCH_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:159: "framework_enriched_episode_plan": "框架转剧本：丰富分集计划",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:224: "framework_enriched_episode_plan": "正在生成框架转剧本：丰富分集计划",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:368: ("framework_enriched_episode_plan", "10 丰富分集计划"),
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:381: "framework_enriched_episode_plan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:394: "framework_enriched_episode_plan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:400: "framework_enriched_episode_plan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:404: "framework_enriched_episode_plan": (
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:405: "framework_enriched_episode_plan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:714: ALL_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:715: BATCH_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:731: ALL_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:732: BATCH_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:746: "framework_enriched_episode_plan": (
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:747: ALL_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:748: BATCH_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:763: BATCH_ENRICHED_EPISODE_PLAN,
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:851: "framework_enriched_episode_plan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:1020: "allEnrichedEpisodePlan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:1037: "allEnrichedEpisodePlan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:1046: "allEnrichedEpisodePlan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:1053: "framework_enriched_episode_plan": (
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:1054: "allEnrichedEpisodePlan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\services\task_manager_common.py:1128: "framework_enriched_episode_plan",
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\workflow_ids.py:118: ALL_ENRICHED_EPISODE_PLAN_VAR = "allEnrichedEpisodePlan"
+C:\Users\Administrator\PycharmProjects\new_scriptmaker_test\workflow_code_skeleton\app\workflow_ids.py:119: BATCH_ENRICHED_EPISODE_PLAN_VAR = "batchEnrichedEpisodePlan"
