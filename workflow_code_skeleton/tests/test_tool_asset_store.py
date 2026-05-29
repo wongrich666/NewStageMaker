@@ -108,6 +108,39 @@ class ToolAssetStoreTests(unittest.TestCase):
         self.assertEqual((private_snapshot.get("artifacts") or {}).get("final_output_text"), "甲线\n乙线")
         self.assertEqual((private_snapshot.get("input_payload") or {}).get("story_outline"), "新的摘要内容")
 
+    def test_character_reskin_asset_uses_script_title_and_appears_in_project_list(self) -> None:
+        asset = self.manager.save_auxiliary_asset(
+            user_id=1,
+            tool_key="character_reskin",
+            request_payload={
+                "title": "镜中雪",
+                "source_outline": "原故事大纲",
+                "source_characters": "旧人物小传",
+                "source_script": "原剧本正文",
+                "total_episodes": 6,
+            },
+            result={
+                "title": "只换人设",
+                "text": "最终正文",
+                "filename": "只换人设_镜中雪.txt",
+                "output_type": "text",
+                "debug": {},
+            },
+        )
+
+        self.assertEqual(asset["title"], "镜中雪")
+        self.assertEqual(asset["asset_kind"], AUXILIARY_TOOL_ASSET_KIND)
+        self.assertEqual(asset["asset_type"], "character_reskin")
+
+        projects = self.manager.list_user_projects(1)
+        self.assertEqual([item["project_id"] for item in projects], [asset["project_id"]])
+        self.assertEqual(projects[0]["tool_key"], "character_reskin")
+        self.assertEqual(projects[0]["title"], "镜中雪")
+
+        public_snapshot = self.manager.get_project_snapshot(int(asset["project_id"]), user_id=1, public_view=True) or {}
+        self.assertEqual(public_snapshot["tool_request_payload"]["source_script"], "原剧本正文")
+        self.assertEqual((public_snapshot.get("artifacts") or {}).get("final_output_text"), "最终正文")
+
 
 if __name__ == "__main__":
     unittest.main()

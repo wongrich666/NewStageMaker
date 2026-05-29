@@ -1599,13 +1599,16 @@ a {
 
 .tool-panel {
   display: grid;
+  grid-template-rows: auto minmax(180px, 1fr) auto minmax(160px, 0.65fr);
   gap: 14px;
+  max-height: calc(100vh - 132px);
   padding: 18px 20px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 22px;
   color: #eff5fc;
   background: rgba(19, 24, 31, 0.9);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.16);
+  overflow: hidden;
 }
 
 .tool-panel-head {
@@ -1635,6 +1638,29 @@ a {
 .tool-forms {
   display: grid;
   gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+  scrollbar-color: rgba(203, 213, 225, 0.45) rgba(255, 255, 255, 0.06);
+}
+
+.tool-forms::-webkit-scrollbar,
+.tool-panel-output::-webkit-scrollbar {
+  width: 10px;
+}
+
+.tool-forms::-webkit-scrollbar-track,
+.tool-panel-output::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.tool-forms::-webkit-scrollbar-thumb,
+.tool-panel-output::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(19, 24, 31, 0.9);
+  border-radius: 999px;
+  background: rgba(203, 213, 225, 0.45);
 }
 
 .tool-form-head h3,
@@ -1652,6 +1678,19 @@ a {
   display: inline-block;
   margin-top: 10px;
   color: var(--mono-muted);
+  font-size: 12px;
+}
+
+.tool-linked-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tool-linked-actions .btn {
+  min-height: 36px;
+  padding: 0 12px;
   font-size: 12px;
 }
 
@@ -1694,10 +1733,11 @@ a {
 
 .tool-panel-output {
   min-height: 180px;
-  max-height: 340px;
+  max-height: none;
   color: #eff5fc;
   border-color: rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
+  overflow: auto;
 }
 
 .sidebar-footer {

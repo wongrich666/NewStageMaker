@@ -129,6 +129,7 @@ class TaskLifecycleMixin:
     def _auxiliary_asset_title(
         self,
         *,
+        tool_key: str,
         tool_label: str,
         request_payload: dict[str, Any],
         result: dict[str, Any],
@@ -154,6 +155,8 @@ class TaskLifecycleMixin:
             suffix = clean_user_visible_text(
                 request_payload.get("project_title") or request_payload.get("title") or ""
             ).strip()
+        if str(tool_key or "").strip() == "character_reskin" and suffix:
+            return suffix
         return f"{tool_label}｜{suffix}" if suffix else tool_label
 
     def _auxiliary_asset_story_outline(
@@ -197,6 +200,7 @@ class TaskLifecycleMixin:
             final_text=final_text,
         )
         title = self._auxiliary_asset_title(
+            tool_key=tool_key,
             tool_label=tool_label,
             request_payload=request_payload,
             result=result,
@@ -216,7 +220,7 @@ class TaskLifecycleMixin:
             "visibility": "private",
             "model_option": None,
             "asset_kind": AUXILIARY_TOOL_ASSET_KIND,
-            "asset_type": "old_script",
+            "asset_type": "character_reskin" if str(tool_key or "").strip() == "character_reskin" else "old_script",
             "tool_key": str(tool_key or "").strip(),
             "tool_label": tool_label,
             "tool_request_payload": copy.deepcopy(request_payload or {}),

@@ -588,7 +588,10 @@ class ProjectSnapshotStoreMixin:
             self._asset_summary(snapshot, include_private=True, use_teaser=False)
             for snapshot in self._all_project_snapshots()
             if self._snapshot_belongs_to_user(snapshot, user_id)
-            and str(snapshot.get("asset_kind") or "").strip() != AUXILIARY_TOOL_ASSET_KIND
+            and (
+                str(snapshot.get("asset_kind") or "").strip() != AUXILIARY_TOOL_ASSET_KIND
+                or str(snapshot.get("tool_key") or "").strip() == "character_reskin"
+            )
         ]
         projects.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return projects

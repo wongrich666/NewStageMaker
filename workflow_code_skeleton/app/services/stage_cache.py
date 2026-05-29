@@ -771,7 +771,7 @@ class StageCacheMixin:
         raw_asset_type = str(snapshot.get("asset_type") or input_payload_for_type.get("asset_type") or "").strip()
         asset_kind_for_type = str(snapshot.get("asset_kind") or input_payload_for_type.get("asset_kind") or "").strip()
         script_format_mode_for_type = str(input_payload_for_type.get("script_format_mode") or "").strip()
-        if raw_asset_type in {"old_script", "legacy_script", "framework", "new_script"}:
+        if raw_asset_type in {"old_script", "legacy_script", "framework", "new_script", "character_reskin"}:
             asset_type = "old_script" if raw_asset_type == "legacy_script" else raw_asset_type
         elif asset_kind_for_type == "framework_planner":
             asset_type = "framework"
@@ -853,6 +853,9 @@ class StageCacheMixin:
             )
             if isinstance(framework_state, dict):
                 payload["framework_planner_state"] = copy.deepcopy(framework_state)
+        if self._is_auxiliary_tool_asset(snapshot):
+            payload["tool_request_payload"] = copy.deepcopy(snapshot.get("tool_request_payload") or {})
+            payload["tool_output_type"] = str(snapshot.get("tool_output_type") or "").strip()
         # 有意不把 debug_state / logs / 内部控制位直接暴露给前端。
         # 前端只看正式字段，避免中间变量、节点回显和恢复指针泄漏到公开接口。
         return payload

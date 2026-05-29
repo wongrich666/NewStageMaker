@@ -70,6 +70,8 @@
     activeProjectList: $("activeProjectList"),
     completedProjectList: $("completedProjectList"),
     newScriptProjectList: $("newScriptProjectList"),
+    waibaoProjectList: $("waibaoProjectList"),
+    characterReskinProjectList: $("characterReskinProjectList"),
     activeProjectCount: $("activeProjectCount"),
     completedProjectCount: $("completedProjectCount"),
 
@@ -2274,6 +2276,13 @@ startRuntimeDebugPolling();
       <div class="tool-form-head">
         <p>${escapeHtml(tool.help)}</p>
         ${tool.jsonFile ? `<small class="tool-form-meta">工作流：${escapeHtml(tool.jsonFile)}</small>` : ""}
+        ${tool.key === "character_reskin" ? `
+          <div class="tool-linked-actions" aria-label="只换人设后续辅助工具">
+            <button class="btn btn-secondary" type="button" disabled>爆款文审核（暂未接入）</button>
+            <button class="btn btn-secondary" type="button" disabled>换皮（暂未接入）</button>
+            <button class="btn btn-secondary" type="button" disabled>增加爽感（暂未接入）</button>
+          </div>
+        ` : ""}
       </div>
         <div class="tool-field-grid">
         ${tool.fields.map((field) => {
@@ -2687,6 +2696,8 @@ startRuntimeDebugPolling();
       els.activeProjectList.innerHTML = message;
       els.completedProjectList.innerHTML = message;
       if (els.newScriptProjectList) els.newScriptProjectList.innerHTML = message;
+      if (els.waibaoProjectList) els.waibaoProjectList.innerHTML = message;
+      if (els.characterReskinProjectList) els.characterReskinProjectList.innerHTML = message;
       if (els.activeProjectCount) els.activeProjectCount.textContent = "0";
       if (els.completedProjectCount) els.completedProjectCount.textContent = "0";
       return;
@@ -2695,6 +2706,8 @@ startRuntimeDebugPolling();
     const oldScriptProjects = projects.filter((item) => assetCategory(item) === "old_script");
     const frameworkProjects = projects.filter((item) => assetCategory(item) === "framework");
     const newScriptProjects = projects.filter((item) => assetCategory(item) === "new_script");
+    const waibaoProjects = projects.filter((item) => assetCategory(item) === "waibao");
+    const characterReskinProjects = projects.filter((item) => assetCategory(item) === "character_reskin");
 
     const renderCompactItems = (items, emptyMessage) => {
       if (!items.length) {
@@ -2740,6 +2753,12 @@ startRuntimeDebugPolling();
     if (els.newScriptProjectList) {
       els.newScriptProjectList.innerHTML = renderCompactItems(newScriptProjects, "当前还没有 08-12 新剧本资产。");
     }
+    if (els.waibaoProjectList) {
+      els.waibaoProjectList.innerHTML = renderCompactItems(waibaoProjects, "当前还没有外包格式专属资产。");
+    }
+    if (els.characterReskinProjectList) {
+      els.characterReskinProjectList.innerHTML = renderCompactItems(characterReskinProjects, "当前还没有只换人设资产。");
+    }
     if (els.activeProjectCount) {
       els.activeProjectCount.textContent = String(oldScriptProjects.length);
     }
@@ -2749,7 +2768,13 @@ startRuntimeDebugPolling();
   }
 
   function workspaceFolders() {
-    return [els.activeWorkspaceFolder, els.completedWorkspaceFolder, els.newScriptProjectList?.closest("details")].filter(Boolean);
+    return [
+      els.activeWorkspaceFolder,
+      els.completedWorkspaceFolder,
+      els.newScriptProjectList?.closest("details"),
+      els.waibaoProjectList?.closest("details"),
+      els.characterReskinProjectList?.closest("details")
+    ].filter(Boolean);
   }
 
   function cancelWorkspaceAutoCollapse() {
@@ -3291,10 +3316,13 @@ startRuntimeDebugPolling();
   function assetCategory(item) {
     const explicit = String(item.asset_type || item.type || "").trim();
     if (explicit === "legacy_script") return "old_script";
-    if (["old_script", "framework", "new_script"].includes(explicit)) return explicit;
+    if (["old_script", "framework", "new_script", "character_reskin", "waibao"].includes(explicit)) return explicit;
     const assetKind = String(item.asset_kind || "").trim();
     const input = item.input_payload && typeof item.input_payload === "object" ? item.input_payload : {};
     const scriptMode = String(item.script_format_mode || input.script_format_mode || "").trim();
+    const toolKey = String(item.tool_key || "").trim();
+    if (assetKind === "tool_result" && toolKey === "character_reskin") return "character_reskin";
+    if (scriptMode === "waibao") return "waibao";
     if (assetKind === "framework_planner") return "framework";
     if (assetKind === "framework_to_script" || scriptMode === "framework_to_script" || input.framework_to_script === true) return "new_script";
     return "old_script";
@@ -3354,6 +3382,9 @@ startRuntimeDebugPolling();
     const project = data.project || {};
     const input = project.input_payload || {};
     const artifacts = project.artifacts || {};
+    const toolRequest = project.tool_request_payload && typeof project.tool_request_payload === "object"
+      ? project.tool_request_payload
+      : null;
     state.editingProjectId = Number(projectId);
     state.editingProjectStatus = String(project.status || "");
     state.editingAssetKind = String(project.asset_kind || "").trim();
@@ -3362,7 +3393,11 @@ startRuntimeDebugPolling();
     state.assetDirty = false;
     const viewModeLocked = true;
     els.editAssetTitle.value = project.title || input.title || "";
-    els.editAssetSummary.value = formatDisplayValue(input.story_outline || artifacts.story_outline || "");
+    els.editAssetSummary.value = formatDisplayValue(
+      toolRequest
+        ? JSON.stringify(toolRequest, null, 2)
+        : (input.story_outline || artifacts.story_outline || "")
+    );
     els.editAssetPrivacy.value = project.visibility || "private";
     els.editAssetFinal.value = state.editingProjectStatus === "completed"
       ? formatDisplayValue(artifacts.final_output_text || artifacts.final_script || "")

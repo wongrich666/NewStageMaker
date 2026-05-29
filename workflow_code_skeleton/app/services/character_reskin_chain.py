@@ -15,9 +15,10 @@ from .simple_fastgpt_tools import DEFAULT_FASTGPT_URL, ToolExecutionError
 
 
 DEDICATED_API_KEY_ENVS: tuple[str, ...] = (
-    "FASTGPT_REWRITE_CHARACTER_PROFILE_KEY",
-    "FASTGPT_REVIEW_CHARACTER_PROFILE_KEY",
+    "FASTGPT_COUNT_ACTUAL_EPISODES_KEY",
     "FASTGPT_WRITE_CHARACTER_PROFILE_KEY",
+    "FASTGPT_REVIEW_CHARACTER_PROFILE_KEY",
+    "FASTGPT_REWRITE_CHARACTER_PROFILE_KEY",
     "FASTGPT_SORT_CHARACTER_PROFILE_KEY",
     "FASTGPT_WRITE_CHARACTER_DIALOGUE_KEY",
     "FASTGPT_REVIEW_CHARACTER_DIALOGUE_KEY",
@@ -31,15 +32,21 @@ DEDICATED_API_KEY_ENVS: tuple[str, ...] = (
 URL_ENV = "FASTGPT_CHAT_COMPLETIONS_URL"
 
 EXPECTED_VARIABLE_KEYS_BY_STAGE: dict[str, list[str]] = {
-    "profile_rewrite": ["pxtQY7p2", "ayxWwSpE"],
-    "profile_review": ["pxtQY7p2", "ayxWwSpE", "fFM0mroW"],
-    "profile_write": ["pxtQY7p2", "ayxWwSpE", "fFM0mroW", "va4Et1LA"],
-    "profile_sort": ["fFM0mroW", "yYYOuumm"],
-    "dialogue_write": ["pxtQY7p2", "ayxWwSpE", "fFM0mroW", "sKq9Iyza", "blkSS7dY"],
-    "dialogue_review": ["pxtQY7p2", "ayxWwSpE", "fFM0mroW", "mN7Fh38L"],
+    "actual_episode_count": ["juben_zhengwen"],
+    "profile_write": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", "rxmvq2lS", "yYYOuumm", "pxtQY7p2"],
+    "profile_review": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW"],
+    "profile_rewrite": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "va4Et1LA"],
+    "profile_sort": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW"],
+    "dialogue_write": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "sKq9Iyza"],
+    "dialogue_review": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "mN7Fh38L"],
     "dialogue_rewrite": [
-        "pxtQY7p2",
+        "n5ZHYrj8",
+        "eBEWC07Q",
+        "blkSS7dY",
         "ayxWwSpE",
+        "rxmvq2lS",
+        "yYYOuumm",
+        "pxtQY7p2",
         "fFM0mroW",
         "mN7Fh38L",
         "rZL0C6f9",
@@ -47,36 +54,45 @@ EXPECTED_VARIABLE_KEYS_BY_STAGE: dict[str, list[str]] = {
         "blkSS7dY",
     ],
     "body_write": [
-        "pxtQY7p2",
+        "n5ZHYrj8",
+        "eBEWC07Q",
+        "blkSS7dY",
         "ayxWwSpE",
+        "rxmvq2lS",
+        "yYYOuumm",
+        "pxtQY7p2",
         "fFM0mroW",
         "pS7JzosX",
         "d4sfifeZ",
-        "blkSS7dY",
-        "eBEWC07Q",
         "bai4xfdD",
     ],
     "body_review": [
-        "pxtQY7p2",
+        "n5ZHYrj8",
+        "eBEWC07Q",
+        "blkSS7dY",
         "ayxWwSpE",
+        "rxmvq2lS",
+        "yYYOuumm",
+        "pxtQY7p2",
         "fFM0mroW",
         "pS7JzosX",
         "zS2LXibg",
         "d4sfifeZ",
-        "blkSS7dY",
-        "eBEWC07Q",
         "ntBQgrAm",
     ],
     "body_rewrite": [
-        "pxtQY7p2",
+        "n5ZHYrj8",
+        "eBEWC07Q",
+        "blkSS7dY",
         "ayxWwSpE",
+        "rxmvq2lS",
+        "yYYOuumm",
+        "pxtQY7p2",
         "fFM0mroW",
         "pS7JzosX",
         "zS2LXibg",
         "gJT2URpY",
         "d4sfifeZ",
-        "blkSS7dY",
-        "eBEWC07Q",
         "mcUdAISf",
     ],
     "script_memory": ["zS2LXibg"],
@@ -123,65 +139,62 @@ def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
     }
     _validate_required_env(debug)
 
+    actual_episode_count = _call_stage(
+        StageSpec("actual_episode_count", "FASTGPT_COUNT_ACTUAL_EPISODES_KEY", ("kpoOTOUP",)),
+        {
+            "juben_zhengwen": state["source_script"],
+        },
+        debug,
+    )
+    state["actual_episodes_raw"] = str(actual_episode_count or "").strip()
+    state["total_episodes"] = _normalize_actual_episode_count(state["actual_episodes_raw"], debug)
+
+    profile_write = StageSpec(
+        "profile_write",
+        "FASTGPT_WRITE_CHARACTER_PROFILE_KEY",
+        ("fFM0mroW",),
+        json_output=True,
+    )
+    state["profile_json"] = _call_stage(
+        profile_write,
+        _with_common_variables(state),
+        debug,
+    )
+
+    profile_review = StageSpec("profile_review", "FASTGPT_REVIEW_CHARACTER_PROFILE_KEY", json_output=True)
     profile_rewrite = StageSpec(
         "profile_rewrite",
         "FASTGPT_REWRITE_CHARACTER_PROFILE_KEY",
         ("fFM0mroW",),
         json_output=True,
     )
-    state["profile_json"] = _call_stage(
-        profile_rewrite,
-        {
-            "pxtQY7p2": state["source_script"],
-            "ayxWwSpE": state["source_outline"],
-        },
-        debug,
-    )
-
-    profile_review = StageSpec("profile_review", "FASTGPT_REVIEW_CHARACTER_PROFILE_KEY", json_output=True)
-    state["profile_review_json"] = _call_stage(
-        profile_review,
-        {
-            "pxtQY7p2": state["source_script"],
-            "ayxWwSpE": state["source_outline"],
-            "fFM0mroW": state["profile_json"],
-        },
-        debug,
-    )
-    if _review_needs_rewrite(state["profile_review_json"]):
-        profile_write = StageSpec(
-            "profile_write",
-            "FASTGPT_WRITE_CHARACTER_PROFILE_KEY",
-            ("fFM0mroW",),
-            json_output=True,
-        )
-        state["profile_json"] = _call_stage(
-            profile_write,
-            {
-                "pxtQY7p2": state["source_script"],
-                "ayxWwSpE": state["source_outline"],
-                "fFM0mroW": state["profile_json"],
-                "va4Et1LA": state["profile_review_json"],
-            },
-            debug,
-        )
+    for rewrite_index in range(0, 6):
         state["profile_review_json"] = _call_stage(
             profile_review,
-            {
-                "pxtQY7p2": state["source_script"],
-                "ayxWwSpE": state["source_outline"],
+            _with_common_variables(state, {"fFM0mroW": state["profile_json"]}),
+            debug,
+        )
+        if not _review_needs_rewrite(state["profile_review_json"]) or rewrite_index >= 5:
+            break
+        state["profile_json"] = _call_stage(
+            profile_rewrite,
+            _with_common_variables(
+                state,
+                {
                 "fFM0mroW": state["profile_json"],
-            },
+                "va4Et1LA": state["profile_review_json"],
+                },
+            ),
             debug,
         )
 
     profile_sort = StageSpec("profile_sort", "FASTGPT_SORT_CHARACTER_PROFILE_KEY", ("vVtCqEXZ",))
     state["profile_text"] = _call_stage(
         profile_sort,
-        {
+        _with_common_variables(state, {
             "fFM0mroW": state["profile_json"],
             "yYYOuumm": state["source_characters"],
-        },
+        }),
         debug,
     )
 
@@ -194,45 +207,49 @@ def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
         )
         state["dialogue_json"] = _call_stage(
             dialogue_write,
-            {
-                "pxtQY7p2": state["source_script"],
-                "ayxWwSpE": state["source_outline"],
+            _with_common_variables(
+                state,
+                {
                 "fFM0mroW": state["profile_json"],
                 "sKq9Iyza": start_episode,
-                "blkSS7dY": state["total_episodes"],
-            },
+                },
+            ),
             debug,
         )
 
         dialogue_review = StageSpec("dialogue_review", "FASTGPT_REVIEW_CHARACTER_DIALOGUE_KEY", json_output=True)
-        state["dialogue_review_json"] = _call_stage(
-            dialogue_review,
-            {
-                "pxtQY7p2": state["source_script"],
-                "ayxWwSpE": state["source_outline"],
-                "fFM0mroW": state["profile_json"],
-                "mN7Fh38L": state["dialogue_json"],
-            },
-            debug,
+        dialogue_rewrite = StageSpec(
+            "dialogue_rewrite",
+            "FASTGPT_REWRITE_CHARACTER_DIALOGUE_KEY",
+            ("mN7Fh38L",),
+            json_output=True,
         )
-        if _review_needs_rewrite(state["dialogue_review_json"]):
-            dialogue_rewrite = StageSpec(
-                "dialogue_rewrite",
-                "FASTGPT_REWRITE_CHARACTER_DIALOGUE_KEY",
-                ("mN7Fh38L",),
-                json_output=True,
+        for rewrite_index in range(0, 6):
+            state["dialogue_review_json"] = _call_stage(
+                dialogue_review,
+                _with_common_variables(
+                    state,
+                    {
+                    "fFM0mroW": state["profile_json"],
+                    "mN7Fh38L": state["dialogue_json"],
+                    "sKq9Iyza": start_episode,
+                    },
+                ),
+                debug,
             )
+            if not _review_needs_rewrite(state["dialogue_review_json"]) or rewrite_index >= 5:
+                break
             state["dialogue_json"] = _call_stage(
                 dialogue_rewrite,
-                {
-                    "pxtQY7p2": state["source_script"],
-                    "ayxWwSpE": state["source_outline"],
+                _with_common_variables(
+                    state,
+                    {
                     "fFM0mroW": state["profile_json"],
                     "mN7Fh38L": state["dialogue_json"],
                     "rZL0C6f9": state["dialogue_review_json"],
                     "sKq9Iyza": start_episode,
-                    "blkSS7dY": state["total_episodes"],
-                },
+                    },
+                ),
                 debug,
             )
         state["final_dialogue_json"] = state["dialogue_json"]
@@ -240,66 +257,50 @@ def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
         body_write = StageSpec("body_write", "FASTGPT_WRITE_SCRIPT_BODY_KEY", ("zS2LXibg",))
         state["body_batch_text"] = _call_stage(
             body_write,
-            {
-                "pxtQY7p2": state["source_script"],
-                "ayxWwSpE": state["source_outline"],
+            _with_common_variables(
+                state,
+                {
                 "fFM0mroW": state["profile_json"],
                 "pS7JzosX": state["final_dialogue_json"],
                 "d4sfifeZ": start_episode,
-                "blkSS7dY": state["total_episodes"],
-                "eBEWC07Q": state["episode_word_count"],
                 "bai4xfdD": state["script_memory_json"],
-            },
+                },
+            ),
             debug,
         )
 
         body_review = StageSpec("body_review", "FASTGPT_REVIEW_SCRIPT_BODY_KEY", json_output=True)
-        state["body_review_json"] = _call_stage(
-            body_review,
-            {
-                "pxtQY7p2": state["source_script"],
-                "ayxWwSpE": state["source_outline"],
-                "fFM0mroW": state["profile_json"],
-                "pS7JzosX": state["final_dialogue_json"],
-                "zS2LXibg": state["body_batch_text"],
-                "d4sfifeZ": start_episode,
-                "blkSS7dY": state["total_episodes"],
-                "eBEWC07Q": state["episode_word_count"],
-                "ntBQgrAm": state["script_memory_json"],
-            },
-            debug,
-        )
-        if _review_needs_rewrite(state["body_review_json"]):
-            body_rewrite = StageSpec("body_rewrite", "FASTGPT_REWRITE_SCRIPT_BODY_KEY", ("zS2LXibg",))
+        body_rewrite = StageSpec("body_rewrite", "FASTGPT_REWRITE_SCRIPT_BODY_KEY", ("zS2LXibg",))
+        for rewrite_index in range(0, 6):
+            state["body_review_json"] = _call_stage(
+                body_review,
+                _with_common_variables(
+                    state,
+                    {
+                    "fFM0mroW": state["profile_json"],
+                    "pS7JzosX": state["final_dialogue_json"],
+                    "zS2LXibg": state["body_batch_text"],
+                    "d4sfifeZ": start_episode,
+                    "ntBQgrAm": state["script_memory_json"],
+                    },
+                ),
+                debug,
+            )
+            if not _review_needs_rewrite(state["body_review_json"]) or rewrite_index >= 5:
+                break
             state["body_batch_text"] = _call_stage(
                 body_rewrite,
-                {
-                    "pxtQY7p2": state["source_script"],
-                    "ayxWwSpE": state["source_outline"],
+                _with_common_variables(
+                    state,
+                    {
                     "fFM0mroW": state["profile_json"],
                     "pS7JzosX": state["final_dialogue_json"],
                     "zS2LXibg": state["body_batch_text"],
                     "gJT2URpY": state["body_review_json"],
                     "d4sfifeZ": start_episode,
-                    "blkSS7dY": state["total_episodes"],
-                    "eBEWC07Q": state["episode_word_count"],
                     "mcUdAISf": state["script_memory_json"],
-                },
-                debug,
-            )
-            state["body_review_json"] = _call_stage(
-                body_review,
-                {
-                    "pxtQY7p2": state["source_script"],
-                    "ayxWwSpE": state["source_outline"],
-                    "fFM0mroW": state["profile_json"],
-                    "pS7JzosX": state["final_dialogue_json"],
-                    "zS2LXibg": state["body_batch_text"],
-                    "d4sfifeZ": start_episode,
-                    "blkSS7dY": state["total_episodes"],
-                    "eBEWC07Q": state["episode_word_count"],
-                    "ntBQgrAm": state["script_memory_json"],
-                },
+                    },
+                ),
                 debug,
             )
 
@@ -354,6 +355,7 @@ def _initial_state(payload: dict[str, Any]) -> dict[str, Any]:
         "core_scenes": _first_text(payload, "core_scenes", "hexin_changjing"),
         "source_characters": _first_text(payload, "source_characters", "renwu_xiaozhuan", "characters"),
         "source_script": _first_text(payload, "source_script", "juben_zhengwen", "script"),
+        "actual_episodes_raw": "",
         "profile_json": "",
         "profile_review_json": "",
         "profile_text": "",
@@ -377,6 +379,24 @@ def _initial_state(payload: dict[str, Any]) -> dict[str, Any]:
             status_code=400,
         )
     return state
+
+
+def _common_variables(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "n5ZHYrj8": state["title"],
+        "eBEWC07Q": state["episode_word_count"],
+        "blkSS7dY": state["total_episodes"],
+        "ayxWwSpE": state["source_outline"],
+        "rxmvq2lS": state["core_scenes"],
+        "yYYOuumm": state["source_characters"],
+        "pxtQY7p2": state["source_script"],
+    }
+
+
+def _with_common_variables(state: dict[str, Any], extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    variables = _common_variables(state)
+    variables.update(extra or {})
+    return variables
 
 
 def _call_stage(spec: StageSpec, variables: dict[str, Any], debug: dict[str, Any]) -> Any:
@@ -571,6 +591,43 @@ def _review_needs_rewrite(value: Any) -> bool:
     if parsed.get("pass") is False:
         return True
     return False
+
+
+def _normalize_actual_episode_count(value: Any, debug: dict[str, Any]) -> int:
+    text = str(value or "").strip()
+    debug["actual_episodes_raw"] = text
+    if text.upper() == "X":
+        raise ToolExecutionError(
+            "原剧本正文存在跳集、漏集或残缺内容，请补全所有集数后再运行只换人设。",
+            tool_id="character_reskin",
+            debug=debug,
+            status_code=400,
+        )
+    if text == "0":
+        raise ToolExecutionError(
+            "原剧本正文为空或未识别到有效集数，请先粘贴完整原剧本正文。",
+            tool_id="character_reskin",
+            debug=debug,
+            status_code=400,
+        )
+    try:
+        number = int(text)
+    except Exception as exc:
+        raise ToolExecutionError(
+            f"实际集数检查返回无效结果：{text or '空'}。请检查统计实际集数 workflow 是否只输出非零自然数、0 或 X。",
+            tool_id="character_reskin",
+            debug=debug,
+            status_code=502,
+        ) from exc
+    if number <= 0:
+        raise ToolExecutionError(
+            f"实际集数检查返回无效结果：{text}。请检查统计实际集数 workflow。",
+            tool_id="character_reskin",
+            debug=debug,
+            status_code=502,
+        )
+    debug["actual_episodes"] = number
+    return number
 
 
 def _validate_required_env(debug: dict[str, Any]) -> None:

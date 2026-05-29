@@ -45,6 +45,7 @@ def _stage_from_headers(headers: dict[str, str]) -> str:
     reverse = {f"key-{index}": name for index, name in enumerate(chain.DEDICATED_API_KEY_ENVS, start=1)}
     env_name = reverse[token]
     return {
+        "FASTGPT_COUNT_ACTUAL_EPISODES_KEY": "actual_episode_count",
         "FASTGPT_REWRITE_CHARACTER_PROFILE_KEY": "profile_rewrite",
         "FASTGPT_REVIEW_CHARACTER_PROFILE_KEY": "profile_review",
         "FASTGPT_WRITE_CHARACTER_PROFILE_KEY": "profile_write",
@@ -67,8 +68,10 @@ def test_character_reskin_runs_all_stages_and_concatenates_batches() -> None:
         stage = _stage_from_headers(headers or {})
         variables = (json or {})["variables"]
         calls.append({"stage": stage, "variables": variables})
-        if stage == "profile_rewrite":
+        if stage == "profile_write":
             return _FakeResponse({"answerText": '{"name":"新主角"}'})
+        if stage == "actual_episode_count":
+            return _FakeResponse({"answerText": "6"})
         if stage == "profile_review":
             return _FakeResponse({"answerText": '{"passed":true,"rewrite_required":false}'})
         if stage == "profile_sort":
@@ -95,8 +98,15 @@ def test_character_reskin_runs_all_stages_and_concatenates_batches() -> None:
     assert result["script_batches"] == ["第1批正文", "第6批正文"]
     assert [call["variables"]["sKq9Iyza"] for call in calls if call["stage"] == "dialogue_write"] == [1, 6]
     assert [call["variables"]["d4sfifeZ"] for call in calls if call["stage"] == "body_write"] == [1, 6]
-    first_profile = next(call for call in calls if call["stage"] == "profile_rewrite")
+    first_profile = next(call for call in calls if call["stage"] == "profile_write")
     assert first_profile["variables"]["ayxWwSpE"] == "【用户换人设要求】\n换成都市复仇人设\n\n【原故事大纲】\n原故事大纲"
+    for key, expected in {
+        "n5ZHYrj8": "镜中雪",
+        "rxmvq2lS": "核心场景",
+        "yYYOuumm": "旧人物小传",
+        "pxtQY7p2": "原剧本正文",
+    }.items():
+        assert first_profile["variables"][key] == expected
 
 
 def test_character_reskin_bridges_review_and_memory_variables() -> None:
@@ -107,11 +117,13 @@ def test_character_reskin_bridges_review_and_memory_variables() -> None:
         stage = _stage_from_headers(headers or {})
         variables = (json or {})["variables"]
         calls.append({"stage": stage, "variables": variables})
-        if stage == "profile_rewrite":
+        if stage == "profile_write":
             return _FakeResponse({"answerText": '{"profile":"draft"}'})
+        if stage == "actual_episode_count":
+            return _FakeResponse({"answerText": "6"})
         if stage == "profile_review":
             return _FakeResponse({"answerText": '{"passed":false,"rewrite_required":true,"note":"profile review"}'})
-        if stage == "profile_write":
+        if stage == "profile_rewrite":
             return _FakeResponse({"answerText": '{"profile":"fixed"}'})
         if stage == "profile_sort":
             return _FakeResponse({"answerText": "新人设小传"})
@@ -134,8 +146,8 @@ def test_character_reskin_bridges_review_and_memory_variables() -> None:
     with patch.dict(os.environ, _env(), clear=True), patch.object(chain.requests, "post", side_effect=fake_post):
         result = tools.run_simple_tool("character_reskin", _payload(total_episodes=6))
 
-    profile_write = next(call for call in calls if call["stage"] == "profile_write")
-    assert profile_write["variables"]["va4Et1LA"]["note"] == "profile review"
+    profile_rewrite = next(call for call in calls if call["stage"] == "profile_rewrite")
+    assert profile_rewrite["variables"]["va4Et1LA"]["note"] == "profile review"
     dialogue_rewrite = next(call for call in calls if call["stage"] == "dialogue_rewrite")
     assert dialogue_rewrite["variables"]["rZL0C6f9"]["note"] == "dialogue review"
     body_rewrite = next(call for call in calls if call["stage"] == "body_rewrite")
@@ -143,7 +155,10 @@ def test_character_reskin_bridges_review_and_memory_variables() -> None:
     body_writes = [call for call in calls if call["stage"] == "body_write"]
     body_reviews = [call for call in calls if call["stage"] == "body_review"]
     second_batch_review = next(call for call in body_reviews if call["variables"]["d4sfifeZ"] == 6)
-    second_body_rewrite = [call for call in calls if call["stage"] == "body_rewrite"][1]
+    second_body_rewrite = next(
+        call for call in calls
+        if call["stage"] == "body_rewrite" and call["variables"]["d4sfifeZ"] == 6
+    )
     assert body_writes[0]["variables"]["bai4xfdD"] == ""
     assert body_writes[1]["variables"]["bai4xfdD"]["memory"] == "承接记忆"
     assert second_batch_review["variables"]["ntBQgrAm"]["memory"] == "承接记忆"
@@ -161,6 +176,8 @@ def test_character_reskin_review_pass_skips_rewrite_stages() -> None:
         stages.append(stage)
         if stage.endswith("review"):
             return _FakeResponse({"answerText": '{"passed":true,"rewrite_required":false}'})
+        if stage == "actual_episode_count":
+            return _FakeResponse({"answerText": "5"})
         if stage == "script_memory":
             return _FakeResponse({"answerText": '{"memory":"ok"}'})
         return _FakeResponse({"answerText": "正文" if stage == "body_write" else '{"ok":true}'})
@@ -169,7 +186,7 @@ def test_character_reskin_review_pass_skips_rewrite_stages() -> None:
         tools.run_simple_tool("character_reskin", _payload(total_episodes=5))
 
     counts = Counter(stages)
-    assert counts["profile_write"] == 0
+    assert counts["profile_rewrite"] == 0
     assert counts["dialogue_rewrite"] == 0
     assert counts["body_rewrite"] == 0
 
@@ -184,6 +201,95 @@ def test_character_reskin_missing_dedicated_key_returns_clear_error_without_requ
     assert "FASTGPT_WRITE_SCRIPT_BODY_KEY" in str(exc.value)
     assert "FASTGPT_WRITE_SCRIPT_BODY_KEY" in exc.value.debug["missing_api_key_envs"]
     mocked_post.assert_not_called()
+
+
+def test_character_reskin_uses_actual_episode_count_and_rejects_incomplete_script() -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_post(url, *, headers=None, json=None, timeout=None):
+        del url, timeout
+        stage = _stage_from_headers(headers or {})
+        variables = (json or {})["variables"]
+        calls.append({"stage": stage, "variables": variables})
+        if stage == "actual_episode_count":
+            return _FakeResponse({"answerText": "3"})
+        if stage == "profile_write":
+            return _FakeResponse({"answerText": '{"profile":"ok"}'})
+        if stage == "profile_review":
+            return _FakeResponse({"answerText": '{"passed":true,"rewrite_required":false}'})
+        if stage == "profile_sort":
+            return _FakeResponse({"answerText": "新人设小传"})
+        if stage == "dialogue_write":
+            return _FakeResponse({"answerText": '{"dialogue":"1-3"}'})
+        if stage == "dialogue_review":
+            return _FakeResponse({"answerText": '{"passed":true,"rewrite_required":false}'})
+        if stage == "body_write":
+            return _FakeResponse({"answerText": "三集正文"})
+        if stage == "body_review":
+            return _FakeResponse({"answerText": '{"passed":true,"rewrite_required":false}'})
+        if stage == "script_memory":
+            return _FakeResponse({"answerText": '{"memory":"done"}'})
+        raise AssertionError(stage)
+
+    with patch.dict(os.environ, _env(), clear=True), patch.object(chain.requests, "post", side_effect=fake_post):
+        result = tools.run_simple_tool("character_reskin", _payload(total_episodes=50))
+
+    assert result["output"] == "三集正文"
+    dialogue_writes = [call for call in calls if call["stage"] == "dialogue_write"]
+    body_writes = [call for call in calls if call["stage"] == "body_write"]
+    assert [call["variables"]["sKq9Iyza"] for call in dialogue_writes] == [1]
+    assert body_writes[0]["variables"]["blkSS7dY"] == 3
+
+    def incomplete_post(url, *, headers=None, json=None, timeout=None):
+        del url, json, timeout
+        assert _stage_from_headers(headers or {}) == "actual_episode_count"
+        return _FakeResponse({"answerText": "X"})
+
+    with patch.dict(os.environ, _env(), clear=True), patch.object(chain.requests, "post", side_effect=incomplete_post):
+        with pytest.raises(tools.ToolExecutionError) as exc:
+            tools.run_simple_tool("character_reskin", _payload(total_episodes=50))
+
+    assert "补全所有集数" in str(exc.value)
+
+
+def test_character_reskin_rewrites_at_most_five_times_and_uses_latest_version() -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_post(url, *, headers=None, json=None, timeout=None):
+        del url, timeout
+        stage = _stage_from_headers(headers or {})
+        variables = (json or {})["variables"]
+        calls.append({"stage": stage, "variables": variables})
+        if stage == "actual_episode_count":
+            return _FakeResponse({"answerText": "1"})
+        if stage == "profile_write":
+            return _FakeResponse({"answerText": '{"profile":"v0"}'})
+        if stage == "profile_review":
+            return _FakeResponse({"answerText": '{"passed":false,"rewrite_required":true}'})
+        if stage == "profile_rewrite":
+            profile_rewrites = len([call for call in calls if call["stage"] == "profile_rewrite"])
+            return _FakeResponse({"answerText": f'{{"profile":"v{profile_rewrites}"}}'})
+        if stage == "profile_sort":
+            return _FakeResponse({"answerText": "最后人设小传"})
+        if stage == "dialogue_write":
+            return _FakeResponse({"answerText": '{"dialogue":"ok"}'})
+        if stage == "dialogue_review":
+            return _FakeResponse({"answerText": '{"passed":true,"rewrite_required":false}'})
+        if stage == "body_write":
+            return _FakeResponse({"answerText": f"正文使用{variables['fFM0mroW']['profile']}"})
+        if stage == "body_review":
+            return _FakeResponse({"answerText": '{"passed":true,"rewrite_required":false}'})
+        if stage == "script_memory":
+            return _FakeResponse({"answerText": '{"memory":"ok"}'})
+        raise AssertionError(stage)
+
+    with patch.dict(os.environ, _env(), clear=True), patch.object(chain.requests, "post", side_effect=fake_post):
+        result = tools.run_simple_tool("character_reskin", _payload(total_episodes=1))
+
+    counts = Counter(call["stage"] for call in calls)
+    assert counts["profile_review"] == 6
+    assert counts["profile_rewrite"] == 5
+    assert result["output"] == "正文使用v5"
 
 
 def test_character_reskin_diagnosis_lists_dedicated_envs_without_values() -> None:

@@ -435,12 +435,13 @@ FASTGPT_PUNCHUP_API_KEY=
 FASTGPT_NEW_FRAMEWORK_API_KEY=
 ```
 
-`character_reskin / 只换人设` 现在不是单个 FastGPT workflow，而是后端维护中间态并串联多个拆分 workflow。它必须配置以下 11 个专用 key，统一使用 `FASTGPT_CHAT_COMPLETIONS_URL`，不再使用 `FASTGPT_EDIT_*` 和 `FASTGPT_SCRIPT_REWRITE_MEMORY_KEY`：
+`character_reskin / 只换人设` 现在不是单个 FastGPT workflow，而是后端维护中间态并串联多个拆分 workflow。它必须配置以下 12 个专用 key，统一使用 `FASTGPT_CHAT_COMPLETIONS_URL`，不再使用 `FASTGPT_EDIT_*` 和 `FASTGPT_SCRIPT_REWRITE_MEMORY_KEY`：
 
 ```env
-FASTGPT_REWRITE_CHARACTER_PROFILE_KEY=
-FASTGPT_REVIEW_CHARACTER_PROFILE_KEY=
+FASTGPT_COUNT_ACTUAL_EPISODES_KEY=
 FASTGPT_WRITE_CHARACTER_PROFILE_KEY=
+FASTGPT_REVIEW_CHARACTER_PROFILE_KEY=
+FASTGPT_REWRITE_CHARACTER_PROFILE_KEY=
 FASTGPT_SORT_CHARACTER_PROFILE_KEY=
 FASTGPT_WRITE_CHARACTER_DIALOGUE_KEY=
 FASTGPT_REVIEW_CHARACTER_DIALOGUE_KEY=
@@ -451,11 +452,13 @@ FASTGPT_REWRITE_SCRIPT_BODY_KEY=
 FASTGPT_SCRIPT_MEMORY_KEY=
 ```
 
-只换人设链路顺序：修订人设 JSON -> 审核人设 JSON -> 必要时修订人设 -> 整理人物小传纯文本 -> 按 5 集一批生成角色对话 -> 审核/必要时修订角色对话 -> 生成正文 -> 审核/必要时修订正文 -> 总结本批剧本记忆 -> 拼接全部正文。
+只换人设链路顺序：统计原剧本实际集数 -> 生成人设 JSON -> 审核人设 JSON -> 必要时修订人设并复审，最多修订 5 次 -> 整理人物小传纯文本 -> 按 5 集一批生成角色对话 -> 审核/必要时修订角色对话，最多修订 5 次 -> 生成正文 -> 审核/必要时修订正文，最多修订 5 次 -> 总结本批剧本记忆 -> 拼接全部正文。
 
 关键桥接规则：
 
 - `target_style` 会拼入 `source_outline`，并传给 `ayxWwSpE`。
+- 先把原剧本正文传给 `统计实际集数` workflow 的 `juben_zhengwen`，读取 `kpoOTOUP / answerText`；非零自然数会覆盖后续所有阶段的 `total_episodes / blkSS7dY`。
+- 实际集数返回 `0` 时提示用户补充原剧本正文；返回 `X` 时提示原剧本跳集、漏集或残缺，需要补全后再运行。
 - 人设审核结果由后端从 `profile_review_json` 桥接到修订变量 `va4Et1LA`。
 - 角色对话审核结果由 `dialogue_review_json` 桥接到 `rZL0C6f9`。
 - 角色对话通过后，后端把 `mN7Fh38L` 对应内容同步为正文阶段读取的 `pS7JzosX`。
