@@ -1402,7 +1402,7 @@ class RuntimeExportStoreMixin:
                     or (snapshot.get("input_payload") or {}).get("hexin_changjing")
                     or (snapshot.get("tool_request_payload") or {}).get("core_scenes")
                     or (snapshot.get("tool_request_payload") or {}).get("hexin_changjing")
-                    or (snapshot.get("tool_request_payload") or {}).get("????")
+                    or (snapshot.get("tool_request_payload") or {}).get("核心场景")
                     or ""
                 ),
             )
