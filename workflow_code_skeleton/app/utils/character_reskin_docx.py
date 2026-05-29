@@ -44,6 +44,7 @@ def build_character_reskin_docx(
     character_profile: Any,
     script_batches: Any,
     final_output_text: str,
+    core_scenes: Any = None,
 ) -> Path:
     doc = Document()
     _configure_doc(doc)
@@ -67,6 +68,12 @@ def build_character_reskin_docx(
         _render_value(doc, "人物详情", character_profile, level=2)
     else:
         _add_paragraph(doc, "未能从人设循环变量中解析到 character_setting。")
+
+    _add_heading(doc, "核心场景", 1)
+    if core_scenes not in (None, "", [], {}):
+        _render_value(doc, "核心场景", core_scenes, level=2)
+    else:
+        _add_paragraph(doc, "暂无核心场景信息。")
 
     _add_heading(doc, "剧本正文", 1)
     for batch in _normalize_batches(script_batches, final_output_text):
@@ -172,18 +179,71 @@ def _render_value(doc: Document, label: str, value: Any, *, level: int = 2, inde
 
 def _normalize_batches(script_batches: Any, final_output_text: str) -> list[dict[str, str]]:
     batches: list[dict[str, str]] = []
+
+    def pick_text(item: Any) -> str:
+        item = _coerce_json(item)
+        if isinstance(item, str):
+            return item.strip()
+        if isinstance(item, dict):
+            for key in (
+                "text",
+                "script_text",
+                "scriptText",
+                "batchScriptText",
+                "batch_script_text",
+                "final_output_text",
+                "final_script",
+                "script_body",
+                "scriptBody",
+                "juben_zhengwen",
+            ):
+                value = item.get(key)
+                if value not in (None, "", [], {}):
+                    return _stringify(value).strip()
+            return ""
+        return _stringify(item).strip()
+
+    def pick_label(item: Any, fallback: str) -> str:
+        item = _coerce_json(item)
+        if isinstance(item, dict):
+            for key in ("label", "title", "batch_label", "batchLabel"):
+                value = item.get(key)
+                if value:
+                    return str(value).strip()
+            start = item.get("start_episode") or item.get("startEpisode")
+            end = item.get("end_episode") or item.get("endEpisode")
+            if start and end:
+                return f"第{start}-{end}集"
+            if start:
+                return f"第{start}集起"
+        return fallback
+
     if isinstance(script_batches, list):
         for index, item in enumerate(script_batches, start=1):
-            text = _stringify(item).strip()
+            text = pick_text(item)
             if text:
-                batches.append({"label": f"正文批次 {index}", "text": text})
+                batches.append({
+                    "label": pick_label(item, f"正文批次 {index}"),
+                    "text": text,
+                })
+
     elif isinstance(script_batches, dict):
-        for key in sorted(script_batches, key=lambda item: int(item) if str(item).isdigit() else str(item)):
-            text = _stringify(script_batches[key]).strip()
+        def sort_key(value: Any) -> Any:
+            value = str(value)
+            return int(value) if value.isdigit() else value
+
+        for index, key in enumerate(sorted(script_batches, key=sort_key), start=1):
+            item = script_batches[key]
+            text = pick_text(item)
             if text:
-                batches.append({"label": f"第 {key} 集起", "text": text})
+                batches.append({
+                    "label": pick_label(item, f"第 {key} 集起"),
+                    "text": text,
+                })
+
     if not batches and str(final_output_text or "").strip():
         batches.append({"label": "", "text": str(final_output_text).strip()})
+
     return batches
 
 

@@ -153,7 +153,7 @@ class TaskLifecycleMixin:
                         break
         if not suffix:
             suffix = clean_user_visible_text(
-                request_payload.get("project_title") or request_payload.get("title") or ""
+                request_payload.get("project_title") or request_payload.get("title") or request_payload.get("ju_ben_biao_ti") or request_payload.get("script_title") or request_payload.get("剧本标题") or ""
             ).strip()
         if str(tool_key or "").strip() == "character_reskin" and suffix:
             return suffix
@@ -260,6 +260,14 @@ class TaskLifecycleMixin:
             )
             snapshot["artifacts"]["character_profile_json"] = copy.deepcopy(
                 result.get("character_profile_json") or {}
+            )
+            snapshot["artifacts"]["core_scenes"] = copy.deepcopy(
+                result.get("core_scenes")
+                or result.get("coreScenes")
+                or request_payload.get("core_scenes")
+                or request_payload.get("hexin_changjing")
+                or request_payload.get("核心场景")
+                or ""
             )
             snapshot["artifacts"]["script_batches"] = copy.deepcopy(result.get("script_batches") or [])
         compacted = self._compact_completed_snapshot(snapshot)

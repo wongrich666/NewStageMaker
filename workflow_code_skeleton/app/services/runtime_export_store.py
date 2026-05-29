@@ -1395,6 +1395,16 @@ class RuntimeExportStoreMixin:
                 character_profile=artifacts.get("character_profile"),
                 script_batches=artifacts.get("script_batches"),
                 final_output_text=final_script,
+                core_scenes=(
+                    artifacts.get("core_scenes")
+                    or artifacts.get("coreScenes")
+                    or (snapshot.get("input_payload") or {}).get("core_scenes")
+                    or (snapshot.get("input_payload") or {}).get("hexin_changjing")
+                    or (snapshot.get("tool_request_payload") or {}).get("core_scenes")
+                    or (snapshot.get("tool_request_payload") or {}).get("hexin_changjing")
+                    or (snapshot.get("tool_request_payload") or {}).get("????")
+                    or ""
+                ),
             )
         except ModuleNotFoundError as exc:
             if exc.name == "docx":
