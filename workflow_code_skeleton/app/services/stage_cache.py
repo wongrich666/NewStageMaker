@@ -1424,7 +1424,16 @@ class StageCacheMixin:
         if self._is_auxiliary_tool_asset(snapshot):
             compacted["artifacts"] = _select_non_empty_fields(
                 compacted.get("artifacts") or {},
-                ("story_outline", "final_script", "final_output_text", "tool_filename", "tool_output_type"),
+                (
+                    "story_outline",
+                    "final_script",
+                    "final_output_text",
+                    "tool_filename",
+                    "tool_output_type",
+                    "character_profile",
+                    "character_profile_json",
+                    "script_batches",
+                ),
             )
             artifacts = compacted.get("artifacts") if isinstance(compacted.get("artifacts"), dict) else {}
             if isinstance(artifacts, dict):

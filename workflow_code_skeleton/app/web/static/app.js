@@ -2152,7 +2152,9 @@ startRuntimeDebugPolling();
       els.downloadToolBtn.classList.toggle("hidden", !shouldShow);
       els.downloadToolBtn.disabled = !shouldShow || isActionLoading("runTool");
       if (shouldShow) {
-        els.downloadToolBtn.textContent = "下载 TXT";
+        els.downloadToolBtn.textContent = toolKey === "character_reskin" && result?.savedAsset?.project_id
+          ? "下载 DOCX"
+          : "下载 TXT";
       }
     }
   }
@@ -3625,6 +3627,13 @@ startRuntimeDebugPolling();
     const toolLabel = tool?.label || "辅助工具结果";
     if (!result?.text || !result?.filename) {
       showToast("暂无可下载内容", `请先成功生成${toolLabel}。`);
+      return;
+    }
+    if (state.activeTool === "character_reskin" && result.savedAsset?.project_id) {
+      const authToken = currentAuthToken();
+      const suffix = authToken ? `?auth_token=${encodeURIComponent(authToken)}` : "";
+      window.location.href = `/api/projects/${encodeURIComponent(result.savedAsset.project_id)}/download${suffix}`;
+      showToast("DOCX 已开始下载", `${projectDisplayTitle(result.savedAsset)}.docx`);
       return;
     }
     downloadTextFile(result.text, result.filename);

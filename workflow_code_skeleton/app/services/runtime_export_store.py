@@ -1288,6 +1288,11 @@ class RuntimeExportStoreMixin:
             raise ValueError("项目不存在")
         artifacts = snapshot.get("artifacts", {})
         final_script = self._best_final_script_text(snapshot)
+        if (
+            str(snapshot.get("asset_kind") or "").strip() == AUXILIARY_TOOL_ASSET_KIND
+            and str(snapshot.get("tool_key") or "").strip() == "character_reskin"
+        ):
+            return self._save_character_reskin_docx(project_id, snapshot)
         total_episodes = _safe_int(
             snapshot.get("total_episodes")
             or (snapshot.get("input_payload") or {}).get("total_episodes"),
@@ -1366,5 +1371,37 @@ class RuntimeExportStoreMixin:
             export_notice="",
             saved_json_files={},
         )
+        return docx_path
+
+    def _save_character_reskin_docx(self, project_id: int, snapshot: dict[str, Any]) -> Path:
+        artifacts = snapshot.get("artifacts", {}) if isinstance(snapshot.get("artifacts"), dict) else {}
+        final_script = self._best_final_script_text(snapshot)
+        if not final_script:
+            raise ValueError("当前只换人设资产还没有可下载的剧本正文")
+        title = str(
+            snapshot.get("title")
+            or (snapshot.get("input_payload") or {}).get("title")
+            or f"character_reskin_{project_id}"
+        ).strip() or f"character_reskin_{project_id}"
+        safe_title = "".join(ch if ch not in '<>:"/\\|?*' else "_" for ch in title)[:80]
+        docx_path = self.exports_dir / f"{safe_title}_{project_id}.docx"
+        try:
+            from ..utils.character_reskin_docx import build_character_reskin_docx
+
+            build_character_reskin_docx(
+                output_path=docx_path,
+                title=title,
+                profile_json=artifacts.get("character_profile_json"),
+                character_profile=artifacts.get("character_profile"),
+                script_batches=artifacts.get("script_batches"),
+                final_output_text=final_script,
+            )
+        except ModuleNotFoundError as exc:
+            if exc.name == "docx":
+                raise ValueError("当前环境缺少 python-docx，暂时无法导出只换人设 DOCX。") from exc
+            raise ValueError(f"导出只换人设 DOCX 失败：{exc}") from exc
+        except Exception as exc:
+            logger.exception("导出只换人设 Word 失败: %s", project_id)
+            raise ValueError(f"导出只换人设 DOCX 失败：{exc}") from exc
         return docx_path
 

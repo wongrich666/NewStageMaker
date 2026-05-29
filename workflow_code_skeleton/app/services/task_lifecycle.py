@@ -254,6 +254,14 @@ class TaskLifecycleMixin:
             "wait_elapsed_ms": 0,
             "wait_started_at": None,
         }
+        if str(tool_key or "").strip() == "character_reskin":
+            snapshot["artifacts"]["character_profile"] = self._render_auxiliary_asset_text(
+                result.get("character_profile") or ""
+            )
+            snapshot["artifacts"]["character_profile_json"] = copy.deepcopy(
+                result.get("character_profile_json") or {}
+            )
+            snapshot["artifacts"]["script_batches"] = copy.deepcopy(result.get("script_batches") or [])
         compacted = self._compact_completed_snapshot(snapshot)
         self._project_path(project_id).write_text(
             json.dumps(compacted, ensure_ascii=False, indent=2),

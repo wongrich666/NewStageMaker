@@ -321,9 +321,12 @@ COMPLETED_ARTIFACT_KEYS = (
     "worldview_natural_language",
     APPEARANCE_NATURAL_LANGUAGE_ARTIFACT,
     "appearanceMapping",
+    "character_profile",
+    "character_profile_json",
     "character_registry",
     "character_alias_registry",
     "episode_alias_plan",
+    "script_batches",
     "final_script",
     "final_output_text",
 )

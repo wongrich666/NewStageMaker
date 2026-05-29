@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from docx import Document
+
 from workflow_code_skeleton.app.services.task_manager import (
     AUXILIARY_TOOL_ASSET_KIND,
     TaskManager,
@@ -124,6 +126,23 @@ class ToolAssetStoreTests(unittest.TestCase):
                 "text": "最终正文",
                 "filename": "只换人设_镜中雪.txt",
                 "output_type": "text",
+                "character_profile": "人物小传纯文本",
+                "character_profile_json": {
+                    "plot_causality_map": {
+                        "cause": "新人设驱动旧剧情结果",
+                    },
+                    "character_setting": {
+                        "character_design_principle": "人物创作原则内容",
+                        "core_relation_logic": "核心关系逻辑内容",
+                        "characters": [
+                            {
+                                "character_name": "林雪",
+                                "core_motivation": "查清真相",
+                            }
+                        ],
+                    },
+                },
+                "script_batches": ["第1集：开端\n正文一", "第2集：推进\n正文二"],
                 "debug": {},
             },
         )
@@ -140,6 +159,23 @@ class ToolAssetStoreTests(unittest.TestCase):
         public_snapshot = self.manager.get_project_snapshot(int(asset["project_id"]), user_id=1, public_view=True) or {}
         self.assertEqual(public_snapshot["tool_request_payload"]["source_script"], "原剧本正文")
         self.assertEqual((public_snapshot.get("artifacts") or {}).get("final_output_text"), "最终正文")
+
+        docx_path = self.manager.save_final_script(int(asset["project_id"]), user_id=1)
+        text = "\n".join(
+            paragraph.text
+            for paragraph in Document(str(docx_path)).paragraphs
+            if paragraph.text.strip()
+        )
+        self.assertIn("剧本标题", text)
+        self.assertIn("镜中雪", text)
+        self.assertIn("故事大纲", text)
+        self.assertIn("剧情因果脉络", text)
+        self.assertIn("人物创作原则", text)
+        self.assertIn("核心关系逻辑", text)
+        self.assertIn("人物详情", text)
+        self.assertIn("剧本正文", text)
+        self.assertIn("正文一", text)
+        self.assertIn("正文二", text)
 
 
 if __name__ == "__main__":
