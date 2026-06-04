@@ -1054,6 +1054,13 @@
       render();
       return;
     }
+    const rewriteExistingScript = stage12Completion().complete || hasStage12ScriptText();
+    if (
+      rewriteExistingScript &&
+      !window.confirm("当前框架资产已经生成过剧本。一键生成将保留 08-10 框架资产，重新生成 11 因果冲突和 12 正文，相当于重写全剧。继续吗？")
+    ) {
+      return;
+    }
     if (!hasObject((state.scriptStages.stage08 || {}).sceneDictionary)) {
       await runStage08();
       if (state.error) return;
@@ -1065,6 +1072,12 @@
     if (!hasContent(stage10Plan(state.scriptStages.stage10 || {}))) {
       await runStage10();
       if (state.error) return;
+    }
+    if (rewriteExistingScript) {
+      await runStage11({ resetStage11: true, skipConfirm: true });
+      if (state.error) return;
+      await runStage12({ resetStage12: true, skipConfirm: true });
+      return;
     }
     if (!stage11Completion().complete) {
       await runStage11();
@@ -1108,7 +1121,7 @@
       return;
     }
     const resetStage11 = Boolean(options.resetStage11);
-    if (resetStage11 && !window.confirm("重新运行 11 会覆盖开头冲突钩子，并清空 12 正文批次。继续吗？")) return;
+    if (resetStage11 && !options.skipConfirm && !window.confirm("重新运行 11 会覆盖开头冲突钩子，并清空 12 正文批次。继续吗？")) return;
     const expectedStarts = expectedBatchStartsFromPlan(allEnrichedEpisodePlan);
     if (resetStage11) {
       state.scriptStages.stage11 = {};
@@ -1167,7 +1180,7 @@
       return;
     }
     const resetStage12 = Boolean(options.resetStage12);
-    if (resetStage12 && !window.confirm("重新运行 12 会覆盖已生成的正文批次。继续吗？")) return;
+    if (resetStage12 && !options.skipConfirm && !window.confirm("重新运行 12 会覆盖已生成的正文批次。继续吗？")) return;
     if (resetStage12) {
       state.scriptStages.stage12 = {};
     }
@@ -1374,7 +1387,8 @@
   }
 
   function renderAssetItem(asset) {
-    const disabled = asset.can_import ? "" : "disabled";
+    const canImport = asset.can_import !== false;
+    const disabled = canImport ? "" : "disabled";
     const meta = [
       asset.target_format || "未填写类型",
       asset.episodes_per_season ? `${asset.episodes_per_season} 集` : "",
@@ -1388,9 +1402,9 @@
           <div class="wts-meta">
             <span>原文：${escapeHtml(asset.source_title || "未填写")}</span>
             ${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
-            <span>${asset.can_import ? "可导入" : "不可导入"}</span>
+            <span>${canImport ? "可导入" : "不可导入"}</span>
           </div>
-          <p>${escapeHtml(asset.summary || "暂无摘要")}</p>
+          <p>${escapeHtml(asset.summary || asset.import_disabled_reason || "暂无摘要")}</p>
         </div>
         <button type="button" class="wts-btn" data-action="import-asset" data-asset-id="${escapeHtml(asset.asset_id)}" ${disabled}>导入</button>
       </article>
@@ -1509,6 +1523,7 @@
     const stage10Valid = has10 && stage10Validation.ok;
     const stage12ButtonText = has12Complete ? "重新运行 12" : has12 ? "生成下一批正文" : "生成当前批正文";
     const stage12Action = has12Complete ? "rerun-stage-12" : "run-stage-12";
+    const fullButtonText = has12Complete ? "重写全剧剧本" : has12 ? "继续一键生成剧本" : "一键生成剧本";
     return `
       <section class="wts-card" id="scriptStageArea">
         <div class="wts-card-head">
@@ -1516,7 +1531,7 @@
             <h2>框架到剧本链路</h2>
             <p>未导入框架前，阶段按钮会保持禁用。08-12 只使用框架资产和上游阶段结果。</p>
           </div>
-          <button type="button" class="wts-btn" data-action="generate-full-script" ${locked ? "disabled" : ""}>一键生成剧本</button>
+          <button type="button" class="wts-btn" data-action="generate-full-script" ${locked ? "disabled" : ""}>${escapeHtml(fullButtonText)}</button>
         </div>
                <div class="wts-steps">
           ${renderStageCard(
@@ -1529,7 +1544,7 @@
             has08
               ? `<p class="wts-hint">已完成</p>`
               : `<p class="wts-hint">运行完成前不展示输出；结果会自动缓存并供后续阶段使用。</p>`,
-            { secondary: has08, hideAction: true }
+            { secondary: has08 }
           )}
 
           ${renderStageCard(
@@ -1542,7 +1557,7 @@
             has09
               ? `<p class="wts-hint">已完成</p>`
               : `<p class="wts-hint">运行完成前不展示输出；结果会自动缓存并供后续阶段使用。</p>`,
-            { secondary: has09, hideAction: true }
+            { secondary: has09 }
           )}
           ${renderStageCard(
             "10",
@@ -1563,7 +1578,7 @@
               </details>
               ${stage10Validation.ok ? `<p class="wts-hint">集数完整性校验通过。</p>` : `<p class="wts-error-inline">集数完整性校验失败：${escapeHtml(stage10Validation.issues.join("；"))}</p>`}
             ` : `<p class="wts-hint">将沿用当前导入的框架资产和已完成的 08/09 输出。</p>`,
-            { secondary: has10, hideAction: true }
+            { secondary: has10 }
           )}
           ${renderStageCard(
             "11",
@@ -1573,7 +1588,7 @@
             has11Complete ? "rerun-stage-11" : "run-stage-11",
             locked || !stage10Valid,
             has11 ? renderStage11Batches(stage11) : `<p class="wts-hint">${state.runningStage ? `当前 ${escapeHtml(state.runningStage)} 阶段运行态锁定，完成或超时后可继续。` : ""}</p>`,
-            { secondary: has11Complete, hideAction: true }
+            { secondary: has11Complete }
           )}
           ${renderStageCard(
             "12",
@@ -1583,7 +1598,7 @@
             stage12Action,
             locked || !has11Complete,
             has12 ? renderStage12Batches(stage12) : `<p class="wts-hint"></p>`,
-            { secondary: has12Complete, hideAction: true }
+            { secondary: has12Complete }
           )}
         </div>
       </section>

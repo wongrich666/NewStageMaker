@@ -180,6 +180,38 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         }
         return _strip_raw_fastgpt_fields(outputs)
 
+    def _framework_import_package(framework_state: dict, stage_outputs: dict | None = None) -> dict:
+        package = framework_state.get("framework_plan_package") if isinstance(framework_state.get("framework_plan_package"), dict) else {}
+        if package:
+            return copy.deepcopy(package)
+        outputs = stage_outputs if isinstance(stage_outputs, dict) else _framework_stage_outputs(framework_state)
+        synthesized = {
+            "source_brief": outputs.get("source_brief") or framework_state.get("source_brief") or {},
+            "worldview_plan": outputs.get("worldview_plan") or framework_state.get("worldview_plan") or {},
+            "character_plan": outputs.get("character_plan") or framework_state.get("character_plan") or {},
+            "beat_checkpoint_timeline": outputs.get("beat_checkpoint_timeline") or framework_state.get("beat_checkpoint_timeline") or [],
+            "checkpoint_explanation": outputs.get("checkpoint_explanation") or framework_state.get("checkpoint_explanation") or {},
+            "character_storylines": outputs.get("character_storylines") or framework_state.get("character_storylines") or [],
+            "storyline_decisions": outputs.get("storyline_decisions") or framework_state.get("storyline_decisions") or [],
+            "adaptation_guide": outputs.get("adaptation_guide") or framework_state.get("adaptation_guide") or {},
+            "basic_config": framework_state.get("basic_config") if isinstance(framework_state.get("basic_config"), dict) else {},
+        }
+        meaningful_keys = (
+            "source_brief",
+            "worldview_plan",
+            "character_plan",
+            "beat_checkpoint_timeline",
+            "checkpoint_explanation",
+            "character_storylines",
+            "storyline_decisions",
+            "adaptation_guide",
+        )
+        if any(_framework_value_present(synthesized.get(key)) for key in meaningful_keys):
+            synthesized["package_id"] = framework_state.get("project_id") or "synthesized_framework_asset"
+            synthesized["import_package_synthesized"] = True
+            return _strip_raw_fastgpt_fields(synthesized)
+        return {}
+
     def _framework_value_present(value) -> bool:
         if value is None:
             return False
@@ -373,8 +405,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         framework_state = _framework_state_from_project(project)
         basic = framework_state.get("basic_config") if isinstance(framework_state.get("basic_config"), dict) else {}
-        package = framework_state.get("framework_plan_package") if isinstance(framework_state.get("framework_plan_package"), dict) else {}
         stage_outputs = _framework_stage_outputs(framework_state)
+        package = _framework_import_package(framework_state, stage_outputs)
         artifacts = project.get("artifacts") if isinstance(project.get("artifacts"), dict) else {}
         input_payload = project.get("input_payload") if isinstance(project.get("input_payload"), dict) else {}
         metadata = project.get("metadata") if isinstance(project.get("metadata"), dict) else {}
@@ -422,6 +454,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "updated_at": project.get("updated_at") or framework_state.get("updated_at"),
             "summary": summary or "已保存的框架资产，可导入后继续 框架到剧本链路。",
             "can_import": bool(package),
+            "import_disabled_reason": "" if package else "缺少可恢复的框架策划包或阶段输出。",
             "stage_prompts": _strip_raw_fastgpt_fields(copy.deepcopy(stage_prompts)),
             "preference_snapshot": _strip_raw_fastgpt_fields(copy.deepcopy(preference_snapshot)),
         }

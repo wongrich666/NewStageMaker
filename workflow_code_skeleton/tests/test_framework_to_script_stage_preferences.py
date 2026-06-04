@@ -224,6 +224,56 @@ def test_framework_asset_import_restores_stage_prompts_for_stage08() -> None:
     assert captured[0]["gsf2Zudx"] == "资产08偏好"
 
 
+def test_framework_asset_without_package_can_import_from_stage_outputs() -> None:
+    app = create_app()
+    app.config["TESTING"] = True
+    client = app.test_client()
+    headers = _auth_headers()
+
+    save_response = client.post(
+        "/api/framework-planner/assets/save",
+        headers=headers,
+        json={
+            "project_title": "旧资产",
+            "basic_config": {"episodes_per_season": 5, "minutes_per_episode": 2},
+            "source_brief": {"premise": "雨夜旧案"},
+            "worldview_plan": {"world_type": "都市悬疑"},
+            "character_plan": {"protagonist": {"name": "林渡"}},
+            "beat_checkpoint_timeline": [{"beat_no": 1, "beat_name": "开场"}],
+            "character_storylines": [{"character": "林渡", "line": "查明旧案"}],
+            "adaptation_guide": {"tone": "冷峻"},
+            "asset_state": {"status": "completed", "current_stage": "package"},
+        },
+    )
+    assert save_response.status_code == 200
+    asset_id = save_response.get_json()["project_id"]
+
+    list_response = client.get("/api/framework-assets", headers=headers)
+    assert list_response.status_code == 200
+    listed_asset = next(item for item in list_response.get_json()["assets"] if str(item["asset_id"]) == str(asset_id))
+    assert listed_asset["can_import"] is True
+
+    detail_response = client.get(f"/api/framework-assets/{asset_id}", headers=headers)
+    assert detail_response.status_code == 200
+    package = detail_response.get_json()["asset"]["framework_plan_package"]
+    assert package["import_package_synthesized"] is True
+    assert package["beat_checkpoint_timeline"] == [{"beat_no": 1, "beat_name": "开场"}]
+    assert package["character_storylines"] == [{"character": "林渡", "line": "查明旧案"}]
+
+
+def test_framework_to_script_ui_allows_stage_rerun_and_full_script_rewrite() -> None:
+    root = Path(__file__).resolve().parents[2]
+    script = (root / "workflow_code_skeleton" / "app" / "web" / "static" / "framework_to_script.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "asset.can_import !== false" in script
+    assert "重写全剧剧本" in script
+    assert "resetStage11: true, skipConfirm: true" in script
+    assert "resetStage12: true, skipConfirm: true" in script
+    assert "hideAction: true" not in script
+
+
 def test_contracts_keep_required_context_for_late_framework_to_script_stages() -> None:
     conflict_rewrite_vars = {
         TOTAL_EPISODES: 60,
