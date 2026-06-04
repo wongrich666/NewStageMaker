@@ -1668,6 +1668,50 @@ def _build_stage_request_variables(
         for alias in aliases:
             if alias == field or alias in public_keys:
                 variables[alias] = wire_value
+    # Stage 07 compatibility fallback:
+    # Some frontend payloads carry adaptation_guide with the new schema
+    # but the generic required-field loop may still mark it as missing.
+    # Resolve it one final time before failing the request.
+    if definition.stage == "07" and "adaptation_guide" in missing_fields:
+        raw_guide = (
+            payload.get("adaptation_guide")
+            or payload.get("adaptationGuide")
+            or payload.get("overallAdaptationGuide")
+            or payload.get("overall_adaptation_guide")
+            or payload.get("guide")
+            or payload.get("previous_adaptation_guide")
+        )
+
+        framework_plan_package = payload.get("framework_plan_package")
+        if not raw_guide and isinstance(framework_plan_package, dict):
+            raw_guide = (
+                framework_plan_package.get("adaptation_guide")
+                or framework_plan_package.get("adaptationGuide")
+                or framework_plan_package.get("overallAdaptationGuide")
+                or framework_plan_package.get("overall_adaptation_guide")
+                or framework_plan_package.get("guide")
+            )
+
+        normalized_guide = _normalize_adaptation_guide(raw_guide)
+
+        if isinstance(normalized_guide, dict) and normalized_guide:
+            wire_value = _wire_value(normalized_guide)
+
+            variables["adaptation_guide"] = wire_value
+            variables["adaptationGuide"] = wire_value
+
+            payload["adaptation_guide"] = normalized_guide
+            payload["adaptationGuide"] = normalized_guide
+
+            missing_fields = [
+                field for field in missing_fields
+                if field != "adaptation_guide"
+            ]
+
+            logger.warning(
+                "stage07 adaptation_guide recovered before missing_fields failure: keys=%s",
+                list(normalized_guide.keys()),
+            )
 
     if missing_fields:
         logger.error(
