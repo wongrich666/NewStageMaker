@@ -42,7 +42,12 @@ from .services.framework_planner_service import (
 from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
 from .services.task_manager import task_manager
 from .services.user_knowledge_store import user_knowledge_store
-from .services.workflow_preference_keys import preference_keys_for
+from .services.workflow_preference_keys import (
+    FRAMEWORK_TO_SCRIPT_STAGE_PREFS,
+    inject_stage_preference,
+    preference_keys_for,
+    stage_prompt_key_for,
+)
 from .utils.logger import get_logger
 from .utils.readable_labels import readable_label, readable_scalar, readable_text
 
@@ -383,6 +388,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
         if not isinstance(preference_snapshot, dict):
             preference_snapshot = {}
+        stage_prompts = _stage_prompts_from_snapshot(preference_snapshot)
         title = str(
             framework_state.get("project_title")
             or project.get("title")
@@ -416,6 +422,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "updated_at": project.get("updated_at") or framework_state.get("updated_at"),
             "summary": summary or "已保存的框架资产，可导入后继续 框架到剧本链路。",
             "can_import": bool(package),
+            "stage_prompts": _strip_raw_fastgpt_fields(copy.deepcopy(stage_prompts)),
             "preference_snapshot": _strip_raw_fastgpt_fields(copy.deepcopy(preference_snapshot)),
         }
         if include_detail:
@@ -426,6 +433,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "stage_outputs": stage_outputs,
                     "framework_to_script_state": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state)),
                     "scriptStages": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state.get("scriptStages") or {})),
+                    "stage_prompts": _strip_raw_fastgpt_fields(copy.deepcopy(stage_prompts)),
                     "preference_snapshot": _strip_raw_fastgpt_fields(copy.deepcopy(preference_snapshot)),
                 }
             )
@@ -535,6 +543,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             merged["preference_snapshot"] = (
                 asset.get("preference_snapshot")
                 if isinstance(asset.get("preference_snapshot"), dict)
+                else {}
+            )
+        if not isinstance(merged.get("stage_prompts"), dict) or not any(_coerce_prompt_text(v) for v in merged.get("stage_prompts", {}).values()):
+            merged["stage_prompts"] = (
+                asset.get("stage_prompts")
+                if isinstance(asset.get("stage_prompts"), dict)
                 else {}
             )
         for key, value in stage_outputs.items():
@@ -941,6 +955,74 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return json.dumps(value, ensure_ascii=False)
         return str(value).strip()
 
+    def _stage_prompt_lookup_from_mapping(value) -> dict:
+        source = value if isinstance(value, dict) else {}
+        result = {}
+        stage_numbers = {
+            "basic": "01",
+            "worldview": "02",
+            "character": "03",
+            "beat": "04",
+            "storylines": "05",
+            "guide": "06",
+            "package": "07",
+            "scene": "08",
+            "appearance": "09",
+            "episode": "10",
+            "conflict": "11",
+            "script_text": "12",
+        }
+        for stage_key, label in _USER_KNOWLEDGE_STAGE_LABELS.items():
+            stage_no = stage_numbers.get(stage_key, "")
+            result[stage_key] = _coerce_prompt_text(
+                source.get(stage_key)
+                or source.get(stage_no)
+                or source.get(label)
+            )
+        return result
+
+    def _stage_prompts_from_snapshot(snapshot) -> dict:
+        if not isinstance(snapshot, dict):
+            return {}
+        result = {}
+        for key in ("stage_prompts", "stagePrompts", "stage_preferences", "stagePreferences"):
+            prompts = snapshot.get(key)
+            if isinstance(prompts, dict):
+                normalized = _stage_prompt_lookup_from_mapping(prompts)
+                for stage_key, text in normalized.items():
+                    if text and not result.get(stage_key):
+                        result[stage_key] = text
+        return result
+
+    def _stage_prompts_from_payload(data: dict) -> dict:
+        if not isinstance(data, dict):
+            return {}
+        result = {}
+        sources = [
+            data.get("stage_prompts"),
+            data.get("stagePrompts"),
+            data.get("stagePreferences"),
+            data.get("stage_preferences"),
+            data.get("user_knowledge_stage_prompts"),
+        ]
+        prompt_preferences = data.get("prompt_preferences") if isinstance(data.get("prompt_preferences"), dict) else {}
+        sources.append(prompt_preferences.get("stage_prompts"))
+        for source in sources:
+            if isinstance(source, dict):
+                normalized = _stage_prompt_lookup_from_mapping(source)
+                for stage_key, text in normalized.items():
+                    if text and not result.get(stage_key):
+                        result[stage_key] = text
+        return result
+
+    def _framework_asset_stage_prompts(framework_asset: dict | None) -> dict:
+        if not isinstance(framework_asset, dict):
+            return {}
+        direct = _stage_prompt_lookup_from_mapping(framework_asset.get("stage_prompts"))
+        if any(direct.values()):
+            return direct
+        return _stage_prompts_from_snapshot(framework_asset.get("preference_snapshot"))
+
     def _framework_planner_stage_key(stage) -> str:
         return {
             "01": "basic",
@@ -984,42 +1066,49 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         return "\n\n".join(sections), len(sections)
 
     def _resolve_stage_preference(data: dict, stage: str, framework_asset: dict | None = None) -> tuple[str, str]:
-        for key in (
-            "stagePreference",
-            "stage_preference",
-            "userPreference",
-            "user_preferences",
-        ):
-            if key in data:
-                preference = _coerce_prompt_text(data.get(key))
-                if preference:
-                    return preference, "request_payload"
+        stage_no = str(stage or "").zfill(2)
+        stage_key = _user_knowledge_stage_key(stage_no)
+        request_stage_prompts = _stage_prompts_from_payload(data)
+        preference = _coerce_prompt_text(request_stage_prompts.get(stage_key))
+        if preference:
+            return preference, "request_stage_prompts"
+
+        asset_stage_prompts = _framework_asset_stage_prompts(framework_asset)
+        preference = _coerce_prompt_text(asset_stage_prompts.get(stage_key))
+        if preference:
+            return preference, "framework_asset_stage_prompts"
+
         snapshot = data.get("preference_snapshot") if isinstance(data.get("preference_snapshot"), dict) else {}
         if not snapshot and isinstance(data.get("preferenceSnapshot"), dict):
             snapshot = data.get("preferenceSnapshot")
         if not snapshot and isinstance(data.get("metadata"), dict):
             metadata_snapshot = data["metadata"].get("preference_snapshot") or data["metadata"].get("preferenceSnapshot")
             snapshot = metadata_snapshot if isinstance(metadata_snapshot, dict) else {}
-        source = "none"
-        if isinstance(framework_asset, dict) and framework_asset.get("asset_id"):
-            source = "framework_asset_snapshot"
-        elif snapshot:
-            source = "imported_json"
-        if not snapshot:
-            return "", "none"
-        stage_preferences = snapshot.get("stage_preferences") if isinstance(snapshot.get("stage_preferences"), dict) else {}
-        if not stage_preferences and isinstance(snapshot.get("stagePreferences"), dict):
-            stage_preferences = snapshot.get("stagePreferences")
-        stage_no = str(stage or "").zfill(2)
-        stage_key = _user_knowledge_stage_key(stage_no)
-        stage_label = _USER_KNOWLEDGE_STAGE_LABELS.get(stage_key, "")
-        preference = _coerce_prompt_text(
-            stage_preferences.get(stage_no)
-            or stage_preferences.get(stage_key)
-            or stage_preferences.get(stage_label)
-            or stage_preferences.get(str(stage or ""))
-        )
-        return preference, source
+        snapshot_stage_prompts = _stage_prompts_from_snapshot(snapshot)
+        preference = _coerce_prompt_text(snapshot_stage_prompts.get(stage_key))
+        if preference:
+            return preference, "source_framework_stage_prompts"
+
+        for key in (
+            "stagePreference",
+            "stage_preference",
+            "stage_preference_prompt",
+            "user_stage_preference_prompt",
+            "userPreference",
+            "user_preferences",
+            "userPreferences",
+            "userRequirements",
+            "user_constraints",
+        ):
+            if key in data:
+                preference = _coerce_prompt_text(data.get(key))
+                if preference:
+                    return preference, "request_legacy_preference"
+
+        preference = _coerce_prompt_text(data.get("prompt_text"))
+        if preference:
+            return preference, "prompt_text_fallback"
+        return "", "none"
 
     def _inject_snapshot_stage_preference(
         variables: dict,
@@ -1032,41 +1121,29 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         preference, source = _resolve_stage_preference(data, stage, framework_asset)
         stage_no = str(stage or "").zfill(2)
         stage_key = _user_knowledge_stage_key(stage_no)
-        stage_label = _USER_KNOWLEDGE_STAGE_LABELS.get(stage_key, "")
-        workflow_preference_keys = tuple(preference_keys_for(workflow_stage or stage_no))
+        stage_prompt_key = stage_prompt_key_for(workflow_stage or stage_no) or stage_key
+        workflow_preference_keys = tuple(
+            FRAMEWORK_TO_SCRIPT_STAGE_PREFS.get(workflow_stage or stage_no, {}).get("workflow_keys")
+            or preference_keys_for(workflow_stage or stage_no)
+        )
         asset_id = str(
             (framework_asset or {}).get("asset_id")
             or data.get("framework_asset_id")
             or data.get("asset_id")
             or ""
         ).strip()
-        for key in (
-            "stagePreference",
-            "stage_preference",
-            "stage_preference_prompt",
-            "userPreference",
-            "user_preferences",
-            "user_stage_preference_prompt",
-        ):
-            variables[key] = preference
-        for key in workflow_preference_keys:
-            variables[key] = preference
-        variables_has_preference_key = (
-            all(key in variables for key in workflow_preference_keys)
-            if workflow_preference_keys
-            else False
-        )
+        inject_stage_preference(variables, preference, workflow_preference_keys)
         logger.info(
-            "framework-to-script stage%s preference resolved asset_id=%s stage_name=%s preference_source=%s preference_label=%s workflow_preference_keys=%s has_stage_preference=%s preference_length=%s variables_has_preference_key=%s",
-            stage_no,
-            asset_id,
-            stage_label,
-            source,
-            stage_label,
-            list(workflow_preference_keys),
-            bool(preference),
-            len(preference),
-            variables_has_preference_key,
+            "framework_to_script stage preference injected",
+            extra={
+                "stage": workflow_stage or stage_no,
+                "stage_prompt_key": stage_prompt_key,
+                "has_stage_preference": bool(preference),
+                "preference_length": len(preference or ""),
+                "workflow_preference_keys": list(workflow_preference_keys),
+                "preference_source": source,
+                "asset_id": asset_id,
+            },
         )
         return variables
 
@@ -2035,9 +2112,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 status=400,
             )
 
+        stage08 = _framework_script_stage_cache(framework_asset, "stage08")
         scene_dictionary = (
             data.get("sceneDictionary")
             or data.get("scene_dictionary")
+            or stage08.get("sceneDictionary")
             or {}
         )
         if not isinstance(scene_dictionary, dict) or not scene_dictionary:
@@ -2478,13 +2557,16 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not isinstance(framework_plan_package, dict) or not framework_plan_package:
             return _json_error("缺少 framework_plan_package，请先导入框架资产。", status=400)
 
-        scene_dictionary = data.get("sceneDictionary") or data.get("scene_dictionary") or {}
+        stage08 = _framework_script_stage_cache(framework_asset, "stage08")
+        stage09 = _framework_script_stage_cache(framework_asset, "stage09")
+        scene_dictionary = data.get("sceneDictionary") or data.get("scene_dictionary") or stage08.get("sceneDictionary") or {}
         if not isinstance(scene_dictionary, dict) or not scene_dictionary:
             return _json_error("缺少 sceneDictionary，请先完成 08 场景字典提炼。", status=400)
 
         rules_digest = (
             data.get("scriptWorldRulesDigest")
             or data.get("script_world_rules_digest")
+            or stage08.get("scriptWorldRulesDigest")
             or {}
         )
         if not isinstance(rules_digest, dict) or not rules_digest:
@@ -2493,10 +2575,26 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         appearance_mapping = (
             data.get("appearanceMapping")
             or data.get("appearance_mapping")
+            or stage09.get("appearanceMapping")
             or {}
         )
         if not isinstance(appearance_mapping, dict) or not appearance_mapping:
             return _json_error("缺少 appearanceMapping，请先完成 09 角色外观映射。", status=400)
+
+        beat_checkpoint_timeline = (
+            data.get("beat_checkpoint_timeline")
+            or data.get("beatCheckpointTimeline")
+            or framework_plan_package.get("beat_checkpoint_timeline")
+            or framework_plan_package.get("beatCheckpointTimeline")
+            or []
+        )
+        character_storylines = (
+            data.get("character_storylines")
+            or data.get("characterStorylines")
+            or framework_plan_package.get("character_storylines")
+            or framework_plan_package.get("characterStorylines")
+            or []
+        )
 
         variables = {
             "frameworkPlanPackage": framework_plan_package,
@@ -2507,6 +2605,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "script_world_rules_digest": rules_digest,
             "appearanceMapping": appearance_mapping,
             "appearance_mapping": appearance_mapping,
+            "beatCheckpointTimeline": beat_checkpoint_timeline,
+            "beat_checkpoint_timeline": beat_checkpoint_timeline,
+            "characterStorylines": character_storylines,
+            "character_storylines": character_storylines,
             "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
         }
         variables = _inject_snapshot_stage_preference(

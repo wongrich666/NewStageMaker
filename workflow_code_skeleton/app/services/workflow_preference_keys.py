@@ -17,13 +17,47 @@ FALLBACK_PREFERENCE_KEYS: dict[str, tuple[str, ...]] = {
     "12_rewrite": ("ls0n1182",),
 }
 
+FRAMEWORK_TO_SCRIPT_STAGE_PREFS: dict[str, dict[str, Any]] = {
+    "08": {
+        "stage_prompt_key": "scene",
+        "workflow_keys": ["gsf2Zudx"],
+    },
+    "09": {
+        "stage_prompt_key": "appearance",
+        "workflow_keys": ["oDaFpjKr"],
+    },
+    "10": {
+        "stage_prompt_key": "episode",
+        "workflow_keys": ["shmRs8OT"],
+    },
+    "11_write": {
+        "stage_prompt_key": "conflict",
+        "workflow_keys": ["tFeUfwch"],
+    },
+    "11_rewrite": {
+        "stage_prompt_key": "conflict",
+        "workflow_keys": ["sfQm5kD7"],
+    },
+    "12_write": {
+        "stage_prompt_key": "script_text",
+        "workflow_keys": ["xOgb7piW"],
+    },
+    "12_rewrite": {
+        "stage_prompt_key": "script_text",
+        "workflow_keys": ["ls0n1182"],
+    },
+}
+
 COMMON_PREFERENCE_KEYS: tuple[str, ...] = (
     "stagePreference",
     "stage_preference",
     "stage_preference_prompt",
     "userPreference",
     "user_preferences",
+    "userPreferences",
     "user_stage_preference_prompt",
+    "userRequirements",
+    "user_constraints",
 )
 
 
@@ -113,6 +147,27 @@ def scanned_preference_key_map() -> dict[str, tuple[str, ...]]:
 
 def preference_keys_for(logical_stage: str) -> tuple[str, ...]:
     return scanned_preference_key_map().get(str(logical_stage or ""), ())
+
+
+def framework_to_script_stage_pref(logical_stage: str) -> dict[str, Any]:
+    return dict(FRAMEWORK_TO_SCRIPT_STAGE_PREFS.get(str(logical_stage or ""), {}))
+
+
+def stage_prompt_key_for(logical_stage: str) -> str:
+    return str(framework_to_script_stage_pref(logical_stage).get("stage_prompt_key") or "")
+
+
+def inject_stage_preference(
+    variables: dict[str, Any],
+    preference_text: str,
+    workflow_keys: list[str] | tuple[str, ...],
+) -> None:
+    text = str(preference_text or "").strip()
+    for key in workflow_keys:
+        if key:
+            variables[str(key)] = text
+    for key in COMMON_PREFERENCE_KEYS:
+        variables[key] = text
 
 
 def all_preference_wire_keys() -> tuple[str, ...]:

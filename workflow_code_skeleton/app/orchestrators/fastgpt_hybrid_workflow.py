@@ -33,6 +33,10 @@ from ..services.fastgpt_client import (
     FastGPTTransientError,
     fastgpt_client,
 )
+from ..services.workflow_preference_keys import (
+    FRAMEWORK_TO_SCRIPT_STAGE_PREFS,
+    inject_stage_preference,
+)
 from ..services.fastgpt_contracts import (
     ALL_DIALOGUES,
     ALL_ENRICHED_EPISODE_PLAN,
@@ -1539,6 +1543,148 @@ def _drop_framework_full_plan_context(context: dict[str, Any]) -> dict[str, Any]
     return sanitized
 
 
+_FRAMEWORK_STAGE_PROMPT_LABELS = {
+    "basic": "01 原文提取偏好",
+    "worldview": "02 世界观偏好",
+    "character": "03 人设偏好",
+    "beat": "04 节拍规划偏好",
+    "storylines": "05 人物故事线偏好",
+    "guide": "06 改编指引偏好",
+    "package": "07 框架校验偏好",
+    "scene": "08 场景字典偏好",
+    "appearance": "09 角色外观映射偏好",
+    "episode": "10 分集细化偏好",
+    "conflict": "11 开头冲突钩子偏好",
+    "script_text": "12 正文写作偏好",
+}
+
+_FRAMEWORK_STAGE_PROMPT_NUMBERS = {
+    "basic": "01",
+    "worldview": "02",
+    "character": "03",
+    "beat": "04",
+    "storylines": "05",
+    "guide": "06",
+    "package": "07",
+    "scene": "08",
+    "appearance": "09",
+    "episode": "10",
+    "conflict": "11",
+    "script_text": "12",
+}
+
+
+def _framework_prompt_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value).strip()
+
+
+def _framework_stage_prompt_lookup(value: Any) -> dict[str, str]:
+    source = value if isinstance(value, dict) else {}
+    result: dict[str, str] = {}
+    for stage_key, label in _FRAMEWORK_STAGE_PROMPT_LABELS.items():
+        stage_no = _FRAMEWORK_STAGE_PROMPT_NUMBERS.get(stage_key, "")
+        result[stage_key] = _framework_prompt_text(
+            source.get(stage_key)
+            or source.get(stage_no)
+            or source.get(label)
+        )
+    return result
+
+
+def _framework_stage_prompts_from_snapshot(snapshot: Any) -> dict[str, str]:
+    if not isinstance(snapshot, dict):
+        return {}
+    for key in ("stage_prompts", "stagePrompts", "stage_preferences", "stagePreferences"):
+        prompts = snapshot.get(key)
+        if isinstance(prompts, dict):
+            normalized = _framework_stage_prompt_lookup(prompts)
+            if any(normalized.values()):
+                return normalized
+    return {}
+
+
+def _resolve_framework_stage_preference(
+    variables: dict[str, Any],
+    workflow_stage: str,
+) -> tuple[str, str, str, list[str]]:
+    config = FRAMEWORK_TO_SCRIPT_STAGE_PREFS.get(workflow_stage, {})
+    stage_prompt_key = str(config.get("stage_prompt_key") or "")
+    workflow_keys = [str(key) for key in config.get("workflow_keys") or [] if str(key).strip()]
+    if not stage_prompt_key:
+        return "", "", "", workflow_keys
+
+    prompt_sources = [
+        ("request_stage_prompts", variables.get("stage_prompts")),
+        ("request_stage_prompts", variables.get("stagePrompts")),
+        ("request_stage_prompts", variables.get("stagePreferences")),
+        ("request_stage_prompts", variables.get("stage_preferences")),
+        ("request_stage_prompts", variables.get("user_knowledge_stage_prompts")),
+    ]
+    prompt_preferences = variables.get("prompt_preferences") if isinstance(variables.get("prompt_preferences"), dict) else {}
+    prompt_sources.append(("request_stage_prompts", prompt_preferences.get("stage_prompts")))
+    for source, prompts in prompt_sources:
+        normalized = _framework_stage_prompt_lookup(prompts)
+        text = _framework_prompt_text(normalized.get(stage_prompt_key))
+        if text:
+            return text, source, stage_prompt_key, workflow_keys
+
+    for snapshot_key in ("preference_snapshot", "preferenceSnapshot"):
+        normalized = _framework_stage_prompts_from_snapshot(variables.get(snapshot_key))
+        text = _framework_prompt_text(normalized.get(stage_prompt_key))
+        if text:
+            return text, "source_framework_stage_prompts", stage_prompt_key, workflow_keys
+
+    for key in (
+        "stagePreference",
+        "stage_preference",
+        "stage_preference_prompt",
+        "user_stage_preference_prompt",
+        "userPreference",
+        "user_preferences",
+        "userPreferences",
+        "userRequirements",
+        "user_constraints",
+    ):
+        text = _framework_prompt_text(variables.get(key))
+        if text:
+            return text, "request_legacy_preference", stage_prompt_key, workflow_keys
+
+    text = _framework_prompt_text(variables.get("prompt_text"))
+    if text:
+        return text, "prompt_text_fallback", stage_prompt_key, workflow_keys
+    return "", "none", stage_prompt_key, workflow_keys
+
+
+def _inject_framework_stage_preference(
+    context: dict[str, Any],
+    variables: dict[str, Any],
+    workflow_stage: str,
+) -> dict[str, Any]:
+    preference, source, stage_prompt_key, workflow_keys = _resolve_framework_stage_preference(
+        variables,
+        workflow_stage,
+    )
+    inject_stage_preference(context, preference, workflow_keys)
+    logger.info(
+        "framework_to_script stage preference injected",
+        extra={
+            "stage": workflow_stage,
+            "stage_prompt_key": stage_prompt_key,
+            "has_stage_preference": bool(preference),
+            "preference_length": len(preference or ""),
+            "workflow_preference_keys": workflow_keys,
+            "preference_source": source,
+        },
+    )
+    return context
+
+
 def _run_framework_to_script_workflow(
     state: WorkflowState,
     runner: FastGPTRunner,
@@ -1566,6 +1712,7 @@ def _run_framework_to_script_workflow(
         )
         sync_runtime_state(state)
     else:
+        _inject_framework_stage_preference(variables, variables, "08")
         output = _run_fastgpt_stage(
             state,
             runner,
@@ -1597,6 +1744,7 @@ def _run_framework_to_script_workflow(
         )
         sync_runtime_state(state)
     else:
+        _inject_framework_stage_preference(variables, variables, "09")
         output = _run_fastgpt_stage(
             state,
             runner,
@@ -1628,6 +1776,7 @@ def _run_framework_to_script_workflow(
         )
         sync_runtime_state(state)
     else:
+        _inject_framework_stage_preference(variables, variables, "10")
         output = _run_fastgpt_stage(
             state,
             runner,
@@ -1689,6 +1838,7 @@ def _run_framework_to_script_workflow(
                 APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
             }
         )
+        _inject_framework_stage_preference(conflict_context, variables, "11_write")
         conflict_plan, conflict_review = _run_batch_write_review_revise_loop(
             state,
             runner,
@@ -1715,15 +1865,23 @@ def _run_framework_to_script_workflow(
                 APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
             },
             rewrite_context_builder=lambda current, review: {
-                **_drop_framework_full_plan_context(
-                    _stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE, variables)
+                **_inject_framework_stage_preference(
+                    {
+                        **_drop_framework_full_plan_context(
+                            _stage_input_context(STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE, variables)
+                        ),
+                        CONFLICT_START_EPISODE: batch.start_episode,
+                        BATCH_CAUSAL_CONFLICT_PLAN: current,
+                        BATCH_CAUSAL_CONFLICT_REVIEW: json.dumps(review, ensure_ascii=False),
+                        CONFLICT_MEMORY: conflict_memory,
+                        BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+                        SCENE_DICTIONARY: variables.get(SCENE_DICTIONARY),
+                        SCRIPT_WORLD_RULES_DIGEST: variables.get(SCRIPT_WORLD_RULES_DIGEST),
+                        APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
+                    },
+                    variables,
+                    "11_rewrite",
                 ),
-                CONFLICT_START_EPISODE: batch.start_episode,
-                BATCH_CAUSAL_CONFLICT_PLAN: current,
-                BATCH_CAUSAL_CONFLICT_REVIEW: json.dumps(review, ensure_ascii=False),
-                CONFLICT_MEMORY: conflict_memory,
-                BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
-                APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
             },
             progress_percent=min(78, 44 + index * 18 // max(1, len(batches))),
             generated_episodes=max(0, batch.start_episode - 1),
@@ -1772,6 +1930,7 @@ def _run_framework_to_script_workflow(
                 APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
             }
         )
+        _inject_framework_stage_preference(script_context, variables, "12_write")
         batch_script, script_review = _run_batch_write_review_revise_loop(
             state,
             runner,
@@ -1794,18 +1953,25 @@ def _run_framework_to_script_workflow(
                 BATCH_CAUSAL_CONFLICT_PLAN: conflict_plan,
                 BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
                 APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
+                SCRIPT_MEMORY: script_memory,
                 BATCH_SCRIPT_TEXT: current,
             },
             rewrite_context_builder=lambda current, review: {
-                **_stage_input_context(STAGE_FRAMEWORK_SCRIPT_REWRITE, variables),
-                SCRIPT_START_EPISODE: batch.start_episode,
-                BATCH_CAUSAL_CONFLICT_PLAN: conflict_plan,
-                BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
-                SCRIPT_WORLD_RULES_DIGEST: variables.get(SCRIPT_WORLD_RULES_DIGEST),
-                APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
-                BATCH_SCRIPT_TEXT: current,
-                BATCH_SCRIPT_REVIEW: json.dumps(review, ensure_ascii=False),
-                SCRIPT_MEMORY: script_memory,
+                **_inject_framework_stage_preference(
+                    {
+                        **_stage_input_context(STAGE_FRAMEWORK_SCRIPT_REWRITE, variables),
+                        SCRIPT_START_EPISODE: batch.start_episode,
+                        BATCH_CAUSAL_CONFLICT_PLAN: conflict_plan,
+                        BATCH_ENRICHED_EPISODE_PLAN: batch_enriched,
+                        SCRIPT_WORLD_RULES_DIGEST: variables.get(SCRIPT_WORLD_RULES_DIGEST),
+                        APPEARANCE_MAPPING: variables.get(APPEARANCE_MAPPING),
+                        BATCH_SCRIPT_TEXT: current,
+                        BATCH_SCRIPT_REVIEW: json.dumps(review, ensure_ascii=False),
+                        SCRIPT_MEMORY: script_memory,
+                    },
+                    variables,
+                    "12_rewrite",
+                ),
             },
             progress_percent=min(96, 62 + index * 24 // max(1, len(batches))),
             generated_episodes=max(0, batch.start_episode - 1),
