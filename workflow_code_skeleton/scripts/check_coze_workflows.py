@@ -12,6 +12,14 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = ROOT / "workflow_code_skeleton" / "config" / "coze_workflows.yaml"
 
 
+def _load_local_env() -> None:
+    try:
+        from dotenv import load_dotenv
+    except Exception:
+        return
+    load_dotenv(ROOT / "workflow_code_skeleton" / ".env", override=True)
+
+
 def _load_config(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     try:
@@ -63,6 +71,7 @@ def _yaml_path_exists(base_dir: Path, yaml_path: str) -> bool:
 
 
 def main() -> int:
+    _load_local_env()
     config_path = Path(os.getenv("COZE_WORKFLOW_CONFIG") or DEFAULT_CONFIG).resolve()
     errors: list[str] = []
     if not config_path.exists():

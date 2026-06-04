@@ -10,7 +10,7 @@
 - dry-run：`COZE_DRY_RUN=1 python main.py`
 - 真实调用：`COZE_DRY_RUN=0`，并在本地 `.env` 配置 `COZE_API_TOKEN`
 
-新增环境变量包括 `COZE_API_TOKEN`、`COZE_API_BASE`、`COZE_WORKFLOW_CONFIG`、`COZE_TIMEOUT_SECONDS`、`COZE_DRY_RUN`、`BETTER_FRAMEWORK_JSONS_DIR`，以及 `COZE_WORKFLOW_STAGE_01_ID` 到 `COZE_WORKFLOW_STAGE_12_ID`。11/12 的 write/review/rewrite/memory 子工作流也可用对应环境变量覆盖。不要提交真实 token；workflow_id 和新旧变量映射统一放在 Coze 配置中。
+新增环境变量包括 `COZE_API_TOKEN`、`COZE_API_BASE`、`COZE_WORKFLOW_CONFIG`、`COZE_TIMEOUT_SECONDS`、`COZE_DRY_RUN`、`BETTER_FRAMEWORK_JSONS_DIR`，以及 `COZE_WORKFLOW_STAGE_01_ID` 到 `COZE_WORKFLOW_STAGE_10_ID`。11/12 已拆成 write/review/rewrite/memory 子工作流，使用对应的 `COZE_WORKFLOW_STAGE_11_*_ID` 和 `COZE_WORKFLOW_STAGE_12_*_ID` 覆盖。不要提交真实 token；workflow_id 和新旧变量映射统一放在 Coze 配置中。
 
 ## 1. 主链路总览
 

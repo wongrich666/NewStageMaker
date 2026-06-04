@@ -7,8 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "coze_workflows.yaml"
+
+load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 class CozeWorkflowError(RuntimeError):
