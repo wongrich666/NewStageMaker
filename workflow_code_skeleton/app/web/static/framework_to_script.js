@@ -34,6 +34,8 @@
     importedFrameworkAsset: null,
     frameworkPlanPackage: null,
     stageOutputs: {},
+    stages: {},
+    completedStages: [],
     settings: {},
     scriptStages: {},
     preferenceSnapshot: {},
@@ -59,6 +61,8 @@
     state.importedFrameworkAsset = null;
     state.frameworkPlanPackage = null;
     state.stageOutputs = {};
+    state.stages = {};
+    state.completedStages = [];
     state.scriptStages = {};
     state.preferenceSnapshot = {};
     state.preferenceSource = "none";
@@ -69,6 +73,8 @@
     state.importedFrameworkAsset = null;
     state.frameworkPlanPackage = null;
     state.stageOutputs = {};
+    state.stages = {};
+    state.completedStages = [];
     state.scriptStages = {};
     state.preferenceSnapshot = {};
     state.preferenceSource = "none";
@@ -338,10 +344,11 @@
     const stage08 = stages.stage08 || {};
     const stage09 = stages.stage09 || {};
     const stage10 = stages.stage10 || {};
+    const completed = new Set((state.completedStages || []).map((item) => String(item)));
 
     if (stage === "08") return hasObject(stage08.sceneDictionary);
     if (stage === "09") return hasObject(stage09.appearanceMapping);
-    if (stage === "10") return hasContent(stage10.allEnrichedEpisodePlan) || hasContent(stage10.enrichedEpisodePlan);
+    if (stage === "10") return completed.has("10") || hasContent(stage10Plan(stage10)) || hasContent(stage10Text(stage10));
     if (stage === "11") return stage11Completion().complete;
     if (stage === "12") return stage12Completion().complete;
     return false;
@@ -429,12 +436,30 @@
 
   function stage10Plan(stage10) {
     const value = stage10 || {};
-    return value.allEnrichedEpisodePlan || value.enrichedEpisodePlan || [];
+    const outputs = state.stageOutputs || {};
+    return value.allEnrichedEpisodePlan
+      || value.enrichedEpisodePlan
+      || value.batchEnrichedEpisodePlan
+      || outputs.allEnrichedEpisodePlan
+      || outputs.all_enriched_episode_plan
+      || outputs.batchEnrichedEpisodePlan
+      || outputs.batch_enriched_episode_plan
+      || (outputs.framework_enriched_episode_plan || {}).allEnrichedEpisodePlan
+      || (outputs.framework_enriched_episode_plan || {}).enrichedEpisodePlan
+      || (outputs.framework_enriched_episode_plan || {}).batchEnrichedEpisodePlan
+      || [];
   }
 
   function stage10Text(stage10) {
     const value = stage10 || {};
-    return value.allEnrichedEpisodePlanText || value.enrichedEpisodePlanText || "";
+    const outputs = state.stageOutputs || {};
+    return value.allEnrichedEpisodePlanText
+      || value.enrichedEpisodePlanText
+      || outputs.allEnrichedEpisodePlanText
+      || outputs.all_enriched_episode_plan_text
+      || (outputs.framework_enriched_episode_plan || {}).allEnrichedEpisodePlanText
+      || (outputs.framework_enriched_episode_plan || {}).enrichedEpisodePlanText
+      || "";
   }
 
   function chineseNumberToInt(text) {
@@ -736,8 +761,11 @@
       state.projectId = asset.project_id || asset.asset_id || id;
       state.importedFrameworkAsset = asset;
       state.frameworkPlanPackage = asset.framework_plan_package || {};
-      state.stageOutputs = asset.stage_outputs || {};
-      state.scriptStages = asset.scriptStages || (asset.framework_to_script_state || {}).scriptStages || {};
+      const workspaceState = asset.framework_to_script_state || {};
+      state.stageOutputs = { ...(asset.stage_outputs || {}), ...(workspaceState.stageOutputs || {}) };
+      state.stages = workspaceState.stages || {};
+      state.completedStages = Array.isArray(workspaceState.completedStages) ? workspaceState.completedStages : [];
+      state.scriptStages = asset.scriptStages || workspaceState.scriptStages || {};
       state.frameworkSource = state.frameworkSource === "刚刚完成的框架" ? "刚刚完成的框架" : "我的资产 / 框架资产";
       setPreferenceSnapshot(asset.preference_snapshot || {}, "framework_asset_snapshot");
       const stage10 = state.scriptStages.stage10 || {};
@@ -844,11 +872,22 @@
         storyline_decisions: stageOutputs.storyline_decisions || data.storyline_decisions || frameworkPlanPackage.storyline_decisions || [],
         adaptation_guide: stageOutputs.adaptation_guide || data.adaptation_guide || frameworkPlanPackage.adaptation_guide || {},
         framework_plan_package: frameworkPlanPackage,
+        framework_enriched_episode_plan: normalizedEpisodePlan.length ? {
+          allEnrichedEpisodePlan: normalizedEpisodePlan,
+          enrichedEpisodePlan: normalizedEpisodePlan,
+          batchEnrichedEpisodePlan: normalizedEpisodePlan,
+          allEnrichedEpisodePlanText,
+          enrichedEpisodePlanText: allEnrichedEpisodePlanText,
+        } : (stageOutputs.framework_enriched_episode_plan || {}),
+        allEnrichedEpisodePlan: normalizedEpisodePlan,
+        allEnrichedEpisodePlanText,
+        batchEnrichedEpisodePlan: normalizedEpisodePlan,
       },
       scriptStages: normalizedEpisodePlan.length ? {
         stage10: {
           allEnrichedEpisodePlan: normalizedEpisodePlan,
           enrichedEpisodePlan: normalizedEpisodePlan,
+          batchEnrichedEpisodePlan: normalizedEpisodePlan,
           allEnrichedEpisodePlanText,
           episodeValidation: { ok: true, issues: [] },
         },
@@ -873,6 +912,9 @@
       state.frameworkPlanPackage = asset.framework_plan_package || {};
       state.stageOutputs = asset.stage_outputs || {};
       state.scriptStages = asset.scriptStages || {};
+      const importedHasStage10 = hasContent(stage10Plan(state.scriptStages.stage10 || {})) || hasContent(stage10Text(state.scriptStages.stage10 || {}));
+      state.stages = importedHasStage10 ? { 10: { status: "completed", stage_key: "stage10", updated_at: new Date().toISOString() } } : {};
+      state.completedStages = importedHasStage10 ? ["10"] : [];
       setPreferenceSnapshot(asset.preference_snapshot || {}, "imported_json");
       state.frameworkSource = "导入 JSON";
       state.assetPanelOpen = false;
@@ -1001,12 +1043,17 @@
         const enrichedEpisodePlan =
           data.enrichedEpisodePlan ||
           data.allEnrichedEpisodePlan ||
+          data.batchEnrichedEpisodePlan ||
+          (data.framework_enriched_episode_plan || {}).allEnrichedEpisodePlan ||
+          (data.framework_enriched_episode_plan || {}).enrichedEpisodePlan ||
           data.enriched_episode_plan ||
           null;
 
         const enrichedEpisodePlanText =
           data.enrichedEpisodePlanText ||
           data.allEnrichedEpisodePlanText ||
+          (data.framework_enriched_episode_plan || {}).allEnrichedEpisodePlanText ||
+          (data.framework_enriched_episode_plan || {}).enrichedEpisodePlanText ||
           data.enriched_episode_plan_text ||
           "";
         const totalEpisodes = inferTotalEpisodes(enrichedEpisodePlan, state.importedFrameworkAsset);
@@ -1018,11 +1065,16 @@
       const enrichedEpisodePlan =
         data.enrichedEpisodePlan ||
         data.allEnrichedEpisodePlan ||
+        data.batchEnrichedEpisodePlan ||
+        (data.framework_enriched_episode_plan || {}).allEnrichedEpisodePlan ||
+        (data.framework_enriched_episode_plan || {}).enrichedEpisodePlan ||
         data.enriched_episode_plan ||
         null;
       const enrichedEpisodePlanText =
         data.enrichedEpisodePlanText ||
         data.allEnrichedEpisodePlanText ||
+        (data.framework_enriched_episode_plan || {}).allEnrichedEpisodePlanText ||
+        (data.framework_enriched_episode_plan || {}).enrichedEpisodePlanText ||
         data.enriched_episode_plan_text ||
         "";
       if (!validation || !validation.ok) {
@@ -1034,9 +1086,26 @@
         enrichedEpisodePlanText,
         allEnrichedEpisodePlan: validation.normalizedPlan,
         allEnrichedEpisodePlanText: data.allEnrichedEpisodePlanText || enrichedEpisodePlanText,
+        batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan || validation.normalizedPlan,
         episodeValidation: validation,
         updated_at: new Date().toISOString(),
       };
+      state.stageOutputs = {
+        ...(state.stageOutputs || {}),
+        ...(data.stageOutputs || {}),
+        framework_enriched_episode_plan: data.framework_enriched_episode_plan || state.scriptStages.stage10,
+        allEnrichedEpisodePlan: validation.normalizedPlan,
+        allEnrichedEpisodePlanText: data.allEnrichedEpisodePlanText || enrichedEpisodePlanText,
+        batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan || validation.normalizedPlan,
+      };
+      state.stages = {
+        ...(state.stages || {}),
+        10: { status: "completed", stage_key: "stage10", updated_at: state.scriptStages.stage10.updated_at },
+        11: { status: "pending", stage_key: "stage11", updated_at: state.scriptStages.stage10.updated_at },
+        12: { status: "pending", stage_key: "stage12", updated_at: state.scriptStages.stage10.updated_at },
+      };
+      state.completedStages = Array.from(new Set([...(state.completedStages || []).map((item) => String(item)), "10"]))
+        .filter((item) => item !== "11" && item !== "12");
       clearDownstreamStages("stage10");
 
       saveWorkspace();

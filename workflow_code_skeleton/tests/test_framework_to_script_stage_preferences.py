@@ -261,6 +261,65 @@ def test_framework_asset_without_package_can_import_from_stage_outputs() -> None
     assert package["character_storylines"] == [{"character": "林渡", "line": "查明旧案"}]
 
 
+def test_stage10_persists_completed_state_and_output_aliases_for_refresh() -> None:
+    app = create_app()
+    app.config["TESTING"] = True
+    client = app.test_client()
+    headers = _auth_headers()
+    package = _framework_package()
+
+    save_response = client.post(
+        "/api/framework-planner/assets/save",
+        headers=headers,
+        json={
+            "project_title": "夜行审判",
+            "framework_plan_package": package,
+            "validation_report": {"status": "pass"},
+        },
+    )
+    assert save_response.status_code == 200
+    asset_id = save_response.get_json()["project_id"]
+
+    def fake_run_stage(stage_name: str, variables: dict[str, object]):
+        if stage_name == "framework_scene_dictionary":
+            return {
+                "sceneDictionary": {"core_scenes": [{"scene_id": "scene_A"}]},
+                "scriptWorldRulesDigest": {"world_type": "都市悬疑"},
+            }
+        if stage_name == "framework_appearanceMapping":
+            return {"appearanceMapping": {"characters": [{"name": "林渡", "alias": "A"}]}}
+        if stage_name == "framework_enriched_episode_plan":
+            return {
+                "allEnrichedEpisodePlan": [{"episode": 1, "title": "开场"}],
+                "allEnrichedEpisodePlanText": "第一集",
+            }
+        raise AssertionError(stage_name)
+
+    with patch("workflow_code_skeleton.app.services.fastgpt_client.fastgpt_client.run_stage", side_effect=fake_run_stage):
+        response08 = client.post("/api/framework-to-script/stage/08", headers=headers, json={"framework_asset_id": asset_id})
+        assert response08.status_code == 200
+        response09 = client.post("/api/framework-to-script/stage/09", headers=headers, json={"framework_asset_id": asset_id})
+        assert response09.status_code == 200
+        response10 = client.post("/api/framework-to-script/stage/10", headers=headers, json={"framework_asset_id": asset_id})
+        assert response10.status_code == 200
+
+    stage10_payload = response10.get_json()
+    assert stage10_payload["framework_enriched_episode_plan"]["allEnrichedEpisodePlan"] == [{"episode": 1, "title": "开场"}]
+    assert stage10_payload["batchEnrichedEpisodePlan"] == [{"episode": 1, "title": "开场"}]
+    assert stage10_payload["stageOutputs"]["allEnrichedEpisodePlan"] == [{"episode": 1, "title": "开场"}]
+    assert "10" in stage10_payload["completedStages"]
+
+    detail_response = client.get(f"/api/framework-assets/{asset_id}", headers=headers)
+    assert detail_response.status_code == 200
+    asset = detail_response.get_json()["asset"]
+    workspace_state = asset["framework_to_script_state"]
+    assert workspace_state["stages"]["10"]["status"] == "completed"
+    assert "10" in workspace_state["completedStages"]
+    assert workspace_state["stageOutputs"]["allEnrichedEpisodePlan"] == [{"episode": 1, "title": "开场"}]
+    assert workspace_state["stageOutputs"]["batchEnrichedEpisodePlan"] == [{"episode": 1, "title": "开场"}]
+    assert asset["scriptStages"]["stage10"]["allEnrichedEpisodePlan"] == [{"episode": 1, "title": "开场"}]
+
+
 def test_framework_to_script_ui_allows_stage_rerun_and_full_script_rewrite() -> None:
     root = Path(__file__).resolve().parents[2]
     script = (root / "workflow_code_skeleton" / "app" / "web" / "static" / "framework_to_script.js").read_text(
@@ -271,6 +330,8 @@ def test_framework_to_script_ui_allows_stage_rerun_and_full_script_rewrite() -> 
     assert "重写全剧剧本" in script
     assert "resetStage11: true, skipConfirm: true" in script
     assert "resetStage12: true, skipConfirm: true" in script
+    assert "framework_enriched_episode_plan" in script
+    assert "completedStages" in script
     assert "hideAction: true" not in script
 
 

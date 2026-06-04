@@ -460,10 +460,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         }
         if include_detail:
             workspace_state = artifacts.get("framework_to_script_state") if isinstance(artifacts.get("framework_to_script_state"), dict) else {}
+            workspace_stage_outputs = (
+                workspace_state.get("stageOutputs")
+                if isinstance(workspace_state.get("stageOutputs"), dict)
+                else {}
+            )
             asset.update(
                 {
                     "framework_plan_package": _strip_raw_fastgpt_fields(copy.deepcopy(package)),
-                    "stage_outputs": stage_outputs,
+                    "stage_outputs": _strip_raw_fastgpt_fields({**copy.deepcopy(stage_outputs), **copy.deepcopy(workspace_stage_outputs)}),
                     "framework_to_script_state": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state)),
                     "scriptStages": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state.get("scriptStages") or {})),
                     "stage_prompts": _strip_raw_fastgpt_fields(copy.deepcopy(stage_prompts)),
@@ -537,9 +542,74 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         }
         for downstream_stage in cascade.get(str(stage_key), ()):
             script_stages.pop(downstream_stage, None)
+        stage_output_aliases = {
+            "stage08": {
+                "framework_scene_dictionary": clean_output,
+                "sceneDictionary": clean_output.get("sceneDictionary"),
+                "scriptWorldRulesDigest": clean_output.get("scriptWorldRulesDigest"),
+            },
+            "stage09": {
+                "framework_appearanceMapping": clean_output,
+                "appearanceMapping": clean_output.get("appearanceMapping"),
+            },
+            "stage10": {
+                "framework_enriched_episode_plan": clean_output,
+                "allEnrichedEpisodePlan": clean_output.get("allEnrichedEpisodePlan") or clean_output.get("enrichedEpisodePlan"),
+                "allEnrichedEpisodePlanText": clean_output.get("allEnrichedEpisodePlanText") or clean_output.get("enrichedEpisodePlanText"),
+                "batchEnrichedEpisodePlan": clean_output.get("batchEnrichedEpisodePlan")
+                or clean_output.get("allEnrichedEpisodePlan")
+                or clean_output.get("enrichedEpisodePlan"),
+            },
+            "stage11": {
+                "framework_causal_conflict_plan": clean_output,
+                "batchCausalConflictPlan": clean_output.get("batchCausalConflictPlan"),
+                "conflictMemory": clean_output.get("conflictMemory"),
+            },
+            "stage12": {
+                "framework_script_text": clean_output,
+                "batchScriptText": clean_output.get("batchScriptText"),
+                "scriptMemory": clean_output.get("scriptMemory"),
+            },
+        }
         clean_output["updated_at"] = now
         script_stages[str(stage_key)] = clean_output
+        stage_outputs = workspace_state.get("stageOutputs")
+        if not isinstance(stage_outputs, dict):
+            stage_outputs = {}
+        for key, value in stage_output_aliases.get(str(stage_key), {}).items():
+            if _framework_value_present(value):
+                stage_outputs[key] = _strip_raw_fastgpt_fields(copy.deepcopy(value))
+        for downstream_stage in cascade.get(str(stage_key), ()):
+            output_key = downstream_stage.replace("stage", "")
+            for key in tuple(stage_outputs.keys()):
+                if output_key in str(key):
+                    stage_outputs.pop(key, None)
+        stages_state = workspace_state.get("stages")
+        if not isinstance(stages_state, dict):
+            stages_state = {}
+        stage_number = str(stage_key).replace("stage", "")
+        stages_state[stage_number] = {
+            "status": "completed",
+            "stage_key": str(stage_key),
+            "updated_at": now,
+        }
+        for downstream_stage in cascade.get(str(stage_key), ()):
+            stages_state[str(downstream_stage).replace("stage", "")] = {
+                "status": "pending",
+                "stage_key": str(downstream_stage),
+                "updated_at": now,
+            }
+        completed_stages = workspace_state.get("completedStages")
+        if not isinstance(completed_stages, list):
+            completed_stages = []
+        completed_set = {str(item) for item in completed_stages}
+        completed_set.add(stage_number)
+        for downstream_stage in cascade.get(str(stage_key), ()):
+            completed_set.discard(str(downstream_stage).replace("stage", ""))
+        workspace_state["completedStages"] = sorted(completed_set, key=lambda item: int(item) if item.isdigit() else 999)
         workspace_state["scriptStages"] = script_stages
+        workspace_state["stageOutputs"] = stage_outputs
+        workspace_state["stages"] = stages_state
         workspace_state["framework_asset_id"] = str(asset_id)
         workspace_state["project_id"] = project_id
         workspace_state["updated_at"] = now
@@ -598,7 +668,29 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not isinstance(stages, dict):
             return {}
         cached = stages.get(stage_key)
-        return cached if isinstance(cached, dict) else {}
+        if isinstance(cached, dict) and cached:
+            return cached
+        stage_outputs = framework_asset.get("stage_outputs") if isinstance(framework_asset.get("stage_outputs"), dict) else {}
+        if stage_key == "stage10" and isinstance(stage_outputs, dict):
+            framework_output = stage_outputs.get("framework_enriched_episode_plan")
+            if isinstance(framework_output, dict) and framework_output:
+                return framework_output
+            plan = (
+                stage_outputs.get("allEnrichedEpisodePlan")
+                or stage_outputs.get("batchEnrichedEpisodePlan")
+                or stage_outputs.get("all_enriched_episode_plan")
+                or []
+            )
+            text = stage_outputs.get("allEnrichedEpisodePlanText") or stage_outputs.get("all_enriched_episode_plan_text") or ""
+            if _framework_value_present(plan) or _framework_value_present(text):
+                return {
+                    "allEnrichedEpisodePlan": plan,
+                    "enrichedEpisodePlan": plan,
+                    "batchEnrichedEpisodePlan": plan,
+                    "allEnrichedEpisodePlanText": text,
+                    "enrichedEpisodePlanText": text,
+                }
+        return {}
 
     def _positive_int(value, default: int) -> int:
         try:
@@ -2791,8 +2883,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     asset_id=asset_id,
                     stage_key="stage10",
                     output={
+                        "framework_enriched_episode_plan": {
+                            "allEnrichedEpisodePlan": plan,
+                            "allEnrichedEpisodePlanText": plan_text,
+                            "batchEnrichedEpisodePlan": plan,
+                        },
                         "allEnrichedEpisodePlan": plan,
                         "allEnrichedEpisodePlanText": plan_text,
+                        "batchEnrichedEpisodePlan": plan,
                         "enrichedEpisodePlan": plan,
                         "enrichedEpisodePlanText": plan_text,
                     },
@@ -2803,10 +2901,28 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         return _json_ok(
             stage="10",
             framework_asset_id=asset_id,
+            framework_enriched_episode_plan={
+                "allEnrichedEpisodePlan": plan,
+                "allEnrichedEpisodePlanText": plan_text,
+                "batchEnrichedEpisodePlan": plan,
+            },
             allEnrichedEpisodePlan=plan,
             allEnrichedEpisodePlanText=plan_text,
+            batchEnrichedEpisodePlan=plan,
             enrichedEpisodePlan=plan,
             enrichedEpisodePlanText=plan_text,
+            stageOutputs={
+                "framework_enriched_episode_plan": {
+                    "allEnrichedEpisodePlan": plan,
+                    "allEnrichedEpisodePlanText": plan_text,
+                    "batchEnrichedEpisodePlan": plan,
+                },
+                "allEnrichedEpisodePlan": plan,
+                "allEnrichedEpisodePlanText": plan_text,
+                "batchEnrichedEpisodePlan": plan,
+            },
+            stages={"10": {"status": "completed"}},
+            completedStages=["10"],
         )
 
     @app.post("/api/framework-to-script/stage/11")
