@@ -1,0 +1,362 @@
+{
+  "provider": "coze",
+  "token_env": "COZE_API_TOKEN",
+  "base_url_env": "COZE_API_BASE",
+  "default_base_url": "COZE_CN_BASE_URL",
+  "timeout_env": "COZE_TIMEOUT_SECONDS",
+  "dry_run_env": "COZE_DRY_RUN",
+  "yaml_base_dir_env": "BETTER_FRAMEWORK_JSONS_DIR",
+  "default_yaml_base_dir": "../../BETTER_FRAMEWORK_JSONS",
+  "output_fallbacks": ["answerText", "textOutput", "content", "data", "message", "output", "result", "newVariables"],
+  "stages": {
+    "stage_01": {
+      "name": "原文信息提取",
+      "workflow_id": "7645196240574234650",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_01_ID",
+      "yaml_path": "Workflow-extract01-draft-9303.zip::Workflow-extract01-draft-9303/workflow/extract01-draft.yaml",
+      "input_mapping": {
+        "adaptation_direction": "adaptation_direction",
+        "episodes_per_season": "episodes_per_season",
+        "minutes_per_episode": "minutes_per_episode",
+        "mode": "mode",
+        "season_count": "season_count",
+        "source_text": "source_text",
+        "source_title": "source_title",
+        "target_format": "target_format",
+        "user_constraints": "user_constraints",
+        "user_requirements": "user_requirements"
+      },
+      "output_mapping": {"confirmed_info": "source_brief"}
+    },
+    "stage_02": {
+      "name": "世界观",
+      "workflow_id": "7645209834124607498",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_02_ID",
+      "yaml_path": "Workflow-worldview02-draft-9322.zip::Workflow-worldview02-draft-9322/workflow/worldview02-draft.yaml",
+      "input_mapping": {
+        "adaptation_direction": "adaptation_direction",
+        "locked_basic_config": "locked_basic_config",
+        "mode": "mode",
+        "previous_worldview_plan": "previous_worldview",
+        "previous_worldview": "previous_worldview",
+        "source_brief": "source_brief",
+        "user_feedback": "user_feedback",
+        "user_requirements": "user_requirements"
+      },
+      "output_mapping": {"worldview": "worldview_plan"}
+    },
+    "stage_03": {
+      "name": "人设方案",
+      "workflow_id": "7645215540566638633",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_03_ID",
+      "yaml_path": "Workflow-character03-draft-9334.zip::Workflow-character03-draft-9334/workflow/character03-draft.yaml",
+      "input_mapping": {
+        "adaptation_direction": "adaptation_direction",
+        "locked_basic_config": "locked_basic_config",
+        "mode": "mode",
+        "previous_character_plan": "previous_character",
+        "previous_character": "previous_character",
+        "source_brief": "source_brief",
+        "user_feedback": "user_feedback",
+        "user_requirements": "user_requirements",
+        "worldview_plan": "worldview_plan"
+      },
+      "output_mapping": {"character": "character_plan"}
+    },
+    "stage_04": {
+      "name": "三幕十五节拍",
+      "workflow_id": "7645218335147966479",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_04_ID",
+      "yaml_path": "Workflow-beat04-draft-9350.zip::Workflow-beat04-draft-9350/workflow/beat04-draft.yaml",
+      "input_mapping": {
+        "adaptation_direction": "adaptation_direction",
+        "basic_config": "basic_config",
+        "character_plan": "character_plan",
+        "framework_score_report": "framework_score_repo",
+        "framework_score_repo": "framework_score_repo",
+        "keyword": "keyword",
+        "mode": "mode",
+        "previous_beat_checkpoint_timeline": "previous_beat",
+        "previous_beat": "previous_beat",
+        "source_brief": "source_brief",
+        "user_feedback": "user_feedback",
+        "user_requirements": "user_requirements",
+        "worldview_plan": "worldview_plan"
+      },
+      "output_mapping": {
+        "beat": "beat_checkpoint_timeline",
+        "beat_checkpoint_timeline": "beat_checkpoint_timeline",
+        "checkpoint_explanation": "checkpoint_explanation"
+      }
+    },
+    "stage_05": {
+      "name": "人物故事线",
+      "workflow_id": "7645224794576896040",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_05_ID",
+      "yaml_path": "Workflow-storyline05-draft-9379.zip::Workflow-storyline05-draft-9379/workflow/storyline05-draft.yaml",
+      "input_mapping": {
+        "adaptation_direction": "adaptation_direction",
+        "basic_config": "basic_config",
+        "beat_checkpoint_timeline": "beat_checkpoint_time",
+        "character_plan": "character_plan",
+        "current_storyline_decisions": "current_storyline",
+        "current_storyline": "current_storyline",
+        "mode": "mode",
+        "previous_character_plan": "previous_character",
+        "previous_character": "previous_character",
+        "source_brief": "source_brief",
+        "user_feedback": "user_feedback",
+        "user_requirements": "user_requirements",
+        "worldview_plan": "worldview_plan"
+      },
+      "output_mapping": {"storyline": "character_storylines"}
+    },
+    "stage_06": {
+      "name": "整体改编指引",
+      "workflow_id": "7645227881429434394",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_06_ID",
+      "yaml_path": "Workflow-adaptation06-draft-9392.zip::Workflow-adaptation06-draft-9392/workflow/adaptation06-draft.yaml",
+      "input_mapping": {
+        "adaptation_direction": "adaptation_direction",
+        "basic_config": "basic_config",
+        "beat_checkpoint_timeline": "beat_checkpoint_time",
+        "character_plan": "character_plan",
+        "character_storylines": "character_storylines",
+        "mode": "mode",
+        "previous_adaptation_guide": "previous_adaptation",
+        "previous_adaptation": "previous_adaptation",
+        "source_brief": "source_brief",
+        "storyline_decisions": "storyline_decisions",
+        "user_feedback": "user_feedback",
+        "user_requirements": "user_requirements",
+        "worldview_plan": "worldview_plan"
+      },
+      "output_mapping": {"adaptation": "adaptation_guide"}
+    },
+    "stage_07": {
+      "name": "框架校验",
+      "workflow_id": "7645230627189014534",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_07_ID",
+      "yaml_path": "Workflow-framework07-draft-9404.zip::Workflow-framework07-draft-9404/workflow/framework07-draft.yaml",
+      "input_mapping": {
+        "adaptation_direction": "adaptation_direction",
+        "adaptation_guide": "adaptation_guide",
+        "basic_config": "basic_config",
+        "beat_checkpoint_timeline": "beat_checkpoint",
+        "character_plan": "character_plan",
+        "character_storylines": "character_storylines",
+        "checkpoint_explanation": "checkpoint_explain",
+        "mode": "mode",
+        "previous_framework_plan_package": "previous_framework",
+        "previous_framework": "previous_framework",
+        "source_brief": "source_brief",
+        "storyline_decisions": "storyline_decisions",
+        "user_edit_history": "user_edit_history",
+        "user_feedback": "user_feedback",
+        "user_requirements": "user_requirements",
+        "worldview_plan": "worldview_plan"
+      },
+      "output_mapping": {
+        "framework": "framework_plan_package",
+        "framework_plan_package": "framework_plan_package",
+        "validation_report": "validation_report"
+      }
+    },
+    "stage_08": {
+      "name": "场景字典",
+      "workflow_id": "7645234586717650953",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_08_ID",
+      "yaml_path": "Workflow-scenedictionary08-draft-9417.zip::Workflow-scenedictionary08-draft-9417/workflow/scenedictionary08-draft.yaml",
+      "input_mapping": {
+        "beat_checkpoint_timeline": "beat",
+        "character_storylines": "character_storyline",
+        "frameworkPlanPackage": "framework",
+        "framework_plan_package": "framework",
+        "user_feedback": "user_feedback",
+        "user_requirements": "user_requirements",
+        "worldviewPlan": "worldview",
+        "worldview_plan": "worldview"
+      },
+      "output_mapping": {
+        "output": "output",
+        "sceneDictionary": "sceneDictionary",
+        "scriptWorldRulesDigest": "scriptWorldRulesDigest"
+      }
+    },
+    "stage_09": {
+      "name": "人物服装映射",
+      "workflow_id": "7645237289745416232",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_09_ID",
+      "yaml_path": "Workflow-alias09-draft-9437.zip::Workflow-alias09-draft-9437/workflow/alias09-draft.yaml",
+      "input_mapping": {
+        "beatCheckpointTimeline": "beat",
+        "beat_checkpoint_timeline": "beat",
+        "characterPlan": "character",
+        "character_plan": "character",
+        "frameworkPlanPackage": "framework",
+        "framework_plan_package": "framework",
+        "sceneDictionary": "scene",
+        "scene_dictionary": "scene",
+        "user_feedback": "user_feedback"
+      },
+      "output_mapping": {
+        "alias": "appearanceMapping",
+        "appearanceMapping": "appearanceMapping"
+      }
+    },
+    "stage_10": {
+      "name": "丰富分集计划",
+      "workflow_id": "7645239548418949129",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_10_ID",
+      "yaml_path": "Workflow-enriched10-draft-9449.zip::Workflow-enriched10-draft-9449/workflow/enriched10-draft.yaml",
+      "input_mapping": {
+        "appearanceMapping": "alias",
+        "frameworkPlanPackage": "framework",
+        "framework_plan_package": "framework",
+        "sceneDictionary": "scene",
+        "scene_dictionary": "scene",
+        "user_feedback": "user_feedback"
+      },
+      "output_mapping": {
+        "episodeplan": "allEnrichedEpisodePlan",
+        "allEnrichedEpisodePlan": "allEnrichedEpisodePlan",
+        "allEnrichedEpisodePlanText": "allEnrichedEpisodePlanText"
+      }
+    },
+    "stage_11_write": {
+      "name": "冲突编写",
+      "workflow_id": "7645242010140590120",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_11_WRITE_ID",
+      "yaml_path": "Workflow-conflict11_01-draft-9462.zip::Workflow-conflict11_01-draft-9462/workflow/conflict11_01-draft.yaml",
+      "input_mapping": {
+        "appearanceMapping": "alias",
+        "batchEnrichedEpisodePlan": "enriched_epiplan",
+        "totalEpisodes": "episode_num",
+        "conflictMemory": "memory",
+        "sceneDictionary": "scene",
+        "conflictStartEpisode": "start_epi",
+        "user_feedback": "user_feedback",
+        "scriptWorldRulesDigest": "worldview"
+      },
+      "output_mapping": {"conflicts": "batchCausalConflictPlan"}
+    },
+    "stage_11_review": {
+      "name": "冲突审核",
+      "workflow_id": "7645245484344770595",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_11_REVIEW_ID",
+      "yaml_path": "Workflow-conflict11_02-draft-9473.zip::Workflow-conflict11_02-draft-9473/workflow/conflict11_02-draft.yaml",
+      "input_mapping": {
+        "appearanceMapping": "alias",
+        "batchCausalConflictPlan": "conflict",
+        "batchEnrichedEpisodePlan": "enriched_epiplan",
+        "totalEpisodes": "episode_num",
+        "conflictMemory": "memory",
+        "sceneDictionary": "scene",
+        "conflictStartEpisode": "start_epi",
+        "user_feedback": "user_feedback",
+        "scriptWorldRulesDigest": "worldview"
+      },
+      "output_mapping": {"conflictreview": "batchCausalConflictReview"}
+    },
+    "stage_11_rewrite": {
+      "name": "冲突重写",
+      "workflow_id": "7645249019329724425",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_11_REWRITE_ID",
+      "yaml_path": "Workflow-conflictrewrite11_03-draft-9495.zip::Workflow-conflictrewrite11_03-draft-9495/workflow/conflictrewrite11_03-draft.yaml",
+      "input_mapping": {
+        "appearanceMapping": "alias",
+        "batchCausalConflictPlan": "conflict",
+        "batchEnrichedEpisodePlan": "enriched_epiplan",
+        "totalEpisodes": "episode_num",
+        "rewriteBrief": "feedback",
+        "conflictMemory": "memory",
+        "batchCausalConflictReview": "review",
+        "sceneDictionary": "scene",
+        "conflictStartEpisode": "start_epi",
+        "user_feedback": "user_feedback"
+      },
+      "output_mapping": {"rewrite": "batchCausalConflictPlan"}
+    },
+    "stage_11_memory": {
+      "name": "冲突记忆",
+      "workflow_id": "7645252634739703850",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_11_MEMORY_ID",
+      "yaml_path": "Workflow-conflictmemory11_04-draft-9524.zip::Workflow-conflictmemory11_04-draft-9524/workflow/conflictmemory11_04-draft.yaml",
+      "input_mapping": {
+        "batchCausalConflictPlan": "conflict",
+        "conflictStartEpisode": "start_epi"
+      },
+      "output_mapping": {"memory": "conflictMemory"}
+    },
+    "stage_12_write": {
+      "name": "正文编写",
+      "notes": "Coze parameter character_count means target word count here; map it from old episodeWordCount.",
+      "workflow_id": "7645253611605688358",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_12_WRITE_ID",
+      "yaml_path": "Workflow-script12_01-draft-9547.zip::Workflow-script12_01-draft-9547/workflow/script12_01-draft.yaml",
+      "input_mapping": {
+        "batchCausalConflictPlan": "according_conflict",
+        "batchEnrichedEpisodePlan": "according_epiplan",
+        "appearanceMapping": "alias",
+        "episodeWordCount": "character_count",
+        "totalEpisodes": "episode_num",
+        "scriptMemory": "memory",
+        "scriptStartEpisode": "start_epi",
+        "user_feedback": "user_feedback",
+        "scriptWorldRulesDigest": "worldview"
+      },
+      "output_mapping": {"script": "batchScriptText"}
+    },
+    "stage_12_review": {
+      "name": "正文审核",
+      "notes": "Coze parameter character_count means target word count here; map it from old episodeWordCount.",
+      "workflow_id": "7645258252653445183",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_12_REVIEW_ID",
+      "yaml_path": "Workflow-script12_02-draft-9556.zip::Workflow-script12_02-draft-9556/workflow/script12_02-draft.yaml",
+      "input_mapping": {
+        "batchCausalConflictPlan": "according_conflict",
+        "batchEnrichedEpisodePlan": "according_epiplan",
+        "episodeWordCount": "character_count",
+        "totalEpisodes": "episode_num",
+        "scriptMemory": "memory",
+        "batchScriptText": "script",
+        "scriptStartEpisode": "start_epi",
+        "user_feedback": "user_feedback"
+      },
+      "output_mapping": {"scriptreview": "batchScriptReview"}
+    },
+    "stage_12_rewrite": {
+      "name": "正文重写",
+      "notes": "Coze parameter character_count means target word count here; map it from old episodeWordCount.",
+      "workflow_id": "7645493618560843828",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_12_REWRITE_ID",
+      "yaml_path": "Workflow-script12_03-draft-9567.zip::Workflow-script12_03-draft-9567/workflow/script12_03-draft.yaml",
+      "input_mapping": {
+        "batchCausalConflictPlan": "according_conflict",
+        "batchEnrichedEpisodePlan": "according_epiplan",
+        "appearanceMapping": "alias",
+        "episodeWordCount": "character_count",
+        "batchScriptReview": "current_review",
+        "batchScriptText": "current_script",
+        "totalEpisodes": "episode_num",
+        "scriptMemory": "memory",
+        "scriptStartEpisode": "start_epi",
+        "user_feedback": "user_feedback",
+        "scriptWorldRulesDigest": "worldview"
+      },
+      "output_mapping": {"script": "batchScriptText"}
+    },
+    "stage_12_memory": {
+      "name": "正文记忆",
+      "workflow_id": "7645499779002220582",
+      "workflow_id_env": "COZE_WORKFLOW_STAGE_12_MEMORY_ID",
+      "yaml_path": "Workflow-script12_04-draft-9576.zip::Workflow-script12_04-draft-9576/workflow/script12_04-draft.yaml",
+      "input_mapping": {"batchScriptText": "script"},
+      "output_mapping": {"script": "scriptMemory"}
+    }
+  },
+  "aliases": {
+    "stage_11": ["stage_11_write", "stage_11_review", "stage_11_rewrite", "stage_11_memory"],
+    "stage_12": ["stage_12_write", "stage_12_review", "stage_12_rewrite", "stage_12_memory"]
+  }
+}
