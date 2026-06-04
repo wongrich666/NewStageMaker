@@ -3054,11 +3054,21 @@ def _normalize_stage_output(
         )
         return normalized
     if stage == "06":
-        if not isinstance(normalized.get("adaptation_guide"), (dict, list, str)):
+        adaptation_guide = _first_present_value(
+            normalized,
+            (
+                "adaptation_guide",
+                "adaptationGuide",
+                "overallAdaptationGuide",
+                "overall_adaptation_guide",
+                "guide",
+            ),
+        )
+        if not isinstance(adaptation_guide, (dict, list, str)):
             warnings.append("adaptation_guide 类型异常，已回退为空对象")
-            _log_field_type_mismatch(stage, "adaptation_guide", "dict/list/str", normalized.get("adaptation_guide"))
+            _log_field_type_mismatch(stage, "adaptation_guide", "dict/list/str", adaptation_guide)
         normalized["adaptation_guide"] = _normalize_adaptation_guide(
-            normalized.get("adaptation_guide")
+            adaptation_guide
         )
         return normalized
     if stage == "07":

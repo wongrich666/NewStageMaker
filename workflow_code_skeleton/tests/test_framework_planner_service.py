@@ -928,6 +928,38 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertEqual(payload["data"]["adaptation_guide"]["core_setting_adjustments"], "强化地方财团压迫感")
         self.assertEqual(payload["display_text"], "guide string root ok")
 
+    def test_stage_06_accepts_overall_adaptation_guide_alias(self) -> None:
+        fastgpt_root = {
+            "overallAdaptationGuide": {
+                "core_setting_adjustments": "保留规则对抗骨架",
+                "structure_and_rhythm": "前十集加快钩子密度",
+                "visualization_strategy": "突出夜景和封闭空间",
+                "character_emotion_strategy": "强化主角创伤与复仇动机",
+            },
+            "display_text": "guide alias ok",
+        }
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json, timeout
+            return _FakeResponse(payload=fastgpt_root)
+
+        with patch.dict(
+            os.environ,
+            {
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "FASTGPT_API_KEY": "fastgpt-global-key",
+                "FASTGPT_CHAT_COMPLETIONS_URL": "https://api.fastgpt.in/api/v1/chat/completions",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                payload = service.run_framework_planner_stage("06", _stage_06_payload())
+
+        self.assertTrue(payload["ok"])
+        self.assertIsInstance(payload["data"]["adaptation_guide"], dict)
+        self.assertEqual(payload["data"]["adaptation_guide"]["core_setting_adjustments"], "保留规则对抗骨架")
+        self.assertEqual(payload["display_text"], "guide alias ok")
+
     def test_stage_07_accepts_list_wrapped_object_and_keeps_package_and_validation_dict(self) -> None:
         wrapped_payload = [
             {

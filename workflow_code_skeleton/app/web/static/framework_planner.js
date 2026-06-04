@@ -381,6 +381,7 @@
     showNewScriptModal: false,
     assets: [],
     assetsLoading: false,
+    assetImporting: false,
     assetSearch: "",
     assetStatusFilter: "all",
     assetSort: "updated_desc",
@@ -1321,14 +1322,14 @@
 
   function renderFrameworkScriptButton(sizeClass) {
     const className = sizeClass ? ` ${sizeClass}` : "";
-    const disabled = canStartFrameworkScript() ? "" : "disabled";
+    const disabled = canStartFrameworkScript() && !ui.assetImporting ? "" : "disabled";
     const label = ui.loading.framework_script ? "正在保存并进入剧本正文阶段..." : "保存框架并进入剧本正文阶段";
     return `<button class="fp-btn${className} primary" data-action="start-framework-script" ${disabled}>${label}</button>`;
   }
 
   function renderSaveFrameworkButton(sizeClass) {
     const className = sizeClass ? ` ${sizeClass}` : "";
-    const disabled = runningStageKey() || ui.loading.framework_save || ui.loading.framework_script ? "disabled" : "";
+    const disabled = runningStageKey() || ui.loading.framework_save || ui.loading.framework_script || ui.assetImporting ? "disabled" : "";
     const label = ui.loading.framework_save ? "正在保存..." : "保存框架";
     return `<button class="fp-btn${className}" data-action="save-framework-asset" ${disabled}>${label}</button>`;
   }
@@ -1862,6 +1863,21 @@
     return Boolean((state.stage_state && state.stage_state[stageKey] || {}).stageDraftDirty);
   }
 
+  function stageProgressDone(stageKey) {
+    if (!stageKey || stageDraftDirty(stageKey)) return false;
+    const stage = stageState(stageKey);
+    if (stage.confirmed || stage.stageCommitted) return true;
+    const index = STAGE_SEQUENCE.indexOf(stageKey);
+    if (index < 0) return false;
+    return STAGE_SEQUENCE.slice(index + 1).some((downstreamKey) => {
+      const downstream = stageState(downstreamKey);
+      return downstream.status === "running"
+        || downstream.stageCommitted
+        || downstream.confirmed
+        || hasStageData(downstreamKey);
+    });
+  }
+
   function isStageEditable(stageKey) {
     return EDITABLE_STAGE_KEYS.has(String(stageKey || ""));
   }
@@ -2330,7 +2346,7 @@
     const navItems = VIEW_DEFS.map((item, index) => {
       const unlocked = viewUnlocked(item.id);
       const active = state.current_view === item.id ? "active" : "";
-      const done = state.stage_state[item.stageKey] && state.stage_state[item.stageKey].confirmed ? "done" : "";
+      const done = stageProgressDone(item.stageKey) ? "done" : "";
       const locked = unlocked ? "" : "locked";
       const mark = done ? "✓" : String(index + 1);
       return `
@@ -2358,8 +2374,8 @@
           <strong>本地保存：</strong>状态会自动保存
         </div>
         <div class="fp-side-actions">
-          <button class="fp-btn small primary" data-action="open-new-script">新建框架项目</button>
-          <button class="fp-btn small" data-action="toggle-assets">${ui.assetsOpen ? "收起框架资产" : "框架资产"}</button>
+          <button class="fp-btn small primary" data-action="open-new-script" ${ui.assetImporting ? "disabled" : ""}>新建框架项目</button>
+          <button class="fp-btn small" data-action="toggle-assets" ${ui.assetImporting ? "disabled" : ""}>${ui.assetsOpen ? "收起框架资产" : "框架资产"}</button>
         </div>
         ${ui.assetsOpen ? renderAssetManager("side") : ""}
         <nav class="fp-nav">${navItems}</nav>
@@ -2381,9 +2397,10 @@
         <div class="fp-top-actions">
           ${renderSaveFrameworkButton("small")}
           <a class="fp-btn small ghost" data-guard-nav="workspace" href="${escapeHtml(config.workspaceUrl || "/workspace")}">返回主工作台</a>
-          <button class="fp-btn small danger" data-action="reset-state" ${canClearFrameworkInput() ? "" : "disabled"}>清空输入</button>
+          <button class="fp-btn small danger" data-action="reset-state" ${canClearFrameworkInput() && !ui.assetImporting ? "" : "disabled"}>清空输入</button>
         </div>
       </div>
+      ${ui.assetImporting ? renderProcessingBanner("导入资产中，请稍后") : ""}
       ${state.current_view === "basic" ? renderKnowledgePanel() : ""}
       <div class="fp-card fp-steps">${renderStepRail()}</div>
       ${renderRunningStageStatus()}
@@ -2399,7 +2416,7 @@
             <h2 class="fp-card-title">我的框架资产</h2>
             <p class="fp-card-sub">从这里手动打开已保存的框架资产。新建框架不会自动恢复旧资产。</p>
           </div>
-          <button class="fp-btn small" data-action="refresh-assets" ${ui.assetsLoading ? "disabled" : ""}>${ui.assetsLoading ? "刷新中..." : "刷新"}</button>
+          <button class="fp-btn small" data-action="refresh-assets" ${ui.assetsLoading || ui.assetImporting ? "disabled" : ""}>${ui.assetsLoading ? "刷新中..." : "刷新"}</button>
         </div>
         <div class="fp-asset-toolbar">
           <input data-asset-search placeholder="搜索标题或摘要" value="${escapeHtml(ui.assetSearch)}" />
@@ -2445,11 +2462,11 @@
           <p>${escapeHtml(item.summary || "这个剧本还没有简短描述。")}</p>
         </div>
         <div class="fp-asset-actions">
-          <button class="fp-btn small primary" data-action="open-asset" data-project-id="${escapeHtml(projectId)}">打开查看</button>
-          <button class="fp-btn small" data-action="duplicate-asset" data-project-id="${escapeHtml(projectId)}">复制</button>
-          ${canStop ? `<button class="fp-btn small danger" data-action="stop-asset-task" data-task-id="${escapeHtml(taskId)}">停止</button>` : ""}
-          ${canContinue ? `<button class="fp-btn small" data-action="continue-asset-task" data-task-id="${escapeHtml(taskId)}">继续</button>` : ""}
-          <button class="fp-btn small danger subtle" data-action="delete-asset" data-project-id="${escapeHtml(projectId)}">删除</button>
+          <button class="fp-btn small primary" data-action="open-asset" data-project-id="${escapeHtml(projectId)}" ${ui.assetImporting ? "disabled" : ""}>打开查看</button>
+          <button class="fp-btn small" data-action="duplicate-asset" data-project-id="${escapeHtml(projectId)}" ${ui.assetImporting ? "disabled" : ""}>复制</button>
+          ${canStop ? `<button class="fp-btn small danger" data-action="stop-asset-task" data-task-id="${escapeHtml(taskId)}" ${ui.assetImporting ? "disabled" : ""}>停止</button>` : ""}
+          ${canContinue ? `<button class="fp-btn small" data-action="continue-asset-task" data-task-id="${escapeHtml(taskId)}" ${ui.assetImporting ? "disabled" : ""}>继续</button>` : ""}
+          <button class="fp-btn small danger subtle" data-action="delete-asset" data-project-id="${escapeHtml(projectId)}" ${ui.assetImporting ? "disabled" : ""}>删除</button>
         </div>
       </article>
     `;
@@ -2698,7 +2715,7 @@
   function renderStepRail() {
     return VIEW_DEFS.map((item, index) => {
       const active = state.current_view === item.id ? "active" : "";
-      const done = state.stage_state[item.stageKey] && state.stage_state[item.stageKey].confirmed ? "done" : "";
+      const done = stageProgressDone(item.stageKey) ? "done" : "";
       const line = index < VIEW_DEFS.length - 1 ? `<span class="fp-step-line"></span>` : "";
       const mark = done ? "✓" : String(index + 1);
       return `<div class="fp-step ${active} ${done}"><span class="fp-step-dot">${mark}</span><span>${escapeHtml(item.label.replace(/^\d+\.\s*/, ""))}</span></div>${line}`;
@@ -3002,13 +3019,13 @@
     const running = isStageLoading(stageKey);
     const dirty = stageDraftDirty(stageKey);
     const blockReason = stageRunBlockReason(stageKey);
-    const canNext = Boolean(nextView && hasOutput && !dirty && viewUnlocked(nextView));
+    const canNext = Boolean(!ui.assetImporting && nextView && hasOutput && !dirty && viewUnlocked(nextView));
     const title = realStageDisplayTitle(stageKey);
     return `
       <div class="fp-actions fp-stage-bottom-actions">
         <button class="fp-btn" data-action="go-view" data-view="${escapeHtml(previousView)}" ${previousView ? "" : "disabled"}>上一步</button>
-        <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="${escapeHtml(stageKey)}" ${running || blockReason ? "disabled" : ""}>${hasOutput ? `重新生成 ${escapeHtml(title)}` : "生成本阶段"}</button>
-        ${isStageEditable(stageKey) ? `<button class="fp-btn ${dirty ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="${escapeHtml(stageKey)}" ${dirty ? "" : "disabled"}>应用修改</button>` : ""}
+        <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="${escapeHtml(stageKey)}" ${ui.assetImporting || running || blockReason ? "disabled" : ""}>${hasOutput ? `重新生成 ${escapeHtml(title)}` : "生成本阶段"}</button>
+        ${isStageEditable(stageKey) ? `<button class="fp-btn ${dirty ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="${escapeHtml(stageKey)}" ${dirty && !ui.assetImporting ? "" : "disabled"}>应用修改</button>` : ""}
         <button class="fp-btn ${canNext ? "primary" : ""}" data-action="go-next-stage" data-view="${escapeHtml(nextView)}" ${canNext ? "" : "disabled"}>下一步</button>
         ${stageKey === "package" ? `${renderSaveFrameworkButton("")}${renderFrameworkScriptButton("")}` : ""}
       </div>
@@ -3328,8 +3345,10 @@
   }
 
   function renderPackageView() {
+    const stage = state.stage_state.package || {};
     const hasOutput = !isEmptyValue(state.framework_plan_package);
     const completed = hasOutput;
+    const locked = Boolean(stage.locked);
     const blockReason = stageRunBlockReason("package");
     return `
       <section class="fp-card fp-section">
@@ -3348,11 +3367,11 @@
         ${renderApplyStageChangesPanel("package")}
         ${renderStageHistoryPanel("package")}
         <div class="fp-actions fp-stage-bottom-actions">
-          <button class="fp-btn" data-action="go-view" data-view="guide">上一步</button>
-          <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="package" ${locked || isStageLoading("package") || blockReason ? "disabled" : ""}>${hasOutput ? "重新生成 07" : "生成本阶段"}</button>
+          <button class="fp-btn" data-action="go-view" data-view="guide" ${ui.assetImporting ? "disabled" : ""}>上一步</button>
+          <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="package" ${ui.assetImporting || locked || isStageLoading("package") || blockReason ? "disabled" : ""}>${hasOutput ? "重新生成 07" : "生成本阶段"}</button>
           ${renderSaveFrameworkButton("")}
-          <button class="fp-btn primary" data-action="download-readable-framework" ${!hasOutput ? "disabled" : ""}>下载可读框架</button>
-          <button class="fp-btn" data-action="download-structured-framework" ${!hasOutput ? "disabled" : ""}>下载结构化框架</button>
+          <button class="fp-btn primary" data-action="download-readable-framework" ${!hasOutput || ui.assetImporting ? "disabled" : ""}>下载可读框架</button>
+          <button class="fp-btn" data-action="download-structured-framework" ${!hasOutput || ui.assetImporting ? "disabled" : ""}>下载结构化框架</button>
           ${renderFrameworkScriptButton("")}
         </div>
       </section>
@@ -3718,6 +3737,30 @@
     return GUIDE_FIELD_DEFS.some(([, , aliases]) => valueByAliases(data, aliases) !== undefined)
       || GUIDE_SUPPLEMENTAL_FIELD_DEFS.some(([, , aliases]) => valueByAliases(data, aliases) !== undefined)
       || valueByAliases(data, ["display_text", "displayText"]) !== undefined;
+  }
+
+  function pickGuidePayload(response, data) {
+    const candidates = [];
+    const collect = (source) => {
+      if (!source || typeof source !== "object" || Array.isArray(source)) return;
+      candidates.push(
+        source.adaptation_guide,
+        source.adaptationGuide,
+        source.overallAdaptationGuide,
+        source.overall_adaptation_guide,
+        source.guide
+      );
+    };
+    collect(data);
+    collect(response);
+    candidates.push(data);
+    for (const item of candidates) {
+      const parsed = safeJsonValue(item);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && looksLikeGuidePayload(parsed)) {
+        return parsed;
+      }
+    }
+    return {};
   }
 
   function guidePayloadForDownstream(data) {
@@ -4799,12 +4842,7 @@
       normalizeStorylinesForCurrentBeats();
     }
     if (stageNo === "06") {
-      const topGuideData = safeResponse.adaptation_guide && typeof safeResponse.adaptation_guide === "object" && !Array.isArray(safeResponse.adaptation_guide)
-        ? safeResponse.adaptation_guide
-        : {};
-      const guideData = safeData.adaptation_guide && typeof safeData.adaptation_guide === "object" && !Array.isArray(safeData.adaptation_guide)
-        ? safeData.adaptation_guide
-        : (!isEmptyValue(topGuideData) ? topGuideData : (looksLikeGuidePayload(safeData) ? safeData : {}));
+      const guideData = pickGuidePayload(safeResponse, safeData);
       const displayText = guideDisplayTextValue(safeResponse, guideData);
       state.adaptation_guide = normalizeGuideFields(Object.assign({}, guideData, {
         display_text: displayText === undefined || displayText === null ? "" : displayText,
@@ -5468,6 +5506,7 @@
   }
 
   function resetTransientUi() {
+    const assetImporting = ui.assetImporting;
     ui.toast = "";
     ui.loading = {};
     ui.loadingStartedAt = {};
@@ -5482,6 +5521,7 @@
     ui.assetsOpen = false;
     ui.showNewScriptModal = false;
     ui.assetsLoading = false;
+    ui.assetImporting = assetImporting;
     ui.assetSearch = "";
     ui.assetStatusFilter = "all";
     ui.assetSort = "updated_desc";
@@ -5996,48 +6036,52 @@
   }
 
   async function openAsset(projectId) {
+    if (ui.assetImporting) return;
     if (promptUnsaved("切换到已有项目", {
       save: async () => openAsset(projectId),
       discard: async () => openAsset(projectId),
     })) return;
-    const data = await requestJson(`/api/projects/${projectId}`);
-    const project = data.project || {};
-    if (String(project.asset_kind || "") === "framework_planner") {
-      try {
+    ui.assetImporting = true;
+    ui.toast = "";
+    render();
+    try {
+      const data = await requestJson(`/api/projects/${projectId}`);
+      const project = data.project || {};
+      if (String(project.asset_kind || "") === "framework_planner") {
         restoreFrameworkPlannerState(project);
-      } catch (error) {
-        showToast((error && error.message) || "资产恢复失败");
+        ui.stageHistory = {};
+        ui.stageHistoryLoading = {};
+        await loadStageHistory(stageKeyForView(state.current_view || "basic"));
+        clearDirty();
+        showToast("资产导入成功");
         return;
       }
+      const input = project.input_payload || {};
+      resetTransientUi();
+      state = clone(initialState);
+      state.basic_config.project_title = project.title || input.title || state.basic_config.project_title;
+      state.basic_config.source_title = project.title || input.title || state.basic_config.source_title;
+      state.basic_config.target_format = input.target_format || state.basic_config.target_format;
+      state.basic_config.season_count = Number(input.season_count || state.basic_config.season_count || 1);
+      state.basic_config.episodes_per_season = Number(input.episodes_per_season || state.basic_config.episodes_per_season || 60);
+      state.basic_config.user_requirements = input.style || state.basic_config.user_requirements || "";
+      state.basic_config.source_text = input.story_outline || state.basic_config.source_text || "";
+      state.asset_state.asset_id = project.project_id || null;
+      state.asset_state.status = project.status || "draft";
+      state.current_view = "basic";
       ui.stageHistory = {};
       ui.stageHistoryLoading = {};
-      await loadStageHistory(stageKeyForView(state.current_view || "basic"));
-      showToast("已恢复框架策划资产，可继续生成或进入下游剧本");
-      render();
+      syncStageFlow(state);
+      saveState();
       clearDirty();
-      return;
+      await loadStageHistory("basic");
+      showToast("资产导入成功");
+    } catch (error) {
+      showToast((error && error.message) || "资产导入失败");
+    } finally {
+      ui.assetImporting = false;
+      render();
     }
-    const input = project.input_payload || {};
-    resetTransientUi();
-    state = clone(initialState);
-    state.basic_config.project_title = project.title || input.title || state.basic_config.project_title;
-    state.basic_config.source_title = project.title || input.title || state.basic_config.source_title;
-    state.basic_config.target_format = input.target_format || state.basic_config.target_format;
-    state.basic_config.season_count = Number(input.season_count || state.basic_config.season_count || 1);
-    state.basic_config.episodes_per_season = Number(input.episodes_per_season || state.basic_config.episodes_per_season || 60);
-    state.basic_config.user_requirements = input.style || state.basic_config.user_requirements || "";
-    state.basic_config.source_text = input.story_outline || state.basic_config.source_text || "";
-    state.asset_state.asset_id = project.project_id || null;
-    state.asset_state.status = project.status || "draft";
-    state.current_view = "basic";
-    ui.stageHistory = {};
-    ui.stageHistoryLoading = {};
-    syncStageFlow(state);
-    saveState();
-    clearDirty();
-    await loadStageHistory("basic");
-    showToast("已打开资产，可从第一阶段查看和继续策划");
-    render();
   }
 
   async function controlAssetTask(taskId, action) {
@@ -6443,6 +6487,10 @@
 
   app.addEventListener("click", async (event) => {
     const guardedLink = event.target.closest && event.target.closest("a[data-guard-nav]");
+    if (guardedLink && ui.assetImporting) {
+      event.preventDefault();
+      return;
+    }
     if (guardedLink && hasUnsavedChanges()) {
       event.preventDefault();
       const targetUrl = guardedLink.href;
@@ -6458,6 +6506,7 @@
     const actionElement = event.target.closest("[data-action]");
     if (!actionElement) return;
     const action = actionElement.dataset.action;
+    if (ui.assetImporting) return;
 
     if (action === "save-unsaved-prompt") {
       await runUnsavedPrompt("save");
