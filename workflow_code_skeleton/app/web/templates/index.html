@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>IDEA TO SCRIPT 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260528-assets-ui">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260603-sidebar-links">
 </head>
 <body class="workspace-body">
   <main class="chat-workspace-shell">
@@ -85,25 +85,15 @@
         </section>
 
         <section class="sidebar-group sidebar-tools-section">
-          <div class="tool-shortcut-list">
-            <button id="waibaoScriptBtn" class="tool-shortcut" type="button">
-              <span>外包专属格式</span>
-              <small>按外包交付格式生成</small>
-            </button>
-          </div>
+          <button id="waibaoScriptBtn" class="sidebar-text-link sidebar-side-link" type="button">外包专属格式</button>
         </section>
 
         <div class="sidebar-group sidebar-tools-section">
-          <div class="tool-shortcut-list">
           <a
             id="openCommunityPanelLink"
-            class="tool-shortcut"
+            class="sidebar-text-link sidebar-side-link"
             href="{{ url_for('workspace_page', auth_token=current_auth_token, section='community') }}"
-          >
-            <span>社区好剧</span>
-            <small>查看公开成品</small>
-          </a>
-          </div>
+          >社区好剧</a>
         </div>
       </div>
 

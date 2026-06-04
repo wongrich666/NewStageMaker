@@ -2745,9 +2745,13 @@ a {
   align-items: center;
   min-height: 28px;
   padding-left: 6px;
+  border: 0;
   color: #f4bd2d;
   font-size: 13px;
   text-decoration: none;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
 }
 
 .sidebar-text-link:hover {
@@ -2755,13 +2759,23 @@ a {
 }
 
 .sidebar-folder-link {
-  color: #f4bd2d;
-  font-size: 13px;
-  font-weight: 700;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
 }
 
 .workspace-body .tools-folder summary:hover .sidebar-folder-link {
-  color: #ffd977;
+  color: inherit;
+}
+
+.sidebar-side-link {
+  color: #8d8d8d;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sidebar-side-link:hover {
+  color: #d6d6d6;
 }
 
 .sidebar-section-head-compact {
@@ -3743,6 +3757,14 @@ a {
   .workspace-body .composer-field textarea,
   .workspace-body .composer-send-btn,
   .workspace-body .workspace-pick-title {
+    color: #111111;
+  }
+
+  .workspace-body .sidebar-side-link {
+    color: #666666;
+  }
+
+  .workspace-body .sidebar-side-link:hover {
     color: #111111;
   }
 

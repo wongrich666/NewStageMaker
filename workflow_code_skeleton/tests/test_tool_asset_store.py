@@ -166,16 +166,18 @@ class ToolAssetStoreTests(unittest.TestCase):
             for paragraph in Document(str(docx_path)).paragraphs
             if paragraph.text.strip()
         )
-        self.assertIn("剧本标题", text)
         self.assertIn("镜中雪", text)
-        self.assertIn("故事大纲", text)
-        self.assertIn("剧情因果脉络", text)
-        self.assertIn("人物创作原则", text)
-        self.assertIn("核心关系逻辑", text)
-        self.assertIn("人物详情", text)
-        self.assertIn("剧本正文", text)
+        self.assertIn("人物小传纯文本", text)
         self.assertIn("正文一", text)
         self.assertIn("正文二", text)
+        self.assertNotIn("故事大纲", text)
+        self.assertNotIn("剧情因果脉络", text)
+        self.assertNotIn("人物创作原则", text)
+        self.assertNotIn("核心关系逻辑", text)
+        self.assertNotIn("人物详情", text)
+        self.assertNotIn("剧本正文", text)
+        self.assertLess(text.index("人物小传纯文本"), text.index("正文一"))
+        self.assertLess(text.index("正文一"), text.index("正文二"))
 
 
 if __name__ == "__main__":

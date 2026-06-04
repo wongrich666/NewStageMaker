@@ -538,6 +538,10 @@
     return data;
   }
 
+  function delay(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
   function buildHeaders() {
     const headers = { "Content-Type": "application/json" };
     if (authToken) headers.Authorization = `Bearer ${authToken}`;
@@ -5637,16 +5641,33 @@
   }
 
   async function loadKnowledgeTags() {
+    const retryDelays = [400, 900];
     ui.knowledge.loading = true;
-    ui.knowledge.status = "";
+    ui.knowledge.status = ui.knowledge.open ? "正在加载标签..." : "";
     if (ui.knowledge.open) render();
+    let lastError = null;
     try {
-      const data = await requestJson("/api/user-knowledge/tags");
-      ui.knowledge.tags = Array.isArray(data.tags) ? data.tags : [];
-      ui.knowledge.status = ui.knowledge.tags.length ? "" : "暂无可用标签";
-    } catch (error) {
+      for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+        try {
+          const data = await requestJson("/api/user-knowledge/tags");
+          ui.knowledge.tags = Array.isArray(data.tags) ? data.tags : [];
+          ui.knowledge.status = ui.knowledge.tags.length ? "" : "暂无可用标签";
+          lastError = null;
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt >= retryDelays.length) break;
+          if (DEV_LOG_ENABLED && typeof console !== "undefined" && console.warn) {
+            console.warn("[framework_planner] knowledge tags load retry", attempt + 1, error);
+          }
+          await delay(retryDelays[attempt]);
+        }
+      }
       ui.knowledge.tags = [];
-      ui.knowledge.status = error.message || "智慧库标签加载失败，已显示空列表";
+      ui.knowledge.status = "标签暂时未加载，可稍后手动刷新";
+      if (DEV_LOG_ENABLED && lastError && typeof console !== "undefined" && console.warn) {
+        console.warn("[framework_planner] knowledge tags load failed", lastError);
+      }
     } finally {
       ui.knowledge.loading = false;
       render();
@@ -6744,6 +6765,7 @@
 
   render();
   loadKnowledgePreferences().catch(() => {});
+  if (ui.knowledge.open) loadKnowledgeTags().catch(() => {});
   loadAssets().catch(() => {});
   if (DEV_LOG_ENABLED) loadStageHistory(stageKeyForView(state.current_view || "basic")).catch(() => {});
 })();

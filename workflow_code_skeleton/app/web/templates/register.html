@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>注册 - 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260528-assets-ui">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260603-sidebar-links">
 </head>
 <body class="workspace-body mono-page auth-page">
   <main class="chat-workspace-shell prelogin-shell">
@@ -96,21 +96,11 @@
         </section>
 
         <section class="sidebar-group sidebar-tools-section">
-          <div class="tool-shortcut-list">
-            <a class="tool-shortcut" href="{{ url_for('register_page') }}">
-              <span>外包专属格式</span>
-              <small>按外包交付格式生成</small>
-            </a>
-          </div>
+          <a class="sidebar-text-link sidebar-side-link" href="{{ url_for('register_page') }}">外包专属格式</a>
         </section>
 
         <div class="sidebar-group sidebar-tools-section">
-          <div class="tool-shortcut-list">
-            <a class="tool-shortcut" href="{{ url_for('index') }}#community">
-              <span>社区好剧</span>
-              <small>查看公开成品</small>
-            </a>
-          </div>
+          <a class="sidebar-text-link sidebar-side-link" href="{{ url_for('index') }}#community">社区好剧</a>
         </div>
       </div>
 
