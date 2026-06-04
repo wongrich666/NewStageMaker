@@ -135,6 +135,52 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         "logs",
         "cache",
     }
+
+    def _run_framework_to_script_workflow(stage_name: str, variables: dict) -> dict:
+        try:
+            from .services.coze_workflow_client import coze_workflow_client, use_coze_workflow_backend
+        except Exception:
+            coze_enabled = False
+        else:
+            coze_enabled = use_coze_workflow_backend()
+
+        if coze_enabled:
+            from .services.fastgpt_contracts import (
+                STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+                STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
+                STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+                STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
+                STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE,
+                STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+                STAGE_FRAMEWORK_SCENE_DICTIONARY,
+                STAGE_FRAMEWORK_SCRIPT_MEMORY,
+                STAGE_FRAMEWORK_SCRIPT_REVIEW,
+                STAGE_FRAMEWORK_SCRIPT_REWRITE,
+                STAGE_FRAMEWORK_SCRIPT_WRITE,
+            )
+
+            coze_stage_keys = {
+                STAGE_FRAMEWORK_SCENE_DICTIONARY: "stage_08",
+                STAGE_FRAMEWORK_APPEARANCE_MAPPING: "stage_09",
+                STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: "stage_10",
+                STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE: "stage_11_write",
+                STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW: "stage_11_review",
+                STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE: "stage_11_rewrite",
+                STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY: "stage_11_memory",
+                STAGE_FRAMEWORK_SCRIPT_WRITE: "stage_12_write",
+                STAGE_FRAMEWORK_SCRIPT_REVIEW: "stage_12_review",
+                STAGE_FRAMEWORK_SCRIPT_REWRITE: "stage_12_rewrite",
+                STAGE_FRAMEWORK_SCRIPT_MEMORY: "stage_12_memory",
+            }
+            stage_key = coze_stage_keys.get(stage_name)
+            if not stage_key:
+                raise RuntimeError(f"未配置 Coze workflow stage 映射: {stage_name}")
+            return coze_workflow_client.run_stage(stage_key, variables or {})
+
+        from .services.fastgpt_client import fastgpt_client
+
+        return fastgpt_client.run_stage(stage_name, variables or {})
+
     framework_stage_runs: set[tuple[int, str, str]] = set()
     framework_stage_runs_lock = threading.Lock()
 
@@ -2155,10 +2201,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error("08 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
             try:
-                from .services.fastgpt_client import fastgpt_client
                 from .services.fastgpt_contracts import STAGE_FRAMEWORK_SCENE_DICTIONARY
 
-                raw_output = fastgpt_client.run_stage(
+                raw_output = _run_framework_to_script_workflow(
                     STAGE_FRAMEWORK_SCENE_DICTIONARY,
                     variables,
                 )
@@ -2613,10 +2658,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error("09 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
             try:
-                from .services.fastgpt_client import fastgpt_client
                 from .services.fastgpt_contracts import STAGE_FRAMEWORK_APPEARANCE_MAPPING
 
-                raw_output = fastgpt_client.run_stage(
+                raw_output = _run_framework_to_script_workflow(
                     STAGE_FRAMEWORK_APPEARANCE_MAPPING,
                     variables,
                 )
@@ -2856,10 +2900,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error("10 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
             try:
-                from .services.fastgpt_client import fastgpt_client
                 from .services.fastgpt_contracts import STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN
 
-                raw_output = fastgpt_client.run_stage(
+                raw_output = _run_framework_to_script_workflow(
                     STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
                     variables,
                 )
@@ -3023,7 +3066,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             base_vars = {}
             total_episodes = 0
             try:
-                from .services.fastgpt_client import FastGPTStageFormatError, fastgpt_client
+                from .services.fastgpt_client import FastGPTStageFormatError
                 from .services.fastgpt_contracts import (
                     STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
                     STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
@@ -3113,7 +3156,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             write_failure_reason,
                         )
                     try:
-                        write_output = fastgpt_client.run_stage(STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE, base_vars)
+                        write_output = _run_framework_to_script_workflow(STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE, base_vars)
                         write_output_data = write_output if isinstance(write_output, dict) else {}
                         write_output_keys = sorted(write_output_data.keys())
                         conflict_plan, conflict_plan_unwrapped, write_failure_reason = _normalize_dict_output_alias(
@@ -3204,7 +3247,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 for review_round in range(1, max_review_rounds + 1):
                     failed_sub_stage = "causal_conflict_review"
                     try:
-                        review_output = fastgpt_client.run_stage(
+                        review_output = _run_framework_to_script_workflow(
                             STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
                             {
                                 **base_vars,
@@ -3314,7 +3357,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         framework_asset=framework_asset,
                         workflow_stage="11_rewrite",
                     )
-                    rewrite_output = fastgpt_client.run_stage(
+                    rewrite_output = _run_framework_to_script_workflow(
                         STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
                         rewrite_vars,
                     )
@@ -3341,7 +3384,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     )
                 failed_sub_stage = "causal_conflict_memory"
                 try:
-                    memory_output = fastgpt_client.run_stage(
+                    memory_output = _run_framework_to_script_workflow(
                         STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
                         {
                             "batchCausalConflictPlan": conflict_plan,
@@ -3521,7 +3564,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             end_episode = None
             base_vars = {}
             try:
-                from .services.fastgpt_client import fastgpt_client
                 from .services.fastgpt_contracts import (
                     STAGE_CONTRACTS,
                     STAGE_FRAMEWORK_SCRIPT_MEMORY,
@@ -3609,7 +3651,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     stage_names,
                 )
                 failed_sub_stage = "script_write"
-                write_output = fastgpt_client.run_stage(STAGE_FRAMEWORK_SCRIPT_WRITE, base_vars)
+                write_output = _run_framework_to_script_workflow(STAGE_FRAMEWORK_SCRIPT_WRITE, base_vars)
                 write_keys = sorted(write_output.keys()) if isinstance(write_output, dict) else []
                 batch_script_value = _first_present(write_output, "batchScriptText", "batch_script_text", default=None)
                 batch_script = str(batch_script_value or "")
@@ -3640,7 +3682,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 rewrite_round = 0
                 for review_round in range(1, max_review_rounds + 1):
                     failed_sub_stage = "script_review"
-                    review_output = fastgpt_client.run_stage(
+                    review_output = _run_framework_to_script_workflow(
                         STAGE_FRAMEWORK_SCRIPT_REVIEW,
                         {
                             **base_vars,
@@ -3738,7 +3780,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         framework_asset=framework_asset,
                         workflow_stage="12_rewrite",
                     )
-                    rewrite_output = fastgpt_client.run_stage(
+                    rewrite_output = _run_framework_to_script_workflow(
                         STAGE_FRAMEWORK_SCRIPT_REWRITE,
                         rewrite_vars,
                     )
@@ -3765,7 +3807,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             }
                         ), 500
                 failed_sub_stage = "script_memory"
-                memory_output = fastgpt_client.run_stage(
+                memory_output = _run_framework_to_script_workflow(
                     STAGE_FRAMEWORK_SCRIPT_MEMORY,
                     {
                         "batchScriptText": batch_script,

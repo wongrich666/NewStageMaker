@@ -1025,6 +1025,13 @@ def framework_planner_fastgpt_diagnostics(stage: str = "05") -> dict[str, Any]:
 
 def stage_has_real_backend(stage: str) -> bool:
     definition = stage_definition(stage)
+    try:
+        from .coze_workflow_client import coze_workflow_client, use_coze_workflow_backend
+
+        if use_coze_workflow_backend() and coze_workflow_client.workflow_id_for_stage(f"stage_{definition.stage}"):
+            return True
+    except Exception:
+        pass
     for env_name in _stage_api_key_env_names(definition):
         if _env(env_name):
             return True
@@ -1074,100 +1081,80 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
     request_variables = _build_stage_request_variables(definition, normalized_payload, workflow_spec)
     if definition.stage == "05":
         _log_stage_05_input_diagnostics(normalized_payload, request_variables)
+    endpoint: FrameworkPlannerEndpoint | None = None
     try:
-        endpoint = _resolve_stage_endpoint(definition)
-    except FrameworkPlannerStageError as exc:
-        _log_stage_not_entering_fastgpt(
-            definition,
-            diagnostics,
-            reason=exc.detail.get("reason") or str(exc),
-        )
-        stage_error = _build_fastgpt_stage_error(
-            definition=definition,
-            diagnostics=diagnostics,
-            reason=exc.detail.get("reason") or str(exc),
-            status_code=exc.status_code,
-            entered_fastgpt_request=False,
-            exc=exc,
-            extra_detail=exc.detail,
-        )
-        print_stage_debug(
-            definition.stage,
-            {
-                "ok": False,
-                "stage": definition.stage,
-                "status": "failed",
-                "reason": stage_error.detail.get("reason") or str(stage_error),
-                "exception_type": type(exc).__name__,
-                "exception_message": str(exc),
-                "detail": stage_error.detail,
-                "traceback": traceback.format_exc(),
-            },
-            normalized_payload,
-        )
-        raise stage_error from exc
+        from .coze_workflow_client import coze_workflow_client, use_coze_workflow_backend
 
-    logger.info(
-        "FastGPT endpoint resolved: stage=%s url_source=%s endpoint=%s workflow_id_missing_but_api_key_mode_enabled=%s",
-        definition.stage,
-        endpoint.url_source or "default",
-        endpoint.url,
-        not bool(endpoint.workflow_id) and bool(endpoint.api_key),
-    )
-    body = _build_request_body(definition, request_variables, endpoint)
-    headers = {
-        "Authorization": f"Bearer {endpoint.api_key}",
-        "Content-Type": "application/json",
-    }
-    try:
-        response = _post_with_retries(
-            definition,
-            endpoint,
-            headers,
-            body,
-            diagnostics=diagnostics,
-        )
-    except FrameworkPlannerStageError as exc:
-        print_stage_debug(
-            definition.stage,
-            {
-                "ok": False,
-                "stage": definition.stage,
-                "status": "failed",
-                "reason": exc.detail.get("reason") or str(exc),
-                "exception_type": type(exc).__name__,
-                "exception_message": str(exc),
-                "detail": exc.detail,
-                "traceback": traceback.format_exc(),
-            },
-            normalized_payload,
-        )
-        raise
-    response_text = _safe_response_text(response)
-    try:
-        response_json = response.json()
-    except ValueError as exc:
-        _log_stage_output_parse_exception(
-            stage=definition.stage,
-            payload_keys=sorted(normalized_payload.keys()),
-            exc=exc,
-            raw_return_object=response_text,
-        )
-        if definition.stage in {"01", "02", "03", "04", "05"}:
-            response_json = response_text
-        else:
-            debug_detail = _write_debug_artifact(
-                stage=definition.stage,
-                workflow_spec=workflow_spec,
-                request_variables=request_variables,
-                payload=normalized_payload,
-                response_raw=response_text,
-                parse_error="response.json invalid",
+        use_coze_backend = use_coze_workflow_backend()
+    except Exception:
+        use_coze_backend = False
+
+    if use_coze_backend:
+        stage_key = f"stage_{definition.stage}"
+        try:
+            response_json = coze_workflow_client.run_stage(
+                stage_key,
+                normalized_payload,
+                request_variables,
             )
-            logger.warning(
-                "框架策划阶段 %s 返回非法 JSON 响应，payload_keys=%s",
+        except Exception as exc:
+            print_stage_debug(
                 definition.stage,
-                sorted(normalized_payload.keys()),
+                {
+                    "ok": False,
+                    "stage": definition.stage,
+                    "status": "failed",
+                    "reason": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                normalized_payload,
+            )
+            raise FrameworkPlannerStageError(
+                "Coze 工作流调用失败，请检查 COZE_API_TOKEN / COZE_API_BASE / workflow_id 配置",
+                stage=definition.stage,
+                status_code=502,
+                detail={
+                    "reason": str(exc),
+                    "backend": "coze",
+                    "stage_key": stage_key,
+                    "expected_env": f"COZE_WORKFLOW_STAGE_{definition.stage}_ID",
+                },
+            ) from exc
+        endpoint = FrameworkPlannerEndpoint(
+            url="coze://workflow",
+            url_source="WORKFLOW_BACKEND",
+            api_key="",
+            api_key_source="COZE_API_TOKEN",
+            workflow_id=str(response_json.get("workflow_id") or ""),
+            workflow_id_source=f"COZE_WORKFLOW_STAGE_{definition.stage}_ID",
+            chat_id="",
+            timeout=int(os.getenv("COZE_TIMEOUT_SECONDS", "600") or "600"),
+        )
+        logger.info(
+            "Coze workflow resolved: stage=%s stage_key=%s workflow_id=%s",
+            definition.stage,
+            stage_key,
+            endpoint.workflow_id,
+        )
+    else:
+        try:
+            endpoint = _resolve_stage_endpoint(definition)
+        except FrameworkPlannerStageError as exc:
+            _log_stage_not_entering_fastgpt(
+                definition,
+                diagnostics,
+                reason=exc.detail.get("reason") or str(exc),
+            )
+            stage_error = _build_fastgpt_stage_error(
+                definition=definition,
+                diagnostics=diagnostics,
+                reason=exc.detail.get("reason") or str(exc),
+                status_code=exc.status_code,
+                entered_fastgpt_request=False,
+                exc=exc,
+                extra_detail=exc.detail,
             )
             print_stage_debug(
                 definition.stage,
@@ -1175,21 +1162,99 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                     "ok": False,
                     "stage": definition.stage,
                     "status": "failed",
-                    "reason": "FastGPT 返回非法 JSON 响应",
+                    "reason": stage_error.detail.get("reason") or str(stage_error),
                     "exception_type": type(exc).__name__,
                     "exception_message": str(exc),
-                    "response": response_text,
-                    "detail": debug_detail,
+                    "detail": stage_error.detail,
                     "traceback": traceback.format_exc(),
                 },
                 normalized_payload,
             )
-            raise FrameworkPlannerStageError(
-                "当前阶段返回格式异常，请重试或查看日志",
+            raise stage_error from exc
+
+        logger.info(
+            "FastGPT endpoint resolved: stage=%s url_source=%s endpoint=%s workflow_id_missing_but_api_key_mode_enabled=%s",
+            definition.stage,
+            endpoint.url_source or "default",
+            endpoint.url,
+            not bool(endpoint.workflow_id) and bool(endpoint.api_key),
+        )
+        body = _build_request_body(definition, request_variables, endpoint)
+        headers = {
+            "Authorization": f"Bearer {endpoint.api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = _post_with_retries(
+                definition,
+                endpoint,
+                headers,
+                body,
+                diagnostics=diagnostics,
+            )
+        except FrameworkPlannerStageError as exc:
+            print_stage_debug(
+                definition.stage,
+                {
+                    "ok": False,
+                    "stage": definition.stage,
+                    "status": "failed",
+                    "reason": exc.detail.get("reason") or str(exc),
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc),
+                    "detail": exc.detail,
+                    "traceback": traceback.format_exc(),
+                },
+                normalized_payload,
+            )
+            raise
+        response_text = _safe_response_text(response)
+        try:
+            response_json = response.json()
+        except ValueError as exc:
+            _log_stage_output_parse_exception(
                 stage=definition.stage,
-                status_code=502,
-                detail=debug_detail,
-            ) from exc
+                payload_keys=sorted(normalized_payload.keys()),
+                exc=exc,
+                raw_return_object=response_text,
+            )
+            if definition.stage in {"01", "02", "03", "04", "05"}:
+                response_json = response_text
+            else:
+                debug_detail = _write_debug_artifact(
+                    stage=definition.stage,
+                    workflow_spec=workflow_spec,
+                    request_variables=request_variables,
+                    payload=normalized_payload,
+                    response_raw=response_text,
+                    parse_error="response.json invalid",
+                )
+                logger.warning(
+                    "框架策划阶段 %s 返回非法 JSON 响应，payload_keys=%s",
+                    definition.stage,
+                    sorted(normalized_payload.keys()),
+                )
+                print_stage_debug(
+                    definition.stage,
+                    {
+                        "ok": False,
+                        "stage": definition.stage,
+                        "status": "failed",
+                        "reason": "FastGPT 返回非法 JSON 响应",
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                        "response": response_text,
+                        "detail": debug_detail,
+                        "traceback": traceback.format_exc(),
+                    },
+                    normalized_payload,
+                )
+                raise FrameworkPlannerStageError(
+                    "当前阶段返回格式异常，请重试或查看日志",
+                    stage=definition.stage,
+                    status_code=502,
+                    detail=debug_detail,
+                ) from exc
 
     try:
         raw_debug_dir = _repo_root() / "cache" / "raw_fastgpt_debug"
