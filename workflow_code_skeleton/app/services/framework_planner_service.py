@@ -966,7 +966,14 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "checkpoint_explanation": ("checkpoint_explanation",),
             "character_storylines": ("character_storylines",),
             "storyline_decisions": ("storyline_decisions",),
-            "adaptation_guide": ("adaptation_guide",),
+            "adaptation_guide": (
+                "adaptation_guide",
+                "adaptationGuide",
+                "overallAdaptationGuide",
+                "overall_adaptation_guide",
+                "guide",
+                "previous_adaptation_guide",
+            ),
             "user_edit_history": ("user_edit_history",),
             "previous_framework_plan_package": ("previous_framework_plan_package",),
             "user_feedback": ("user_feedback",),
@@ -1617,6 +1624,26 @@ def _build_stage_request_variables(
             value = payload.get("basic_config")
         if field == "basic_config" and _is_blank(value):
             value = payload.get("locked_basic_config")
+        if definition.stage == "07" and field == "adaptation_guide" and _is_blank(value):
+            framework_plan_package = payload.get("framework_plan_package")
+            if isinstance(framework_plan_package, dict):
+                value = (
+                        framework_plan_package.get("adaptation_guide")
+                        or framework_plan_package.get("adaptationGuide")
+                        or framework_plan_package.get("overallAdaptationGuide")
+                        or framework_plan_package.get("overall_adaptation_guide")
+                        or framework_plan_package.get("guide")
+                )
+            if _is_blank(value):
+                value = (
+                        payload.get("adaptation_guide")
+                        or payload.get("adaptationGuide")
+                        or payload.get("overallAdaptationGuide")
+                        or payload.get("overall_adaptation_guide")
+                        or payload.get("guide")
+                        or payload.get("previous_adaptation_guide")
+                )
+
         if field in definition.required_fields and _is_blank(value):
             missing_fields.append(field)
             continue
@@ -4372,7 +4399,14 @@ def _sanitize_framework_plan_package(value: Any) -> dict[str, Any]:
         "checkpoint_explanation": _ensure_object_value(package.get("checkpoint_explanation")),
         "character_storylines": _ensure_list_value(package.get("character_storylines")),
         "storyline_decisions": _ensure_list_value(package.get("storyline_decisions")),
-        "adaptation_guide": _normalize_adaptation_guide(package.get("adaptation_guide")),
+        "adaptation_guide": _normalize_adaptation_guide(
+            package.get("adaptation_guide")
+            or package.get("adaptationGuide")
+            or package.get("overallAdaptationGuide")
+            or package.get("overall_adaptation_guide")
+            or package.get("guide")
+            or package.get("previous_adaptation_guide")
+        ),
         "user_edit_history": _ensure_list_value(package.get("user_edit_history")),
     }
 
@@ -4914,7 +4948,15 @@ def _build_mock_stage_output(stage: str, payload: dict[str, Any]) -> tuple[dict[
             "checkpoint_explanation": payload.get("checkpoint_explanation") or {},
             "character_storylines": selected_storylines,
             "storyline_decisions": payload.get("storyline_decisions") or [],
-            "adaptation_guide": payload.get("adaptation_guide") or {},
+            "adaptation_guide": _normalize_adaptation_guide(
+                payload.get("adaptation_guide")
+                or payload.get("adaptationGuide")
+                or payload.get("overallAdaptationGuide")
+                or payload.get("overall_adaptation_guide")
+                or payload.get("guide")
+                or payload.get("previous_adaptation_guide")
+                or {}
+            ),
             "user_edit_history": payload.get("user_edit_history") or [],
             "handoff_notes": "该策划包已按框架工作台输出，可直接交给正式剧本生成链路。",
             "storage_key": FRAMEWORK_PLANNER_STORAGE_KEY,
