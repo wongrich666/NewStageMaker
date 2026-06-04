@@ -2751,9 +2751,9 @@ startRuntimeDebugPolling();
     };
 
     els.activeProjectList.innerHTML = renderCompactItems(oldScriptProjects, "当前没有老剧本平台资产。");
-    els.completedProjectList.innerHTML = renderCompactItems(frameworkProjects, "当前还没有 01-07 框架资产。");
+    els.completedProjectList.innerHTML = renderCompactItems(frameworkProjects, "当前还没有框架资产。");
     if (els.newScriptProjectList) {
-      els.newScriptProjectList.innerHTML = renderCompactItems(newScriptProjects, "当前还没有 08-12 新剧本资产。");
+      els.newScriptProjectList.innerHTML = renderCompactItems(newScriptProjects, "当前还没有新剧本平台资产。");
     }
     if (els.waibaoProjectList) {
       els.waibaoProjectList.innerHTML = renderCompactItems(waibaoProjects, "当前还没有外包格式专属资产。");
