@@ -24,6 +24,58 @@
   - 已通过审核的分批正文 / 最终正文
 - `characters / scenes / appearance` 的结构化与自然语言结果仍保留在后端状态里给后续流程使用，但不会作为普通用户阶段卡片直接展示。
 
+## Coze / 扣子 / 火山工作流接入说明
+
+安装依赖：
+
+```bash
+pip install -r workflow_code_skeleton/requirements.txt
+```
+
+本地 `.env` 中配置 Coze。不要提交真实 token：
+
+```dotenv
+COZE_API_TOKEN=cztei_xxxx
+COZE_API_BASE=
+COZE_WORKFLOW_CONFIG=
+COZE_TIMEOUT_SECONDS=600
+COZE_DRY_RUN=0
+COZE_WORKFLOW_STAGE_01_ID=
+COZE_WORKFLOW_STAGE_02_ID=
+COZE_WORKFLOW_STAGE_03_ID=
+COZE_WORKFLOW_STAGE_04_ID=
+COZE_WORKFLOW_STAGE_05_ID=
+COZE_WORKFLOW_STAGE_06_ID=
+COZE_WORKFLOW_STAGE_07_ID=
+COZE_WORKFLOW_STAGE_08_ID=
+COZE_WORKFLOW_STAGE_09_ID=
+COZE_WORKFLOW_STAGE_10_ID=
+COZE_WORKFLOW_STAGE_11_WRITE_ID=
+COZE_WORKFLOW_STAGE_11_REVIEW_ID=
+COZE_WORKFLOW_STAGE_11_REWRITE_ID=
+COZE_WORKFLOW_STAGE_11_MEMORY_ID=
+COZE_WORKFLOW_STAGE_12_WRITE_ID=
+COZE_WORKFLOW_STAGE_12_REVIEW_ID=
+COZE_WORKFLOW_STAGE_12_REWRITE_ID=
+COZE_WORKFLOW_STAGE_12_MEMORY_ID=
+```
+
+统一阶段配置位于 `workflow_code_skeleton/config/coze_workflows.yaml`。workflow_id 可以通过环境变量覆盖，新旧变量通过该配置集中映射，业务代码只通过统一 Coze client 调用。
+
+检查配置，不请求 Coze API，也不输出 token：
+
+```bash
+python workflow_code_skeleton/scripts/check_coze_workflows.py
+```
+
+dry-run：
+
+```bash
+COZE_DRY_RUN=1 python main.py
+```
+
+真实调用时设置 `COZE_DRY_RUN=0` 并配置 `COZE_API_TOKEN`。如果新工作流 YAML 导出目录不在仓库根目录的 `BETTER_FRAMEWORK_JSONS`，用 `BETTER_FRAMEWORK_JSONS_DIR` 指向本地目录。11/12 阶段已拆成 write/review/rewrite/memory 四个子工作流，不再使用 `COZE_WORKFLOW_STAGE_11_ID` 和 `COZE_WORKFLOW_STAGE_12_ID`。
+
 ## 项目结构
 
 ```text

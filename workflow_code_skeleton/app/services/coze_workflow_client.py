@@ -7,8 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "coze_workflows.yaml"
+
+load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 class CozeWorkflowError(RuntimeError):
@@ -38,9 +43,8 @@ class CozeStageConfig:
     output_fallbacks: tuple[str, ...]
 
 
-def use_coze_workflow_backend() -> bool:
-    backend = str(os.getenv("WORKFLOW_BACKEND") or "").strip().lower()
-    return backend in {"coze", "volc", "volcano", "coze_workflow", "volc_workflow"}
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
 
 
 def _load_config_file(path: Path) -> dict[str, Any]:
@@ -50,7 +54,7 @@ def _load_config_file(path: Path) -> dict[str, Any]:
     except json.JSONDecodeError:
         try:
             import yaml  # type: ignore
-        except Exception as exc:  # pragma: no cover
+        except Exception as exc:  # pragma: no cover - only hit without JSON config
             raise CozeWorkflowError(
                 f"Coze workflow config must be JSON-compatible YAML or PyYAML must be installed: {path}"
             ) from exc
@@ -64,9 +68,9 @@ def _jsonable(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, dict):
-        return {str(key): _jsonable(val) for key, val in value.items()}
+        return {str(k): _jsonable(v) for k, v in value.items()}
     if isinstance(value, (list, tuple, set)):
-        return [_jsonable(item) for item in value]
+        return [_jsonable(v) for v in value]
     return str(value)
 
 
@@ -114,29 +118,6 @@ def _first_text(value: Any, keys: tuple[str, ...]) -> str:
     return ""
 
 
-def _event_to_jsonable(value: Any) -> Any:
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, dict):
-        return {str(key): _event_to_jsonable(val) for key, val in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [_event_to_jsonable(item) for item in value]
-    for attr in ("model_dump", "dict", "to_dict"):
-        method = getattr(value, attr, None)
-        if callable(method):
-            try:
-                return _event_to_jsonable(method())
-            except Exception:
-                pass
-    if hasattr(value, "__dict__"):
-        return {
-            str(key): _event_to_jsonable(val)
-            for key, val in vars(value).items()
-            if not str(key).startswith("_")
-        }
-    return str(value)
-
-
 class CozeWorkflowClient:
     def __init__(self, config_path: str | os.PathLike[str] | None = None) -> None:
         env_config = os.getenv("COZE_WORKFLOW_CONFIG")
@@ -149,7 +130,7 @@ class CozeWorkflowClient:
         )
         self.dry_run = str(
             os.getenv(str(self.config.get("dry_run_env") or "COZE_DRY_RUN"), "0")
-        ).strip().lower() in {"1", "true", "yes", "on"}
+        ).strip() in {"1", "true", "TRUE", "yes", "on"}
         self._coze: Any = None
 
     def run_stage(
@@ -157,18 +138,21 @@ class CozeWorkflowClient:
         stage_key: str,
         project_state: dict[str, Any] | None = None,
         parameters: dict[str, Any] | None = None,
-        *,
         stream: bool = True,
     ) -> dict[str, Any]:
-        built = self.build_parameters(stage_key, project_state or {}, parameters)
-        workflow_id = self.workflow_id_for_stage(stage_key)
-        return self.run_workflow_by_id(workflow_id, parameters=built, stream=stream, stage_key=stage_key)
+        stage = self.stage_config(stage_key)
+        built = self.build_parameters(stage.key, project_state or {}, parameters)
+        return self.run_workflow_by_id(
+            self.workflow_id_for_stage(stage.key),
+            parameters=built,
+            stream=stream,
+            stage_key=stage.key,
+        )
 
     def run_workflow_by_id(
         self,
         workflow_id: str,
         parameters: dict[str, Any] | None = None,
-        *,
         stream: bool = True,
         stage_key: str = "",
     ) -> dict[str, Any]:
@@ -191,6 +175,7 @@ class CozeWorkflowClient:
                 stage_key=stage_key,
                 workflow_id=workflow_id,
             )
+
         coze = self._client()
         try:
             if stream:
@@ -198,7 +183,10 @@ class CozeWorkflowClient:
                 messages: list[str] = []
                 from cozepy import WorkflowEventType
 
-                for event in coze.workflows.runs.stream(workflow_id=workflow_id, parameters=safe_parameters):
+                for event in coze.workflows.runs.stream(
+                    workflow_id=workflow_id,
+                    parameters=safe_parameters,
+                ):
                     raw_events.append(event)
                     event_type = getattr(event, "event", None) or getattr(event, "type", None)
                     data = getattr(event, "message", None) or getattr(event, "data", None) or event
@@ -220,10 +208,7 @@ class CozeWorkflowClient:
                             workflow_id=workflow_id,
                             error=_event_to_jsonable(data),
                         )
-                raw: Any = {
-                    "events": [_event_to_jsonable(item) for item in raw_events],
-                    "content": "".join(messages),
-                }
+                raw: Any = {"events": [_event_to_jsonable(item) for item in raw_events], "content": "".join(messages)}
             else:
                 raw = coze.workflows.runs.create(workflow_id=workflow_id, parameters=safe_parameters)
         except CozeWorkflowError:
@@ -257,17 +242,14 @@ class CozeWorkflowClient:
         raw_jsonable = _event_to_jsonable(raw_response)
         content = _first_text(raw_jsonable, ("content", "answerText", "textOutput", "message", "data", "output", "result"))
         parsed = _try_json_loads(content) if content else _try_json_loads(raw_jsonable)
+        stage = self.stage_config(stage_key) if stage_key else None
         normalized: dict[str, Any] = {
             "stage_key": stage_key,
             "workflow_id": workflow_id,
             "ok": True,
             "content": content,
-            "answerText": content,
-            "textOutput": content,
             "parsed": parsed,
             "raw_response": raw_jsonable,
-            "responseData": raw_jsonable if isinstance(raw_jsonable, dict) else {"raw": raw_jsonable},
-            "newVariables": {},
             "error": None,
         }
         if isinstance(parsed, dict):
@@ -275,27 +257,8 @@ class CozeWorkflowClient:
         elif isinstance(raw_jsonable, dict):
             normalized.update(raw_jsonable)
 
-        stage = self.stage_config(stage_key) if stage_key else None
         if stage:
             self._apply_output_mapping(normalized, parsed, raw_jsonable, stage)
-        normalized["newVariables"] = {
-            key: value
-            for key, value in normalized.items()
-            if key
-            not in {
-                "stage_key",
-                "workflow_id",
-                "ok",
-                "content",
-                "answerText",
-                "textOutput",
-                "parsed",
-                "raw_response",
-                "responseData",
-                "newVariables",
-                "error",
-            }
-        }
         return normalized
 
     def stage_config(self, stage_key: str) -> CozeStageConfig:
@@ -363,6 +326,29 @@ class CozeWorkflowClient:
         base_url = os.getenv(self.base_url_env) or COZE_CN_BASE_URL
         self._coze = Coze(auth=TokenAuth(token=token), base_url=base_url)
         return self._coze
+
+
+def _event_to_jsonable(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _event_to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_event_to_jsonable(v) for v in value]
+    for attr in ("model_dump", "dict", "to_dict"):
+        method = getattr(value, attr, None)
+        if callable(method):
+            try:
+                return _event_to_jsonable(method())
+            except Exception:
+                pass
+    if hasattr(value, "__dict__"):
+        return {
+            str(k): _event_to_jsonable(v)
+            for k, v in vars(value).items()
+            if not str(k).startswith("_")
+        }
+    return str(value)
 
 
 coze_workflow_client = CozeWorkflowClient()
