@@ -212,6 +212,67 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
         return state if isinstance(state, dict) else {}
 
+    def _framework_payload_source_text(data: dict) -> str:
+        if not isinstance(data, dict):
+            return ""
+        source_text = str(data.get("source_text") or "").strip()
+        if source_text:
+            return source_text
+        basic = data.get("basic_config") if isinstance(data.get("basic_config"), dict) else {}
+        return str(basic.get("source_text") or "").strip()
+
+    def _restore_framework_payload_source_text(data: dict, user_id: int) -> tuple[str, list[str]]:
+        tried_fields: list[str] = []
+        if not isinstance(data, dict):
+            return "", tried_fields
+        raw_project_id = data.get("project_id") or data.get("asset_id") or data.get("source_framework_project_id")
+        try:
+            project_id_int = int(str(raw_project_id or "").strip())
+        except Exception:
+            project_id_int = 0
+        if project_id_int <= 0:
+            return "", tried_fields
+        try:
+            project = task_manager.get_project_snapshot(project_id_int, user_id=user_id, public_view=False)
+        except Exception:
+            project = None
+        if not isinstance(project, dict):
+            return "", tried_fields
+
+        framework_state = _framework_state_from_project(project)
+        artifacts = project.get("artifacts") if isinstance(project.get("artifacts"), dict) else {}
+        input_payload = project.get("input_payload") if isinstance(project.get("input_payload"), dict) else {}
+        artifact_state = artifacts.get("framework_planner_state") if isinstance(artifacts.get("framework_planner_state"), dict) else {}
+        artifact_basic = artifact_state.get("basic_config") if isinstance(artifact_state.get("basic_config"), dict) else {}
+        candidates = [
+            ("framework_state.basic_config.source_text", (framework_state.get("basic_config") if isinstance(framework_state.get("basic_config"), dict) else {}).get("source_text")),
+            ("framework_state.source_text", framework_state.get("source_text")),
+            ("input_payload.basic_config.source_text", (input_payload.get("basic_config") if isinstance(input_payload.get("basic_config"), dict) else {}).get("source_text")),
+            ("input_payload.source_text", input_payload.get("source_text")),
+            ("input_payload.description", input_payload.get("description")),
+            ("input_payload.story_outline", input_payload.get("story_outline")),
+            ("artifacts.framework_planner_state.basic_config.source_text", artifact_basic.get("source_text")),
+        ]
+        for field, value in candidates:
+            tried_fields.append(field)
+            text = str(value or "").strip()
+            if text:
+                return text, tried_fields
+        return "", tried_fields
+
+    def _ensure_framework_stage_source_text(data: dict, user_id: int) -> tuple[str, list[str]]:
+        source_text = _framework_payload_source_text(data)
+        tried_fields: list[str] = []
+        if source_text:
+            return source_text, tried_fields
+        restored, tried_fields = _restore_framework_payload_source_text(data, user_id)
+        if restored and isinstance(data, dict):
+            data["source_text"] = restored
+            basic = data.get("basic_config") if isinstance(data.get("basic_config"), dict) else {}
+            data["basic_config"] = {**basic, "source_text": restored}
+            return restored, tried_fields
+        return "", tried_fields
+
     def _framework_stage_outputs(framework_state: dict) -> dict:
         package = framework_state.get("framework_plan_package") if isinstance(framework_state.get("framework_plan_package"), dict) else {}
         outputs = {
@@ -1336,6 +1397,35 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 result.append(tag)
         return result
 
+    def _hydrate_user_knowledge_preferences(data: dict, *, user_id: int | str) -> tuple[list[dict], list[str], dict]:
+        selected_tags = _coerce_tag_list(data.get("selected_preference_tags"))
+        selected_ids = _coerce_string_list(data.get("selected_preference_tag_ids"))
+        if selected_tags and not selected_ids:
+            selected_ids = [tag["id"] for tag in selected_tags if tag.get("id")]
+
+        if selected_ids and not selected_tags:
+            applied = user_knowledge_store.apply_tags(
+                selected_ids,
+                existing_user_preference=data.get("user_preference_prompt") or "",
+            )
+            selected_tags = _coerce_tag_list(applied.get("selected_tags"))
+            selected_ids = _coerce_string_list(applied.get("selected_preference_tag_ids") or selected_ids)
+            stage_prompts = _coerce_stage_prompts(applied.get("stage_prompts"))
+        else:
+            stage_prompts = _coerce_stage_prompts({})
+
+        if not selected_tags:
+            selected_tags = _resolve_saved_preference_tags(user_id, selected_ids)
+            if selected_tags and not selected_ids:
+                selected_ids = [tag["id"] for tag in selected_tags if tag.get("id")]
+            if selected_tags and not any(stage_prompts.values()):
+                applied = user_knowledge_store.apply_tags(
+                    selected_ids,
+                    existing_user_preference=data.get("user_preference_prompt") or "",
+                )
+                stage_prompts = _coerce_stage_prompts(applied.get("stage_prompts"))
+        return selected_tags, selected_ids, stage_prompts
+
     def _inject_stage_preference_variables(variables: dict, data: dict, stage: str, *, user_id: int | str) -> dict:
         selected_tags = _coerce_tag_list(data.get("selected_preference_tags"))
         selected_ids = _coerce_string_list(data.get("selected_preference_tag_ids"))
@@ -1380,10 +1470,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         return variables
 
     def _attach_user_knowledge_payload(payload: dict, data: dict, stage: str | None = None) -> None:
-        selected_tags = _coerce_tag_list(data.get("selected_preference_tags"))
-        selected_ids = _coerce_string_list(data.get("selected_preference_tag_ids"))
-        if not selected_ids and selected_tags:
-            selected_ids = [tag["id"] for tag in selected_tags if tag.get("id")]
+        selected_tags, selected_ids, hydrated_stage_prompts = _hydrate_user_knowledge_preferences(
+            data,
+            user_id=_require_user_id(),
+        )
         payload["selected_preference_tags"] = selected_tags
         payload["selected_preference_tag_ids"] = selected_ids
         payload["user_preference_prompt"] = _coerce_prompt_text(data.get("user_preference_prompt"))
@@ -1394,13 +1484,22 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         stage_prompt_source = data.get("user_knowledge_stage_prompts")
         if not isinstance(stage_prompt_source, dict):
             stage_prompt_source = prompt_preferences.get("stage_prompts")
-        payload["user_knowledge_stage_prompts"] = _coerce_stage_prompts(stage_prompt_source)
+        user_knowledge_stage_prompts = _coerce_stage_prompts(stage_prompt_source)
+        if selected_ids and not any(user_knowledge_stage_prompts.values()) and not any(prompt_preferences["stage_prompts"].values()):
+            user_knowledge_stage_prompts = hydrated_stage_prompts
+            prompt_preferences["stage_prompts"] = hydrated_stage_prompts
+        elif selected_ids and not any(user_knowledge_stage_prompts.values()) and any(prompt_preferences["stage_prompts"].values()):
+            user_knowledge_stage_prompts = prompt_preferences["stage_prompts"]
+        elif selected_ids and any(user_knowledge_stage_prompts.values()) and not any(prompt_preferences["stage_prompts"].values()):
+            prompt_preferences["stage_prompts"] = user_knowledge_stage_prompts
+        payload["user_knowledge_stage_prompts"] = user_knowledge_stage_prompts
         payload["prompt_preferences"] = prompt_preferences
         stage_key = _framework_planner_stage_key(stage)
         current_stage_prompt = payload["user_knowledge_stage_prompts"].get(stage_key, "") if stage_key else ""
         if current_stage_prompt:
             payload["stage_preference_prompt"] = current_stage_prompt
             payload["user_stage_preference_prompt"] = current_stage_prompt
+            payload["user_knowledge_stage_prompt"] = current_stage_prompt
             payload["user_preference_prompt"] = current_stage_prompt
         if any(key in data for key in ("selected_preference_tags", "selected_preference_tag_ids", "user_preference_prompt", "user_knowledge_tag_prompt", "user_knowledge_stage_prompts", "prompt_preferences")):
             selected_prompt, tags_with_preference_count = _stage_preference_from_tags(stage or "", selected_tags)
@@ -1844,6 +1943,37 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
         try:
             user_id = _require_user_id()
+            if isinstance(data, dict):
+                source_text, tried_restore_fields = _ensure_framework_stage_source_text(data, user_id)
+                basic_config = data.get("basic_config") if isinstance(data.get("basic_config"), dict) else {}
+                project_title = str(
+                    data.get("project_title")
+                    or basic_config.get("project_title")
+                    or data.get("title")
+                    or basic_config.get("source_title")
+                    or ""
+                ).strip()
+                logger.info(
+                    "framework planner source_text guard: stage=%s project_id=%s project_title=%s source_text_length=%s tried_restore_fields=%s",
+                    str(stage).zfill(2),
+                    data.get("project_id"),
+                    project_title,
+                    len(source_text),
+                    tried_restore_fields,
+                )
+                data["tried_restore_fields_debug"] = tried_restore_fields
+                if not source_text:
+                    return _framework_planner_error(
+                        str(stage).zfill(2),
+                        "当前剧本尚未创建或原文为空，请先填写剧本内容。",
+                        status=400,
+                        detail={
+                            "project_id": data.get("project_id"),
+                            "project_title": project_title,
+                            "source_text_length": 0,
+                            "tried_restore_fields": tried_restore_fields,
+                        },
+                    )
             payload = run_framework_planner_stage(stage, data)
             payload["history"] = save_framework_stage_history(
                 project_id=project_id,

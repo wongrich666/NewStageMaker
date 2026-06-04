@@ -1823,6 +1823,21 @@
       .filter(Boolean);
   }
 
+  async function hydrateSelectedKnowledgeTagsBeforeStage() {
+    const selectedIds = (ui.knowledge.selectedIds || []).map((item) => String(item || "").trim()).filter(Boolean);
+    if (!selectedIds.length) return;
+    const loadedIds = new Set((ui.knowledge.tags || []).map((tag) => String(tag.id || "")));
+    const missingSelected = selectedIds.some((id) => !loadedIds.has(id));
+    if (!missingSelected) return;
+    try {
+      await loadKnowledgeTags();
+    } catch (error) {
+      if (DEV_LOG_ENABLED && typeof console !== "undefined" && console.warn) {
+        console.warn("[framework_planner] selected preference tag hydration failed", error);
+      }
+    }
+  }
+
   function mergeSelectedKnowledgeStagePrompts(tags) {
     const result = normalizeStagePrompts({});
     (tags || []).forEach((tag) => {
@@ -4616,6 +4631,97 @@
     });
   }
 
+  function currentSourceText() {
+    syncBasicConfigFromDom();
+    return String(((state.basic_config || {}).source_text) || "").trim();
+  }
+
+  function currentProjectTitleForSave() {
+    syncBasicConfigFromDom();
+    const basic = state.basic_config || {};
+    return String(basic.project_title || basic.source_title || "未命名项目").trim() || "未命名项目";
+  }
+
+  function restoreSourceTextFromProjectSnapshot(project) {
+    if (!project || typeof project !== "object") return "";
+    const input = project.input_payload && typeof project.input_payload === "object" ? project.input_payload : {};
+    const artifacts = project.artifacts && typeof project.artifacts === "object" ? project.artifacts : {};
+    const frameworkState = project.framework_planner_state
+      || input.framework_planner_state
+      || artifacts.framework_planner_state
+      || {};
+    const basic = frameworkState && typeof frameworkState.basic_config === "object" ? frameworkState.basic_config : {};
+    const artifactState = artifacts.framework_planner_state && typeof artifacts.framework_planner_state === "object"
+      ? artifacts.framework_planner_state
+      : {};
+    const artifactBasic = artifactState.basic_config && typeof artifactState.basic_config === "object" ? artifactState.basic_config : {};
+    const candidates = [
+      basic.source_text,
+      frameworkState.source_text,
+      input.basic_config && input.basic_config.source_text,
+      input.source_text,
+      input.description,
+      input.story_outline,
+      artifactBasic.source_text,
+    ];
+    for (const value of candidates) {
+      const text = String(value || "").trim();
+      if (text) {
+        state.basic_config.source_text = text;
+        return text;
+      }
+    }
+    return "";
+  }
+
+  async function ensureCurrentSourceTextBeforeStage() {
+    let sourceText = currentSourceText();
+    if (sourceText || !hasSavedFrameworkProjectId()) return sourceText;
+    try {
+      const data = await requestJson(`/api/projects/${encodeURIComponent(currentProjectId())}`);
+      sourceText = restoreSourceTextFromProjectSnapshot(data.project || {});
+      if (sourceText) {
+        saveState();
+        render();
+      }
+    } catch (error) {
+      if (DEV_LOG_ENABLED && typeof console !== "undefined" && console.warn) {
+        console.warn("[framework_planner] source_text restore before stage failed", error);
+      }
+    }
+    return sourceText;
+  }
+
+  async function ensureSavedProjectBeforeStage(stageKey) {
+    syncBasicConfigFromDom();
+    await hydrateSelectedKnowledgeTagsBeforeStage();
+    const sourceText = await ensureCurrentSourceTextBeforeStage();
+    if (!sourceText) {
+      throw new Error("请先填写剧本原文/设定内容");
+    }
+    if (!String((state.basic_config || {}).project_title || "").trim()) {
+      state.basic_config.project_title = currentProjectTitleForSave();
+    }
+    if (!String((state.basic_config || {}).source_title || "").trim()) {
+      state.basic_config.source_title = state.basic_config.project_title;
+    }
+    if (hasSavedFrameworkProjectId()) {
+      return currentProjectId();
+    }
+    const asset = await saveFrameworkAsset({ silent: true, skipDirtyCheck: true });
+    const projectId = currentProjectId();
+    debugFrontendEvent("stage_auto_saved_project", frameworkAssetSavePayload(), {
+      stageKey,
+      project_id: projectId,
+      source_text_length: sourceText.length,
+      asset_project_id: asset && (asset.project_id || asset.asset_id || asset.id || ""),
+    });
+    if (!hasSavedFrameworkProjectId()) {
+      throw new Error("自动创建项目失败：project_id 缺失");
+    }
+    return projectId;
+  }
+
   function collectNewScriptFormFromDom() {
     const next = Object.assign({}, ui.newScriptForm || {});
     app.querySelectorAll("[data-new-script-field]").forEach((field) => {
@@ -4879,7 +4985,11 @@
     render();
     try {
       await waitForPaint();
+      await ensureSavedProjectBeforeStage(stageKey);
       const payload = cleanOutgoingPayload(attachProjectContext(attachKnowledgePayload(buildStagePayload(stageKey, options || {}), stageKey)), `stage${stageNo} payload`);
+      if (!String(payload.source_text || (payload.basic_config && payload.basic_config.source_text) || "").trim()) {
+        throw new Error("请先填写剧本原文/设定内容");
+      }
       debugFrontendEvent(`stage${stageNo}_request`, payload, {
         stageKey,
         stageNo,
@@ -5570,6 +5680,42 @@
     saveState();
     savePromptPreferences("clear_input");
     render();
+  }
+
+  function beginNewScriptEditingState() {
+    const preservedPromptPreferences = normalizePromptPreferences(state.prompt_preferences || loadPromptPreferences() || {});
+    const preservedKnowledge = {
+      tags: Array.isArray(ui.knowledge.tags) ? ui.knowledge.tags.slice() : [],
+      selectedIds: Array.isArray(ui.knowledge.selectedIds) ? ui.knowledge.selectedIds.map(String) : [],
+      open: Boolean(ui.knowledge.open),
+      status: ui.knowledge.status || "",
+      tagPromptText: ui.knowledge.tagPromptText || "",
+    };
+    const assetImporting = ui.assetImporting;
+    resetTransientUi();
+    state = clone(initialState);
+    state.prompt_preferences = preservedPromptPreferences;
+    state.project_id = null;
+    state.asset_state = clone(initialState.asset_state);
+    state.display_texts = {};
+    state.raw_stage_responses = {};
+    state.stage_state = clone(initialState.stage_state);
+    state.current_view = "basic";
+    ui.assetImporting = assetImporting;
+    ui.knowledge.tags = preservedKnowledge.tags;
+    ui.knowledge.selectedIds = preservedKnowledge.selectedIds;
+    ui.knowledge.open = preservedKnowledge.open;
+    ui.knowledge.status = preservedKnowledge.status;
+    ui.knowledge.tagPromptText = preservedKnowledge.tagPromptText;
+    ui.showNewScriptModal = false;
+    ui.stageHistory = {};
+    ui.stageHistoryLoading = {};
+    ui.stageErrors = {};
+    syncStageFlow(state);
+    saveState();
+    clearDirty();
+    render();
+    showToast("已进入新剧本编辑状态，请填写标题和剧本原文/设定内容");
   }
 
   function canClearFrameworkInput() {
@@ -6528,16 +6674,13 @@
     if (action === "open-new-script") {
       if (promptUnsaved("新建框架项目", {
         save: () => {
-          ui.showNewScriptModal = true;
-          render();
+          beginNewScriptEditingState();
         },
         discard: () => {
-          ui.showNewScriptModal = true;
-          render();
+          beginNewScriptEditingState();
         },
       })) return;
-      ui.showNewScriptModal = true;
-      render();
+      beginNewScriptEditingState();
       return;
     }
     if (action === "close-new-script") {

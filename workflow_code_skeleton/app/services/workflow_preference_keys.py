@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -61,11 +62,24 @@ COMMON_PREFERENCE_KEYS: tuple[str, ...] = (
 )
 
 
+def _find_repo_root(start: Path | None = None) -> Path:
+    current = (start or Path(__file__)).resolve()
+    if current.is_file():
+        current = current.parent
+    for candidate in (current, *current.parents):
+        if (candidate / ".git").exists() or (candidate / "workflow_code_skeleton").exists():
+            return candidate
+    return Path(__file__).resolve().parent
+
+
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return _find_repo_root(Path(__file__))
 
 
 def _workflow_root() -> Path:
+    configured = os.getenv("BETTER_FRAMEWORK_JSONS_DIR")
+    if configured:
+        return Path(configured).expanduser().resolve()
     return _repo_root() / "BETTER_FRAMEWORK_JSONS"
 
 

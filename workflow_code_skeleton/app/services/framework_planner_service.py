@@ -93,8 +93,21 @@ FIFTEEN_BEAT_NAMES = (
 )
 
 
+def _find_repo_root(start: Path | None = None) -> Path:
+    current = (start or Path(__file__)).resolve()
+    if current.is_file():
+        current = current.parent
+    for candidate in (current, *current.parents):
+        has_git = (candidate / ".git").exists()
+        has_workflow = (candidate / "workflow_code_skeleton").exists()
+        has_better_framework = (candidate / "BETTER_FRAMEWORK_JSONS").exists()
+        if has_git or (has_workflow and has_better_framework) or has_workflow:
+            return candidate
+    return Path(__file__).resolve().parent
+
+
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return _find_repo_root(Path(__file__))
 
 
 def _safe_project_history_name(value: Any) -> str:
@@ -1041,6 +1054,30 @@ def stage_has_real_backend(stage: str) -> bool:
 def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> dict[str, Any]:
     definition = stage_definition(stage)
     normalized_payload = _ensure_payload_project_title(_normalize_payload(payload))
+    source_text_length = _source_text_length_from_payload(normalized_payload)
+    project_id = normalized_payload.get("project_id", "")
+    project_title = _payload_project_name(normalized_payload)
+    tried_restore_fields = normalized_payload.get("tried_restore_fields") or normalized_payload.get("tried_restore_fields_debug") or []
+    logger.info(
+        "framework planner service source_text guard: stage=%s project_id=%s project_title=%s source_text_length=%s tried_restore_fields=%s",
+        definition.stage,
+        project_id,
+        project_title,
+        source_text_length,
+        tried_restore_fields,
+    )
+    if source_text_length <= 0:
+        raise FrameworkPlannerStageError(
+            "当前剧本尚未创建或原文为空，请先填写剧本内容。",
+            stage=definition.stage,
+            status_code=400,
+            detail={
+                "project_id": project_id,
+                "project_title": project_title,
+                "source_text_length": 0,
+                "tried_restore_fields": tried_restore_fields,
+            },
+        )
     print(
         "[framework_planner_entry] "
         f"stage={definition.stage} project_name={_payload_project_name(normalized_payload)} "
@@ -1498,17 +1535,55 @@ def run_framework_planner_score(payload: dict[str, Any] | None) -> dict[str, Any
 
 @lru_cache(maxsize=1)
 def framework_workflow_dir() -> Path:
-    configured = _env("FRAMEWORK_PLANNER_WORKFLOW_DIR")
+    repo_root = _repo_root()
+    configured = _env("BETTER_FRAMEWORK_JSONS_DIR")
+    tried_paths: list[Path] = []
     if configured:
-        path = Path(configured).expanduser().resolve()
+        configured_path = Path(configured).expanduser()
+        configured_candidates = (
+            [configured_path]
+            if configured_path.is_absolute()
+            else [repo_root / configured_path, Path.cwd() / configured_path]
+        )
+        path = configured_candidates[0].resolve()
+        for candidate in configured_candidates:
+            resolved = candidate.resolve()
+            if resolved not in tried_paths:
+                tried_paths.append(resolved)
+            if resolved.exists():
+                path = resolved
+                break
     else:
-        path = Path(__file__).resolve().parents[3] / "BETTER_FRAMEWORK_JSONS"
+        expected = repo_root / "BETTER_FRAMEWORK_JSONS"
+        tried_paths.append(expected)
+        path = expected
+        legacy_configured = _env("FRAMEWORK_PLANNER_WORKFLOW_DIR")
+        if not path.exists() and legacy_configured:
+            legacy_path = Path(legacy_configured).expanduser()
+            legacy_candidates = [
+                legacy_path if legacy_path.is_absolute() else (repo_root / legacy_path),
+                legacy_path.resolve(),
+            ]
+            for candidate in legacy_candidates:
+                resolved = candidate.resolve()
+                if resolved not in tried_paths:
+                    tried_paths.append(resolved)
+                if resolved.exists():
+                    path = resolved
+                    break
     if not path.exists():
         raise FrameworkPlannerStageError(
             "未找到 BETTER_FRAMEWORK_JSONS 工作流目录",
             stage="00",
             status_code=500,
-            detail={"workflow_dir": str(path)},
+            detail={
+                "cwd": str(Path.cwd()),
+                "repo_root": str(repo_root),
+                "tried_paths": [str(item) for item in tried_paths],
+                "workflow_dir": str(path),
+                "expected_workflow_dir": str(repo_root / "BETTER_FRAMEWORK_JSONS"),
+                "expected workflow_dir": str(repo_root / "BETTER_FRAMEWORK_JSONS"),
+            },
         )
     return path
 
@@ -1536,6 +1611,7 @@ def resolve_stage_workflow_path(stage: str) -> Path:
             detail={
                 "workflow_dir": str(framework_workflow_dir()),
                 "workflow_glob": definition.workflow_glob,
+                "tried_paths": [str(framework_workflow_dir() / definition.workflow_glob)],
             },
         )
     return matches[0]

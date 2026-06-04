@@ -87,6 +87,66 @@ class ServerFrameworkPlannerApiTests(unittest.TestCase):
         self.assertEqual(data["stage"], "04")
         self.assertEqual(len(data["data"]["beat_checkpoint_timeline"]), 15)
 
+    def test_stage_api_hydrates_preferences_from_selected_tag_ids(self) -> None:
+        stage_prompts = {
+            "basic": "basic hydrated preference",
+            "worldview": "",
+            "character": "",
+            "beat": "",
+            "storylines": "",
+            "guide": "",
+            "package": "",
+            "scene": "",
+            "appearance": "",
+            "episode": "",
+            "conflict": "",
+            "script_text": "",
+        }
+        selected_tag = {
+            "id": "tag-a",
+            "name": "tag a",
+            "category": "",
+            "builtin": False,
+            "prompt_text": "",
+            "stage_prompts": stage_prompts,
+        }
+        fake_payload = {"ok": True, "stage": "01", "data": {"source_brief": {}}, "display_text": ""}
+        with (
+            patch(
+                "workflow_code_skeleton.app.server.user_knowledge_store.apply_tags",
+                return_value={
+                    "selected_tags": [selected_tag],
+                    "selected_preference_tag_ids": ["tag-a"],
+                    "stage_prompts": stage_prompts,
+                },
+            ),
+            patch("workflow_code_skeleton.app.server.run_framework_planner_stage", return_value=fake_payload) as mocked,
+        ):
+            response = self.client.post(
+                "/api/framework-planner/stage/01",
+                headers=self.headers,
+                json={
+                    "mode": "create",
+                    "basic_config": _basic_config(),
+                    "source_text": "source",
+                    "selected_preference_tag_ids": ["tag-a"],
+                    "selected_preference_tags": [],
+                    "prompt_preferences": {"stage_prompts": {}},
+                    "user_knowledge_stage_prompts": {},
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        input_payload = mocked.call_args.args[1]
+        self.assertEqual(input_payload["selected_preference_tag_ids"], ["tag-a"])
+        self.assertEqual(input_payload["selected_preference_tags"][0]["id"], "tag-a")
+        self.assertEqual(input_payload["user_knowledge_stage_prompts"]["basic"], "basic hydrated preference")
+        self.assertEqual(input_payload["prompt_preferences"]["stage_prompts"]["basic"], "basic hydrated preference")
+        self.assertEqual(input_payload["stage_preference_prompt"], "basic hydrated preference")
+        self.assertEqual(input_payload["user_stage_preference_prompt"], "basic hydrated preference")
+        self.assertEqual(input_payload["user_knowledge_stage_prompt"], "basic hydrated preference")
+        self.assertEqual(input_payload["user_preference_prompt"], "basic hydrated preference")
+
     def test_stage_04_score_api_returns_string_report(self) -> None:
         with patch.dict(os.environ, {"FRAMEWORK_PLANNER_USE_MOCK": "true"}, clear=False):
             beat_payload = self.client.post(
