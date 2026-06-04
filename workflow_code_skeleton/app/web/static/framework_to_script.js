@@ -140,6 +140,8 @@
         importedFrameworkAsset: state.importedFrameworkAsset,
         frameworkPlanPackage: state.frameworkPlanPackage,
         stageOutputs: state.stageOutputs,
+        stages: state.stages,
+        completedStages: state.completedStages,
         settings: state.settings,
         scriptStages: state.scriptStages,
         frameworkSource: state.frameworkSource,
@@ -564,6 +566,24 @@
       textNotInPlan,
       normalizedPlan,
     };
+  }
+
+  function stage10ReadyForStage11(stage10) {
+    const plan = stage10Plan(stage10 || {});
+    if (!hasContent(plan)) return { ok: false, validation: { ok: false, issues: ["缺少 allEnrichedEpisodePlan"] } };
+    const completed = new Set((state.completedStages || []).map((item) => String(item)));
+    if (completed.has("10")) {
+      return { ok: true, validation: (stage10 || {}).episodeValidation || { ok: true, issues: [] } };
+    }
+    if ((stage10 || {}).episodeValidation && (stage10 || {}).episodeValidation.ok) {
+      return { ok: true, validation: (stage10 || {}).episodeValidation };
+    }
+    const validation = validateStage10Completeness(
+      plan,
+      stage10Text(stage10 || {}),
+      inferTotalEpisodes(plan, state.importedFrameworkAsset)
+    );
+    return { ok: validation.ok, validation };
   }
 
   function textOrEmpty(value) {
@@ -1173,9 +1193,10 @@
       render();
       return;
     }
-    const validation = validateStage10Completeness(allEnrichedEpisodePlan, stage10Text(stage10), inferTotalEpisodes(allEnrichedEpisodePlan, state.importedFrameworkAsset));
-    if (!validation.ok) {
-      state.error = `10 分集细化校验未通过，不能进入 11：${validation.issues.join("；")}`;
+    const stage10Gate = stage10ReadyForStage11(stage10);
+    if (!stage10Gate.ok) {
+      const issues = ((stage10Gate.validation || {}).issues || []).join("；");
+      state.error = `10 分集细化尚未完成，不能进入 11${issues ? `：${issues}` : "。"}`;
       render();
       return;
     }
@@ -1588,8 +1609,9 @@
           : has11Complete
             ? "待运行"
             : "等待 11";
-    const stage10Validation = stage10.episodeValidation || validateStage10Completeness(stage10Plan(stage10), stage10Text(stage10), inferTotalEpisodes(stage10Plan(stage10), state.importedFrameworkAsset));
-    const stage10Valid = has10 && stage10Validation.ok;
+    const stage10Gate = stage10ReadyForStage11(stage10);
+    const stage10Validation = stage10Gate.validation || validateStage10Completeness(stage10Plan(stage10), stage10Text(stage10), inferTotalEpisodes(stage10Plan(stage10), state.importedFrameworkAsset));
+    const stage10Valid = has10 && stage10Gate.ok;
     const stage12ButtonText = has12Complete ? "重新运行 12" : has12 ? "生成下一批正文" : "生成当前批正文";
     const stage12Action = has12Complete ? "rerun-stage-12" : "run-stage-12";
     const fullButtonText = has12Complete ? "重写全剧剧本" : has12 ? "继续一键生成剧本" : "一键生成剧本";
@@ -1645,7 +1667,7 @@
                   "enrichedEpisodePlanText"
                 )}
               </details>
-              ${stage10Validation.ok ? `<p class="wts-hint">集数完整性校验通过。</p>` : `<p class="wts-error-inline">集数完整性校验失败：${escapeHtml(stage10Validation.issues.join("；"))}</p>`}
+              ${stage10Valid ? `<p class="wts-hint">第 10 阶段已完成，可继续运行 11。</p>` : `<p class="wts-error-inline">集数完整性校验失败：${escapeHtml((stage10Validation.issues || []).join("；"))}</p>`}
             ` : `<p class="wts-hint">将沿用当前导入的框架资产和已完成的 08/09 输出。</p>`,
             { secondary: has10 }
           )}
