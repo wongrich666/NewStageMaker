@@ -80,10 +80,6 @@
                 <small>登录后可运行</small>
               </a>
               <a class="tool-shortcut" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">
-                <span>换皮</span>
-                <small>登录后可运行</small>
-              </a>
-              <a class="tool-shortcut" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">
                 <span>增加爽感</span>
                 <small>登录后可运行</small>
               </a>
@@ -163,7 +159,6 @@
             <p>直接输入你的创作需求，平台会把剧本框架和剧本正文按对话流展示，中间过程统一显示创作状态。</p>
             <div class="chat-empty-tools">
               <a class="chat-suggestion-btn" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">爆款文审核</a>
-              <a class="chat-suggestion-btn" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">换皮</a>
               <a class="chat-suggestion-btn" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">增加爽感</a>
               <a class="chat-suggestion-btn" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">只换人设</a>
             </div>

@@ -410,6 +410,7 @@
       status: "",
       tags: [],
       selectedIds: [],
+      selectedTags: [],
       tagPromptText: "",
       editingId: "",
       formOpen: false,
@@ -939,7 +940,13 @@
       next.asset_state.project_id = next.project_id;
       next.asset_state.asset_id = next.project_id;
     }
-    next.prompt_preferences = normalizePromptPreferences(Object.assign({}, storedPreferences || {}, saved.prompt_preferences || {}));
+    const savedPreferences = saved.prompt_preferences || {};
+    next.prompt_preferences = normalizePromptPreferences(Object.assign({}, storedPreferences || {}, savedPreferences || {}, {
+      stage_prompts: mergeStagePromptsNonEmpty(
+        (storedPreferences || {}).stage_prompts || {},
+        (savedPreferences || {}).stage_prompts || {}
+      ),
+    }));
     next.source_brief = next.source_brief && typeof next.source_brief === "object" && !Array.isArray(next.source_brief) ? next.source_brief : {};
     next.worldview_plan = next.worldview_plan && typeof next.worldview_plan === "object" && !Array.isArray(next.worldview_plan) ? next.worldview_plan : {};
     next.character_plan = next.character_plan && typeof next.character_plan === "object" && !Array.isArray(next.character_plan) ? next.character_plan : {};
@@ -963,7 +970,10 @@
     const source = value && typeof value === "object" ? value : {};
     const defaults = clone(initialState.prompt_preferences);
     const next = Object.assign(defaults, source);
-    next.stage_prompts = Object.assign(clone(initialState.prompt_preferences.stage_prompts), source.stage_prompts || {});
+    next.stage_prompts = mergeStagePromptsNonEmpty(
+      clone(initialState.prompt_preferences.stage_prompts),
+      source.stage_prompts || {}
+    );
     next.basic_prompt_fields = Object.assign(clone(initialState.prompt_preferences.basic_prompt_fields), source.basic_prompt_fields || {});
     const customTemplates = Array.isArray(source.templates) ? source.templates : [];
     const templatesById = new Map();
@@ -1259,6 +1269,18 @@
 
   function stageBlockedByUpstream(stage) {
     return false;
+  }
+
+  function mergeStagePromptsNonEmpty() {
+    const result = normalizeStagePrompts({});
+    Array.from(arguments).forEach((source) => {
+      const prompts = normalizeStagePrompts(source || {});
+      ALL_STAGE_PREFERENCE_KEYS.forEach((stageKey) => {
+        const text = String(prompts[stageKey] || "").trim();
+        if (text) result[stageKey] = prompts[stageKey];
+      });
+    });
+    return result;
   }
 
   function prerequisiteStageKey(stageKey) {
@@ -1818,9 +1840,16 @@
 
   function selectedKnowledgeTags() {
     const byId = new Map((ui.knowledge.tags || []).map((tag) => [String(tag.id || ""), tag]));
+    const cachedById = new Map((ui.knowledge.selectedTags || []).map((tag) => [String(tag.id || ""), tag]));
     return (ui.knowledge.selectedIds || [])
-      .map((item) => byId.get(String(item)))
+      .map((item) => byId.get(String(item)) || cachedById.get(String(item)))
       .filter(Boolean);
+  }
+
+  function syncSelectedKnowledgeTagsFromIds() {
+    const tags = selectedKnowledgeTags();
+    if (tags.length) ui.knowledge.selectedTags = tags.map((tag) => clone(tag));
+    return tags;
   }
 
   function mergeSelectedKnowledgeStagePrompts(tags) {
@@ -1976,7 +2005,7 @@
     const selectedIds = (ui.knowledge.selectedIds || []).map((item) => String(item || "").trim()).filter(Boolean);
     const tagStagePrompts = mergeSelectedKnowledgeStagePrompts(tags);
     const manualStagePrompts = normalizeStagePrompts((state.prompt_preferences || {}).stage_prompts || {});
-    const stagePrompts = normalizeStagePrompts(Object.assign({}, manualStagePrompts, tagStagePrompts));
+    const stagePrompts = mergeStagePromptsNonEmpty(manualStagePrompts, tagStagePrompts);
     const currentStagePrompts = normalizeStagePrompts({});
     currentStagePrompts[stageKey] = String(stagePrompts[stageKey] || "");
     return {
@@ -1984,10 +2013,10 @@
       selected_preference_tags: tags,
       user_preference_prompt: String((state.prompt_preferences || {}).script_preference || ""),
       user_knowledge_tag_prompt: String(ui.knowledge.tagPromptText || ""),
-      user_knowledge_stage_prompts: currentStagePrompts,
+      user_knowledge_stage_prompts: stagePrompts,
       prompt_preferences: {
         script_preference: String((state.prompt_preferences || {}).script_preference || ""),
-        stage_prompts: currentStagePrompts,
+        stage_prompts: stagePrompts,
       },
       user_knowledge_stage_prompt: String(stagePrompts[stageKey] || ""),
       stage_preference_prompt: String(stagePrompts[stageKey] || ""),
@@ -2004,7 +2033,7 @@
     const selectedIds = (ui.knowledge.selectedIds || []).map((item) => String(item || "").trim()).filter(Boolean);
     const tagStagePrompts = mergeSelectedKnowledgeStagePrompts(tags);
     const manualStagePrompts = normalizeStagePrompts((state.prompt_preferences || {}).stage_prompts || {});
-    const mergedStagePrompts = normalizeStagePrompts(Object.assign({}, manualStagePrompts, tagStagePrompts));
+    const mergedStagePrompts = mergeStagePromptsNonEmpty(manualStagePrompts, tagStagePrompts);
     const stagePreferences = {};
     KNOWLEDGE_SNAPSHOT_STAGE_KEYS.forEach((stageKey) => {
       const stageNo = KNOWLEDGE_SNAPSHOT_STAGE_NUMBERS[stageKey] || stageKey;
@@ -3383,14 +3412,10 @@
       return `<div class="fp-empty">07 阶段尚未执行。确认 06 后，再生成最终策划包。</div>`;
     }
     return `
-      <div class="fp-grid two">
+      <div class="fp-grid">
         <div class="fp-panel-card">
           <h3 class="fp-panel-title">框架确认</h3>
           ${renderDataBlock(state.framework_plan_package, { dataKey: "framework_plan_package", stageKey: "package", editable: false })}
-        </div>
-        <div class="fp-panel-card">
-          <h3 class="fp-panel-title">进入剧本阶段检查</h3>
-          ${renderWhitelistFields("package", state.framework_plan_package || {})}
         </div>
       </div>
       <div class="fp-stage-note">
@@ -4557,7 +4582,7 @@
       framework_to_script: true,
       framework_planner_source: true,
     };
-    return cleanOutgoingPayload(payload, "framework_to_script payload");
+    return cleanOutgoingPayload(Object.assign(payload, knowledgePayloadFields("scene")), "framework_to_script payload");
   }
 
   function frameworkAssetSavePayload() {
@@ -4594,7 +4619,12 @@
       created_at: assetState.created_at || "",
       updated_at: new Date().toISOString(),
     }, knowledgeFields);
-    payload.prompt_preferences = clone(state.prompt_preferences || {});
+    payload.prompt_preferences = normalizePromptPreferences(Object.assign({}, state.prompt_preferences || {}, {
+      stage_prompts: mergeStagePromptsNonEmpty(
+        (state.prompt_preferences || {}).stage_prompts || {},
+        (knowledgeFields.prompt_preferences || {}).stage_prompts || {}
+      ),
+    }));
     return cleanOutgoingPayload(payload, "framework_asset_save payload");
   }
 
@@ -5691,6 +5721,7 @@
         try {
           const data = await requestJson("/api/user-knowledge/tags");
           ui.knowledge.tags = Array.isArray(data.tags) ? data.tags : [];
+          syncSelectedKnowledgeTagsFromIds();
           ui.knowledge.status = ui.knowledge.tags.length ? "" : "暂无可用标签";
           lastError = null;
           return;
@@ -5723,9 +5754,12 @@
       if (Array.isArray(preferences.selected_preference_tag_ids)) {
         ui.knowledge.selectedIds = preferences.selected_preference_tag_ids.map(String);
       }
+      syncSelectedKnowledgeTagsFromIds();
       state.prompt_preferences = normalizePromptPreferences(Object.assign({}, state.prompt_preferences || {}, {
         script_preference: preferences.user_preference_prompt || (state.prompt_preferences || {}).script_preference || "",
-        stage_prompts: hasRemoteStagePrompt ? remoteStagePrompts : (state.prompt_preferences || {}).stage_prompts || {},
+        stage_prompts: hasRemoteStagePrompt
+          ? mergeStagePromptsNonEmpty((state.prompt_preferences || {}).stage_prompts || {}, remoteStagePrompts)
+          : (state.prompt_preferences || {}).stage_prompts || {},
       }));
       saveState();
       render();
@@ -5760,10 +5794,11 @@
       const stagePrompts = normalizeStagePrompts(data.stage_prompts || {});
       state.prompt_preferences = normalizePromptPreferences(Object.assign({}, state.prompt_preferences || {}, {
         script_preference: String(data.merged_preference_prompt || ""),
-        stage_prompts: stagePrompts,
+        stage_prompts: mergeStagePromptsNonEmpty((state.prompt_preferences || {}).stage_prompts || {}, stagePrompts),
         active_template_id: "custom",
       }));
       ui.knowledge.selectedIds = Array.isArray(data.selected_tag_ids) ? data.selected_tag_ids.map(String) : selectedIds;
+      syncSelectedKnowledgeTagsFromIds();
       ui.knowledge.tagPromptText = String(data.tag_prompt_text || "");
       savePromptPreferences("apply_knowledge_tags");
       saveState();
@@ -5843,6 +5878,7 @@
         if (existingIndex >= 0) ui.knowledge.tags.splice(existingIndex, 1, tag);
         else ui.knowledge.tags.push(tag);
         ui.knowledge.selectedIds = Array.from(new Set((ui.knowledge.selectedIds || []).concat(String(tag.id))));
+        syncSelectedKnowledgeTagsFromIds();
       }
       ui.knowledge.formOpen = false;
       ui.knowledge.editingId = "";
@@ -6031,6 +6067,10 @@
     ui.knowledge.selectedIds = Array.isArray(restored.selected_preference_tag_ids)
       ? restored.selected_preference_tag_ids.map(String)
       : [];
+    ui.knowledge.selectedTags = Array.isArray(restored.selected_preference_tags)
+      ? restored.selected_preference_tags.map((tag) => clone(tag))
+      : [];
+    state.prompt_preferences = normalizePromptPreferences(state.prompt_preferences || {});
     syncStageFlow(state);
     saveState();
   }
@@ -6813,8 +6853,11 @@
   });
 
   render();
-  loadKnowledgePreferences().catch(() => {});
-  if (ui.knowledge.open) loadKnowledgeTags().catch(() => {});
+  loadKnowledgePreferences()
+    .then(() => loadKnowledgeTags())
+    .catch(() => {
+      if (ui.knowledge.open) loadKnowledgeTags().catch(() => {});
+    });
   loadAssets().catch(() => {});
   if (DEV_LOG_ENABLED) loadStageHistory(stageKeyForView(state.current_view || "basic")).catch(() => {});
 })();

@@ -313,6 +313,28 @@ class UserKnowledgeApiTests(unittest.TestCase):
         self.assertEqual(input_payload["stage_preference_prompt"], "阶段二偏好")
         self.assertEqual(input_payload["user_preference_prompt"], "阶段二偏好")
 
+    def test_framework_planner_stage_resolves_full_tags_from_ids(self) -> None:
+        fake_payload = {"ok": True, "stage": "07", "data": {"framework_plan_package": {}}, "display_text": ""}
+        with patch("workflow_code_skeleton.app.server.run_framework_planner_stage", return_value=fake_payload) as mocked:
+            response = self.client.post(
+                "/api/framework-planner/stage/07",
+                headers=self.headers,
+                json={
+                    "source_brief": {},
+                    "selected_preference_tag_ids": ["builtin-规则怪谈"],
+                    "selected_preference_tags": [],
+                    "prompt_preferences": {"stage_prompts": {"scene": "", "script_text": ""}},
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        input_payload = mocked.call_args.args[1]
+        self.assertEqual(input_payload["selected_preference_tag_ids"], ["builtin-规则怪谈"])
+        self.assertEqual(input_payload["selected_preference_tags"][0]["id"], "builtin-规则怪谈")
+        prompts = input_payload["prompt_preferences"]["stage_prompts"]
+        for key in ("scene", "appearance", "episode", "conflict", "script_text"):
+            self.assertGreater(len(prompts[key]), 0)
+
     def test_resolve_stage_preference_prompt_uses_only_current_stage(self) -> None:
         payload = {
             "user_knowledge_stage_prompts": {
@@ -362,6 +384,28 @@ class UserKnowledgeApiTests(unittest.TestCase):
         self.assertNotIn("d3ixvj8d", package)
         self.assertIsInstance(package["beat_checkpoint_timeline"], list)
         self.assertIsInstance(package["character_storylines"], list)
+
+    def test_stage07_package_repair_keeps_full_stage_prompts(self) -> None:
+        payload_prompts = {
+            "scene": "08 场景偏好",
+            "appearance": "09 外观偏好",
+            "episode": "10 分集偏好",
+            "conflict": "11 冲突偏好",
+            "script_text": "12 正文偏好",
+        }
+        repaired = framework_planner_service._repair_stage_output_with_payload(
+            "07",
+            {"framework_plan_package": {"source_brief": {}}},
+            {
+                "user_knowledge_stage_prompts": payload_prompts,
+                "prompt_preferences": {"stage_prompts": {"scene": ""}},
+            },
+        )
+
+        package = repaired["framework_plan_package"]
+        for key, expected in payload_prompts.items():
+            self.assertEqual(package["stage_prompts"][key], expected)
+            self.assertEqual(package["prompt_preferences"]["stage_prompts"][key], expected)
 
 
 if __name__ == "__main__":

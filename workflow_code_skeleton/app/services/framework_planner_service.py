@@ -1523,9 +1523,14 @@ def _normalize_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     prompt_preferences = normalized.get("prompt_preferences") if isinstance(normalized.get("prompt_preferences"), dict) else {}
     if not isinstance(stage_prompts, dict):
         stage_prompts = prompt_preferences.get("stage_prompts") if isinstance(prompt_preferences.get("stage_prompts"), dict) else {}
-    normalized["user_knowledge_stage_prompts"] = _normalize_stage_prompt_payload(stage_prompts)
+    merged_stage_prompts = _merge_stage_prompt_payloads_non_empty(
+        prompt_preferences.get("stage_prompts") if isinstance(prompt_preferences.get("stage_prompts"), dict) else {},
+        normalized.get("stage_prompts") if isinstance(normalized.get("stage_prompts"), dict) else {},
+        stage_prompts,
+    )
+    normalized["user_knowledge_stage_prompts"] = merged_stage_prompts
     prompt_preferences = dict(prompt_preferences)
-    prompt_preferences["stage_prompts"] = _normalize_stage_prompt_payload(prompt_preferences.get("stage_prompts"))
+    prompt_preferences["stage_prompts"] = merged_stage_prompts
     normalized["prompt_preferences"] = prompt_preferences
     if "selected_preference_tags" not in normalized or not isinstance(normalized.get("selected_preference_tags"), list):
         normalized["selected_preference_tags"] = []
@@ -1589,6 +1594,16 @@ def _normalize_stage_prompt_payload(value: Any) -> dict[str, str]:
             "script_text",
         )
     }
+
+
+def _merge_stage_prompt_payloads_non_empty(*sources: Any) -> dict[str, str]:
+    result = _normalize_stage_prompt_payload({})
+    for source in sources:
+        normalized = _normalize_stage_prompt_payload(source)
+        for key, value in normalized.items():
+            if value:
+                result[key] = value
+    return result
 
 
 def _coerce_text_payload(value: Any) -> str:
@@ -1668,6 +1683,50 @@ def _build_stage_request_variables(
         for alias in aliases:
             if alias == field or alias in public_keys:
                 variables[alias] = wire_value
+    # Stage 07 compatibility fallback:
+    # Some frontend payloads carry adaptation_guide with the new schema
+    # but the generic required-field loop may still mark it as missing.
+    # Resolve it one final time before failing the request.
+    if definition.stage == "07" and "adaptation_guide" in missing_fields:
+        raw_guide = (
+            payload.get("adaptation_guide")
+            or payload.get("adaptationGuide")
+            or payload.get("overallAdaptationGuide")
+            or payload.get("overall_adaptation_guide")
+            or payload.get("guide")
+            or payload.get("previous_adaptation_guide")
+        )
+
+        framework_plan_package = payload.get("framework_plan_package")
+        if not raw_guide and isinstance(framework_plan_package, dict):
+            raw_guide = (
+                framework_plan_package.get("adaptation_guide")
+                or framework_plan_package.get("adaptationGuide")
+                or framework_plan_package.get("overallAdaptationGuide")
+                or framework_plan_package.get("overall_adaptation_guide")
+                or framework_plan_package.get("guide")
+            )
+
+        normalized_guide = _normalize_adaptation_guide(raw_guide)
+
+        if isinstance(normalized_guide, dict) and normalized_guide:
+            wire_value = _wire_value(normalized_guide)
+
+            variables["adaptation_guide"] = wire_value
+            variables["adaptationGuide"] = wire_value
+
+            payload["adaptation_guide"] = normalized_guide
+            payload["adaptationGuide"] = normalized_guide
+
+            missing_fields = [
+                field for field in missing_fields
+                if field != "adaptation_guide"
+            ]
+
+            logger.warning(
+                "stage07 adaptation_guide recovered before missing_fields failure: keys=%s",
+                list(normalized_guide.keys()),
+            )
 
     if missing_fields:
         logger.error(
@@ -4422,6 +4481,20 @@ def _sanitize_framework_plan_package(value: Any) -> dict[str, Any]:
     if storage_key not in (None, "", [], {}):
         cleaned["storage_key"] = str(storage_key)
 
+    stage_prompts = _merge_stage_prompt_payloads_non_empty(
+        package.get("stage_prompts"),
+        package.get("stagePrompts"),
+        package.get("user_knowledge_stage_prompts"),
+        (package.get("prompt_preferences") or {}).get("stage_prompts") if isinstance(package.get("prompt_preferences"), dict) else {},
+    )
+    if any(stage_prompts.values()):
+        cleaned["stage_prompts"] = stage_prompts
+        cleaned["user_knowledge_stage_prompts"] = stage_prompts
+        cleaned["prompt_preferences"] = {
+            **(package.get("prompt_preferences") if isinstance(package.get("prompt_preferences"), dict) else {}),
+            "stage_prompts": stage_prompts,
+        }
+
     source_brief = cleaned.get("source_brief")
     if isinstance(source_brief, dict):
         source_title = str(source_brief.get("source_title") or "").strip()
@@ -5186,5 +5259,25 @@ def _repair_stage_output_with_payload(
         source_brief = result.get("source_brief")
         source_brief = _overlay_source_brief_locked_fields(source_brief, payload)
         result["source_brief"] = _ensure_source_brief_core_fields(source_brief)
+
+    if stage == "07":
+        package = result.get("framework_plan_package") if isinstance(result.get("framework_plan_package"), dict) else {}
+        stage_prompts = _merge_stage_prompt_payloads_non_empty(
+            package.get("stage_prompts"),
+            package.get("user_knowledge_stage_prompts"),
+            (package.get("prompt_preferences") or {}).get("stage_prompts") if isinstance(package.get("prompt_preferences"), dict) else {},
+            payload.get("stage_prompts") if isinstance(payload.get("stage_prompts"), dict) else {},
+            payload.get("user_knowledge_stage_prompts") if isinstance(payload.get("user_knowledge_stage_prompts"), dict) else {},
+            (payload.get("prompt_preferences") or {}).get("stage_prompts") if isinstance(payload.get("prompt_preferences"), dict) else {},
+        )
+        if any(stage_prompts.values()):
+            package = dict(package)
+            package["stage_prompts"] = stage_prompts
+            package["user_knowledge_stage_prompts"] = stage_prompts
+            package["prompt_preferences"] = {
+                **(package.get("prompt_preferences") if isinstance(package.get("prompt_preferences"), dict) else {}),
+                "stage_prompts": stage_prompts,
+            }
+            result["framework_plan_package"] = package
 
     return result

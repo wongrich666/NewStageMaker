@@ -341,6 +341,11 @@
     return { expected, done, complete: Boolean(expected.length && done.length >= expected.length) };
   }
 
+  function missingBatchStarts(expected, done) {
+    const completed = new Set((done || []).map((key) => String(key)));
+    return (expected || []).filter((key) => !completed.has(String(key)));
+  }
+
   function stageHasCompleted(stage) {
     const stages = state.scriptStages || {};
     const stage08 = stages.stage08 || {};
@@ -1051,13 +1056,13 @@
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         data = await requestJson("/api/framework-to-script/stage/10", {
           method: "POST",
-          body: JSON.stringify({
+          body: JSON.stringify(attachKnowledgePayload({
             ...frameworkRequestBase(),
             sceneDictionary: stage08.sceneDictionary,
             scriptWorldRulesDigest: stage08.scriptWorldRulesDigest,
             appearanceMapping: stage09.appearanceMapping,
             retry_reason: lastIssues.join("；"),
-          }),
+          }, "10")),
         });
 
         const enrichedEpisodePlan =
@@ -1227,7 +1232,8 @@
         guard += 1;
         const currentStage11 = state.scriptStages.stage11 || {};
         const beforeCount = numericKeys(currentStage11.batches).length;
-        if (expectedStarts.length && beforeCount >= expectedStarts.length) break;
+        const beforeMissing = missingBatchStarts(expectedStarts, numericKeys(currentStage11.batches));
+        if (expectedStarts.length && !beforeMissing.length) break;
         const data = await requestJson("/api/framework-to-script/stage/11", {
           method: "POST",
           body: JSON.stringify(attachKnowledgePayload({
@@ -1244,8 +1250,15 @@
         saveWorkspace();
         render();
         const afterCount = numericKeys((state.scriptStages.stage11 || {}).batches).length;
-        if (afterCount <= beforeCount) break;
+        const afterMissing = missingBatchStarts(expectedStarts, numericKeys((state.scriptStages.stage11 || {}).batches));
+        if (afterMissing.length && afterCount <= beforeCount) {
+          throw new Error(`11 未能继续生成剩余批次：第 ${afterMissing[0]} 集起。`);
+        }
         firstRequest = false;
+      }
+      const finalMissing = missingBatchStarts(expectedStarts, numericKeys((state.scriptStages.stage11 || {}).batches));
+      if (finalMissing.length) {
+        throw new Error(`11 未完成全部批次，剩余第 ${finalMissing.join("、")} 集起。`);
       }
       saveWorkspace();
     } catch (error) {
@@ -1263,11 +1276,9 @@
       return;
     }
     const stage11 = state.scriptStages.stage11 || {};
-    const hasStage11Batches = stage11.batches && Object.keys(stage11.batches).length > 0;
-    if (!hasContent(stage11.batchCausalConflictPlan) && !hasStage11Batches) {
-      state.error = "请先完成 11 当前批次开头冲突钩子。";
-      render();
-      return;
+    if (!stage11Completion().complete) {
+      await runStage11();
+      if (state.error) return;
     }
     const resetStage12 = Boolean(options.resetStage12);
     if (resetStage12 && !options.skipConfirm && !window.confirm("重新运行 12 会覆盖已生成的正文批次。继续吗？")) return;
@@ -1287,7 +1298,8 @@
         const stage11Keys = numericKeys(currentStage11.batches);
         const expectedCount = stage11Keys.length || (hasContent(currentStage11.batchCausalConflictPlan) ? 1 : 0);
         const beforeCount = numericKeys(currentStage12.batches).length;
-        if (expectedCount && beforeCount >= expectedCount) break;
+        const beforeMissing = missingBatchStarts(stage11Keys, numericKeys(currentStage12.batches));
+        if (expectedCount && !beforeMissing.length) break;
         const data = await requestJson("/api/framework-to-script/stage/12", {
           method: "POST",
           body: JSON.stringify(attachKnowledgePayload({
@@ -1303,8 +1315,16 @@
         saveWorkspace();
         render();
         const afterCount = numericKeys((state.scriptStages.stage12 || {}).batches).length;
-        if (afterCount <= beforeCount) break;
+        const afterMissing = missingBatchStarts(stage11Keys, numericKeys((state.scriptStages.stage12 || {}).batches));
+        if (afterMissing.length && afterCount <= beforeCount) {
+          throw new Error(`12 未能继续生成剩余正文批次：第 ${afterMissing[0]} 集起。`);
+        }
         firstRequest = false;
+      }
+      const finalStage11Keys = numericKeys((state.scriptStages.stage11 || {}).batches);
+      const finalMissing = missingBatchStarts(finalStage11Keys, numericKeys((state.scriptStages.stage12 || {}).batches));
+      if (finalMissing.length) {
+        throw new Error(`12 未完成全部正文批次，剩余第 ${finalMissing.join("、")} 集起。`);
       }
       saveWorkspace();
     } catch (error) {
@@ -1444,7 +1464,11 @@
     if (text.length <= 420) return `<span>${escapeHtml(text)}</span>`;
     return `
       <details class="wts-tree-more">
-        <summary>${escapeHtml(text.slice(0, 420))}... <span>展开全文</span></summary>
+        <summary>
+          <span class="wts-tree-preview">${escapeHtml(text.slice(0, 420))}...</span>
+          <span class="wts-tree-expand-label">展开全文</span>
+          <span class="wts-tree-collapse-label">收起</span>
+        </summary>
         <div>${escapeHtml(text)}</div>
       </details>
     `;
@@ -1612,7 +1636,7 @@
     const stage10Gate = stage10ReadyForStage11(stage10);
     const stage10Validation = stage10Gate.validation || validateStage10Completeness(stage10Plan(stage10), stage10Text(stage10), inferTotalEpisodes(stage10Plan(stage10), state.importedFrameworkAsset));
     const stage10Valid = has10 && stage10Gate.ok;
-    const stage12ButtonText = has12Complete ? "重新运行 12" : has12 ? "生成下一批正文" : "生成当前批正文";
+    const stage12ButtonText = has12Complete ? "重新运行 12" : "生成全部正文";
     const stage12Action = has12Complete ? "rerun-stage-12" : "run-stage-12";
     const fullButtonText = has12Complete ? "重写全剧剧本" : has12 ? "继续一键生成剧本" : "一键生成剧本";
     return `
@@ -1675,7 +1699,7 @@
             "11",
             "开头冲突钩子",
             stage11Status,
-            has11Complete ? "重新运行 11" : has11 ? "继续运行 11" : "运行 11 开头冲突钩子",
+            has11Complete ? "重新运行 11" : "运行全部 11 开头冲突钩子",
             has11Complete ? "rerun-stage-11" : "run-stage-11",
             locked || !stage10Valid,
             has11 ? renderStage11Batches(stage11) : `<p class="wts-hint">${state.runningStage ? `当前 ${escapeHtml(state.runningStage)} 阶段运行态锁定，完成或超时后可继续。` : ""}</p>`,

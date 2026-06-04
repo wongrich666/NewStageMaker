@@ -259,7 +259,12 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .wts-tree-node[open] > summary .wts-tree-arrow:before { content: "⌃"; }
 .wts-collapse-local { justify-self: end; margin-top: 8px; }
 .wts-tree-more summary { padding: 0; font-weight: 400; color: #374151; }
-.wts-tree-more summary span { color: var(--wts-strong); font-weight: 700; }
+.wts-tree-more summary .wts-tree-expand-label,
+.wts-tree-more summary .wts-tree-collapse-label { color: var(--wts-strong); font-weight: 700; }
+.wts-tree-more .wts-tree-collapse-label { display: none; }
+.wts-tree-more[open] .wts-tree-preview,
+.wts-tree-more[open] .wts-tree-expand-label { display: none; }
+.wts-tree-more[open] .wts-tree-collapse-label { display: inline; }
 .wts-tree-more div { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .wts-asset-current {
   display: grid;

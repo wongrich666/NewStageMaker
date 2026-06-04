@@ -28,9 +28,12 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     STAGE_FRAMEWORK_APPEARANCE_MAPPING,
     STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
     STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+    STAGE_FRAMEWORK_SCRIPT_MEMORY,
     STAGE_FRAMEWORK_SCRIPT_REVIEW,
     STAGE_FRAMEWORK_SCRIPT_REWRITE,
+    STAGE_FRAMEWORK_SCRIPT_WRITE,
     TOTAL_EPISODES,
+    WORLDVIEW_PLAN,
     contract_for,
 )
 from workflow_code_skeleton.app.services.workflow_preference_keys import inject_stage_preference
@@ -325,14 +328,24 @@ def test_framework_to_script_ui_allows_stage_rerun_and_full_script_rewrite() -> 
     script = (root / "workflow_code_skeleton" / "app" / "web" / "static" / "framework_to_script.js").read_text(
         encoding="utf-8"
     )
+    styles = (root / "workflow_code_skeleton" / "app" / "web" / "static" / "framework_to_script.css").read_text(
+        encoding="utf-8"
+    )
 
     assert "asset.can_import !== false" in script
     assert "重写全剧剧本" in script
     assert "resetStage11: true, skipConfirm: true" in script
     assert "resetStage12: true, skipConfirm: true" in script
+    assert "运行全部 11 开头冲突钩子" in script
+    assert "生成全部正文" in script
+    assert "生成下一批正文" not in script
     assert "framework_enriched_episode_plan" in script
     assert "completedStages" in script
     assert "hideAction: true" not in script
+    assert "wts-tree-preview" in script
+    assert "wts-tree-collapse-label" in script
+    assert ".wts-tree-more[open] .wts-tree-preview" in styles
+    assert ".wts-tree-more[open] .wts-tree-expand-label" in styles
 
 
 def test_contracts_keep_required_context_for_late_framework_to_script_stages() -> None:
@@ -405,3 +418,79 @@ def test_stage_09_10_contracts_keep_beat_and_storyline_inputs() -> None:
     enriched_payload = contract_for(STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN).build_input_payload(base_vars)
     assert enriched_payload[BEAT_CHECKPOINT_TIMELINE] == [{"beat_no": 1}]
     assert enriched_payload[CHARACTER_STORYLINES] == [{"character": "林渡"}]
+
+
+def test_stage12_sub_stages_keep_memory_alias_worldview_and_preference_context() -> None:
+    app = create_app()
+    app.config["TESTING"] = True
+    client = app.test_client()
+    headers = _auth_headers()
+    captured: list[tuple[str, dict[str, object]]] = []
+    package = {
+        **_framework_package(),
+        "stage_prompts": {"script_text": "12正文偏好"},
+    }
+    review_calls = 0
+
+    def fake_run_stage(stage_name: str, variables: dict[str, object]):
+        nonlocal review_calls
+        captured.append((stage_name, dict(variables)))
+        if stage_name == STAGE_FRAMEWORK_SCRIPT_WRITE:
+            return {"batchScriptText": "第1集正文"}
+        if stage_name == STAGE_FRAMEWORK_SCRIPT_REVIEW:
+            review_calls += 1
+            if review_calls > 1:
+                return {"reviewPassed": True, "rewriteRequired": False, "blockingIssues": []}
+            return {
+                "reviewPassed": False,
+                "rewriteRequired": True,
+                "blockingIssues": ["需要重写"],
+                "rewriteBrief": "强化alias和世界观",
+            }
+        if stage_name == STAGE_FRAMEWORK_SCRIPT_REWRITE:
+            return {"batchScriptText": "第1集重写正文"}
+        if stage_name == STAGE_FRAMEWORK_SCRIPT_MEMORY:
+            return {"scriptMemory": "新的正文记忆"}
+        raise AssertionError(stage_name)
+
+    payload = {
+        "framework_plan_package": package,
+        "stage08": {
+            "sceneDictionary": {"core_scenes": [{"scene_id": "scene_A"}]},
+            "scriptWorldRulesDigest": {"world_type": "都市悬疑"},
+        },
+        "stage09": {
+            "appearanceMapping": {"characters": [{"name": "林渡", "alias_name": "林渡(A)"}]},
+        },
+        "stage11": {
+            "batches": {
+                "1": {
+                    "batchStartEpisode": 1,
+                    "batchEndEpisode": 1,
+                    "batchEnrichedEpisodePlan": [{"episode": 1, "title": "开场", "characters": ["林渡(A)"]}],
+                    "batchCausalConflictPlan": {"episodes": [{"episode": 1, "opening_alias_plan": []}]},
+                }
+            }
+        },
+        "stage12": {"scriptMemory": "上一批正文记忆"},
+    }
+
+    with patch("workflow_code_skeleton.app.services.fastgpt_client.fastgpt_client.run_stage", side_effect=fake_run_stage):
+        response = client.post("/api/framework-to-script/stage/12", headers=headers, json=payload)
+
+    assert response.status_code == 200
+    by_stage = {stage_name: variables for stage_name, variables in captured}
+    review_vars = by_stage[STAGE_FRAMEWORK_SCRIPT_REVIEW]
+    rewrite_vars = by_stage[STAGE_FRAMEWORK_SCRIPT_REWRITE]
+    memory_vars = by_stage[STAGE_FRAMEWORK_SCRIPT_MEMORY]
+
+    assert review_vars[SCRIPT_MEMORY] == "上一批正文记忆"
+    assert rewrite_vars["ls0n1182"] == "12正文偏好"
+    assert rewrite_vars[SCENE_DICTIONARY] == {"core_scenes": [{"scene_id": "scene_A"}]}
+    assert rewrite_vars["scene_dictionary"] == {"core_scenes": [{"scene_id": "scene_A"}]}
+    assert rewrite_vars[APPEARANCE_MAPPING] == {"characters": [{"name": "林渡", "alias_name": "林渡(A)"}]}
+    assert rewrite_vars["appearance_mapping"] == {"characters": [{"name": "林渡", "alias_name": "林渡(A)"}]}
+    assert rewrite_vars[WORLDVIEW_PLAN] == {"world_type": "都市悬疑"}
+    assert memory_vars[SCRIPT_MEMORY] == "上一批正文记忆"
+    assert memory_vars[SCENE_DICTIONARY] == {"core_scenes": [{"scene_id": "scene_A"}]}
+    assert memory_vars[APPEARANCE_MAPPING] == {"characters": [{"name": "林渡", "alias_name": "林渡(A)"}]}

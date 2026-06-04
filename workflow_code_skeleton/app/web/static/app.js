@@ -151,7 +151,7 @@
     assetDeleteConfirmResolver: null,
     assetDeleteHideTimer: null,
     toolDefinitions: {},
-    activeTool: "character_reskin",
+    activeTool: "hot_review",
     toolDrafts: {},
     toolResults: {},
     knowledgeTags: [],
@@ -182,23 +182,6 @@
       configured: false,
       source: "fallback"
     },
-    reskin: {
-      key: "reskin",
-      label: "换皮",
-      help: "保留原剧本骨架，按目标风格做整套换皮。",
-      fields: [
-        { name: "title", label: "剧本标题", type: "input", placeholder: "新剧本标题。", required: true },
-        { name: "source_outline", label: "源剧本梗概", type: "textarea", placeholder: "源故事梗概。", required: true },
-        { name: "core_scenes", label: "源剧本核心场景", type: "textarea", placeholder: "可选，源剧本核心场景。", required: false },
-        { name: "source_characters", label: "源剧本人物小传", type: "textarea", placeholder: "源人物小传。", required: true },
-        { name: "source_script", label: "源剧本正文", type: "textarea", placeholder: "可选，源剧本正文。", required: false },
-        { name: "target_style", label: "目标风格", type: "textarea", placeholder: "希望换成的题材、风格、爽点方向。", required: true },
-        { name: "total_episodes", label: "总集数", type: "number", placeholder: "例如 60。", required: true, defaultValue: 60 },
-        { name: "episode_word_count", label: "每集字数", type: "number", placeholder: "例如 600。", required: true, defaultValue: 600 }
-      ],
-      configured: false,
-      source: "fallback"
-    },
     punchup: {
       key: "punchup",
       label: "增加爽感",
@@ -221,7 +204,7 @@
       fields: [
         { name: "title", label: "剧本标题", type: "input", placeholder: "新剧本标题。", required: true },
         { name: "story_outline", label: "故事大纲", type: "textarea", placeholder: "故事大纲。", required: true },
-        { name: "characters", label: "人物小传", type: "textarea", placeholder: "需要换皮的人物小传。", required: true },
+        { name: "characters", label: "人物小传", type: "textarea", placeholder: "需要替换的人物小传。", required: true },
         { name: "core_scenes", label: "核心场景", type: "textarea", placeholder: "核心场景。", required: true },
         { name: "source_script", label: "原剧本正文", type: "textarea", placeholder: "原剧本正文。", required: true },
         { name: "total_episodes", label: "总集数", type: "number", placeholder: "总集数。", required: true },
@@ -1871,7 +1854,7 @@ startRuntimeDebugPolling();
 
   function toolConfig(toolKey) {
     const definitions = toolDefinitions();
-    return definitions[toolKey] || definitions.character_reskin || Object.values(definitions)[0];
+    return definitions[toolKey] || definitions.hot_review || Object.values(definitions)[0];
   }
 
   function isActionLoading(actionKey) {
@@ -2006,6 +1989,7 @@ startRuntimeDebugPolling();
   function normalizeToolDefinition(tool) {
     const key = tool?.key || tool?.tool_id || "";
     if (!key) return null;
+    if (key === "reskin") return null;
     const fallback = DEFAULT_TOOL_DEFINITIONS[key] || {};
     return {
       key,
@@ -2260,7 +2244,7 @@ startRuntimeDebugPolling();
       state.toolDefinitions = { ...DEFAULT_TOOL_DEFINITIONS };
     }
     if (!toolConfig(state.activeTool)) {
-      state.activeTool = Object.keys(toolDefinitions())[0] || "character_reskin";
+      state.activeTool = Object.keys(toolDefinitions())[0] || "hot_review";
     }
     renderToolList();
     renderToolForm(state.activeTool);
@@ -2281,7 +2265,6 @@ startRuntimeDebugPolling();
         ${tool.key === "character_reskin" ? `
           <div class="tool-linked-actions" aria-label="只换人设后续辅助工具">
             <button class="btn btn-secondary" type="button" disabled>爆款文审核（暂未接入）</button>
-            <button class="btn btn-secondary" type="button" disabled>换皮（暂未接入）</button>
             <button class="btn btn-secondary" type="button" disabled>增加爽感（暂未接入）</button>
           </div>
         ` : ""}
