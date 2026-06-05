@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from ..coze_workflow_client import CozeWorkflowClient, coze_workflow_client
+from ..coze_workflow_client import CozeWorkflowClient, coze_workflow_client, _resolve_coze_base_url_info
 
 
 class CozeWorkflowAdapter:
@@ -34,6 +34,16 @@ class CozeWorkflowAdapter:
     def diagnostics(self, stage_key: str | None = None) -> dict[str, Any]:
         workflow_id = ""
         workflow_info: dict[str, Any] = {}
+        base_url = ""
+        base_url_source = ""
+        try:
+            base_url, base_url_source = _resolve_coze_base_url_info(
+                os.getenv(self.client.base_url_env),
+                self.client.base_url_env,
+            )
+        except Exception as exc:
+            base_url = f"invalid: {exc}"
+            base_url_source = self.client.base_url_env
         if stage_key:
             try:
                 workflow_info = self.client.workflow_id_info_for_stage(stage_key)
@@ -56,6 +66,9 @@ class CozeWorkflowAdapter:
             "token_status": "SET" if os.getenv(self.client.token_env) else "EMPTY",
             "base_url_env": self.client.base_url_env,
             "base_url_status": "SET" if os.getenv(self.client.base_url_env) else "EMPTY",
+            "base_url": base_url,
+            "base_url_source": base_url_source,
+            "workflow_id_status": "SET" if workflow_id else "EMPTY",
             "timeout_seconds": self.client.timeout_seconds,
         }
 

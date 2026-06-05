@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -12,17 +13,30 @@ REPO_ROOT = BASE_DIR.parent
 ENV_PATH = BASE_DIR / ".env"
 REPO_ENV_PATH = REPO_ROOT / ".env"
 
-PREEXISTING_ENV = dict(os.environ)
 LOADED_ENV_PATHS: list[Path] = []
+if ENV_PATH.exists():
+    load_dotenv(ENV_PATH, override=False)
+    LOADED_ENV_PATHS.append(ENV_PATH)
 if REPO_ENV_PATH.exists():
     load_dotenv(REPO_ENV_PATH, override=False)
     LOADED_ENV_PATHS.append(REPO_ENV_PATH)
-if ENV_PATH.exists():
-    load_dotenv(ENV_PATH, override=True)
-    LOADED_ENV_PATHS.append(ENV_PATH)
-for key, value in PREEXISTING_ENV.items():
-    if str(value).strip() != "":
-        os.environ[key] = value
+
+CONFIG_LOGGER = logging.getLogger("workflow_config")
+
+
+def _env_status(name: str) -> str:
+    return "SET" if os.getenv(name) else "EMPTY"
+
+
+CONFIG_LOGGER.info(
+    "workflow runtime env loaded: cwd=%s env_loaded_paths=%s WORKFLOW_BACKEND=%s COZE_API_BASE=%s COZE_API_TOKEN=%s COZE_WORKFLOW_STAGE_01_ID=%s",
+    os.getcwd(),
+    [str(path) for path in LOADED_ENV_PATHS],
+    os.getenv("WORKFLOW_BACKEND") or "",
+    os.getenv("COZE_API_BASE") or "",
+    _env_status("COZE_API_TOKEN"),
+    _env_status("COZE_WORKFLOW_STAGE_01_ID"),
+)
 
 
 def _getenv(*keys: str, default: str | None = None) -> str | None:

@@ -1989,7 +1989,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 payload=data,
                 output={},
                 status="failed",
-                error={"type": type(exc).__name__, "message": str(exc)},
+                error={"type": type(exc).__name__, "message": str(exc), "detail": exc.detail},
             )
             return _framework_planner_error(
                 exc.stage,
@@ -2115,7 +2115,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 payload=data,
                 output={},
                 status="failed",
-                error={"type": type(exc).__name__, "message": str(exc)},
+                error={"type": type(exc).__name__, "message": str(exc), "detail": exc.detail},
             )
             return _framework_planner_error(
                 exc.stage,

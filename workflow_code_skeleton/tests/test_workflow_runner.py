@@ -103,7 +103,18 @@ def test_coze_access_token_invalid_error_has_region_hint(monkeypatch):
     with pytest.raises(CozeWorkflowError) as exc:
         coze_workflow_client.run_workflow_by_id(
             "workflow-id",
-            parameters={"source_text": "x"},
+            parameters={
+                "adaptation_direction": "",
+                "episodes_per_season": 20,
+                "minutes_per_episode": 2,
+                "mode": "创作",
+                "season_count": 1,
+                "source_text": "x",
+                "source_title": "测试",
+                "target_format": "短剧",
+                "user_constraints": "",
+                "user_requirements": "",
+            },
             stage_key="stage_01",
         )
 
@@ -111,6 +122,32 @@ def test_coze_access_token_invalid_error_has_region_hint(monkeypatch):
     assert "COZE_API_BASE=COZE_CN_BASE_URL" in str(exc.value)
     assert exc.value.detail["code"] == 700012006
     assert exc.value.detail["msg"] == "access token invalid"
+
+
+def test_coze_stage_01_missing_variables_fail_before_request(monkeypatch):
+    class FakeRuns:
+        def stream(self, **kwargs):
+            raise AssertionError("Coze request should not be sent with missing variables")
+
+    class FakeWorkflows:
+        runs = FakeRuns()
+
+    class FakeCoze:
+        workflows = FakeWorkflows()
+
+    monkeypatch.setenv("COZE_API_TOKEN", "fake-token")
+    monkeypatch.setattr(coze_workflow_client, "_coze", FakeCoze())
+
+    with pytest.raises(CozeWorkflowError) as exc:
+        coze_workflow_client.run_workflow_by_id(
+            "workflow-id",
+            parameters={"source_text": "x"},
+            stage_key="stage_01",
+        )
+
+    assert "Coze workflow input variables missing" in str(exc.value)
+    assert "source_title" in exc.value.detail["missing_input_variables"]
+    assert exc.value.detail["request_parameters_keys"] == ["source_text"]
 
 
 def test_workflow_runner_rejects_unknown_backend(monkeypatch):

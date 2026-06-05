@@ -1154,6 +1154,16 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             )
         except WorkflowRunnerError as exc:
             runner_detail = exc.detail if isinstance(exc.detail, dict) else {}
+            debug_detail = _write_debug_artifact(
+                stage=definition.stage,
+                workflow_spec=workflow_spec,
+                request_variables=request_variables,
+                payload=normalized_payload,
+                response_raw={"error": str(exc), "detail": runner_detail},
+                parse_error="workflow backend request failed",
+                extra_detail=runner_detail,
+            )
+            runner_detail = {**runner_detail, **debug_detail}
             print_stage_debug(
                 definition.stage,
                 {
@@ -4957,6 +4967,7 @@ def _write_debug_artifact(
     payload: dict[str, Any],
     response_raw: Any,
     parse_error: str,
+    extra_detail: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     debug_dir = get_runtime_data_dir(Path(__file__).resolve().parents[2]) / "debug_dumps" / "framework_planner"
     debug_dir.mkdir(parents=True, exist_ok=True)
@@ -4970,13 +4981,18 @@ def _write_debug_artifact(
         "response_raw": response_raw,
         "parse_error": parse_error,
     }
+    if isinstance(extra_detail, dict):
+        artifact.update(extra_detail)
     path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {
+    result = {
         "debug_artifact_path": str(path),
         "workflow_json_path": str(workflow_spec.path),
         "payload_keys": sorted(payload.keys()),
         "parse_error": parse_error,
     }
+    if isinstance(extra_detail, dict):
+        result.update(extra_detail)
+    return result
 
 
 def _build_mock_stage_output(stage: str, payload: dict[str, Any]) -> tuple[dict[str, Any], str]:

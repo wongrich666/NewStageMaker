@@ -95,6 +95,14 @@ def _env_status(name: str) -> str:
     return "SET" if os.getenv(name) else "EMPTY"
 
 
+def _env_value_with_source(*names: str) -> tuple[str, str]:
+    for name in names:
+        value = str(os.getenv(name) or "").strip()
+        if value:
+            return value, name
+    return "", ""
+
+
 def _resolve_coze_base_url(value: str | None = None) -> str:
     from cozepy import COZE_CN_BASE_URL
 
@@ -113,6 +121,14 @@ def _resolve_coze_base_url(value: str | None = None) -> str:
     )
 
 
+def _resolve_coze_base_url_info(value: str | None = None, source: str = "") -> tuple[str, str]:
+    raw = str(value if value is not None else os.getenv("COZE_API_BASE") or "").strip()
+    base_url = _resolve_coze_base_url(raw)
+    if raw:
+        return base_url, source or "COZE_API_BASE"
+    return base_url, "default:COZE_CN_BASE_URL"
+
+
 def _exception_detail(exc: Exception) -> dict[str, Any]:
     detail: dict[str, Any] = {
         "original_exception_type": type(exc).__name__,
@@ -127,6 +143,12 @@ def _exception_detail(exc: Exception) -> dict[str, Any]:
             if str(key).startswith("_") or key in detail:
                 continue
             detail[str(key)] = _event_to_jsonable(value)
+    code = detail.get("code") or detail.get("error_code") or detail.get("status_code")
+    msg = detail.get("msg") or detail.get("message") or detail.get("error_msg")
+    if code not in (None, ""):
+        detail["original_error_code"] = _event_to_jsonable(code)
+    if msg not in (None, ""):
+        detail["original_error_msg"] = _event_to_jsonable(msg)
     return detail
 
 
@@ -238,6 +260,28 @@ class CozeWorkflowClient:
         ).strip() in {"1", "true", "TRUE", "yes", "on"}
         self._coze: Any = None
 
+    def _bot_app_info_for_stage(self, stage_key: str) -> dict[str, Any]:
+        normalized = normalize_coze_stage_key(stage_key).upper()
+        compact = normalized.replace("_", "")
+        bot_id, bot_source = _env_value_with_source(
+            f"COZE_WORKFLOW_{normalized}_BOT_ID",
+            f"COZE_WORKFLOW_{compact}_BOT_ID",
+            "COZE_BOT_ID",
+        )
+        app_id, app_source = _env_value_with_source(
+            f"COZE_WORKFLOW_{normalized}_APP_ID",
+            f"COZE_WORKFLOW_{compact}_APP_ID",
+            "COZE_APP_ID",
+        )
+        return {
+            "bot_id": bot_id,
+            "bot_id_source": bot_source,
+            "bot_id_status": "SET" if bot_id else "EMPTY",
+            "app_id": app_id,
+            "app_id_source": app_source,
+            "app_id_status": "SET" if app_id else "EMPTY",
+        }
+
     def run_stage(
         self,
         stage_key: str,
@@ -288,6 +332,17 @@ class CozeWorkflowClient:
                 stage_key=normalized_stage_key,
                 detail=self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
             )
+        missing_input_variables = self._missing_input_variables(normalized_stage_key, safe_parameters)
+        if missing_input_variables:
+            raise CozeWorkflowError(
+                "Coze workflow input variables missing",
+                stage_key=normalized_stage_key,
+                workflow_id=workflow_id,
+                detail={
+                    **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
+                    "missing_input_variables": missing_input_variables,
+                },
+            )
         if self.dry_run:
             raw = {
                 "dry_run": True,
@@ -306,14 +361,28 @@ class CozeWorkflowClient:
             )
 
         coze = self._client()
-        base_url = _resolve_coze_base_url(os.getenv(self.base_url_env))
+        base_url, base_url_source = _resolve_coze_base_url_info(os.getenv(self.base_url_env), self.base_url_env)
+        bot_app_info = self._bot_app_info_for_stage(normalized_stage_key)
+        run_kwargs = {
+            "workflow_id": workflow_id,
+            "parameters": safe_parameters,
+        }
+        if bot_app_info["bot_id"]:
+            run_kwargs["bot_id"] = bot_app_info["bot_id"]
+        if bot_app_info["app_id"]:
+            run_kwargs["app_id"] = bot_app_info["app_id"]
         logger.info(
-            "Coze workflow request start stage_key=%s workflow_id=%s base_url=%s stream=%s token_exists=%s parameter_keys=%s",
+            "Coze workflow request start stage_key=%s workflow_id=%s base_url=%s base_url_source=%s stream=%s token_status=%s workflow_id_status=%s workflow_id_source=%s bot_id_status=%s app_id_status=%s parameter_keys=%s",
             normalized_stage_key,
             workflow_id,
             base_url,
+            base_url_source,
             stream,
-            bool(token),
+            "SET" if token else "EMPTY",
+            "SET" if workflow_id else "EMPTY",
+            workflow_info.get("workflow_id_source") or "",
+            bot_app_info["bot_id_status"],
+            bot_app_info["app_id_status"],
             sorted(safe_parameters.keys()),
         )
         try:
@@ -322,10 +391,7 @@ class CozeWorkflowClient:
                 messages: list[str] = []
                 from cozepy import WorkflowEventType
 
-                for event in coze.workflows.runs.stream(
-                    workflow_id=workflow_id,
-                    parameters=safe_parameters,
-                ):
+                for event in coze.workflows.runs.stream(**run_kwargs):
                     raw_events.append(event)
                     event_type = getattr(event, "event", None) or getattr(event, "type", None)
                     data = getattr(event, "message", None) or getattr(event, "data", None) or event
@@ -335,14 +401,27 @@ class CozeWorkflowClient:
                             messages.append(text)
                     elif event_type == WorkflowEventType.ERROR:
                         error_data = getattr(event, "error", None) or data
+                        error_jsonable = _event_to_jsonable(error_data)
+                        error_code = _deep_find_key(error_jsonable, "code") if isinstance(error_jsonable, (dict, list)) else None
+                        error_msg = (
+                            _deep_find_key(error_jsonable, "msg")
+                            or _deep_find_key(error_jsonable, "message")
+                            if isinstance(error_jsonable, (dict, list))
+                            else None
+                        )
                         raise CozeWorkflowError(
-                            f"Coze workflow returned ERROR event: {json.dumps(_event_to_jsonable(error_data), ensure_ascii=False, default=str)}",
+                            f"Coze workflow returned ERROR event: {json.dumps(error_jsonable, ensure_ascii=False, default=str)}",
                             stage_key=normalized_stage_key,
                             workflow_id=workflow_id,
-                            error=_event_to_jsonable(error_data),
+                            error=error_jsonable,
                             detail={
                                 **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
-                                "coze_error_event": _event_to_jsonable(error_data),
+                                "original_exception_type": "CozeWorkflowError",
+                                "original_exception_message": "Coze workflow returned ERROR event",
+                                "original_error_code": error_code or "",
+                                "original_error_msg": error_msg or "",
+                                "debug_url": _deep_find_key(error_jsonable, "debug_url") if isinstance(error_jsonable, (dict, list)) else "",
+                                "coze_error_event": error_jsonable,
                             },
                         )
                     elif event_type == WorkflowEventType.INTERRUPT:
@@ -359,7 +438,7 @@ class CozeWorkflowClient:
                         )
                 raw: Any = {"events": [_event_to_jsonable(item) for item in raw_events], "content": "".join(messages)}
             else:
-                raw = coze.workflows.runs.create(workflow_id=workflow_id, parameters=safe_parameters)
+                raw = coze.workflows.runs.create(**run_kwargs)
         except CozeWorkflowError:
             raise
         except Exception as exc:
@@ -383,6 +462,11 @@ class CozeWorkflowClient:
                 detail=detail,
             ) from exc
         return self.normalize_response(normalized_stage_key, workflow_id, raw)
+
+    def _missing_input_variables(self, stage_key: str, parameters: dict[str, Any]) -> list[str]:
+        stage = self.stage_config(stage_key)
+        required = list(dict.fromkeys(str(value) for value in stage.input_mapping.values() if str(value).strip()))
+        return [key for key in required if key not in parameters]
 
     def build_parameters(
         self,
@@ -497,10 +581,14 @@ class CozeWorkflowClient:
         workflow_info: dict[str, Any],
     ) -> dict[str, Any]:
         base_url = ""
+        base_url_source = ""
         try:
-            base_url = _resolve_coze_base_url(os.getenv(self.base_url_env))
+            base_url, base_url_source = _resolve_coze_base_url_info(os.getenv(self.base_url_env), self.base_url_env)
         except Exception as exc:
             base_url = f"invalid: {exc}"
+            base_url_source = self.base_url_env
+        bot_app_info = self._bot_app_info_for_stage(stage_key)
+        missing_input_variables = self._missing_input_variables(stage_key, parameters)
         return {
             "workflow_backend": str(os.getenv("WORKFLOW_BACKEND") or settings.workflow_backend or ""),
             "env_loaded_paths": [str(path) for path in getattr(settings, "loaded_env_paths", ())],
@@ -508,16 +596,22 @@ class CozeWorkflowClient:
             "config_path": str(self.config_path),
             "stage_key": str(stage_key),
             "normalized_stage_key": normalize_coze_stage_key(stage_key),
+            "backend_stage_key": normalize_coze_stage_key(stage_key),
             "workflow_id_exists": bool(workflow_id),
+            "workflow_id_status": "SET" if workflow_id else "EMPTY",
             "workflow_id_source": workflow_info.get("workflow_id_source") or "",
             "workflow_id_env": workflow_info.get("workflow_id_env") or "",
             "token_status": _env_status(self.token_env),
             "base_url_status": _env_status(self.base_url_env),
             "base_url": base_url,
+            "base_url_source": base_url_source,
             "cozepy_version": _cozepy_version(),
             "request_parameters_keys": sorted(parameters.keys()),
+            "missing_input_variables": missing_input_variables,
             "resource_path": workflow_info.get("resource_path") or "",
             "inner_yaml_path": workflow_info.get("inner_yaml_path") or "",
+            "sdk_optional_parameters_supported": ["bot_id", "app_id"],
+            **bot_app_info,
         }
 
     def _apply_output_mapping(
