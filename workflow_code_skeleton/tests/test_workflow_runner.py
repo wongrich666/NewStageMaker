@@ -4,7 +4,12 @@ import json
 
 import pytest
 
-from workflow_code_skeleton.app.services.coze_workflow_client import coze_workflow_client, normalize_coze_stage_key
+from workflow_code_skeleton.app.services.coze_workflow_client import (
+    CozeWorkflowError,
+    coze_workflow_client,
+    normalize_coze_stage_key,
+    use_coze_workflow_backend,
+)
 from workflow_code_skeleton.app.services import workflow_runner
 
 
@@ -64,6 +69,48 @@ def test_coze_stage_key_aliases_resolve_stage_01():
     assert info["workflow_id"]
     assert info["resource_path"].endswith(".zip")
     assert info["inner_yaml_path"].endswith(".yaml")
+
+
+def test_use_coze_workflow_backend_defaults_to_settings(monkeypatch):
+    monkeypatch.delenv("WORKFLOW_BACKEND", raising=False)
+    assert use_coze_workflow_backend() is True
+
+
+def test_coze_access_token_invalid_error_has_region_hint(monkeypatch):
+    class FakeRuns:
+        def stream(self, **kwargs):
+            raise FakeCozeApiError()
+
+    class FakeWorkflows:
+        runs = FakeRuns()
+
+    class FakeCoze:
+        workflows = FakeWorkflows()
+
+    class FakeCozeApiError(Exception):
+        code = 700012006
+        msg = "access token invalid"
+        logid = "test-logid"
+        debug_url = None
+
+        def __str__(self) -> str:
+            return "code: 700012006, msg: access token invalid, logid: test-logid"
+
+    monkeypatch.setenv("COZE_API_TOKEN", "fake-token")
+    monkeypatch.setenv("COZE_API_BASE", "https://api.coze.com")
+    monkeypatch.setattr(coze_workflow_client, "_coze", FakeCoze())
+
+    with pytest.raises(CozeWorkflowError) as exc:
+        coze_workflow_client.run_workflow_by_id(
+            "workflow-id",
+            parameters={"source_text": "x"},
+            stage_key="stage_01",
+        )
+
+    assert "Coze access token invalid" in str(exc.value)
+    assert "COZE_API_BASE=COZE_CN_BASE_URL" in str(exc.value)
+    assert exc.value.detail["code"] == 700012006
+    assert exc.value.detail["msg"] == "access token invalid"
 
 
 def test_workflow_runner_rejects_unknown_backend(monkeypatch):

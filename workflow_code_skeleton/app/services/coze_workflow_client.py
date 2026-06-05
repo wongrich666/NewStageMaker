@@ -9,16 +9,11 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
-
 from ..config import settings
 from ..utils.logger import get_logger
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "coze_workflows.yaml"
 logger = get_logger("coze_workflow_client")
-
-load_dotenv()
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 class CozeWorkflowError(RuntimeError):
@@ -133,6 +128,24 @@ def _exception_detail(exc: Exception) -> dict[str, Any]:
                 continue
             detail[str(key)] = _event_to_jsonable(value)
     return detail
+
+
+def _coze_error_message(exc: Exception, detail: dict[str, Any]) -> str:
+    message = f"Coze workflow request failed: {type(exc).__name__}: {exc}"
+    code = str(detail.get("code") or "")
+    msg = str(detail.get("msg") or detail.get("original_exception_message") or "").lower()
+    base_url = str(detail.get("base_url") or "")
+    if code == "700012006" or "access token invalid" in msg:
+        hint = (
+            "Coze access token invalid. Check COZE_API_TOKEN, and make sure "
+            "COZE_API_BASE matches the token region."
+        )
+        if "api.coze.com" in base_url:
+            hint += " If this is a Coze CN token, set COZE_API_BASE=COZE_CN_BASE_URL or https://api.coze.cn."
+        elif "api.coze.cn" in base_url:
+            hint += " If this is a global Coze token, set COZE_API_BASE=COZE_COM_BASE_URL or https://api.coze.com."
+        return hint
+    return message
 
 
 def _repo_root() -> Path:
@@ -363,7 +376,7 @@ class CozeWorkflowClient:
                 sorted(safe_parameters.keys()),
             )
             raise CozeWorkflowError(
-                f"Coze workflow request failed: {type(exc).__name__}: {exc}",
+                _coze_error_message(exc, detail),
                 stage_key=normalized_stage_key,
                 workflow_id=workflow_id,
                 error=detail,
@@ -572,4 +585,5 @@ coze_workflow_client = CozeWorkflowClient()
 
 
 def use_coze_workflow_backend() -> bool:
-    return str(os.getenv("WORKFLOW_BACKEND") or "").strip().lower() in {"coze", "volcengine", "volcano"}
+    backend = str(os.getenv("WORKFLOW_BACKEND") or getattr(settings, "workflow_backend", "") or "coze")
+    return backend.strip().lower() in {"coze", "volcengine", "volcano"}
