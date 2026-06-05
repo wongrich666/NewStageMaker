@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -144,18 +145,194 @@ def _stage_07_payload() -> dict[str, object]:
     }
 
 
+def _write_workflow_fixture_files(workflow_dir: Path) -> None:
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    for definition in service.STAGE_DEFINITIONS.values():
+        public_keys: list[str] = []
+        seen: set[str] = set()
+
+        def add_public(key: object) -> None:
+            text = str(key or "").strip()
+            if text and text not in seen:
+                seen.add(text)
+                public_keys.append(text)
+
+        for field in (*definition.input_fields, *definition.output_fields):
+            add_public(field)
+        for aliases in (*definition.input_aliases.values(), *definition.output_aliases.values()):
+            for alias in aliases:
+                add_public(alias)
+        for preference_key in (
+            "stagePreference",
+            "stage_preference",
+            "stage_preference_prompt",
+            "user_stage_preference_prompt",
+            "user_preference_prompt",
+            "user_preferences",
+            "userPreferences",
+            "userRequirements",
+            "user_constraints",
+        ):
+            add_public(preference_key)
+
+        workflow = {
+            "chatConfig": {
+                "variables": [
+                    *({"key": key, "type": "string"} for key in public_keys),
+                    {"key": "d3ixvj8d", "type": "internal"},
+                ]
+            },
+            "nodes": [
+                {
+                    "flowNodeType": "answerNode",
+                    "name": f"stage {definition.stage} answer",
+                }
+            ],
+        }
+        (workflow_dir / f"{definition.stage}_fixture.json").write_text(
+            service.json.dumps(workflow, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+
 class FrameworkPlannerServiceTests(unittest.TestCase):
     def setUp(self) -> None:
+        self._workflow_fixture_root = tempfile.TemporaryDirectory()
+        self._workflow_fixture_dir = Path(self._workflow_fixture_root.name) / "BETTER_FRAMEWORK_JSONS"
+        _write_workflow_fixture_files(self._workflow_fixture_dir)
+        self._settings_workflow_backend = service.settings.workflow_backend
+        service.settings.workflow_backend = "fastgpt"
+        self._env_patcher = patch.dict(
+            os.environ,
+            {
+                "BETTER_FRAMEWORK_JSONS_DIR": str(self._workflow_fixture_dir),
+                "WORKFLOW_BACKEND": "fastgpt",
+            },
+            clear=False,
+        )
+        self._env_patcher.start()
         service.framework_workflow_dir.cache_clear()
         service.resolve_framework_contract_path.cache_clear()
         service.resolve_stage_workflow_path.cache_clear()
         service.load_stage_workflow_spec.cache_clear()
+
+    def tearDown(self) -> None:
+        service.framework_workflow_dir.cache_clear()
+        service.resolve_framework_contract_path.cache_clear()
+        service.resolve_stage_workflow_path.cache_clear()
+        service.load_stage_workflow_spec.cache_clear()
+        self._env_patcher.stop()
+        service.settings.workflow_backend = self._settings_workflow_backend
+        self._workflow_fixture_root.cleanup()
 
     def test_resolve_stage_workflow_path_reads_better_framework_jsons(self) -> None:
         path = service.resolve_stage_workflow_path("04")
         self.assertIsInstance(path, Path)
         self.assertTrue(path.name.startswith("04_"))
         self.assertIn("BETTER_FRAMEWORK_JSONS", str(path))
+
+    def test_stage_01_coze_backend_does_not_require_fastgpt_workflow_json(self) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_run_workflow_stage(stage_key, variables=None, extra_parameters=None):
+            captured["stage_key"] = stage_key
+            captured["variables"] = dict(variables or {})
+            captured["extra_parameters"] = dict(extra_parameters or {})
+            return {
+                "ok": True,
+                "workflow_id": "wf-coze-stage-01",
+                "backend_stage_key": "stage_01",
+                "source_brief": {"source_title": "夜行审判", "core_premise": "旧案重启"},
+                "content": '{"source_brief": {"source_title": "夜行审判", "core_premise": "旧案重启"}}',
+            }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(
+                os.environ,
+                {
+                    "WORKFLOW_BACKEND": "coze",
+                    "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                    "BETTER_FRAMEWORK_JSONS_DIR": tmpdir,
+                },
+                clear=True,
+            ):
+                with patch.object(service, "workflow_backend_ready", return_value=True):
+                    with patch.object(service, "run_workflow_stage", side_effect=_fake_run_workflow_stage):
+                        payload = service.run_framework_planner_stage("01", _basic_config())
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(captured["stage_key"], "stage_01")
+        self.assertEqual(captured["extra_parameters"]["source_text"], _basic_config()["source_text"])
+        self.assertEqual(captured["extra_parameters"]["source_title"], "夜行审判")
+        self.assertIn("source_brief", payload["data"])
+
+    def test_stage_01_coze_backend_failure_keeps_detail_without_fastgpt_json(self) -> None:
+        error_detail = {
+            "backend_stage_key": "stage_01",
+            "base_url": "https://api.coze.com",
+            "base_url_source": "COZE_API_BASE",
+            "token_status": "SET",
+            "workflow_id_status": "SET",
+            "workflow_id_source": "COZE_WORKFLOW_STAGE_01_ID",
+            "request_parameters_keys": ["source_text", "source_title"],
+            "missing_input_variables": [],
+            "original_error_code": 700012006,
+            "original_error_msg": "access token invalid",
+            "debug_url": "https://debug.example.invalid",
+        }
+
+        def _fake_run_workflow_stage(stage_key, variables=None, extra_parameters=None):
+            del stage_key, variables, extra_parameters
+            raise service.WorkflowRunnerError(
+                "Workflow backend request failed: CozeWorkflowError: access token invalid",
+                backend="coze",
+                stage_key="stage_01",
+                detail=error_detail,
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(
+                os.environ,
+                {
+                    "WORKFLOW_BACKEND": "coze",
+                    "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                    "BETTER_FRAMEWORK_JSONS_DIR": tmpdir,
+                },
+                clear=True,
+            ):
+                with patch.object(service, "workflow_backend_ready", return_value=True):
+                    with patch.object(service, "run_workflow_stage", side_effect=_fake_run_workflow_stage):
+                        with self.assertRaises(service.FrameworkPlannerStageError) as ctx:
+                            service.run_framework_planner_stage("01", _basic_config())
+
+        exc = ctx.exception
+        self.assertEqual(exc.status_code, 502)
+        self.assertEqual(exc.detail["backend"], "coze")
+        self.assertEqual(exc.detail["base_url"], "https://api.coze.com")
+        self.assertEqual(exc.detail["workflow_id_source"], "COZE_WORKFLOW_STAGE_01_ID")
+        self.assertEqual(exc.detail["original_error_code"], 700012006)
+        self.assertEqual(exc.detail["original_error_msg"], "access token invalid")
+        self.assertTrue(str(exc.detail["debug_artifact_path"]).endswith(".json"))
+
+    def test_stage_01_fastgpt_backend_still_requires_workflow_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(
+                os.environ,
+                {
+                    "WORKFLOW_BACKEND": "fastgpt",
+                    "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                    "BETTER_FRAMEWORK_JSONS_DIR": tmpdir,
+                    "FASTGPT_API_KEY": "fastgpt-global-key",
+                    "FASTGPT_CHAT_COMPLETIONS_URL": "https://api.fastgpt.in/api/v1/chat/completions",
+                },
+                clear=True,
+            ):
+                with self.assertRaises(service.FrameworkPlannerStageError) as ctx:
+                    service.run_framework_planner_stage("01", _basic_config())
+
+        self.assertEqual(ctx.exception.status_code, 500)
+        self.assertIn("未找到阶段 01 对应的工作流 JSON", str(ctx.exception))
+        self.assertEqual(ctx.exception.detail["workflow_glob"], "01_*.json")
 
     def test_stage_04_mock_output_contains_15_beats_and_required_fields(self) -> None:
         with patch.dict(os.environ, {"FRAMEWORK_PLANNER_USE_MOCK": "true"}, clear=False):
@@ -1041,6 +1218,8 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "WORKFLOW_BACKEND": "fastgpt",
+                "BETTER_FRAMEWORK_JSONS_DIR": str(self._workflow_fixture_dir),
                 "FRAMEWORK_PLANNER_USE_MOCK": "false",
                 "FASTGPT_FRAMEWORK_API_KEY": "fastgpt-framework-key",
                 "FASTGPT_API_URL": "https://api.fastgpt.in/api/v1",
@@ -1070,6 +1249,8 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "WORKFLOW_BACKEND": "fastgpt",
+                "BETTER_FRAMEWORK_JSONS_DIR": str(self._workflow_fixture_dir),
                 "FRAMEWORK_PLANNER_USE_MOCK": "false",
                 "FASTGPT_API_KEY": "fastgpt-global-key",
                 "FASTGPT_CHAT_COMPLETIONS_URL": "http://192.168.2.203:3000/api/v1/chat/completions",

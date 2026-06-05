@@ -95,6 +95,29 @@ def _env_status(name: str) -> str:
     return "SET" if os.getenv(name) else "EMPTY"
 
 
+def _base_url_region(base_url: str) -> str:
+    lowered = str(base_url or "").lower()
+    if "api.coze.cn" in lowered:
+        return "cn"
+    if "api.coze.com" in lowered:
+        return "global"
+    return "custom" if lowered else ""
+
+
+def _normalized_token_value(raw_token: str | None) -> tuple[str, dict[str, Any]]:
+    raw = "" if raw_token is None else str(raw_token)
+    stripped = raw.strip()
+    bearer_prefixed = stripped.lower().startswith("bearer ")
+    normalized = stripped[7:].strip() if bearer_prefixed else stripped
+    return normalized, {
+        "token_status": "SET" if normalized else "EMPTY",
+        "token_format_status": "BEARER_PREFIX_STRIPPED" if bearer_prefixed else ("SET" if normalized else "EMPTY"),
+        "token_had_bearer_prefix": bearer_prefixed,
+        "token_had_leading_or_trailing_space": raw != stripped,
+        "token_contains_newline": "\n" in raw or "\r" in raw,
+    }
+
+
 def _env_value_with_source(*names: str) -> tuple[str, str]:
     for name in names:
         value = str(os.getenv(name) or "").strip()
@@ -157,6 +180,12 @@ def _coze_error_message(exc: Exception, detail: dict[str, Any]) -> str:
     code = str(detail.get("code") or "")
     msg = str(detail.get("msg") or detail.get("original_exception_message") or "").lower()
     base_url = str(detail.get("base_url") or "")
+    if code == "4100" or "authentication is invalid" in msg:
+        return (
+            "Coze authentication invalid. COZE_API_TOKEN is present, but Coze rejected it "
+            f"for base_url={base_url or 'unknown'}. Regenerate or replace the PAT for this Coze region, "
+            "then restart the server."
+        )
     if code == "700012006" or "access token invalid" in msg:
         hint = (
             "Coze access token invalid. Check COZE_API_TOKEN, and make sure "
@@ -168,6 +197,38 @@ def _coze_error_message(exc: Exception, detail: dict[str, Any]) -> str:
             hint += " If this is a global Coze token, set COZE_API_BASE=COZE_COM_BASE_URL or https://api.coze.com."
         return hint
     return message
+
+
+def _augment_authentication_failure_detail(detail: dict[str, Any]) -> None:
+    code = str(detail.get("original_error_code") or detail.get("code") or "")
+    msg = str(detail.get("original_error_msg") or detail.get("msg") or detail.get("original_exception_message") or "").lower()
+    if code not in {"4100", "700012006"} and "authentication is invalid" not in msg and "access token invalid" not in msg:
+        return
+    base_url = str(detail.get("base_url") or "")
+    detail["auth_failure_suspected"] = True
+    detail["auth_failure_code"] = code
+    detail["base_url_region"] = _base_url_region(base_url)
+    detail["token_action_required"] = "replace_or_regenerate_coze_pat"
+    detail["token_action_hint"] = (
+        "COZE_API_TOKEN is set, but Coze rejected it. Use a valid PAT for the configured "
+        "COZE_API_BASE region, and restart the server after updating .env."
+    )
+
+
+def _augment_region_mismatch_detail(detail: dict[str, Any]) -> None:
+    code = str(detail.get("original_error_code") or detail.get("code") or "")
+    msg = str(detail.get("original_error_msg") or detail.get("msg") or detail.get("original_exception_message") or "").lower()
+    if code != "700012006" and "access token invalid" not in msg:
+        return
+    base_url = str(detail.get("base_url") or "")
+    if "api.coze.com" in base_url:
+        detail["region_mismatch_suspected"] = True
+        detail["suggested_base_url"] = "https://api.coze.cn"
+        detail["suggested_base_url_env"] = "COZE_API_BASE=https://api.coze.cn"
+    elif "api.coze.cn" in base_url:
+        detail["region_mismatch_suspected"] = True
+        detail["suggested_base_url"] = "https://api.coze.com"
+        detail["suggested_base_url_env"] = "COZE_API_BASE=https://api.coze.com"
 
 
 def _repo_root() -> Path:
@@ -259,6 +320,7 @@ class CozeWorkflowClient:
             os.getenv(str(self.config.get("dry_run_env") or "COZE_DRY_RUN"), "0")
         ).strip() in {"1", "true", "TRUE", "yes", "on"}
         self._coze: Any = None
+        self._coze_signature: tuple[str, str] | None = None
 
     def _bot_app_info_for_stage(self, stage_key: str) -> dict[str, Any]:
         normalized = normalize_coze_stage_key(stage_key).upper()
@@ -351,7 +413,7 @@ class CozeWorkflowClient:
                 "parameter_keys": sorted(safe_parameters.keys()),
             }
             return self.normalize_response(normalized_stage_key, workflow_id, raw)
-        token = os.getenv(self.token_env)
+        token, _token_detail = _normalized_token_value(os.getenv(self.token_env))
         if not token:
             raise CozeWorkflowError(
                 "COZE_API_TOKEN is required for Coze workflow backend",
@@ -447,6 +509,8 @@ class CozeWorkflowClient:
                 **_exception_detail(exc),
                 "traceback": traceback.format_exc(limit=8),
             }
+            _augment_authentication_failure_detail(detail)
+            _augment_region_mismatch_detail(detail)
             logger.exception(
                 "Coze workflow request exception stage_key=%s workflow_id=%s base_url=%s parameter_keys=%s",
                 normalized_stage_key,
@@ -587,6 +651,7 @@ class CozeWorkflowClient:
         except Exception as exc:
             base_url = f"invalid: {exc}"
             base_url_source = self.base_url_env
+        _token, token_detail = _normalized_token_value(os.getenv(self.token_env))
         bot_app_info = self._bot_app_info_for_stage(stage_key)
         missing_input_variables = self._missing_input_variables(stage_key, parameters)
         return {
@@ -601,10 +666,11 @@ class CozeWorkflowClient:
             "workflow_id_status": "SET" if workflow_id else "EMPTY",
             "workflow_id_source": workflow_info.get("workflow_id_source") or "",
             "workflow_id_env": workflow_info.get("workflow_id_env") or "",
-            "token_status": _env_status(self.token_env),
+            **token_detail,
             "base_url_status": _env_status(self.base_url_env),
             "base_url": base_url,
             "base_url_source": base_url_source,
+            "base_url_region": _base_url_region(base_url),
             "cozepy_version": _cozepy_version(),
             "request_parameters_keys": sorted(parameters.keys()),
             "missing_input_variables": missing_input_variables,
@@ -642,13 +708,15 @@ class CozeWorkflowClient:
                 normalized[target_key] = parsed
 
     def _client(self) -> Any:
-        if self._coze is not None:
+        token, _token_detail = _normalized_token_value(os.getenv(self.token_env))
+        base_url = _resolve_coze_base_url(os.getenv(self.base_url_env))
+        signature = (token, base_url)
+        if self._coze is not None and (self._coze_signature is None or self._coze_signature == signature):
             return self._coze
         from cozepy import Coze, TokenAuth
 
-        token = os.getenv(self.token_env)
-        base_url = _resolve_coze_base_url(os.getenv(self.base_url_env))
         self._coze = Coze(auth=TokenAuth(token=token), base_url=base_url)
+        self._coze_signature = signature
         return self._coze
 
 

@@ -99,6 +99,7 @@ def test_coze_access_token_invalid_error_has_region_hint(monkeypatch):
     monkeypatch.setenv("COZE_API_TOKEN", "fake-token")
     monkeypatch.setenv("COZE_API_BASE", "https://api.coze.com")
     monkeypatch.setattr(coze_workflow_client, "_coze", FakeCoze())
+    monkeypatch.setattr(coze_workflow_client, "_coze_signature", None)
 
     with pytest.raises(CozeWorkflowError) as exc:
         coze_workflow_client.run_workflow_by_id(
@@ -122,6 +123,65 @@ def test_coze_access_token_invalid_error_has_region_hint(monkeypatch):
     assert "COZE_API_BASE=COZE_CN_BASE_URL" in str(exc.value)
     assert exc.value.detail["code"] == 700012006
     assert exc.value.detail["msg"] == "access token invalid"
+    assert exc.value.detail["region_mismatch_suspected"] is True
+    assert exc.value.detail["suggested_base_url"] == "https://api.coze.cn"
+    assert exc.value.detail["suggested_base_url_env"] == "COZE_API_BASE=https://api.coze.cn"
+    assert exc.value.detail["auth_failure_suspected"] is True
+    assert exc.value.detail["token_action_required"] == "replace_or_regenerate_coze_pat"
+
+
+def test_coze_authentication_invalid_error_has_token_hint(monkeypatch):
+    class FakeRuns:
+        def stream(self, **kwargs):
+            raise FakeCozeApiError()
+
+    class FakeWorkflows:
+        runs = FakeRuns()
+
+    class FakeCoze:
+        workflows = FakeWorkflows()
+
+    class FakeCozeApiError(Exception):
+        code = 4100
+        msg = "authentication is invalid"
+        logid = "test-logid"
+        debug_url = None
+
+        def __str__(self) -> str:
+            return "code: 4100, msg: authentication is invalid, logid: test-logid"
+
+    monkeypatch.setenv("COZE_API_TOKEN", "fake-token")
+    monkeypatch.setenv("COZE_API_BASE", "https://api.coze.cn")
+    monkeypatch.setattr(coze_workflow_client, "_coze", FakeCoze())
+    monkeypatch.setattr(coze_workflow_client, "_coze_signature", None)
+
+    with pytest.raises(CozeWorkflowError) as exc:
+        coze_workflow_client.run_workflow_by_id(
+            "workflow-id",
+            parameters={
+                "adaptation_direction": "",
+                "episodes_per_season": 20,
+                "minutes_per_episode": 2,
+                "mode": "创作",
+                "season_count": 1,
+                "source_text": "x",
+                "source_title": "测试",
+                "target_format": "短剧",
+                "user_constraints": "",
+                "user_requirements": "",
+            },
+            stage_key="stage_01",
+        )
+
+    assert "Coze authentication invalid" in str(exc.value)
+    assert "base_url=https://api.coze.cn" in str(exc.value)
+    assert exc.value.detail["code"] == 4100
+    assert exc.value.detail["msg"] == "authentication is invalid"
+    assert exc.value.detail["auth_failure_suspected"] is True
+    assert exc.value.detail["auth_failure_code"] == "4100"
+    assert exc.value.detail["base_url_region"] == "cn"
+    assert exc.value.detail["token_action_required"] == "replace_or_regenerate_coze_pat"
+    assert exc.value.detail["token_status"] == "SET"
 
 
 def test_coze_stage_01_missing_variables_fail_before_request(monkeypatch):

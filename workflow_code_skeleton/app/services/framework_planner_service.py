@@ -1110,7 +1110,13 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         f"payload_keys={_history_payload_keys(normalized_payload)}",
         flush=True,
     )
-    workflow_spec = load_stage_workflow_spec(definition.stage)
+    backend = selected_workflow_backend()
+    is_fastgpt_backend = backend == "fastgpt"
+    workflow_spec = (
+        load_stage_workflow_spec(definition.stage)
+        if is_fastgpt_backend
+        else _workflow_backend_spec(definition, backend)
+    )
     diagnostics = _stage_runtime_diagnostics(definition, normalized_payload)
     _log_stage_entry(definition, diagnostics)
     if _should_use_mock_backend(definition):
@@ -1144,7 +1150,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
     if definition.stage == "05":
         _log_stage_05_input_diagnostics(normalized_payload, request_variables)
     endpoint: FrameworkPlannerEndpoint | None = None
-    if selected_workflow_backend() != "fastgpt":
+    if not is_fastgpt_backend:
         stage_key = f"stage_{definition.stage}"
         try:
             response_json = run_workflow_stage(
@@ -1184,7 +1190,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 status_code=502,
                 detail={
                     "reason": str(exc),
-                    "backend": exc.backend or selected_workflow_backend(),
+                    "backend": exc.backend or backend,
                     "stage_key": stage_key,
                     "backend_stage_key": runner_detail.get("backend_stage_key") or "",
                     **runner_detail,
@@ -1192,7 +1198,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 },
             ) from exc
         endpoint = FrameworkPlannerEndpoint(
-            url=f"{selected_workflow_backend()}://workflow",
+            url=f"{backend}://workflow",
             url_source="WORKFLOW_BACKEND",
             api_key="",
             api_key_source="",
@@ -1203,7 +1209,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         )
         logger.info(
             "Workflow backend resolved: backend=%s stage=%s stage_key=%s workflow_id=%s",
-            selected_workflow_backend(),
+            backend,
             definition.stage,
             stage_key,
             endpoint.workflow_id,
@@ -1688,6 +1694,20 @@ def load_stage_workflow_spec(stage: str) -> FrameworkPlannerWorkflowSpec:
         internal_variable_keys=tuple(internal_keys),
         answer_node_names=tuple(name for name in answer_node_names if name),
         contract_path=resolve_framework_contract_path(),
+    )
+
+
+def _workflow_backend_spec(definition: FrameworkPlannerStageDefinition, backend: str) -> FrameworkPlannerWorkflowSpec:
+    normalized_backend = str(backend or "").strip().lower()
+    config_name = "coze_workflows.yaml" if normalized_backend in {"coze", "volcengine", "volcano"} else "workflows.yaml"
+    config_path = Path(__file__).resolve().parents[2] / "config" / config_name
+    return FrameworkPlannerWorkflowSpec(
+        stage=definition.stage,
+        path=config_path,
+        public_variable_keys=tuple(definition.input_fields),
+        internal_variable_keys=(),
+        answer_node_names=(),
+        contract_path=None,
     )
 
 
