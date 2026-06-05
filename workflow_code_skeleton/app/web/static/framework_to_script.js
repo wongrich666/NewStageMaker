@@ -102,8 +102,9 @@
       const detail = data.detail && typeof data.detail === "object" ? data.detail : {};
       const detailMessage = detail.error_message || detail.message || "";
       const failedSubStage = detail.failed_sub_stage ? `（${detail.failed_sub_stage}）` : "";
+      const debugPath = detail.debug_path ? `debug: ${detail.debug_path}` : "";
       throw new Error(
-        [data.message || data.error || "请求失败，请稍后重试。", failedSubStage, detailMessage]
+        [data.message || data.error || "请求失败，请稍后重试。", failedSubStage, detailMessage, debugPath]
           .filter(Boolean)
           .join(" ")
       );

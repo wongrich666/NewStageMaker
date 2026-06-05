@@ -4,6 +4,8 @@ import json
 import copy
 import threading
 import tempfile
+import time
+import traceback
 from io import BytesIO
 from functools import wraps
 import os
@@ -140,6 +142,148 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
     def _now_iso() -> str:
         return datetime.now(timezone.utc).astimezone().isoformat()
+
+    def _stage12_debug_safe_name(value) -> str:
+        text = str(value or "").strip()
+        invalid = '<>:"/\\|?*'
+        text = "".join("_" if (char in invalid or ord(char) < 32) else char for char in text)
+        text = "_".join(text.split()).strip("._ ")
+        return text[:80] or "未命名项目"
+
+    def _stage12_debug_project_title(data: dict, framework_asset: dict | None) -> str:
+        candidates = [
+            data.get("project_title"),
+            data.get("project_name"),
+            data.get("title"),
+            data.get("source_title"),
+            (framework_asset or {}).get("project_title") if isinstance(framework_asset, dict) else "",
+            (framework_asset or {}).get("title") if isinstance(framework_asset, dict) else "",
+            (framework_asset or {}).get("source_title") if isinstance(framework_asset, dict) else "",
+        ]
+        package = data.get("framework_plan_package") if isinstance(data.get("framework_plan_package"), dict) else {}
+        basic_config = package.get("basic_config") if isinstance(package.get("basic_config"), dict) else {}
+        candidates.extend(
+            [
+                package.get("project_title"),
+                package.get("title"),
+                basic_config.get("project_title"),
+                basic_config.get("title"),
+            ]
+        )
+        for item in candidates:
+            text = str(item or "").strip()
+            if text:
+                return text
+        project_id = str(data.get("project_id") or data.get("framework_asset_id") or "").strip()
+        return f"project_{project_id}" if project_id else "未命名项目"
+
+    def _stage12_debug_preview(value, *, limit: int = 240):
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            text = value
+        else:
+            try:
+                text = json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
+            except Exception:
+                text = str(value)
+        text = " ".join(str(text).split())
+        if len(text) > limit:
+            return text[:limit] + "..."
+        return text
+
+    def _stage12_debug_summary(value, *, preview_limit: int = 240):
+        if value is None:
+            return {"type": "null", "exists": False, "length": 0, "preview": ""}
+        if isinstance(value, str):
+            return {
+                "type": "str",
+                "exists": bool(value),
+                "length": len(value),
+                "preview": _stage12_debug_preview(value, limit=preview_limit),
+            }
+        if isinstance(value, dict):
+            return {
+                "type": "dict",
+                "exists": bool(value),
+                "length": len(value),
+                "keys": sorted(str(key) for key in value.keys())[:40],
+                "json_length": len(json.dumps(value, ensure_ascii=False, default=str)),
+                "preview": _stage12_debug_preview(value, limit=preview_limit),
+            }
+        if isinstance(value, list):
+            return {
+                "type": "list",
+                "exists": bool(value),
+                "length": len(value),
+                "json_length": len(json.dumps(value, ensure_ascii=False, default=str)),
+                "preview": _stage12_debug_preview(value[:2], limit=preview_limit),
+            }
+        text = str(value)
+        return {
+            "type": type(value).__name__,
+            "exists": bool(text),
+            "length": len(text),
+            "preview": _stage12_debug_preview(text, limit=preview_limit),
+        }
+
+    def _stage12_debug_dir(data: dict, framework_asset: dict | None) -> Path:
+        title = _stage12_debug_project_title(data, framework_asset)
+        path = Path(__file__).resolve().parents[2] / "cache" / _stage12_debug_safe_name(title) / "framework_to_script" / "stage12"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _write_stage12_debug_file(
+        debug_record: dict,
+        *,
+        data: dict,
+        framework_asset: dict | None,
+        success: bool = False,
+    ) -> str:
+        try:
+            start_episode = debug_record.get("batch_start_episode") or "unknown"
+            end_episode = debug_record.get("batch_end_episode") or start_episode
+            if not debug_record.get("_debug_timestamp"):
+                debug_record["_debug_timestamp"] = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+            filename = (
+                f"stage12_episodes_{start_episode}_{end_episode}_success.json"
+                if success
+                else f"stage12_episodes_{start_episode}_{end_episode}_{debug_record['_debug_timestamp']}.json"
+            )
+            path = _stage12_debug_dir(data, framework_asset) / filename
+            public_record = {key: value for key, value in debug_record.items() if not str(key).startswith("_")}
+            public_record["debug_path"] = str(path)
+            path.write_text(json.dumps(public_record, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+            return str(path)
+        except Exception:
+            logger.exception("framework-to-script stage12 debug file write failed")
+            return ""
+
+    def _stage12_fastgpt_debug_summary(client, stage_name: str) -> dict:
+        try:
+            info = client.get_last_stage_debug_info(stage_name)
+        except Exception:
+            info = {}
+        if not isinstance(info, dict):
+            return {}
+        return {
+            "status": info.get("status"),
+            "http_status": info.get("http_status"),
+            "http_reason": info.get("http_reason"),
+            "payload_stats": info.get("payload_stats"),
+            "payload_stats_before_compact": info.get("payload_stats_before_compact"),
+            "payload_compaction": info.get("payload_compaction"),
+            "raw_output_source": info.get("raw_output_source"),
+            "matched_fields": info.get("matched_fields"),
+            "matched_aliases": info.get("matched_aliases"),
+            "missing_fields": info.get("missing_fields"),
+            "candidate_sources": info.get("candidate_sources"),
+            "probable_truncated_json": info.get("probable_truncated_json"),
+            "response_preview": _stage12_debug_preview(info.get("response_preview"), limit=600),
+            "answer_text_preview": _stage12_debug_preview(info.get("answer_text_preview"), limit=600),
+            "output_keys": info.get("output_keys"),
+            "last_failure_reason": info.get("last_failure_reason"),
+        }
 
     def _strip_raw_fastgpt_fields(value):
         if isinstance(value, list):
@@ -3673,6 +3817,21 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             start_episode = None
             end_episode = None
             base_vars = {}
+            debug_record = {
+                "project_id": asset_id or data.get("project_id") or data.get("source_framework_project_id"),
+                "project_title": _stage12_debug_project_title(data, framework_asset),
+                "stage": 12,
+                "status": "started",
+                "selected_batch_source": selected_batch_source,
+                "batch_key": batch_key,
+                "attempt": 1,
+                "rewrite_attempt": 0,
+                "review_attempt": 0,
+                "events": [],
+                "created_at": _now_iso(),
+                "updated_at": _now_iso(),
+            }
+            debug_path = ""
             try:
                 from .services.fastgpt_client import fastgpt_client
                 from .services.fastgpt_contracts import (
@@ -3685,6 +3844,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
                 start_episode = _positive_int(stage11_batch.get("batchStartEpisode"), _positive_int(batch_key, 1))
                 end_episode = _positive_int(stage11_batch.get("batchEndEpisode"), start_episode + 4)
+                debug_record.update(
+                    {
+                        "batch_start_episode": start_episode,
+                        "batch_end_episode": end_episode,
+                        "episode_count": max(0, end_episode - start_episode + 1),
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                 minutes = _positive_int((framework_asset or {}).get("minutes_per_episode"), 2)
                 episode_word_count = _positive_int(data.get("episode_word_count"), max(600, minutes * 450))
                 total_episodes = _positive_int(
@@ -3729,6 +3897,51 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     framework_asset=framework_asset,
                     workflow_stage="12_write",
                 )
+                preference_snapshot = data.get("preference_snapshot") if isinstance(data.get("preference_snapshot"), dict) else {}
+                prompt_preferences = data.get("prompt_preferences") if isinstance(data.get("prompt_preferences"), dict) else {}
+                user_preference_payload = {
+                    "preference_snapshot": preference_snapshot,
+                    "prompt_preferences": prompt_preferences,
+                }
+                debug_record.update(
+                    {
+                        "status": "prepared",
+                        "request_variable_keys_before_fastgpt": sorted(base_vars.keys()),
+                        "variable_length_summary": {
+                            key: _stage12_debug_summary(base_vars.get(key))
+                            for key in sorted(base_vars.keys())
+                            if key
+                            in {
+                                "totalEpisodes",
+                                "scriptStartEpisode",
+                                "episodeWordCount",
+                                "batchEnrichedEpisodePlan",
+                                "batchCausalConflictPlan",
+                                "sceneDictionary",
+                                "appearanceMapping",
+                                "scriptWorldRulesDigest",
+                                "scriptMemory",
+                                "userPreference",
+                                "userPreferences",
+                                "preferenceSnapshot",
+                                "promptPreferences",
+                            }
+                        },
+                        "scriptMemory_length": len(script_memory),
+                        "scriptMemory_preview": _stage12_debug_preview(script_memory),
+                        "batchEnrichedEpisodePlan_length": len(json.dumps(batch_plan, ensure_ascii=False, default=str)),
+                        "batchEnrichedEpisodePlan_preview": _stage12_debug_preview(batch_plan),
+                        "batchCausalConflictPlan_length": len(json.dumps(conflict_plan, ensure_ascii=False, default=str)),
+                        "batchCausalConflictPlan_preview": _stage12_debug_preview(conflict_plan),
+                        "appearanceMapping_exists": bool(appearance_mapping),
+                        "scriptWorldRulesDigest_exists": bool(stage08.get("scriptWorldRulesDigest") or {}),
+                        "user_preference_exists": bool(preference_snapshot or prompt_preferences),
+                        "user_preference_length": len(json.dumps(user_preference_payload, ensure_ascii=False, default=str)),
+                        "user_preference_preview": _stage12_debug_preview(user_preference_payload),
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                 first_plan = batch_plan[0] if isinstance(batch_plan[0], dict) else {}
                 first_plan_summary = {
                     "episode": first_plan.get("episode"),
@@ -3769,10 +3982,39 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     stage_names,
                 )
                 failed_sub_stage = "script_write"
+                write_event = {
+                    "sub_stage": "script_write",
+                    "attempt": 1,
+                    "review_attempt": 0,
+                    "rewrite_attempt": 0,
+                    "fastgpt_request_started_at": _now_iso(),
+                    "request_variable_keys": sorted(base_vars.keys()),
+                }
+                debug_record["events"].append(write_event)
+                debug_record.update({"status": "requesting_fastgpt", "failed_sub_stage": failed_sub_stage, "updated_at": _now_iso()})
+                debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
+                write_started = time.monotonic()
                 write_output = fastgpt_client.run_stage(STAGE_FRAMEWORK_SCRIPT_WRITE, base_vars)
+                write_event["fastgpt_request_ended_at"] = _now_iso()
+                write_event["duration_ms"] = int((time.monotonic() - write_started) * 1000)
+                write_event["fastgpt_debug"] = _stage12_fastgpt_debug_summary(fastgpt_client, STAGE_FRAMEWORK_SCRIPT_WRITE)
                 write_keys = sorted(write_output.keys()) if isinstance(write_output, dict) else []
                 batch_script_value = _first_present(write_output, "batchScriptText", "batch_script_text", default=None)
                 batch_script = str(batch_script_value or "")
+                write_event["raw_response_summary"] = _stage12_debug_summary(write_output, preview_limit=600)
+                write_event["parsed_fields"] = write_keys
+                write_event["batchScriptText_length"] = len(batch_script)
+                write_event["parse_failure_reason"] = "" if batch_script.strip() else "missing_or_empty_batchScriptText"
+                debug_record.update(
+                    {
+                        "status": "script_write_done" if batch_script.strip() else "parse_failed",
+                        "parsed_fields": write_keys,
+                        "raw_response_summary": _stage12_debug_summary(write_output, preview_limit=600),
+                        "parse_failure_reason": write_event["parse_failure_reason"],
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                 logger.info(
                     "framework-to-script stage12 script_write output write_output_keys=%s batchScriptText_type=%s "
                     "batchScriptText_length=%s batchScriptText_empty=%s normalized_keys=%s input_keys=%s",
@@ -3784,14 +4026,26 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     sorted(base_vars.keys()),
                 )
                 if not batch_script.strip():
+                    debug_record.update(
+                        {
+                            "status": "failed",
+                            "failure_phase": "解析",
+                            "failed_sub_stage": "script_write",
+                            "exception_type": "",
+                            "exception_message": "12 write/rewrite 阶段未返回 batchScriptText",
+                            "updated_at": _now_iso(),
+                        }
+                    )
+                    debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                     return jsonify(
                         {
                             "success": False,
-                            "message": "12 正文对白批次调用失败",
+                            "message": f"12 阶段第 {start_episode}-{end_episode} 集生成失败/解析失败：write 未返回正文。",
                             "detail": {
                                 "failed_sub_stage": "script_write",
                                 "error_message": "12 write/rewrite 阶段未返回 batchScriptText",
                                 "write_output_keys": write_keys,
+                                "debug_path": debug_path,
                             },
                         }
                     ), 500
@@ -3800,13 +4054,40 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 rewrite_round = 0
                 for review_round in range(1, max_review_rounds + 1):
                     failed_sub_stage = "script_review"
+                    debug_record.update(
+                        {
+                            "status": "requesting_fastgpt",
+                            "failed_sub_stage": failed_sub_stage,
+                            "review_attempt": review_round,
+                            "rewrite_attempt": rewrite_round,
+                            "updated_at": _now_iso(),
+                        }
+                    )
+                    review_vars = {
+                        **base_vars,
+                        "batchScriptText": batch_script,
+                    }
+                    review_event = {
+                        "sub_stage": "script_review",
+                        "attempt": 1,
+                        "review_attempt": review_round,
+                        "rewrite_attempt": rewrite_round,
+                        "fastgpt_request_started_at": _now_iso(),
+                        "request_variable_keys": sorted(review_vars.keys()),
+                        "batchScriptText_length": len(batch_script),
+                        "batchScriptText_preview": _stage12_debug_preview(batch_script),
+                    }
+                    debug_record["events"].append(review_event)
+                    debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
+                    review_started = time.monotonic()
                     review_output = fastgpt_client.run_stage(
                         STAGE_FRAMEWORK_SCRIPT_REVIEW,
-                        {
-                            **base_vars,
-                            "batchScriptText": batch_script,
-                        },
+                        review_vars,
                     )
+                    review_event["fastgpt_request_ended_at"] = _now_iso()
+                    review_event["duration_ms"] = int((time.monotonic() - review_started) * 1000)
+                    review_event["fastgpt_debug"] = _stage12_fastgpt_debug_summary(fastgpt_client, STAGE_FRAMEWORK_SCRIPT_REVIEW)
+                    review_event["http_status"] = review_event["fastgpt_debug"].get("http_status")
                     review_keys = sorted(review_output.keys()) if isinstance(review_output, dict) else []
                     if not isinstance(review_output, dict):
                         review_output = {}
@@ -3836,6 +4117,33 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         "rewrite_brief": rewrite_brief,
                     }
                     rewrite_triggered = _framework_review_needs_rewrite(script_review)
+                    review_result_summary = {
+                        "reviewPassed": review_passed,
+                        "rewriteRequired": rewrite_required,
+                        "blockingIssues_count": len(blocking_issues),
+                        "blockingIssues_preview": _stage12_debug_preview(blocking_issues),
+                        "nonBlockingIssues_count": len(non_blocking_issues),
+                        "nonBlockingIssues_preview": _stage12_debug_preview(non_blocking_issues),
+                        "rewriteBrief_length": len(str(rewrite_brief or "")),
+                        "rewriteBrief_preview": _stage12_debug_preview(rewrite_brief),
+                        "rewrite_triggered": rewrite_triggered,
+                    }
+                    review_event.update(
+                        {
+                            "raw_response_summary": _stage12_debug_summary(review_output, preview_limit=600),
+                            "parsed_fields": review_keys,
+                            "review_result": review_result_summary,
+                        }
+                    )
+                    debug_record.update(
+                        {
+                            "status": "script_review_done",
+                            "parsed_fields": review_keys,
+                            "review_result": review_result_summary,
+                            "updated_at": _now_iso(),
+                        }
+                    )
+                    debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                     logger.info(
                         "framework-to-script stage12 review loop: stage=%s batchStartEpisode=%s review_round=%s "
                         "rewrite_round=%s reviewPassed=%s rewriteRequired=%s blockingIssues_count=%s "
@@ -3857,10 +4165,22 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     if review_passed is True and rewrite_required is False:
                         break
                     if review_round >= max_review_rounds:
+                        debug_record.update(
+                            {
+                                "status": "failed",
+                                "failure_phase": "审核/重写",
+                                "failed_sub_stage": "script_review",
+                                "review_attempt": review_round,
+                                "rewrite_attempt": rewrite_round,
+                                "rewrite_reason": _stage12_debug_preview(blocking_issues or rewrite_brief),
+                                "updated_at": _now_iso(),
+                            }
+                        )
+                        debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                         return jsonify(
                             {
                                 "success": False,
-                                "message": "12 正文对白审核修订 5 轮后仍未通过，已停止保存当前批次。",
+                                "message": f"12 阶段第 {start_episode}-{end_episode} 集审核重写失败：5 轮后仍未通过。",
                                 "detail": {
                                     "failed_sub_stage": "script_review",
                                     "max_review_rounds": max_review_rounds,
@@ -3871,11 +4191,22 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                                     "last_review": script_review,
                                     "blockingIssues": blocking_issues,
                                     "blocking_issues": blocking_issues,
+                                    "debug_path": debug_path,
                                 },
                             }
                         ), 422
                     failed_sub_stage = "script_rewrite"
                     rewrite_round += 1
+                    debug_record.update(
+                        {
+                            "status": "requesting_fastgpt",
+                            "failed_sub_stage": failed_sub_stage,
+                            "review_attempt": review_round,
+                            "rewrite_attempt": rewrite_round,
+                            "rewrite_reason": _stage12_debug_preview(blocking_issues or rewrite_brief),
+                            "updated_at": _now_iso(),
+                        }
+                    )
                     logger.info(
                         "framework-to-script stage12 rewrite loop: stage=%s batchStartEpisode=%s review_round=%s "
                         "rewrite_round=%s reviewPassed=%s rewriteRequired=%s blockingIssues_count=%s",
@@ -3898,13 +4229,46 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         framework_asset=framework_asset,
                         workflow_stage="12_rewrite",
                     )
+                    rewrite_event = {
+                        "sub_stage": "script_rewrite",
+                        "attempt": 1,
+                        "review_attempt": review_round,
+                        "rewrite_attempt": rewrite_round,
+                        "rewrite_reason": _stage12_debug_preview(blocking_issues or rewrite_brief),
+                        "fastgpt_request_started_at": _now_iso(),
+                        "request_variable_keys": sorted(rewrite_vars.keys()),
+                        "batchScriptText_length": len(batch_script),
+                        "batchScriptText_preview": _stage12_debug_preview(batch_script),
+                        "batchScriptReview_summary": _stage12_debug_summary(script_review),
+                    }
+                    debug_record["events"].append(rewrite_event)
+                    debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
+                    rewrite_started = time.monotonic()
                     rewrite_output = fastgpt_client.run_stage(
                         STAGE_FRAMEWORK_SCRIPT_REWRITE,
                         rewrite_vars,
                     )
+                    rewrite_event["fastgpt_request_ended_at"] = _now_iso()
+                    rewrite_event["duration_ms"] = int((time.monotonic() - rewrite_started) * 1000)
+                    rewrite_event["fastgpt_debug"] = _stage12_fastgpt_debug_summary(fastgpt_client, STAGE_FRAMEWORK_SCRIPT_REWRITE)
+                    rewrite_event["http_status"] = rewrite_event["fastgpt_debug"].get("http_status")
                     rewrite_keys = sorted(rewrite_output.keys()) if isinstance(rewrite_output, dict) else []
                     rewrite_script_value = _first_present(rewrite_output, "batchScriptText", "batch_script_text", default=None)
                     batch_script = str(rewrite_script_value or "")
+                    rewrite_event["raw_response_summary"] = _stage12_debug_summary(rewrite_output, preview_limit=600)
+                    rewrite_event["parsed_fields"] = rewrite_keys
+                    rewrite_event["batchScriptText_length_after"] = len(batch_script)
+                    rewrite_event["parse_failure_reason"] = "" if batch_script.strip() else "missing_or_empty_batchScriptText"
+                    debug_record.update(
+                        {
+                            "status": "script_rewrite_done" if batch_script.strip() else "parse_failed",
+                            "parsed_fields": rewrite_keys,
+                            "parse_failure_reason": rewrite_event["parse_failure_reason"],
+                            "raw_response_summary": _stage12_debug_summary(rewrite_output, preview_limit=600),
+                            "updated_at": _now_iso(),
+                        }
+                    )
+                    debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                     logger.info(
                         "framework-to-script stage12 script_rewrite output rewrite_output_keys=%s batchScriptText_length=%s "
                         "normalized_keys=%s",
@@ -3913,27 +4277,68 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         ["batchScriptText", "batch_script_text"],
                     )
                     if not batch_script.strip():
+                        debug_record.update(
+                            {
+                                "status": "failed",
+                                "failure_phase": "解析",
+                                "failed_sub_stage": "script_rewrite",
+                                "exception_type": "",
+                                "exception_message": "12 write/rewrite 阶段未返回 batchScriptText",
+                                "updated_at": _now_iso(),
+                            }
+                        )
+                        debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                         return jsonify(
                             {
                                 "success": False,
-                                "message": "12 正文对白批次调用失败",
+                                "message": f"12 阶段第 {start_episode}-{end_episode} 集生成失败/解析失败：rewrite 未返回正文。",
                                 "detail": {
                                     "failed_sub_stage": "script_rewrite",
                                     "error_message": "12 write/rewrite 阶段未返回 batchScriptText",
                                     "rewrite_output_keys": rewrite_keys,
+                                    "debug_path": debug_path,
                                 },
-                            }
-                        ), 500
+                        }
+                    ), 500
                 failed_sub_stage = "script_memory"
+                memory_vars = {
+                    **base_vars,
+                    "batchScriptText": batch_script,
+                    "scriptMemory": script_memory,
+                    "scriptStartEpisode": start_episode,
+                }
+                debug_record.update(
+                    {
+                        "status": "requesting_fastgpt",
+                        "failed_sub_stage": failed_sub_stage,
+                        "review_attempt": review_round if "review_round" in locals() else 0,
+                        "rewrite_attempt": rewrite_round,
+                        "updated_at": _now_iso(),
+                    }
+                )
+                memory_event = {
+                    "sub_stage": "script_memory",
+                    "attempt": 1,
+                    "review_attempt": review_round if "review_round" in locals() else 0,
+                    "rewrite_attempt": rewrite_round,
+                    "fastgpt_request_started_at": _now_iso(),
+                    "request_variable_keys": sorted(memory_vars.keys()),
+                    "batchScriptText_length": len(batch_script),
+                    "batchScriptText_preview": _stage12_debug_preview(batch_script),
+                    "scriptMemory_length_before": len(script_memory),
+                    "scriptMemory_preview_before": _stage12_debug_preview(script_memory),
+                }
+                debug_record["events"].append(memory_event)
+                debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
+                memory_started = time.monotonic()
                 memory_output = fastgpt_client.run_stage(
                     STAGE_FRAMEWORK_SCRIPT_MEMORY,
-                    {
-                        **base_vars,
-                        "batchScriptText": batch_script,
-                        "scriptMemory": script_memory,
-                        "scriptStartEpisode": start_episode,
-                    },
+                    memory_vars,
                 )
+                memory_event["fastgpt_request_ended_at"] = _now_iso()
+                memory_event["duration_ms"] = int((time.monotonic() - memory_started) * 1000)
+                memory_event["fastgpt_debug"] = _stage12_fastgpt_debug_summary(fastgpt_client, STAGE_FRAMEWORK_SCRIPT_MEMORY)
+                memory_event["http_status"] = memory_event["fastgpt_debug"].get("http_status")
                 memory_keys = sorted(memory_output.keys()) if isinstance(memory_output, dict) else []
                 memory_value = _first_present(memory_output, "scriptMemory", "script_memory", default=None)
                 if memory_value is None:
@@ -3943,6 +4348,23 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     )
                 else:
                     script_memory = str(memory_value)
+                memory_event.update(
+                    {
+                        "raw_response_summary": _stage12_debug_summary(memory_output, preview_limit=600),
+                        "parsed_fields": memory_keys,
+                        "scriptMemory_length_after": len(script_memory),
+                        "scriptMemory_preview_after": _stage12_debug_preview(script_memory),
+                    }
+                )
+                debug_record.update(
+                    {
+                        "status": "script_memory_done",
+                        "parsed_fields": memory_keys,
+                        "scriptMemory_length": len(script_memory),
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                 logger.info(
                     "framework-to-script stage12 script_memory output memory_output_keys=%s normalized_keys=%s scriptMemory_length=%s",
                     memory_keys,
@@ -3950,6 +4372,18 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     len(script_memory),
                 )
             except Exception as exc:
+                debug_record.update(
+                    {
+                        "status": "failed",
+                        "failure_phase": failed_sub_stage,
+                        "failed_sub_stage": failed_sub_stage,
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                        "traceback": traceback.format_exc(),
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                 logger.exception(
                     "framework-to-script stage12 failed failed_sub_stage=%s asset_id=%s start_episode=%s "
                     "end_episode=%s batch_plan_count=%s base_vars_keys=%s error_type=%s error_message=%s",
@@ -3965,7 +4399,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 return jsonify(
                     {
                         "success": False,
-                        "message": "12 正文对白批次调用失败",
+                        "message": f"12 阶段第 {start_episode or batch_key}-{end_episode or '?'} 集生成失败：{failed_sub_stage}",
                         "detail": {
                             "failed_sub_stage": failed_sub_stage,
                             "error_type": type(exc).__name__,
@@ -3975,6 +4409,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "end_episode": end_episode,
                             "batch_plan_count": len(batch_plan),
                             "base_var_keys": sorted(base_vars.keys()),
+                            "debug_path": debug_path,
                         },
                     }
                 ), 500
@@ -3992,16 +4427,44 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 "batch_script_review": script_review,
                 "scriptMemory": script_memory,
                 "script_memory": script_memory,
+                "stage12DebugPath": debug_path,
             }
             batches[str(start_episode)] = batch_output
             output = {**batch_output, "batches": batches}
             if asset_id:
+                debug_record.update(
+                    {
+                        "status": "saving",
+                        "final_save_fields": sorted(batch_output.keys()),
+                        "final_batchScriptText_length": len(batch_script),
+                        "final_scriptMemory_length": len(script_memory),
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                 _save_framework_to_script_stage(
                     user_id=user_id,
                     asset_id=asset_id,
                     stage_key="stage12",
                     output=output,
                 )
+            debug_record.update(
+                {
+                    "status": "success",
+                    "failure_phase": "",
+                    "failed_sub_stage": "",
+                    "final_save_fields": sorted(batch_output.keys()),
+                    "final_batchScriptText_length": len(batch_script),
+                    "final_scriptMemory_length": len(script_memory),
+                    "updated_at": _now_iso(),
+                }
+            )
+            debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
+            success_debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset, success=True)
+            if debug_path:
+                output["stage12DebugPath"] = debug_path
+            if success_debug_path:
+                output["stage12SuccessDebugPath"] = success_debug_path
         finally:
             _end_framework_stage(user_id, asset_id, "12")
 

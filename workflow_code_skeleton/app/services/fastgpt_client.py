@@ -512,6 +512,11 @@ class FastGPTClient:
             "Content-Type": "application/json",
         }
         response = self._post_with_retries(endpoint, headers, body, stage_name)
+        self._remember_stage_debug_info(
+            stage_name,
+            http_status=getattr(response, "status_code", None),
+            http_reason=getattr(response, "reason", ""),
+        )
         try:
             data = response.json()
         except ValueError as exc:
