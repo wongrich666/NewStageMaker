@@ -7,8 +7,22 @@ from typing import Iterable
 
 from dotenv import load_dotenv
 
-load_dotenv()
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+BASE_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = BASE_DIR.parent
+ENV_PATH = BASE_DIR / ".env"
+REPO_ENV_PATH = REPO_ROOT / ".env"
+
+PREEXISTING_ENV = dict(os.environ)
+LOADED_ENV_PATHS: list[Path] = []
+if REPO_ENV_PATH.exists():
+    load_dotenv(REPO_ENV_PATH, override=False)
+    LOADED_ENV_PATHS.append(REPO_ENV_PATH)
+if ENV_PATH.exists():
+    load_dotenv(ENV_PATH, override=True)
+    LOADED_ENV_PATHS.append(ENV_PATH)
+for key, value in PREEXISTING_ENV.items():
+    if str(value).strip() != "":
+        os.environ[key] = value
 
 
 def _getenv(*keys: str, default: str | None = None) -> str | None:
@@ -67,7 +81,16 @@ class ModelOption:
 class Settings:
     def __init__(self) -> None:
         self.api_provider = _getenv("API", default="deepseek").lower()
-        self.workflow_backend = _getenv("WORKFLOW_BACKEND", default="fastgpt").lower()
+        self.base_dir = BASE_DIR
+        self.repo_root = REPO_ROOT
+        self.env_path = ENV_PATH
+        self.loaded_env_paths = tuple(LOADED_ENV_PATHS)
+        self.workflow_backend = _getenv("WORKFLOW_BACKEND", default="coze").lower()
+        self.coze_api_token = _getenv("COZE_API_TOKEN")
+        self.coze_api_base = _getenv("COZE_API_BASE")
+        self.coze_workflow_config = _getenv("COZE_WORKFLOW_CONFIG")
+        self.coze_timeout_seconds = int(_getenv("COZE_TIMEOUT_SECONDS", default="600"))
+        self.coze_dry_run = _getenv_bool("COZE_DRY_RUN", default=False)
         self.batch_size = int(_getenv("BATCH_SIZE", default="5"))
         self.max_retries_default = int(_getenv("MAX_RETRIES_DEFAULT", default="10"))
         self.fastgpt_stage_retries = int(_getenv("FASTGPT_STAGE_RETRIES", default="0"))

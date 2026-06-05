@@ -1153,6 +1153,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 request_variables,
             )
         except WorkflowRunnerError as exc:
+            runner_detail = exc.detail if isinstance(exc.detail, dict) else {}
             print_stage_debug(
                 definition.stage,
                 {
@@ -1162,6 +1163,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                     "reason": str(exc),
                     "exception_type": type(exc).__name__,
                     "exception_message": str(exc),
+                    "detail": runner_detail,
                     "traceback": traceback.format_exc(),
                 },
                 normalized_payload,
@@ -1174,8 +1176,9 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                     "reason": str(exc),
                     "backend": exc.backend or selected_workflow_backend(),
                     "stage_key": stage_key,
-                    "backend_stage_key": exc.detail.get("backend_stage_key") if isinstance(exc.detail, dict) else "",
-                    "detail": exc.detail,
+                    "backend_stage_key": runner_detail.get("backend_stage_key") or "",
+                    **runner_detail,
+                    "detail": runner_detail,
                 },
             ) from exc
         endpoint = FrameworkPlannerEndpoint(

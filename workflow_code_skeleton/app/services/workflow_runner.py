@@ -7,6 +7,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 
+from ..config import settings
+
 
 DEFAULT_WORKFLOW_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "workflows.yaml"
 
@@ -46,7 +48,7 @@ class WorkflowStageConfig:
 
 
 def selected_workflow_backend() -> str:
-    return str(os.getenv("WORKFLOW_BACKEND") or "fastgpt").strip().lower() or "fastgpt"
+    return str(os.getenv("WORKFLOW_BACKEND") or getattr(settings, "workflow_backend", "") or "coze").strip().lower() or "coze"
 
 
 def _load_config_file(path: Path) -> dict[str, Any]:
@@ -126,11 +128,20 @@ def run_stage(
     except WorkflowRunnerError:
         raise
     except Exception as exc:
+        nested_detail = getattr(exc, "detail", None)
+        detail = {
+            "backend_stage_key": resolved_stage_key,
+            "reason": str(exc),
+            "original_exception_type": type(exc).__name__,
+            "original_exception_message": str(exc),
+        }
+        if isinstance(nested_detail, dict):
+            detail.update(nested_detail)
         raise WorkflowRunnerError(
             f"Workflow backend request failed: {type(exc).__name__}: {exc}",
             backend=backend,
             stage_key=stage_key,
-            detail={"backend_stage_key": resolved_stage_key, "reason": str(exc)},
+            detail=detail,
         ) from exc
     if isinstance(result, dict):
         result.setdefault("backend", backend)

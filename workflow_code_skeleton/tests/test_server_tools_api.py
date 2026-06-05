@@ -43,6 +43,16 @@ class ServerToolsApiTests(unittest.TestCase):
         self.assertEqual(reskin["fields"][3]["name"], "source_characters")
         self.assertFalse(reskin["fields"][4]["required"])
 
+    def test_models_api_returns_coze_workflow_fallback(self) -> None:
+        response = self.client.get("/api/models", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["models"][0]["id"], "coze-workflow")
+        self.assertEqual(payload["models"][0]["provider"], "coze")
+
     def test_run_tool_api_returns_user_visible_result_payload(self) -> None:
         fake_result = {
             "ok": True,

@@ -275,7 +275,7 @@
       "name": "冲突记忆",
       "workflow_id": "7645252634739703850",
       "workflow_id_env": "COZE_WORKFLOW_STAGE_11_MEMORY_ID",
-      "yaml_path": "Workflow-conflictmemory11_04-draft-9524.zip::Workflow-conflictmemory11_04-draft.yaml",
+      "yaml_path": "Workflow-conflictmemory11_04-draft-9524.zip::Workflow-conflictmemory11_04-draft-9524/workflow/conflictmemory11_04-draft.yaml",
       "input_mapping": {"batchCausalConflictPlan": "conflict", "conflictStartEpisode": "start_epi"},
       "output_mapping": {"memory": "conflictMemory", "conflictMemory": "conflictMemory"}
     },
@@ -318,7 +318,7 @@
       "name": "正文重写",
       "workflow_id": "7645493618560843828",
       "workflow_id_env": "COZE_WORKFLOW_STAGE_12_REWRITE_ID",
-      "yaml_path": "Workflow-script12_03-draft-9567.zip::Workflow-script12_03-draft.yaml",
+      "yaml_path": "Workflow-script12_03-draft-9567.zip::Workflow-script12_03-draft-9567/workflow/script12_03-draft.yaml",
       "input_mapping": {
         "totalEpisodes": "episode_num",
         "scriptStartEpisode": "start_epi",
@@ -338,7 +338,7 @@
       "name": "正文记忆",
       "workflow_id": "7645499779002220582",
       "workflow_id_env": "COZE_WORKFLOW_STAGE_12_MEMORY_ID",
-      "yaml_path": "Workflow-script12_04-draft-9576.zip::Workflow-script12_04-draft.yaml",
+      "yaml_path": "Workflow-script12_04-draft-9576.zip::Workflow-script12_04-draft-9576/workflow/script12_04-draft.yaml",
       "input_mapping": {"batchScriptText": "script"},
       "output_mapping": {"script": "scriptMemory", "scriptMemory": "scriptMemory"}
     }

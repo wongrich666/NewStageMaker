@@ -3,14 +3,19 @@ from __future__ import annotations
 import json
 import os
 import re
+import traceback
 from dataclasses import dataclass
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 
+from ..config import settings
+from ..utils.logger import get_logger
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "coze_workflows.yaml"
+logger = get_logger("coze_workflow_client")
 
 load_dotenv()
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
@@ -24,11 +29,13 @@ class CozeWorkflowError(RuntimeError):
         stage_key: str = "",
         workflow_id: str = "",
         error: Any = None,
+        detail: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.stage_key = stage_key
         self.workflow_id = workflow_id
         self.error = error
+        self.detail = detail or {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +48,91 @@ class CozeStageConfig:
     input_mapping: dict[str, str]
     output_mapping: dict[str, str]
     output_fallbacks: tuple[str, ...]
+
+
+STAGE_KEY_ALIASES: dict[str, str] = {
+    "basic": "stage_01",
+    "source": "stage_01",
+    "source_brief": "stage_01",
+    "worldview": "stage_02",
+    "character": "stage_03",
+    "characters": "stage_03",
+    "beat": "stage_04",
+    "storyline": "stage_05",
+    "storylines": "stage_05",
+    "guide": "stage_06",
+    "adaptation": "stage_06",
+    "package": "stage_07",
+    "framework": "stage_07",
+    "scene": "stage_08",
+    "appearance": "stage_09",
+    "alias": "stage_09",
+    "episode": "stage_10",
+    "enriched": "stage_10",
+    "conflict": "stage_11_write",
+    "script": "stage_12_write",
+    "script_text": "stage_12_write",
+}
+
+
+def normalize_coze_stage_key(stage_key: Any) -> str:
+    raw = str(stage_key or "").strip()
+    lowered = raw.lower().replace("-", "_")
+    if lowered in STAGE_KEY_ALIASES:
+        return STAGE_KEY_ALIASES[lowered]
+    substage_match = re.fullmatch(r"stage_?(1[12])_?(write|review|rewrite|memory)", lowered)
+    if substage_match:
+        return f"stage_{substage_match.group(1)}_{substage_match.group(2)}"
+    number_match = re.fullmatch(r"(?:stage_?)?(\d{1,2})", lowered)
+    if number_match:
+        return f"stage_{int(number_match.group(1)):02d}"
+    return lowered
+
+
+def _cozepy_version() -> str:
+    try:
+        return metadata.version("cozepy")
+    except Exception:
+        return "unknown"
+
+
+def _env_status(name: str) -> str:
+    return "SET" if os.getenv(name) else "EMPTY"
+
+
+def _resolve_coze_base_url(value: str | None = None) -> str:
+    from cozepy import COZE_CN_BASE_URL
+
+    raw = str(value if value is not None else os.getenv("COZE_API_BASE") or "").strip()
+    if not raw:
+        return COZE_CN_BASE_URL
+    normalized = raw.upper()
+    if normalized in {"COZE_CN_BASE_URL", "CN", "CHINA", "COZE_CN"}:
+        return COZE_CN_BASE_URL
+    if normalized in {"COZE_COM_BASE_URL", "GLOBAL", "COM", "US"}:
+        return "https://api.coze.com"
+    if raw.startswith(("http://", "https://")):
+        return raw.rstrip("/")
+    raise CozeWorkflowError(
+        f"Invalid COZE_API_BASE: {raw}. Use COZE_CN_BASE_URL, COZE_COM_BASE_URL, or a full https:// URL."
+    )
+
+
+def _exception_detail(exc: Exception) -> dict[str, Any]:
+    detail: dict[str, Any] = {
+        "original_exception_type": type(exc).__name__,
+        "original_exception_message": str(exc),
+    }
+    for attr in ("code", "msg", "logid", "debug_url", "status_code"):
+        value = getattr(exc, attr, None)
+        if value is not None:
+            detail[attr] = _event_to_jsonable(value)
+    if hasattr(exc, "__dict__"):
+        for key, value in vars(exc).items():
+            if str(key).startswith("_") or key in detail:
+                continue
+            detail[str(key)] = _event_to_jsonable(value)
+    return detail
 
 
 def _repo_root() -> Path:
@@ -140,13 +232,29 @@ class CozeWorkflowClient:
         parameters: dict[str, Any] | None = None,
         stream: bool = True,
     ) -> dict[str, Any]:
-        stage = self.stage_config(stage_key)
+        normalized_stage_key = normalize_coze_stage_key(stage_key)
+        stage = self.stage_config(normalized_stage_key)
         built = self.build_parameters(stage.key, project_state or {}, parameters)
+        workflow_info = self.workflow_id_info_for_stage(stage.key)
+        workflow_id = str(workflow_info.get("workflow_id") or "")
+        logger.info(
+            "Coze stage resolved input_stage_key=%s normalized_stage_key=%s workflow_id_exists=%s workflow_id_source=%s config_path=%s resource_path=%s inner_yaml_path=%s token_status=%s base_url_status=%s",
+            stage_key,
+            normalized_stage_key,
+            bool(workflow_id),
+            workflow_info.get("workflow_id_source") or "",
+            self.config_path,
+            workflow_info.get("resource_path") or "",
+            workflow_info.get("inner_yaml_path") or "",
+            _env_status(self.token_env),
+            _env_status(self.base_url_env),
+        )
         return self.run_workflow_by_id(
-            self.workflow_id_for_stage(stage.key),
+            workflow_id,
             parameters=built,
             stream=stream,
             stage_key=stage.key,
+            workflow_info=workflow_info,
         )
 
     def run_workflow_by_id(
@@ -155,28 +263,46 @@ class CozeWorkflowClient:
         parameters: dict[str, Any] | None = None,
         stream: bool = True,
         stage_key: str = "",
+        workflow_info: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        normalized_stage_key = normalize_coze_stage_key(stage_key)
         safe_parameters = _jsonable(parameters or {})
         workflow_id = str(workflow_id or "").strip()
+        workflow_info = workflow_info or self.workflow_id_info_for_stage(normalized_stage_key)
         if not workflow_id:
-            raise CozeWorkflowError("Coze workflow_id is empty", stage_key=stage_key)
+            raise CozeWorkflowError(
+                "Coze workflow_id is empty",
+                stage_key=normalized_stage_key,
+                detail=self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
+            )
         if self.dry_run:
             raw = {
                 "dry_run": True,
-                "stage_key": stage_key,
+                "stage_key": normalized_stage_key,
                 "workflow_id": workflow_id,
                 "parameter_keys": sorted(safe_parameters.keys()),
             }
-            return self.normalize_response(stage_key, workflow_id, raw)
+            return self.normalize_response(normalized_stage_key, workflow_id, raw)
         token = os.getenv(self.token_env)
         if not token:
             raise CozeWorkflowError(
-                f"Missing {self.token_env}; set COZE_API_TOKEN or enable COZE_DRY_RUN=1",
-                stage_key=stage_key,
+                "COZE_API_TOKEN is required for Coze workflow backend",
+                stage_key=normalized_stage_key,
                 workflow_id=workflow_id,
+                detail=self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
             )
 
         coze = self._client()
+        base_url = _resolve_coze_base_url(os.getenv(self.base_url_env))
+        logger.info(
+            "Coze workflow request start stage_key=%s workflow_id=%s base_url=%s stream=%s token_exists=%s parameter_keys=%s",
+            normalized_stage_key,
+            workflow_id,
+            base_url,
+            stream,
+            bool(token),
+            sorted(safe_parameters.keys()),
+        )
         try:
             if stream:
                 raw_events: list[Any] = []
@@ -195,18 +321,28 @@ class CozeWorkflowClient:
                         if text:
                             messages.append(text)
                     elif event_type == WorkflowEventType.ERROR:
+                        error_data = getattr(event, "error", None) or data
                         raise CozeWorkflowError(
-                            "Coze workflow returned ERROR event",
-                            stage_key=stage_key,
+                            f"Coze workflow returned ERROR event: {json.dumps(_event_to_jsonable(error_data), ensure_ascii=False, default=str)}",
+                            stage_key=normalized_stage_key,
                             workflow_id=workflow_id,
-                            error=_event_to_jsonable(data),
+                            error=_event_to_jsonable(error_data),
+                            detail={
+                                **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
+                                "coze_error_event": _event_to_jsonable(error_data),
+                            },
                         )
                     elif event_type == WorkflowEventType.INTERRUPT:
+                        interrupt_data = getattr(event, "interrupt", None) or data
                         raise CozeWorkflowError(
                             "Coze workflow returned INTERRUPT; resume strategy is not configured",
-                            stage_key=stage_key,
+                            stage_key=normalized_stage_key,
                             workflow_id=workflow_id,
-                            error=_event_to_jsonable(data),
+                            error=_event_to_jsonable(interrupt_data),
+                            detail={
+                                **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
+                                "coze_interrupt_event": _event_to_jsonable(interrupt_data),
+                            },
                         )
                 raw: Any = {"events": [_event_to_jsonable(item) for item in raw_events], "content": "".join(messages)}
             else:
@@ -214,13 +350,26 @@ class CozeWorkflowClient:
         except CozeWorkflowError:
             raise
         except Exception as exc:
+            detail = {
+                **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
+                **_exception_detail(exc),
+                "traceback": traceback.format_exc(limit=8),
+            }
+            logger.exception(
+                "Coze workflow request exception stage_key=%s workflow_id=%s base_url=%s parameter_keys=%s",
+                normalized_stage_key,
+                workflow_id,
+                base_url,
+                sorted(safe_parameters.keys()),
+            )
             raise CozeWorkflowError(
                 f"Coze workflow request failed: {type(exc).__name__}: {exc}",
-                stage_key=stage_key,
+                stage_key=normalized_stage_key,
                 workflow_id=workflow_id,
-                error=str(exc),
+                error=detail,
+                detail=detail,
             ) from exc
-        return self.normalize_response(stage_key, workflow_id, raw)
+        return self.normalize_response(normalized_stage_key, workflow_id, raw)
 
     def build_parameters(
         self,
@@ -262,6 +411,7 @@ class CozeWorkflowClient:
         return normalized
 
     def stage_config(self, stage_key: str) -> CozeStageConfig:
+        stage_key = normalize_coze_stage_key(stage_key)
         stages = self.config.get("stages")
         if not isinstance(stages, dict):
             raise CozeWorkflowError("Coze workflow config missing stages")
@@ -283,12 +433,79 @@ class CozeWorkflowClient:
         )
 
     def workflow_id_for_stage(self, stage_key: str) -> str:
+        return str(self.workflow_id_info_for_stage(stage_key).get("workflow_id") or "")
+
+    def workflow_id_info_for_stage(self, stage_key: str) -> dict[str, Any]:
+        normalized_stage_key = normalize_coze_stage_key(stage_key)
+        stage = self.stage_config(normalized_stage_key)
+        resource_path, inner_yaml_path = self._stage_resource_paths(stage)
         stage = self.stage_config(stage_key)
         if stage.workflow_id_env:
             env_value = os.getenv(stage.workflow_id_env)
             if env_value:
-                return env_value.strip()
-        return stage.workflow_id
+                return {
+                    "input_stage_key": str(stage_key),
+                    "normalized_stage_key": normalized_stage_key,
+                    "workflow_id": env_value.strip(),
+                    "workflow_id_source": stage.workflow_id_env,
+                    "workflow_id_env": stage.workflow_id_env,
+                    "config_path": str(self.config_path),
+                    "resource_path": resource_path,
+                    "inner_yaml_path": inner_yaml_path,
+                }
+        return {
+            "input_stage_key": str(stage_key),
+            "normalized_stage_key": normalized_stage_key,
+            "workflow_id": stage.workflow_id,
+            "workflow_id_source": "config/coze_workflows.yaml" if stage.workflow_id else "",
+            "workflow_id_env": stage.workflow_id_env,
+            "config_path": str(self.config_path),
+            "resource_path": resource_path,
+            "inner_yaml_path": inner_yaml_path,
+        }
+
+    def _stage_resource_paths(self, stage: CozeStageConfig) -> tuple[str, str]:
+        yaml_path = str(stage.yaml_path or "")
+        if "::" in yaml_path:
+            zip_name, inner = yaml_path.split("::", 1)
+            return str(_repo_root() / "BETTER_FRAMEWORK_JSONS" / zip_name), inner
+        if yaml_path:
+            path = Path(yaml_path)
+            if not path.is_absolute():
+                path = _repo_root() / "BETTER_FRAMEWORK_JSONS" / path
+            return str(path), ""
+        return "", ""
+
+    def _request_debug_detail(
+        self,
+        stage_key: str,
+        workflow_id: str,
+        parameters: dict[str, Any],
+        workflow_info: dict[str, Any],
+    ) -> dict[str, Any]:
+        base_url = ""
+        try:
+            base_url = _resolve_coze_base_url(os.getenv(self.base_url_env))
+        except Exception as exc:
+            base_url = f"invalid: {exc}"
+        return {
+            "workflow_backend": str(os.getenv("WORKFLOW_BACKEND") or settings.workflow_backend or ""),
+            "env_loaded_paths": [str(path) for path in getattr(settings, "loaded_env_paths", ())],
+            "env_path": str(getattr(settings, "env_path", "")),
+            "config_path": str(self.config_path),
+            "stage_key": str(stage_key),
+            "normalized_stage_key": normalize_coze_stage_key(stage_key),
+            "workflow_id_exists": bool(workflow_id),
+            "workflow_id_source": workflow_info.get("workflow_id_source") or "",
+            "workflow_id_env": workflow_info.get("workflow_id_env") or "",
+            "token_status": _env_status(self.token_env),
+            "base_url_status": _env_status(self.base_url_env),
+            "base_url": base_url,
+            "cozepy_version": _cozepy_version(),
+            "request_parameters_keys": sorted(parameters.keys()),
+            "resource_path": workflow_info.get("resource_path") or "",
+            "inner_yaml_path": workflow_info.get("inner_yaml_path") or "",
+        }
 
     def _apply_output_mapping(
         self,
@@ -320,10 +537,10 @@ class CozeWorkflowClient:
     def _client(self) -> Any:
         if self._coze is not None:
             return self._coze
-        from cozepy import COZE_CN_BASE_URL, Coze, TokenAuth
+        from cozepy import Coze, TokenAuth
 
         token = os.getenv(self.token_env)
-        base_url = os.getenv(self.base_url_env) or COZE_CN_BASE_URL
+        base_url = _resolve_coze_base_url(os.getenv(self.base_url_env))
         self._coze = Coze(auth=TokenAuth(token=token), base_url=base_url)
         return self._coze
 

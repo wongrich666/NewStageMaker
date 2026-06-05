@@ -24,6 +24,7 @@ from flask import (
     url_for,
 )
 
+from .config import settings
 from .models.inputs import derive_script_title_content
 from .services.auth_store import auth_store
 from .services.fastgpt_client import FastGPTTransientError
@@ -1736,11 +1737,25 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @_login_required
     def list_models():
         spec_path = str(request.args.get("workflow_spec_path") or app.config["WORKFLOW_SPEC_PATH"])
+        coze_models = [
+            {
+                "id": "coze-workflow",
+                "name": "Coze 工作流",
+                "label": "Coze 工作流",
+                "provider": "coze",
+                "model": "workflow",
+                "is_default": True,
+                "configured": True,
+            }
+        ]
+        if settings.workflow_backend == "coze":
+            return _json_ok(ok=True, models=coze_models, workflow_spec_path=spec_path)
         try:
             models = task_manager.list_model_options(spec_path)
         except Exception as exc:
-            return _json_error(str(exc), status=500, fallback="模型列表加载失败，请稍后重试。")
-        return _json_ok(models=models, workflow_spec_path=spec_path)
+            logger.exception("/api/models fallback to Coze workflow model")
+            return _json_ok(ok=True, models=coze_models, workflow_spec_path=spec_path, fallback_reason=str(exc))
+        return _json_ok(ok=True, models=models, workflow_spec_path=spec_path)
 
     @app.get("/api/tools")
     @_login_required

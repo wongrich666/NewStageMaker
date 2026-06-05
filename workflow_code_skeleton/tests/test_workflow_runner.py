@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from workflow_code_skeleton.app.services.coze_workflow_client import coze_workflow_client, normalize_coze_stage_key
 from workflow_code_skeleton.app.services import workflow_runner
 
 
@@ -54,6 +55,17 @@ def test_workflow_runner_selects_coze_backend_stage_key(monkeypatch):
     assert result["backend_stage_key"] == "stage_12_rewrite"
 
 
+def test_coze_stage_key_aliases_resolve_stage_01():
+    assert normalize_coze_stage_key("basic") == "stage_01"
+    assert normalize_coze_stage_key("01") == "stage_01"
+    assert normalize_coze_stage_key("stage01") == "stage_01"
+    info = coze_workflow_client.workflow_id_info_for_stage("basic")
+    assert info["normalized_stage_key"] == "stage_01"
+    assert info["workflow_id"]
+    assert info["resource_path"].endswith(".zip")
+    assert info["inner_yaml_path"].endswith(".yaml")
+
+
 def test_workflow_runner_rejects_unknown_backend(monkeypatch):
     monkeypatch.setenv("WORKFLOW_BACKEND", "unknown")
 
@@ -62,6 +74,37 @@ def test_workflow_runner_rejects_unknown_backend(monkeypatch):
 
     assert exc.value.backend == "unknown"
     assert "fastgpt" in exc.value.detail["supported_backends"]
+
+
+def test_workflow_runner_preserves_coze_adapter_error_detail(monkeypatch):
+    class FakeCozeError(RuntimeError):
+        detail = {
+            "original_exception_type": "CozeAPIError",
+            "original_exception_message": "access token invalid",
+            "workflow_id_source": "COZE_WORKFLOW_STAGE_01_ID",
+            "token_status": "SET",
+            "resource_path": "Workflow-extract01.zip",
+            "inner_yaml_path": "workflow/extract01.yaml",
+        }
+
+    def fake_run_stage(self, stage_key, variables=None, extra_parameters=None):
+        raise FakeCozeError("coze failed")
+
+    monkeypatch.setenv("WORKFLOW_BACKEND", "coze")
+    monkeypatch.delenv("WORKFLOW_CONFIG", raising=False)
+    monkeypatch.setattr(
+        "workflow_code_skeleton.app.services.workflow_adapters.coze_adapter.CozeWorkflowAdapter.run_stage",
+        fake_run_stage,
+    )
+
+    with pytest.raises(workflow_runner.WorkflowRunnerError) as exc:
+        workflow_runner.run_stage("stage_01", {"source_text": "x"})
+
+    assert exc.value.backend == "coze"
+    assert exc.value.detail["backend_stage_key"] == "stage_01"
+    assert exc.value.detail["original_exception_type"] == "CozeAPIError"
+    assert exc.value.detail["workflow_id_source"] == "COZE_WORKFLOW_STAGE_01_ID"
+    assert exc.value.detail["token_status"] == "SET"
 
 
 def test_workflow_runner_loads_stage_mapping_from_config(monkeypatch, tmp_path):
