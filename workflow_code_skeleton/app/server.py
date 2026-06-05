@@ -244,6 +244,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         input_payload = project.get("input_payload") if isinstance(project.get("input_payload"), dict) else {}
         artifact_state = artifacts.get("framework_planner_state") if isinstance(artifacts.get("framework_planner_state"), dict) else {}
         artifact_basic = artifact_state.get("basic_config") if isinstance(artifact_state.get("basic_config"), dict) else {}
+        autosaved_asset = project.get("autosaved_asset") if isinstance(project.get("autosaved_asset"), dict) else {}
+        autosaved_state = autosaved_asset.get("framework_planner_state") if isinstance(autosaved_asset.get("framework_planner_state"), dict) else {}
+        autosaved_basic = autosaved_state.get("basic_config") if isinstance(autosaved_state.get("basic_config"), dict) else {}
         candidates = [
             ("framework_state.basic_config.source_text", (framework_state.get("basic_config") if isinstance(framework_state.get("basic_config"), dict) else {}).get("source_text")),
             ("framework_state.source_text", framework_state.get("source_text")),
@@ -252,7 +255,30 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             ("input_payload.description", input_payload.get("description")),
             ("input_payload.story_outline", input_payload.get("story_outline")),
             ("artifacts.framework_planner_state.basic_config.source_text", artifact_basic.get("source_text")),
+            ("autosaved_asset.framework_planner_state.basic_config.source_text", autosaved_basic.get("source_text")),
+            ("autosaved_asset.source_text", autosaved_asset.get("source_text")),
         ]
+        try:
+            history_entries = list_framework_stage_history(project_id_int, "01").get("entries") or []
+        except Exception:
+            history_entries = []
+        for index, entry in enumerate(history_entries[:3]):
+            filename = entry.get("latest_filename") or entry.get("filename")
+            if not filename:
+                continue
+            try:
+                record = load_framework_stage_history(project_id_int, str(filename)).get("record") or {}
+            except Exception:
+                record = {}
+            record_payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+            record_basic = record_payload.get("basic_config") if isinstance(record_payload.get("basic_config"), dict) else {}
+            record_output = record.get("output") if isinstance(record.get("output"), dict) else {}
+            candidates.extend([
+                (f"latest_history[{index}].payload.basic_config.source_text", record_basic.get("source_text")),
+                (f"latest_history[{index}].payload.source_text", record_payload.get("source_text")),
+                (f"latest_history[{index}].output.basic_config.source_text", (record_output.get("basic_config") if isinstance(record_output.get("basic_config"), dict) else {}).get("source_text")),
+                (f"latest_history[{index}].output.source_text", record_output.get("source_text")),
+            ])
         for field, value in candidates:
             tried_fields.append(field)
             text = str(value or "").strip()
