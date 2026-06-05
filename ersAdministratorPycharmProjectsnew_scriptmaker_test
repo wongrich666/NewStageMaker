@@ -1,0 +1,218 @@
+[33m< 710ab2d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mtest-5001[m[33m, [m[1;31morigin/test-5001[m[33m)[m 增加后台debug保存的任务
+[33m< a24c480[m Merge remote-tracking branch 'origin/test-5001' into test-5001
+[33m< 28b0cb0[m 完善了第七阶段的问题
+[33m> e767551[m[33m ([m[1;31morigin/local_competition_backup[m[33m, [m[1;31morigin/competition[m[33m)[m 更新到新的工作流里
+[33m< a16d0d3[m 完善了第七阶段的问题
+[33m< c0cf516[m 完善了框架转剧本10阶段问题
+[33m< df5664a[m 完善了框架转剧本10阶段问题
+[33m< fdf6fba[m 完善了框架转剧本10阶段问题
+[33m< c64e8d8[m 完善了框架转剧本10阶段问题
+[33m< 4093bae[m 完善了框架转剧本10阶段问题
+[33m< 2f0ba59[m 完善了框架转剧本阶段的按钮无法使用问题
+[33m< 10d6f67[m Merge remote-tracking branch 'origin/test-5001' into test-5001
+[33m< b726185[m 更新工作流json
+[33m< 5f05bdb[m 更新工作流json
+[33m> 2959f92[m 更新到新的工作流里
+[33m< 9aa631b[m[33m ([m[1;31morigin/origin_competition_backup[m[33m)[m 修复只换人设DOCX核心场景字段乱码
+[33m< f0064f9[m 修理换皮
+[33m< 24e04e6[m 移除误提交的手动补丁备份目录
+[33m< 8d9e1ee[m 修理换皮
+[33m< f56f9b9[m 修理换皮
+[33m< 82c081a[m 修理换皮
+[33m< 26a7116[m 修理换皮
+[33m< b93e79f[m 修理换皮
+[33m< 75c7cff[m Merge remote-tracking branch 'origin/test-5001' into test-5001
+[33m< d92d081[m 修理换皮
+[33m< fcd30c8[m 修理换皮
+[33m< fc6ca1b[m 修理换皮
+[33m< 95bf97f[m 全面优化细节
+[33m< 74e4015[m Merge remote-tracking branch 'origin/test-5001' into test-5001
+[33m< 0d59ea0[m 添加新的智慧库标签
+[33m< 4fff43e[m 优化UI
+[33m< 9ceaec7[m 确保智慧库被应用到8-12阶段
+[33m< 0da7efe[m 完善逻辑树改到一半
+[33m< cb4c140[m 完善逻辑树改到一半
+[33m< aba5e79[m 完善用户旅程和逻辑树
+[33m< 7881bc3[m 完善用户旅程和逻辑树
+[33m< 51bdf4a[m Merge remote-tracking branch 'origin/test-5001' into test-5001
+[33m< cfe2fd9[m 完善链路逻辑和完整框架
+[33m< 3379ac7[m 完善链路逻辑和完整框架
+[33m< 85eec59[m 完善链路逻辑和完整框架
+[33m< 0e0adff[m 完善链路逻辑和完整框架
+[33m< c91b9d9[m 完善链路逻辑
+[33m< e3a979f[m commit temporary
+[33m< babfc19[m 2026年5月25日22:41:38
+[33m< 627282f[m 中途提交
+[33m< e508daf[m 中途提交
+[33m< f5d7106[m[33m ([m[1;32mfix-framework-to-script-11-12[m[33m)[m 现在把9 10部分的人物服饰映射传下去了
+[33m< 8cb696c[m 连接好第十步骤
+[33m< 52a506b[m 连接好第十步骤
+[33m< d2c00e5[m 连接好第十步骤
+[33m< 81cd40c[m 连接好第十步骤
+[33m< 326caea[m 连接好第十步骤
+[33m< fa92b25[m 新链路中途提交
+[33m< eb7b63b[m Merge remote-tracking branch 'origin/test-5001' into test-5001
+[33m< 07cdedc[m 新链路中途提交
+[33m< e7ff340[m 新链路中途提交
+[33m< 2cfa6bf[m 新链路中途提交
+[33m< 6fc3c93[m Remove tracked env and runtime debug artifacts
+[33m< 8e6ada2[m Remove tracked env and runtime debug artifacts
+[33m< 4adeaa3[m 新链路中途提交
+[33m< 299f625[m 新链路中途提交
+[33m< e260379[m 新链路中途提交
+[33m< 4f408da[m 新链路中途提交
+[33m< 3ffc328[m 新链路完善提交
+[33m< a5e7122[m Merge remote-tracking branch 'origin/test-5001' into test-5001
+[33m< f4d95f1[m 新链路完善提交
+[33m< 7113925[m 新链路完善提交
+[33m< 2115794[m 部分修改（修改了一些细节的问题完整版）
+[33m< b1d044a[m 部分修改（修改了一些细节的问题完整版）
+[33m< fac680d[m 部分修改（修改了一些细节的问题完整版）
+[33m< 578734f[m 部分修改
+[33m< 22d999d[m Merge remote-tracking branch 'origin/test-5001' into test-5001
+[33m< e424c23[m 链路打通
+[33m< 1f0a32c[m 链路打通
+[33m< 469e5a9[m Fix framework planner copy fallback
+[33m< 6d67ce1[m 展示报错日志（中途提交）
+[33m< c9a29b6[m fix framework planner history cache lookup
+[33m< 36285c5[m 展示报错日志（中途提交）
+[33m< a1087bc[m 解决问题（中途推送）
+[33m< 8355380[m 处理报错的问题（中途推送）
+[33m< 4455d73[m 处理报错的问题（中途推送）
+[33m< feb115d[m 处理报错的问题（中途推送）
+[33m< 1a83d3b[m 处理报错的问题
+[33m< be04255[m 处理报错的问题
+[33m< 67ea8e8[m 中途上传
+[33m< 3116673[m 中途上传
+[33m< 773b1ca[m Merge remote-tracking branch 'origin/test-5001' into test-5001
+[33m< bd78c44[m Merge remote-tracking branch 'origin/test-5001' into test-5001
+[33m< 0b4160a[m Merge remote-tracking branch 'origin/test-5001' into test-5001
+[33m< 7bb0c0e[m 优化缓存第一版
+[33m< a55a760[m 中途提交
+[33m< 35c2f34[m 中途提交
+[33m< e3ce1f1[m Merge remote-tracking branch 'origin/test-5001' into test-5001
+[33m< 5b2ec45[m 中途提交
+[33m< 3c947a9[m 中途提交
+[33m< 19fb9c0[m 中途提交
+[33m< 6f60cda[m 中途提交
+[33m< d83f550[m 中途提交
+[33m< fcc22cb[m 中途提交
+[33m< d2130ed[m 中途提交
+[33m< 7987bfd[m 中途提交
+[33m< 6b666b9[m 中途提交一下
+[33m< 22c7998[m 修改后面阶段字段识别问题（中途提交）
+[33m< f8324e2[m 修改后面阶段字段识别问题（中途提交）
+[33m< 97384ce[m 01阶段通过
+[33m< df8b671[m 修改01阶段报错
+[33m< ffda354[m 修改01阶段报错
+[33m< 2b870c9[m 第一次搭建三幕十五节拍
+[33m< 946ccca[m 第一次搭建三幕十五节拍
+[33m< 6f6a6aa[m 第一次搭建三幕十五节拍
+[33m< 80a5d8d[m Merge branch 'test-5001' of https://github.com/wongrich666/NewStageMaker into test-5001 Merge remote changes into local test-5001#
+[33m< 01d64b1[m 第一次搭建三幕十五节拍
+[33m< 224ae26[m 第一次搭建三幕十五节拍
+[33m< 3c83849[m 第一次搭建三幕十五节拍
+[33m< c8caab0[m 第一次搭建三幕十五节拍
+[33m< 2b4a451[m add some jsons and web
+[33m< 52a255e[m 测试分支默认使用5001端口
+[33m< 5aae2ce[m[33m ([m[1;32mmain[m[33m)[m 修改了辅助功能
+[33m< fa0aa2a[m 修改了辅助功能
+[33m< d4d0ddb[m 接入了15内容框架生成功能
+[33m< b4a9a92[m 接入了15内容框架生成功能
+[33m< 1f9304c[m 接入了15内容框架生成功能
+[33m< 47d5e6f[m 接入了15内容框架生成功能
+[33m< eac8d2b[m codex改了一半我手动补全
+[33m< 1399bf3[m 修复服装别名圆括号格式校验
+[33m< 89ddfb5[m codex改了一半我手动补全
+[33m< fbe00ff[m 更新服饰映射的工作流格式
+[33m< cae491a[m 更新服饰映射的工作流格式
+[33m< 907e11b[m 更新服饰映射的工作流格式
+[33m< 52bfbcd[m 资产便捷删除的修改
+[33m< d5b256f[m 恢复到指定版本并完成最新修复
+[33m< 6df65a9[m 一个残缺版本
+[33m< 867e5dc[m 局部修改
+[33m< 9f5a1fb[m 局部修改
+[33m< a943339[m 局部修改
+[33m< 8434dfd[m 局部修改
+[33m< cb0b99d[m 局部修改
+[33m< 4956642[m 中途更新
+[33m< b9a2e68[m Merge remote-tracking branch 'origin/main'
+[33m< 244f3cb[m 中途更新
+[33m< 30469db[m 更新了一些回退重写的错误
+[33m< 4cbc7f7[m Merge remote-tracking branch 'origin/main'
+[33m< 0917293[m 一个完全可以使用的版本（未校验/修改辅助工作流）
+[33m< 73ca66c[m 一个完全可以使用的版本（未校验/修改辅助工作流）
+[33m< 038afbc[m Merge remote-tracking branch 'origin/main'
+[33m< 6507cc5[m 中途更新
+[33m< fb8827c[m 中途更新
+[33m< 6ea7d42[m 中途更新
+[33m< 4e3fb35[m 中途更新
+[33m< 60f9563[m 中途更新
+[33m< ff01d28[m 中途更新
+[33m< be4e752[m 中途更新
+[33m< 817a767[m 加了一些补丁
+[33m< d051325[m 全部都改好了，现在的23集剧本已经跑通
+[33m< 328187c[m 改通了服饰那里由于太长/映射问题导致的中断，但是还没开始拆分四个阶段
+[33m< 425a704[m 修改了错误的服饰版本阶段工作流，并且增加收口。接下来只需测试“开，角，正”即可
+[33m< ce4aad1[m 中途更新
+[33m< 022d526[m 中途更新
+[33m< c61f807[m 中途更新
+[33m< c2569e4[m 中途更新
+[33m< 3282185[m 中途更新
+[33m< 95f4288[m 中途更新
+[33m< a0f807d[m 中途更新
+[33m< d48e74a[m all things changed and the first complete push
+[33m< 371b840[m update the workflow jsons
+[33m< bd07142[m update the workflow jsons
+[33m< 8edc14d[m Merge recovered master into main
+[33m< a61e885[m[33m ([m[1;31morigin/master[m[33m)[m totally updated
+[33m< 23741c6[m 修改了后三个和新阶段的工作流，拆分开了
+[33m< 00353a2[m 中途更新
+[33m< 21d79b4[m 中途更新
+[33m< d48b04e[m 中途更新
+[33m< d63f2bb[m 中途更新
+[33m< 58f60e1[m 中途更新
+[33m< 2cfa7dc[m update
+[33m< e29a104[m update
+[33m< 18451ce[m 中途更新
+[33m< 6ef7fca[m update
+[33m< 1392813[m update
+[33m< 5cb3d6b[m fixed the problem of exporting
+[33m< 84b75dc[m new changes
+[33m< b03e30e[m 上传一下
+[33m< 4a134ed[m 修改后的版本，修改的地方主要是契约字段的问题
+[33m< 6e87048[m 更新一下
+[33m< ab97946[m 更新一下
+[33m< 410cdc1[m 更新一下
+[33m< 2003916[m 新的界面和优化了契约
+[33m< caa00a5[m 上串一下
+[33m< 46bc041[m 修改了很多东西
+[33m< ecdbb81[m 刚刚一直没有push
+[33m< 1614f70[m 修改了细节
+[33m< bdca6ab[m 改进循环模式中间步骤
+[33m< 998f7c9[m 改进循环模式中间步骤
+[33m< 03bf5cf[m 修改了细节
+[33m< 8f121c5[m 修改了细节
+[33m< 5f57de6[m 修改了细节
+[33m< 41f3b2c[m 修改了回退机制的问题
+[33m< 67bebd6[m 修改了token太长的问题
+[33m< 657cfb1[m 修改了很多网页搜索的报错问题，解决了变量错误接口的问题，然后添加了用户回退重写的功能
+[33m< 4deb528[m 让后端的工作流和代码更加匹配
+[33m< a5e80b4[m 让后端的工作流和代码更加匹配
+[33m< 910c5af[m 修改了工作流的json
+[33m< f84c6bd[m 增加了工作流的json
+[33m< f8e5d9e[m 修改好了很多bug
+[33m< 20dc792[m 上传当前代码
+[33m< 4203691[m 上传当前代码
+[33m< e78af8d[m 新增了服装区别的第一代版本
+[33m< e879a4a[m 更新一下
+[33m< e5a9c14[m 修改了一些工作流的报错和网页的提示，简洁化了网页
+[33m< 665c415[m 更新了一些报错
+[33m< a9130a0[m 添加了一个框架撰写流程，当前的版本是只需要一句话就能出剧本的工作流
+[33m< f68c118[m 最新修改的优化了网页版支持多人/单人并发
+[33m< 22cf8e4[m 优化了ui
+[33m< 2da511c[m 优化web ui
+[33m< b8b9775[m 优化了循环的模式
+[33m< 7cc260b[m 优化了循环的模式
+[33m< f7c534d[m 优化了循环的模式
+[33m< c30f5b3[m first commit

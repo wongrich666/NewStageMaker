@@ -102,8 +102,13 @@
       const detail = data.detail && typeof data.detail === "object" ? data.detail : {};
       const detailMessage = detail.error_message || detail.message || "";
       const failedSubStage = detail.failed_sub_stage ? `（${detail.failed_sub_stage}）` : "";
+      const failedStart = detail.batch_start_episode || detail.start_episode;
+      const failedEnd = detail.batch_end_episode || detail.end_episode;
+      const failedBatch = failedStart
+        ? `第 ${failedStart}-${failedEnd || failedStart} 集失败，可从该批次继续。`
+        : "";
       throw new Error(
-        [data.message || data.error || "请求失败，请稍后重试。", failedSubStage, detailMessage]
+        [failedBatch, data.message || data.error || "请求失败，请稍后重试。", failedSubStage, detailMessage]
           .filter(Boolean)
           .join(" ")
       );
@@ -331,14 +336,18 @@
   function stage11Completion() {
     const expected = expectedStage11Starts();
     const done = numericKeys(((state.scriptStages || {}).stage11 || {}).batches);
-    return { expected, done, complete: Boolean(expected.length && done.length >= expected.length) };
+    const doneSet = new Set(done);
+    const complete = Boolean(expected.length && expected.every((key) => doneSet.has(String(key))));
+    return { expected, done, complete };
   }
 
   function stage12Completion() {
-    const stage11 = ((state.scriptStages || {}).stage11 || {});
-    const expected = numericKeys(stage11.batches);
+    const stage11Progress = stage11Completion();
+    const expected = stage11Progress.expected.length ? stage11Progress.expected : numericKeys(((state.scriptStages || {}).stage11 || {}).batches);
     const done = numericKeys(((state.scriptStages || {}).stage12 || {}).batches);
-    return { expected, done, complete: Boolean(expected.length && done.length >= expected.length) };
+    const doneSet = new Set(done);
+    const complete = Boolean(expected.length && expected.every((key) => doneSet.has(String(key))));
+    return { expected, done, complete };
   }
 
   function stageHasCompleted(stage) {
@@ -1211,7 +1220,7 @@
       return;
     }
     const resetStage11 = Boolean(options.resetStage11);
-    if (resetStage11 && !options.skipConfirm && !window.confirm("重新运行 11 会覆盖开头冲突钩子，并清空 12 正文批次。继续吗？")) return;
+    if (resetStage11 && !options.skipConfirm && !window.confirm("重跑 11 会覆盖因果冲突，并清空 12 正文批次。继续吗？")) return;
     const expectedStarts = expectedBatchStartsFromPlan(allEnrichedEpisodePlan);
     if (resetStage11) {
       state.scriptStages.stage11 = {};
@@ -1249,7 +1258,7 @@
       }
       saveWorkspace();
     } catch (error) {
-      state.error = error.message || "11 开头冲突钩子失败";
+      state.error = error.message || "11 因果冲突失败";
     } finally {
       clearRunningStage("11");
       render();
@@ -1265,12 +1274,12 @@
     const stage11 = state.scriptStages.stage11 || {};
     const hasStage11Batches = stage11.batches && Object.keys(stage11.batches).length > 0;
     if (!hasContent(stage11.batchCausalConflictPlan) && !hasStage11Batches) {
-      state.error = "请先完成 11 当前批次开头冲突钩子。";
+      state.error = "请先完成 11 因果冲突。";
       render();
       return;
     }
     const resetStage12 = Boolean(options.resetStage12);
-    if (resetStage12 && !options.skipConfirm && !window.confirm("重新运行 12 会覆盖已生成的正文批次。继续吗？")) return;
+    if (resetStage12 && !options.skipConfirm && !window.confirm("重跑 12 会覆盖已生成的正文批次。继续吗？")) return;
     if (resetStage12) {
       state.scriptStages.stage12 = {};
     }
@@ -1612,7 +1621,7 @@
     const stage10Gate = stage10ReadyForStage11(stage10);
     const stage10Validation = stage10Gate.validation || validateStage10Completeness(stage10Plan(stage10), stage10Text(stage10), inferTotalEpisodes(stage10Plan(stage10), state.importedFrameworkAsset));
     const stage10Valid = has10 && stage10Gate.ok;
-    const stage12ButtonText = has12Complete ? "重新运行 12" : has12 ? "生成下一批正文" : "生成当前批正文";
+    const stage12ButtonText = has12Complete ? "重跑 12" : "运行 12";
     const stage12Action = has12Complete ? "rerun-stage-12" : "run-stage-12";
     const fullButtonText = has12Complete ? "重写全剧剧本" : has12 ? "继续一键生成剧本" : "一键生成剧本";
     return `
@@ -1673,9 +1682,9 @@
           )}
           ${renderStageCard(
             "11",
-            "开头冲突钩子",
+            "因果冲突",
             stage11Status,
-            has11Complete ? "重新运行 11" : has11 ? "继续运行 11" : "运行 11 开头冲突钩子",
+            has11Complete ? "重跑 11" : "运行 11",
             has11Complete ? "rerun-stage-11" : "run-stage-11",
             locked || !stage10Valid,
             has11 ? renderStage11Batches(stage11) : `<p class="wts-hint">${state.runningStage ? `当前 ${escapeHtml(state.runningStage)} 阶段运行态锁定，完成或超时后可继续。` : ""}</p>`,

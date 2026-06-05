@@ -4,6 +4,7 @@ import json
 import copy
 import threading
 import tempfile
+import re
 from io import BytesIO
 from functools import wraps
 import os
@@ -645,6 +646,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         asset_id: str,
         stage_key: str,
         output: dict,
+        status: str = "completed",
+        cascade_downstream: bool = True,
     ) -> None:
         try:
             project_id = int(str(asset_id or "").strip())
@@ -673,7 +676,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "stage10": ("stage11", "stage12"),
             "stage11": ("stage12",),
         }
-        for downstream_stage in cascade.get(str(stage_key), ()):
+        downstream_stages = cascade.get(str(stage_key), ()) if cascade_downstream else ()
+        for downstream_stage in downstream_stages:
             script_stages.pop(downstream_stage, None)
         stage_output_aliases = {
             "stage08": {
@@ -712,7 +716,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         for key, value in stage_output_aliases.get(str(stage_key), {}).items():
             if _framework_value_present(value):
                 stage_outputs[key] = _strip_raw_fastgpt_fields(copy.deepcopy(value))
-        for downstream_stage in cascade.get(str(stage_key), ()):
+        for downstream_stage in downstream_stages:
             output_key = downstream_stage.replace("stage", "")
             for key in tuple(stage_outputs.keys()):
                 if output_key in str(key):
@@ -721,12 +725,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not isinstance(stages_state, dict):
             stages_state = {}
         stage_number = str(stage_key).replace("stage", "")
+        normalized_status = str(status or "completed").strip() or "completed"
         stages_state[stage_number] = {
-            "status": "completed",
+            "status": normalized_status,
             "stage_key": str(stage_key),
             "updated_at": now,
         }
-        for downstream_stage in cascade.get(str(stage_key), ()):
+        for downstream_stage in downstream_stages:
             stages_state[str(downstream_stage).replace("stage", "")] = {
                 "status": "pending",
                 "stage_key": str(downstream_stage),
@@ -736,8 +741,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not isinstance(completed_stages, list):
             completed_stages = []
         completed_set = {str(item) for item in completed_stages}
-        completed_set.add(stage_number)
-        for downstream_stage in cascade.get(str(stage_key), ()):
+        if normalized_status == "completed":
+            completed_set.add(stage_number)
+        else:
+            completed_set.discard(stage_number)
+        for downstream_stage in downstream_stages:
             completed_set.discard(str(downstream_stage).replace("stage", ""))
         workspace_state["completedStages"] = sorted(completed_set, key=lambda item: int(item) if item.isdigit() else 999)
         workspace_state["scriptStages"] = script_stages
@@ -1002,6 +1010,97 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if batch:
             end_episode = max(batch_episode_numbers)
         return start_episode, end_episode, batch
+
+    def _framework_expected_batch_ranges(plan: list, total_episodes: int) -> list[tuple[int, int]]:
+        episode_numbers: set[int] = set()
+        for index, item in enumerate(plan if isinstance(plan, list) else [], start=1):
+            if not isinstance(item, dict):
+                continue
+            episode = _positive_int(
+                item.get("episode")
+                or item.get("episodeNumber")
+                or item.get("episode_number")
+                or item.get("ep")
+                or index,
+                index,
+            )
+            if episode > 0:
+                episode_numbers.add(episode)
+        inferred_total = max(episode_numbers) if episode_numbers else 0
+        total = _positive_int(total_episodes, inferred_total or len(plan if isinstance(plan, list) else []))
+        starts = sorted({((episode - 1) // 5) * 5 + 1 for episode in episode_numbers if 1 <= episode <= total})
+        if not starts and total > 0:
+            starts = list(range(1, total + 1, 5))
+        return [(start, min(start + 4, total)) for start in starts if start <= total]
+
+    def _framework_promote_top_level_batch(stage: dict, content_keys: tuple[str, ...]) -> dict:
+        if not isinstance(stage, dict):
+            return {}
+        batches = stage.get("batches") if isinstance(stage.get("batches"), dict) else {}
+        promoted = dict(batches)
+        if any(_framework_value_present(_first_present(stage, key, default=None)) for key in content_keys):
+            start = _positive_int(stage.get("batchStartEpisode") or stage.get("batch_start_episode"), 1)
+            promoted.setdefault(str(start), stage)
+        return promoted
+
+    def _framework_stage11_batch_valid(batch: dict, start_episode: int, end_episode: int) -> bool:
+        if not isinstance(batch, dict):
+            return False
+        plan, _ = _unwrap_dict_alias(batch, "batchCausalConflictPlan", "batch_causal_conflict_plan")
+        return not _validate_stage11_causal_conflict_plan(
+            plan,
+            start_episode=start_episode,
+            end_episode=end_episode,
+        )
+
+    def _framework_stage12_batch_valid(batch: dict, start_episode: int, end_episode: int) -> bool:
+        if not isinstance(batch, dict):
+            return False
+        text = str(_first_present(batch, "batchScriptText", "batch_script_text", default="") or "").strip()
+        if not text:
+            return False
+        expected = set(range(int(start_episode), int(end_episode) + 1))
+        # Prefer explicit episode markers when available, but keep old text-only batches resumable.
+        found = {int(match) for match in re.findall(r"第\s*(\d+)\s*集", text) if str(match).isdigit()}
+        return not found or expected.issubset(found)
+
+    def _framework_continuous_batch_progress(
+        batches: dict,
+        expected_ranges: list[tuple[int, int]],
+        validator,
+    ) -> dict:
+        valid_batches: dict[str, dict] = {}
+        completed_ranges: list[tuple[int, int]] = []
+        for start, end in expected_ranges:
+            batch = batches.get(str(start)) if isinstance(batches, dict) else None
+            if not isinstance(batch, dict) or not validator(batch, start, end):
+                break
+            valid_batches[str(start)] = batch
+            completed_ranges.append((start, end))
+        completed_count = len(completed_ranges)
+        next_range = expected_ranges[completed_count] if completed_count < len(expected_ranges) else None
+        next_episode = next_range[0] if next_range else None
+        return {
+            "valid_batches": valid_batches,
+            "completed_ranges": completed_ranges,
+            "completed_batches": completed_count,
+            "current_batch": f"{next_range[0]}-{next_range[1]}" if next_range else None,
+            "next_episode": next_episode,
+            "is_complete": bool(expected_ranges and completed_count >= len(expected_ranges)),
+        }
+
+    def _framework_batch_progress_payload(progress: dict, expected_ranges: list[tuple[int, int]]) -> dict:
+        completed_ranges = progress.get("completed_ranges") if isinstance(progress.get("completed_ranges"), list) else []
+        return {
+            "completed_batches": int(progress.get("completed_batches") or 0),
+            "total_batches": len(expected_ranges),
+            "completedRanges": [{"start": start, "end": end} for start, end in completed_ranges],
+            "completed_ranges": [{"start": start, "end": end} for start, end in completed_ranges],
+            "current_batch": progress.get("current_batch"),
+            "next_episode": progress.get("next_episode"),
+            "isComplete": bool(progress.get("is_complete")),
+            "is_complete": bool(progress.get("is_complete")),
+        }
 
     def _sorted_numeric_batch_keys(batches: dict) -> list[str]:
         if not isinstance(batches, dict):
@@ -3160,8 +3259,16 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not isinstance(rules_digest, dict) or not rules_digest:
             return _json_error("缺少 scriptWorldRulesDigest，请先完成 08 场景字典提炼。", status=400)
 
+        total_episodes = _positive_int(
+            data.get("total_episodes") or (framework_asset or {}).get("episodes_per_season"),
+            len(plan),
+        )
+        expected_ranges = _framework_expected_batch_ranges(plan, total_episodes)
         existing_stage11 = _framework_script_stage_cache(framework_asset, "stage11")
-        existing_batches = existing_stage11.get("batches") if isinstance(existing_stage11.get("batches"), dict) else {}
+        existing_batches = _framework_promote_top_level_batch(
+            existing_stage11,
+            ("batchCausalConflictPlan", "batch_causal_conflict_plan"),
+        )
         reset_stage11 = bool(data.get("reset_stage11") or data.get("resetStage11"))
         if reset_stage11:
             existing_batches = {}
@@ -3173,39 +3280,16 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     asset_id=reset_asset_id,
                     stage_key="stage12",
                     output={"batches": {}},
+                    status="pending",
+                    cascade_downstream=False,
                 )
         else:
-            valid_existing_batches = {}
-            for existing_key, existing_batch in existing_batches.items():
-                if not isinstance(existing_batch, dict):
-                    continue
-                existing_start = _positive_int(
-                    existing_batch.get("batchStartEpisode") or existing_key,
-                    _positive_int(existing_key, 1),
-                )
-                existing_end = _positive_int(existing_batch.get("batchEndEpisode"), existing_start + 4)
-                existing_plan, _ = _unwrap_dict_alias(
-                    existing_batch,
-                    "batchCausalConflictPlan",
-                    "batch_causal_conflict_plan",
-                )
-                existing_issues = _validate_stage11_causal_conflict_plan(
-                    existing_plan,
-                    start_episode=existing_start,
-                    end_episode=existing_end,
-                )
-                if existing_issues:
-                    logger.warning(
-                        "framework-to-script stage11 dropping invalid cached batch before retry: "
-                        "asset_id=%s batchStartEpisode=%s batchEndEpisode=%s reason=%s",
-                        str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip(),
-                        existing_start,
-                        existing_end,
-                        "; ".join(existing_issues[:8]),
-                    )
-                    continue
-                valid_existing_batches[str(existing_start)] = existing_batch
-            existing_batches = valid_existing_batches
+            progress = _framework_continuous_batch_progress(
+                existing_batches,
+                expected_ranges,
+                _framework_stage11_batch_valid,
+            )
+            existing_batches = progress["valid_batches"]
         start_episode, end_episode, batch_plan = _framework_batch_from_plan(
             plan,
             data.get("batchStartEpisode") or data.get("batch_start_episode"),
@@ -3220,7 +3304,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         try:
             failed_sub_stage = "stage11_prepare"
             base_vars = {}
-            total_episodes = 0
             try:
                 from .services.fastgpt_client import FastGPTStageFormatError
                 from .services.fastgpt_contracts import (
@@ -3230,10 +3313,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE,
                 )
 
-                total_episodes = _positive_int(
-                    data.get("total_episodes") or (framework_asset or {}).get("episodes_per_season"),
-                    len(plan),
-                )
                 conflict_memory = str(
                     _first_present(data, "conflictMemory", "conflict_memory", default=None)
                     or _first_present(existing_stage11, "conflictMemory", "conflict_memory", default="")
@@ -3392,6 +3471,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                                 "max_write_retries": max_write_retries,
                                 "start_episode": start_episode,
                                 "end_episode": end_episode,
+                                "batch_start_episode": start_episode,
+                                "batch_end_episode": end_episode,
+                                "failure_reason": write_failure_reason,
                                 "write_failure_reason": write_failure_reason,
                                 "write_output_keys": write_output_keys,
                             },
@@ -3482,6 +3564,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                                     "rewrite_round": rewrite_round,
                                     "start_episode": start_episode,
                                     "end_episode": end_episode,
+                                    "batch_start_episode": start_episode,
+                                    "batch_end_episode": end_episode,
+                                    "failure_reason": "causal_conflict_review did not pass after max review rounds",
                                     "last_review": conflict_review,
                                     "blockingIssues": blocking_issues,
                                     "blocking_issues": blocking_issues,
@@ -3596,9 +3681,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "failed_sub_stage": failed_sub_stage,
                             "error_type": type(exc).__name__,
                             "error_message": str(exc),
+                            "failure_reason": str(exc),
                             "asset_id": asset_id,
                             "start_episode": start_episode,
                             "end_episode": end_episode,
+                            "batch_start_episode": start_episode,
+                            "batch_end_episode": end_episode,
                             "batch_plan_count": len(batch_plan) if isinstance(batch_plan, list) else 0,
                             "base_var_keys": sorted(base_vars.keys()) if isinstance(base_vars, dict) else [],
                         },
@@ -3610,6 +3698,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             batch_output = {
                 "batchStartEpisode": start_episode,
                 "batchEndEpisode": end_episode,
+                "batch_start_episode": start_episode,
+                "batch_end_episode": end_episode,
                 "batchEnrichedEpisodePlan": batch_plan,
                 "batchCausalConflictPlan": conflict_plan,
                 "batch_causal_conflict_plan": conflict_plan,
@@ -3619,16 +3709,33 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 "conflict_memory": conflict_memory,
             }
             batches[batch_key] = batch_output
-            output = {**batch_output, "batches": batches}
+            progress_after = _framework_continuous_batch_progress(
+                batches,
+                expected_ranges,
+                _framework_stage11_batch_valid,
+            )
+            progress_payload = _framework_batch_progress_payload(progress_after, expected_ranges)
+            output = {**batch_output, "batches": batches, **progress_payload}
             if asset_id:
                 _save_framework_to_script_stage(
                     user_id=user_id,
                     asset_id=asset_id,
                     stage_key="stage11",
                     output=output,
+                    status="completed" if progress_after["is_complete"] else "in_progress",
+                    cascade_downstream=reset_stage11,
                 )
         finally:
             _end_framework_stage(user_id, asset_id, "11")
+
+        if (
+            not (data.get("batchStartEpisode") or data.get("batch_start_episode"))
+            and not output.get("isComplete")
+            and len(output.get("batches") or {}) < len(expected_ranges)
+        ):
+            data["reset_stage11"] = False
+            data["resetStage11"] = False
+            return run_framework_to_script_stage11_api()
 
         return _json_ok(stage="11", framework_asset_id=asset_id, **output)
 
@@ -3647,14 +3754,55 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         stage08 = data.get("stage08") if isinstance(data.get("stage08"), dict) else _framework_script_stage_cache(framework_asset, "stage08")
         stage09 = data.get("stage09") if isinstance(data.get("stage09"), dict) else _framework_script_stage_cache(framework_asset, "stage09")
+        stage10 = _framework_script_stage_cache(framework_asset, "stage10")
         stage11 = data.get("stage11") if isinstance(data.get("stage11"), dict) else _framework_script_stage_cache(framework_asset, "stage11")
-        stage11_batches = stage11.get("batches") if isinstance(stage11.get("batches"), dict) else {}
+        stage11_batches = _framework_promote_top_level_batch(
+            stage11,
+            ("batchCausalConflictPlan", "batch_causal_conflict_plan"),
+        )
         existing_stage12 = data.get("stage12") if isinstance(data.get("stage12"), dict) else _framework_script_stage_cache(framework_asset, "stage12")
-        existing_batches = existing_stage12.get("batches") if isinstance(existing_stage12.get("batches"), dict) else {}
+        existing_batches = _framework_promote_top_level_batch(
+            existing_stage12,
+            ("batchScriptText", "batch_script_text"),
+        )
         reset_stage12 = bool(data.get("reset_stage12") or data.get("resetStage12"))
         if reset_stage12:
             existing_stage12 = {}
             existing_batches = {}
+        total_episodes = _positive_int(
+            data.get("total_episodes") or (framework_asset or {}).get("episodes_per_season"),
+            0,
+        )
+        stage10_plan = (
+            stage10.get("allEnrichedEpisodePlan")
+            or stage10.get("enrichedEpisodePlan")
+            or stage10.get("batchEnrichedEpisodePlan")
+            or []
+        )
+        expected_ranges = _framework_expected_batch_ranges(stage10_plan, total_episodes)
+        if not expected_ranges:
+            expected_ranges = [
+                (
+                    _positive_int((stage11_batches.get(key) or {}).get("batchStartEpisode") or key, _positive_int(key, 1)),
+                    _positive_int((stage11_batches.get(key) or {}).get("batchEndEpisode"), _positive_int(key, 1) + 4),
+                )
+                for key in _sorted_numeric_batch_keys(stage11_batches)
+            ]
+        stage11_progress = _framework_continuous_batch_progress(
+            stage11_batches,
+            expected_ranges,
+            _framework_stage11_batch_valid,
+        )
+        if expected_ranges and not stage11_progress["is_complete"]:
+            next_label = stage11_progress.get("current_batch") or "下一批"
+            return _json_error(f"请先完成 11 因果冲突阶段，缺少第 {next_label} 集。", status=400)
+        stage11_batches = stage11_progress["valid_batches"] if expected_ranges else stage11_batches
+        stage12_progress = _framework_continuous_batch_progress(
+            existing_batches,
+            expected_ranges,
+            _framework_stage12_batch_valid,
+        )
+        existing_batches = stage12_progress["valid_batches"]
         requested_start = data.get("batchStartEpisode") or data.get("batch_start_episode")
         selected_batch_source = ""
         if requested_start:
@@ -3829,6 +3977,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "detail": {
                                 "failed_sub_stage": "script_write",
                                 "error_message": "12 write/rewrite 阶段未返回 batchScriptText",
+                                "failure_reason": "12 write/rewrite 阶段未返回 batchScriptText",
+                                "batch_start_episode": start_episode,
+                                "batch_end_episode": end_episode,
+                                "start_episode": start_episode,
+                                "end_episode": end_episode,
                                 "write_output_keys": write_keys,
                             },
                         }
@@ -3906,6 +4059,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                                     "rewrite_round": rewrite_round,
                                     "start_episode": start_episode,
                                     "end_episode": end_episode,
+                                    "batch_start_episode": start_episode,
+                                    "batch_end_episode": end_episode,
+                                    "failure_reason": "script_review did not pass after max review rounds",
                                     "last_review": script_review,
                                     "blockingIssues": blocking_issues,
                                     "blocking_issues": blocking_issues,
@@ -3958,6 +4114,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                                 "detail": {
                                     "failed_sub_stage": "script_rewrite",
                                     "error_message": "12 write/rewrite 阶段未返回 batchScriptText",
+                                    "failure_reason": "12 write/rewrite 阶段未返回 batchScriptText",
+                                    "batch_start_episode": start_episode,
+                                    "batch_end_episode": end_episode,
+                                    "start_episode": start_episode,
+                                    "end_episode": end_episode,
                                     "rewrite_output_keys": rewrite_keys,
                                 },
                             }
@@ -4007,9 +4168,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "failed_sub_stage": failed_sub_stage,
                             "error_type": type(exc).__name__,
                             "error_message": str(exc),
+                            "failure_reason": str(exc),
                             "asset_id": asset_id,
                             "start_episode": start_episode,
                             "end_episode": end_episode,
+                            "batch_start_episode": start_episode,
+                            "batch_end_episode": end_episode,
                             "batch_plan_count": len(batch_plan),
                             "base_var_keys": sorted(base_vars.keys()),
                         },
@@ -4020,6 +4184,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             batch_output = {
                 "batchStartEpisode": start_episode,
                 "batchEndEpisode": end_episode,
+                "batch_start_episode": start_episode,
+                "batch_end_episode": end_episode,
                 "batchEnrichedEpisodePlan": batch_plan,
                 "batchCausalConflictPlan": conflict_plan,
                 "batch_causal_conflict_plan": conflict_plan,
@@ -4031,16 +4197,33 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 "script_memory": script_memory,
             }
             batches[str(start_episode)] = batch_output
-            output = {**batch_output, "batches": batches}
+            progress_after = _framework_continuous_batch_progress(
+                batches,
+                expected_ranges,
+                _framework_stage12_batch_valid,
+            )
+            progress_payload = _framework_batch_progress_payload(progress_after, expected_ranges)
+            output = {**batch_output, "batches": batches, **progress_payload}
             if asset_id:
                 _save_framework_to_script_stage(
                     user_id=user_id,
                     asset_id=asset_id,
                     stage_key="stage12",
                     output=output,
+                    status="completed" if progress_after["is_complete"] else "in_progress",
+                    cascade_downstream=False,
                 )
         finally:
             _end_framework_stage(user_id, asset_id, "12")
+
+        if (
+            not (data.get("batchStartEpisode") or data.get("batch_start_episode"))
+            and not output.get("isComplete")
+            and len(output.get("batches") or {}) < len(expected_ranges)
+        ):
+            data["reset_stage12"] = False
+            data["resetStage12"] = False
+            return run_framework_to_script_stage12_api()
 
         return _json_ok(stage="12", framework_asset_id=asset_id, **output)
 
