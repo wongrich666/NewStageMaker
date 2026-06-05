@@ -1,0 +1,22 @@
+{
+  "stages": {
+    "stage_01": {"backend_stage_keys": {"fastgpt": "stage_01", "coze": "stage_01"}},
+    "stage_02": {"backend_stage_keys": {"fastgpt": "stage_02", "coze": "stage_02"}},
+    "stage_03": {"backend_stage_keys": {"fastgpt": "stage_03", "coze": "stage_03"}},
+    "stage_04": {"backend_stage_keys": {"fastgpt": "stage_04", "coze": "stage_04"}},
+    "stage_05": {"backend_stage_keys": {"fastgpt": "stage_05", "coze": "stage_05"}},
+    "stage_06": {"backend_stage_keys": {"fastgpt": "stage_06", "coze": "stage_06"}},
+    "stage_07": {"backend_stage_keys": {"fastgpt": "stage_07", "coze": "stage_07"}},
+    "framework_scene_dictionary": {"backend_stage_keys": {"fastgpt": "framework_scene_dictionary", "coze": "stage_08"}},
+    "framework_appearanceMapping": {"backend_stage_keys": {"fastgpt": "framework_appearanceMapping", "coze": "stage_09"}},
+    "framework_enriched_episode_plan": {"backend_stage_keys": {"fastgpt": "framework_enriched_episode_plan", "coze": "stage_10"}},
+    "framework_causal_conflict_write": {"backend_stage_keys": {"fastgpt": "framework_causal_conflict_write", "coze": "stage_11_write"}},
+    "framework_causal_conflict_review": {"backend_stage_keys": {"fastgpt": "framework_causal_conflict_review", "coze": "stage_11_review"}},
+    "framework_causal_conflict_rewrite": {"backend_stage_keys": {"fastgpt": "framework_causal_conflict_rewrite", "coze": "stage_11_rewrite"}},
+    "framework_causal_conflict_memory": {"backend_stage_keys": {"fastgpt": "framework_causal_conflict_memory", "coze": "stage_11_memory"}},
+    "framework_script_write": {"backend_stage_keys": {"fastgpt": "framework_script_write", "coze": "stage_12_write"}},
+    "framework_script_review": {"backend_stage_keys": {"fastgpt": "framework_script_review", "coze": "stage_12_review"}},
+    "framework_script_rewrite": {"backend_stage_keys": {"fastgpt": "framework_script_rewrite", "coze": "stage_12_rewrite"}},
+    "framework_script_memory": {"backend_stage_keys": {"fastgpt": "framework_script_memory", "coze": "stage_12_memory"}}
+  }
+}

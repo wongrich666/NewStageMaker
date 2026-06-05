@@ -19,6 +19,13 @@ from ..config import settings
 from ..utils.logger import get_logger
 from .json_utils import parse_json, strip_code_fence
 from .runtime_paths import get_runtime_data_dir
+from .workflow_runner import (
+    WorkflowRunnerError,
+    backend_ready as workflow_backend_ready,
+    diagnostics as workflow_diagnostics,
+    run_stage as run_workflow_stage,
+    selected_workflow_backend,
+)
 
 logger = get_logger("framework_planner_service")
 
@@ -1022,7 +1029,7 @@ def framework_planner_fastgpt_diagnostics(stage: str = "05") -> dict[str, Any]:
     diagnostics = _stage_runtime_diagnostics(definition, {})
     endpoint = str(diagnostics.get("resolved_url") or DEFAULT_FASTGPT_URL)
     host, port = _endpoint_host_port(endpoint)
-    return {
+    payload = {
         "ok": True,
         "stage": definition.stage,
         "endpoint": endpoint,
@@ -1034,17 +1041,14 @@ def framework_planner_fastgpt_diagnostics(stage: str = "05") -> dict[str, Any]:
         "url_config_name": diagnostics.get("url_source") or "default",
         "timeout_seconds": diagnostics.get("timeout_seconds") or 0,
     }
+    payload.update(workflow_diagnostics(f"stage_{definition.stage}"))
+    return payload
 
 
 def stage_has_real_backend(stage: str) -> bool:
     definition = stage_definition(stage)
-    try:
-        from .coze_workflow_client import coze_workflow_client, use_coze_workflow_backend
-
-        if use_coze_workflow_backend() and coze_workflow_client.workflow_id_for_stage(f"stage_{definition.stage}"):
-            return True
-    except Exception:
-        pass
+    if selected_workflow_backend() != "fastgpt":
+        return workflow_backend_ready(f"stage_{definition.stage}")
     for env_name in _stage_api_key_env_names(definition):
         if _env(env_name):
             return True
@@ -1066,7 +1070,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         source_text_length,
         tried_restore_fields,
     )
-    if source_text_length <= 0:
+    if definition.stage == "01" and source_text_length <= 0:
         raise FrameworkPlannerStageError(
             "当前剧本尚未创建或原文为空，请先填写剧本内容。",
             stage=definition.stage,
@@ -1119,22 +1123,15 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
     if definition.stage == "05":
         _log_stage_05_input_diagnostics(normalized_payload, request_variables)
     endpoint: FrameworkPlannerEndpoint | None = None
-    try:
-        from .coze_workflow_client import coze_workflow_client, use_coze_workflow_backend
-
-        use_coze_backend = use_coze_workflow_backend()
-    except Exception:
-        use_coze_backend = False
-
-    if use_coze_backend:
+    if selected_workflow_backend() != "fastgpt":
         stage_key = f"stage_{definition.stage}"
         try:
-            response_json = coze_workflow_client.run_stage(
+            response_json = run_workflow_stage(
                 stage_key,
                 normalized_payload,
                 request_variables,
             )
-        except Exception as exc:
+        except WorkflowRunnerError as exc:
             print_stage_debug(
                 definition.stage,
                 {
@@ -1149,28 +1146,30 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 normalized_payload,
             )
             raise FrameworkPlannerStageError(
-                "Coze 工作流调用失败，请检查 COZE_API_TOKEN / COZE_API_BASE / workflow_id 配置",
+                "工作流后端调用失败，请检查 WORKFLOW_BACKEND 及对应 workflow_id 配置",
                 stage=definition.stage,
                 status_code=502,
                 detail={
                     "reason": str(exc),
-                    "backend": "coze",
+                    "backend": exc.backend or selected_workflow_backend(),
                     "stage_key": stage_key,
-                    "expected_env": f"COZE_WORKFLOW_STAGE_{definition.stage}_ID",
+                    "backend_stage_key": exc.detail.get("backend_stage_key") if isinstance(exc.detail, dict) else "",
+                    "detail": exc.detail,
                 },
             ) from exc
         endpoint = FrameworkPlannerEndpoint(
-            url="coze://workflow",
+            url=f"{selected_workflow_backend()}://workflow",
             url_source="WORKFLOW_BACKEND",
             api_key="",
-            api_key_source="COZE_API_TOKEN",
+            api_key_source="",
             workflow_id=str(response_json.get("workflow_id") or ""),
-            workflow_id_source=f"COZE_WORKFLOW_STAGE_{definition.stage}_ID",
+            workflow_id_source=str(response_json.get("backend_stage_key") or stage_key),
             chat_id="",
-            timeout=int(os.getenv("COZE_TIMEOUT_SECONDS", "600") or "600"),
+            timeout=int(os.getenv("COZE_TIMEOUT_SECONDS", os.getenv("FASTGPT_TIMEOUT", "600")) or "600"),
         )
         logger.info(
-            "Coze workflow resolved: stage=%s stage_key=%s workflow_id=%s",
+            "Workflow backend resolved: backend=%s stage=%s stage_key=%s workflow_id=%s",
+            selected_workflow_backend(),
             definition.stage,
             stage_key,
             endpoint.workflow_id,

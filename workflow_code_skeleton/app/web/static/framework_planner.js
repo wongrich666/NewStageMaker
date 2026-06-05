@@ -5074,10 +5074,10 @@
       return `${label}：模型暂时不可用，请稍后重试。`;
     }
     if (/格式异常/.test(message)) return `${label} 返回格式异常，请重试或查看日志。`;
-    if (/无法连接 FastGPT 服务/.test(message)) {
-      const parts = [`${label} 无法连接 FastGPT 服务`];
+    if (/无法连接 (FastGPT|工作流) 服务/.test(message)) {
+      const parts = [`${label} 无法连接工作流服务`];
       if (endpoint) parts.push(`当前 endpoint：${endpoint}`);
-      parts.push(suggestion || "建议检查 IP、端口、防火墙、FastGPT 服务状态。");
+      parts.push(suggestion || "建议检查 WORKFLOW_BACKEND、服务地址、端口、防火墙和后端服务状态。");
       return parts.join("\n");
     }
     if (lastExceptionMessage && lastExceptionMessage !== message && lastExceptionMessage !== reason) {
