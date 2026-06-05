@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="工作流 JSON 规格文件路径",
     )
     serve_parser.add_argument("--host", default="0.0.0.0", help="绑定地址")
-    serve_parser.add_argument("--port", type=int, default=5001, help="监听端口")
+    serve_parser.add_argument("--port", type=int, default=5002, help="监听端口")
     serve_parser.add_argument(
         "--debug",
         action="store_true",

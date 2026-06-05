@@ -55,6 +55,27 @@ FRAMEWORK_BUSINESS_FIELDS = {
     "framework_plan_package",
     "validation_report",
 }
+FRAMEWORK_BUSINESS_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "source_brief": ("source_brief", "sourceBrief", "confirmed_info", "confirmedInfo"),
+    "worldview_plan": ("worldview_plan", "worldviewPlan", "worldview"),
+    "character_plan": ("character_plan", "characterPlan", "character"),
+    "beat_checkpoint_timeline": (
+        "beat_checkpoint_timeline",
+        "beatCheckpointTimeline",
+        "beat",
+        "timeline",
+        "beats",
+    ),
+    "checkpoint_explanation": (
+        "checkpoint_explanation",
+        "checkpointExplanation",
+        "checkpoint_explain",
+        "checkpointExplain",
+        "explanation",
+        "beat_explanation",
+    ),
+    "character_storylines": ("character_storylines", "characterStorylines", "storyline", "storylines"),
+}
 STAGE_DEBUG_PREVIEW_LIMIT = 200
 FRAMEWORK_BUSINESS_LIST_FIELDS = {
     "beat_checkpoint_timeline",
@@ -3230,6 +3251,46 @@ def _normalize_stage_output(
         normalized["character_plan"] = _ensure_character_core_fields(normalized["character_plan"])
         return normalized
     if stage == "04":
+        beat_value = normalized.get("beat")
+        if not isinstance(normalized.get("beat_checkpoint_timeline"), list):
+            wrapped_timeline = normalized.get("beat_checkpoint_timeline")
+            if isinstance(wrapped_timeline, dict):
+                normalized["beat_checkpoint_timeline"] = (
+                    wrapped_timeline.get("beat_checkpoint_timeline")
+                    or wrapped_timeline.get("beatCheckpointTimeline")
+                    or wrapped_timeline.get("timeline")
+                    or wrapped_timeline.get("beats")
+                    or normalized.get("beat_checkpoint_timeline")
+                )
+            if isinstance(beat_value, list):
+                normalized["beat_checkpoint_timeline"] = beat_value
+            elif isinstance(beat_value, dict):
+                normalized["beat_checkpoint_timeline"] = (
+                    beat_value.get("beat_checkpoint_timeline")
+                    or beat_value.get("beatCheckpointTimeline")
+                    or beat_value.get("timeline")
+                    or beat_value.get("beats")
+                    or normalized.get("beat_checkpoint_timeline")
+                )
+        if normalized.get("checkpoint_explanation") in (None, "", [], {}):
+            if isinstance(beat_value, dict):
+                normalized["checkpoint_explanation"] = (
+                    beat_value.get("checkpoint_explanation")
+                    or beat_value.get("checkpointExplanation")
+                    or beat_value.get("checkpoint_explain")
+                    or beat_value.get("checkpointExplain")
+                    or beat_value.get("explanation")
+                    or beat_value.get("beat_explanation")
+                    or normalized.get("checkpoint_explanation")
+                )
+            else:
+                normalized["checkpoint_explanation"] = (
+                    normalized.get("checkpoint_explain")
+                    or normalized.get("checkpointExplain")
+                    or normalized.get("explanation")
+                    or normalized.get("beat_explanation")
+                    or normalized.get("checkpoint_explanation")
+                )
         checkpoint_missing = normalized.get("checkpoint_explanation") in (None, "", [], {})
         if not isinstance(normalized.get("beat_checkpoint_timeline"), list):
             warnings.append("beat_checkpoint_timeline 不是 list，已回退为 15 条占位节拍")
@@ -3495,6 +3556,7 @@ def _safe_root_mapping(value: Any) -> dict[str, Any]:
 
 
 def extract_business_field(value: Any, field_name: str) -> Any:
+    aliases = FRAMEWORK_BUSINESS_FIELD_ALIASES.get(field_name, (field_name,))
     if value in (None, ""):
         return value
     if isinstance(value, str):
@@ -3511,19 +3573,19 @@ def extract_business_field(value: Any, field_name: str) -> Any:
     if not isinstance(value, dict):
         return value
 
-    direct = _find_value_by_aliases(value, (field_name,))
+    direct = _find_value_by_aliases(value, aliases)
     if direct is not None:
         return direct
     data = value.get("data")
     if isinstance(data, dict):
-        nested = _find_value_by_aliases(data, (field_name,))
+        nested = _find_value_by_aliases(data, aliases)
         if nested is not None:
             return nested
 
     for container_name in ("newVariables", "variables"):
         container = value.get(container_name)
         if isinstance(container, dict):
-            nested = _find_value_by_aliases(container, (field_name,))
+            nested = _find_value_by_aliases(container, aliases)
             if nested is not None:
                 return extract_business_field(nested, field_name)
         if isinstance(container, list):
@@ -3535,7 +3597,7 @@ def extract_business_field(value: Any, field_name: str) -> Any:
                     variable_key = str(variable[-1] or "").strip()
                 else:
                     variable_key = str(variable or item.get("key") or item.get("name") or "").strip()
-                if variable_key == field_name:
+                if variable_key in aliases:
                     return extract_business_field(item.get("value"), field_name)
 
     response_data = value.get("responseData")
@@ -3543,12 +3605,12 @@ def extract_business_field(value: Any, field_name: str) -> Any:
         for _, text_value in _iter_text_fields(node):
             parsed = _parse_candidate_value(text_value)
             if isinstance(parsed, dict):
-                nested = _find_value_by_aliases(parsed, (field_name,))
+                nested = _find_value_by_aliases(parsed, aliases)
                 if nested is not None:
                     return nested
                 data = parsed.get("data")
                 if isinstance(data, dict):
-                    nested = _find_value_by_aliases(data, (field_name,))
+                    nested = _find_value_by_aliases(data, aliases)
                     if nested is not None:
                         return nested
 
@@ -3558,7 +3620,7 @@ def extract_business_field(value: Any, field_name: str) -> Any:
             continue
         parsed = _parse_candidate_value(text_value)
         if isinstance(parsed, dict):
-            nested = _find_value_by_aliases(parsed, (field_name,))
+            nested = _find_value_by_aliases(parsed, aliases)
             if nested is not None:
                 return nested
     return value

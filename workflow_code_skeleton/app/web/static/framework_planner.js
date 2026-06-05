@@ -24,6 +24,14 @@
     "character_storylines",
   ];
   const ARRAY_BUSINESS_FIELDS = new Set(["beat_checkpoint_timeline", "character_storylines"]);
+  const BUSINESS_FIELD_ALIASES = {
+    source_brief: ["source_brief", "sourceBrief", "confirmed_info", "confirmedInfo"],
+    worldview_plan: ["worldview_plan", "worldviewPlan", "worldview"],
+    character_plan: ["character_plan", "characterPlan", "character"],
+    beat_checkpoint_timeline: ["beat_checkpoint_timeline", "beatCheckpointTimeline", "beat", "timeline"],
+    checkpoint_explanation: ["checkpoint_explanation", "checkpointExplanation", "checkpoint_explain", "checkpointExplain", "explanation", "beat_explanation"],
+    character_storylines: ["character_storylines", "characterStorylines", "storyline", "storylines"],
+  };
   const STAGE_OUTPUT_ROOT_KEYS = {
     basic: ["source_brief"],
     worldview: ["worldview_plan"],
@@ -603,6 +611,7 @@
   }
 
   function extractBusinessField(value, fieldName) {
+    const aliases = BUSINESS_FIELD_ALIASES[fieldName] || [fieldName];
     if (value === null || value === undefined || value === "") return value;
     if (typeof value === "string") {
       const text = value.trim();
@@ -615,20 +624,28 @@
     }
     if (Array.isArray(value)) return value;
     if (typeof value !== "object") return value;
-    if (value[fieldName] !== undefined && value[fieldName] !== null) return value[fieldName];
-    if (value.data && typeof value.data === "object" && value.data[fieldName] !== undefined && value.data[fieldName] !== null) {
-      return value.data[fieldName];
+    for (const alias of aliases) {
+      if (value[alias] !== undefined && value[alias] !== null) return value[alias];
+    }
+    if (value.data && typeof value.data === "object") {
+      for (const alias of aliases) {
+        if (value.data[alias] !== undefined && value.data[alias] !== null) return value.data[alias];
+      }
     }
     for (const containerName of ["newVariables", "variables"]) {
       const container = value[containerName];
-      if (container && typeof container === "object" && !Array.isArray(container) && container[fieldName] !== undefined && container[fieldName] !== null) {
-        return extractBusinessField(container[fieldName], fieldName);
+      if (container && typeof container === "object" && !Array.isArray(container)) {
+        for (const alias of aliases) {
+          if (container[alias] !== undefined && container[alias] !== null) {
+            return extractBusinessField(container[alias], fieldName);
+          }
+        }
       }
       if (Array.isArray(container)) {
         for (const item of container) {
           if (!item || typeof item !== "object") continue;
           const variable = Array.isArray(item.variable) ? item.variable[item.variable.length - 1] : (item.variable || item.key || item.name);
-          if (String(variable || "").trim() === fieldName) {
+          if (aliases.includes(String(variable || "").trim())) {
             return extractBusinessField(item.value, fieldName);
           }
         }
@@ -647,11 +664,15 @@
         if (!raw || typeof raw !== "string") continue;
         try {
           const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === "object" && parsed[fieldName] !== undefined && parsed[fieldName] !== null) {
-            return parsed[fieldName];
+          if (parsed && typeof parsed === "object") {
+            for (const alias of aliases) {
+              if (parsed[alias] !== undefined && parsed[alias] !== null) return parsed[alias];
+            }
           }
-          if (parsed && parsed.data && typeof parsed.data === "object" && parsed.data[fieldName] !== undefined && parsed.data[fieldName] !== null) {
-            return parsed.data[fieldName];
+          if (parsed && parsed.data && typeof parsed.data === "object") {
+            for (const alias of aliases) {
+              if (parsed.data[alias] !== undefined && parsed.data[alias] !== null) return parsed.data[alias];
+            }
           }
         } catch (error) {
           // Ignore non-JSON answer text.
@@ -662,14 +683,36 @@
       if (!value[key] || typeof value[key] !== "string") continue;
       try {
         const parsed = JSON.parse(value[key]);
-        if (parsed && typeof parsed === "object" && parsed[fieldName] !== undefined && parsed[fieldName] !== null) {
-          return parsed[fieldName];
+        if (parsed && typeof parsed === "object") {
+          for (const alias of aliases) {
+            if (parsed[alias] !== undefined && parsed[alias] !== null) return parsed[alias];
+          }
         }
       } catch (error) {
         // Ignore non-JSON text.
       }
     }
     return value;
+  }
+
+  function normalizeBeatTimelineValue(value) {
+    if (Array.isArray(value)) return value;
+    if (!value || typeof value !== "object") return [];
+    const candidates = [
+      value.beat_checkpoint_timeline,
+      value.beatCheckpointTimeline,
+      value.timeline,
+      value.beats,
+      value.beat,
+    ];
+    for (const candidate of candidates) {
+      if (Array.isArray(candidate)) return candidate;
+      if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+        const nested = normalizeBeatTimelineValue(candidate);
+        if (nested.length) return nested;
+      }
+    }
+    return [];
   }
 
   function hasRawResponseKeys(value, depth = 0) {
@@ -745,6 +788,7 @@
 
   function cleanBusinessFieldValue(value, field) {
     const extracted = extractBusinessField(value, field);
+    if (field === "beat_checkpoint_timeline") return normalizeBeatTimelineValue(extracted);
     if (!hasRawResponseKeys(extracted)) return extracted;
     return defaultBusinessValue(field);
   }
@@ -1438,8 +1482,10 @@
       if (!condition) issues.push(label);
     };
     const hasBasic = !isEmptyValue(state.basic_config)
-      && (String(state.basic_config.project_title || state.basic_config.source_title || "").trim()
-        || String(state.basic_config.source_text || "").trim());
+      && (
+        String(state.basic_config.project_title || state.basic_config.source_title || "").trim()
+        || !isEmptyValue(state.source_brief)
+      );
     const hasBeats = Array.isArray(state.beat_checkpoint_timeline) && state.beat_checkpoint_timeline.length === 15;
     if (stageKey === "basic") return issues;
     requireValue(hasBasic, "01 基础配置");
@@ -4933,11 +4979,13 @@
         : {};
     }
     if (stageNo === "04") {
-      state.beat_checkpoint_timeline = Array.isArray(safeData.beat_checkpoint_timeline)
-        ? safeData.beat_checkpoint_timeline
-        : [];
-      state.checkpoint_explanation = safeData.checkpoint_explanation && typeof safeData.checkpoint_explanation === "object" && !Array.isArray(safeData.checkpoint_explanation)
-        ? safeData.checkpoint_explanation
+      const beatTimeline = extractBusinessField(safeResponse, "beat_checkpoint_timeline");
+      const checkpointExplanation = extractBusinessField(safeResponse, "checkpoint_explanation");
+      state.beat_checkpoint_timeline = normalizeBeatTimelineValue(beatTimeline);
+      state.checkpoint_explanation = checkpointExplanation && typeof checkpointExplanation === "object" && !Array.isArray(checkpointExplanation)
+        ? checkpointExplanation
+        : typeof checkpointExplanation === "string" && checkpointExplanation.trim()
+          ? { overview: checkpointExplanation.trim(), beat_notes: [] }
         : {};
       syncBeatCheckpointData({ clearStorylines: true });
     }
