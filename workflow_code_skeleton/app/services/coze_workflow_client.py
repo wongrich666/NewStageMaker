@@ -352,3 +352,7 @@ def _event_to_jsonable(value: Any) -> Any:
 
 
 coze_workflow_client = CozeWorkflowClient()
+
+
+def use_coze_workflow_backend() -> bool:
+    return str(os.getenv("WORKFLOW_BACKEND") or "").strip().lower() in {"coze", "volcengine", "volcano"}

@@ -31,7 +31,6 @@ from ..services.fastgpt_client import (
     FastGPTPayloadTooLargeError,
     FastGPTStageFormatError,
     FastGPTTransientError,
-    fastgpt_client,
 )
 from ..services.workflow_preference_keys import (
     FRAMEWORK_TO_SCRIPT_STAGE_PREFS,
@@ -180,6 +179,7 @@ from ..services.workflow_output_validation import (
     resolve_workflow_json_path,
     validate_stage_output_with_workflow_contract,
 )
+from ..services import workflow_runner
 from ..utils.episode import BatchWindow, iter_episode_batches, iter_episode_batches_from
 from ..utils.logger import get_logger
 from ..utils.user_visible_text import has_meaningful_content, is_meaningful_text
@@ -406,9 +406,12 @@ CHARACTER_NATURALIZE_READY_FLAG = "__character_naturalize_ready__"
 REVIEW_ROUND_MESSAGE_PATTERN = re.compile(r"(第\s*\d+\s*/\s*\d+\s*轮)")
 
 
-class FastGPTRunner(Protocol):
+class WorkflowStageRunner(Protocol):
     def run_stage(self, stage_name: str, variables: dict[str, Any]) -> dict[str, Any]:
         ...
+
+
+FastGPTRunner = WorkflowStageRunner
 
 
 class FrameworkOutputValidationError(ValueError):
@@ -482,7 +485,7 @@ def run_fastgpt_hybrid_workflow(
     state.runtime = runtime
     state.preferred_provider = model_option.provider if model_option else None
     state.preferred_model = model_option.model if model_option else None
-    runner = client or fastgpt_client
+    runner = client or workflow_runner
 
     variables = _initial_fastgpt_variables(payload)
     _restore_resume_state(state, variables, resume_snapshot)

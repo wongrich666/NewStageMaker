@@ -48,6 +48,7 @@ from .services.workflow_preference_keys import (
     preference_keys_for,
     stage_prompt_key_for,
 )
+from .services.workflow_runner import run_stage as run_workflow_stage
 from .utils.logger import get_logger
 from .utils.readable_labels import readable_label, readable_scalar, readable_text
 
@@ -137,49 +138,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     }
 
     def _run_framework_to_script_workflow(stage_name: str, variables: dict) -> dict:
-        try:
-            from .services.coze_workflow_client import coze_workflow_client, use_coze_workflow_backend
-        except Exception:
-            coze_enabled = False
-        else:
-            coze_enabled = use_coze_workflow_backend()
-
-        if coze_enabled:
-            from .services.fastgpt_contracts import (
-                STAGE_FRAMEWORK_APPEARANCE_MAPPING,
-                STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
-                STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
-                STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
-                STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE,
-                STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
-                STAGE_FRAMEWORK_SCENE_DICTIONARY,
-                STAGE_FRAMEWORK_SCRIPT_MEMORY,
-                STAGE_FRAMEWORK_SCRIPT_REVIEW,
-                STAGE_FRAMEWORK_SCRIPT_REWRITE,
-                STAGE_FRAMEWORK_SCRIPT_WRITE,
-            )
-
-            coze_stage_keys = {
-                STAGE_FRAMEWORK_SCENE_DICTIONARY: "stage_08",
-                STAGE_FRAMEWORK_APPEARANCE_MAPPING: "stage_09",
-                STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: "stage_10",
-                STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE: "stage_11_write",
-                STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW: "stage_11_review",
-                STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE: "stage_11_rewrite",
-                STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY: "stage_11_memory",
-                STAGE_FRAMEWORK_SCRIPT_WRITE: "stage_12_write",
-                STAGE_FRAMEWORK_SCRIPT_REVIEW: "stage_12_review",
-                STAGE_FRAMEWORK_SCRIPT_REWRITE: "stage_12_rewrite",
-                STAGE_FRAMEWORK_SCRIPT_MEMORY: "stage_12_memory",
-            }
-            stage_key = coze_stage_keys.get(stage_name)
-            if not stage_key:
-                raise RuntimeError(f"未配置 Coze workflow stage 映射: {stage_name}")
-            return coze_workflow_client.run_stage(stage_key, variables or {})
-
-        from .services.fastgpt_client import fastgpt_client
-
-        return fastgpt_client.run_stage(stage_name, variables or {})
+        return run_workflow_stage(stage_name, variables or {})
 
     framework_stage_runs: set[tuple[int, str, str]] = set()
     framework_stage_runs_lock = threading.Lock()
@@ -1988,7 +1947,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     tried_restore_fields,
                 )
                 data["tried_restore_fields_debug"] = tried_restore_fields
-                if not source_text:
+                if str(stage).zfill(2) == "01" and not source_text:
                     return _framework_planner_error(
                         str(stage).zfill(2),
                         "当前剧本尚未创建或原文为空，请先填写剧本内容。",
