@@ -332,6 +332,36 @@ class ServerFrameworkPlannerApiTests(unittest.TestCase):
         self.assertTrue(framework_state["stage_state"]["package"]["confirmed"])
         self.assertEqual(framework_state["asset_state"]["project_id"], project_id)
 
+    def test_framework_asset_detail_clears_stale_running_stage_state(self) -> None:
+        payload = _planner_payload()
+        payload.update(
+            {
+                "project_title": "澶滆瀹″垽",
+                "asset_state": {"status": "running", "current_stage": "worldview"},
+                "stage_state": {
+                    "basic": {"status": "confirmed", "confirmed": True, "locked": True},
+                    "worldview": {"status": "running", "confirmed": False, "locked": False},
+                },
+                "current_view": "worldview",
+            }
+        )
+
+        response = self.client.post(
+            "/api/framework-planner/assets/save",
+            headers=self.headers,
+            json=payload,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        project_id = response.get_json()["project_id"]
+        detail_response = self.client.get(f"/api/framework-assets/{project_id}", headers=self.headers)
+        self.assertEqual(detail_response.status_code, 200)
+        asset = detail_response.get_json()["asset"]
+        self.assertEqual(asset["status"], "in_progress")
+        framework_state = asset["framework_planner_state"]
+        self.assertNotEqual(framework_state["stage_state"]["worldview"]["status"], "running")
+        self.assertEqual(framework_state["asset_state"]["status"], "in_progress")
+
     def test_stage_success_autosaves_framework_asset_outputs(self) -> None:
         create_response = self.client.post(
             "/api/framework-planner/assets",

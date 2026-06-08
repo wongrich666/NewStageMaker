@@ -901,7 +901,8 @@
 
   function loadState() {
     const params = new URLSearchParams(window.location.search || "");
-    if (params.get("resume") !== "1") {
+    const forceFresh = ["1", "true", "yes"].includes(String(params.get("fresh") || params.get("reset") || "").toLowerCase());
+    if (forceFresh) {
       storageRemove(STORAGE_KEY);
       storageRemove(LEGACY_STORAGE_KEY);
       const fresh = normalizeState(null);
@@ -956,9 +957,8 @@
 
   function normalizeState(saved) {
     const next = clone(initialState);
-    const storedPreferences = loadPromptPreferences();
     if (!saved || typeof saved !== "object") {
-      next.prompt_preferences = normalizePromptPreferences(storedPreferences);
+      next.prompt_preferences = normalizePromptPreferences({});
       applyPromptPreferencesToBasicConfig(next, true);
       return syncStageFlow(next);
     }
@@ -983,7 +983,7 @@
       next.asset_state.project_id = next.project_id;
       next.asset_state.asset_id = next.project_id;
     }
-    next.prompt_preferences = normalizePromptPreferences(Object.assign({}, storedPreferences || {}, saved.prompt_preferences || {}));
+    next.prompt_preferences = normalizePromptPreferences(saved.prompt_preferences || {});
     next.source_brief = next.source_brief && typeof next.source_brief === "object" && !Array.isArray(next.source_brief) ? next.source_brief : {};
     next.worldview_plan = next.worldview_plan && typeof next.worldview_plan === "object" && !Array.isArray(next.worldview_plan) ? next.worldview_plan : {};
     next.character_plan = next.character_plan && typeof next.character_plan === "object" && !Array.isArray(next.character_plan) ? next.character_plan : {};
@@ -1564,6 +1564,31 @@
     return (VIEW_DEFS.find((item) => viewUnlockedFor(targetState, item.id)) || VIEW_DEFS[0]).id;
   }
 
+  function restoredStageStatus(targetState, stageKey, stage) {
+    if (stage && stage.confirmed) return "confirmed";
+    if (stageKey === "basic") return hasStageDataFor(targetState, stageKey) ? "generated" : "editing";
+    if (!prerequisiteConfirmedFor(targetState, stageKey)) return "locked";
+    if (hasStageDataFor(targetState, stageKey)) return stage && stage.stageDraftDirty ? "updated" : "generated";
+    return stage && stage.locked ? "locked" : "idle";
+  }
+
+  function clearStaleRunningStages(targetState) {
+    if (!targetState || typeof targetState !== "object") return targetState;
+    const stageState = targetState.stage_state || {};
+    STAGE_SEQUENCE.forEach((stageKey) => {
+      const stage = stageState[stageKey];
+      if (!stage || stage.status !== "running" || isStageLoading(stageKey)) return;
+      stage.status = restoredStageStatus(targetState, stageKey, stage);
+      if (!stage.status || stage.status === "running") {
+        stage.status = stageKey === "basic" ? "editing" : "idle";
+      }
+    });
+    if (targetState.asset_state && ["pending", "running", "pausing"].includes(String(targetState.asset_state.status || ""))) {
+      targetState.asset_state.status = "in_progress";
+    }
+    return targetState;
+  }
+
   function reconcileStageState(targetState) {
     if (!targetState || typeof targetState !== "object") return targetState;
     targetState.stage_state = targetState.stage_state || clone(initialState.stage_state);
@@ -1578,6 +1603,7 @@
       stage.stagePreferenceReady = stage.stagePreferenceReady !== false;
       stage.stageCommitted = Boolean(stage.stageCommitted || stage.confirmed || (hasStageDataFor(targetState, stageKey) && !stage.stageDraftDirty));
     });
+    clearStaleRunningStages(targetState);
 
     STAGE_SEQUENCE.forEach((stageKey) => {
       const stage = targetState.stage_state[stageKey];
@@ -4623,6 +4649,7 @@
 
   function frameworkAssetSavePayload() {
     syncBasicConfigFromDom();
+    clearStaleRunningStages(state);
     const knowledgeFields = knowledgePayloadFields("package");
     const assetState = clone(state.asset_state || {});
     const projectId = currentProjectId();
@@ -4908,11 +4935,12 @@
     return next;
   }
 
-  async function loadStageHistory(stageKey) {
+  async function loadStageHistory(stageKey, options) {
     const stageNo = stageNoForKey(stageKey);
     if (!stageNo) return;
+    const silent = Boolean(options && options.silent);
     ui.stageHistoryLoading[stageKey] = true;
-    render();
+    if (!silent) render();
     try {
       const params = new URLSearchParams({
         project_id: currentProjectCacheName(),
@@ -4921,10 +4949,16 @@
       const data = await requestJson(`/api/framework-planner/history?${params.toString()}`);
       ui.stageHistory[stageKey] = Array.isArray(data.entries) ? data.entries : [];
     } catch (error) {
-      showToast(error.message || "历史版本刷新失败");
+      if (silent) {
+        if (DEV_LOG_ENABLED && typeof console !== "undefined" && console.warn) {
+          console.warn("[framework_planner] silent stage history load failed", error);
+        }
+      } else {
+        showToast(error.message || "历史版本刷新失败");
+      }
     } finally {
       ui.stageHistoryLoading[stageKey] = false;
-      render();
+      if (!silent) render();
     }
   }
 
@@ -5731,18 +5765,15 @@
   }
 
   function beginNewScriptEditingState() {
-    const preservedPromptPreferences = normalizePromptPreferences(state.prompt_preferences || loadPromptPreferences() || {});
     const preservedKnowledge = {
       tags: Array.isArray(ui.knowledge.tags) ? ui.knowledge.tags.slice() : [],
-      selectedIds: Array.isArray(ui.knowledge.selectedIds) ? ui.knowledge.selectedIds.map(String) : [],
       open: Boolean(ui.knowledge.open),
-      status: ui.knowledge.status || "",
-      tagPromptText: ui.knowledge.tagPromptText || "",
+      status: "",
     };
     const assetImporting = ui.assetImporting;
     resetTransientUi();
     state = clone(initialState);
-    state.prompt_preferences = preservedPromptPreferences;
+    state.prompt_preferences = normalizePromptPreferences({});
     state.project_id = null;
     state.asset_state = clone(initialState.asset_state);
     state.display_texts = {};
@@ -5751,14 +5782,15 @@
     state.current_view = "basic";
     ui.assetImporting = assetImporting;
     ui.knowledge.tags = preservedKnowledge.tags;
-    ui.knowledge.selectedIds = preservedKnowledge.selectedIds;
+    ui.knowledge.selectedIds = [];
     ui.knowledge.open = preservedKnowledge.open;
     ui.knowledge.status = preservedKnowledge.status;
-    ui.knowledge.tagPromptText = preservedKnowledge.tagPromptText;
+    ui.knowledge.tagPromptText = "";
     ui.showNewScriptModal = false;
     ui.stageHistory = {};
     ui.stageHistoryLoading = {};
     ui.stageErrors = {};
+    storageRemove(PREFERENCE_STORAGE_KEY);
     syncStageFlow(state);
     saveState();
     clearDirty();
@@ -6071,7 +6103,7 @@
     ui.assetsLoading = true;
     if (ui.assetsOpen) render();
     try {
-      const data = await requestJson("/api/assets");
+      const data = await requestJson("/api/framework-assets");
       ui.assets = Array.isArray(data.assets) ? data.assets : [];
     } catch (error) {
       showToast(error.message || "资产列表加载失败");
@@ -6239,13 +6271,13 @@
     ui.toast = "";
     render();
     try {
-      const data = await requestJson(`/api/projects/${projectId}`);
-      const project = data.project || {};
-      if (String(project.asset_kind || "") === "framework_planner") {
+      const data = await requestJson(`/api/framework-assets/${projectId}`);
+      const project = data.asset || data.project || {};
+      if (String(project.asset_kind || "framework_planner") === "framework_planner") {
         restoreFrameworkPlannerState(project);
         ui.stageHistory = {};
         ui.stageHistoryLoading = {};
-        await loadStageHistory(stageKeyForView(state.current_view || "basic"));
+        loadStageHistory(stageKeyForView(state.current_view || "basic"), { silent: true }).catch(() => {});
         clearDirty();
         showToast("资产导入成功");
         return;
@@ -6268,7 +6300,7 @@
       syncStageFlow(state);
       saveState();
       clearDirty();
-      await loadStageHistory("basic");
+      loadStageHistory("basic", { silent: true }).catch(() => {});
       showToast("资产导入成功");
     } catch (error) {
       showToast((error && error.message) || "资产导入失败");
@@ -7004,7 +7036,6 @@
   });
 
   render();
-  loadKnowledgePreferences().catch(() => {});
   if (ui.knowledge.open) loadKnowledgeTags().catch(() => {});
   loadAssets().catch(() => {});
   if (DEV_LOG_ENABLED) loadStageHistory(stageKeyForView(state.current_view || "basic")).catch(() => {});

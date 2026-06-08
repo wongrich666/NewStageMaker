@@ -54,6 +54,31 @@ def test_framework_planner_asset_import_uses_single_busy_state() -> None:
     assert "已恢复框架策划资产，可继续生成或进入下游剧本" not in FRONTEND_SOURCE
 
 
+def test_framework_planner_refresh_keeps_local_state_unless_forced_fresh() -> None:
+    assert 'params.get("resume") !== "1"' not in FRONTEND_SOURCE
+    assert 'params.get("fresh") || params.get("reset")' in FRONTEND_SOURCE
+    assert "persistLoadedState(normalized)" in FRONTEND_SOURCE
+
+
+def test_framework_planner_clears_stale_running_state_on_restore() -> None:
+    assert "function clearStaleRunningStages(targetState)" in FRONTEND_SOURCE
+    assert 'stage.status !== "running" || isStageLoading(stageKey)' in FRONTEND_SOURCE
+    assert 'targetState.asset_state.status = "in_progress"' in FRONTEND_SOURCE
+
+
+def test_framework_planner_asset_import_uses_framework_asset_endpoints_and_silent_history() -> None:
+    assert 'requestJson("/api/framework-assets")' in FRONTEND_SOURCE
+    assert "requestJson(`/api/framework-assets/${projectId}`)" in FRONTEND_SOURCE
+    assert 'loadStageHistory(stageKeyForView(state.current_view || "basic"), { silent: true })' in FRONTEND_SOURCE
+
+
+def test_framework_planner_new_project_clears_knowledge_residue() -> None:
+    assert "loadKnowledgePreferences().catch" not in FRONTEND_SOURCE
+    assert "state.prompt_preferences = normalizePromptPreferences({});" in FRONTEND_SOURCE
+    assert "ui.knowledge.selectedIds = [];" in FRONTEND_SOURCE
+    assert "storageRemove(PREFERENCE_STORAGE_KEY);" in FRONTEND_SOURCE
+
+
 def test_framework_planner_package_view_defines_locked_and_template_busts_cache() -> None:
     assert "function renderPackageView() {" in FRONTEND_SOURCE
     assert "const locked = Boolean(stage.locked);" in FRONTEND_SOURCE

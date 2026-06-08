@@ -173,6 +173,41 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
         return state if isinstance(state, dict) else {}
 
+    def _framework_stage_has_data(framework_state: dict, stage_key: str) -> bool:
+        field_map = {
+            "basic": ("source_brief",),
+            "worldview": ("worldview_plan",),
+            "character": ("character_plan",),
+            "beat": ("beat_checkpoint_timeline", "checkpoint_explanation"),
+            "storylines": ("character_storylines",),
+            "guide": ("adaptation_guide",),
+            "package": ("framework_plan_package",),
+        }
+        return any(_framework_value_present(framework_state.get(field)) for field in field_map.get(stage_key, ()))
+
+    def _sanitize_framework_planner_state_for_import(framework_state: dict) -> dict:
+        state = copy.deepcopy(framework_state) if isinstance(framework_state, dict) else {}
+        stage_state = state.get("stage_state") if isinstance(state.get("stage_state"), dict) else {}
+        for stage_key, stage in list(stage_state.items()):
+            if not isinstance(stage, dict) or str(stage.get("status") or "") != "running":
+                continue
+            if bool(stage.get("confirmed")):
+                stage["status"] = "confirmed"
+            elif bool(stage.get("stageDraftDirty")):
+                stage["status"] = "updated"
+            elif stage_key == "basic":
+                stage["status"] = "generated" if _framework_stage_has_data(state, stage_key) else "editing"
+            elif _framework_stage_has_data(state, stage_key):
+                stage["status"] = "generated"
+            else:
+                stage["status"] = "idle"
+        state["stage_state"] = stage_state
+        asset_state = state.get("asset_state") if isinstance(state.get("asset_state"), dict) else {}
+        if str(asset_state.get("status") or "") in {"pending", "running", "pausing"}:
+            asset_state["status"] = "in_progress"
+        state["asset_state"] = asset_state
+        return state
+
     def _framework_payload_source_text(data: dict) -> str:
         if not isinstance(data, dict):
             return ""
@@ -200,7 +235,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not isinstance(project, dict):
             return "", tried_fields
 
-        framework_state = _framework_state_from_project(project)
+        framework_state = _sanitize_framework_planner_state_for_import(_framework_state_from_project(project))
         artifacts = project.get("artifacts") if isinstance(project.get("artifacts"), dict) else {}
         input_payload = project.get("input_payload") if isinstance(project.get("input_payload"), dict) else {}
         artifact_state = artifacts.get("framework_planner_state") if isinstance(artifacts.get("framework_planner_state"), dict) else {}
@@ -497,7 +532,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             except Exception:
                 return default
 
-        framework_state = _framework_state_from_project(project)
+        framework_state = _sanitize_framework_planner_state_for_import(_framework_state_from_project(project))
         basic = framework_state.get("basic_config") if isinstance(framework_state.get("basic_config"), dict) else {}
         stage_outputs = _framework_stage_outputs(framework_state)
         package = _framework_import_package(framework_state, stage_outputs)
@@ -515,6 +550,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not isinstance(preference_snapshot, dict):
             preference_snapshot = {}
         stage_prompts = _stage_prompts_from_snapshot(preference_snapshot)
+        framework_asset_state = framework_state.get("asset_state") if isinstance(framework_state.get("asset_state"), dict) else {}
+        raw_status = str(project.get("status") or framework_asset_state.get("status") or "draft").strip() or "draft"
+        status = "in_progress" if raw_status in {"pending", "running", "pausing"} else raw_status
         title = str(
             framework_state.get("project_title")
             or project.get("title")
@@ -546,6 +584,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "season_count": _safe_positive_int(basic.get("season_count"), 1),
             "created_at": project.get("created_at") or framework_state.get("created_at"),
             "updated_at": project.get("updated_at") or framework_state.get("updated_at"),
+            "status": status,
+            "asset_kind": "framework_planner",
+            "asset_type": "framework",
+            "current_stage": project.get("current_stage") or framework_asset_state.get("current_stage"),
+            "current_stage_label": project.get("current_stage_label"),
             "summary": summary or "已保存的框架资产，可导入后继续 框架到剧本链路。",
             "can_import": bool(package),
             "import_disabled_reason": "" if package else "缺少可恢复的框架策划包或阶段输出。",
@@ -562,6 +605,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             asset.update(
                 {
                     "framework_plan_package": _strip_raw_fastgpt_fields(copy.deepcopy(package)),
+                    "framework_planner_state": _strip_raw_fastgpt_fields(copy.deepcopy(framework_state)),
                     "stage_outputs": _strip_raw_fastgpt_fields({**copy.deepcopy(stage_outputs), **copy.deepcopy(workspace_stage_outputs)}),
                     "framework_to_script_state": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state)),
                     "scriptStages": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state.get("scriptStages") or {})),
