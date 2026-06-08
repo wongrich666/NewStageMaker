@@ -266,6 +266,51 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertEqual(captured["extra_parameters"]["source_title"], "夜行审判")
         self.assertIn("source_brief", payload["data"])
 
+    def test_stage_01_coze_backend_extracts_source_brief_from_fenced_field_content(self) -> None:
+        fenced = (
+            "```json\n"
+            "{\n"
+            '  "source_brief": {\n'
+            '    "title": "Stage One Title",\n'
+            '    "core_logline": "A protagonist faces a central opposition.",\n'
+            '    "missing_information_risks": ["A", ' + "\u201c" + "B" + "\u201d" + "]\n"
+            "  },\n"
+            '  "display_text": "Stage one display text."\n'
+            "}\n"
+            "```"
+        )
+
+        def _fake_run_workflow_stage(stage_key, variables=None, extra_parameters=None):
+            del variables, extra_parameters
+            return {
+                "ok": True,
+                "workflow_id": "wf-coze-stage-01",
+                "backend_stage_key": stage_key,
+                "source_brief": fenced,
+                "content": fenced,
+            }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(
+                os.environ,
+                {
+                    "WORKFLOW_BACKEND": "coze",
+                    "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                    "BETTER_FRAMEWORK_JSONS_DIR": tmpdir,
+                },
+                clear=True,
+            ):
+                with patch.object(service, "workflow_backend_ready", return_value=True):
+                    with patch.object(service, "run_workflow_stage", side_effect=_fake_run_workflow_stage):
+                        payload = service.run_framework_planner_stage("01", _basic_config())
+
+        source_brief = payload["data"]["source_brief"]
+        self.assertEqual(source_brief["title"], "Stage One Title")
+        self.assertEqual(source_brief["missing_information_risks"], ["A", "B"])
+        self.assertNotIn("content", source_brief)
+        self.assertEqual(payload["display_text"], "Stage one display text.")
+        self.assertNotIn("source_brief 不是 dict", " | ".join(payload["raw"]["parse_warning"]))
+
     def test_stage_01_coze_backend_failure_keeps_detail_without_fastgpt_json(self) -> None:
         error_detail = {
             "backend_stage_key": "stage_01",
@@ -620,7 +665,7 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertIsInstance(payload["data"]["source_brief"], dict)
         self.assertEqual(payload["data"]["source_brief"]["source_title"], "夜行审判")
-        self.assertEqual(payload["display_text"], "未明确，需后续确认……")
+        self.assertEqual(payload["display_text"], payload["data"]["source_brief"]["source_title"])
 
     def test_stage_02_accepts_list_root_response_and_keeps_worldview_plan_dict(self) -> None:
         def _fake_post(url, *, headers=None, json=None, timeout=None):

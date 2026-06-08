@@ -26,6 +26,7 @@ from .workflow_runner import (
     run_stage as run_workflow_stage,
     selected_workflow_backend,
 )
+from .workflow_output_normalizer import normalize_stage_output as normalize_workflow_stage_output
 
 logger = get_logger("framework_planner_service")
 
@@ -1331,6 +1332,14 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                     status_code=502,
                     detail=debug_detail,
                 ) from exc
+
+    response_json = normalize_workflow_stage_output(
+        f"stage_{definition.stage}",
+        response_json,
+        payload=normalized_payload,
+        backend=backend,
+        backend_stage_key=str(getattr(endpoint, "workflow_id_source", "") or f"stage_{definition.stage}"),
+    )
 
     try:
         raw_debug_dir = _repo_root() / "cache" / "raw_fastgpt_debug"
@@ -3180,6 +3189,50 @@ def _coerce_non_list_candidate_to_stage_output(
     return None, warnings
 
 
+def _normalize_json_delimiter_quotes(text: str) -> str:
+    result: list[str] = []
+    in_string = False
+    string_quote = ""
+    escaping = False
+    smart_quotes = {"\u201c", "\u201d"}
+
+    for char in text:
+        if in_string:
+            if escaping:
+                result.append(char)
+                escaping = False
+                continue
+            if char == "\\":
+                result.append(char)
+                escaping = True
+                continue
+            if string_quote == '"' and char == '"':
+                result.append(char)
+                in_string = False
+                string_quote = ""
+                continue
+            if string_quote == "smart" and char in smart_quotes:
+                result.append('"')
+                in_string = False
+                string_quote = ""
+                continue
+            result.append(char)
+            continue
+
+        if char == '"':
+            result.append(char)
+            in_string = True
+            string_quote = '"'
+        elif char in smart_quotes:
+            result.append('"')
+            in_string = True
+            string_quote = "smart"
+        else:
+            result.append(char)
+
+    return "".join(result)
+
+
 def _parse_candidate_value(candidate: Any) -> Any:
     if isinstance(candidate, (dict, list)):
         return candidate
@@ -3194,7 +3247,18 @@ def _parse_candidate_value(candidate: Any) -> Any:
     try:
         return parse_json(text)
     except Exception:
-        return cleaned
+        pass
+    quote_repaired = _normalize_json_delimiter_quotes(cleaned)
+    if quote_repaired != cleaned:
+        try:
+            return json.loads(quote_repaired)
+        except Exception:
+            pass
+        try:
+            return parse_json(quote_repaired)
+        except Exception:
+            pass
+    return cleaned
 
 
 def safe_parse_stage_output(
@@ -3254,6 +3318,54 @@ def _log_field_type_mismatch(stage: str, field: str, expected: str, value: Any) 
     )
 
 
+def _extract_embedded_object_field(
+    value: Any,
+    *,
+    aliases: tuple[str, ...],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if isinstance(value, dict):
+        direct = _find_value_by_aliases(value, aliases)
+        if isinstance(direct, dict):
+            return direct, value
+        if direct is not None:
+            parsed_direct = _parse_candidate_value(direct)
+            if isinstance(parsed_direct, dict):
+                nested = _find_value_by_aliases(parsed_direct, aliases)
+                return (nested, parsed_direct) if isinstance(nested, dict) else (parsed_direct, value)
+
+        content = value.get("content")
+        if isinstance(content, str) and content.strip():
+            extracted, envelope = _extract_embedded_object_field(content, aliases=aliases)
+            if extracted is not None:
+                return extracted, envelope
+        return value, None
+
+    parsed = _parse_candidate_value(value)
+    if not isinstance(parsed, dict):
+        return None, None
+
+    direct = _find_value_by_aliases(parsed, aliases)
+    if isinstance(direct, dict):
+        return direct, parsed
+    if direct is not None:
+        parsed_direct = _parse_candidate_value(direct)
+        if isinstance(parsed_direct, dict):
+            nested = _find_value_by_aliases(parsed_direct, aliases)
+            return (nested, parsed_direct) if isinstance(nested, dict) else (parsed_direct, parsed)
+
+    return parsed, parsed
+
+
+def _copy_embedded_display_text(target: dict[str, Any], envelope: dict[str, Any] | None) -> None:
+    if not isinstance(envelope, dict) or target.get("display_text") not in (None, "", [], {}):
+        return
+    for key in ("display_text", "displayText"):
+        value = envelope.get(key)
+        if isinstance(value, str) and value.strip():
+            target["display_text"] = value.strip()
+            return
+
+
 def _normalize_stage_output(
     stage: str,
     data: dict[str, Any],
@@ -3263,6 +3375,13 @@ def _normalize_stage_output(
     warnings = parse_warnings if parse_warnings is not None else []
     normalized = dict(data if isinstance(data, dict) else {})
     if stage == "01":
+        source_brief, envelope = _extract_embedded_object_field(
+            normalized.get("source_brief"),
+            aliases=FRAMEWORK_BUSINESS_FIELD_ALIASES["source_brief"],
+        )
+        if source_brief is not None:
+            normalized["source_brief"] = source_brief
+            _copy_embedded_display_text(normalized, envelope)
         if not isinstance(normalized.get("source_brief"), dict):
             warnings.append("source_brief 不是 dict，已回退为对象占位")
             _log_field_type_mismatch(stage, "source_brief", "dict", normalized.get("source_brief"))

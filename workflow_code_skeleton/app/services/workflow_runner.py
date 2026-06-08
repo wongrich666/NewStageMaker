@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from ..config import settings
+from .workflow_output_normalizer import normalize_stage_output
 
 
 DEFAULT_WORKFLOW_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "workflows.yaml"
@@ -143,11 +144,17 @@ def run_stage(
             stage_key=stage_key,
             detail=detail,
         ) from exc
-    if isinstance(result, dict):
-        result.setdefault("backend", backend)
-        result.setdefault("stage_key", stage_key)
-        result.setdefault("backend_stage_key", resolved_stage_key)
-    return result
+    normalized = normalize_stage_output(
+        stage_key,
+        result,
+        payload=variables or {},
+        backend=backend,
+        backend_stage_key=resolved_stage_key,
+    )
+    normalized.setdefault("backend", backend)
+    normalized.setdefault("stage_key", stage_key)
+    normalized.setdefault("backend_stage_key", resolved_stage_key)
+    return normalized
 
 
 def backend_ready(stage_key: str | None = None) -> bool:

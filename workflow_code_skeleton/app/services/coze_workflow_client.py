@@ -11,6 +11,7 @@ from typing import Any
 
 from ..config import settings
 from ..utils.logger import get_logger
+from .workflow_output_normalizer import normalize_stage_output
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "coze_workflows.yaml"
 logger = get_logger("coze_workflow_client")
@@ -569,7 +570,7 @@ class CozeWorkflowClient:
 
         if stage:
             self._apply_output_mapping(normalized, parsed, raw_jsonable, stage)
-        return normalized
+        return normalize_stage_output(stage_key, normalized, backend="coze", backend_stage_key=stage_key)
 
     def stage_config(self, stage_key: str) -> CozeStageConfig:
         stage_key = normalize_coze_stage_key(stage_key)

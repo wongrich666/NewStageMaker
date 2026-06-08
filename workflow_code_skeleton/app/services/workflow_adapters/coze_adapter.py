@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from ..coze_workflow_client import CozeWorkflowClient, coze_workflow_client, _resolve_coze_base_url_info
+from ..workflow_output_normalizer import OUTPUT_FORMAT_INSTRUCTION, normalize_stage_output
 
 
 class CozeWorkflowAdapter:
@@ -18,7 +19,10 @@ class CozeWorkflowAdapter:
         variables: dict[str, Any] | None = None,
         extra_parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return self.client.run_stage(stage_key, variables or {}, extra_parameters)
+        parameters = dict(extra_parameters or {})
+        parameters.setdefault("workflow_output_format_instruction", OUTPUT_FORMAT_INSTRUCTION)
+        raw_result = self.client.run_stage(stage_key, variables or {}, parameters)
+        return normalize_stage_output(stage_key, raw_result, payload=variables or {}, backend=self.name, backend_stage_key=stage_key)
 
     def backend_ready(self, stage_key: str | None = None) -> bool:
         try:

@@ -60,6 +60,27 @@ def test_workflow_runner_selects_coze_backend_stage_key(monkeypatch):
     assert result["backend_stage_key"] == "stage_12_rewrite"
 
 
+def test_workflow_runner_normalizes_adapter_output(monkeypatch):
+    def fake_run_stage(self, stage_key, variables=None, extra_parameters=None):
+        return {
+            "ok": True,
+            "content": '```json\n{"source_brief": {"title": "Runner Normalized"}, "display_text": "Readable"}\n```',
+        }
+
+    monkeypatch.setenv("WORKFLOW_BACKEND", "coze")
+    monkeypatch.delenv("WORKFLOW_CONFIG", raising=False)
+    monkeypatch.setattr(
+        "workflow_code_skeleton.app.services.workflow_adapters.coze_adapter.CozeWorkflowAdapter.run_stage",
+        fake_run_stage,
+    )
+
+    result = workflow_runner.run_stage("stage_01", {"source_text": "x"})
+
+    assert result["source_brief"]["title"] == "Runner Normalized"
+    assert result["display_text"] == "Readable"
+    assert result["_normalizer_debug"]["raw_result"]["content"].startswith("```json")
+
+
 def test_coze_stage_key_aliases_resolve_stage_01():
     assert normalize_coze_stage_key("basic") == "stage_01"
     assert normalize_coze_stage_key("01") == "stage_01"

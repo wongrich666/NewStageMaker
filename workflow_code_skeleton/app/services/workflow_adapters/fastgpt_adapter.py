@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from ..fastgpt_client import fastgpt_client
+from ..workflow_output_normalizer import OUTPUT_FORMAT_INSTRUCTION, normalize_stage_output
 
 
 class FastGPTWorkflowAdapter:
@@ -18,7 +19,9 @@ class FastGPTWorkflowAdapter:
         payload = dict(variables or {})
         if extra_parameters:
             payload.update(extra_parameters)
-        return fastgpt_client.run_stage(stage_key, payload)
+        payload.setdefault("workflow_output_format_instruction", OUTPUT_FORMAT_INSTRUCTION)
+        raw_result = fastgpt_client.run_stage(stage_key, payload)
+        return normalize_stage_output(stage_key, raw_result, payload=payload, backend=self.name, backend_stage_key=stage_key)
 
     def backend_ready(self, stage_key: str | None = None) -> bool:
         if os.getenv("FASTGPT_API_KEY"):
@@ -40,4 +43,3 @@ class FastGPTWorkflowAdapter:
             "stage_key": stage_key or "",
             "has_api_key": self.backend_ready(stage_key),
         }
-
