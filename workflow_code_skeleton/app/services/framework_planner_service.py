@@ -353,11 +353,23 @@ def _debug_error_summary(response_json: Any) -> list[str]:
         "status_code",
         "response_status",
         "response_error",
+        "auth_failure_code",
+        "credential_name",
+        "token_env",
+        "credential_chain",
+        "credential_attempt_order",
+        "credential_attempts",
+        "token_action_hint",
+        "base_url",
+        "base_url_region",
         "traceback",
     ):
         value = response_json.get(key)
         if value in (None, "", [], {}):
             value = detail.get(key)
+        nested_detail = detail.get("detail") if isinstance(detail.get("detail"), dict) else {}
+        if value in (None, "", [], {}) and nested_detail:
+            value = nested_detail.get(key)
         if value not in (None, "", [], {}):
             lines.append(f"{key}: {_debug_value_summary(value)}")
     return lines

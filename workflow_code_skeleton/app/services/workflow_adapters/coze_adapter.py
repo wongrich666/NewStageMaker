@@ -54,6 +54,8 @@ class CozeWorkflowAdapter:
                 workflow_id = str(workflow_info.get("workflow_id") or "")
             except Exception:
                 workflow_id = ""
+        credentials = self.client.credentials_diagnostics()
+        first_credential = credentials[0] if credentials else {}
         return {
             "ok": True,
             "backend": self.name,
@@ -66,12 +68,22 @@ class CozeWorkflowAdapter:
             "resource_path": workflow_info.get("resource_path") or "",
             "inner_yaml_path": workflow_info.get("inner_yaml_path") or "",
             "dry_run": bool(self.client.dry_run),
-            "token_env": self.client.token_env,
-            "token_status": "SET" if os.getenv(self.client.token_env) else "EMPTY",
-            "base_url_env": self.client.base_url_env,
-            "base_url_status": "SET" if os.getenv(self.client.base_url_env) else "EMPTY",
-            "base_url": base_url,
-            "base_url_source": base_url_source,
+            "token_env": first_credential.get("token_env") or self.client.token_env,
+            "legacy_token_env": self.client.token_env,
+            "token_status": first_credential.get("token_status") or ("SET" if os.getenv(self.client.token_env) else "EMPTY"),
+            "token_prefix": first_credential.get("token_prefix") or "",
+            "token_len": first_credential.get("token_len") or 0,
+            "token_expires_at": first_credential.get("token_expires_at") or "",
+            "token_days_left": first_credential.get("token_days_left"),
+            "credential_name": first_credential.get("credential_name") or "",
+            "credential_attempt_order": [item.get("credential_name") for item in credentials],
+            "credential_order_env": os.getenv("COZE_CREDENTIALS_ORDER") or "",
+            "credentials": credentials,
+            "base_url_env": first_credential.get("base_url_env") or self.client.base_url_env,
+            "legacy_base_url_env": self.client.base_url_env,
+            "base_url_status": "SET" if first_credential.get("base_url") else "EMPTY",
+            "base_url": first_credential.get("base_url") or base_url,
+            "base_url_source": first_credential.get("base_url_source") or base_url_source,
             "workflow_id_status": "SET" if workflow_id else "EMPTY",
             "timeout_seconds": self.client.timeout_seconds,
         }

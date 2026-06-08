@@ -5,6 +5,7 @@ import os
 import re
 import traceback
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from importlib import metadata
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,20 @@ class CozeStageConfig:
     input_mapping: dict[str, str]
     output_mapping: dict[str, str]
     output_fallbacks: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CozeCredential:
+    name: str
+    auth_type: str
+    token: str
+    token_env: str
+    token_expires_at: str
+    token_expires_env: str
+    base_url: str
+    base_url_source: str
+    base_url_env: str
+    token_detail: dict[str, Any]
 
 
 STAGE_KEY_ALIASES: dict[str, str] = {
@@ -96,6 +111,10 @@ def _env_status(name: str) -> str:
     return "SET" if os.getenv(name) else "EMPTY"
 
 
+def _env_flag(name: str, default: str = "0") -> bool:
+    return str(os.getenv(name, default) or default).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _base_url_region(base_url: str) -> str:
     lowered = str(base_url or "").lower()
     if "api.coze.cn" in lowered:
@@ -119,6 +138,63 @@ def _normalized_token_value(raw_token: str | None) -> tuple[str, dict[str, Any]]
     }
 
 
+def _safe_token_prefix(token: str) -> str:
+    text = str(token or "")
+    if not text:
+        return ""
+    return text[:8]
+
+
+def _days_left(expires_at: str) -> int | None:
+    text = str(expires_at or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+    return (parsed - datetime.now(timezone.utc).date()).days
+
+
+def _safe_credential_detail(credential: CozeCredential) -> dict[str, Any]:
+    days_left = _days_left(credential.token_expires_at)
+    detail = {
+        "credential_name": credential.name,
+        "auth_type": credential.auth_type,
+        "token_env": credential.token_env,
+        "token_status": "SET" if credential.token else "EMPTY",
+        "token_redacted": True,
+        "token_prefix": _safe_token_prefix(credential.token),
+        "token_len": len(credential.token),
+        "token_expires_at": credential.token_expires_at,
+        "token_days_left": days_left,
+        "base_url": credential.base_url,
+        "base_url_source": credential.base_url_source,
+        "base_url_env": credential.base_url_env,
+        "base_url_region": _base_url_region(credential.base_url),
+    }
+    detail.update(credential.token_detail)
+    return detail
+
+
+def _coze_error_code_from_detail(detail: dict[str, Any]) -> str:
+    for key in ("code", "error_code", "original_error_code", "status_code"):
+        value = detail.get(key)
+        if value not in (None, ""):
+            return str(value)
+    text = str(detail.get("original_exception_message") or detail.get("msg") or detail.get("message") or "")
+    match = re.search(r"(?:code|error_code)\s*[:=]\s*([A-Za-z0-9_-]+)", text)
+    return match.group(1) if match else ""
+
+
+def _coze_error_message_from_detail(detail: dict[str, Any]) -> str:
+    for key in ("msg", "message", "error_message", "original_error_msg", "original_exception_message"):
+        value = detail.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
 def _env_value_with_source(*names: str) -> tuple[str, str]:
     for name in names:
         value = str(os.getenv(name) or "").strip()
@@ -135,8 +211,12 @@ def _resolve_coze_base_url(value: str | None = None) -> str:
         return COZE_CN_BASE_URL
     normalized = raw.upper()
     if normalized in {"COZE_CN_BASE_URL", "CN", "CHINA", "COZE_CN"}:
+        if normalized == "COZE_CN_BASE_URL":
+            logger.warning("COZE_API_BASE=COZE_CN_BASE_URL is accepted, but https://api.coze.cn is preferred.")
         return COZE_CN_BASE_URL
     if normalized in {"COZE_COM_BASE_URL", "GLOBAL", "COM", "US"}:
+        if normalized == "COZE_COM_BASE_URL":
+            logger.warning("COZE_API_BASE=COZE_COM_BASE_URL is accepted, but https://api.coze.com is preferred.")
         return "https://api.coze.com"
     if raw.startswith(("http://", "https://")):
         return raw.rstrip("/")
@@ -181,15 +261,21 @@ def _coze_error_message(exc: Exception, detail: dict[str, Any]) -> str:
     code = str(detail.get("code") or "")
     msg = str(detail.get("msg") or detail.get("original_exception_message") or "").lower()
     base_url = str(detail.get("base_url") or "")
+    token_env = str(detail.get("token_env") or "COZE_API_TOKEN")
     if code == "4100" or "authentication is invalid" in msg:
         return (
-            "Coze authentication invalid. COZE_API_TOKEN is present, but Coze rejected it "
+            f"Coze authentication invalid. {token_env} is present, but Coze rejected it "
             f"for base_url={base_url or 'unknown'}. Regenerate or replace the PAT for this Coze region, "
             "then restart the server."
         )
+    if code == "4101" or "permission denied" in msg or "permission" in msg:
+        return (
+            "Coze permission denied. The token is valid but does not have permission to run this workflow "
+            f"for base_url={base_url or 'unknown'}. Check Workflow.run permission and workspace authorization."
+        )
     if code == "700012006" or "access token invalid" in msg:
         hint = (
-            "Coze access token invalid. Check COZE_API_TOKEN, and make sure "
+            f"Coze access token invalid. Check {token_env}, and make sure "
             "COZE_API_BASE matches the token region."
         )
         if "api.coze.com" in base_url:
@@ -203,16 +289,23 @@ def _coze_error_message(exc: Exception, detail: dict[str, Any]) -> str:
 def _augment_authentication_failure_detail(detail: dict[str, Any]) -> None:
     code = str(detail.get("original_error_code") or detail.get("code") or "")
     msg = str(detail.get("original_error_msg") or detail.get("msg") or detail.get("original_exception_message") or "").lower()
-    if code not in {"4100", "700012006"} and "authentication is invalid" not in msg and "access token invalid" not in msg:
+    if (
+        code not in {"4100", "4101", "700012006"}
+        and "authentication is invalid" not in msg
+        and "access token invalid" not in msg
+        and "permission denied" not in msg
+    ):
         return
     base_url = str(detail.get("base_url") or "")
     detail["auth_failure_suspected"] = True
     detail["auth_failure_code"] = code
     detail["base_url_region"] = _base_url_region(base_url)
     detail["token_action_required"] = "replace_or_regenerate_coze_pat"
+    token_env = str(detail.get("token_env") or "COZE_API_TOKEN")
+    base_url_env = str(detail.get("base_url_env") or "COZE_API_BASE")
     detail["token_action_hint"] = (
-        "COZE_API_TOKEN is set, but Coze rejected it. Use a valid PAT for the configured "
-        "COZE_API_BASE region, and restart the server after updating .env."
+        f"{token_env} is set, but Coze rejected it. Use a valid PAT for the configured "
+        f"{base_url_env} region, and restart the server after updating .env."
     )
 
 
@@ -321,7 +414,85 @@ class CozeWorkflowClient:
             os.getenv(str(self.config.get("dry_run_env") or "COZE_DRY_RUN"), "0")
         ).strip() in {"1", "true", "TRUE", "yes", "on"}
         self._coze: Any = None
-        self._coze_signature: tuple[str, str] | None = None
+        self._coze_signature: tuple[str, str, str] | None = None
+
+    def credentials(self) -> list[CozeCredential]:
+        multi_credential_configured = any(
+            str(os.getenv(name) or "").strip()
+            for name in (
+                "COZE_PRIMARY_API_TOKEN",
+                "COZE_SECONDARY_API_TOKEN",
+                "COZE_CREDENTIALS_ORDER",
+            )
+        )
+        if multi_credential_configured:
+            names = [
+                re.sub(r"[^A-Za-z0-9_]", "", item.strip()).lower()
+                for item in str(os.getenv("COZE_CREDENTIALS_ORDER") or "primary,secondary").split(",")
+                if item.strip()
+            ]
+            if not names:
+                names = ["primary", "secondary"]
+            return [self._credential_from_name(name) for name in names]
+        return [self._legacy_credential()]
+
+    def credentials_diagnostics(self) -> list[dict[str, Any]]:
+        return [_safe_credential_detail(credential) for credential in self.credentials()]
+
+    def credential_order(self) -> list[str]:
+        return [credential.name for credential in self.credentials()]
+
+    def _credential_from_name(self, name: str) -> CozeCredential:
+        normalized = str(name or "").strip().lower() or "primary"
+        if normalized == "legacy":
+            return self._legacy_credential()
+        prefix = f"COZE_{normalized.upper()}"
+        token_env = f"{prefix}_API_TOKEN"
+        expires_env = f"{prefix}_TOKEN_EXPIRES_AT"
+        base_env = f"{prefix}_API_BASE"
+        token, token_detail = _normalized_token_value(os.getenv(token_env))
+        base_raw = os.getenv(base_env)
+        base_source = base_env if str(base_raw or "").strip() else self.base_url_env
+        try:
+            base_url, base_url_source = _resolve_coze_base_url_info(
+                base_raw if str(base_raw or "").strip() else os.getenv(self.base_url_env),
+                base_source,
+            )
+        except Exception as exc:
+            base_url, base_url_source = "", base_source
+            token_detail["base_url_error"] = str(exc)
+        return CozeCredential(
+            name=normalized,
+            auth_type=str(os.getenv(f"{prefix}_AUTH_TYPE") or os.getenv("COZE_AUTH_TYPE") or "pat").strip().lower() or "pat",
+            token=token,
+            token_env=token_env,
+            token_expires_at=str(os.getenv(expires_env) or "").strip(),
+            token_expires_env=expires_env,
+            base_url=base_url,
+            base_url_source=base_url_source,
+            base_url_env=base_source,
+            token_detail=token_detail,
+        )
+
+    def _legacy_credential(self) -> CozeCredential:
+        token, token_detail = _normalized_token_value(os.getenv(self.token_env))
+        try:
+            base_url, base_url_source = _resolve_coze_base_url_info(os.getenv(self.base_url_env), self.base_url_env)
+        except Exception as exc:
+            base_url, base_url_source = "", self.base_url_env
+            token_detail["base_url_error"] = str(exc)
+        return CozeCredential(
+            name="legacy",
+            auth_type=str(os.getenv("COZE_AUTH_TYPE") or "pat").strip().lower() or "pat",
+            token=token,
+            token_env=self.token_env,
+            token_expires_at=str(os.getenv("COZE_TOKEN_EXPIRES_AT") or "").strip(),
+            token_expires_env="COZE_TOKEN_EXPIRES_AT",
+            base_url=base_url,
+            base_url_source=base_url_source,
+            base_url_env=self.base_url_env,
+            token_detail=token_detail,
+        )
 
     def _bot_app_info_for_stage(self, stage_key: str) -> dict[str, Any]:
         normalized = normalize_coze_stage_key(stage_key).upper()
@@ -357,8 +528,10 @@ class CozeWorkflowClient:
         built = self.build_parameters(stage.key, project_state or {}, parameters)
         workflow_info = self.workflow_id_info_for_stage(stage.key)
         workflow_id = str(workflow_info.get("workflow_id") or "")
+        credential_diagnostics = self.credentials_diagnostics()
+        first_credential = credential_diagnostics[0] if credential_diagnostics else {}
         logger.info(
-            "Coze stage resolved input_stage_key=%s normalized_stage_key=%s workflow_id_exists=%s workflow_id_source=%s config_path=%s resource_path=%s inner_yaml_path=%s token_status=%s base_url_status=%s",
+            "Coze stage resolved input_stage_key=%s normalized_stage_key=%s workflow_id_exists=%s workflow_id_source=%s config_path=%s resource_path=%s inner_yaml_path=%s credential_name=%s token_status=%s base_url_status=%s",
             stage_key,
             normalized_stage_key,
             bool(workflow_id),
@@ -366,8 +539,9 @@ class CozeWorkflowClient:
             self.config_path,
             workflow_info.get("resource_path") or "",
             workflow_info.get("inner_yaml_path") or "",
-            _env_status(self.token_env),
-            _env_status(self.base_url_env),
+            first_credential.get("credential_name") or "",
+            first_credential.get("token_status") or "EMPTY",
+            "SET" if first_credential.get("base_url") else "EMPTY",
         )
         return self.run_workflow_by_id(
             workflow_id,
@@ -414,17 +588,113 @@ class CozeWorkflowClient:
                 "parameter_keys": sorted(safe_parameters.keys()),
             }
             return self.normalize_response(normalized_stage_key, workflow_id, raw)
-        token, _token_detail = _normalized_token_value(os.getenv(self.token_env))
-        if not token:
+
+        credentials = self.credentials()
+        attempts: list[dict[str, Any]] = []
+        last_error: CozeWorkflowError | None = None
+        for index, credential in enumerate(credentials):
+            try:
+                result = self._run_workflow_by_id_once(
+                    workflow_id,
+                    parameters=safe_parameters,
+                    stream=stream,
+                    stage_key=normalized_stage_key,
+                    workflow_info=workflow_info,
+                    credential=credential,
+                )
+                if isinstance(result, dict):
+                    result.setdefault("coze_credential_name", credential.name)
+                    result.setdefault("credential_name", credential.name)
+                    result.setdefault("credential_attempts", attempts + [self._credential_success_attempt(credential)])
+                return result
+            except CozeWorkflowError as exc:
+                last_error = exc
+                fallback_allowed, fallback_reason = self._fallback_allowed(exc)
+                is_last = index >= len(credentials) - 1
+                attempt = self._credential_failure_attempt(credential, exc, fallback_allowed, fallback_reason)
+                attempts.append(attempt)
+                exc.detail["credential_attempts"] = attempts
+                if is_last or not fallback_allowed:
+                    detail = dict(exc.detail)
+                    detail["credential_attempts"] = attempts
+                    if len(credentials) > 1:
+                        raise CozeWorkflowError(
+                            f"All Coze credentials failed; last credential={credential.name}: {exc}",
+                            stage_key=normalized_stage_key,
+                            workflow_id=workflow_id,
+                            error=detail,
+                            detail=detail,
+                        ) from exc
+                    raise
+                next_credential = credentials[index + 1]
+                logger.warning(
+                    "Coze credential failed, trying next credential: credential=%s error_code=%s fallback_next=%s",
+                    credential.name,
+                    attempt.get("error_code") or "",
+                    next_credential.name,
+                )
+
+        detail = {
+            **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
+            "credential_attempts": attempts,
+        }
+        raise CozeWorkflowError(
+            f"All Coze credentials failed: {last_error or 'no credential attempted'}",
+            stage_key=normalized_stage_key,
+            workflow_id=workflow_id,
+            error=detail,
+            detail=detail,
+        )
+
+    def _run_workflow_by_id_once(
+        self,
+        workflow_id: str,
+        *,
+        parameters: dict[str, Any],
+        stream: bool,
+        stage_key: str,
+        workflow_info: dict[str, Any],
+        credential: CozeCredential,
+    ) -> dict[str, Any]:
+        normalized_stage_key = normalize_coze_stage_key(stage_key)
+        safe_parameters = _jsonable(parameters or {})
+        if not credential.base_url:
             raise CozeWorkflowError(
-                "COZE_API_TOKEN is required for Coze workflow backend",
+                "Coze credential base_url is invalid",
                 stage_key=normalized_stage_key,
                 workflow_id=workflow_id,
-                detail=self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
+                detail={
+                    **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info, credential),
+                    "credential_config_invalid": True,
+                    "credential_config_error": credential.token_detail.get("base_url_error") or "base_url_empty",
+                },
+            )
+        if credential.token_detail.get("token_had_bearer_prefix"):
+            raise CozeWorkflowError(
+                "Coze credential token must not include Bearer prefix",
+                stage_key=normalized_stage_key,
+                workflow_id=workflow_id,
+                detail={
+                    **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info, credential),
+                    "credential_config_invalid": True,
+                    "credential_config_error": "token_has_bearer_prefix",
+                },
+            )
+        if not credential.token:
+            raise CozeWorkflowError(
+                f"{credential.token_env} is required for Coze workflow backend",
+                stage_key=normalized_stage_key,
+                workflow_id=workflow_id,
+                detail={
+                    **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info, credential),
+                    "credential_config_invalid": True,
+                    "credential_config_error": "token_empty",
+                },
             )
 
-        coze = self._client()
-        base_url, base_url_source = _resolve_coze_base_url_info(os.getenv(self.base_url_env), self.base_url_env)
+        coze = self._client(credential)
+        base_url = credential.base_url
+        base_url_source = credential.base_url_source
         bot_app_info = self._bot_app_info_for_stage(normalized_stage_key)
         run_kwargs = {
             "workflow_id": workflow_id,
@@ -435,23 +705,28 @@ class CozeWorkflowClient:
         if bot_app_info["app_id"]:
             run_kwargs["app_id"] = bot_app_info["app_id"]
         logger.info(
-            "Coze workflow request start stage_key=%s workflow_id=%s base_url=%s base_url_source=%s stream=%s token_status=%s workflow_id_status=%s workflow_id_source=%s bot_id_status=%s app_id_status=%s parameter_keys=%s",
+            "Coze workflow request start backend=coze stage_key=%s workflow_id_status=%s workflow_id_source=%s credential_name=%s auth_type=%s token_status=%s token_prefix=%s token_len=%s token_expires_at=%s token_days_left=%s base_url=%s base_url_source=%s stream=%s bot_id_status=%s app_id_status=%s parameter_keys=%s",
             normalized_stage_key,
-            workflow_id,
+            "SET" if workflow_id else "EMPTY",
+            workflow_info.get("workflow_id_source") or "",
+            credential.name,
+            credential.auth_type,
+            "SET" if credential.token else "EMPTY",
+            _safe_token_prefix(credential.token),
+            len(credential.token),
+            credential.token_expires_at,
+            _days_left(credential.token_expires_at),
             base_url,
             base_url_source,
             stream,
-            "SET" if token else "EMPTY",
-            "SET" if workflow_id else "EMPTY",
-            workflow_info.get("workflow_id_source") or "",
             bot_app_info["bot_id_status"],
             bot_app_info["app_id_status"],
             sorted(safe_parameters.keys()),
         )
+        raw_events: list[Any] = []
+        messages: list[str] = []
         try:
             if stream:
-                raw_events: list[Any] = []
-                messages: list[str] = []
                 from cozepy import WorkflowEventType
 
                 for event in coze.workflows.runs.stream(**run_kwargs):
@@ -478,13 +753,18 @@ class CozeWorkflowClient:
                             workflow_id=workflow_id,
                             error=error_jsonable,
                             detail={
-                                **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
+                                **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info, credential),
                                 "original_exception_type": "CozeWorkflowError",
                                 "original_exception_message": "Coze workflow returned ERROR event",
+                                "code": error_code or "",
+                                "msg": error_msg or "",
                                 "original_error_code": error_code or "",
                                 "original_error_msg": error_msg or "",
                                 "debug_url": _deep_find_key(error_jsonable, "debug_url") if isinstance(error_jsonable, (dict, list)) else "",
                                 "coze_error_event": error_jsonable,
+                                "stream_event_count": len(raw_events),
+                                "stream_message_count": len(messages),
+                                "received_stream_output": bool(messages),
                             },
                         )
                     elif event_type == WorkflowEventType.INTERRUPT:
@@ -495,27 +775,36 @@ class CozeWorkflowClient:
                             workflow_id=workflow_id,
                             error=_event_to_jsonable(interrupt_data),
                             detail={
-                                **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
+                                **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info, credential),
                                 "coze_interrupt_event": _event_to_jsonable(interrupt_data),
+                                "stream_event_count": len(raw_events),
+                                "stream_message_count": len(messages),
+                                "received_stream_output": bool(messages),
                             },
                         )
                 raw: Any = {"events": [_event_to_jsonable(item) for item in raw_events], "content": "".join(messages)}
             else:
                 raw = coze.workflows.runs.create(**run_kwargs)
-        except CozeWorkflowError:
+        except CozeWorkflowError as exc:
+            _augment_authentication_failure_detail(exc.detail)
+            _augment_region_mismatch_detail(exc.detail)
             raise
         except Exception as exc:
             detail = {
-                **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
+                **self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info, credential),
                 **_exception_detail(exc),
                 "traceback": traceback.format_exc(limit=8),
+                "stream_event_count": len(raw_events),
+                "stream_message_count": len(messages),
+                "received_stream_output": bool(messages),
             }
             _augment_authentication_failure_detail(detail)
             _augment_region_mismatch_detail(detail)
             logger.exception(
-                "Coze workflow request exception stage_key=%s workflow_id=%s base_url=%s parameter_keys=%s",
+                "Coze workflow request exception stage_key=%s workflow_id=%s credential_name=%s base_url=%s parameter_keys=%s",
                 normalized_stage_key,
                 workflow_id,
+                credential.name,
                 base_url,
                 sorted(safe_parameters.keys()),
             )
@@ -526,7 +815,69 @@ class CozeWorkflowClient:
                 error=detail,
                 detail=detail,
             ) from exc
-        return self.normalize_response(normalized_stage_key, workflow_id, raw)
+        normalized = self.normalize_response(normalized_stage_key, workflow_id, raw)
+        normalized.setdefault("coze_credential_name", credential.name)
+        return normalized
+
+    def _credential_success_attempt(self, credential: CozeCredential) -> dict[str, Any]:
+        return {
+            **_safe_credential_detail(credential),
+            "success": True,
+            "fallback_allowed": False,
+            "error_code": "",
+            "error_message": "",
+        }
+
+    def _credential_failure_attempt(
+        self,
+        credential: CozeCredential,
+        exc: CozeWorkflowError,
+        fallback_allowed: bool,
+        fallback_reason: str,
+    ) -> dict[str, Any]:
+        detail = getattr(exc, "detail", {}) if isinstance(getattr(exc, "detail", None), dict) else {}
+        return {
+            **_safe_credential_detail(credential),
+            "success": False,
+            "error_code": _coze_error_code_from_detail(detail),
+            "error_message": _coze_error_message_from_detail(detail) or str(exc),
+            "fallback_allowed": bool(fallback_allowed),
+            "fallback_reason": fallback_reason,
+            "original_exception_type": detail.get("original_exception_type") or type(exc).__name__,
+        }
+
+    def _fallback_allowed(self, exc: CozeWorkflowError) -> tuple[bool, str]:
+        detail = getattr(exc, "detail", {}) if isinstance(getattr(exc, "detail", None), dict) else {}
+        if detail.get("received_stream_output"):
+            return False, "stream_output_already_received"
+        if detail.get("missing_input_variables"):
+            return False, "missing_input_variables"
+        if detail.get("bot_app_conflict"):
+            return False, "bot_id_and_app_id_conflict"
+        if detail.get("workflow_id_status") == "EMPTY" or not detail.get("workflow_id_exists", True):
+            return False, "workflow_id_missing"
+        if detail.get("credential_config_invalid"):
+            return True, str(detail.get("credential_config_error") or "credential_config_invalid")
+
+        code = _coze_error_code_from_detail(detail)
+        msg = _coze_error_message_from_detail(detail).lower()
+        if code in {"4000", "4200"}:
+            return False, f"non_fallback_code_{code}"
+        if code in {"4100", "4101", "700012006"}:
+            return True, f"fallback_code_{code}"
+        if "authentication is invalid" in msg or "access token invalid" in msg:
+            return True, "authentication_invalid"
+        if "permission denied" in msg or "permission" in msg and "denied" in msg:
+            return True, "permission_denied"
+
+        exc_type = str(detail.get("original_exception_type") or "")
+        timeout_like = "Timeout" in exc_type or "timeout" in msg or "timed out" in msg
+        if timeout_like:
+            return (_env_flag("COZE_FALLBACK_ON_TIMEOUT", "0"), "timeout")
+        network_like = any(marker in exc_type for marker in ("Connection", "Connect", "Proxy", "SSLError", "Network"))
+        if network_like and _env_flag("COZE_FALLBACK_ON_NETWORK", "1"):
+            return True, "network_error"
+        return False, "not_fallback_error"
 
     def _missing_input_variables(self, stage_key: str, parameters: dict[str, Any]) -> list[str]:
         stage = self.stage_config(stage_key)
@@ -644,17 +995,19 @@ class CozeWorkflowClient:
         workflow_id: str,
         parameters: dict[str, Any],
         workflow_info: dict[str, Any],
+        credential: CozeCredential | None = None,
     ) -> dict[str, Any]:
-        base_url = ""
-        base_url_source = ""
-        try:
-            base_url, base_url_source = _resolve_coze_base_url_info(os.getenv(self.base_url_env), self.base_url_env)
-        except Exception as exc:
-            base_url = f"invalid: {exc}"
-            base_url_source = self.base_url_env
-        _token, token_detail = _normalized_token_value(os.getenv(self.token_env))
+        if credential is None:
+            try:
+                credential = self.credentials()[0]
+            except Exception:
+                credential = None
+        base_url = credential.base_url if credential else ""
+        base_url_source = credential.base_url_source if credential else self.base_url_env
+        credential_detail = _safe_credential_detail(credential) if credential else {}
         bot_app_info = self._bot_app_info_for_stage(stage_key)
         missing_input_variables = self._missing_input_variables(stage_key, parameters)
+        bot_app_conflict = bool(bot_app_info.get("bot_id") and bot_app_info.get("app_id"))
         return {
             "workflow_backend": str(os.getenv("WORKFLOW_BACKEND") or settings.workflow_backend or ""),
             "env_loaded_paths": [str(path) for path in getattr(settings, "loaded_env_paths", ())],
@@ -667,7 +1020,10 @@ class CozeWorkflowClient:
             "workflow_id_status": "SET" if workflow_id else "EMPTY",
             "workflow_id_source": workflow_info.get("workflow_id_source") or "",
             "workflow_id_env": workflow_info.get("workflow_id_env") or "",
-            **token_detail,
+            **credential_detail,
+            "credential_chain": [item.get("credential_name") for item in self.credentials_diagnostics()],
+            "credential_attempt_order": self.credential_order(),
+            "credential_order_env": str(os.getenv("COZE_CREDENTIALS_ORDER") or ""),
             "base_url_status": _env_status(self.base_url_env),
             "base_url": base_url,
             "base_url_source": base_url_source,
@@ -678,6 +1034,7 @@ class CozeWorkflowClient:
             "resource_path": workflow_info.get("resource_path") or "",
             "inner_yaml_path": workflow_info.get("inner_yaml_path") or "",
             "sdk_optional_parameters_supported": ["bot_id", "app_id"],
+            "bot_app_conflict": bot_app_conflict,
             **bot_app_info,
         }
 
@@ -708,10 +1065,12 @@ class CozeWorkflowClient:
             if target_key not in normalized and parsed not in (None, "", {}, []):
                 normalized[target_key] = parsed
 
-    def _client(self) -> Any:
-        token, _token_detail = _normalized_token_value(os.getenv(self.token_env))
-        base_url = _resolve_coze_base_url(os.getenv(self.base_url_env))
-        signature = (token, base_url)
+    def _client(self, credential: CozeCredential | None = None) -> Any:
+        if credential is None:
+            credential = self.credentials()[0]
+        token = credential.token
+        base_url = credential.base_url
+        signature = (credential.name, token, base_url)
         if self._coze is not None and (self._coze_signature is None or self._coze_signature == signature):
             return self._coze
         from cozepy import Coze, TokenAuth

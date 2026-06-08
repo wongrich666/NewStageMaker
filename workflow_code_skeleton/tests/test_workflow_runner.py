@@ -13,6 +13,36 @@ from workflow_code_skeleton.app.services.coze_workflow_client import (
 from workflow_code_skeleton.app.services import workflow_runner
 
 
+def _clear_coze_credential_env(monkeypatch):
+    for name in (
+        "COZE_CREDENTIALS_ORDER",
+        "COZE_PRIMARY_API_TOKEN",
+        "COZE_SECONDARY_API_TOKEN",
+        "COZE_PRIMARY_API_BASE",
+        "COZE_SECONDARY_API_BASE",
+        "COZE_PRIMARY_AUTH_TYPE",
+        "COZE_SECONDARY_AUTH_TYPE",
+        "COZE_PRIMARY_TOKEN_EXPIRES_AT",
+        "COZE_SECONDARY_TOKEN_EXPIRES_AT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def _stage01_required_params():
+    return {
+        "adaptation_direction": "",
+        "episodes_per_season": 20,
+        "minutes_per_episode": 2,
+        "mode": "create",
+        "season_count": 1,
+        "source_text": "x",
+        "source_title": "test",
+        "target_format": "short",
+        "user_constraints": "",
+        "user_requirements": "",
+    }
+
+
 def test_workflow_runner_selects_fastgpt_adapter(monkeypatch):
     captured = {}
 
@@ -98,6 +128,8 @@ def test_use_coze_workflow_backend_defaults_to_settings(monkeypatch):
 
 
 def test_coze_access_token_invalid_error_has_region_hint(monkeypatch):
+    _clear_coze_credential_env(monkeypatch)
+
     class FakeRuns:
         def stream(self, **kwargs):
             raise FakeCozeApiError()
@@ -152,6 +184,8 @@ def test_coze_access_token_invalid_error_has_region_hint(monkeypatch):
 
 
 def test_coze_authentication_invalid_error_has_token_hint(monkeypatch):
+    _clear_coze_credential_env(monkeypatch)
+
     class FakeRuns:
         def stream(self, **kwargs):
             raise FakeCozeApiError()
@@ -206,6 +240,8 @@ def test_coze_authentication_invalid_error_has_token_hint(monkeypatch):
 
 
 def test_coze_stage_01_missing_variables_fail_before_request(monkeypatch):
+    _clear_coze_credential_env(monkeypatch)
+
     class FakeRuns:
         def stream(self, **kwargs):
             raise AssertionError("Coze request should not be sent with missing variables")
@@ -229,6 +265,129 @@ def test_coze_stage_01_missing_variables_fail_before_request(monkeypatch):
     assert "Coze workflow input variables missing" in str(exc.value)
     assert "source_title" in exc.value.detail["missing_input_variables"]
     assert exc.value.detail["request_parameters_keys"] == ["source_text"]
+
+
+def test_coze_credentials_use_primary_secondary_order(monkeypatch):
+    _clear_coze_credential_env(monkeypatch)
+    monkeypatch.delenv("COZE_API_TOKEN", raising=False)
+    monkeypatch.setenv("COZE_CREDENTIALS_ORDER", "primary,secondary")
+    monkeypatch.setenv("COZE_SECONDARY_API_TOKEN", "secondary-token-secret")
+    monkeypatch.setenv("COZE_API_BASE", "https://api.coze.cn")
+
+    credentials = coze_workflow_client.credentials()
+    diagnostics = coze_workflow_client.credentials_diagnostics()
+    serialized = json.dumps(diagnostics, ensure_ascii=False)
+
+    assert [credential.name for credential in credentials] == ["primary", "secondary"]
+    assert credentials[0].token_env == "COZE_PRIMARY_API_TOKEN"
+    assert credentials[0].token == ""
+    assert credentials[1].token_env == "COZE_SECONDARY_API_TOKEN"
+    assert credentials[1].token == "secondary-token-secret"
+    assert [item["credential_name"] for item in diagnostics] == ["primary", "secondary"]
+    assert diagnostics[0]["token_status"] == "EMPTY"
+    assert diagnostics[1]["token_status"] == "SET"
+    assert diagnostics[1]["token_redacted"] is True
+    assert "secondary-token-secret" not in serialized
+
+
+def test_coze_primary_4100_falls_back_to_secondary(monkeypatch):
+    _clear_coze_credential_env(monkeypatch)
+    monkeypatch.delenv("COZE_API_TOKEN", raising=False)
+    monkeypatch.setenv("COZE_CREDENTIALS_ORDER", "primary,secondary")
+    monkeypatch.setenv("COZE_PRIMARY_API_TOKEN", "primary-token-secret")
+    monkeypatch.setenv("COZE_SECONDARY_API_TOKEN", "secondary-token-secret")
+    monkeypatch.setenv("COZE_API_BASE", "https://api.coze.cn")
+    calls = []
+
+    def fake_run_once(workflow_id, *, parameters, stream, stage_key, workflow_info, credential):
+        calls.append(credential.name)
+        if credential.name == "primary":
+            raise CozeWorkflowError(
+                "primary failed",
+                stage_key=stage_key,
+                workflow_id=workflow_id,
+                detail={
+                    "code": 4100,
+                    "original_error_code": 4100,
+                    "msg": "authentication is invalid",
+                    "original_error_msg": "authentication is invalid",
+                    "workflow_id_status": "SET",
+                    "workflow_id_exists": True,
+                    "token_env": credential.token_env,
+                    "base_url": credential.base_url,
+                    "base_url_env": credential.base_url_env,
+                },
+            )
+        return {"ok": True, "content": "secondary ok"}
+
+    monkeypatch.setattr(coze_workflow_client, "_run_workflow_by_id_once", fake_run_once)
+
+    result = coze_workflow_client.run_workflow_by_id(
+        "workflow-id",
+        parameters=_stage01_required_params(),
+        stage_key="stage_01",
+    )
+    attempts = result["credential_attempts"]
+    serialized = json.dumps(attempts, ensure_ascii=False)
+
+    assert calls == ["primary", "secondary"]
+    assert [item["credential_name"] for item in attempts] == ["primary", "secondary"]
+    assert attempts[0]["success"] is False
+    assert attempts[0]["error_code"] == "4100"
+    assert attempts[0]["fallback_allowed"] is True
+    assert attempts[1]["success"] is True
+    assert result["credential_name"] == "secondary"
+    assert "primary-token-secret" not in serialized
+    assert "secondary-token-secret" not in serialized
+
+
+def test_coze_all_credentials_failed_reports_sanitized_attempts(monkeypatch):
+    _clear_coze_credential_env(monkeypatch)
+    monkeypatch.delenv("COZE_API_TOKEN", raising=False)
+    monkeypatch.setenv("COZE_CREDENTIALS_ORDER", "primary,secondary")
+    monkeypatch.setenv("COZE_PRIMARY_API_TOKEN", "primary-token-secret")
+    monkeypatch.setenv("COZE_SECONDARY_API_TOKEN", "secondary-token-secret")
+    monkeypatch.setenv("COZE_API_BASE", "https://api.coze.cn")
+    calls = []
+
+    def fake_run_once(workflow_id, *, parameters, stream, stage_key, workflow_info, credential):
+        calls.append(credential.name)
+        raise CozeWorkflowError(
+            f"{credential.name} failed",
+            stage_key=stage_key,
+            workflow_id=workflow_id,
+            detail={
+                "code": 4100,
+                "original_error_code": 4100,
+                "msg": "authentication is invalid",
+                "original_error_msg": "authentication is invalid",
+                "workflow_id_status": "SET",
+                "workflow_id_exists": True,
+                "token_env": credential.token_env,
+                "base_url": credential.base_url,
+                "base_url_env": credential.base_url_env,
+            },
+        )
+
+    monkeypatch.setattr(coze_workflow_client, "_run_workflow_by_id_once", fake_run_once)
+
+    with pytest.raises(CozeWorkflowError) as exc:
+        coze_workflow_client.run_workflow_by_id(
+            "workflow-id",
+            parameters=_stage01_required_params(),
+            stage_key="stage_01",
+        )
+
+    attempts = exc.value.detail["credential_attempts"]
+    serialized = json.dumps(attempts, ensure_ascii=False)
+
+    assert calls == ["primary", "secondary"]
+    assert [item["credential_name"] for item in attempts] == ["primary", "secondary"]
+    assert [item["token_env"] for item in attempts] == ["COZE_PRIMARY_API_TOKEN", "COZE_SECONDARY_API_TOKEN"]
+    assert all(item["success"] is False for item in attempts)
+    assert all(item["error_code"] == "4100" for item in attempts)
+    assert "primary-token-secret" not in serialized
+    assert "secondary-token-secret" not in serialized
 
 
 def test_workflow_runner_rejects_unknown_backend(monkeypatch):
