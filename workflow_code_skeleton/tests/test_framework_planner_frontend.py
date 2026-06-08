@@ -82,4 +82,4 @@ def test_framework_planner_new_project_clears_knowledge_residue() -> None:
 def test_framework_planner_package_view_defines_locked_and_template_busts_cache() -> None:
     assert "function renderPackageView() {" in FRONTEND_SOURCE
     assert "const locked = Boolean(stage.locked);" in FRONTEND_SOURCE
-    assert "framework_planner.js') }}?v=20260604-framework-planner-flow-fixes" in FRONTEND_TEMPLATE
+    assert "framework_planner.js') }}?v=20260608-framework-asset-restore-state" in FRONTEND_TEMPLATE
