@@ -55,6 +55,7 @@ class CozeWorkflowAdapter:
             except Exception:
                 workflow_id = ""
         credentials = self.client.credentials_diagnostics()
+        credential_detail = self.client.credential_diagnostics()
         first_credential = credentials[0] if credentials else {}
         return {
             "ok": True,
@@ -76,6 +77,7 @@ class CozeWorkflowAdapter:
             "token_expires_at": first_credential.get("token_expires_at") or "",
             "token_days_left": first_credential.get("token_days_left"),
             "credential_name": first_credential.get("credential_name") or "",
+            "credential_chain": credential_detail.get("credential_chain", []),
             "credential_attempt_order": [item.get("credential_name") for item in credentials],
             "credential_order_env": os.getenv("COZE_CREDENTIALS_ORDER") or "",
             "credentials": credentials,

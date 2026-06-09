@@ -15,7 +15,7 @@ REPO_ENV_PATH = REPO_ROOT / ".env"
 
 LOADED_ENV_PATHS: list[Path] = []
 if ENV_PATH.exists():
-    load_dotenv(ENV_PATH, override=False)
+    load_dotenv(ENV_PATH, override=True)
     LOADED_ENV_PATHS.append(ENV_PATH)
 if REPO_ENV_PATH.exists():
     load_dotenv(REPO_ENV_PATH, override=False)
@@ -28,14 +28,26 @@ def _env_status(name: str) -> str:
     return "SET" if os.getenv(name) else "EMPTY"
 
 
+def _token_summary(name: str) -> str:
+    value = os.getenv(name) or ""
+    stripped = value.strip()
+    if not stripped:
+        return "EMPTY"
+    return f"SET prefix={stripped[:8]} len={len(stripped)}"
+
+
 CONFIG_LOGGER.info(
-    "workflow runtime env loaded: cwd=%s env_loaded_paths=%s WORKFLOW_BACKEND=%s COZE_API_BASE=%s COZE_API_TOKEN=%s COZE_WORKFLOW_STAGE_01_ID=%s",
+    "workflow runtime env loaded: cwd=%s env_path=%s env_loaded_paths=%s WORKFLOW_BACKEND=%s COZE_API_BASE=%s COZE_CREDENTIALS_ORDER=%s COZE_PRIMARY_API_TOKEN=%s COZE_SECONDARY_API_TOKEN=%s COZE_API_TOKEN=%s COZE_WORKFLOW_STAGE_01_ID=%s",
     os.getcwd(),
+    str(ENV_PATH),
     [str(path) for path in LOADED_ENV_PATHS],
     os.getenv("WORKFLOW_BACKEND") or "",
     os.getenv("COZE_API_BASE") or "",
-    _env_status("COZE_API_TOKEN"),
-    _env_status("COZE_WORKFLOW_STAGE_01_ID"),
+    os.getenv("COZE_CREDENTIALS_ORDER") or "",
+    _token_summary("COZE_PRIMARY_API_TOKEN"),
+    _token_summary("COZE_SECONDARY_API_TOKEN"),
+    _token_summary("COZE_API_TOKEN"),
+    os.getenv("COZE_WORKFLOW_STAGE_01_ID") or "",
 )
 
 

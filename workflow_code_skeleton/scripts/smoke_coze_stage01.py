@@ -15,7 +15,7 @@ if str(SKELETON_ROOT) not in sys.path:
 from dotenv import load_dotenv  # noqa: E402
 
 
-load_dotenv(SKELETON_ROOT / ".env", override=False)
+load_dotenv(SKELETON_ROOT / ".env", override=True)
 load_dotenv(SKELETON_ROOT.parent / ".env", override=False)
 
 from app.services.coze_workflow_client import coze_workflow_client  # noqa: E402
@@ -39,6 +39,7 @@ def main() -> int:
     print(f"env_path = {SKELETON_ROOT / '.env'}")
     print(f"parent_env_path = {SKELETON_ROOT.parent / '.env'}")
     print(f"coze_credentials_order = {os.getenv('COZE_CREDENTIALS_ORDER') or 'primary,secondary'}")
+    print(f"credential_chain = {[item.get('credential_name') for item in credentials]}")
     print(f"credential_attempt_order = {[item.get('credential_name') for item in credentials]}")
     print(f"base_url = {first_credential.get('base_url') or ''}")
     print(f"base_url_source = {first_credential.get('base_url_source') or ''}")
@@ -49,8 +50,10 @@ def main() -> int:
     print("credentials =")
     print(_safe_dump(credentials))
     print(f"workflow_id_status = {'SET' if workflow_id else 'EMPTY'}")
+    print(f"workflow_id = {workflow_id}")
     print(f"stage_key = {stage_key}")
     print(f"workflow_id_source = {workflow_info.get('workflow_id_source') or ''}")
+    print(f"workflow_id_env = {workflow_info.get('workflow_id_env') or ''}")
     print(f"resource_path = {workflow_info.get('resource_path') or ''}")
     print(f"inner_yaml_path = {workflow_info.get('inner_yaml_path') or ''}")
     if not any(item.get("token_status") == "SET" for item in credentials):

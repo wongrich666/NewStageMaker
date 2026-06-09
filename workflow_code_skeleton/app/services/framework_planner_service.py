@@ -1197,8 +1197,36 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 },
                 normalized_payload,
             )
+            coze_error_code = str(
+                runner_detail.get("original_error_code")
+                or runner_detail.get("code")
+                or runner_detail.get("error_code")
+                or ""
+            )
+            workflow_id = str(runner_detail.get("workflow_id") or "")
+            workflow_id_env = str(runner_detail.get("workflow_id_env_value") or "")
+            resolved_workflow_id = workflow_id
+            if workflow_id_env and resolved_workflow_id and workflow_id_env != resolved_workflow_id:
+                user_message = (
+                    f"检测到 workflow_id 覆盖异常：env={workflow_id_env}，resolved={resolved_workflow_id}，请检查配置优先级。"
+                )
+            elif runner_detail.get("coze_error_hint"):
+                user_message = str(runner_detail.get("coze_error_hint"))
+            elif coze_error_code == "4101":
+                user_message = (
+                    f"当前 token 有效，但没有权限访问 workflow_id={workflow_id}。请检查该 token 是否授权了 workflow "
+                    "所在工作空间，并勾选 Workflow.run 权限；也请确认 workflow_id 是否属于当前 token 可访问空间。"
+                )
+            elif coze_error_code == "4100":
+                user_message = "当前 token 鉴权失败，可能过期、复制错误、区域不匹配、带了 Bearer 前缀，或 token 被截断。"
+            elif coze_error_code == "4200":
+                user_message = "Coze workflow 未发布或不可运行，请先发布 workflow 后重试。"
+            elif coze_error_code == "4000":
+                user_message = "Coze 请求参数错误，请检查 workflow 入参名称、必填字段和参数格式。"
+            else:
+                user_message = "工作流后端调用失败，请检查 WORKFLOW_BACKEND、credential chain 及 workflow_id 配置。"
             raise FrameworkPlannerStageError(
-                "工作流后端调用失败，请检查 WORKFLOW_BACKEND 及对应 workflow_id 配置",
+                user_message,
                 stage=definition.stage,
                 status_code=502,
                 detail={
