@@ -509,7 +509,7 @@
         "valueType": "number",
         "description": "如果是连续剧或短剧，用于让 AI 判断 15 节拍大致覆盖的篇幅段落；不是生成分集。",
         "required": true,
-        "defaultValue": 60
+        "defaultValue": 20
       },
       {
         "type": "input",

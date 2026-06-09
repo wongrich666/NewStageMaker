@@ -51,6 +51,12 @@
     frameworkSource: "",
   }, loadWorkspace());
 
+  // Do not trust persisted running state after page reload.
+  // A previous fetch may have finished on the backend while the browser kept stale localStorage.
+  state.isRunning = false;
+  state.runningStage = "";
+  state.runningStartedAt = "";
+
   const urlAssetId = params.get("framework_asset_id") || params.get("asset_id") || "";
   const directFromPlanner = Boolean(urlAssetId && (params.has("source_framework_project_id") || params.has("project_id")));
   if (urlAssetId && (directFromPlanner || String(urlAssetId) !== String(state.frameworkAssetId || ""))) {
@@ -984,6 +990,7 @@
       state.error = error.message || "08 场景字典提炼失败";
     } finally {
       clearRunningStage("08");
+      saveWorkspace();
       render();
     }
   }
@@ -1022,6 +1029,7 @@
       state.error = error.message || "09 角色外观映射失败";
     } finally {
       clearRunningStage("09");
+      saveWorkspace();
       render();
     }
   }
@@ -1142,6 +1150,7 @@
       state.error = error.message || "10 分集细化方案失败";
     } finally {
       clearRunningStage("10");
+      saveWorkspace();
       render();
     }
   }
@@ -1261,6 +1270,7 @@
       state.error = error.message || "11 因果冲突失败";
     } finally {
       clearRunningStage("11");
+      saveWorkspace();
       render();
     }
   }
@@ -1321,6 +1331,7 @@
     } finally {
       if (!options.autoFromStage11) {
         clearRunningStage("12");
+        saveWorkspace();
       } else {
         state.runningStage = "";
         state.runningStartedAt = "";
@@ -1643,7 +1654,7 @@
             locked,
             has08
               ? `<p class="wts-hint">已完成</p>`
-              : `<p class="wts-hint">运行完成前不展示输出；结果会自动缓存并供后续阶段使用。</p>`,
+              : `<p class="wts-hint">本阶段不展示输出</p>`,
             { secondary: has08 }
           )}
 
@@ -1656,7 +1667,7 @@
             locked || !has08,
             has09
               ? `<p class="wts-hint">已完成</p>`
-              : `<p class="wts-hint">运行完成前不展示输出；结果会自动缓存并供后续阶段使用。</p>`,
+              : `<p class="wts-hint">本阶段不展示输出</p>`,
             { secondary: has09 }
           )}
           ${renderStageCard(

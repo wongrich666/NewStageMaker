@@ -193,7 +193,7 @@
         { name: "source_characters", label: "源剧本人物小传", type: "textarea", placeholder: "源人物小传。", required: true },
         { name: "source_script", label: "源剧本正文", type: "textarea", placeholder: "可选，源剧本正文。", required: false },
         { name: "target_style", label: "目标风格", type: "textarea", placeholder: "希望换成的题材、风格、爽点方向。", required: true },
-        { name: "total_episodes", label: "总集数", type: "number", placeholder: "例如 60。", required: true, defaultValue: 60 },
+        { name: "total_episodes", label: "总集数", type: "number", placeholder: "例如 20。", required: true, defaultValue: 20 },
         { name: "episode_word_count", label: "每集字数", type: "number", placeholder: "例如 600。", required: true, defaultValue: 600 }
       ],
       configured: false,

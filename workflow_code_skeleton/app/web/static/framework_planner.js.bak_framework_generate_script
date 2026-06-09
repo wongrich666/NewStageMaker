@@ -97,7 +97,7 @@
       source_title: "",
       target_format: "短剧",
       season_count: 1,
-      episodes_per_season: 60,
+      episodes_per_season: 2,
       minutes_per_episode: 2,
       adaptation_direction: "请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。",
       user_constraints: "",
@@ -200,7 +200,7 @@
     newScriptForm: {
       title: "",
       season_count: 1,
-      episodes_per_season: 60,
+      episodes_per_season: 20,
       target_format: "短剧",
       style: "",
       description: "",
@@ -3762,7 +3762,7 @@
     ui.newScriptForm = {
       title: "",
       season_count: 1,
-      episodes_per_season: 60,
+      episodes_per_season: 20,
       target_format: "短剧",
       style: "",
       description: "",
