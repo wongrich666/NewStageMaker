@@ -7080,4 +7080,515 @@
   if (ui.knowledge.open) loadKnowledgeTags().catch(() => {});
   loadAssets().catch(() => {});
   if (DEV_LOG_ENABLED) loadStageHistory(stageKeyForView(state.current_view || "basic")).catch(() => {});
+
+
+  // FRAMEWORK_PLANNER_EXPORT_CANONICAL_PATCH_V1
+  window.__FP_EXPORT_PATCH_STATUS = window.__FP_EXPORT_PATCH_STATUS || {
+    marker: "FRAMEWORK_PLANNER_EXPORT_CANONICAL_PATCH_V1",
+    wrapped: [],
+    errors: []
+  };
+
+  function fpExportPatchIsObject(value) {
+    return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  }
+
+  function fpExportPatchClone(value) {
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (error) {
+      return value;
+    }
+  }
+
+  function fpExportPatchHasContent(value) {
+    if (value === null || value === undefined) return false;
+    if (typeof value === "string") return value.trim().length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "object") return Object.keys(value).length > 0;
+    return true;
+  }
+
+  function fpExportPatchFirst() {
+    for (const value of arguments) {
+      if (fpExportPatchHasContent(value)) return value;
+    }
+    return undefined;
+  }
+
+  function fpExportPatchNumber(value, fallback) {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  }
+
+  function fpExportPatchOutputs() {
+    if (fpExportPatchIsObject(state.stageOutputs)) return state.stageOutputs;
+    if (fpExportPatchIsObject(state.stage_outputs)) return state.stage_outputs;
+    return {};
+  }
+
+  function fpExportPatchArray(value) {
+    return Array.isArray(value) ? fpExportPatchClone(value) : [];
+  }
+
+  function fpExportPatchObject(value) {
+    return fpExportPatchIsObject(value) ? fpExportPatchClone(value) : {};
+  }
+
+  function fpExportPatchNormalizeBasicConfig(existingPackage, sourceBrief) {
+    const pkg = fpExportPatchObject(existingPackage);
+    const source = fpExportPatchObject(sourceBrief);
+    const basic = Object.assign(
+      {},
+      fpExportPatchObject(state.basic_config),
+      fpExportPatchObject(pkg.basic_config)
+    );
+
+    basic.project_title = fpExportPatchFirst(
+      basic.project_title,
+      state.project_title,
+      state.title,
+      source.project_title,
+      source.source_title,
+      "Untitled"
+    );
+
+    basic.source_title = fpExportPatchFirst(
+      basic.source_title,
+      source.source_title,
+      basic.project_title,
+      "Untitled"
+    );
+
+    basic.title = fpExportPatchFirst(basic.title, basic.project_title);
+    basic.mode = fpExportPatchFirst(basic.mode, state.mode, "create");
+    basic.target_format = fpExportPatchFirst(basic.target_format, source.target_format, state.target_format, "short_drama");
+    basic.adaptation_direction = fpExportPatchFirst(basic.adaptation_direction, source.adaptation_direction, state.adaptation_direction, "");
+
+    basic.season_count = fpExportPatchNumber(
+      fpExportPatchFirst(basic.season_count, source.season_count, state.season_count),
+      1
+    );
+
+    basic.episodes_per_season = fpExportPatchNumber(
+      fpExportPatchFirst(basic.episodes_per_season, source.episodes_per_season, state.episodes_per_season),
+      60
+    );
+
+    basic.minutes_per_episode = fpExportPatchNumber(
+      fpExportPatchFirst(basic.minutes_per_episode, source.minutes_per_episode, state.minutes_per_episode),
+      2
+    );
+
+    basic.total_episodes = fpExportPatchNumber(
+      fpExportPatchFirst(basic.total_episodes, source.total_episodes),
+      basic.season_count * basic.episodes_per_season
+    );
+
+    return basic;
+  }
+
+  function fpExportPatchNormalizeCharacter(raw) {
+    const c = fpExportPatchObject(raw);
+
+    c.name = fpExportPatchFirst(c.name, c.character_name, c.title, c.id, "Unnamed");
+    c.id = fpExportPatchFirst(c.id, c.character_id, c.name);
+
+    c.role = fpExportPatchFirst(c.role, c.identity_position, c.identity_label, c.identity, c.character_role, "");
+    c.identity = fpExportPatchFirst(c.identity, c.identity_desc, c.role, "");
+
+    c.goal = fpExportPatchFirst(c.goal, c.external_goal, c.objective, c.character_goal, c.mission, "");
+    c.external_goal = fpExportPatchFirst(c.external_goal, c.goal, c.objective, "");
+    c.objective = fpExportPatchFirst(c.objective, c.external_goal, c.goal, "");
+
+    c.desire = fpExportPatchFirst(c.desire, c.internal_need, c.core_desire, c.motivation, c.want, "");
+    c.core_desire = fpExportPatchFirst(c.core_desire, c.internal_need, c.desire, c.motivation, "");
+    c.internal_need = fpExportPatchFirst(c.internal_need, c.core_desire, c.desire, "");
+
+    c.relationship = fpExportPatchFirst(
+      c.relationship,
+      c.relationships,
+      c.relationship_hooks,
+      c.relation,
+      c.character_relationships,
+      ""
+    );
+
+    c.relationships = fpExportPatchFirst(
+      c.relationships,
+      c.relationship_hooks,
+      c.character_relationships,
+      Array.isArray(c.relationship) ? c.relationship : (c.relationship ? [c.relationship] : [])
+    );
+
+    c.relationship_hooks = fpExportPatchFirst(c.relationship_hooks, c.relationships, []);
+
+    c.growth_arc = fpExportPatchFirst(c.growth_arc, c.arc, c.character_arc, "");
+    c.story_function = fpExportPatchFirst(c.story_function, c.function, c.narrative_function, "");
+    c.weakness = fpExportPatchFirst(c.weakness, c.flaw, "");
+    c.ability_or_resource = fpExportPatchFirst(c.ability_or_resource, c.ability, c.resource, "");
+
+    return c;
+  }
+
+  function fpExportPatchUniqueCharacters(items) {
+    const list = Array.isArray(items) ? items : [];
+    const seen = new Set();
+    const result = [];
+
+    for (const item of list) {
+      const c = fpExportPatchNormalizeCharacter(item);
+      const key = String(c.id || c.name || "").trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      result.push(c);
+    }
+
+    return result;
+  }
+
+  function fpExportPatchNormalizeCharacterPlan(rawPlan) {
+    const plan = fpExportPatchObject(rawPlan);
+    const merged = [];
+
+    if (Array.isArray(plan.characters)) merged.push(...plan.characters);
+    if (Array.isArray(plan.main_characters)) merged.push(...plan.main_characters);
+    if (fpExportPatchIsObject(plan.protagonist)) merged.push(plan.protagonist);
+
+    const characters = fpExportPatchUniqueCharacters(merged);
+    const protagonist = fpExportPatchNormalizeCharacter(
+      fpExportPatchFirst(
+        plan.protagonist,
+        characters.find((c) => /protagonist|lead/i.test(String(c.role || c.identity || ""))),
+        characters[0],
+        {}
+      )
+    );
+
+    plan.protagonist = protagonist;
+    plan.characters = characters;
+    plan.main_characters = fpExportPatchUniqueCharacters(fpExportPatchFirst(plan.main_characters, characters, []));
+    plan.relationship_map = fpExportPatchFirst(plan.relationship_map, plan.character_relationships, []);
+    plan.character_relationships = fpExportPatchFirst(plan.character_relationships, plan.relationship_map, []);
+
+    return plan;
+  }
+
+  function fpExportPatchNormalizeAdaptationGuide(rawGuide) {
+    const guide = fpExportPatchObject(rawGuide);
+
+    guide.core_setting_adjustment = fpExportPatchFirst(
+      guide.core_setting_adjustment,
+      guide.core_setting_adjustments,
+      ""
+    );
+    guide.core_setting_adjustments = fpExportPatchFirst(
+      guide.core_setting_adjustments,
+      guide.core_setting_adjustment,
+      ""
+    );
+
+    guide.narrative_rhythm_structure = fpExportPatchFirst(
+      guide.narrative_rhythm_structure,
+      guide.structure_and_rhythm,
+      ""
+    );
+    guide.structure_and_rhythm = fpExportPatchFirst(
+      guide.structure_and_rhythm,
+      guide.narrative_rhythm_structure,
+      ""
+    );
+
+    guide.visualization = fpExportPatchFirst(
+      guide.visualization,
+      guide.visualization_strategy,
+      ""
+    );
+    guide.visualization_strategy = fpExportPatchFirst(
+      guide.visualization_strategy,
+      guide.visualization,
+      ""
+    );
+
+    guide.character_emotion_shaping = fpExportPatchFirst(
+      guide.character_emotion_shaping,
+      guide.character_emotion_strategy,
+      ""
+    );
+    guide.character_emotion_strategy = fpExportPatchFirst(
+      guide.character_emotion_strategy,
+      guide.character_emotion_shaping,
+      ""
+    );
+
+    return guide;
+  }
+
+  function fpExportPatchBuildCanonicalPackage() {
+    const outputs = fpExportPatchOutputs();
+
+    const existingPackage = fpExportPatchObject(
+      fpExportPatchFirst(
+        state.framework_plan_package,
+        state.frameworkPlanPackage,
+        outputs.framework_plan_package,
+        outputs.frameworkPlanPackage,
+        {}
+      )
+    );
+
+    const sourceBrief = fpExportPatchObject(
+      fpExportPatchFirst(
+        existingPackage.source_brief,
+        state.source_brief,
+        outputs.source_brief,
+        {}
+      )
+    );
+
+    const basicConfig = fpExportPatchNormalizeBasicConfig(existingPackage, sourceBrief);
+
+    const worldviewPlan = fpExportPatchObject(
+      fpExportPatchFirst(
+        existingPackage.worldview_plan,
+        state.worldview_plan,
+        outputs.worldview_plan,
+        {}
+      )
+    );
+
+    const characterPlan = fpExportPatchNormalizeCharacterPlan(
+      fpExportPatchFirst(
+        existingPackage.character_plan,
+        state.character_plan,
+        outputs.character_plan,
+        {}
+      )
+    );
+
+    const beatTimeline = fpExportPatchArray(
+      fpExportPatchFirst(
+        existingPackage.beat_checkpoint_timeline,
+        state.beat_checkpoint_timeline,
+        outputs.beat_checkpoint_timeline,
+        []
+      )
+    );
+
+    const checkpointExplanation = fpExportPatchObject(
+      fpExportPatchFirst(
+        existingPackage.checkpoint_explanation,
+        state.checkpoint_explanation,
+        outputs.checkpoint_explanation,
+        {}
+      )
+    );
+
+    const characterStorylines = fpExportPatchArray(
+      fpExportPatchFirst(
+        existingPackage.character_storylines,
+        state.character_storylines,
+        outputs.character_storylines,
+        []
+      )
+    );
+
+    const storylineDecisions = fpExportPatchArray(
+      fpExportPatchFirst(
+        existingPackage.storyline_decisions,
+        state.storyline_decisions,
+        outputs.storyline_decisions,
+        []
+      )
+    );
+
+    const adaptationGuide = fpExportPatchNormalizeAdaptationGuide(
+      fpExportPatchFirst(
+        existingPackage.adaptation_guide,
+        state.adaptation_guide,
+        outputs.adaptation_guide,
+        {}
+      )
+    );
+
+    const validationReport = fpExportPatchObject(
+      fpExportPatchFirst(
+        existingPackage.validation_report,
+        state.validation_report,
+        outputs.validation_report,
+        {}
+      )
+    );
+
+    const canonical = Object.assign({}, existingPackage, {
+      basic_config: basicConfig,
+      source_brief: sourceBrief,
+      worldview_plan: worldviewPlan,
+      character_plan: characterPlan,
+      beat_checkpoint_timeline: beatTimeline,
+      checkpoint_explanation: checkpointExplanation,
+      character_storylines: characterStorylines,
+      storyline_decisions: storylineDecisions,
+      adaptation_guide: adaptationGuide,
+      validation_report: validationReport,
+
+      project_title: basicConfig.project_title,
+      source_title: basicConfig.source_title,
+      title: basicConfig.title || basicConfig.project_title,
+      mode: basicConfig.mode,
+      target_format: basicConfig.target_format,
+      adaptation_direction: basicConfig.adaptation_direction,
+      season_count: basicConfig.season_count,
+      episodes_per_season: basicConfig.episodes_per_season,
+      total_episodes: basicConfig.total_episodes,
+      minutes_per_episode: basicConfig.minutes_per_episode
+    });
+
+    return canonical;
+  }
+
+  function fpExportPatchApplyCanonicalPackage() {
+    const canonical = fpExportPatchBuildCanonicalPackage();
+
+    state.framework_plan_package = canonical;
+    state.frameworkPlanPackage = canonical;
+    state.basic_config = canonical.basic_config;
+
+    state.stageOutputs = Object.assign({}, fpExportPatchOutputs(), {
+      source_brief: canonical.source_brief,
+      worldview_plan: canonical.worldview_plan,
+      character_plan: canonical.character_plan,
+      beat_checkpoint_timeline: canonical.beat_checkpoint_timeline,
+      checkpoint_explanation: canonical.checkpoint_explanation,
+      character_storylines: canonical.character_storylines,
+      storyline_decisions: canonical.storyline_decisions,
+      adaptation_guide: canonical.adaptation_guide,
+      validation_report: canonical.validation_report,
+      framework_plan_package: canonical,
+      frameworkPlanPackage: canonical
+    });
+
+    return canonical;
+  }
+
+  function fpExportPatchApplyToPayload(payload) {
+    if (!fpExportPatchIsObject(payload)) return payload;
+
+    const canonical = fpExportPatchApplyCanonicalPackage();
+
+    payload.framework_plan_package = canonical;
+    payload.frameworkPlanPackage = canonical;
+    payload.basic_config = canonical.basic_config;
+    payload.source_brief = canonical.source_brief;
+    payload.worldview_plan = canonical.worldview_plan;
+    payload.character_plan = canonical.character_plan;
+    payload.beat_checkpoint_timeline = canonical.beat_checkpoint_timeline;
+    payload.checkpoint_explanation = canonical.checkpoint_explanation;
+    payload.character_storylines = canonical.character_storylines;
+    payload.storyline_decisions = canonical.storyline_decisions;
+    payload.adaptation_guide = canonical.adaptation_guide;
+    payload.validation_report = canonical.validation_report;
+    payload.stageOutputs = Object.assign({}, payload.stageOutputs || {}, state.stageOutputs || {});
+
+    payload.season_count = canonical.season_count;
+    payload.episodes_per_season = canonical.episodes_per_season;
+    payload.total_episodes = canonical.total_episodes;
+    payload.minutes_per_episode = canonical.minutes_per_episode;
+
+    return payload;
+  }
+
+  function fpExportPatchMarkWrapped(name) {
+    try {
+      if (!window.__FP_EXPORT_PATCH_STATUS.wrapped.includes(name)) {
+        window.__FP_EXPORT_PATCH_STATUS.wrapped.push(name);
+      }
+    } catch (error) {}
+  }
+
+  function fpExportPatchMarkError(name, error) {
+    try {
+      window.__FP_EXPORT_PATCH_STATUS.errors.push(name + ": " + String(error && error.message || error));
+    } catch (innerError) {}
+  }
+
+  try {
+    if (typeof frameworkAssetSavePayload === "function") {
+      const originalFrameworkAssetSavePayloadForExportPatch = frameworkAssetSavePayload;
+      frameworkAssetSavePayload = function frameworkAssetSavePayloadExportPatchWrapper() {
+        const payload = originalFrameworkAssetSavePayloadForExportPatch.apply(this, arguments);
+        return fpExportPatchApplyToPayload(payload);
+      };
+      fpExportPatchMarkWrapped("frameworkAssetSavePayload");
+    }
+  } catch (error) {
+    fpExportPatchMarkError("frameworkAssetSavePayload", error);
+  }
+
+  try {
+    if (typeof frameworkToScriptPayload === "function") {
+      const originalFrameworkToScriptPayloadForExportPatch = frameworkToScriptPayload;
+      frameworkToScriptPayload = function frameworkToScriptPayloadExportPatchWrapper() {
+        const payload = originalFrameworkToScriptPayloadForExportPatch.apply(this, arguments);
+        return fpExportPatchApplyToPayload(payload);
+      };
+      fpExportPatchMarkWrapped("frameworkToScriptPayload");
+    }
+  } catch (error) {
+    fpExportPatchMarkError("frameworkToScriptPayload", error);
+  }
+
+  try {
+    if (typeof downloadReadableFramework === "function") {
+      const originalDownloadReadableFrameworkForExportPatch = downloadReadableFramework;
+      downloadReadableFramework = function downloadReadableFrameworkExportPatchWrapper() {
+        fpExportPatchApplyCanonicalPackage();
+        return originalDownloadReadableFrameworkForExportPatch.apply(this, arguments);
+      };
+      fpExportPatchMarkWrapped("downloadReadableFramework");
+    }
+  } catch (error) {
+    fpExportPatchMarkError("downloadReadableFramework", error);
+  }
+
+  try {
+    if (typeof downloadStructuredFramework === "function") {
+      const originalDownloadStructuredFrameworkForExportPatch = downloadStructuredFramework;
+      downloadStructuredFramework = function downloadStructuredFrameworkExportPatchWrapper() {
+        fpExportPatchApplyCanonicalPackage();
+        return originalDownloadStructuredFrameworkForExportPatch.apply(this, arguments);
+      };
+      fpExportPatchMarkWrapped("downloadStructuredFramework");
+    }
+  } catch (error) {
+    fpExportPatchMarkError("downloadStructuredFramework", error);
+  }
+
+  try {
+    if (typeof exportReadableFramework === "function") {
+      const originalExportReadableFrameworkForExportPatch = exportReadableFramework;
+      exportReadableFramework = function exportReadableFrameworkExportPatchWrapper() {
+        fpExportPatchApplyCanonicalPackage();
+        return originalExportReadableFrameworkForExportPatch.apply(this, arguments);
+      };
+      fpExportPatchMarkWrapped("exportReadableFramework");
+    }
+  } catch (error) {
+    fpExportPatchMarkError("exportReadableFramework", error);
+  }
+
+  try {
+    if (typeof exportStructuredFramework === "function") {
+      const originalExportStructuredFrameworkForExportPatch = exportStructuredFramework;
+      exportStructuredFramework = function exportStructuredFrameworkExportPatchWrapper() {
+        fpExportPatchApplyCanonicalPackage();
+        return originalExportStructuredFrameworkForExportPatch.apply(this, arguments);
+      };
+      fpExportPatchMarkWrapped("exportStructuredFramework");
+    }
+  } catch (error) {
+    fpExportPatchMarkError("exportStructuredFramework", error);
+  }
+
+
 })();
