@@ -14,6 +14,112 @@ from .workflow_output_normalizer import normalize_stage_output
 DEFAULT_WORKFLOW_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "workflows.yaml"
 
 
+
+def _workflow_stage_debug_artifact(event, local_vars=None, exc=None):
+    """Write request/success/error debug artifacts for framework-to-script stages 08-12."""
+    try:
+        from pathlib import Path
+        from datetime import datetime, timezone
+        import json
+        import traceback
+        import re
+
+        local_vars = dict(local_vars or {})
+        stage = (
+            local_vars.get("resolved_stage_key")
+            or local_vars.get("stage_key")
+            or local_vars.get("stage_name")
+            or local_vars.get("backend_stage_key")
+            or ""
+        )
+        stage = str(stage or "")
+        stage_lower = stage.lower()
+
+        nums = re.findall(r"\d+", stage_lower)
+        should_log = False
+        if nums:
+            try:
+                n = int(nums[0])
+                should_log = 8 <= n <= 12
+            except Exception:
+                should_log = False
+        if not should_log and not any(x in stage_lower for x in ("stage_08", "stage_09", "stage_10", "stage_11", "stage_12")):
+            return
+
+        def safe(value, depth=0):
+            if depth > 5:
+                return f"<max_depth type={type(value).__name__}>"
+            if value is None or isinstance(value, (bool, int, float)):
+                return value
+            if isinstance(value, str):
+                return value if len(value) <= 3000 else value[:3000] + f"...<truncated len={len(value)}>"
+            if isinstance(value, (list, tuple)):
+                return [safe(v, depth + 1) for v in list(value)[:60]]
+            if isinstance(value, dict):
+                out = {}
+                for idx, (k, v) in enumerate(value.items()):
+                    if idx >= 120:
+                        out["<truncated>"] = f"dict_len={len(value)}"
+                        break
+                    ks = str(k)
+                    if any(token in ks.upper() for token in ("TOKEN", "KEY", "SECRET", "AUTH", "PASSWORD")):
+                        out[ks] = "<REDACTED>"
+                    else:
+                        out[ks] = safe(v, depth + 1)
+                return out
+            return repr(value)[:3000]
+
+        keep = {
+            "stage_key",
+            "stage_name",
+            "resolved_stage_key",
+            "backend",
+            "workflow_backend",
+            "variables",
+            "extra_parameters",
+            "parameters",
+            "result",
+            "adapter",
+        }
+
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": event,
+            "stage": stage,
+            "locals": {},
+        }
+
+        for k, v in local_vars.items():
+            if k in keep:
+                if k == "adapter":
+                    record["locals"][k] = type(v).__name__
+                else:
+                    record["locals"][k] = safe(v)
+
+        if exc is not None:
+            record["exception"] = {
+                "type": type(exc).__name__,
+                "message": str(exc),
+                "repr": repr(exc),
+                "traceback": traceback.format_exc(),
+            }
+
+        stage_dir_name = stage or "unknown_stage"
+        stage_dir_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", stage_dir_name)
+        debug_dir = Path.cwd() / "cache" / "workflow_stage_debug" / stage_dir_name
+        debug_dir.mkdir(parents=True, exist_ok=True)
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        payload = json.dumps(record, ensure_ascii=False, indent=2)
+        out = debug_dir / f"{stamp}_{event}.json"
+        out.write_text(payload, encoding="utf-8")
+        (debug_dir / f"latest_{event}.json").write_text(payload, encoding="utf-8")
+        (debug_dir / "latest.json").write_text(payload, encoding="utf-8")
+        print(f"[workflow_stage_debug] wrote {out}")
+    except Exception as debug_exc:
+        print(f"[workflow_stage_debug] failed: {debug_exc}")
+
+
 class WorkflowRunnerError(RuntimeError):
     def __init__(self, message: str, *, backend: str = "", stage_key: str = "", detail: dict[str, Any] | None = None) -> None:
         super().__init__(message)
@@ -125,10 +231,13 @@ def run_stage(
     adapter = _adapter_for_backend(backend)
     resolved_stage_key = backend_stage_key(stage_key, backend)
     try:
+        _workflow_stage_debug_artifact("request", locals())
         result = adapter.run_stage(resolved_stage_key, variables or {}, extra_parameters)
+        _workflow_stage_debug_artifact("success", locals())
     except WorkflowRunnerError:
         raise
     except Exception as exc:
+        _workflow_stage_debug_artifact("error", locals(), exc)
         nested_detail = getattr(exc, "detail", None)
         detail = {
             "backend_stage_key": resolved_stage_key,

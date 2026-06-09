@@ -18,6 +18,118 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "coze_wor
 logger = get_logger("coze_workflow_client")
 
 
+
+def _coze_client_debug_artifact(event, local_vars=None, exc=None):
+    """Write Coze client internal debug artifacts, especially missing input variables."""
+    try:
+        from pathlib import Path
+        from datetime import datetime, timezone
+        import json
+        import traceback
+        import re
+
+        local_vars = dict(local_vars or {})
+        stage = (
+            local_vars.get("normalized_stage_key")
+            or local_vars.get("stage_key")
+            or local_vars.get("input_stage_key")
+            or local_vars.get("backend_stage_key")
+            or ""
+        )
+        stage = str(stage or "")
+        stage_lower = stage.lower()
+
+        nums = re.findall(r"\d+", stage_lower)
+        should_log = False
+        if nums:
+            try:
+                n = int(nums[0])
+                should_log = 8 <= n <= 12
+            except Exception:
+                should_log = False
+        if not should_log and not any(x in stage_lower for x in ("stage_08", "stage_09", "stage_10", "stage_11", "stage_12")):
+            return
+
+        def safe(value, depth=0):
+            if depth > 5:
+                return f"<max_depth type={type(value).__name__}>"
+            if value is None or isinstance(value, (bool, int, float)):
+                return value
+            if isinstance(value, str):
+                return value if len(value) <= 3000 else value[:3000] + f"...<truncated len={len(value)}>"
+            if isinstance(value, (list, tuple, set)):
+                return [safe(v, depth + 1) for v in list(value)[:80]]
+            if isinstance(value, dict):
+                out = {}
+                for idx, (k, v) in enumerate(value.items()):
+                    if idx >= 160:
+                        out["<truncated>"] = f"dict_len={len(value)}"
+                        break
+                    ks = str(k)
+                    if any(token in ks.upper() for token in ("TOKEN", "KEY", "SECRET", "AUTH", "PASSWORD")):
+                        out[ks] = "<REDACTED>"
+                    else:
+                        out[ks] = safe(v, depth + 1)
+                return out
+            return repr(value)[:3000]
+
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": event,
+            "stage": stage,
+            "locals": {},
+        }
+
+        interesting_names = [
+            "stage_key",
+            "input_stage_key",
+            "normalized_stage_key",
+            "workflow_id",
+            "workflow_id_source",
+            "workflow_input_variables",
+            "input_variables",
+            "required_input_variables",
+            "required_variables",
+            "missing_input_variables",
+            "missing_variables",
+            "missing",
+            "variables",
+            "parameters",
+            "request_parameters",
+            "mapped_parameters",
+            "extra_parameters",
+            "workflow_config",
+            "stage_config",
+        ]
+
+        for name in interesting_names:
+            if name in local_vars:
+                record["locals"][name] = safe(local_vars.get(name))
+
+        if exc is not None:
+            record["exception"] = {
+                "type": type(exc).__name__,
+                "message": str(exc),
+                "repr": repr(exc),
+                "traceback": traceback.format_exc(),
+            }
+
+        stage_dir_name = stage or "unknown_stage"
+        stage_dir_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", stage_dir_name)
+        debug_dir = Path.cwd() / "cache" / "coze_client_debug" / stage_dir_name
+        debug_dir.mkdir(parents=True, exist_ok=True)
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        payload = json.dumps(record, ensure_ascii=False, indent=2)
+        out = debug_dir / f"{stamp}_{event}.json"
+        out.write_text(payload, encoding="utf-8")
+        (debug_dir / f"latest_{event}.json").write_text(payload, encoding="utf-8")
+        (debug_dir / "latest.json").write_text(payload, encoding="utf-8")
+        print(f"[coze_client_debug] wrote {out}")
+    except Exception as debug_exc:
+        print(f"[coze_client_debug] failed: {debug_exc}")
+
+
 class CozeWorkflowError(RuntimeError):
     def __init__(
         self,
@@ -638,7 +750,32 @@ class CozeWorkflowClient:
                 detail=self._request_debug_detail(normalized_stage_key, workflow_id, safe_parameters, workflow_info),
             )
         missing_input_variables = self._missing_input_variables(normalized_stage_key, safe_parameters)
+        # Some Coze workflows declare these text fields as required, but an empty value is valid.
+        # Keep them present instead of failing local required-input validation.
+        empty_allowed_required_inputs = {"user_feedback", "user_requirements"}
         if missing_input_variables:
+            for _empty_name in list(missing_input_variables):
+                if _empty_name in empty_allowed_required_inputs:
+                    if isinstance(safe_parameters, dict):
+                        safe_parameters.setdefault(_empty_name, "")
+                    if isinstance(parameters, dict):
+                        parameters.setdefault(_empty_name, "")
+            missing_input_variables = [
+                _name for _name in missing_input_variables
+                if _name not in empty_allowed_required_inputs
+            ]
+        if missing_input_variables:
+            try:
+                _debug_locals = locals()
+                print('[coze_missing_input_debug] local_keys=', sorted(_debug_locals.keys()))
+                for _debug_name in ('stage_key', 'normalized_stage_key', 'workflow_id', 'workflow_input_variables', 'input_variables', 'required_input_variables', 'required_variables', 'missing_input_variables', 'missing_variables', 'missing', 'parameters', 'request_parameters', 'mapped_parameters', 'extra_parameters'):
+                    _debug_value = _debug_locals.get(_debug_name, '<NOT_IN_LOCALS>')
+                    if isinstance(_debug_value, dict):
+                        _debug_value = {'keys': sorted(_debug_value.keys()), 'preview': {k: type(v).__name__ for k, v in list(_debug_value.items())[:20]}}
+                    print(f'[coze_missing_input_debug] {_debug_name}={_debug_value!r}')
+            except Exception as _debug_exc:
+                print('[coze_missing_input_debug] failed:', repr(_debug_exc))
+            _coze_client_debug_artifact("missing_inputs", locals())
             raise CozeWorkflowError(
                 "Coze workflow input variables missing",
                 stage_key=normalized_stage_key,

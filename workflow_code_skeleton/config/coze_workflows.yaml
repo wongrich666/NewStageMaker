@@ -4,7 +4,16 @@
   "base_url_env": "COZE_API_BASE",
   "timeout_env": "COZE_TIMEOUT_SECONDS",
   "dry_run_env": "COZE_DRY_RUN",
-  "output_fallbacks": ["answerText", "textOutput", "content", "data", "message", "output", "result", "newVariables"],
+  "output_fallbacks": [
+    "answerText",
+    "textOutput",
+    "content",
+    "data",
+    "message",
+    "output",
+    "result",
+    "newVariables"
+  ],
   "stages": {
     "stage_01": {
       "name": "原文信息提取",
@@ -23,7 +32,10 @@
         "user_constraints": "user_constraints",
         "user_requirements": "user_requirements"
       },
-      "output_mapping": {"confirmed_info": "source_brief", "source_brief": "source_brief"}
+      "output_mapping": {
+        "confirmed_info": "source_brief",
+        "source_brief": "source_brief"
+      }
     },
     "stage_02": {
       "name": "世界观",
@@ -41,7 +53,10 @@
         "adaptation_direction": "adaptation_direction",
         "user_requirements": "user_requirements"
       },
-      "output_mapping": {"worldview": "worldview_plan", "worldview_plan": "worldview_plan"}
+      "output_mapping": {
+        "worldview": "worldview_plan",
+        "worldview_plan": "worldview_plan"
+      }
     },
     "stage_03": {
       "name": "人设方案",
@@ -60,7 +75,10 @@
         "adaptation_direction": "adaptation_direction",
         "user_requirements": "user_requirements"
       },
-      "output_mapping": {"character": "character_plan", "character_plan": "character_plan"}
+      "output_mapping": {
+        "character": "character_plan",
+        "character_plan": "character_plan"
+      }
     },
     "stage_04": {
       "name": "三幕十五节拍",
@@ -105,9 +123,13 @@
         "current_storyline": "current_storyline",
         "user_feedback": "user_feedback",
         "adaptation_direction": "adaptation_direction",
-        "user_requirements": "user_requirements"
+        "user_requirements": "user_requirements",
+        "previous_character_storylines": "previous_character"
       },
-      "output_mapping": {"storyline": "character_storylines", "character_storylines": "character_storylines"}
+      "output_mapping": {
+        "storyline": "character_storylines",
+        "character_storylines": "character_storylines"
+      }
     },
     "stage_06": {
       "name": "整体改编指引",
@@ -129,7 +151,10 @@
         "adaptation_direction": "adaptation_direction",
         "user_requirements": "user_requirements"
       },
-      "output_mapping": {"adaptation": "adaptation_guide", "adaptation_guide": "adaptation_guide"}
+      "output_mapping": {
+        "adaptation": "adaptation_guide",
+        "adaptation_guide": "adaptation_guide"
+      }
     },
     "stage_07": {
       "name": "框架校验",
@@ -177,7 +202,11 @@
         "user_feedback": "user_feedback",
         "user_requirements": "user_requirements"
       },
-      "output_mapping": {"output": "output", "sceneDictionary": "sceneDictionary", "scriptWorldRulesDigest": "scriptWorldRulesDigest"}
+      "output_mapping": {
+        "output": "output",
+        "sceneDictionary": "sceneDictionary",
+        "scriptWorldRulesDigest": "scriptWorldRulesDigest"
+      }
     },
     "stage_09": {
       "name": "人物服装映射",
@@ -195,7 +224,10 @@
         "beat_checkpoint_timeline": "beat",
         "user_feedback": "user_feedback"
       },
-      "output_mapping": {"alias": "appearanceMapping", "appearanceMapping": "appearanceMapping"}
+      "output_mapping": {
+        "alias": "appearanceMapping",
+        "appearanceMapping": "appearanceMapping"
+      }
     },
     "stage_10": {
       "name": "丰富分集计划",
@@ -232,7 +264,10 @@
         "conflictMemory": "memory",
         "user_feedback": "user_feedback"
       },
-      "output_mapping": {"conflicts": "batchCausalConflictPlan", "batchCausalConflictPlan": "batchCausalConflictPlan"}
+      "output_mapping": {
+        "conflicts": "batchCausalConflictPlan",
+        "batchCausalConflictPlan": "batchCausalConflictPlan"
+      }
     },
     "stage_11_review": {
       "name": "冲突审核",
@@ -250,7 +285,10 @@
         "conflictMemory": "memory",
         "user_feedback": "user_feedback"
       },
-      "output_mapping": {"conflictreview": "batchCausalConflictReview", "batchCausalConflictReview": "batchCausalConflictReview"}
+      "output_mapping": {
+        "conflictreview": "batchCausalConflictReview",
+        "batchCausalConflictReview": "batchCausalConflictReview"
+      }
     },
     "stage_11_rewrite": {
       "name": "冲突重写",
@@ -269,15 +307,24 @@
         "conflictMemory": "memory",
         "user_feedback": "user_feedback"
       },
-      "output_mapping": {"rewrite": "batchCausalConflictPlan", "batchCausalConflictPlan": "batchCausalConflictPlan"}
+      "output_mapping": {
+        "rewrite": "batchCausalConflictPlan",
+        "batchCausalConflictPlan": "batchCausalConflictPlan"
+      }
     },
     "stage_11_memory": {
       "name": "冲突记忆",
       "workflow_id": "7645252634739703850",
       "workflow_id_env": "COZE_WORKFLOW_STAGE_11_MEMORY_ID",
       "yaml_path": "Workflow-conflictmemory11_04-draft-9524.zip::Workflow-conflictmemory11_04-draft-9524/workflow/conflictmemory11_04-draft.yaml",
-      "input_mapping": {"batchCausalConflictPlan": "conflict", "conflictStartEpisode": "start_epi"},
-      "output_mapping": {"memory": "conflictMemory", "conflictMemory": "conflictMemory"}
+      "input_mapping": {
+        "batchCausalConflictPlan": "conflict",
+        "conflictStartEpisode": "start_epi"
+      },
+      "output_mapping": {
+        "memory": "conflictMemory",
+        "conflictMemory": "conflictMemory"
+      }
     },
     "stage_12_write": {
       "name": "正文编写",
@@ -295,7 +342,10 @@
         "scriptMemory": "memory",
         "user_feedback": "user_feedback"
       },
-      "output_mapping": {"script": "batchScriptText", "batchScriptText": "batchScriptText"}
+      "output_mapping": {
+        "script": "batchScriptText",
+        "batchScriptText": "batchScriptText"
+      }
     },
     "stage_12_review": {
       "name": "正文审核",
@@ -312,7 +362,10 @@
         "scriptMemory": "memory",
         "user_feedback": "user_feedback"
       },
-      "output_mapping": {"scriptreview": "batchScriptReview", "batchScriptReview": "batchScriptReview"}
+      "output_mapping": {
+        "scriptreview": "batchScriptReview",
+        "batchScriptReview": "batchScriptReview"
+      }
     },
     "stage_12_rewrite": {
       "name": "正文重写",
@@ -332,15 +385,23 @@
         "scriptMemory": "memory",
         "user_feedback": "user_feedback"
       },
-      "output_mapping": {"script": "batchScriptText", "batchScriptText": "batchScriptText"}
+      "output_mapping": {
+        "script": "batchScriptText",
+        "batchScriptText": "batchScriptText"
+      }
     },
     "stage_12_memory": {
       "name": "正文记忆",
       "workflow_id": "7645499779002220582",
       "workflow_id_env": "COZE_WORKFLOW_STAGE_12_MEMORY_ID",
       "yaml_path": "Workflow-script12_04-draft-9576.zip::Workflow-script12_04-draft-9576/workflow/script12_04-draft.yaml",
-      "input_mapping": {"batchScriptText": "script"},
-      "output_mapping": {"script": "scriptMemory", "scriptMemory": "scriptMemory"}
+      "input_mapping": {
+        "batchScriptText": "script"
+      },
+      "output_mapping": {
+        "script": "scriptMemory",
+        "scriptMemory": "scriptMemory"
+      }
     }
   }
 }

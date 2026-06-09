@@ -274,7 +274,7 @@
       source_title: "",
       target_format: "短剧",
       season_count: 1,
-      episodes_per_season: 60,
+      episodes_per_season: 20,
       minutes_per_episode: 2,
       adaptation_direction: "请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。",
       user_constraints: "",
@@ -396,7 +396,7 @@
     newScriptForm: {
       title: "",
       season_count: 1,
-      episodes_per_season: 60,
+      episodes_per_season: 20,
       target_format: "短剧",
       style: "",
       description: "",
@@ -1950,19 +1950,52 @@
     return Boolean((state.stage_state && state.stage_state[stageKey] || {}).stageDraftDirty);
   }
 
+  function strictStageOutputDone(stageKey) {
+    if (stageKey === "basic") {
+      return !isEmptyValue(state.source_brief) || Boolean(String((state.display_texts || {})["01"] || "").trim());
+    }
+    if (stageKey === "worldview") {
+      return !isEmptyValue(state.worldview_plan);
+    }
+    if (stageKey === "character") {
+      return !isEmptyValue(state.character_plan);
+    }
+    if (stageKey === "beat") {
+      return Array.isArray(state.beat_checkpoint_timeline) && state.beat_checkpoint_timeline.length > 0;
+    }
+    if (stageKey === "storylines") {
+      return Array.isArray(state.character_storylines) && state.character_storylines.length > 0;
+    }
+    if (stageKey === "guide") {
+      return !isEmptyValue(state.adaptation_guide);
+    }
+    if (stageKey === "package") {
+      return !isEmptyValue(state.framework_plan_package);
+    }
+    return false;
+  }
+
   function stageProgressDone(stageKey) {
-    if (!stageKey || stageDraftDirty(stageKey)) return false;
+    if (!stageKey) return false;
+    if (stageDraftDirty(stageKey)) return false;
+    if (isStageLoading(stageKey)) return false;
+
     const stage = stageState(stageKey);
-    if (stage.confirmed || stage.stageCommitted) return true;
-    const index = STAGE_SEQUENCE.indexOf(stageKey);
-    if (index < 0) return false;
-    return STAGE_SEQUENCE.slice(index + 1).some((downstreamKey) => {
-      const downstream = stageState(downstreamKey);
-      return downstream.status === "running"
-        || downstream.stageCommitted
-        || downstream.confirmed
-        || hasStageData(downstreamKey);
-    });
+    if (!stage) return false;
+    if (stage.status === "running" || stage.status === "error" || stage.status === "locked") {
+      return false;
+    }
+
+    // Sidebar and step-rail checkmarks must only reflect real output of this exact stage.
+    // Do not infer done from downstream status, history loaded, project_id, or old committed flags.
+    if (!strictStageOutputDone(stageKey)) {
+      return false;
+    }
+
+    return stage.confirmed
+      || stage.stageCommitted
+      || stage.status === "generated"
+      || stage.status === "updated";
   }
 
   function isStageEditable(stageKey) {
@@ -4769,8 +4802,9 @@
     syncBasicConfigFromDom();
     await hydrateSelectedKnowledgeTagsBeforeStage();
     const sourceText = await ensureCurrentSourceTextBeforeStage();
-    if (!sourceText) {
-      throw new Error("请先填写剧本原文/设定内容");
+    const requiresRawSourceText = stageKey === "basic";
+    if (requiresRawSourceText && !sourceText) {
+      throw new Error("\u8bf7\u5148\u586b\u5199\u5267\u672c\u539f\u6587/\u8bbe\u5b9a\u5185\u5bb9");
     }
     if (!String((state.basic_config || {}).project_title || "").trim()) {
       state.basic_config.project_title = currentProjectTitleForSave();
@@ -5069,8 +5103,12 @@
       await waitForPaint();
       await ensureSavedProjectBeforeStage(stageKey);
       const payload = cleanOutgoingPayload(attachProjectContext(attachKnowledgePayload(buildStagePayload(stageKey, options || {}), stageKey)), `stage${stageNo} payload`);
-      if (!String(payload.source_text || (payload.basic_config && payload.basic_config.source_text) || "").trim()) {
-        throw new Error("请先填写剧本原文/设定内容");
+      // ?? 01/basic ?????? source_text?
+      // 02-07 ???? source_text ?????????????????
+      const requiresRawSourceText = stageKey === "basic";
+      const outgoingSourceText = String(payload.source_text || (payload.basic_config && payload.basic_config.source_text) || "").trim();
+      if (requiresRawSourceText && !outgoingSourceText) {
+        throw new Error("\u8bf7\u5148\u586b\u5199\u5267\u672c\u539f\u6587/\u8bbe\u5b9a\u5185\u5bb9");
       }
       debugFrontendEvent(`stage${stageNo}_request`, payload, {
         stageKey,
@@ -6243,13 +6281,16 @@
     }
     state.adaptation_guide = normalizeGuideFields(state.adaptation_guide);
     if (!isEmptyValue(state.framework_plan_package)) {
-      STAGE_SEQUENCE.forEach((stageKey) => {
-        state.stage_state[stageKey] = Object.assign(clone(initialState.stage_state[stageKey]), state.stage_state[stageKey] || {}, {
-          confirmed: true,
-          locked: true,
-          status: "confirmed",
-        });
-      });
+      const packageStage = state.stage_state.package || {};
+      state.stage_state.package = Object.assign(
+        clone(initialState.stage_state.package),
+        packageStage,
+        {
+          locked: false,
+          status: packageStage.confirmed ? "confirmed" : "generated",
+          stageCommitted: true,
+        }
+      );
       state.current_view = restored.current_view || "package";
     } else {
       state.current_view = restored.current_view || "basic";
