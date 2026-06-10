@@ -3490,27 +3490,34 @@
     `;
   }
 
-  function renderPackageBlocks() {
-    if (isEmptyValue(state.framework_plan_package)) {
-      return `<div class="fp-empty">07 阶段尚未执行。确认 06 后，再生成最终策划包。</div>`;
-    }
-    return `
-      <div class="fp-grid">
-        <div class="fp-panel-card">
-          <h3 class="fp-panel-title">框架确认</h3>
-          ${renderDataBlock(state.framework_plan_package, { dataKey: "framework_plan_package", stageKey: "package", editable: false })}
-        </div>
-      </div>
-      <div class="fp-stage-note">
-        <strong>当前框架版本</strong>
-        <div class="fp-asset-meta">
-          <span>资产编号：${escapeHtml((state.asset_state || {}).asset_id || state.project_id || "尚未保存")}</span>
-          <span>保存时间：${escapeHtml(formatDateTime((state.asset_state || {}).updated_at || "" ) || "尚未保存")}</span>
-          <span>状态：${escapeHtml(assetStatusLabel((state.asset_state || {}).status || "draft"))}</span>
-        </div>
-      </div>
-    `;
+function renderPackageBlocks() {
+  if (isEmptyValue(state.framework_plan_package)) {
+    return `<div class="fp-empty">07 阶段尚未执行。确认 06 后，再生成最终策划包。</div>`;
   }
+
+  return `
+    <div class="fp-package-wide">
+      <div class="fp-panel-card fp-package-card">
+        <div class="fp-package-card-head">
+          <div>
+            <h3 class="fp-panel-title">框架确认</h3>
+            <div class="fp-muted">最终策划包已生成，可在此查看完整框架内容。</div>
+          </div>
+        </div>
+        ${renderDataBlock(state.framework_plan_package, { dataKey: "framework_plan_package", stageKey: "package", editable: false })}
+      </div>
+    </div>
+
+    <div class="fp-stage-note">
+      <strong>当前框架版本</strong>
+      <div class="fp-asset-meta">
+        <span>资产编号：${escapeHtml((state.asset_state || {}).asset_id || state.project_id || "尚未保存")}</span>
+        <span>保存时间：${escapeHtml(formatDateTime((state.asset_state || {}).updated_at || "") || "尚未保存")}</span>
+        <span>状态：${escapeHtml(assetStatusLabel((state.asset_state || {}).status || "draft"))}</span>
+      </div>
+    </div>
+  `;
+}
 
   function frameworkDownloadBaseName() {
     return String(state.basic_config.project_title || state.basic_config.source_title || "structured_framework")

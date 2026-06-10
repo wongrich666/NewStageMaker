@@ -87,6 +87,32 @@ code { background: rgba(63, 95, 227, .08); padding: 1px 5px; border-radius: 6px;
 .fp-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .fp-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .fp-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.fp-package-wide {
+  width: 100%;
+  max-width: none;
+  display: block;
+}
+
+.fp-package-card {
+  width: 100%;
+  max-width: none;
+}
+
+.fp-package-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.fp-package-card .fp-data-block,
+.fp-package-card .fp-json-tree,
+.fp-package-card .fp-readable-block,
+.fp-package-card pre {
+  width: 100%;
+  max-width: none;
+}
 .fp-field { display: grid; gap: 7px; }
 .fp-field label { font-weight: 600; font-size: 13px; }
 .fp-field input, .fp-field textarea, .fp-field select {
