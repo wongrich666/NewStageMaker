@@ -4623,3 +4623,330 @@ a {
     grid-template-columns: 1fr;
   }
 }
+/* UI_GLOBAL_CLEAN_THEME_V1: unify home / auth / community / tools with gray-white workspace style */
+
+:root {
+  --ui-bg: #f3f5f9;
+  --ui-bg-2: #eef2f7;
+  --ui-surface: rgba(255, 255, 255, 0.96);
+  --ui-surface-soft: #f8fafc;
+  --ui-line: rgba(24, 34, 53, 0.08);
+  --ui-line-strong: rgba(24, 34, 53, 0.14);
+  --ui-text: #161c28;
+  --ui-muted: #6b7282;
+  --ui-primary: #253247;
+  --ui-primary-hover: #1b2636;
+  --ui-shadow: 0 18px 48px rgba(15, 23, 42, 0.07);
+  --ui-radius: 24px;
+}
+
+html,
+body,
+.home-body,
+.workspace-body,
+.mono-page,
+.auth-page,
+.community-page {
+  color: var(--ui-text);
+  background: linear-gradient(180deg, #f7f8fb 0%, var(--ui-bg-2) 100%) !important;
+}
+
+.home-shell,
+.shell {
+  width: min(1320px, calc(100% - 32px));
+}
+
+.home-topbar,
+.topbar,
+.runtime,
+.card,
+.auth-card,
+.community-detail-card,
+.composer-card,
+.chat-composer-shell,
+.prelogin-inline-auth,
+.profile-drawer,
+.mini-card,
+.asset-editor,
+.empty-card,
+.community-tile,
+.asset-tile {
+  color: var(--ui-text) !important;
+  border-color: var(--ui-line) !important;
+  background: var(--ui-surface) !important;
+  box-shadow: var(--ui-shadow) !important;
+}
+
+.home-hero-card,
+.hero-panel,
+.mono-page .home-hero-card {
+  color: var(--ui-text) !important;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(247, 249, 253, 0.96)) !important;
+  border: 1px solid var(--ui-line) !important;
+  box-shadow: var(--ui-shadow) !important;
+}
+
+.home-hero-copy h1,
+.hero-panel h1,
+.home-entry-card,
+.community-detail-head h1,
+.auth-card h2,
+.runtime h2,
+.section-head h2,
+.card-head h3,
+.tool-panel-head h3 {
+  color: var(--ui-text) !important;
+}
+
+.home-hero-copy p,
+.hero-copy,
+.muted,
+.hint,
+.card-head p,
+.section-head p,
+.community-detail-summary,
+.guide-card p,
+.asset-tile p,
+.community-tile p,
+.empty-card p,
+.auth-switch,
+.runtime-foot,
+.composer-hint,
+.prelogin-status-note {
+  color: var(--ui-muted) !important;
+}
+
+.home-entry-card,
+.guide-card,
+.asset-tile,
+.community-tile,
+.empty-card {
+  border: 1px solid var(--ui-line) !important;
+  color: var(--ui-text) !important;
+  background: var(--ui-surface) !important;
+  box-shadow: var(--ui-shadow) !important;
+}
+
+.workspace-sidebar,
+.workspace-body .workspace-sidebar,
+.prelogin-sidebar {
+  background: rgba(15, 20, 28, 0.94) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.sidebar-brand,
+.sidebar-brand-text strong,
+.sidebar-section-head,
+.sidebar-group-label,
+.workspace-body .workspace-folder summary {
+  color: #edf4fb !important;
+}
+
+.sidebar-brand-text em,
+.sidebar-refresh-btn,
+.sidebar-logout-link,
+.workspace-body .workspace-pick-meta,
+.workspace-body .workspace-pick-state,
+.tool-shortcut small {
+  color: #9aa8ba !important;
+}
+
+.sidebar-brand-mark,
+.sidebar-profile-avatar {
+  background: linear-gradient(135deg, #55657b, #2b3543) !important;
+}
+
+.sidebar-create-btn,
+.workspace-body .sidebar-create-btn {
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: linear-gradient(135deg, #2f3f55, #1c2531) !important;
+}
+
+.sidebar-profile-btn,
+.sidebar-toggle,
+.workspace-body .sidebar-profile-btn,
+.workspace-body .sidebar-toggle,
+.workspace-body .tool-shortcut,
+.workspace-body .workspace-folder,
+.workspace-body .workspace-empty,
+.workspace-body .workspace-pick {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+.workspace-body .workspace-pick.active,
+.tool-shortcut.active {
+  border-color: rgba(148, 163, 184, 0.34) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-ghost,
+.btn-public,
+.btn-danger,
+.btn-edit,
+.btn-neutral,
+.composer-send-btn,
+.prelogin-send-link {
+  border-radius: 999px !important;
+  font-weight: 800;
+}
+
+.btn-primary,
+.composer-send-btn,
+.prelogin-send-link {
+  color: #ffffff !important;
+  border-color: transparent !important;
+  background: var(--ui-primary) !important;
+}
+
+.btn-primary:hover,
+.composer-send-btn:hover,
+.prelogin-send-link:hover {
+  background: var(--ui-primary-hover) !important;
+}
+
+.btn-secondary,
+.btn-ghost,
+.page-back-link,
+.page-back-link-light,
+.home-nav a,
+.mono-page .btn-secondary,
+.mono-page .btn-ghost {
+  color: var(--ui-text) !important;
+  border-color: var(--ui-line) !important;
+  background: rgba(255, 255, 255, 0.94) !important;
+}
+
+.btn-public,
+.status-pill-public,
+.community-tag.status-pill-public {
+  color: #2f3a4b !important;
+  border: 1px solid rgba(24, 34, 53, 0.08) !important;
+  background: #eef2f7 !important;
+}
+
+.btn-danger,
+.mono-page .btn-danger {
+  color: #9f2f24 !important;
+  border: 1px solid rgba(159, 47, 36, 0.14) !important;
+  background: #fff1f0 !important;
+}
+
+.status-pill,
+.status-pill-completed,
+.status-pill-public,
+.status-pill-private,
+.guide-card span,
+.community-tag {
+  color: #334155 !important;
+  background: #eef2f7 !important;
+  border: 1px solid var(--ui-line) !important;
+}
+
+.status-pill-completed {
+  color: #067647 !important;
+  background: #ecfdf3 !important;
+  border-color: #abefc6 !important;
+}
+
+.tool-panel,
+.community-panel,
+.workspace-body .tool-panel {
+  color: var(--ui-text) !important;
+  border-color: var(--ui-line) !important;
+  background: var(--ui-surface) !important;
+  box-shadow: var(--ui-shadow) !important;
+}
+
+.tool-panel-kicker,
+.eyebrow,
+.runtime-kicker {
+  color: var(--ui-muted) !important;
+}
+
+.tool-panel-output,
+.output-box,
+.detail-output,
+.community-page .detail-output {
+  color: var(--ui-text) !important;
+  border-color: var(--ui-line) !important;
+  background: #ffffff !important;
+}
+
+.field input,
+.field select,
+.field textarea,
+.auth-page .field input,
+.workspace-body .tool-field input,
+.workspace-body .tool-field textarea {
+  color: var(--ui-text) !important;
+  border-color: var(--ui-line) !important;
+  background: #ffffff !important;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus,
+.auth-page .field input:focus,
+.workspace-body .tool-field input:focus,
+.workspace-body .tool-field textarea:focus {
+  border-color: rgba(37, 50, 71, 0.22) !important;
+  box-shadow: 0 0 0 4px rgba(37, 50, 71, 0.08) !important;
+  background: #ffffff !important;
+}
+
+.auth-page .auth-error,
+.auth-error {
+  color: #9f2f24 !important;
+  border: 1px solid rgba(159, 47, 36, 0.14) !important;
+  background: #fff1f0 !important;
+}
+
+.auth-switch a {
+  color: var(--ui-primary) !important;
+}
+
+.progress-bar {
+  background: rgba(37, 50, 71, 0.08) !important;
+}
+
+.progress-fill {
+  background: linear-gradient(90deg, #253247, #64748b) !important;
+}
+
+.chat-view,
+.prelogin-chat-view,
+.chat-transcript,
+.prelogin-transcript {
+  background: transparent !important;
+}
+
+.chat-empty-state,
+.prelogin-chat-empty {
+  color: var(--ui-text) !important;
+  border-color: var(--ui-line) !important;
+  background: var(--ui-surface) !important;
+  box-shadow: var(--ui-shadow) !important;
+}
+
+.chat-suggestion-btn,
+.composer-action-link {
+  color: var(--ui-text) !important;
+  border-color: var(--ui-line) !important;
+  background: rgba(255, 255, 255, 0.94) !important;
+}
+
+.chat-composer-plus {
+  color: var(--ui-primary) !important;
+}
+
+.home-hero-orb,
+.mono-page .home-hero-orb,
+.auth-page .bg-orb {
+  opacity: 0.08 !important;
+  background: radial-gradient(circle at 30% 30%, rgba(100, 116, 139, 0.18), rgba(100, 116, 139, 0.06), transparent 70%) !important;
+}
