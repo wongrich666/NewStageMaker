@@ -3397,7 +3397,7 @@
         ${renderStageHistoryPanel("package")}
         <div class="fp-actions fp-stage-bottom-actions">
           <button class="fp-btn" data-action="go-view" data-view="guide" ${ui.assetImporting ? "disabled" : ""}>上一步</button>
-          <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="package" ${ui.assetImporting || locked || isStageLoading("package") || blockReason ? "disabled" : ""}>${hasOutput ? "重新生成 07" : "生成本阶段"}</button>
+          <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="package" ${ui.assetImporting || isStageLoading("package") || blockReason ? "disabled" : ""}>${hasOutput ? "重新生成 07" : "生成本阶段"}</button>
           ${renderSaveFrameworkButton("")}
           <button class="fp-btn primary" data-action="download-readable-framework" ${!hasOutput || ui.assetImporting ? "disabled" : ""}>下载可读框架</button>
           <button class="fp-btn" data-action="download-structured-framework" ${!hasOutput || ui.assetImporting ? "disabled" : ""}>下载结构化框架</button>
@@ -3451,65 +3451,164 @@
     return `${label}：${summarizeReadableValue(value) || "暂无"}`;
   }
 
+  // FP_READABLE_TEXT_FIELD_ALIAS_PATCH_V2
   function buildReadableFrameworkText() {
-    const basic = state.basic_config || {};
-    const worldview = state.worldview_plan || {};
-    const packageValue = state.framework_plan_package || {};
-    const title = basic.project_title || basic.source_title || packageValue.title || "未命名框架";
+    const NO_DATA = "\u6682\u65e0";
+
+    const hasValue = (value) => {
+      if (value === null || value === undefined) return false;
+      if (typeof value === "string") return value.trim().length > 0;
+      if (Array.isArray(value)) return value.length > 0;
+      if (typeof value === "object") return Object.keys(value).length > 0;
+      return true;
+    };
+
+    const firstValue = (...values) => {
+      for (const value of values) {
+        if (hasValue(value)) return value;
+      }
+      return "";
+    };
+
+    const textValue = (value, fallback) => {
+      const raw = firstValue(value);
+      if (!hasValue(raw)) return fallback || NO_DATA;
+      const text = summarizeReadableValue(raw);
+      return String(text || "").trim() || fallback || NO_DATA;
+    };
+
+    const characterScore = (item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return 0;
+      return [
+        "name", "character_name", "role", "identity", "identity_position",
+        "external_goal", "goal", "objective", "character_goal",
+        "internal_need", "core_desire", "desire", "motivation",
+        "relationship_hooks", "relationships", "relationship", "relation",
+        "growth_arc", "story_function"
+      ].reduce((score, key) => score + (hasValue(item[key]) ? 1 : 0), 0);
+    };
+
+    const normalizeCharacter = (item) => {
+      const source = item && typeof item === "object" && !Array.isArray(item) ? item : {};
+      const name = firstValue(source.name, source.character_name, source.title, source.id, "\u672a\u547d\u540d\u4eba\u7269");
+      return {
+        key: String(firstValue(source.id, source.character_id, name)).trim(),
+        name,
+        role: firstValue(source.role, source.identity_position, source.identity_label, source.character_role, source.identity),
+        goal: firstValue(source.external_goal, source.goal, source.objective, source.character_goal, source.mission),
+        desire: firstValue(source.internal_need, source.core_desire, source.desire, source.motivation, source.want),
+        relationship: firstValue(source.relationship_hooks, source.relationships, source.relationship, source.relation, source.character_relationships),
+        growth_arc: firstValue(source.growth_arc, source.arc, source.character_arc),
+        story_function: firstValue(source.story_function, source.function, source.narrative_function),
+        raw: source
+      };
+    };
+
     const characterSource = state.character_plan || {};
-    const characters = []
+    const characterCandidates = []
       .concat(characterSource.protagonist ? [characterSource.protagonist] : [])
       .concat(characterSource.antagonist ? [characterSource.antagonist] : [])
+      .concat(Array.isArray(characterSource.characters) ? characterSource.characters : [])
       .concat(Array.isArray(characterSource.main_characters) ? characterSource.main_characters : [])
       .concat(Array.isArray(characterSource.supporting_characters) ? characterSource.supporting_characters : []);
+
+    const characterMap = new Map();
+    characterCandidates.forEach((item) => {
+      const normalized = normalizeCharacter(item);
+      const key = normalized.key || String(normalized.name || "").trim();
+      if (!key) return;
+      const old = characterMap.get(key);
+      if (!old || characterScore(normalized.raw) > characterScore(old.raw)) {
+        characterMap.set(key, normalized);
+      }
+    });
+
+    const characters = Array.from(characterMap.values());
+
     const characterText = characters.length
       ? characters.map((item, index) => {
-        const character = item && typeof item === "object" ? item : {};
-        return [
-          `${index + 1}. ${character.name || character.legal_name || character.title || "未命名人物"}`,
-          readableLine("身份定位", character.role || character.identity),
-          readableLine("人物目标", character.goal),
-          readableLine("核心欲望", character.desire || character.motivation),
-          readableLine("人物关系", character.relationship || character.relationships),
-        ].join("\n");
-      }).join("\n\n")
-      : "暂无";
-    const beats = Array.isArray(state.beat_checkpoint_timeline) ? state.beat_checkpoint_timeline : [];
-    const beatText = beats.length
-      ? beats.map((beat) => `${beat.beat_no || ""}. ${beat.beat_name || "未命名节拍"}｜${beat.episode_range || "暂无集数"}\n${summarizeReadableValue(beat.plot_content || beat.narrative_function || beat.hook_or_reversal) || "暂无"}`).join("\n\n")
-      : "暂无";
-    const storylines = Array.isArray(state.character_storylines) ? state.character_storylines : [];
-    const storylineText = storylines.length
-      ? storylines.map((item, index) => `${index + 1}. ${item.title || item.character_name || "未命名故事线"}\n${summarizeReadableValue(item.summary || item.detailed_storyline || item.stage_goal) || "暂无"}`).join("\n\n")
-      : "暂无";
+          const lines = [
+            `${index + 1}. ${textValue(item.name)}`,
+            `\u8eab\u4efd\u5b9a\u4f4d\uff1a${textValue(item.role)}`,
+            `\u4eba\u7269\u76ee\u6807\uff1a${textValue(item.goal)}`,
+            `\u6838\u5fc3\u6b32\u671b\uff1a${textValue(item.desire)}`,
+            `\u4eba\u7269\u5173\u7cfb\uff1a${textValue(item.relationship)}`
+          ];
+          if (hasValue(item.growth_arc)) lines.push(`\u6210\u957f\u5f27\u5149\uff1a${textValue(item.growth_arc)}`);
+          if (hasValue(item.story_function)) lines.push(`\u53d9\u4e8b\u529f\u80fd\uff1a${textValue(item.story_function)}`);
+          return lines.join("\n");
+        }).join("\n\n")
+      : NO_DATA;
+
+    const basic = state.basic_config || {};
+    const brief = state.source_brief || {};
+    const worldview = state.worldview_plan || {};
+    const packageValue = state.framework_plan_package || {};
+    const guide = state.adaptation_guide || {};
+    const title = firstValue(basic.project_title, basic.source_title, packageValue.title, "\u672a\u547d\u540d\u6846\u67b6");
+
+    const relationshipText = textValue(firstValue(
+      characterSource.character_relationships,
+      characterSource.relationship_map,
+      characterSource.relationships
+    ));
+
+    const beatText = Array.isArray(state.beat_checkpoint_timeline) && state.beat_checkpoint_timeline.length
+      ? state.beat_checkpoint_timeline.map((item, index) => {
+          return `${index + 1}. ${textValue(firstValue(item.beat_name, item.title))}\uff5c${textValue(item.episode_range)}\n${textValue(firstValue(item.plot_content, item.narrative_function, item.checkpoint_title))}`;
+        }).join("\n\n")
+      : NO_DATA;
+
+    const storylineText = Array.isArray(state.character_storylines) && state.character_storylines.length
+      ? state.character_storylines.map((item, index) => {
+          return `${index + 1}. ${textValue(firstValue(item.title, item.name, item.id))}\n${textValue(firstValue(item.summary, item.detailed_storyline, item.edit_notes))}`;
+        }).join("\n\n")
+      : NO_DATA;
+
+    const downstreamNotes = firstValue(
+      packageValue.downstream_requirements,
+      packageValue.handoff_to_script_workflow,
+      packageValue.downstream_writing_notes,
+      packageValue.writing_requirements,
+      guide.downstream_writing_notes,
+      guide.downstream_notes,
+      guide.downstream_requirements,
+      guide.hard_constraints_for_script_workflow,
+      guide.hard_requirements,
+      worldview.downstream_requirements
+    );
+
     return [
-      `项目标题：${title}`,
-      `导出时间：${new Date().toLocaleString()}`,
+      `\u9879\u76ee\u6807\u9898\uff1a${textValue(title)}`,
+      `\u5bfc\u51fa\u65f6\u95f4\uff1a${new Date().toLocaleString()}`,
       "",
-      "一、故事梗概",
-      summarizeReadableValue(state.source_brief && (state.source_brief.story_core || state.source_brief.core_story || state.source_brief.summary || state.source_brief)) || "暂无",
+      "\u4e00\u3001\u6545\u4e8b\u6897\u6982",
+      `\u6539\u7f16\u65b9\u5411\uff1a${textValue(firstValue(brief.adaptation_direction, basic.adaptation_direction))}`,
+      `\u73b0\u6709\u6750\u6599\u6458\u8981\uff1a${textValue(brief.available_material_summary)}`,
+      `\u6838\u5fc3\u51b2\u7a81\uff1a${textValue(brief.core_conflict)}`,
+      `\u6545\u4e8b\u6838\u5fc3\uff1a${textValue(firstValue(brief.core_logline, brief.core_premise, brief.story_outline, basic.story_outline))}`,
       "",
-      "二、世界观",
-      readableLine("世界观概述", worldview.overview || worldview.worldview_overview || worldview.summary),
-      readableLine("核心规则", worldview.core_rules || worldview.rules),
+      "\u4e8c\u3001\u4e16\u754c\u89c2",
+      `\u4e16\u754c\u89c2\u6982\u8ff0\uff1a${textValue(firstValue(worldview.summary, worldview.core_setting, worldview.world_type))}`,
+      `\u6838\u5fc3\u89c4\u5219\uff1a${textValue(firstValue(worldview.core_rules, worldview.rules))}`,
       "",
-      "三、主要人物小传",
+      "\u4e09\u3001\u4e3b\u8981\u4eba\u7269\u5c0f\u4f20",
       characterText,
       "",
-      "四、人物关系",
-      summarizeReadableValue(characterSource.relationships || characterSource.character_relationships || "暂无"),
+      "\u56db\u3001\u4eba\u7269\u5173\u7cfb",
+      relationshipText,
       "",
-      "五、三幕十五节拍",
+      "\u4e94\u3001\u4e09\u5e55\u5341\u4e94\u8282\u62cd",
       beatText,
       "",
-      "六、人物故事线",
+      "\u516d\u3001\u4eba\u7269\u6545\u4e8b\u7ebf",
       storylineText,
       "",
-      "七、整体改编指引",
-      summarizeReadableValue(state.adaptation_guide || "暂无"),
+      "\u4e03\u3001\u6574\u4f53\u6539\u7f16\u6307\u5f15",
+      textValue(guide),
       "",
-      "八、下游写作注意事项",
-      summarizeReadableValue(packageValue.downstream_requirements || packageValue.handoff_to_script_workflow || worldview.downstream_requirements || "暂无"),
+      "\u516b\u3001\u4e0b\u6e38\u5199\u4f5c\u6ce8\u610f\u4e8b\u9879",
+      textValue(downstreamNotes),
     ].join("\n");
   }
 
@@ -6860,4 +6959,6 @@
     });
   loadAssets().catch(() => {});
   if (DEV_LOG_ENABLED) loadStageHistory(stageKeyForView(state.current_view || "basic")).catch(() => {});
+
+
 })();
