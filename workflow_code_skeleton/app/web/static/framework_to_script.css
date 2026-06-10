@@ -311,3 +311,202 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .wts-version { justify-content: flex-start; }
   .wts-summary-grid { grid-template-columns: 1fr; }
 }
+/* UI_UNIFIED_THEME_V1: align framework-to-script page with main workspace */
+
+:root {
+  --color-bg: #f3f5f9;
+  --color-panel: #ffffff;
+  --color-primary: #253247;
+  --color-primary-soft: #eef2ff;
+  --color-border: rgba(24, 34, 53, 0.08);
+  --color-text: #161c28;
+  --color-muted: #6b7282;
+  --color-shadow: 0 18px 48px rgba(15, 23, 42, 0.07);
+  --color-radius: 22px;
+
+  --wts-bg: var(--color-bg);
+  --wts-panel: var(--color-panel);
+  --wts-soft: #f8fafc;
+  --wts-border: var(--color-border);
+  --wts-strong: var(--color-primary);
+  --wts-text: var(--color-text);
+  --wts-muted: var(--color-muted);
+  --wts-radius: var(--color-radius);
+  --wts-shadow: var(--color-shadow);
+}
+
+body {
+  color: var(--wts-text);
+  background: linear-gradient(180deg, #f7f8fb 0%, #eef2f7 100%);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+}
+
+.wts-shell {
+  width: min(1320px, calc(100% - 32px));
+  padding: 24px 0 56px;
+}
+
+.wts-header,
+.wts-card {
+  border: 1px solid var(--wts-border);
+  border-radius: var(--wts-radius);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--wts-shadow);
+}
+
+.wts-card {
+  padding: 22px;
+}
+
+.wts-header {
+  padding: 24px;
+}
+
+.wts-header h1 {
+  font-size: 26px;
+  letter-spacing: -0.03em;
+}
+
+.wts-card h2,
+.wts-step h3,
+.wts-asset-item h3 {
+  color: var(--wts-text);
+  letter-spacing: -0.02em;
+}
+
+.wts-btn,
+.wts-step-actions button {
+  border-radius: 999px;
+  border-color: transparent;
+  background: var(--wts-strong);
+  color: #ffffff;
+  font-weight: 800;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+}
+
+.wts-btn.ghost,
+.wts-step-actions button.secondary,
+.wts-step-actions button:disabled {
+  border-color: var(--wts-border);
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--wts-text);
+  box-shadow: none;
+}
+
+.wts-step,
+.wts-asset-item,
+.wts-tree-leaf,
+.wts-import-json,
+.wts-empty,
+.wts-empty-state,
+.wts-loading {
+  border-color: var(--wts-border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.wts-step.done {
+  border-color: rgba(22, 128, 60, 0.18);
+  background: rgba(248, 253, 250, 0.92);
+}
+
+.wts-tree-list {
+  gap: 8px;
+}
+
+.wts-tree-leaf {
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+  padding: 10px 12px;
+}
+
+.wts-tree-leaf b {
+  color: #334155;
+}
+
+.wts-tree-leaf span,
+.wts-tree-text {
+  color: #374151;
+  line-height: 1.75;
+}
+/* UI_STAGE_SCRIPT_VISIBLE_POLISH_V2 */
+
+body {
+  background: linear-gradient(180deg, #f7f8fb 0%, #eef2f7 100%);
+}
+
+.wts-shell {
+  width: min(1440px, calc(100% - 48px));
+  padding: 28px 0 72px;
+}
+
+.wts-header {
+  padding: 24px 28px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.07);
+}
+
+.wts-header h1 {
+  font-size: 30px;
+  letter-spacing: -0.04em;
+}
+
+.wts-card {
+  padding: 24px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.06);
+}
+
+.wts-btn,
+.wts-step-actions button {
+  border-radius: 999px;
+  background: #253247;
+  border-color: transparent;
+}
+
+.wts-btn.ghost,
+.wts-step-actions button.secondary,
+.wts-step-actions button:disabled {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(24, 34, 53, 0.1);
+  color: #161c28;
+}
+
+.wts-asset-item,
+.wts-step,
+.wts-output,
+.wts-tree-node,
+.wts-tree-leaf,
+.wts-import-json {
+  border-color: rgba(24, 34, 53, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.wts-asset-item {
+  padding: 18px;
+}
+
+.wts-step {
+  padding: 18px;
+}
+
+.wts-step > b {
+  background: #253247;
+  border-radius: 14px;
+}
+
+.wts-output summary,
+.wts-tree-node summary {
+  padding: 13px 15px;
+}
+
+.wts-output > div,
+.wts-tree-node > div {
+  padding: 14px 15px;
+}
+
+.wts-tree-leaf {
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+}

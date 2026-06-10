@@ -118,7 +118,28 @@
       </div>
     </aside>
 
-    <section class="chat-main">
+    <section class="chat-main workspace-main-minimal">
+            <section class="workspace-landing">
+        <div class="workspace-landing__inner">
+          <div class="workspace-landing__eyebrow">IDEA TO SCRIPT</div>
+          <h1 class="workspace-landing__title">剧本平台</h1>
+          <p class="workspace-landing__subtitle">
+            可选流程：从头开始搭建框架，或者导入框架生成剧本
+          </p>
+
+          <div class="workspace-landing__actions">
+            <a class="workspace-landing__card primary" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">
+              <span class="workspace-landing__card-title">新建框架</span>
+              <span class="workspace-landing__card-desc">进入 01-07 框架策划流程</span>
+            </a>
+
+            <a class="workspace-landing__card" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">
+              <span class="workspace-landing__card-title">框架到剧本</span>
+              <span class="workspace-landing__card-desc">进入 08-12 剧本生成流程</span>
+            </a>
+          </div>
+        </div>
+      </section>
       <header class="workspace-runtime runtime">
         <div class="progress-bar progress-bar-fixed runtime-progress-top">
           <div id="progressFill" class="progress-fill"></div>

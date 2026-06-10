@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>登录 - 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260603-sidebar-links">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260610-minimal-home-v1">
 </head>
 <body class="workspace-body mono-page auth-page">
   <main class="chat-workspace-shell prelogin-shell">
@@ -111,51 +111,28 @@
       </div>
     </aside>
 
-    <section class="chat-main prelogin-main-shell">
-      <header class="workspace-runtime runtime">
-        <div class="progress-bar progress-bar-fixed runtime-progress-top">
-          <div class="progress-fill" style="width: 0%;"></div>
-        </div>
-        <div class="runtime-strip">
-          <div class="runtime-brandline">
-            <span class="runtime-app-label">IDEA TO SCRIPT 剧本平台</span>
-          </div>
-          <div class="runtime-meta-strip">
-            <div class="runtime-pill">
-              <span class="runtime-kicker">状态</span>
-              <strong>待登录</strong>
-            </div>
-            <div class="runtime-pill">
-              <span class="runtime-kicker">阶段</span>
-              <strong>待开始</strong>
-            </div>
-            <div class="runtime-pill">
-              <span class="runtime-kicker">等待</span>
-              <strong>00:00</strong>
-            </div>
-          </div>
-        </div>
-        <div class="runtime-foot">
-          <span>0%</span>
-          <span>任务：登录后开始</span>
-        </div>
-      </header>
+    <section class="chat-main prelogin-main-shell workspace-main-minimal">
+      <section class="workspace-landing workspace-login-landing">
+        <div class="workspace-landing__inner">
+          <div class="workspace-landing__eyebrow">IDEA TO SCRIPT</div>
+          <h1 class="workspace-landing__title">剧本平台</h1>
+          <p class="workspace-landing__subtitle">
+            登录后可新建框架、导入框架生成剧本，并在左侧管理资产与辅助工具。
+          </p>
 
-      <section class="chat-view prelogin-chat-view">
-        <div class="chat-transcript prelogin-transcript">
-          <section class="chat-empty-state prelogin-chat-empty">
-            <strong>剧本创作工作台</strong>
-            <p>直接输入你的创作需求，平台会把剧本框架和剧本正文按对话流展示，中间过程统一显示创作状态。</p>
-            <div class="chat-empty-tools">
-              <a class="chat-suggestion-btn" href="{{ url_for('login_page') }}">爆款文审核</a>
-              <a class="chat-suggestion-btn" href="{{ url_for('login_page') }}">增加爽感</a>
-              <a class="chat-suggestion-btn" href="{{ url_for('login_page') }}">只换人设</a>
-            </div>
-          </section>
-        </div>
+          <div class="workspace-landing__actions workspace-landing__actions-login">
+            <a class="workspace-landing__card primary" href="#login-form">
+              <span class="workspace-landing__card-title">新建框架</span>
+              <span class="workspace-landing__card-desc">登录后进入 01-07 框架策划</span>
+            </a>
 
-        <div class="prelogin-auth-overlay">
-          <section class="card auth-card prelogin-inline-auth">
+            <a class="workspace-landing__card" href="#login-form">
+              <span class="workspace-landing__card-title">框架到剧本</span>
+              <span class="workspace-landing__card-desc">登录后进入 08-12 剧本生成</span>
+            </a>
+          </div>
+
+          <section id="login-form" class="card auth-card workspace-login-card">
             <p class="eyebrow">Welcome Back</p>
             <h2>登录工作台</h2>
             {% if error %}
@@ -175,37 +152,6 @@
             <p class="auth-switch">还没有账号？<a href="{{ url_for('register_page') }}">注册一个</a></p>
           </section>
         </div>
-      </section>
-
-      <section class="composer-card prelogin-composer-card">
-        <div class="chat-composer-shell">
-          <div class="chat-composer-plus">＋</div>
-          <div class="chat-composer-main">
-            <label class="composer-field composer-field-wide">
-              <span class="visually-hidden">想要的剧本</span>
-              <textarea placeholder="剧本创作需求请写在这里~" readonly></textarea>
-            </label>
-            <div class="composer-grid composer-grid-inline composer-grid-toolbar">
-              <label class="composer-field composer-field-mini">
-                <span>角色</span>
-                <input type="number" min="1" max="50" value="15" readonly>
-              </label>
-              <label class="composer-field composer-field-mini">
-                <span>集数</span>
-                <input type="number" min="1" max="100" value="15" readonly>
-              </label>
-              <div class="composer-inline-tools">
-                <a class="btn btn-secondary composer-action-link" href="{{ url_for('login_page') }}">暂停生成</a>
-                <a class="btn btn-secondary composer-action-link" href="{{ url_for('login_page') }}">继续生成</a>
-                <a class="btn btn-danger composer-action-link" href="{{ url_for('login_page') }}">终止生成</a>
-                <a class="btn btn-secondary composer-action-link" href="{{ url_for('login_page') }}">下载成品</a>
-                <a class="btn btn-ghost composer-action-link" href="{{ url_for('login_page') }}">清空输入</a>
-              </div>
-            </div>
-          </div>
-          <a class="composer-send-btn prelogin-send-link" href="{{ url_for('login_page') }}">开始</a>
-        </div>
-        <p class="composer-hint prelogin-status-note">登录后即可开始生成、查看进度、运行辅助工具。</p>
       </section>
     </section>
   </main>

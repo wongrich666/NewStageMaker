@@ -1,5 +1,0 @@
-剧本生成网页服务已启动：http://0.0.0.0:5002
-按 Ctrl+C 可以停止服务。
-[route-probe] framework history route registered = True
- * Serving Flask app 'workflow_code_skeleton.app.server'
- * Debug mode: off

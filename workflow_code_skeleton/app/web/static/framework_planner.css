@@ -728,3 +728,231 @@ code { background: rgba(63, 95, 227, .08); padding: 1px 5px; border-radius: 6px;
   .fp-asset-actions { justify-content: flex-start; }
   .fp-history-actions { justify-content: flex-start; }
 }
+/* UI_UNIFIED_THEME_V1: align framework planner page with main workspace */
+
+:root {
+  --fp-bg: #f3f5f9;
+  --fp-panel: #ffffff;
+  --fp-soft: #f8fafc;
+  --fp-border: rgba(24, 34, 53, 0.08);
+  --fp-text: #161c28;
+  --fp-muted: #6b7282;
+  --fp-primary: #253247;
+  --fp-primary-soft: #eef2ff;
+  --fp-radius: 22px;
+  --fp-shadow: 0 18px 48px rgba(15, 23, 42, 0.07);
+}
+
+body {
+  color: var(--fp-text);
+  background: linear-gradient(180deg, #f7f8fb 0%, #eef2f7 100%);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+}
+
+.fp-app {
+  min-height: 100vh;
+  color: var(--fp-text);
+  background: linear-gradient(180deg, #f7f8fb 0%, #eef2f7 100%);
+}
+
+.fp-card,
+.fp-section,
+.fp-panel-card,
+.fp-stage-note,
+.fp-asset-card,
+.fp-modal-card,
+.fp-knowledge-panel,
+.fp-package-card {
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--fp-shadow);
+}
+
+.fp-panel-card,
+.fp-package-card {
+  padding: 22px;
+}
+
+.fp-panel-title,
+.fp-section-title,
+.fp-card h2,
+.fp-card h3 {
+  color: var(--fp-text);
+  letter-spacing: -0.02em;
+}
+
+.fp-muted,
+.fp-hint,
+.fp-empty,
+.fp-asset-meta,
+.fp-stage-note {
+  color: var(--fp-muted);
+}
+
+button,
+.fp-btn,
+.fp-action-btn,
+.fp-primary-btn,
+.fp-stage-btn,
+.fp-save-btn {
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+.fp-primary-btn,
+.fp-stage-btn,
+.fp-save-btn {
+  border-color: transparent;
+  background: var(--fp-primary);
+  color: #ffffff;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+}
+
+.fp-btn.secondary,
+.fp-action-btn.secondary,
+.fp-stage-btn.secondary,
+.fp-save-btn.secondary {
+  border-color: var(--fp-border);
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--fp-text);
+  box-shadow: none;
+}
+
+.fp-grid {
+  gap: 16px;
+}
+
+.fp-readable-card,
+.fp-data-block,
+.fp-json-tree,
+.fp-tree-node,
+.fp-tree-leaf,
+.fp-field-card {
+  border-color: var(--fp-border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.fp-package-wide {
+  width: 100%;
+  max-width: none;
+}
+/* UI_STAGE_PLANNER_VISIBLE_POLISH_V2 */
+
+.fp-app {
+  background: linear-gradient(180deg, #f7f8fb 0%, #eef2f7 100%);
+}
+
+.fp-shell {
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+
+.fp-side {
+  padding: 18px 16px;
+  background: rgba(15, 20, 28, 0.94);
+  color: #eef4fb;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.fp-logo,
+.fp-logo small,
+.fp-side-note,
+.fp-side-line {
+  color: #dbe5f1;
+}
+
+.fp-side-note {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.fp-logo-mark {
+  background: #253247;
+}
+
+.fp-nav-item {
+  color: #aab6c7;
+  border-radius: 14px;
+}
+
+.fp-nav-item.done {
+  color: #edf4fb;
+}
+
+.fp-nav-item.active {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.fp-nav-item.locked {
+  color: #6f7a89;
+}
+
+.fp-nav-pill {
+  background: rgba(255, 255, 255, 0.06);
+  color: #aab6c7;
+}
+
+.fp-nav-item.done .fp-nav-pill {
+  background: rgba(49, 227, 115, 0.16);
+  color: #8df0b4;
+}
+
+.fp-main {
+  padding: 28px 32px 96px;
+}
+
+.fp-top {
+  padding: 22px 24px;
+  margin-bottom: 18px;
+  border: 1px solid rgba(24, 34, 53, 0.08);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.07);
+}
+
+.fp-title {
+  font-size: 28px;
+  letter-spacing: -0.04em;
+}
+
+.fp-steps,
+.fp-section,
+.fp-card,
+.fp-panel-card,
+.fp-stage-note {
+  border-color: rgba(24, 34, 53, 0.08);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.06);
+}
+
+.fp-panel-card {
+  padding: 22px;
+}
+
+.fp-btn {
+  border-radius: 999px;
+}
+
+.fp-btn.primary {
+  border-color: transparent;
+  background: #253247;
+  color: #ffffff;
+}
+
+.fp-btn.primary:hover:not(:disabled) {
+  background: #1b2636;
+}
+
+.fp-package-wide {
+  width: 100%;
+  max-width: none;
+}
+
+.fp-package-card {
+  width: 100%;
+  max-width: none;
+}
