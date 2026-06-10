@@ -5459,4 +5459,41 @@ body,
   color: #cfd8e6 !important;
   font-size: 12px !important;
 }
+/* FP_ASSET_TITLE_READABILITY_V1: fix framework asset card title contrast */
+
+.fp-asset-item {
+  color: #161c28 !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(24, 34, 53, 0.08) !important;
+}
+
+.fp-asset-title,
+.fp-asset-item .fp-asset-title,
+.fp-asset-item div.fp-asset-title {
+  color: #0f172a !important;
+  font-weight: 800 !important;
+}
+
+.fp-asset-meta,
+.fp-asset-meta span,
+.fp-asset-item p {
+  color: #64748b !important;
+}
+
+.fp-asset-item .fp-tag {
+  color: #067647 !important;
+  background: #ecfdf3 !important;
+  border-color: #abefc6 !important;
+}
+/* FP_HIDE_BOTTOM_FOOTER_NOTE_V1: remove fixed footer that protrudes into sidebar */
+
+.fp-footer {
+  display: none !important;
+}
+
+.fp-main {
+  padding-bottom: 36px !important;
+}
+
+
 

@@ -900,7 +900,8 @@
       }
     };
 
-    if (explicitFresh && !savedHasWork) {
+    // FP_NEW_PROJECT_ALWAYS_FRESH_V1
+    if (explicitFresh) {
       storageRemove(STORAGE_KEY);
       storageRemove(LEGACY_STORAGE_KEY);
       const fresh = normalizeState(null);
@@ -1494,7 +1495,7 @@
     if (stageKey === "storylines") {
       return Array.isArray(targetState.character_storylines) && targetState.character_storylines.length > 0;
     }
-    if (stageKey === "guide") return !isEmptyValue(targetState.adaptation_guide);
+    if (stageKey === "guide") return hasMeaningfulGuideOutput(targetState);
     if (stageKey === "package") return !isEmptyValue(targetState.framework_plan_package);
     return false;
   }
@@ -1524,7 +1525,7 @@
     if (stageKey === "storylines") return issues;
     requireValue(Array.isArray(state.character_storylines) && state.character_storylines.length > 0, "05 人物故事线");
     if (stageKey === "guide") return issues;
-    requireValue(!isEmptyValue(state.adaptation_guide), "06 整体改编指引");
+    requireValue(hasMeaningfulGuideOutput(state), "06 整体改编指引");
     if (stageKey === "package") {
       requireValue(!isEmptyValue(state.checkpoint_explanation), "04 卡点说明");
       requireValue(Array.isArray(state.storyline_decisions) && state.storyline_decisions.length > 0, "05 故事线处理决策");
@@ -1777,6 +1778,35 @@
     if (typeof value === "object") return Object.keys(value).length === 0;
     return false;
   }
+    // FP_GUIDE_MEANINGFUL_OUTPUT_PATCH_V1
+  function hasMeaningfulOutputValue(value) {
+    if (value === null || value === undefined) return false;
+
+    if (typeof value === "string") {
+      const text = value.trim();
+      return Boolean(text)
+        && !["{}", "[]", "null", "undefined", "[object Object]", "暂无"].includes(text);
+    }
+
+    if (Array.isArray(value)) {
+      return value.some((item) => hasMeaningfulOutputValue(item));
+    }
+
+    if (typeof value === "object") {
+      return Object.keys(value).some((key) => {
+        if (isHiddenTechnicalKey(key)) return false;
+        return hasMeaningfulOutputValue(value[key]);
+      });
+    }
+
+    return true;
+  }
+
+  // FP_GUIDE_MEANINGFUL_OUTPUT_PATCH_V1
+  function hasMeaningfulGuideOutput(targetState) {
+    const source = targetState || state || {};
+    return hasMeaningfulOutputValue(source.adaptation_guide);
+  }
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -1975,7 +2005,7 @@
       }
 
       if (stageKey === "guide") {
-        return !isEmptyValue(state.adaptation_guide);
+        return hasMeaningfulGuideOutput(state);
       }
 
       if (stageKey === "package") {
@@ -5767,6 +5797,45 @@ function renderPackageBlocks() {
     }
   }
 
+  // FP_START_FRESH_FRAMEWORK_NO_MODAL_V1
+    function startFreshFrameworkProject() {
+      resetTransientUi();
+
+      state = clone(initialState);
+      state.project_id = null;
+      state.current_view = "basic";
+      state.asset_state = clone(initialState.asset_state);
+      state.stage_state = clone(initialState.stage_state);
+      state.source_brief = {};
+      state.worldview_plan = {};
+      state.character_plan = {};
+      state.beat_checkpoint_timeline = [];
+      state.checkpoint_explanation = {};
+      state.character_storylines = [];
+      state.storyline_decisions = [];
+      state.adaptation_guide = {};
+      state.framework_plan_package = {};
+      state.validation_report = {};
+      state.display_texts = {};
+      state.raw_stage_responses = {};
+
+      state.prompt_preferences = normalizePromptPreferences(loadPromptPreferences());
+      applyPromptPreferencesToBasicConfig(state, true);
+
+      try {
+        window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+      } catch (error) {
+        // ignore storage cleanup errors
+      }
+
+      syncStageFlow(state);
+      saveState();
+      clearDirty();
+      loadStageHistory("basic", { silent: true }).catch(() => {});
+      showToast("已新建空白框架，请在 01 阶段填写输入。");
+      render();
+    }
+
   function resetState() {
     if (!canClearFrameworkInput()) {
       showToast("当前策划已开始，不能清空输入；如需新建，请点击新建框架项目");
@@ -5858,46 +5927,75 @@ function renderPackageBlocks() {
     }
   }
 
-  async function saveFrameworkAsset(options) {
-    if (!(options && options.skipDirtyCheck) && anyStageDraftDirty()) {
-      showToast("当前阶段有未应用的修改。请先点击“应用修改”，否则下游仍会使用旧结果。");
-      throw new Error("存在未应用的阶段修改");
+  // FP_ASSET_AFTER_STAGE01_ONLY_V3
+function hasBasicStageOutputForAsset() {
+  return !isEmptyValue(state.source_brief)
+    || Boolean(String((state.display_texts || {})["01"] || "").trim());
+}
+  // FP_ASSET_AFTER_STAGE01_ONLY_V1
+    function hasBasicStageOutputForAsset() {
+      return !isEmptyValue(state.source_brief)
+        || Boolean(String((state.display_texts || {})["01"] || "").trim());
     }
-    ui.loading.framework_save = true;
-    render();
-    try {
-      const data = await planningApi.saveFrameworkAsset(frameworkAssetSavePayload());
-      const asset = data.asset || data.project || {};
-      const projectId = data.project_id || asset.project_id || asset.asset_id || asset.id || "";
-      if (projectId === undefined || projectId === null || String(projectId).trim() === "") {
-        throw new Error("project_id 缺失");
-      }
-      state.project_id = projectId;
-      state.asset_state = Object.assign({}, state.asset_state || {}, asset.asset_state || {}, {
-        asset_kind: "framework_planner",
-        asset_id: projectId,
-        project_id: projectId,
-        status: asset.status || (state.asset_state || {}).status || "in_progress",
-        updated_at: asset.updated_at || new Date().toISOString(),
-      });
-      syncStageFlow(state);
-      saveState();
-      clearDirty();
-      if (!options || !options.silent) {
-        showToast("当前框架已保存");
-      }
-      await loadAssets();
-      return asset;
-    } catch (error) {
-      if (!options || !options.silent) {
-        showToast((error && error.message) || "保存失败");
-      }
-      throw error;
-    } finally {
-      ui.loading.framework_save = false;
-      render();
-    }
+
+    // FP_ASSET_AFTER_STAGE01_ONLY_V3
+async function saveFrameworkAsset(options) {
+  const safeOptions = options || {};
+
+  if (!(safeOptions && safeOptions.skipDirtyCheck) && anyStageDraftDirty()) {
+    showToast("当前阶段有未应用的修改。请先点击“应用修改”，否则下游仍会使用旧结果。");
+    throw new Error("存在未应用的阶段修改");
   }
+
+  if (!hasSavedFrameworkProjectId() && !hasBasicStageOutputForAsset()) {
+    const message = "请先运行 01 阶段。01 阶段成功生成后，框架才会保存为资产。";
+    if (!safeOptions.silent) {
+      showToast(message);
+    }
+    throw new Error(message);
+  }
+
+  ui.loading.framework_save = true;
+  render();
+
+  try {
+        const data = await planningApi.saveFrameworkAsset(frameworkAssetSavePayload());
+        const asset = data.asset || data.project || {};
+        const projectId = data.project_id || asset.project_id || asset.asset_id || asset.id || "";
+
+        if (projectId === undefined || projectId === null || String(projectId).trim() === "") {
+          throw new Error("project_id 缺失");
+        }
+
+        state.project_id = projectId;
+        state.asset_state = Object.assign({}, state.asset_state || {}, asset.asset_state || {}, {
+          asset_kind: "framework_planner",
+          asset_id: projectId,
+          project_id: projectId,
+          status: asset.status || (state.asset_state || {}).status || "in_progress",
+          updated_at: asset.updated_at || new Date().toISOString(),
+        });
+
+        syncStageFlow(state);
+        saveState();
+        clearDirty();
+
+        if (!safeOptions.silent) {
+          showToast("当前框架已保存");
+        }
+
+        await loadAssets();
+        return asset;
+      } catch (error) {
+        if (!safeOptions.silent) {
+          showToast((error && error.message) || "保存失败");
+        }
+        throw error;
+      } finally {
+        ui.loading.framework_save = false;
+        render();
+      }
+}
 
   async function loadKnowledgeTags() {
     const retryDelays = [400, 900];
@@ -6755,18 +6853,7 @@ function renderPackageBlocks() {
       return;
     }
     if (action === "open-new-script") {
-      if (promptUnsaved("新建框架项目", {
-        save: () => {
-          ui.showNewScriptModal = true;
-          render();
-        },
-        discard: () => {
-          ui.showNewScriptModal = true;
-          render();
-        },
-      })) return;
-      ui.showNewScriptModal = true;
-      render();
+      startFreshFrameworkProject();
       return;
     }
     if (action === "close-new-script") {

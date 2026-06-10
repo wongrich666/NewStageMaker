@@ -956,3 +956,51 @@ button,
   width: 100%;
   max-width: none;
 }
+/* FP_ASSET_TITLE_READABILITY_V2 */
+
+.fp-asset-item,
+.fp-asset-manager .fp-asset-item {
+  color: #161c28 !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(24, 34, 53, 0.08) !important;
+}
+
+.fp-asset-title,
+.fp-asset-item .fp-asset-title {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+
+.fp-asset-item p,
+.fp-asset-meta,
+.fp-asset-meta span {
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+
+.fp-asset-item .fp-tag {
+  color: #067647 !important;
+  background: #ecfdf3 !important;
+  border-color: #abefc6 !important;
+}
+
+.fp-asset-actions .fp-btn.primary {
+  color: #ffffff !important;
+  background: #253247 !important;
+  border-color: #253247 !important;
+}
+
+.fp-asset-actions .fp-btn {
+  color: #253247 !important;
+  background: #ffffff !important;
+  border-color: rgba(24, 34, 53, 0.12) !important;
+}
+
+.fp-asset-actions .fp-btn.danger,
+.fp-asset-actions .fp-btn.danger.subtle {
+  color: #b42318 !important;
+  background: #fff4f2 !important;
+  border-color: #fecdca !important;
+}
