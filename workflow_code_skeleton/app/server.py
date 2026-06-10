@@ -1084,6 +1084,49 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return "\n\n".join(parts)
         return str(_first_present(stage12, "batchScriptText", "batch_script_text", default="") or "").strip()
 
+
+    # FRAMEWORK_TO_SCRIPT_EXPORT_PRUNE_NOISE_V1
+    def _clean_framework_to_script_export_text(text: str) -> str:
+        """Remove internal workflow notes from exported TXT/DOCX content."""
+        lines = str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        result = []
+        skip_indent = None
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Remove internal adaptation-guide meta text:
+            # "??????????????????..."
+            if (
+                stripped.startswith("\u6587\u672c\uff1a\u672c\u6b21\u6574\u4f53\u6539\u7f16\u6307\u5f15")
+                or stripped.startswith("\u6587\u672c:\u672c\u6b21\u6574\u4f53\u6539\u7f16\u6307\u5f15")
+            ):
+                continue
+
+            # Remove source-trace blocks under scenes:
+            # "?????" and all child lines until the next same/lower-indent field.
+            if (
+                stripped.startswith("\u6765\u6e90\u4f9d\u636e\uff1a")
+                or stripped.startswith("\u6765\u6e90\u4f9d\u636e:")
+            ):
+                skip_indent = len(line) - len(line.lstrip(" "))
+                continue
+
+            if skip_indent is not None:
+                if not stripped:
+                    continue
+                indent = len(line) - len(line.lstrip(" "))
+                if indent > skip_indent:
+                    continue
+                skip_indent = None
+
+            result.append(line.rstrip())
+
+        cleaned = "\n".join(result).strip()
+        while "\n\n\n" in cleaned:
+            cleaned = cleaned.replace("\n\n\n", "\n\n")
+        return cleaned + "\n"
+
     def _framework_to_script_txt(asset: dict) -> str:
         package = asset.get("framework_plan_package") if isinstance(asset.get("framework_plan_package"), dict) else {}
         stage_outputs = asset.get("stage_outputs") if isinstance(asset.get("stage_outputs"), dict) else {}
@@ -1119,7 +1162,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
         script_text = _txt_readable(_framework_script_text_from_batches(stage12) or "暂无")
         title = _txt_scalar(asset.get("title") or package.get("title") or package.get("project_title") or "未命名框架剧本")
-        return "\n\n".join(
+        export_text = "\n\n".join(
             [
                 f"《{title}》",
                 "一、故事梗概\n" + _txt_readable(story),
@@ -1128,6 +1171,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 "四、剧本正文\n" + script_text,
             ]
         ) + "\n"
+        return _clean_framework_to_script_export_text(export_text)
 
     def _framework_review_needs_rewrite(review: dict) -> bool:
         if not isinstance(review, dict):
