@@ -2510,7 +2510,7 @@
         </div>
         <div class="fp-side-note">
           <div class="fp-side-line"><span class="fp-tag ${modeClass}">${escapeHtml(modeLabel)}</span></div>
-          <div>每个阶段都需要手动生成、审阅结果；编辑后点击“应用修改”，下游阶段才会读取新版结果。</div>
+          <div>每个阶段都需要调整输入、手动确认生成、审阅结果；若有修改请点击“应用修改”，下游阶段才会读取新版输入。</div>
         </div>
         <div class="fp-side-note">
           <strong>本地保存：</strong>状态会自动保存
