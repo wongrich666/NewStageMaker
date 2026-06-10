@@ -856,19 +856,68 @@
     }[field] || "basic";
   }
 
+  // FP_REFRESH_RESUME_PATCH_V1
   function loadState() {
     const params = new URLSearchParams(window.location.search || "");
-    if (params.get("resume") !== "1") {
+    const explicitFresh = params.get("new") === "1" || params.get("reset") === "1" || params.get("fresh") === "1";
+    const saved = readStorage(STORAGE_KEY) || readStorage(LEGACY_STORAGE_KEY);
+
+    const hasContent = (value) => {
+      if (value === null || value === undefined) return false;
+      if (typeof value === "string") return value.trim().length > 0;
+      if (Array.isArray(value)) return value.length > 0;
+      if (typeof value === "object") return Object.keys(value).length > 0;
+      return true;
+    };
+
+    const savedProjectId = saved && typeof saved === "object"
+      ? Number(saved.project_id || (saved.asset_state || {}).project_id || (saved.asset_state || {}).asset_id || 0)
+      : 0;
+
+    const savedHasWork = Boolean(saved && typeof saved === "object" && (
+      savedProjectId > 0
+      || hasContent(saved.source_brief)
+      || hasContent(saved.worldview_plan)
+      || hasContent(saved.character_plan)
+      || hasContent(saved.beat_checkpoint_timeline)
+      || hasContent(saved.checkpoint_explanation)
+      || hasContent(saved.character_storylines)
+      || hasContent(saved.storyline_decisions)
+      || hasContent(saved.adaptation_guide)
+      || hasContent(saved.framework_plan_package)
+    ));
+
+    const normalizeUrlForResume = () => {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("new");
+        url.searchParams.delete("reset");
+        url.searchParams.delete("fresh");
+        url.searchParams.set("resume", "1");
+        window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+      } catch (error) {
+        // ignore URL update errors
+      }
+    };
+
+    if (explicitFresh && !savedHasWork) {
       storageRemove(STORAGE_KEY);
       storageRemove(LEGACY_STORAGE_KEY);
       const fresh = normalizeState(null);
       persistLoadedState(fresh);
+      normalizeUrlForResume();
       return fresh;
     }
-    const saved = readStorage(STORAGE_KEY) || readStorage(LEGACY_STORAGE_KEY);
-    const normalized = normalizeState(sanitizeLoadedState(saved));
-    persistLoadedState(normalized);
-    return normalized;
+
+    if (saved && typeof saved === "object") {
+      normalizeUrlForResume();
+      return normalizeState(sanitizeLoadedState(saved));
+    }
+
+    const fresh = normalizeState(null);
+    persistLoadedState(fresh);
+    normalizeUrlForResume();
+    return fresh;
   }
 
   function readStorage(key) {
@@ -1892,19 +1941,53 @@
     return Boolean((state.stage_state && state.stage_state[stageKey] || {}).stageDraftDirty);
   }
 
+  // FP_STRICT_STAGE_PROGRESS_DONE_PATCH_V1
   function stageProgressDone(stageKey) {
-    if (!stageKey || stageDraftDirty(stageKey)) return false;
-    const stage = stageState(stageKey);
-    if (stage.confirmed || stage.stageCommitted) return true;
-    const index = STAGE_SEQUENCE.indexOf(stageKey);
-    if (index < 0) return false;
-    return STAGE_SEQUENCE.slice(index + 1).some((downstreamKey) => {
-      const downstream = stageState(downstreamKey);
-      return downstream.status === "running"
-        || downstream.stageCommitted
-        || downstream.confirmed
-        || hasStageData(downstreamKey);
-    });
+    if (!stageKey) return false;
+    if (stageDraftDirty(stageKey)) return false;
+    if (isStageLoading(stageKey)) return false;
+
+    const hasStageOwnOutput = (() => {
+      if (stageKey === "basic") {
+        return !isEmptyValue(state.source_brief)
+          || Boolean(String((state.display_texts || {})["01"] || "").trim());
+      }
+
+      if (stageKey === "worldview") {
+        return !isEmptyValue(state.worldview_plan);
+      }
+
+      if (stageKey === "character") {
+        return !isEmptyValue(state.character_plan);
+      }
+
+      if (stageKey === "beat") {
+        return Array.isArray(state.beat_checkpoint_timeline)
+          && state.beat_checkpoint_timeline.length > 0
+          && !isEmptyValue(state.checkpoint_explanation);
+      }
+
+      if (stageKey === "storylines") {
+        return Array.isArray(state.character_storylines)
+          && state.character_storylines.length > 0
+          && Array.isArray(state.storyline_decisions)
+          && state.storyline_decisions.length > 0;
+      }
+
+      if (stageKey === "guide") {
+        return !isEmptyValue(state.adaptation_guide);
+      }
+
+      if (stageKey === "package") {
+        return !isEmptyValue(state.framework_plan_package);
+      }
+
+      return false;
+    })();
+
+    // Sidebar checkmarks must reflect only the current stage's own output.
+    // Do not infer completion from downstream package, restored confirmed flags, or old stage_state.
+    return Boolean(hasStageOwnOutput);
   }
 
   function isStageEditable(stageKey) {

@@ -375,16 +375,50 @@
     };
   }
 
+  // FP_STAGE12_MERGE_BATCHES_PATCH_V1
   function mergeStage12(data) {
+    const current = (state.scriptStages || {}).stage12 || {};
+    const currentBatches = current.batches && typeof current.batches === "object" && !Array.isArray(current.batches)
+      ? current.batches
+      : {};
+    const incomingBatches = data && data.batches && typeof data.batches === "object" && !Array.isArray(data.batches)
+      ? data.batches
+      : {};
+
+    const mergedBatches = Object.assign({}, currentBatches, incomingBatches);
+
+    const startEpisode = data.batchStartEpisode || data.batch_start_episode || data.startEpisode || data.start_episode;
+    const endEpisode = data.batchEndEpisode || data.batch_end_episode || data.endEpisode || data.end_episode;
+    const batchScriptText = data.batchScriptText || data.batch_script_text;
+    const batchScriptReview = data.batchScriptReview || data.batch_script_review;
+    const batchKey = startEpisode ? String(startEpisode) : "";
+
+    if (batchKey && hasContent(batchScriptText)) {
+      mergedBatches[batchKey] = Object.assign(
+        {},
+        currentBatches[batchKey] || {},
+        incomingBatches[batchKey] || {},
+        {
+          batchStartEpisode: startEpisode,
+          batchEndEpisode: endEpisode,
+          batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan || data.batch_enriched_episode_plan || (incomingBatches[batchKey] || {}).batchEnrichedEpisodePlan || (currentBatches[batchKey] || {}).batchEnrichedEpisodePlan,
+          batchCausalConflictPlan: data.batchCausalConflictPlan || data.batch_causal_conflict_plan || (incomingBatches[batchKey] || {}).batchCausalConflictPlan || (currentBatches[batchKey] || {}).batchCausalConflictPlan,
+          batchScriptText: batchScriptText,
+          batchScriptReview: batchScriptReview || (incomingBatches[batchKey] || {}).batchScriptReview || (currentBatches[batchKey] || {}).batchScriptReview,
+          scriptMemory: data.scriptMemory || data.script_memory || (incomingBatches[batchKey] || {}).scriptMemory || (currentBatches[batchKey] || {}).scriptMemory
+        }
+      );
+    }
+
     state.scriptStages.stage12 = {
-      batchStartEpisode: data.batchStartEpisode,
-      batchEndEpisode: data.batchEndEpisode,
-      batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan,
-      batchCausalConflictPlan: data.batchCausalConflictPlan,
-      batchScriptText: data.batchScriptText,
-      batchScriptReview: data.batchScriptReview,
-      scriptMemory: data.scriptMemory,
-      batches: data.batches || {},
+      batchStartEpisode: startEpisode || current.batchStartEpisode,
+      batchEndEpisode: endEpisode || current.batchEndEpisode,
+      batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan || data.batch_enriched_episode_plan || current.batchEnrichedEpisodePlan,
+      batchCausalConflictPlan: data.batchCausalConflictPlan || data.batch_causal_conflict_plan || current.batchCausalConflictPlan,
+      batchScriptText: batchScriptText || current.batchScriptText,
+      batchScriptReview: batchScriptReview || current.batchScriptReview,
+      scriptMemory: data.scriptMemory || data.script_memory || current.scriptMemory,
+      batches: mergedBatches,
       updated_at: new Date().toISOString(),
     };
   }
