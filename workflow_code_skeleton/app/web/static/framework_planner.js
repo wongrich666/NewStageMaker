@@ -1499,7 +1499,7 @@
     if (stageKey === "worldview") return !isEmptyValue(targetState.worldview_plan);
     if (stageKey === "character") return !isEmptyValue(targetState.character_plan);
     if (stageKey === "beat") {
-      return !isEmptyValue(targetState.beat_checkpoint_timeline) && !isEmptyValue(targetState.checkpoint_explanation);
+      return hasCompleteBeatStage(targetState);
     }
     if (stageKey === "storylines") {
       return !isEmptyValue(targetState.character_storylines) && !isEmptyValue(targetState.storyline_decisions);
@@ -1523,7 +1523,7 @@
         String(state.basic_config.project_title || state.basic_config.source_title || "").trim()
         || !isEmptyValue(state.source_brief)
       );
-    const hasBeats = !isEmptyValue(state.beat_checkpoint_timeline) && !isEmptyValue(state.checkpoint_explanation);
+    const hasBeats = hasCompleteBeatStage(state);
     const hasStorylines = !isEmptyValue(state.character_storylines) && !isEmptyValue(state.storyline_decisions);
     if (stageKey === "basic") return issues;
     requireValue(hasBasic, "01 基础配置");
@@ -1844,6 +1844,44 @@
     return false;
   }
 
+  function hasMeaningfulBeatItem(item) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    return [
+      "narrative_function",
+      "plot_content",
+      "character_change",
+      "conflict_upgrade",
+      "hook_or_reversal",
+    ].some((key) => hasMeaningfulBusinessValue(item[key]));
+  }
+
+  function hasCompleteBeatTimeline(value) {
+    return Array.isArray(value) && value.length === 15 && value.every((item) => hasMeaningfulBeatItem(item));
+  }
+
+  function hasCompleteCheckpointExplanation(value) {
+    if (typeof value === "string") return hasMeaningfulBusinessValue(value);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const summaryKeys = [
+      "act_one_logic",
+      "act_two_logic",
+      "act_three_logic",
+      "opening_hook",
+      "first_three_episodes",
+      "midpoint",
+      "dark_night_and_turn",
+      "ending_closure",
+    ];
+    if (summaryKeys.some((key) => hasMeaningfulBusinessValue(value[key]))) return true;
+    const notes = Array.isArray(value.beat_notes) ? value.beat_notes : [];
+    return notes.some((item) => item && typeof item === "object" && hasMeaningfulBusinessValue(item.explanation || item.summary || item.content));
+  }
+
+  function hasCompleteBeatStage(targetState) {
+    const source = targetState || state || {};
+    return hasCompleteBeatTimeline(source.beat_checkpoint_timeline) && hasCompleteCheckpointExplanation(source.checkpoint_explanation);
+  }
+
   function escapeHtml(value) {
     return String(value == null ? "" : value)
       .replace(/&/g, "&amp;")
@@ -2026,7 +2064,7 @@
       return !isEmptyValue(state.character_plan);
     }
     if (stageKey === "beat") {
-      return !isEmptyValue(state.beat_checkpoint_timeline) && !isEmptyValue(state.checkpoint_explanation);
+      return hasCompleteBeatStage(state);
     }
     if (stageKey === "storylines") {
       return !isEmptyValue(state.character_storylines) && !isEmptyValue(state.storyline_decisions);
@@ -3236,7 +3274,7 @@
     const stage = state.stage_state.beat;
     const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
-    const canConfirm = state.beat_checkpoint_timeline.length === 15 && !isEmptyValue(state.checkpoint_explanation);
+    const canConfirm = hasCompleteBeatStage(state);
     const hasTimeline = Array.isArray(state.beat_checkpoint_timeline) && state.beat_checkpoint_timeline.length > 0;
     return `
       <section class="fp-card fp-section">
@@ -4724,13 +4762,55 @@
     return Number.isFinite(number) && number > 0 ? number : fallback;
   }
 
+  function normalizedEpisodeConfig(source) {
+    const basic = source && typeof source === "object" ? source : {};
+    const seasonCount = positiveNumber(basic.season_count, 1);
+    const explicitEpisodesPerSeason = positiveNumber(basic.episodes_per_season || basic.episodesPerSeason, 0);
+    const explicitTotalEpisodes = positiveNumber(
+      basic.total_episodes || basic.totalEpisodes || basic.totalEpisodeCount || basic.episode_num || basic.episode_count || basic.episodeCount,
+      0
+    );
+    const episodesPerSeason = explicitEpisodesPerSeason || explicitTotalEpisodes || 20;
+    const derivedTotalEpisodes = seasonCount * episodesPerSeason;
+    const totalEpisodes = explicitEpisodesPerSeason ? derivedTotalEpisodes : (explicitTotalEpisodes || derivedTotalEpisodes);
+    return {
+      seasonCount,
+      episodesPerSeason,
+      totalEpisodes,
+      minutesPerEpisode: positiveNumber(basic.minutes_per_episode || basic.minutesPerEpisode, 2),
+    };
+  }
+
+  function stageEpisodeAliases(source) {
+    const episodeConfig = normalizedEpisodeConfig(source);
+    return {
+      season_count: episodeConfig.seasonCount,
+      seasonCount: episodeConfig.seasonCount,
+      episodes_per_season: episodeConfig.episodesPerSeason,
+      episodesPerSeason: episodeConfig.episodesPerSeason,
+      total_episodes: episodeConfig.totalEpisodes,
+      totalEpisodes: episodeConfig.totalEpisodes,
+      episode_num: episodeConfig.totalEpisodes,
+      episode_count: episodeConfig.totalEpisodes,
+      episodeCount: episodeConfig.totalEpisodes,
+      minutes_per_episode: episodeConfig.minutesPerEpisode,
+      minutesPerEpisode: episodeConfig.minutesPerEpisode,
+    };
+  }
+
+  function basicConfigForStage() {
+    const basic = Object.assign({}, state.basic_config || {});
+    return Object.assign(basic, stageEpisodeAliases(basic));
+  }
+
   function frameworkToScriptPayload() {
     syncBasicConfigFromDom();
-    const basic = state.basic_config || {};
-    const seasonCount = positiveNumber(basic.season_count, 1);
-    const episodesPerSeason = positiveNumber(basic.episodes_per_season, 60);
-    const totalEpisodes = positiveNumber(basic.total_episodes, seasonCount * episodesPerSeason);
-    const minutesPerEpisode = positiveNumber(basic.minutes_per_episode, 2);
+    const basic = basicConfigForStage();
+    const episodeConfig = normalizedEpisodeConfig(basic);
+    const seasonCount = episodeConfig.seasonCount;
+    const episodesPerSeason = episodeConfig.episodesPerSeason;
+    const totalEpisodes = episodeConfig.totalEpisodes;
+    const minutesPerEpisode = episodeConfig.minutesPerEpisode;
     const title = String(basic.project_title || basic.source_title || "未命名框架剧本").trim();
     const payload = {
       title,
@@ -4944,18 +5024,18 @@
   function buildStagePayload(stageKey, options) {
     syncBasicConfigFromDom();
     const revise = options && options.revise;
+    const basicConfig = basicConfigForStage();
+    const episodeAliases = stageEpisodeAliases(basicConfig);
     if (stageKey === "basic") {
       return {
-        project_title: state.basic_config.project_title,
-        mode: state.basic_config.mode,
-        source_text: state.basic_config.source_text,
-        source_title: state.basic_config.source_title || state.basic_config.project_title,
-        target_format: state.basic_config.target_format,
-        season_count: state.basic_config.season_count,
-        episodes_per_season: state.basic_config.episodes_per_season,
-        minutes_per_episode: state.basic_config.minutes_per_episode,
-        adaptation_direction: state.basic_config.adaptation_direction,
-        user_constraints: state.basic_config.user_constraints,
+        project_title: basicConfig.project_title,
+        mode: basicConfig.mode,
+        source_text: basicConfig.source_text,
+        source_title: basicConfig.source_title || basicConfig.project_title,
+        target_format: basicConfig.target_format,
+        ...episodeAliases,
+        adaptation_direction: basicConfig.adaptation_direction,
+        user_constraints: basicConfig.user_constraints,
         user_requirements: payloadUserRequirements(),
       };
     }
@@ -4963,11 +5043,12 @@
       return {
         mode: revise ? "改写" : "创作",
         source_brief: state.source_brief,
-        locked_basic_config: state.basic_config,
-        basic_config: state.basic_config,
+        locked_basic_config: basicConfig,
+        basic_config: basicConfig,
+        ...episodeAliases,
         previous_worldview_plan: revise ? state.worldview_plan : {},
         user_feedback: stageFeedbackPayload("worldview"),
-        adaptation_direction: state.basic_config.adaptation_direction,
+        adaptation_direction: basicConfig.adaptation_direction,
         user_requirements: payloadUserRequirements(),
       };
     }
@@ -4975,12 +5056,13 @@
       return {
         mode: revise ? "改写" : "创作",
         source_brief: state.source_brief,
-        locked_basic_config: state.basic_config,
-        basic_config: state.basic_config,
+        locked_basic_config: basicConfig,
+        basic_config: basicConfig,
+        ...episodeAliases,
         worldview_plan: state.worldview_plan,
         previous_character_plan: revise ? state.character_plan : {},
         user_feedback: stageFeedbackPayload("character"),
-        adaptation_direction: state.basic_config.adaptation_direction,
+        adaptation_direction: basicConfig.adaptation_direction,
         user_requirements: payloadUserRequirements(),
       };
     }
@@ -4988,13 +5070,14 @@
       return {
         mode: revise ? "改写" : "创作",
         source_brief: state.source_brief,
-        basic_config: state.basic_config,
+        basic_config: basicConfig,
+        ...episodeAliases,
         worldview_plan: state.worldview_plan,
         character_plan: state.character_plan,
         previous_beat_checkpoint_timeline: revise ? state.beat_checkpoint_timeline : [],
         user_feedback: stageFeedbackPayload("beat"),
         framework_score_report: state.framework_score_report,
-        adaptation_direction: state.basic_config.adaptation_direction,
+        adaptation_direction: basicConfig.adaptation_direction,
         user_requirements: payloadUserRequirements(),
       };
     }
@@ -5002,14 +5085,15 @@
       return cleanStage05Payload({
         mode: revise ? "改写" : "创作",
         source_brief: state.source_brief,
-        basic_config: state.basic_config,
+        basic_config: basicConfig,
+        ...episodeAliases,
         worldview_plan: state.worldview_plan,
         character_plan: state.character_plan,
         beat_checkpoint_timeline: state.beat_checkpoint_timeline,
         previous_character_storylines: revise ? state.character_storylines : [],
         current_storyline_decisions: state.storyline_decisions,
         user_feedback: stageFeedbackPayload("storylines"),
-        adaptation_direction: state.basic_config.adaptation_direction,
+        adaptation_direction: basicConfig.adaptation_direction,
         user_requirements: payloadUserRequirements(),
       });
     }
@@ -5018,7 +5102,8 @@
       return {
         mode: revise ? "改写" : "创作",
         source_brief: state.source_brief,
-        basic_config: state.basic_config,
+        basic_config: basicConfig,
+        ...episodeAliases,
         worldview_plan: state.worldview_plan,
         character_plan: state.character_plan,
         beat_checkpoint_timeline: state.beat_checkpoint_timeline,
@@ -5026,7 +5111,7 @@
         storyline_decisions: state.storyline_decisions,
         previous_adaptation_guide: revise ? state.adaptation_guide : {},
         user_feedback: stageFeedbackPayload("guide"),
-        adaptation_direction: state.basic_config.adaptation_direction,
+        adaptation_direction: basicConfig.adaptation_direction,
         user_requirements: payloadUserRequirements(),
       };
     }
@@ -5035,7 +5120,8 @@
       const adaptationGuide = guidePayloadForDownstream(state.adaptation_guide);
       return {
         mode: revise ? "改写" : "创作",
-        basic_config: state.basic_config,
+        basic_config: basicConfig,
+        ...episodeAliases,
         source_brief: state.source_brief,
         worldview_plan: state.worldview_plan,
         character_plan: state.character_plan,
@@ -5047,7 +5133,7 @@
         user_edit_history: state.user_edit_history,
         previous_framework_plan_package: revise ? state.framework_plan_package : {},
         user_feedback: stageFeedbackPayload("package"),
-        adaptation_direction: state.basic_config.adaptation_direction,
+        adaptation_direction: basicConfig.adaptation_direction,
         user_requirements: payloadUserRequirements(),
       };
     }
@@ -5235,15 +5321,23 @@
       } else {
         loadStageHistory(stageKey).catch(() => {});
       }
-      state.stage_state[stageKey].status = options && options.revise ? "updated" : "generated";
+      const stageComplete = hasStageData(stageKey);
+      state.stage_state[stageKey].status = stageComplete
+        ? (options && options.revise ? "updated" : "generated")
+        : "incomplete";
       state.stage_state[stageKey].confirmed = false;
-      state.stage_state[stageKey].stageCommitted = true;
+      state.stage_state[stageKey].stageCommitted = stageComplete;
       state.stage_state[stageKey].stageDraftDirty = false;
       setStageEditMode(stageKey, false);
       delete ui.editSnapshots[stageKey];
       clearDownstreamAfterStageGenerate(stageKey);
       const next = STAGE_SEQUENCE[STAGE_SEQUENCE.indexOf(stageKey) + 1];
-      if (next) unlockStage(next);
+      if (stageComplete && next) unlockStage(next);
+      if (!stageComplete) {
+        ui.stageErrors[stageKey] = stageKey === "beat"
+          ? "04 阶段返回不完整：需要 15 条节拍都包含真实剧情内容，已阻止进入后续阶段。"
+          : "当前阶段返回内容不完整，已阻止进入后续阶段。";
+      }
       syncFrameworkAssetState(state, `generate:${stageKey}`);
       saveState();
       try {
@@ -5333,7 +5427,7 @@
       showToast("当前阶段没有可应用的结果");
       return;
     }
-    if (stageKey === "beat" && (state.beat_checkpoint_timeline.length !== 15 || isEmptyValue(state.checkpoint_explanation))) {
+    if (stageKey === "beat" && !hasCompleteBeatStage(state)) {
       showToast("04 阶段必须同时具备 15 条时间轴和卡点说明后才能应用");
       return;
     }
@@ -5395,7 +5489,7 @@
   async function confirmStage(stageKey) {
     if (stageKey === "worldview" && isEmptyValue(state.worldview_plan)) return;
     if (stageKey === "character" && isEmptyValue(state.character_plan)) return;
-    if (stageKey === "beat" && (state.beat_checkpoint_timeline.length !== 15 || isEmptyValue(state.checkpoint_explanation))) {
+    if (stageKey === "beat" && !hasCompleteBeatStage(state)) {
       showToast("04 阶段必须同时具备 15 条时间轴和卡点说明后才能确认");
       return;
     }
@@ -5771,17 +5865,20 @@
     render();
     try {
       while (round <= rounds) {
+        const basicConfig = basicConfigForStage();
+        const episodeAliases = stageEpisodeAliases(basicConfig);
         const payload = cleanOutgoingPayload(attachKnowledgePayload({
           mode: current ? "改写" : "创作",
           project_id: currentProjectId(),
           source_brief: state.source_brief,
-          basic_config: state.basic_config,
+          basic_config: basicConfig,
+          ...episodeAliases,
           worldview_plan: state.worldview_plan,
           character_plan: state.character_plan,
           previous_beat_checkpoint_timeline: current || [],
           user_feedback: stageFeedbackPayload("beat"),
           framework_score_report: lastScoreReport,
-          adaptation_direction: state.basic_config.adaptation_direction,
+          adaptation_direction: basicConfig.adaptation_direction,
           user_requirements: payloadUserRequirements(),
         }, "beat"), "stage04 score-loop payload");
         const beatResponse = await planningApi.runStage("04", payload);
@@ -5792,7 +5889,8 @@
           project_id: currentProjectId(),
           beat_checkpoint_timeline: state.beat_checkpoint_timeline,
           checkpoint_explanation: state.checkpoint_explanation,
-          basic_config: state.basic_config,
+          basic_config: basicConfig,
+          ...episodeAliases,
           source_brief: state.source_brief,
           worldview_plan: state.worldview_plan,
           character_plan: state.character_plan,
@@ -5851,7 +5949,7 @@
     ui.newScriptForm = {
       title: "",
       season_count: 1,
-      episodes_per_season: 60,
+      episodes_per_season: 20,
       target_format: "短剧",
       style: "",
       description: "",
@@ -6272,7 +6370,8 @@
     state.basic_config.source_title = form.title || "";
     state.basic_config.target_format = form.target_format || "短剧";
     state.basic_config.season_count = Number(form.season_count || 1);
-    state.basic_config.episodes_per_season = Number(form.episodes_per_season || 60);
+    state.basic_config.episodes_per_season = positiveNumber(form.episodes_per_season, state.basic_config.episodes_per_season || 20);
+    Object.assign(state.basic_config, stageEpisodeAliases(state.basic_config));
     state.basic_config.user_requirements = form.style || "";
     state.basic_config.source_text = form.description || "";
     state.project_id = null;
@@ -6315,7 +6414,7 @@
     ui.newScriptForm = {
       title: `${project.title || input.title || "未命名剧本"} 副本`,
       season_count: input.season_count || 1,
-      episodes_per_season: input.episodes_per_season || project.total_episodes || 60,
+      episodes_per_season: input.episodes_per_season || project.episodes_per_season || project.total_episodes || 20,
       target_format: input.target_format || "短剧",
       style: input.style || "",
       description: input.story_outline || "",
@@ -6416,7 +6515,8 @@
       state.basic_config.source_title = project.title || input.title || state.basic_config.source_title;
       state.basic_config.target_format = input.target_format || state.basic_config.target_format;
       state.basic_config.season_count = Number(input.season_count || state.basic_config.season_count || 1);
-      state.basic_config.episodes_per_season = Number(input.episodes_per_season || state.basic_config.episodes_per_season || 60);
+      state.basic_config.episodes_per_season = positiveNumber(input.episodes_per_season || input.episodesPerSeason || project.episodes_per_season || project.total_episodes, state.basic_config.episodes_per_season || 20);
+      Object.assign(state.basic_config, stageEpisodeAliases(state.basic_config));
       state.basic_config.user_requirements = input.style || state.basic_config.user_requirements || "";
       state.basic_config.source_text = input.story_outline || state.basic_config.source_text || "";
       state.asset_state.asset_id = project.project_id || null;
@@ -6544,7 +6644,7 @@
       return response;
     }
     if (stageNo === "04") {
-      const ranges = splitEpisodeRanges(Number((payload.basic_config || {}).episodes_per_season || 60));
+      const ranges = splitEpisodeRanges(normalizedEpisodeConfig(payload.basic_config || payload).totalEpisodes);
       response.data.beat_checkpoint_timeline = BEAT_NAMES.map((name, index) => ({
         beat_no: index + 1,
         beat_name: name,
@@ -6634,7 +6734,7 @@
   }
 
   function splitEpisodeRanges(totalEpisodes) {
-    const total = Math.max(15, Number(totalEpisodes) || 60);
+    const total = Math.max(15, Number(totalEpisodes) || 20);
     const weights = [3, 4, 4, 4, 4, 5, 5, 7, 5, 5, 4, 4, 3, 2, 1];
     const sum = weights.reduce((acc, item) => acc + item, 0);
     let start = 1;

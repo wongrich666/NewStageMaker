@@ -103,6 +103,23 @@ REQUIRED_BEAT_FIELDS = (
     "hook_or_reversal",
     "linked_storylines",
 )
+EPISODE_COUNT_ALIASES = (
+    "total_episodes",
+    "totalEpisodes",
+    "totalEpisodeCount",
+    "episode_num",
+    "episodeNum",
+    "episode_count",
+    "episodeCount",
+)
+EPISODES_PER_SEASON_ALIASES = (
+    "episodes_per_season",
+    "episodesPerSeason",
+)
+SEASON_COUNT_ALIASES = (
+    "season_count",
+    "seasonCount",
+)
 FIFTEEN_BEAT_NAMES = (
     "开场",
     "主体呈现",
@@ -862,6 +879,12 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "mode",
             "source_brief",
             "basic_config",
+            "episodes_per_season",
+            "episodesPerSeason",
+            "total_episodes",
+            "totalEpisodes",
+            "episode_num",
+            "episode_count",
             "worldview_plan",
             "character_plan",
             "previous_beat_checkpoint_timeline",
@@ -876,6 +899,12 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "mode": ("mode",),
             "source_brief": ("source_brief",),
             "basic_config": ("basic_config",),
+            "episodes_per_season": ("episodes_per_season", "episodesPerSeason"),
+            "episodesPerSeason": ("episodesPerSeason", "episodes_per_season"),
+            "total_episodes": ("total_episodes", "totalEpisodes", "episode_num", "episode_count"),
+            "totalEpisodes": ("totalEpisodes", "total_episodes", "episode_num", "episode_count"),
+            "episode_num": ("episode_num", "totalEpisodes", "total_episodes", "episode_count"),
+            "episode_count": ("episode_count", "episodeCount", "totalEpisodes", "total_episodes", "episode_num"),
             "worldview_plan": ("worldview_plan",),
             "character_plan": ("character_plan",),
             "previous_beat_checkpoint_timeline": ("previous_beat_checkpoint_timeline",),
@@ -1423,6 +1452,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             data = _normalize_stage_output(
                 definition.stage,
                 safe_output,
+                payload=normalized_payload,
                 parse_warnings=parse_warnings,
             )
             _log_stage_parse_warnings(definition.stage, parse_warnings)
@@ -1504,6 +1534,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
     data = _normalize_stage_output(
         definition.stage,
         data,
+        payload=normalized_payload,
         parse_warnings=parse_warnings,
     )
 
@@ -1760,8 +1791,89 @@ def _workflow_backend_spec(definition: FrameworkPlannerStageDefinition, backend:
     )
 
 
-def _normalize_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+def _coerce_positive_episode_count(value: Any, default: int = 0) -> int:
+    if value in (None, "", [], {}):
+        return default
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        match = re.search(r"\d+", str(value or ""))
+        if not match:
+            return default
+        try:
+            number = int(match.group(0))
+        except (TypeError, ValueError):
+            return default
+    return number if number > 0 else default
+
+
+def _episode_count_from_mapping(source: Any, aliases: tuple[str, ...]) -> int:
+    if not isinstance(source, dict):
+        return 0
+    for alias in aliases:
+        number = _coerce_positive_episode_count(source.get(alias), 0)
+        if number > 0:
+            return number
+    return 0
+
+
+def _episode_count_from_payload(payload: Any, default: int = 20) -> int:
+    source = payload if isinstance(payload, dict) else {}
+    basic = source.get("basic_config") if isinstance(source.get("basic_config"), dict) else {}
+    source_brief = source.get("source_brief") if isinstance(source.get("source_brief"), dict) else {}
+    season_plan = source_brief.get("season_plan") if isinstance(source_brief.get("season_plan"), dict) else {}
+
+    per_season = (
+        _episode_count_from_mapping(source, EPISODES_PER_SEASON_ALIASES)
+        or _episode_count_from_mapping(basic, EPISODES_PER_SEASON_ALIASES)
+        or _episode_count_from_mapping(source_brief, EPISODES_PER_SEASON_ALIASES)
+        or _episode_count_from_mapping(season_plan, EPISODES_PER_SEASON_ALIASES)
+    )
+    if per_season > 0:
+        season_count = (
+            _episode_count_from_mapping(source, SEASON_COUNT_ALIASES)
+            or _episode_count_from_mapping(basic, SEASON_COUNT_ALIASES)
+            or _episode_count_from_mapping(source_brief, SEASON_COUNT_ALIASES)
+            or _episode_count_from_mapping(season_plan, SEASON_COUNT_ALIASES)
+            or 1
+        )
+        return max(15, per_season * max(1, season_count))
+
+    total = (
+        _episode_count_from_mapping(source, EPISODE_COUNT_ALIASES)
+        or _episode_count_from_mapping(basic, EPISODE_COUNT_ALIASES)
+        or _episode_count_from_mapping(source_brief, EPISODE_COUNT_ALIASES)
+        or _episode_count_from_mapping(season_plan, EPISODE_COUNT_ALIASES)
+    )
+    if total > 0:
+        return max(15, total)
+
+    return max(15, per_season or default)
+
+
+def _sync_episode_aliases(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(payload or {})
+    basic = normalized.get("basic_config") if isinstance(normalized.get("basic_config"), dict) else {}
+    basic = dict(basic)
+    total = _episode_count_from_payload({**normalized, "basic_config": basic}, default=20)
+    episodes_per_season = (
+        _episode_count_from_mapping(normalized, EPISODES_PER_SEASON_ALIASES)
+        or _episode_count_from_mapping(basic, EPISODES_PER_SEASON_ALIASES)
+        or total
+    )
+
+    for key in EPISODE_COUNT_ALIASES:
+        normalized[key] = total
+        basic[key] = total
+    for key in EPISODES_PER_SEASON_ALIASES:
+        normalized[key] = episodes_per_season
+        basic[key] = episodes_per_season
+    normalized["basic_config"] = basic
+    return normalized
+
+
+def _normalize_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    normalized = _sync_episode_aliases(dict(payload or {}))
     stage_prompts = normalized.get("user_knowledge_stage_prompts")
     prompt_preferences = normalized.get("prompt_preferences") if isinstance(normalized.get("prompt_preferences"), dict) else {}
     if not isinstance(stage_prompts, dict):
@@ -3410,6 +3522,7 @@ def _normalize_stage_output(
     stage: str,
     data: dict[str, Any],
     *,
+    payload: dict[str, Any] | None = None,
     parse_warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     warnings = parse_warnings if parse_warnings is not None else []
@@ -3497,7 +3610,8 @@ def _normalize_stage_output(
             warnings.append("checkpoint_explanation 不是 dict/str，已回退为说明占位")
             _log_field_type_mismatch(stage, "checkpoint_explanation", "dict/str", normalized.get("checkpoint_explanation"))
         normalized["beat_checkpoint_timeline"] = _normalize_beat_timeline(
-            normalized.get("beat_checkpoint_timeline")
+            normalized.get("beat_checkpoint_timeline"),
+            payload=payload,
         )
         normalized["checkpoint_explanation"] = _normalize_checkpoint_explanation(
             normalized.get("checkpoint_explanation"),
@@ -3858,7 +3972,14 @@ def _compact_stage_05_basic_config(value: Any) -> dict[str, Any]:
         "target_format",
         "season_count",
         "episodes_per_season",
+        "episodesPerSeason",
+        "total_episodes",
+        "totalEpisodes",
+        "episode_num",
+        "episode_count",
+        "episodeCount",
         "minutes_per_episode",
+        "minutesPerEpisode",
         "adaptation_direction",
         "user_constraints",
         "user_requirements",
@@ -3876,6 +3997,12 @@ def _compact_stage_05_basic_config(value: Any) -> dict[str, Any]:
         compact["source_title"] = compact["project_title"]
     if "project_title" not in compact and compact.get("source_title"):
         compact["project_title"] = compact["source_title"]
+    total = _episode_count_from_payload({"basic_config": compact}, default=20)
+    per_season = _episode_count_from_mapping(compact, EPISODES_PER_SEASON_ALIASES) or total
+    for key in EPISODE_COUNT_ALIASES:
+        compact[key] = total
+    for key in EPISODES_PER_SEASON_ALIASES:
+        compact[key] = per_season
     return compact
 
 
@@ -4433,7 +4560,7 @@ def _ensure_source_brief_core_fields(value: dict[str, Any]) -> dict[str, Any]:
     result.setdefault("source_title", result.get("title") or result.get("project_title") or "未命名项目")
     result.setdefault("target_format", result.get("format") or "短剧")
     result.setdefault("season_count", 1)
-    result.setdefault("episodes_per_season", result.get("total_episodes") or 60)
+    result.setdefault("episodes_per_season", _episode_count_from_payload({"source_brief": result}, default=20))
     result.setdefault("minutes_per_episode", 2)
     result.setdefault("core_premise", content or "核心故事信息待人工补充")
     result.setdefault("story_outline", result.get("outline") or result["core_premise"])
@@ -4535,9 +4662,9 @@ def _ensure_character_core_fields(value: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _normalize_beat_timeline(value: Any) -> list[dict[str, Any]]:
+def _normalize_beat_timeline(value: Any, *, payload: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     items = value if isinstance(value, list) else []
-    ranges = _split_episode_ranges(_episodes_per_season_from_basic_config(None))
+    ranges = _split_episode_ranges(_episode_count_from_payload(payload or {}, default=20))
     normalized: list[dict[str, Any]] = []
     for index in range(15):
         raw = items[index] if index < len(items) and isinstance(items[index], dict) else {}
@@ -5184,7 +5311,11 @@ def _build_mock_stage_output(stage: str, payload: dict[str, Any]) -> tuple[dict[
             "target_format": target_format,
             "season_plan": {
                 "season_count": int(payload.get("season_count") or 1),
-                "episodes_per_season": int(payload.get("episodes_per_season") or 60),
+                "episodes_per_season": int(
+                    payload.get("episodes_per_season")
+                    or payload.get("episodesPerSeason")
+                    or _episode_count_from_payload(payload, default=20)
+                ),
                 "minutes_per_episode": int(payload.get("minutes_per_episode") or 2),
             },
             "core_premise": source_text[:180] or "当前为 mock 提取结果，请在接入真实原文后替换。",
@@ -5247,7 +5378,7 @@ def _build_mock_stage_output(stage: str, payload: dict[str, Any]) -> tuple[dict[
         return {"character_plan": character_plan}, json.dumps(character_plan, ensure_ascii=False, indent=2)
 
     if stage == "04":
-        total = _episodes_per_season_from_basic_config(payload.get("basic_config"))
+        total = _episode_count_from_payload(payload, default=20)
         ranges = _split_episode_ranges(total)
         linked_storylines = [
             ["主角成长线", "反派压迫线"],
@@ -5449,16 +5580,7 @@ def _normalize_storyline_decisions(
 
 
 def _episodes_per_season_from_basic_config(value: Any) -> int:
-    config = value if isinstance(value, dict) else {}
-    try:
-        episodes = int(
-            config.get("episodes_per_season")
-            or config.get("episodesPerSeason")
-            or 60
-        )
-    except (TypeError, ValueError, AttributeError):
-        episodes = 60
-    return max(15, episodes)
+    return _episode_count_from_payload({"basic_config": value if isinstance(value, dict) else {}}, default=20)
 
 
 def _split_episode_ranges(total_episodes: int) -> list[str]:
@@ -5630,5 +5752,15 @@ def _repair_stage_output_with_payload(
         source_brief = result.get("source_brief")
         source_brief = _overlay_source_brief_locked_fields(source_brief, payload)
         result["source_brief"] = _ensure_source_brief_core_fields(source_brief)
+
+    if stage == "04":
+        result["beat_checkpoint_timeline"] = _normalize_beat_timeline(
+            result.get("beat_checkpoint_timeline"),
+            payload=payload,
+        )
+        result["checkpoint_explanation"] = _normalize_checkpoint_explanation(
+            result.get("checkpoint_explanation"),
+            result["beat_checkpoint_timeline"],
+        )
 
     return result

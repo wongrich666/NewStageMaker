@@ -184,7 +184,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not fields:
             return False
 
-        if stage_key in {"beat", "storylines"}:
+        if stage_key == "beat":
+            return (
+                _framework_beat_timeline_complete(framework_state.get("beat_checkpoint_timeline"))
+                and _framework_checkpoint_explanation_complete(framework_state.get("checkpoint_explanation"))
+            )
+
+        if stage_key == "storylines":
             return all(_framework_value_present(framework_state.get(field)) for field in fields)
 
         return any(_framework_value_present(framework_state.get(field)) for field in fields)
@@ -445,6 +451,53 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         return bool(value)
 
+    def _framework_beat_item_has_real_content(item) -> bool:
+        if not isinstance(item, dict):
+            return False
+        for key in (
+            "narrative_function",
+            "plot_content",
+            "character_change",
+            "conflict_upgrade",
+            "hook_or_reversal",
+        ):
+            if _framework_value_present(item.get(key)):
+                return True
+        return False
+
+    def _framework_beat_timeline_complete(value) -> bool:
+        if not isinstance(value, list) or len(value) != 15:
+            return False
+        return all(_framework_beat_item_has_real_content(item) for item in value)
+
+    def _framework_checkpoint_explanation_complete(value) -> bool:
+        if isinstance(value, str):
+            return _framework_value_present(value)
+        if not isinstance(value, dict):
+            return False
+        for key in (
+            "act_one_logic",
+            "act_two_logic",
+            "act_three_logic",
+            "opening_hook",
+            "first_three_episodes",
+            "midpoint",
+            "dark_night_and_turn",
+            "ending_closure",
+        ):
+            if _framework_value_present(value.get(key)):
+                return True
+        beat_notes = value.get("beat_notes")
+        if isinstance(beat_notes, list):
+            return any(
+                isinstance(item, dict)
+                and _framework_value_present(
+                    item.get("explanation") or item.get("summary") or item.get("content")
+                )
+                for item in beat_notes
+            )
+        return False
+
     def _framework_basic_config_from_stage_payload(data: dict, existing_state: dict) -> dict:
         basic = data.get("basic_config") if isinstance(data.get("basic_config"), dict) else {}
         if basic:
@@ -485,7 +538,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not stage_key:
             return stage_state
         fields = _framework_stage_output_fields(stage_no)
-        if str(stage_no or "").zfill(2) in {"04", "05"}:
+        normalized_stage_no = str(stage_no or "").zfill(2)
+        if normalized_stage_no == "04":
+            has_output = (
+                _framework_beat_timeline_complete(stage_output.get("beat_checkpoint_timeline"))
+                and _framework_checkpoint_explanation_complete(stage_output.get("checkpoint_explanation"))
+            )
+        elif normalized_stage_no == "05":
             has_output = all(_framework_value_present(stage_output.get(field)) for field in fields)
         else:
             has_output = any(_framework_value_present(stage_output.get(field)) for field in fields)
@@ -2570,11 +2629,20 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def create_framework_planner_asset_api():
         data = request.get_json(silent=True) or {}
         try:
+            episodes_per_season = int(
+                data.get("episodes_per_season")
+                or data.get("episodesPerSeason")
+                or data.get("total_episodes")
+                or data.get("totalEpisodes")
+                or data.get("episode_num")
+                or data.get("episode_count")
+                or 20
+            )
             asset = task_manager.create_framework_planner_asset(
                 user_id=_require_user_id(),
                 title=str(data.get("title") or data.get("project_title") or ""),
                 season_count=int(data.get("season_count") or 1),
-                episodes_per_season=int(data.get("episodes_per_season") or data.get("total_episodes") or 60),
+                episodes_per_season=episodes_per_season,
                 target_format=str(data.get("target_format") or data.get("genre") or "短剧"),
                 style=str(data.get("style") or ""),
                 description=str(data.get("description") or data.get("story_outline") or ""),
