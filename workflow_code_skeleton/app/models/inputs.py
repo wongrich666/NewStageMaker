@@ -1,0 +1,284 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+
+def _pick(data: dict[str, Any], *keys: str, default: Any = "") -> Any:
+    for key in keys:
+        if key in data and data[key] is not None:
+            return data[key]
+    return default
+
+
+def _jsonish_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _derive_total_episodes_from_package(value: Any) -> int:
+    package = _jsonish_dict(value)
+    if isinstance(package.get("framework_plan_package"), dict):
+        package = package["framework_plan_package"]
+    candidates = [
+        package.get("totalEpisodes"),
+        package.get("total_episodes"),
+        package.get("episode_count"),
+    ]
+    basic = package.get("basic_config")
+    if isinstance(basic, dict):
+        candidates.extend(
+            [
+                basic.get("totalEpisodes"),
+                basic.get("total_episodes"),
+                basic.get("episode_count"),
+                basic.get("episodes_per_season"),
+            ]
+        )
+    for candidate in candidates:
+        try:
+            if isinstance(candidate, bool):
+                continue
+            number = int(candidate)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            return number
+    return 0
+
+
+def derive_script_title_content(*candidates: Any) -> str:
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if not text:
+            continue
+        compact = " ".join(text.split())
+        return compact[:32] or "AI原创剧本"
+    return "AI原创剧本"
+
+
+@dataclass(slots=True)
+class WorkflowInput:
+    title: str
+    episode_word_count: int
+    total_episodes: int
+    user_expectation: str
+    character_count: int
+    character_appearance_requirements: str
+    character_alias_naming_rules: str
+    outfit_switch_rules: str
+    story_outline: str
+    core_scene_input: str
+    character_bios: str
+    episode_plan: str
+    selected_preference_tags: list[dict[str, Any]] = field(default_factory=list)
+    selected_preference_tag_ids: list[str] = field(default_factory=list)
+    user_preference_prompt: str = ""
+    user_knowledge_tag_prompt: str = ""
+    script_format_mode: str = ""
+    framework_plan_package: Any = field(default_factory=dict)
+    worldview_plan: Any = field(default_factory=dict)
+    beat_checkpoint_timeline: Any = field(default_factory=list)
+    character_storylines: Any = field(default_factory=list)
+    character_plan: Any = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "WorkflowInput":
+        user_expectation = str(
+            _pick(
+                data,
+                "user_expectation",
+                "expectation",
+                "用户期待",
+                "用户想要的故事",
+                default="",
+            )
+        ).strip()
+        framework_plan_package = _pick(data, "framework_plan_package", "frameworkPlanPackage", default={})
+        total_episodes = int(
+            _pick(data, "total_episodes", "总集数", default=0)
+        )
+        if total_episodes <= 0:
+            total_episodes = _derive_total_episodes_from_package(framework_plan_package)
+        return cls(
+            title=str(
+                _pick(
+                    data,
+                    "title",
+                    "script_title_content",
+                    "剧本标题",
+                    default=derive_script_title_content(user_expectation),
+                )
+            ).strip()
+            or derive_script_title_content(user_expectation),
+            episode_word_count=int(
+                _pick(
+                    data,
+                    "episode_word_count",
+                    "per_episode_word_count",
+                    "每集正文字数",
+                    default=600,
+                )
+            ),
+            total_episodes=total_episodes,
+            user_expectation=user_expectation,
+            character_count=int(
+                _pick(data, "character_count", "角色数量", default=0)
+            ),
+            character_appearance_requirements=str(
+                _pick(
+                    data,
+                    "character_appearance_requirements",
+                    "appearance_requirements",
+                    "服装版本需求",
+                    "人物服装要求",
+                    default="",
+                )
+            ).strip(),
+            character_alias_naming_rules=str(
+                _pick(
+                    data,
+                    "character_alias_naming_rules",
+                    "alias_naming_rules",
+                    "命名偏好",
+                    "人物别名命名规则",
+                    default="",
+                )
+            ).strip(),
+            outfit_switch_rules=str(
+                _pick(
+                    data,
+                    "outfit_switch_rules",
+                    "服装切换规则",
+                    "换装规则",
+                    default="",
+                )
+            ).strip(),
+            story_outline=str(
+                _pick(data, "story_outline", "故事大纲", default="")
+            ).strip(),
+            core_scene_input=str(
+                _pick(data, "core_scene_input", "核心场景", default="")
+            ).strip(),
+            character_bios=str(
+                _pick(data, "character_bios", "人物小传", default="")
+            ).strip(),
+            episode_plan=str(
+                _pick(data, "episode_plan", "分集计划", default="")
+            ).strip(),
+            selected_preference_tags=_coerce_tag_list(
+                _pick(data, "selected_preference_tags", default=[])
+            ),
+            selected_preference_tag_ids=_coerce_string_list(
+                _pick(data, "selected_preference_tag_ids", default=[])
+            ),
+            user_preference_prompt=str(
+                _pick(data, "user_preference_prompt", default="")
+            ).strip(),
+            user_knowledge_tag_prompt=str(
+                _pick(data, "user_knowledge_tag_prompt", default="")
+            ).strip(),
+            script_format_mode=str(
+                _pick(data, "script_format_mode", "scriptFormatMode", default="")
+            ).strip(),
+            framework_plan_package=framework_plan_package,
+            worldview_plan=_pick(data, "worldview_plan", "worldviewPlan", default={}),
+            beat_checkpoint_timeline=_pick(
+                data,
+                "beat_checkpoint_timeline",
+                "beatCheckpointTimeline",
+                default=[],
+            ),
+            character_storylines=_pick(
+                data,
+                "character_storylines",
+                "characterStorylines",
+                default=[],
+            ),
+            character_plan=_pick(data, "character_plan", "characterPlan", default={}),
+        )
+
+    @classmethod
+    def from_json_file(cls, path: str | Path) -> "WorkflowInput":
+        file_path = Path(path)
+        data = json.loads(file_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(data, dict):
+            raise ValueError("输入文件必须是 JSON object")
+        return cls.from_dict(data)
+
+    def validate(self) -> None:
+        if self.total_episodes <= 0:
+            raise ValueError("total_episodes / 总集数 必须大于 0")
+        if self.episode_word_count <= 0:
+            raise ValueError("episode_word_count / 每集正文字数 必须大于 0")
+        has_full_outline = bool(self.story_outline and self.character_bios and self.episode_plan)
+        # framework 新版工作流起步只依赖 3 个网页输入：
+        # user_expectation / character_count / total_episodes。
+        # story_outline 等字段仍保留为兼容导入或恢复旧项目，但不再是框架启动必填。
+        has_framework_prompt = bool(
+            self.user_expectation and self.character_count > 0 and self.total_episodes > 0
+        )
+        has_framework_to_script_package = bool(
+            self.script_format_mode in {"framework_to_script", "better_framework_script"}
+            and self.framework_plan_package
+            and self.total_episodes > 0
+        )
+        if not has_full_outline and not has_framework_prompt and not has_framework_to_script_package:
+            raise ValueError(
+                "请提供完整的故事大纲/人物小传/分集计划，或至少提供 "
+                "user_expectation / 用户期待、character_count / 角色数量、"
+                "total_episodes / 总集数，或提供 framework_to_script 专用的 "
+                "framework_plan_package / total_episodes"
+            )
+
+
+def _coerce_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = str(item.get("id") if isinstance(item, dict) else item or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def _coerce_tag_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict):
+            tag_id = str(item.get("id") or "").strip()
+            name = str(item.get("name") or "").strip()
+            if not tag_id and not name:
+                continue
+            result.append(
+                {
+                    "id": tag_id,
+                    "name": name,
+                    "category": str(item.get("category") or "").strip(),
+                    "builtin": bool(item.get("builtin")),
+                    "description": str(item.get("description") or "").strip(),
+                    "prompt_text": str(item.get("prompt_text") or "").strip(),
+                }
+            )
+        else:
+            text = str(item or "").strip()
+            if text:
+                result.append({"id": text, "name": text, "category": "", "builtin": False, "description": "", "prompt_text": ""})
+    return result

@@ -1,0 +1,365 @@
+schema_version: 1.0.0
+name: script12_02
+id: 7645258252653445183
+description: "正文审核"
+mode: workflow
+icon: plugin_icon/workflow.png
+nodes:
+    - id: "100001"
+      type: start
+      title: 开始
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-Start-v2.jpg
+      description: "工作流的起始节点，用于设定启动工作流需要的信息"
+      position:
+        x: 0
+        y: 0
+      parameters:
+        node_outputs:
+            according_conflict:
+                type: string
+                required: true
+                value: null
+            according_epiplan:
+                type: string
+                required: true
+                value: null
+            character_count:
+                type: integer
+                required: true
+                value: null
+            episode_num:
+                type: integer
+                required: true
+                value: null
+            memory:
+                type: string
+                required: true
+                value: null
+            script:
+                type: string
+                required: true
+                value: null
+            start_epi:
+                type: integer
+                required: true
+                value: null
+            user_feedback:
+                type: string
+                value: null
+    - id: "900001"
+      type: end
+      title: 结束
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-End-v2.jpg
+      description: "工作流的最终节点，用于返回工作流运行后的结果信息"
+      position:
+        x: 1000
+        y: 0
+      parameters:
+        node_inputs:
+            - name: scriptreview
+              input:
+                type: string
+                value:
+                    path: scriptreview
+                    ref_node: "197606"
+        terminatePlan: returnVariables
+    - id: "197606"
+      type: llm
+      title: 大模型
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-LLM-v2.jpg
+      description: "调用大语言模型,使用变量和提示词生成回复"
+      version: "3"
+      position:
+        x: 426.67757774140756
+        y: -39
+      parameters:
+        fcParamVar:
+            knowledgeFCParam: {}
+        llmParam:
+            - name: generationDiversity
+              input:
+                type: string
+                value: default_val
+            - name: apiMode
+              input:
+                type: integer
+                value: "0"
+            - name: maxTokens
+              input:
+                type: integer
+                value: "32768"
+            - name: spCurrentTime
+              input:
+                type: boolean
+                value: false
+            - name: spAntiLeak
+              input:
+                type: boolean
+                value: false
+            - name: thinkingType
+              input:
+                type: string
+                value: disabled
+            - name: responseFormat
+              input:
+                type: integer
+                value: "2"
+            - name: modelName
+              input:
+                type: string
+                value: DeepSeek-V3.2
+            - name: modelType
+              input:
+                type: integer
+                value: "1764929611"
+            - name: parameters
+              input:
+                type: object
+                value: null
+            - name: prompt
+              input:
+                type: string
+                value: 执行阶段：框架转剧本正文对白融合审核。读取输入，并只返回约定的输出字段。
+            - name: enableChatHistory
+              input:
+                type: boolean
+                value: false
+            - name: chatHistoryRound
+              input:
+                type: integer
+                value: "3"
+            - name: systemPrompt
+              input:
+                type: string
+                value: |-
+                    你是“五集正文连贯性审核编剧”。
+
+                    你的职责不是润色，不是评价文采，而是判断当前这一批正文是否具备进入下一阶段的资格。
+                    你必须优先审：批次边界、格式结构、alias 命名纪律、集间承接、因果冲突成立、人物动机成立、对白自然度、角色声音区分度、可拍性和结果推进。
+
+                    角色对白工作流已经合并进正文编写。
+                    你不再审核“当前五集角色对话JSON是否落地”。
+                    你要直接审核正文里的对白是否像角色当场说出口的话，是否有潜台词、关系压力、说话动作和人物区分度。
+                    如果正文只是为了冲突而吵架、为了推进剧情而说话、为了解释设定而说话，必须判为问题。
+
+                    # 输入
+
+                    【大纲对应集的分集计划】
+                    {{according_epiplan}}
+
+                    【前文记忆】
+                    {{memory}}
+
+                    【对应集开头冲突钩子】
+                    {{according_conflict}}
+
+                    【当前批次剧本正文】
+                    {{script}}
+
+                    【每集正文字数】
+                    {{character_count}}
+
+                    # 输出强约束
+
+                    只输出合法 JSON object。
+                    禁止输出 markdown、代码块、解释、标题、注释、自然语言报告。
+                    passed 与 rewrite_required 必须是 boolean。
+                    blocking_issues 与 non_blocking_issues 必须是数组。
+                    rewrite_start_episode 必须是整数。
+                    stage 固定写 "five_episode_continuity_review"。
+
+                    如果存在任意 blocking_issues：passed=false，rewrite_required=true，rewrite_start_episode 填写本批次中最早出问题的实际集数。
+                    如果没有 blocking_issues：passed=true，rewrite_required=false，blocking_issues=[]，rewrite_start_episode 填写本批次起始集 {{start_epi}}。
+                    blocking_issues 必须具体到可修复：第几集、第几场、什么问题、为什么影响后续、应该修什么方向。
+
+                    # 审核优先级
+
+                    第一优先级：批次边界和基础格式。
+                    必须从第 {{start_epi}} 集开始，连续覆盖当前批次，不得跳集、漏集、重复集、越界。当前批次最多五集，最后一集不得超过总集数 {{episode_num}}。每集必须 2-3 场。每场必须有场次头、角色行、场景行、道具行、动作行、对白行。如果缺集、跳集、越界、场次结构严重错误，直接 blocking。
+
+                    第二优先级：前文记忆
+                    本批第一集必须接住【前文记忆】中的 final_hook、must_carry_into_next_turn、unresolved_threads、relationship_state 或 appearance_continuity_summary。如果第一场另起炉灶、重新开局、跳过上批结尾危机或关系状态，直接 blocking。每集开头也必须承接上一集结尾。
+
+                    第三优先级：对应集开头冲突钩子
+                    每集必须能对应【对应集开头冲突钩子】中的 carry_in、why_now、character_motivation、emotional_precondition、scene_cause_chain、opening_action、current_goal、core_obstacle、mid_episode_turn、episode_state_change、non_conflict_moment、natural_transition、ending_hook。
+                    如果上游暂时没有 why_now 等新字段，则审核正文是否自行补出了合理的“为什么现在发生”和“人物为什么这样做”。
+                    以下情况直接 blocking：只落地冲突表象没有动机；人物突然行动没有触发；冲突像被硬塞进剧情；每场都是吵架但没有具体目标和阻力；ending_hook 没有落在具体事件上；当前目标、核心阻力和结尾钩子完全脱节。
+
+                    第四优先级：人物动机和行为成立。
+                    关键选择必须来自人设、处境、关系、利益、恐惧、压力或前文事件。如果角色为了推进剧情突然降智、突然转变、突然知道信息、突然相信/不相信某人，直接 blocking。
+
+                    第五优先级：正文内对白质量。
+                    对白必须像角色当场说出口的话，而不是作者替角色解释剧情。
+                    以下情况直接 blocking：大量说明书式台词活台词晦涩；所有人都说完整标准句；去掉说话人后分不出谁在说；对白只是交代设定、复述剧情、解释规则；没有欲望、遮掩、试探、回避、反击或潜台词；对白推动剧情但不符合身份和关系；每场只靠争吵推进；角色明明有隐瞒动机却把所有信息说清楚；连续 3 句以上像书面说明、逻辑总结或作者代讲。
+
+                    第六优先级：角色声音区分度。
+                    检查句长、语气、攻击方式、回避方式、情绪爆点、亲近/对立时的表达方式、同一角色前后声音是否稳定。如果两个以上关键角色声音高度同质化，且影响可表演性，必须 blocking。
+
+                    第七优先级：non_conflict_moment 是否有效。
+                    每集至少应该有一个不以直接争吵推进的自然人物时刻。可以是动作、沉默、处理道具、短暂合作、回避视线、照顾细节、整理衣物、隐藏证据等。如果整集从头到尾都是硬冲突、硬逼问、硬反转，没有任何自然过渡，且导致剧情刻意，必须 blocking 或 non_blocking。如果该时刻只是闲聊、灌水、无效抒情，也应判问题。
+
+                    第八优先级：影视化可拍性。
+                    正文必须通过动作、对白、场面变化呈现信息。不能大量依赖作者解释、小说化心理描写或抽象总结。大量出现“他意识到”“她心里明白”“他其实仍然在乎”等不可拍心理描写，直接 blocking。
+
+                    第九优先级：结果推进。
+                    每场戏、每一集都必须改变至少一种状态：局势、关系、信息差、资源、身份、退路、目标、代价、敌我优势、下一步行动条件。如果单场戏结束后什么都没变，判问题；如果单集没有实际变化，直接 blocking。
+
+                    第十优先级：字数。
+                    每集字数应接近 {{character_count}}，允许约 ±30%。字数问题不能盖过承接、alias、人物行为、对白质量和因果成立。
+
+                    # 审核总原则
+
+                    你的任务不是追求理想满分剧本，而是判断当前批次是否具备进入下一阶段的最低可用质量。
+
+                    审核要严格，但不能无限拔高标准。只有会导致后续正文断裂、观众看不懂、批次不完整、人物行为不成立、关键钩子无法承接的问题，才放入 blocking_issues。
+
+                    如果问题只是“可以更好”“对白还可更自然”“某个动作可以更细”“某场节奏可以更强”，但不影响主线承接和下一阶段继续生成，应放入 non_blocking_issues，不要阻止通过。
+
+                    不要把所有创作建议都写成 blocking。blocking_issues 应该少而准，优先指出最影响连贯性的 1-5 个问题。
+
+                    # 一票否决项
+
+                    出现以下任一情况，必须进入 blocking_issues：
+                    批次不从第 {{start_epi}} 集开始；跳集、漏集、重复集、越界；每集不是 2-3 场；对白像说明书、总结陈词、模型拼句
+                    某集缺少必要场次，导致剧情无法成立。场次结构缺失严重；未声明 alias；alias 错绑；必须使用 alias 时退回裸名/泛称；命名漂移；关键人物行为不符合人设或规则
+                    第一集没有承接上批记忆；上一集结尾问题没有被下一集开头接住；正文没有落实因果计划中的 opening_action/current_goal/core_obstacle/ending_hook；冲突缺少 why_now 或人物动机
+                    上游明确要求的核心事件完全缺失，导致后续剧情无法继续。
+                    角色目标、阻碍、选择、结果缺失，观众无法看懂本集冲突为什么发生。
+                    关键人物行为明显违背人设或规则，且没有触发原因。角色声音高度同质化；每场都靠直接争吵推进
+                    结尾钩子缺失或与下一集无法连接。
+                    大量说明书式对白导致冲突前因后果无法以戏的形式成立。关键转变没有触发；单集没有实际结果变化；场次没有改变任何状态；大量不可拍心理描写
+                    alias 命名错误影响后续识别，例如裸名、泛称、错绑 outfit_id、同场命名漂移。未声明 alias；alias 错绑；必须使用 alias 时退回裸名/泛称；命名漂移；关键人物行为不符合人设或规则
+                    如果正文默认观众已经知道上游冲突，只展示抽象对峙、情绪压迫或结论性对白，却没有让观众在场景中看懂冲突的前因、触发、阻碍、选择和后果，应判定为需要修订。
+
+                    以下情况优先进入 non_blocking_issues：
+
+                    对白可以更口语，但当前已能看懂人物诉求。
+                    某个 non_conflict_moment 不够好，但不影响主线。
+                    字数略少，但剧情完整。
+                    某个动作或道具还可以更细，但场面因果已成立。
+                    角色声音有相似之处，但不影响基本可演。
+                    mid_episode_turn 不够强，但本集仍有明确转折和结果。
+                    ending_hook 可以更有力，但下一集仍能承接。
+
+                    重点检查：
+                    本集冲突是否有具体触发事件。
+                    角色目标和阻碍是否通过动作、对话、道具或现场规则体现。
+                    观众是否能看懂双方为什么对立。
+                    场末是否有具体结果，而不是只留下抽象悬念。
+
+                    # blocking_issues 写法
+
+                    错误写法：对白不自然。剧情刻意。节奏有问题。
+                    正确写法：第3集第2场，角色A连续三句解释规则，像作者代讲设定，没有试探、回避或关系压力；需要改成角色A为了隐瞒信息而答非所问，并让角色B通过追问逼出一个破绽。
+
+                    # 输出结构：用纯文本格式输出以下json，不要用```json开头
+
+                    {
+                      "passed": false,
+                      "rewrite_required": true,
+                      "summary": "用一句话总结当前批次是否可进入下一阶段，以及主要问题是什么。",
+                      "blocking_issues": ["第X集第X场，具体问题；需要如何修。"],
+                      "non_blocking_issues": ["不影响通过但建议修的问题。"],
+                      "rewrite_start_episode": 1,
+                      "stage": "five_episode_continuity_review"
+                    }
+            - name: stableSystemPrompt
+              input:
+                type: string
+                value: ""
+            - name: canContinue
+              input:
+                type: boolean
+                value: false
+            - name: loopPromptVersion
+              input:
+                type: string
+                value: ""
+            - name: loopPromptName
+              input:
+                type: string
+                value: ""
+            - name: loopPromptId
+              input:
+                type: string
+                value: ""
+        node_inputs:
+            - name: episode_num
+              input:
+                value:
+                    path: episode_num
+                    ref_node: "100001"
+            - name: start_epi
+              input:
+                value:
+                    path: start_epi
+                    ref_node: "100001"
+            - name: character_count
+              input:
+                value:
+                    path: character_count
+                    ref_node: "100001"
+            - name: according_conflict
+              input:
+                value:
+                    path: according_conflict
+                    ref_node: "100001"
+            - name: according_epiplan
+              input:
+                value:
+                    path: according_epiplan
+                    ref_node: "100001"
+            - name: memory
+              input:
+                value:
+                    path: memory
+                    ref_node: "100001"
+            - name: user_feedback
+              input:
+                value:
+                    path: user_feedback
+                    ref_node: "100001"
+            - name: script
+              input:
+                value:
+                    path: script
+                    ref_node: "100001"
+        node_outputs:
+            errorBody:
+                type: object
+                properties:
+                    errorCode:
+                        type: string
+                        value: null
+                    errorMessage:
+                        type: string
+                        value: null
+                value: null
+            isSuccess:
+                type: boolean
+                value: null
+            scriptreview:
+                type: string
+                value: null
+        settingOnError:
+            dataOnErr: |-
+                {
+                  "passed": false,
+                  "rewrite_required": true,
+                  "summary": "用一句话总结当前批次是否可进入下一阶段，以及主要问题是什么。",
+                  "blocking_issues": ["第X集第X场，具体问题；需要如何修。"],
+                  "non_blocking_issues": ["不影响通过但建议修的问题。"],
+                  "rewrite_start_episode": 1,
+                  "stage": "five_episode_continuity_review"
+                }
+            ext:
+                backupLLmParam: '{"apiMode":0,"temperature":1,"topP":0.7,"frequencyPenalty":0,"maxTokens":32768,"spCurrentTime":false,"spAntiLeak":false,"thinkingType":"disabled","responseFormat":2,"modelName":"豆包·1.6·思考深度调节","modelType":1761535088,"generationDiversity":"default_val","parameters":{"max_completion_tokens":0,"reasoning_effort":"medium"}}'
+            processType: 2
+            retryTimes: 3
+            switch: true
+            timeoutMs: 180000
+edges:
+    - source_node: "100001"
+      target_node: "197606"
+    - source_node: "197606"
+      target_node: "900001"

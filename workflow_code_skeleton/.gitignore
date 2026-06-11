@@ -1,0 +1,68 @@
+.env
+.env.local
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyc.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+cache/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+
+# Local CLI/debug outputs
+output*.txt
+debug_state*.json
+*.tmp
+*.dump
+*.log
+
+# Repository-local transient artifacts
+debug/
+output/
+logs/
+tmp/
+temp/
+generated/
+intermediate/
+.tmp_test_workspaces/
+_merge_audit/
+
+# Runtime-generated data and archives
+runtime_data/
+runtime_archive/
+
+# Optional local notes
+CODER_README.md
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+
+
+raw_fastgpt_debug_export/
+raw_fastgpt_debug_export.zip
+
+stage*_cache_dump.json
+stage*_output_only.json
+stage*_worldview_plan_only.json
+stage*_character_plan_only.json
+
+inspect_*.py
+inspect_*.txt
+patch_*.py
+
+*_verify.png
+*.bak
+*.bak_*

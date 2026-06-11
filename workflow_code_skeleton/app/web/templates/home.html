@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>剧本生成平台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260610-minimal-home-v1">
+</head>
+<body class="workspace-body mono-page">
+  <main class="chat-workspace-shell prelogin-shell">
+    <aside id="workspaceCard" class="workspace-sidebar prelogin-sidebar">
+      <div class="sidebar-top">
+        <div class="sidebar-brand-row">
+          <button class="sidebar-toggle" type="button" aria-label="折叠侧边栏">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+          <a class="sidebar-brand" href="{{ url_for('index', auth_token=current_auth_token) }}">
+            <span class="sidebar-brand-mark">I</span>
+            <span class="sidebar-brand-text">
+              <strong>IDEA TO SCRIPT</strong>
+              <em>剧本平台</em>
+            </span>
+          </a>
+        </div>
+      </div>
+
+      <div class="sidebar-primary">
+        <a class="sidebar-create-btn" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') if current_user else url_for('login_page') }}">＋ 新建框架</a>
+        <a class="sidebar-create-btn" href="{{ '/framework-to-script?auth_token=' ~ current_auth_token if current_user and current_auth_token else ('/framework-to-script' if current_user else url_for('login_page')) }}">＋ 框架到剧本</a>
+      </div>
+
+      <div class="sidebar-nav">
+        <section class="sidebar-group">
+          <div class="sidebar-group-label">我的资产</div>
+          <div class="sidebar-section-head sidebar-section-head-compact">
+            <span>资产会话</span>
+            <a class="sidebar-refresh-btn prelogin-inline-link" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token) }}">刷新</a>
+          </div>
+          <div class="sidebar-folders">
+            <details class="workspace-folder">
+              <summary>
+                <span>老剧本平台资产</span>
+              </summary>
+              <div class="workspace-compact-list">
+                <div class="workspace-empty">登录后查看老剧本平台资产。</div>
+              </div>
+            </details>
+            <details class="workspace-folder">
+              <summary>
+                <span>框架资产</span>
+              </summary>
+              <div class="workspace-compact-list">
+                <div class="workspace-empty">登录后查看 01-07 框架资产。</div>
+              </div>
+            </details>
+            <details class="workspace-folder">
+              <summary>
+                <span>新剧本资产</span>
+              </summary>
+              <div class="workspace-compact-list">
+                <div class="workspace-empty">登录后查看 08-12 新剧本资产。</div>
+              </div>
+            </details>
+          </div>
+        </section>
+
+        <section class="sidebar-group sidebar-tools-section">
+          <details class="workspace-folder tools-folder" open>
+            <summary>
+              <span class="sidebar-folder-link">辅助工具</span>
+            </summary>
+            <div class="tool-shortcut-list">
+              <a class="tool-shortcut" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">
+                <span>爆款文审核</span>
+                <small>登录后可运行</small>
+              </a>
+              <a class="tool-shortcut" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">
+                <span>增加爽感</span>
+                <small>登录后可运行</small>
+              </a>
+              <a class="tool-shortcut" href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, section='tools') }}">
+                <span>只换人设</span>
+                <small>登录后可运行</small>
+              </a>
+            </div>
+          </details>
+        </section>
+
+        <section class="sidebar-group sidebar-tools-section">
+          <a
+            class="sidebar-text-link sidebar-side-link"
+            href="{{ url_for('login_page') if not current_user else url_for('workspace_page', auth_token=current_auth_token, mode='new', script_format_mode='waibao') }}"
+          >外包专属格式</a>
+        </section>
+
+        <div class="sidebar-group sidebar-tools-section">
+          <a class="sidebar-text-link sidebar-side-link" href="{{ url_for('index', auth_token=current_auth_token) }}#community">社区好剧</a>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-footer-links">
+          {% if current_user %}
+            <a class="sidebar-profile-btn" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">
+              <span class="sidebar-profile-avatar">{{ current_user.username[:1] }}</span>
+              <span class="sidebar-footer-text">进入工作台</span>
+            </a>
+            <a class="sidebar-logout-link" href="{{ url_for('logout', auth_token=current_auth_token) }}">退出登录</a>
+          {% else %}
+            <a class="sidebar-profile-btn" href="{{ url_for('login_page') }}">
+              <span class="sidebar-profile-avatar">登</span>
+              <span class="sidebar-footer-text">登录创作</span>
+            </a>
+            <a class="sidebar-logout-link" href="{{ url_for('register_page') }}">注册账号</a>
+          {% endif %}
+        </div>
+      </div>
+    </aside>
+
+    <section class="chat-main prelogin-main-shell workspace-main-minimal">
+      <section class="workspace-landing">
+        <div class="workspace-landing__inner">
+          <div class="workspace-landing__eyebrow">IDEA TO SCRIPT</div>
+          <h1 class="workspace-landing__title">剧本平台</h1>
+          <p class="workspace-landing__subtitle">
+            从框架策划到剧本生成，只保留两条核心入口。登录后可保存资产、查看进度、运行辅助工具。
+          </p>
+
+          <div class="workspace-landing__actions">
+            <a class="workspace-landing__card primary" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') if current_user else url_for('login_page') }}">
+              <span class="workspace-landing__card-title">新建框架</span>
+            </a>
+
+            <a class="workspace-landing__card" href="{{ '/framework-to-script?auth_token=' ~ current_auth_token if current_user and current_auth_token else ('/framework-to-script' if current_user else url_for('login_page')) }}">
+              <span class="workspace-landing__card-title">框架到剧本</span>
+            </a>
+          </div>
+
+          <div class="workspace-landing__footnote">
+            {% if current_user %}
+              当前已登录，可直接进入工作流。
+            {% else %}
+              未登录状态下会先进入登录页。
+            {% endif %}
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

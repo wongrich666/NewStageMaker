@@ -1,0 +1,302 @@
+schema_version: 1.0.0
+name: conflictmemory11_04
+id: 7645252634739703850
+description: "钩子记忆"
+mode: workflow
+icon: plugin_icon/workflow.png
+nodes:
+    - id: "100001"
+      type: start
+      title: 开始
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-Start-v2.jpg
+      description: "工作流的起始节点，用于设定启动工作流需要的信息"
+      position:
+        x: 0
+        y: 0
+      parameters:
+        node_outputs:
+            conflict:
+                type: string
+                required: true
+                value: null
+            start_epi:
+                type: integer
+                required: true
+                value: null
+    - id: "900001"
+      type: end
+      title: 结束
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-End-v2.jpg
+      description: "工作流的最终节点，用于返回工作流运行后的结果信息"
+      position:
+        x: 1000
+        y: 0
+      parameters:
+        node_inputs:
+            - name: memory
+              input:
+                type: string
+                value:
+                    path: memory
+                    ref_node: "113344"
+        terminatePlan: returnVariables
+    - id: "113344"
+      type: llm
+      title: 大模型
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-LLM-v2.jpg
+      description: "调用大语言模型,使用变量和提示词生成回复"
+      version: "3"
+      position:
+        x: 480
+        y: 0
+      parameters:
+        fcParamVar:
+            knowledgeFCParam: {}
+        llmParam:
+            - name: generationDiversity
+              input:
+                type: string
+                value: default_val
+            - name: apiMode
+              input:
+                type: integer
+                value: "0"
+            - name: maxTokens
+              input:
+                type: integer
+                value: "32768"
+            - name: spCurrentTime
+              input:
+                type: boolean
+                value: false
+            - name: spAntiLeak
+              input:
+                type: boolean
+                value: false
+            - name: thinkingType
+              input:
+                type: string
+                value: enabled
+            - name: responseFormat
+              input:
+                type: integer
+                value: "2"
+            - name: modelName
+              input:
+                type: string
+                value: DeepSeek-V3.2
+            - name: modelType
+              input:
+                type: integer
+                value: "1764929611"
+            - name: maxCompletionTokens
+              input:
+                type: string
+                value: "0"
+            - name: parameters
+              input:
+                type: object
+                value: null
+            - name: prompt
+              input:
+                type: string
+                value: 执行阶段：框架转剧本因果冲突记忆。读取输入，并只返回约定的输出字段。
+            - name: enableChatHistory
+              input:
+                type: boolean
+                value: false
+            - name: chatHistoryRound
+              input:
+                type: integer
+                value: "3"
+            - name: systemPrompt
+              input:
+                type: string
+                value: |-
+                    你是“因果冲突计划记忆整理器”。
+
+                    你的任务不是复述当前批次 JSON，而是整理一个短、准、能直接喂给下一批因果冲突计划编写器的记忆包。
+                    这个记忆包要帮助下一批承接 final_hook、延续人物动机、避免重复冲突套路、保持 alias 连续性，并继续防止“为冲突而冲突”。
+
+                    # 输入
+
+                    【当前批次起始集】
+                    {{start_epi}}
+
+                    【当前批次因果冲突计划】
+                    {{conflict}}
+
+
+                    # 输出强约束
+
+                    只输出合法 JSON object。
+                    禁止输出 Markdown、代码块、解释、前言、总结。
+                    不得新增字段、删除字段或改字段名。
+                    不得复述全文。
+                    不得杜撰计划里没有发生的内容。
+                    数组没有内容时输出 []，字符串无法判断时输出 ""。
+
+                    # 提炼重点
+
+                    本批最后一集 ending_hook；
+                    下一批第一集必须承接的具体动作、危机、发现或选择；
+                    当前因果状态：哪些压力已经成立、哪些规则已经触发、谁失去退路；
+                    关键角色当前动机状态和未说出口的压力；
+                    尚未解决的因果线索；
+                    下一批不要重复的冲突套路；
+                    已启用 alias 与下一批命名风险。
+
+                    # 人物显示名记忆纪律
+
+                    记忆整理必须保留当前批次已经使用的“人物名(outfit_id)”格式。
+
+                    motivation_continuity[].character_name 必须使用 batchCausalConflictPlan 中的人物显示名，不得删除 outfit_id。
+                    appearance_alias_continuity_summary.character_alias_continuity[].character_name 必须保留“人物名(outfit_id)”。
+                    last_opening_alias 必须保留本批最后一次使用的人物显示名或 opening_alias，不得退回裸名。
+                    aliases_activated_in_plan 中如果出现“人物名(outfit_id)”或带 outfit_id 的 alias，必须原样保留。
+                    next_plan_naming_warning 必须提醒下一批继续沿用“人物名(outfit_id)”格式。
+                    禁止把“林砚(A)”总结成“林砚”。
+                    禁止把 outfit_id 当成可省略信息；它是后续正文阶段识别服装版本和人物状态的必要标记。
+
+                    示例：
+                    如果本批出现 林砚(A)，则记忆中必须写：
+                    "character_name": "林砚(A)"
+                    而不是：
+                    "character_name": "林砚"
+
+                    # 长度标准
+
+                    abstract_of_this_turn 不超过 180 字。
+                    final_hook_of_this_turn 不超过 120 字。
+                    causal_continuity_state 最多 5 条。
+                    motivation_continuity 最多 8 个角色。
+                    unresolved_causal_threads 最多 6 条。
+                    must_carry_into_next_turn 最多 6 条。
+                    do_not_repeat_conflict_patterns 最多 8 条。
+
+                    # 输出结构
+
+                    {
+                      "this_turn_episodes": "例如 1-5 / 6-10",
+                      "abstract_of_this_turn": "",
+                      "final_hook_of_this_turn": "",
+                      "causal_continuity_state": [],
+                      "motivation_continuity": [
+                        {
+                          "character_name": "",
+                          "current_motivation_state": "",
+                          "unspoken_pressure": "",
+                          "next_turn_warning": ""
+                        }
+                      ],
+                      "unresolved_causal_threads": [],
+                      "must_carry_into_next_turn": [],
+                      "next_turn_opening_guidance": "",
+                      "do_not_repeat_conflict_patterns": [],
+                      "appearance_alias_continuity_summary": {
+                        "global_summary": "",
+                        "character_alias_continuity": [
+                          {
+                            "character_name": "",
+                            "last_opening_alias": "",
+                            "aliases_activated_in_plan": [],
+                            "aliases_not_yet_appeared": [],
+                            "next_plan_naming_warning": ""
+                          }
+                        ],
+                        "batch_level_naming_warnings": []
+                      }
+                    }
+            - name: stableSystemPrompt
+              input:
+                type: string
+                value: ""
+            - name: canContinue
+              input:
+                type: boolean
+                value: false
+            - name: loopPromptVersion
+              input:
+                type: string
+                value: ""
+            - name: loopPromptName
+              input:
+                type: string
+                value: ""
+            - name: loopPromptId
+              input:
+                type: string
+                value: ""
+        node_inputs:
+            - name: conflict
+              input:
+                value:
+                    path: conflict
+                    ref_node: "100001"
+            - name: start_epi
+              input:
+                value:
+                    path: start_epi
+                    ref_node: "100001"
+        node_outputs:
+            errorBody:
+                type: object
+                properties:
+                    errorCode:
+                        type: string
+                        value: null
+                    errorMessage:
+                        type: string
+                        value: null
+                value: null
+            isSuccess:
+                type: boolean
+                value: null
+            memory:
+                type: string
+                value: null
+        settingOnError:
+            dataOnErr: |-
+                {
+                    "this_turn_episodes": "例如 1-5 / 6-10",
+                    "abstract_of_this_turn": "",
+                    "final_hook_of_this_turn": "",
+                    "causal_continuity_state": [],
+                    "motivation_continuity": [
+                        {
+                            "character_name": "",
+                            "current_motivation_state": "",
+                            "unspoken_pressure": "",
+                            "next_turn_warning": ""
+                        }
+                    ],
+                    "unresolved_causal_threads": [],
+                    "must_carry_into_next_turn": [],
+                    "next_turn_opening_guidance": "",
+                    "do_not_repeat_conflict_patterns": [],
+                    "appearance_alias_continuity_summary": {
+                        "global_summary": "",
+                        "character_alias_continuity": [
+                            {
+                                "character_name": "",
+                                "last_opening_alias": "",
+                                "aliases_activated_in_plan": [],
+                                "aliases_not_yet_appeared": [],
+                                "next_plan_naming_warning": ""
+                            }
+                        ],
+                        "batch_level_naming_warnings": []
+                    },
+                    "memory": ""
+                }
+            ext:
+                backupLLmParam: '{"generationDiversity":"precise","apiMode":0,"temperature":0.2,"topP":1,"frequencyPenalty":0,"maxTokens":4096,"spCurrentTime":false,"spAntiLeak":false,"thinkingType":"enabled","responseFormat":2,"modelName":"豆包·1.6·思考深度调节","modelType":1761535088,"parameters":{"max_completion_tokens":"0","reasoning_effort":"medium"}}'
+            processType: 2
+            retryTimes: 3
+            switch: true
+            timeoutMs: 300000
+edges:
+    - source_node: "100001"
+      target_node: "113344"
+    - source_node: "113344"
+      target_node: "900001"

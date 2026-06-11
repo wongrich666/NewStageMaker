@@ -1,0 +1,437 @@
+schema_version: 1.0.0
+name: storyline05
+id: 7645224794576896040
+description: "故事线"
+mode: workflow
+icon: plugin_icon/workflow.png
+nodes:
+    - id: "100001"
+      type: start
+      title: 开始
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-Start-v2.jpg
+      description: "工作流的起始节点，用于设定启动工作流需要的信息"
+      position:
+        x: 9.296235679214403
+        y: 0
+      parameters:
+        node_outputs:
+            adaptation_direction:
+                type: string
+                value: null
+            basic_config:
+                type: string
+                required: true
+                value: null
+            beat_checkpoint_time:
+                type: string
+                required: true
+                value: null
+            character_plan:
+                type: string
+                required: true
+                value: null
+            current_storyline:
+                type: string
+                value: null
+            mode:
+                type: string
+                value: null
+                default_value: 创作
+            previous_character:
+                type: string
+                value: null
+            source_brief:
+                type: string
+                required: true
+                value: null
+            user_feedback:
+                type: string
+                value: null
+            user_requirements:
+                type: string
+                value: null
+                default_value: 执行剧本框架策划阶段 05：三幕十五节拍输出。请只返回约定输出。
+            worldview_plan:
+                type: string
+                required: true
+                value: null
+    - id: "900001"
+      type: end
+      title: 结束
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-End-v2.jpg
+      description: "工作流的最终节点，用于返回工作流运行后的结果信息"
+      position:
+        x: 1000
+        y: 0
+      parameters:
+        node_inputs:
+            - name: storyline
+              input:
+                type: string
+                value:
+                    path: storyline
+                    ref_node: "173212"
+        terminatePlan: returnVariables
+    - id: "173212"
+      type: llm
+      title: 大模型
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-LLM-v2.jpg
+      description: "调用大语言模型,使用变量和提示词生成回复"
+      version: "3"
+      position:
+        x: 489.2962356792144
+        y: 0
+      parameters:
+        fcParamVar:
+            knowledgeFCParam: {}
+        llmParam:
+            - name: generationDiversity
+              input:
+                type: string
+                value: default_val
+            - name: apiMode
+              input:
+                type: integer
+                value: "0"
+            - name: maxTokens
+              input:
+                type: integer
+                value: "32768"
+            - name: spCurrentTime
+              input:
+                type: boolean
+                value: false
+            - name: spAntiLeak
+              input:
+                type: boolean
+                value: false
+            - name: thinkingType
+              input:
+                type: string
+                value: enabled
+            - name: responseFormat
+              input:
+                type: integer
+                value: "2"
+            - name: modelName
+              input:
+                type: string
+                value: DeepSeek-V3.2
+            - name: modelType
+              input:
+                type: integer
+                value: "1764929611"
+            - name: maxCompletionTokens
+              input:
+                type: string
+                value: "0"
+            - name: parameters
+              input:
+                type: object
+                value: null
+            - name: prompt
+              input:
+                type: string
+                value: 执行剧本框架策划阶段 05：人物故事线生成更新。请只返回约定输出。
+            - name: enableChatHistory
+              input:
+                type: boolean
+                value: false
+            - name: chatHistoryRound
+              input:
+                type: integer
+                value: "3"
+            - name: systemPrompt
+              input:
+                type: string
+                value: |-
+                    你是“人物故事线生成更新器”。
+
+                    你的任务：
+                    基于已确认的 source_brief、basic_config、worldview_plan、character_plan 和 beat_checkpoint_timeline，从泛泛的主剧情框架中提炼出不同人物自己的故事线。这个阶段不联网搜索，不引入外部资料，只做内部一致性拆解、穿透、归纳和更新。
+
+                    核心目标：
+                    人物故事线不是重新写一套剧情，也不是简单罗列人物经历。你要把 04 阶段三幕十五节拍卡点中的主剧情，拆成每个关键人物在不同节拍和集数中的目标变化、关系变化、冲突位置、情绪推进和叙事功能。每条人物线必须能被后续前端展示为“查看详细故事线”，并允许用户选择 keep / simplify / delete。
+
+                    输入变量：
+                    user_requirements={{user_requirements}}
+                    mode={{mode}}
+                    source_brief={{source_brief}}
+                    basic_config={{basic_config}}
+                    worldview_plan={{worldview_plan}}
+                    character_plan={{character_plan}}
+                    beat_checkpoint_timeline={{beat_checkpoint_timeline}}
+                    previous_character_storylines={{previous_character_storylines}}
+                    current_storyline_decisions={{current_storyline_decisions}}
+                    user_feedback={{user_feedback}}
+                    adaptation_direction={{adaptation_direction}}
+
+                    工作模式：
+                    mode=create 或“创作”：首次生成人物故事线。
+                    mode=revise 或“改写”：根据 previous_character_storylines、current_storyline_decisions 和 user_feedback 更新人物故事线。
+                    如果 mode 为空或无法识别，默认按 create 处理。
+                    revise 时必须尽量保留原有 story line 的 id、character_name、line_type 和合理的 episode_distribution，只修改用户反馈或前端决策涉及的部分。
+
+                    输入优先级：
+                    最高优先级：本提示词规定的输出格式、字段结构、JSON 规则。
+                    第二优先级：已确认上游事实 source_brief、basic_config、worldview_plan、character_plan、beat_checkpoint_timeline。
+                    第三优先级：current_storyline_decisions、previous_character_storylines、user_feedback。
+                    第四优先级：user_requirements 与 adaptation_direction。
+                    第五优先级：你的合理推断。推断必须来自上游已确认事实，不得凭空新增人物、关系、能力、世界规则或核心事件。
+
+                    上游一致性规则：
+                    人物姓名、身份、关系、能力、目标、弱点必须优先来自 character_plan。
+                    世界规则、核心资源、势力结构、空间逻辑必须服从 worldview_plan。
+                    每条故事线的 linked_beats 必须来自 beat_checkpoint_timeline 中真实存在的 beat_no，只能使用 1 到 15 的整数。
+                    每条 episode_distribution 的 episode_range 必须尽量沿用 beat_checkpoint_timeline 中已经存在的 episode_range，不要随意重排集数。
+                    relation_to_beat 必须明确写出对应的节拍编号和节拍名称，例如“对应第9节拍：中点”。
+                    不得新增与 beat_checkpoint_timeline 冲突的关键事件。如果确实需要补足人物线，只能做轻量连接和解释，不得改写主卡点。
+                    如果 user_feedback 或 current_storyline_decisions 要求推翻已确认上游事实，只能在 edit_notes 或 display_text 中提示需要回到上游重新确认，不能直接篡改上游。
+
+                    故事线拆解规则：
+                    至少输出 3 条人物故事线。
+                    必须优先包含主角主线、主要反派/阻力线、B故事/关键配角线。
+                    如果 character_plan 中存在明确的师徒、伙伴、亲情、爱情、家族、组织、秘密或价值观镜像人物，可以根据叙事重要性增加为 strong_support、weak_support 或 optional。
+                    每条故事线都必须有独立的叙事功能，不能只是把同一条主线换个名字重复写。
+                    人物故事线必须穿透三幕十五节拍，不能游离于主框架外。
+                    主角线通常应覆盖第一幕进入主线、第二幕对抗升级、中点变化、最低谷、第三幕整合和结局完成。
+                    反派/阻力线应体现压迫机制、资源优势、阶段性升级和最终解决，不要只写“阻碍主角”。
+                    B故事线应体现情感、关系、主题或价值观的推进，不一定是爱情。
+                    弱副线和可删线必须说明删减后对主线的影响。
+
+                     decision 规则：
+                    decision 只能是 keep、simplify、delete。
+                    首次生成时，主角线和主要反派/阻力线默认 keep。
+                    首次生成时，强副线可默认 keep 或 simplify；弱副线和可选线可默认 simplify。
+                    如果 current_storyline_decisions 中已有前端选择，必须优先应用。
+                    如果 decision=delete，仍要保留该条对象，说明删除理由、原本功能、删除后需要由哪条线承接功能；episode_distribution 可简化，但不得为空。
+                    如果 decision=simplify，必须在 edit_notes 中说明保留哪些核心节点、删减哪些分散事件、如何降低篇幅。
+                    如果 decision=keep，必须在 edit_notes 中说明为什么值得保留，以及后续剧本生成时要注意什么。
+
+                    字段填写规则：
+                    id
+                    使用英文小写下划线，稳定可复用，例如 protagonist_main_line、antagonist_pressure_line、mentor_b_story_line。
+                    revise 时尽量沿用 previous_character_storylines 中已有 id。
+                    不要使用中文、空格或特殊符号。
+
+                    character_name
+                    必须使用 character_plan 中已存在的人物姓名。
+                    如果该线是群像关系线，可以写“角色A/角色B”或“主角与伙伴群”，但必须能从 character_plan 找到依据。
+                    不得凭空新增关键人物。
+
+                    line_type
+                    写明故事线类型，例如“主角成长线”“反派压迫线”“B故事情感线”“师徒关系线”“伙伴信任线”“家族秘密线”“价值观镜像线”。
+
+                    importance
+                    main：主线，通常只给主角主线。
+                    strong_support：强副线，删除会明显损害主线推进或主题表达。
+                    weak_support：弱副线，保留有帮助但可压缩。
+                    optional：可选线，可删或可合并。
+
+                    summary
+                    用一段话概括这条人物线的起点、核心矛盾、推进方式和终点。
+                    不要只写人物简介。
+
+                    linked_beats
+                    数组，填写该人物线显著参与或承担功能的节拍编号。
+                    必须使用 1 到 15 的整数。
+                    主角主线通常应覆盖较多节拍；弱线可覆盖少量关键节拍。
+
+                    episode_distribution
+                    数组，每项必须包含 episode_range、function、event、relation_to_beat。
+                    episode_range 尽量沿用 beat_checkpoint_timeline 中的集数范围。
+                    function 写这段在该人物线中的作用。
+                    event 写这一段人物线的具体推进事件。
+                    relation_to_beat 写它对应哪个节拍，以及如何服务该节拍。
+
+                    detailed_storyline
+                    写成一条完整的人物线说明，必须包含起点、阶段推进、中段变化、危机、结局或删减处理。
+                    不是分集正文，不要写台词，不要写场景细节过多。
+                    要清楚体现“这个人物自己的线索”而不是泛泛复述总剧情。
+
+                    edit_notes
+                    写本条线的编辑建议、保留/精简/删除原因、一致性风险和后续剧本生成注意事项。
+                    如果应用了 current_storyline_decisions 或 user_feedback，必须说明已如何应用。
+                    如果发现与上游不一致，必须明确指出，不要自行改上游。
+
+                    display_text
+                    给前端展示的自然语言总结，400-800 字。
+                    应说明本次拆出了哪些人物线、哪些建议保留/精简/删除、这些人物线如何穿透十五节拍、是否存在与上游不一致的风险。
+                    不要使用 Markdown 标题，不要输出代码块，不要逐项翻译字段名。
+
+                    输出格式：
+                    你必须只输出一个合法 JSON 对象，且必须完全符合以下结构：
+
+                    {
+                      "character_storylines": [
+                        {
+                          "id": "string",
+                          "character_name": "string",
+                          "line_type": "string",
+                          "importance": "main",
+                          "decision": "keep",
+                          "summary": "string",
+                          "linked_beats": [1],
+                          "episode_distribution": [
+                            {
+                              "episode_range": "string",
+                              "function": "string",
+                              "event": "string",
+                              "relation_to_beat": "string"
+                            }
+                          ],
+                          "detailed_storyline": "string",
+                          "edit_notes": "string"
+                        }
+                      ],
+                      "display_text": "string"
+                    }
+
+                    强制规则：
+                    最终回复只能是 JSON 对象。
+                    禁止输出 Markdown。
+                    尤其注意禁止输出 ```json 代码块。
+                    禁止输出解释性前缀，例如“以下是结果”。
+                    禁止输出 JSON 之外的任何文本。
+                    禁止新增 schema 之外的字段。
+                    禁止删除任何字段。
+                    禁止把字段名翻译成中文。
+                    禁止输出空字符串。
+                    数组不得为空。
+                    importance 只能是 main、strong_support、weak_support、optional。
+                    decision 只能是 keep、simplify、delete。
+                    linked_beats 只能包含 1 到 15 的整数。
+                    如果信息缺失，必须用“未明确，需后续确认……”这类文本填充，而不是留空。
+                    输出必须能被 JSON.parse 直接解析。
+            - name: stableSystemPrompt
+              input:
+                type: string
+                value: ""
+            - name: canContinue
+              input:
+                type: boolean
+                value: false
+            - name: loopPromptVersion
+              input:
+                type: string
+                value: ""
+            - name: loopPromptName
+              input:
+                type: string
+                value: ""
+            - name: loopPromptId
+              input:
+                type: string
+                value: ""
+        node_inputs:
+            - name: user_requirements
+              input:
+                value:
+                    path: user_requirements
+                    ref_node: "100001"
+            - name: mode
+              input:
+                value:
+                    path: mode
+                    ref_node: "100001"
+            - name: source_brief
+              input:
+                value:
+                    path: source_brief
+                    ref_node: "100001"
+            - name: basic_config
+              input:
+                value:
+                    path: basic_config
+                    ref_node: "100001"
+            - name: worldview_plan
+              input:
+                value:
+                    path: worldview_plan
+                    ref_node: "100001"
+            - name: character_plan
+              input:
+                value:
+                    path: character_plan
+                    ref_node: "100001"
+            - name: beat_checkpoint_timeline
+              input:
+                value:
+                    path: beat_checkpoint_time
+                    ref_node: "100001"
+            - name: previous_character_storylines
+              input:
+                value:
+                    path: previous_character
+                    ref_node: "100001"
+            - name: current_storyline_decisions
+              input:
+                value:
+                    path: current_storyline
+                    ref_node: "100001"
+            - name: user_feedback
+              input:
+                value:
+                    path: user_feedback
+                    ref_node: "100001"
+            - name: adaptation_direction
+              input:
+                value:
+                    path: adaptation_direction
+                    ref_node: "100001"
+        node_outputs:
+            errorBody:
+                type: object
+                properties:
+                    errorCode:
+                        type: string
+                        value: null
+                    errorMessage:
+                        type: string
+                        value: null
+                value: null
+            isSuccess:
+                type: boolean
+                value: null
+            storyline:
+                type: string
+                value: null
+        settingOnError:
+            dataOnErr: |-
+                {
+                    "character_storylines": [
+                        {
+                            "id": "string",
+                            "character_name": "string",
+                            "line_type": "string",
+                            "importance": "main",
+                            "decision": "keep",
+                            "summary": "string",
+                            "linked_beats": [
+                                1
+                            ],
+                            "episode_distribution": [
+                                {
+                                    "episode_range": "string",
+                                    "function": "string",
+                                    "event": "string",
+                                    "relation_to_beat": "string"
+                                }
+                            ],
+                            "detailed_storyline": "string",
+                            "edit_notes": "string"
+                        }
+                    ],
+                    "display_text": "string"
+                }
+            ext:
+                backupLLmParam: '{"apiMode":0,"temperature":1,"topP":0.7,"frequencyPenalty":0,"maxTokens":4096,"spCurrentTime":false,"spAntiLeak":false,"thinkingType":"enabled","responseFormat":2,"modelName":"豆包·1.6·思考深度调节","modelType":1761535088,"generationDiversity":"default_val","parameters":{"max_completion_tokens":"0","reasoning_effort":"medium"}}'
+            processType: 2
+            retryTimes: 3
+            switch: true
+            timeoutMs: 300000
+edges:
+    - source_node: "100001"
+      target_node: "173212"
+    - source_node: "173212"
+      target_node: "900001"

@@ -1,0 +1,28 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>剧本框架策划工作台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='framework_planner.css') }}?v=20260610-hide-footer-v1" />
+</head>
+<body>
+  <div id="frameworkPlannerApp" class="fp-app"></div>
+  <script>
+    window.frameworkPlannerConfig = {
+      authToken: {{ current_auth_token|tojson }},
+      workspaceUrl: {{ url_for('workspace_page', auth_token=current_auth_token)|tojson }},
+      backendReady: {{ framework_backend_ready|tojson }},
+      storageKey: {{ framework_planner_storage_key|tojson }},
+      apiBase: "/api/framework-planner"
+    };
+  </script>
+  <script src="{{ url_for('static', filename='field_labels_cn.js') }}?v=20260527-readable-labels"></script>
+  <script src="{{ url_for('static', filename='framework_planner.js') }}?v=20260610-guide-check-v1"></script>
+</body>
+</html>
+
+
