@@ -165,16 +165,29 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         return state if isinstance(state, dict) else {}
 
     def _framework_stage_has_data(framework_state: dict, stage_key: str) -> bool:
+        if not isinstance(framework_state, dict):
+            return False
+
+        stage_key = str(stage_key or "").strip()
+
         field_map = {
             "basic": ("source_brief",),
             "worldview": ("worldview_plan",),
             "character": ("character_plan",),
             "beat": ("beat_checkpoint_timeline", "checkpoint_explanation"),
-            "storylines": ("character_storylines",),
+            "storylines": ("character_storylines", "storyline_decisions"),
             "guide": ("adaptation_guide",),
             "package": ("framework_plan_package",),
         }
-        return any(_framework_value_present(framework_state.get(field)) for field in field_map.get(stage_key, ()))
+
+        fields = field_map.get(stage_key, ())
+        if not fields:
+            return False
+
+        if stage_key in {"beat", "storylines"}:
+            return all(_framework_value_present(framework_state.get(field)) for field in fields)
+
+        return any(_framework_value_present(framework_state.get(field)) for field in fields)
 
     def _sanitize_framework_planner_state_for_import(framework_state: dict) -> dict:
         state = copy.deepcopy(framework_state) if isinstance(framework_state, dict) else {}
@@ -332,14 +345,105 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _strip_raw_fastgpt_fields(synthesized)
         return {}
 
+    _FRAMEWORK_EMPTY_TEXTS = {
+        "",
+        "暂无",
+        "无",
+        "无内容",
+        "未提供",
+        "没有",
+        "null",
+        "none",
+        "undefined",
+        "n/a",
+        "na",
+        "[]",
+        "{}",
+    }
+
+    _FRAMEWORK_TECHNICAL_KEYS = {
+        "id",
+        "nodeId",
+        "moduleName",
+        "moduleType",
+        "moduleLogo",
+        "runningTime",
+        "totalPoints",
+        "model",
+        "inputTokens",
+        "outputTokens",
+        "query",
+        "maxToken",
+        "reasoningText",
+        "historyPreview",
+        "contextTotalLen",
+        "finishReason",
+        "llmRequestIds",
+        "updateVarResult",
+        "responseData",
+        "raw",
+        "raw_output",
+        "raw_stage_responses",
+        "debug",
+        "metadata",
+        "usage",
+        "cache",
+        "logs",
+        "backend",
+        "stage_key",
+        "backend_stage_key",
+        "schema_version",
+        "mapping_version",
+        "contract_version",
+        "validation_status",
+        "validation_report",
+        "confirmed",
+        "locked",
+        "stageCommitted",
+        "stage_committed",
+        "completedStages",
+        "completed_stages",
+        "status",
+        "source_path",
+        "source_ref",
+        "payload_keys",
+        "updated_at",
+    }
+
     def _framework_value_present(value) -> bool:
+        """严格判断框架阶段/剧本阶段是否真的有业务内容。
+
+        旧逻辑只判断 dict/list 是否非空，会把空对象壳误判成已完成。
+        这个函数会递归检查真实内容，并过滤常见技术字段。
+        """
         if value is None:
             return False
+
         if isinstance(value, str):
-            return bool(value.strip())
-        if isinstance(value, (list, tuple, set, dict)):
-            return bool(value)
-        return True
+            text = value.strip()
+            if not text:
+                return False
+            return text.lower() not in _FRAMEWORK_EMPTY_TEXTS
+
+        if isinstance(value, bool):
+            return value
+
+        if isinstance(value, (int, float)):
+            return value != 0
+
+        if isinstance(value, (list, tuple, set)):
+            return any(_framework_value_present(item) for item in value)
+
+        if isinstance(value, dict):
+            for key, item in value.items():
+                key_text = str(key or "").strip()
+                if key_text in _FRAMEWORK_TECHNICAL_KEYS:
+                    continue
+                if _framework_value_present(item):
+                    return True
+            return False
+
+        return bool(value)
 
     def _framework_basic_config_from_stage_payload(data: dict, existing_state: dict) -> dict:
         basic = data.get("basic_config") if isinstance(data.get("basic_config"), dict) else {}
@@ -372,7 +476,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "04": ("beat_checkpoint_timeline", "checkpoint_explanation"),
             "05": ("character_storylines", "storyline_decisions"),
             "06": ("adaptation_guide",),
-            "07": ("framework_plan_package", "validation_report"),
+            "07": ("framework_plan_package",),
         }.get(str(stage_no or "").zfill(2), ())
 
     def _merge_framework_stage_state(existing_state: dict, stage_no: str, stage_output: dict) -> dict:
@@ -380,7 +484,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         stage_state = copy.deepcopy(existing_state.get("stage_state") if isinstance(existing_state.get("stage_state"), dict) else {})
         if not stage_key:
             return stage_state
-        has_output = any(_framework_value_present(stage_output.get(field)) for field in _framework_stage_output_fields(stage_no))
+        fields = _framework_stage_output_fields(stage_no)
+        if str(stage_no or "").zfill(2) in {"04", "05"}:
+            has_output = all(_framework_value_present(stage_output.get(field)) for field in fields)
+        else:
+            has_output = any(_framework_value_present(stage_output.get(field)) for field in fields)
         if not has_output:
             return stage_state
         current = stage_state.get(stage_key) if isinstance(stage_state.get(stage_key), dict) else {}
@@ -635,6 +743,159 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         with framework_stage_runs_lock:
             framework_stage_runs.discard(key)
 
+    def _extract_batch_start_from_output(output: dict) -> int | None:
+        if not isinstance(output, dict):
+            return None
+
+        direct_keys = (
+            "batch_start_episode",
+            "batchStartEpisode",
+            "start_episode",
+            "startEpisode",
+            "batch_start",
+            "batchStart",
+            "current_batch_start",
+            "currentBatchStart",
+        )
+
+        for key in direct_keys:
+            value = output.get(key)
+            try:
+                number = int(str(value).strip())
+                if number > 0:
+                    return number
+            except Exception:
+                pass
+
+        nested_candidates = [
+            output.get("batch_meta"),
+            output.get("batchMeta"),
+        ]
+
+        for container_key in (
+                "batchCausalConflictPlan",
+                "batchScriptText",
+                "scriptText",
+                "causalConflictPlan",
+        ):
+            container = output.get(container_key)
+            if isinstance(container, dict):
+                nested_candidates.append(container.get("batch_meta"))
+                nested_candidates.append(container.get("batchMeta"))
+
+        for meta in nested_candidates:
+            if not isinstance(meta, dict):
+                continue
+            for key in direct_keys:
+                value = meta.get(key)
+                try:
+                    number = int(str(value).strip())
+                    if number > 0:
+                        return number
+                except Exception:
+                    pass
+
+        return None
+
+    def _merge_batch_maps(existing, incoming) -> dict:
+        merged = copy.deepcopy(existing) if isinstance(existing, dict) else {}
+
+        if not isinstance(incoming, dict):
+            return merged
+
+        for key, value in incoming.items():
+            if _framework_value_present(value):
+                merged[str(key)] = _strip_raw_fastgpt_fields(copy.deepcopy(value))
+
+        return merged
+
+    def _merge_framework_to_script_stage_output(existing: dict, incoming: dict, stage_key: str) -> dict:
+        """合并 08-12 阶段输出。
+
+        对 11/12 来说，核心是保留历史 batches，不能让新返回的单批次覆盖前面批次。
+        """
+        existing = copy.deepcopy(existing) if isinstance(existing, dict) else {}
+        incoming = copy.deepcopy(incoming) if isinstance(incoming, dict) else {}
+
+        if not existing:
+            merged = {}
+        else:
+            merged = existing
+
+        for key, value in incoming.items():
+            if key == "batches":
+                continue
+            if _framework_value_present(value):
+                merged[key] = _strip_raw_fastgpt_fields(copy.deepcopy(value))
+
+        normalized_stage_key = str(stage_key or "").strip()
+
+        if normalized_stage_key in {"stage11", "stage12"}:
+            existing_batches = existing.get("batches") if isinstance(existing.get("batches"), dict) else {}
+            incoming_has_batches_key = "batches" in incoming and isinstance(incoming.get("batches"), dict)
+            incoming_batches = incoming.get("batches") if isinstance(incoming.get("batches"), dict) else {}
+
+            top_level_batch_content_keys = (
+                "batchCausalConflictPlan",
+                "batch_causal_conflict_plan",
+                "batchScriptText",
+                "batch_script_text",
+            )
+            incoming_has_top_level_batch_content = any(
+                _framework_value_present(incoming.get(key))
+                for key in top_level_batch_content_keys
+            )
+
+            # 明确传入 {"batches": {}} 且没有顶层批次内容时，表示清空当前阶段批次。
+            if incoming_has_batches_key and not incoming_batches and not incoming_has_top_level_batch_content:
+                for key in (
+                        "batches",
+                        "completedBatchStarts",
+                        "completed_batches",
+                        "completedRanges",
+                        "completed_ranges",
+                        "current_batch",
+                        "next_episode",
+                        "isComplete",
+                        "is_complete",
+                        "batchStartEpisode",
+                        "batchEndEpisode",
+                        "batch_start_episode",
+                        "batch_end_episode",
+                        "batchCausalConflictPlan",
+                        "batch_causal_conflict_plan",
+                        "batchScriptText",
+                        "batch_script_text",
+                        "batchCausalConflictReview",
+                        "batch_causal_conflict_review",
+                        "batchScriptReview",
+                        "batch_script_review",
+                ):
+                    merged.pop(key, None)
+                merged["batches"] = {}
+                merged["completedBatchStarts"] = []
+                return _strip_raw_fastgpt_fields(merged)
+
+            batches = _merge_batch_maps(existing_batches, incoming_batches)
+
+            # 兼容后端/Coze 每次只返回当前批次、没有 batches 包裹的情况。
+            if not incoming_batches and _framework_value_present(incoming):
+                batch_start = _extract_batch_start_from_output(incoming)
+                if batch_start:
+                    batches[str(batch_start)] = _strip_raw_fastgpt_fields(copy.deepcopy(incoming))
+
+            if batches:
+                merged["batches"] = batches
+                completed_starts = []
+                for key in batches.keys():
+                    try:
+                        completed_starts.append(int(str(key).strip()))
+                    except Exception:
+                        pass
+                merged["completedBatchStarts"] = sorted(set(completed_starts))
+
+        return _strip_raw_fastgpt_fields(merged)
+
     def _save_framework_to_script_stage(
         *,
         user_id: int,
@@ -703,11 +964,34 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 "scriptMemory": clean_output.get("scriptMemory"),
             },
         }
+        previous_stage_output = script_stages.get(str(stage_key))
+        if not isinstance(previous_stage_output, dict):
+            previous_stage_output = {}
+
+        clean_output = _merge_framework_to_script_stage_output(
+            previous_stage_output,
+            clean_output,
+            str(stage_key),
+        )
         clean_output["updated_at"] = now
         script_stages[str(stage_key)] = clean_output
         stage_outputs = workspace_state.get("stageOutputs")
         if not isinstance(stage_outputs, dict):
             stage_outputs = {}
+        if (
+            str(stage_key) in {"stage11", "stage12"}
+            and isinstance(output, dict)
+            and "batches" in output
+            and isinstance(output.get("batches"), dict)
+            and not output.get("batches")
+        ):
+            stale_aliases = (
+                ("framework_causal_conflict_plan", "batchCausalConflictPlan", "conflictMemory")
+                if str(stage_key) == "stage11"
+                else ("framework_script_text", "batchScriptText", "scriptMemory")
+            )
+            for key in stale_aliases:
+                stage_outputs.pop(key, None)
         for key, value in stage_output_aliases.get(str(stage_key), {}).items():
             if _framework_value_present(value):
                 stage_outputs[key] = _strip_raw_fastgpt_fields(copy.deepcopy(value))
@@ -1104,6 +1388,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             [str(key) for key in batches.keys() if str(key).strip().isdigit()],
             key=lambda item: int(item),
         )
+
+    def _completed_batch_starts_for_detail(batches: dict) -> list[int]:
+        starts: list[int] = []
+        for key in _sorted_numeric_batch_keys(batches):
+            try:
+                starts.append(int(str(key).strip()))
+            except Exception:
+                pass
+        return starts
 
     def _txt_label(key) -> str:
         return readable_label(key)
@@ -3277,6 +3570,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             len(plan),
         )
         expected_ranges = _framework_expected_batch_ranges(plan, total_episodes)
+        asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
         existing_stage11 = _framework_script_stage_cache(framework_asset, "stage11")
         existing_batches = _framework_promote_top_level_batch(
             existing_stage11,
@@ -3288,6 +3582,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             existing_stage11 = {}
             reset_asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
             if reset_asset_id:
+                _save_framework_to_script_stage(
+                    user_id=user_id,
+                    asset_id=reset_asset_id,
+                    stage_key="stage11",
+                    output={"batches": {}},
+                    status="pending",
+                    cascade_downstream=False,
+                )
                 _save_framework_to_script_stage(
                     user_id=user_id,
                     asset_id=reset_asset_id,
@@ -3303,6 +3605,18 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 _framework_stage11_batch_valid,
             )
             existing_batches = progress["valid_batches"]
+            if (
+                expected_ranges
+                and progress["is_complete"]
+                and not (data.get("batchStartEpisode") or data.get("batch_start_episode"))
+            ):
+                return _json_ok(
+                    stage="11",
+                    framework_asset_id=asset_id,
+                    batches=existing_batches,
+                    completedBatchStarts=_completed_batch_starts_for_detail(existing_batches),
+                    **_framework_batch_progress_payload(progress, expected_ranges),
+                )
         start_episode, end_episode, batch_plan = _framework_batch_from_plan(
             plan,
             data.get("batchStartEpisode") or data.get("batch_start_episode"),
@@ -3311,7 +3625,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not batch_plan:
             return _json_error("当前批次缺少 batchEnrichedEpisodePlan，请检查 10 输出集数。", status=400)
 
-        asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
         if not _try_begin_framework_stage(user_id, asset_id, "11"):
             return _json_error("11 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
@@ -3489,6 +3802,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                                 "failure_reason": write_failure_reason,
                                 "write_failure_reason": write_failure_reason,
                                 "write_output_keys": write_output_keys,
+                                "saved_completed_batch_starts": _completed_batch_starts_for_detail(existing_batches),
+                                "can_resume": True,
                             },
                         }
                     ), 500
@@ -3583,6 +3898,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                                     "last_review": conflict_review,
                                     "blockingIssues": blocking_issues,
                                     "blocking_issues": blocking_issues,
+                                    "saved_completed_batch_starts": _completed_batch_starts_for_detail(existing_batches),
+                                    "can_resume": True,
                                 },
                             }
                         ), 422
@@ -3702,6 +4019,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "batch_end_episode": end_episode,
                             "batch_plan_count": len(batch_plan) if isinstance(batch_plan, list) else 0,
                             "base_var_keys": sorted(base_vars.keys()) if isinstance(base_vars, dict) else [],
+                            "saved_completed_batch_starts": _completed_batch_starts_for_detail(existing_batches),
+                            "can_resume": True,
                         },
                     }
                 ), 500
@@ -3741,15 +4060,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         finally:
             _end_framework_stage(user_id, asset_id, "11")
 
-        if (
-            not (data.get("batchStartEpisode") or data.get("batch_start_episode"))
-            and not output.get("isComplete")
-            and len(output.get("batches") or {}) < len(expected_ranges)
-        ):
-            data["reset_stage11"] = False
-            data["resetStage11"] = False
-            return run_framework_to_script_stage11_api()
-
         return _json_ok(stage="11", framework_asset_id=asset_id, **output)
 
     @app.post("/api/framework-to-script/stage/12")
@@ -3779,9 +4089,19 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             ("batchScriptText", "batch_script_text"),
         )
         reset_stage12 = bool(data.get("reset_stage12") or data.get("resetStage12"))
+        asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
         if reset_stage12:
             existing_stage12 = {}
             existing_batches = {}
+            if asset_id:
+                _save_framework_to_script_stage(
+                    user_id=user_id,
+                    asset_id=asset_id,
+                    stage_key="stage12",
+                    output={"batches": {}},
+                    status="pending",
+                    cascade_downstream=False,
+                )
         total_episodes = _positive_int(
             data.get("total_episodes") or (framework_asset or {}).get("episodes_per_season"),
             0,
@@ -3816,6 +4136,18 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             _framework_stage12_batch_valid,
         )
         existing_batches = stage12_progress["valid_batches"]
+        if (
+            expected_ranges
+            and stage12_progress["is_complete"]
+            and not (data.get("batchStartEpisode") or data.get("batch_start_episode"))
+        ):
+            return _json_ok(
+                stage="12",
+                framework_asset_id=asset_id,
+                batches=existing_batches,
+                completedBatchStarts=_completed_batch_starts_for_detail(existing_batches),
+                **_framework_batch_progress_payload(stage12_progress, expected_ranges),
+            )
         requested_start = data.get("batchStartEpisode") or data.get("batch_start_episode")
         selected_batch_source = ""
         if requested_start:
@@ -3872,7 +4204,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not appearance_mapping:
             return _json_error("缺少第09阶段人设服装映射，请先重新运行09。", status=400)
 
-        asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
         if not _try_begin_framework_stage(user_id, asset_id, "12"):
             return _json_error("12 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
@@ -3902,6 +4233,44 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     or _first_present(existing_stage12, "scriptMemory", "script_memory", default="")
                     or ""
                 )
+                framework_plan_package = (
+                        data.get("framework_plan_package")
+                        or data.get("frameworkPlanPackage")
+                        or (framework_asset or {}).get("framework_plan_package")
+                        or {}
+                )
+
+                continuity_brief = {
+                    "project_title": (framework_asset or {}).get("title") or data.get("project_title") or data.get(
+                        "title") or "",
+                    "total_episodes": total_episodes,
+                    "current_batch": {
+                        "start_episode": start_episode,
+                        "end_episode": end_episode,
+                    },
+                    "source_brief": framework_plan_package.get("source_brief") if isinstance(framework_plan_package,
+                                                                                             dict) else {},
+                    "worldview_plan": framework_plan_package.get("worldview_plan") if isinstance(framework_plan_package,
+                                                                                                 dict) else {},
+                    "character_plan": framework_plan_package.get("character_plan") if isinstance(framework_plan_package,
+                                                                                                 dict) else {},
+                    "beat_checkpoint_timeline": framework_plan_package.get("beat_checkpoint_timeline") if isinstance(
+                        framework_plan_package, dict) else [],
+                    "checkpoint_explanation": framework_plan_package.get("checkpoint_explanation") if isinstance(
+                        framework_plan_package, dict) else {},
+                    "character_storylines": framework_plan_package.get("character_storylines") if isinstance(
+                        framework_plan_package, dict) else [],
+                    "storyline_decisions": framework_plan_package.get("storyline_decisions") if isinstance(
+                        framework_plan_package, dict) else [],
+                    "adaptation_guide": framework_plan_package.get("adaptation_guide") if isinstance(
+                        framework_plan_package, dict) else {},
+                    "must_explain_for_reader": [
+                        "本批正文必须从读者零信息视角写清楚人物为什么在这里。",
+                        "必须交代当前冲突的起因、人物动机、上一批次或上游规划留下的因果。",
+                        "不能默认读者已经知道 01-11 阶段的设定。",
+                        "不能只写情绪和对白，必须补足事件来龙去脉。",
+                    ],
+                }
                 base_vars = {
                     "totalEpisodes": total_episodes,
                     "scriptStartEpisode": start_episode,
@@ -3912,6 +4281,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "appearanceMapping": appearance_mapping,
                     "scriptWorldRulesDigest": stage08.get("scriptWorldRulesDigest") or {},
                     "scriptMemory": script_memory,
+
+                    "frameworkPlanPackage": framework_plan_package,
+                    "framework_plan_package": framework_plan_package,
+                    "continuityBrief": continuity_brief,
+                    "continuity_brief": continuity_brief,
                 }
                 _merge_aliases(
                     base_vars,
@@ -3996,6 +4370,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                                 "start_episode": start_episode,
                                 "end_episode": end_episode,
                                 "write_output_keys": write_keys,
+                                "saved_completed_batch_starts": _completed_batch_starts_for_detail(existing_batches),
+                                "can_resume": True,
                             },
                         }
                     ), 500
@@ -4078,6 +4454,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                                     "last_review": script_review,
                                     "blockingIssues": blocking_issues,
                                     "blocking_issues": blocking_issues,
+                                    "saved_completed_batch_starts": _completed_batch_starts_for_detail(existing_batches),
+                                    "can_resume": True,
                                 },
                             }
                         ), 422
@@ -4133,6 +4511,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                                     "start_episode": start_episode,
                                     "end_episode": end_episode,
                                     "rewrite_output_keys": rewrite_keys,
+                                    "saved_completed_batch_starts": _completed_batch_starts_for_detail(existing_batches),
+                                    "can_resume": True,
                                 },
                             }
                         ), 500
@@ -4189,6 +4569,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "batch_end_episode": end_episode,
                             "batch_plan_count": len(batch_plan),
                             "base_var_keys": sorted(base_vars.keys()),
+                            "saved_completed_batch_starts": _completed_batch_starts_for_detail(existing_batches),
+                            "can_resume": True,
                         },
                     }
                 ), 500
@@ -4228,15 +4610,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 )
         finally:
             _end_framework_stage(user_id, asset_id, "12")
-
-        if (
-            not (data.get("batchStartEpisode") or data.get("batch_start_episode"))
-            and not output.get("isComplete")
-            and len(output.get("batches") or {}) < len(expected_ranges)
-        ):
-            data["reset_stage12"] = False
-            data["resetStage12"] = False
-            return run_framework_to_script_stage12_api()
 
         return _json_ok(stage="12", framework_asset_id=asset_id, **output)
 

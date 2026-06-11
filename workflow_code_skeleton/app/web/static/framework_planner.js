@@ -6,6 +6,13 @@
   const KNOWLEDGE_PANEL_STORAGE_KEY = config.knowledgePanelStorageKey || "frameworkPlannerKnowledgePanelOpen.v1";
   const API_BASE = config.apiBase || "/api/framework-planner";
   const authToken = String(config.authToken || "").trim();
+  const INITIAL_URL_PARAMS = new URLSearchParams(window.location.search || "");
+  const INITIAL_ASSET_ID = String(
+    INITIAL_URL_PARAMS.get("asset_id")
+    || INITIAL_URL_PARAMS.get("framework_asset_id")
+    || INITIAL_URL_PARAMS.get("source_framework_project_id")
+    || ""
+  ).trim();
   const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "choices", "usage", "updateVarResult", "newVariables"];
   const TECHNICAL_FIELD_KEYS = new Set(RAW_RESPONSE_KEYS.concat([
     "id", "nodeId", "moduleName", "moduleType", "moduleLogo",
@@ -13,6 +20,8 @@
     "model", "query", "contextTotalLen", "finishReason", "llmRequestIds",
     "mapping_version", "schema_version", "version", "debug", "metadata",
     "cache", "logs", "_meta", "asset_state", "stage_state", "raw_stage_responses",
+    "validation_report", "confirmed", "locked", "stageCommitted", "stage_committed",
+    "completedStages", "completed_stages", "status",
   ]));
   const UNSAVED_MESSAGE = "当前框架尚未保存，直接退出会丢失本次生成结果。";
   const BUSINESS_FIELD_KEYS = [
@@ -22,8 +31,11 @@
     "beat_checkpoint_timeline",
     "checkpoint_explanation",
     "character_storylines",
+    "storyline_decisions",
+    "adaptation_guide",
+    "framework_plan_package",
   ];
-  const ARRAY_BUSINESS_FIELDS = new Set(["beat_checkpoint_timeline", "character_storylines"]);
+  const ARRAY_BUSINESS_FIELDS = new Set(["beat_checkpoint_timeline", "character_storylines", "storyline_decisions"]);
   const BUSINESS_FIELD_ALIASES = {
     source_brief: ["source_brief", "sourceBrief", "confirmed_info", "confirmedInfo"],
     worldview_plan: ["worldview_plan", "worldviewPlan", "worldview"],
@@ -31,15 +43,18 @@
     beat_checkpoint_timeline: ["beat_checkpoint_timeline", "beatCheckpointTimeline", "beat", "timeline"],
     checkpoint_explanation: ["checkpoint_explanation", "checkpointExplanation", "checkpoint_explain", "checkpointExplain", "explanation", "beat_explanation"],
     character_storylines: ["character_storylines", "characterStorylines", "storyline", "storylines"],
+    storyline_decisions: ["storyline_decisions", "storylineDecisions", "decisions"],
+    adaptation_guide: ["adaptation_guide", "adaptationGuide", "overall_adaptation_guide", "overallAdaptationGuide"],
+    framework_plan_package: ["framework_plan_package", "frameworkPlanPackage"],
   };
   const STAGE_OUTPUT_ROOT_KEYS = {
     basic: ["source_brief"],
     worldview: ["worldview_plan"],
     character: ["character_plan"],
     beat: ["beat_checkpoint_timeline", "checkpoint_explanation"],
-    storylines: ["character_storylines"],
+    storylines: ["character_storylines", "storyline_decisions"],
     guide: ["adaptation_guide"],
-    package: ["framework_plan_package", "validation_report"],
+    package: ["framework_plan_package"],
   };
   const STAGE_READABLE_FIELDS = {
     basic: [
@@ -374,6 +389,7 @@
     expandedBeats: {},
     expandedStorylines: {},
     expandedBusinessPanels: {},
+    packageSectionsMode: "default",
     expandedRawTree: {},
     rawTreeAllOpen: false,
     rawTreeAllCollapsed: false,
@@ -900,19 +916,41 @@
   }
 
   function loadState() {
-    const params = new URLSearchParams(window.location.search || "");
-    const forceFresh = ["1", "true", "yes"].includes(String(params.get("fresh") || params.get("reset") || "").toLowerCase());
+    const params = INITIAL_URL_PARAMS;
+    const forceFresh = ["1", "true", "yes"].includes(String(params.get("new") || params.get("fresh") || params.get("reset") || "").toLowerCase());
     if (forceFresh) {
       storageRemove(STORAGE_KEY);
       storageRemove(LEGACY_STORAGE_KEY);
       const fresh = normalizeState(null);
       persistLoadedState(fresh);
+      cleanOneTimePlannerUrlParams();
       return fresh;
     }
     const saved = readStorage(STORAGE_KEY) || readStorage(LEGACY_STORAGE_KEY);
     const normalized = normalizeState(sanitizeLoadedState(saved));
     persistLoadedState(normalized);
+    cleanOneTimePlannerUrlParams();
     return normalized;
+  }
+
+  function cleanOneTimePlannerUrlParams() {
+    try {
+      const url = new URL(window.location.href);
+      const sourceOnlyAssetId = url.searchParams.get("source_framework_project_id");
+      if (sourceOnlyAssetId && !url.searchParams.get("asset_id") && !url.searchParams.get("framework_asset_id")) {
+        url.searchParams.set("asset_id", sourceOnlyAssetId);
+      }
+      ["new", "fresh", "reset", "source_framework_project_id"].forEach((key) => {
+        url.searchParams.delete(key);
+      });
+      const next = url.pathname + url.search + url.hash;
+      const current = window.location.pathname + window.location.search + window.location.hash;
+      if (next !== current) {
+        window.history.replaceState(window.history.state, document.title, next);
+      }
+    } catch (error) {
+      console.warn("[framework_planner] clean one-time url params failed", error);
+    }
   }
 
   function readStorage(key) {
@@ -1314,9 +1352,7 @@
     if (stageKey === "basic") return true;
     const prerequisite = prerequisiteStageKey(stageKey);
     if (!prerequisite) return true;
-    const stageState = targetState && targetState.stage_state ? targetState.stage_state : {};
-    const upstream = stageState[prerequisite] || {};
-    return Boolean(upstream.confirmed || upstream.stageCommitted);
+    return hasStageDataFor(targetState, prerequisite);
   }
 
   function viewUnlockedFor(targetState, viewId) {
@@ -1458,14 +1494,15 @@
   }
 
   function hasStageDataFor(targetState, stageKey) {
-    if (stageKey === "basic") return true;
+    if (!targetState || typeof targetState !== "object") return false;
+    if (stageKey === "basic") return !isEmptyValue(targetState.source_brief);
     if (stageKey === "worldview") return !isEmptyValue(targetState.worldview_plan);
     if (stageKey === "character") return !isEmptyValue(targetState.character_plan);
     if (stageKey === "beat") {
-      return Array.isArray(targetState.beat_checkpoint_timeline) && targetState.beat_checkpoint_timeline.length > 0;
+      return !isEmptyValue(targetState.beat_checkpoint_timeline) && !isEmptyValue(targetState.checkpoint_explanation);
     }
     if (stageKey === "storylines") {
-      return Array.isArray(targetState.character_storylines) && targetState.character_storylines.length > 0;
+      return !isEmptyValue(targetState.character_storylines) && !isEmptyValue(targetState.storyline_decisions);
     }
     if (stageKey === "guide") return !isEmptyValue(targetState.adaptation_guide);
     if (stageKey === "package") return !isEmptyValue(targetState.framework_plan_package);
@@ -1486,7 +1523,8 @@
         String(state.basic_config.project_title || state.basic_config.source_title || "").trim()
         || !isEmptyValue(state.source_brief)
       );
-    const hasBeats = Array.isArray(state.beat_checkpoint_timeline) && state.beat_checkpoint_timeline.length === 15;
+    const hasBeats = !isEmptyValue(state.beat_checkpoint_timeline) && !isEmptyValue(state.checkpoint_explanation);
+    const hasStorylines = !isEmptyValue(state.character_storylines) && !isEmptyValue(state.storyline_decisions);
     if (stageKey === "basic") return issues;
     requireValue(hasBasic, "01 基础配置");
     requireValue(!isEmptyValue(state.source_brief), "01 原文信息提取结果");
@@ -1495,9 +1533,9 @@
     if (stageKey === "character") return issues;
     requireValue(!isEmptyValue(state.character_plan), "03 人设方案");
     if (stageKey === "beat") return issues;
-    requireValue(hasBeats, "04 三幕十五节拍时间轴");
+    requireValue(hasBeats, "04 三幕十五节拍时间轴与卡点说明");
     if (stageKey === "storylines") return issues;
-    requireValue(Array.isArray(state.character_storylines) && state.character_storylines.length > 0, "05 人物故事线");
+    requireValue(hasStorylines, "05 人物故事线与处理决策");
     if (stageKey === "guide") return issues;
     requireValue(!isEmptyValue(state.adaptation_guide), "06 整体改编指引");
     if (stageKey === "package") {
@@ -1508,7 +1546,6 @@
   }
 
   function hasStageOutput(stageKey) {
-    if (stageKey === "basic") return !isEmptyValue(state.source_brief) || Boolean(String(state.display_texts["01"] || "").trim());
     return hasStageData(stageKey);
   }
 
@@ -1771,11 +1808,39 @@
     render();
   }
 
+  function clearDownstreamAfterStageGenerate(stageKey) {
+    downstreamStages(stageKey).forEach((downstreamKey) => {
+      clearStageData(downstreamKey);
+      const downstream = stageState(downstreamKey);
+      downstream.confirmed = false;
+      downstream.locked = true;
+      downstream.status = "locked";
+      downstream.stageCommitted = false;
+      downstream.stageDraftDirty = false;
+    });
+  }
+
   function isEmptyValue(value) {
-    if (value == null) return true;
-    if (typeof value === "string") return !value.trim();
-    if (Array.isArray(value)) return value.length === 0;
-    if (typeof value === "object") return Object.keys(value).length === 0;
+    return !hasMeaningfulBusinessValue(value);
+  }
+
+  function hasMeaningfulBusinessValue(value, depth = 0) {
+    if (value === null || value === undefined) return false;
+    if (depth > 12) return false;
+    if (typeof value === "string") {
+      const text = value.trim();
+      if (!text) return false;
+      return !["暂无", "无", "null", "undefined", "none", "n/a", "N/A"].includes(text);
+    }
+    if (typeof value === "number") return Number.isFinite(value);
+    if (typeof value === "boolean") return true;
+    if (Array.isArray(value)) return value.some((item) => hasMeaningfulBusinessValue(item, depth + 1));
+    if (typeof value === "object") {
+      return Object.keys(value).some((key) => {
+        if (TECHNICAL_FIELD_KEYS.has(key)) return false;
+        return hasMeaningfulBusinessValue(value[key], depth + 1);
+      });
+    }
     return false;
   }
 
@@ -1952,7 +2017,7 @@
 
   function strictStageOutputDone(stageKey) {
     if (stageKey === "basic") {
-      return !isEmptyValue(state.source_brief) || Boolean(String((state.display_texts || {})["01"] || "").trim());
+      return !isEmptyValue(state.source_brief);
     }
     if (stageKey === "worldview") {
       return !isEmptyValue(state.worldview_plan);
@@ -1961,10 +2026,10 @@
       return !isEmptyValue(state.character_plan);
     }
     if (stageKey === "beat") {
-      return Array.isArray(state.beat_checkpoint_timeline) && state.beat_checkpoint_timeline.length > 0;
+      return !isEmptyValue(state.beat_checkpoint_timeline) && !isEmptyValue(state.checkpoint_explanation);
     }
     if (stageKey === "storylines") {
-      return Array.isArray(state.character_storylines) && state.character_storylines.length > 0;
+      return !isEmptyValue(state.character_storylines) && !isEmptyValue(state.storyline_decisions);
     }
     if (stageKey === "guide") {
       return !isEmptyValue(state.adaptation_guide);
@@ -1979,23 +2044,9 @@
     if (!stageKey) return false;
     if (stageDraftDirty(stageKey)) return false;
     if (isStageLoading(stageKey)) return false;
-
-    const stage = stageState(stageKey);
-    if (!stage) return false;
-    if (stage.status === "running" || stage.status === "error" || stage.status === "locked") {
-      return false;
-    }
-
     // Sidebar and step-rail checkmarks must only reflect real output of this exact stage.
-    // Do not infer done from downstream status, history loaded, project_id, or old committed flags.
-    if (!strictStageOutputDone(stageKey)) {
-      return false;
-    }
-
-    return stage.confirmed
-      || stage.stageCommitted
-      || stage.status === "generated"
-      || stage.status === "updated";
+    // Do not infer done from status, confirmation, locks, history, project_id, or downstream artifacts.
+    return strictStageOutputDone(stageKey);
   }
 
   function isStageEditable(stageKey) {
@@ -3468,10 +3519,10 @@
     const stage = state.stage_state.package || {};
     const hasOutput = !isEmptyValue(state.framework_plan_package);
     const completed = hasOutput;
-    const locked = Boolean(stage.locked);
+    const locked = false;
     const blockReason = stageRunBlockReason("package");
     return `
-      <section class="fp-card fp-section">
+      <section class="fp-card fp-section fp-package-wide">
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">最终策划包输出</h2>
@@ -3502,16 +3553,38 @@
     if (isEmptyValue(state.framework_plan_package)) {
       return `<div class="fp-empty">07 阶段尚未执行。确认 06 后，再生成最终策划包。</div>`;
     }
+    const packageValue = state.framework_plan_package || {};
+    const basicInfo = {
+      project_title: packageValue.project_title || (state.basic_config || {}).project_title || "",
+      source_title: packageValue.source_title || (state.basic_config || {}).source_title || "",
+      target_format: packageValue.target_format || (state.basic_config || {}).target_format || "",
+      season_count: packageValue.season_count || (state.basic_config || {}).season_count || "",
+      episodes_per_season: packageValue.episodes_per_season || (state.basic_config || {}).episodes_per_season || "",
+      minutes_per_episode: packageValue.minutes_per_episode || (state.basic_config || {}).minutes_per_episode || "",
+    };
+    const sections = [
+      ["basic", "基础信息", basicInfo, true],
+      ["source", "故事梗概", packageValue.source_brief || state.source_brief || {}, true],
+      ["worldview", "世界观", packageValue.worldview_plan || state.worldview_plan || {}, false],
+      ["character", "人物方案", packageValue.character_plan || state.character_plan || {}, false],
+      ["beat", "三幕十五节拍", {
+        beat_checkpoint_timeline: packageValue.beat_checkpoint_timeline || state.beat_checkpoint_timeline || [],
+        checkpoint_explanation: packageValue.checkpoint_explanation || state.checkpoint_explanation || {},
+      }, false],
+      ["storylines", "人物故事线", {
+        character_storylines: packageValue.character_storylines || state.character_storylines || [],
+        storyline_decisions: packageValue.storyline_decisions || state.storyline_decisions || [],
+      }, false],
+      ["guide", "整体改编指引", packageValue.adaptation_guide || state.adaptation_guide || {}, true],
+      ["validation", "校验报告", state.validation_report || packageValue.validation_report || {}, false],
+    ].filter(([, , value]) => !isEmptyValue(value));
     return `
-      <div class="fp-grid two">
-        <div class="fp-panel-card">
-          <h3 class="fp-panel-title">框架确认</h3>
-          ${renderDataBlock(state.framework_plan_package, { dataKey: "framework_plan_package", stageKey: "package", editable: false })}
-        </div>
-        <div class="fp-panel-card">
-          <h3 class="fp-panel-title">进入剧本阶段检查</h3>
-          ${renderWhitelistFields("package", state.framework_plan_package || {})}
-        </div>
+      <div class="fp-package-toolbar">
+        <button class="fp-btn small" data-action="package-expand-all">展开全部</button>
+        <button class="fp-btn small" data-action="package-collapse-all">收起全部</button>
+      </div>
+      <div class="fp-package-card">
+        ${sections.map(([id, title, value, defaultOpen]) => renderPackageSection(id, title, value, defaultOpen)).join("")}
       </div>
       <div class="fp-stage-note">
         <strong>当前框架版本</strong>
@@ -3521,6 +3594,22 @@
           <span>状态：${escapeHtml(assetStatusLabel((state.asset_state || {}).status || "draft"))}</span>
         </div>
       </div>
+    `;
+  }
+
+  function renderPackageSection(id, title, value, defaultOpen) {
+    const mode = ui.packageSectionsMode || "default";
+    const open = mode === "all" || (mode === "default" && defaultOpen);
+    return `
+      <details class="fp-package-section" data-package-section="${escapeHtml(id)}" ${open ? "open" : ""}>
+        <summary>
+          <span>${escapeHtml(title)}</span>
+          <span class="fp-package-toggle">展开/收起</span>
+        </summary>
+        <div class="fp-package-section-body">
+          ${renderDataBlock(value, { dataKey: `framework_plan_package.${id}`, stageKey: "package", editable: false })}
+        </div>
+      </details>
     `;
   }
 
@@ -4815,6 +4904,9 @@
     if (hasSavedFrameworkProjectId()) {
       return currentProjectId();
     }
+    if (stageKey === "basic") {
+      return "";
+    }
     const asset = await saveFrameworkAsset({ silent: true, skipDirtyCheck: true });
     const projectId = currentProjectId();
     debugFrontendEvent("stage_auto_saved_project", frameworkAssetSavePayload(), {
@@ -5149,6 +5241,7 @@
       state.stage_state[stageKey].stageDraftDirty = false;
       setStageEditMode(stageKey, false);
       delete ui.editSnapshots[stageKey];
+      clearDownstreamAfterStageGenerate(stageKey);
       const next = STAGE_SEQUENCE[STAGE_SEQUENCE.indexOf(stageKey) + 1];
       if (next) unlockStage(next);
       syncFrameworkAssetState(state, `generate:${stageKey}`);
@@ -6173,26 +6266,21 @@
       form,
       note: "新建框架项目提交时从当前 DOM 重新收集的表单值",
     });
-    const data = await requestJson("/api/framework-planner/assets", {
-      method: "POST",
-      body: JSON.stringify(form),
-    });
-    const asset = data.asset || {};
     resetTransientUi();
     state = clone(initialState);
-    state.basic_config.project_title = asset.title || form.title || "未命名剧本";
-    state.basic_config.source_title = asset.title || form.title || "";
+    state.basic_config.project_title = form.title || "未命名剧本";
+    state.basic_config.source_title = form.title || "";
     state.basic_config.target_format = form.target_format || "短剧";
     state.basic_config.season_count = Number(form.season_count || 1);
     state.basic_config.episodes_per_season = Number(form.episodes_per_season || 60);
     state.basic_config.user_requirements = form.style || "";
     state.basic_config.source_text = form.description || "";
-    state.project_id = asset.project_id || null;
-    state.asset_state.asset_id = asset.project_id || null;
-    state.asset_state.project_id = asset.project_id || null;
+    state.project_id = null;
+    state.asset_state.asset_id = null;
+    state.asset_state.project_id = null;
     state.asset_state.status = "draft";
     state.current_view = "basic";
-    ui.assetsOpen = true;
+    ui.assetsOpen = false;
     syncStageFlow(state);
     saveState();
     clearDirty();
@@ -6206,12 +6294,10 @@
       source_text: state.basic_config.source_text,
       user_requirements: state.basic_config.user_requirements,
     }, {
-      asset,
-      history_hint: `版本历史：${currentProjectCacheName()}`,
+      asset: {},
+      history_hint: "本地草稿：01 成功生成或保存后才创建远端资产",
     });
-    await loadAssets();
-    await loadStageHistory("basic");
-    showToast("新框架项目已创建，已进入 01 阶段");
+    showToast("已进入本地草稿，请填写并运行 01；成功后再创建远端资产");
   }
 
   async function deleteAsset(projectId) {
@@ -6302,9 +6388,9 @@
     saveState();
   }
 
-  async function openAsset(projectId) {
+  async function openAsset(projectId, options = {}) {
     if (ui.assetImporting) return;
-    if (promptUnsaved("切换到已有项目", {
+    if (!(options && options.skipPrompt) && promptUnsaved("切换到已有项目", {
       save: async () => openAsset(projectId),
       discard: async () => openAsset(projectId),
     })) return;
@@ -6792,6 +6878,16 @@
       setCurrentView(actionElement.dataset.view);
       return;
     }
+    if (action === "package-expand-all") {
+      ui.packageSectionsMode = "all";
+      render();
+      return;
+    }
+    if (action === "package-collapse-all") {
+      ui.packageSectionsMode = "none";
+      render();
+      return;
+    }
     if (action === "open-new-script") {
       if (promptUnsaved("新建框架项目", {
         save: () => {
@@ -7078,7 +7174,13 @@
 
   render();
   if (ui.knowledge.open) loadKnowledgeTags().catch(() => {});
-  loadAssets().catch(() => {});
+  if (INITIAL_ASSET_ID) {
+    openAsset(INITIAL_ASSET_ID, { skipPrompt: true })
+      .then(() => loadAssets())
+      .catch(() => loadAssets().catch(() => {}));
+  } else {
+    loadAssets().catch(() => {});
+  }
   if (DEV_LOG_ENABLED) loadStageHistory(stageKeyForView(state.current_view || "basic")).catch(() => {});
 
 

@@ -57,9 +57,24 @@
   state.runningStage = "";
   state.runningStartedAt = "";
 
-  const urlAssetId = params.get("framework_asset_id") || params.get("asset_id") || "";
+  const urlAssetId = params.get("framework_asset_id") || params.get("asset_id") || params.get("source_framework_project_id") || "";
   const directFromPlanner = Boolean(urlAssetId && (params.has("source_framework_project_id") || params.has("project_id")));
-  if (urlAssetId && (directFromPlanner || String(urlAssetId) !== String(state.frameworkAssetId || ""))) {
+  const oneTimeReset = ["1", "true", "yes"].includes(String(params.get("new") || params.get("fresh") || params.get("reset") || "").toLowerCase());
+  if (oneTimeReset) {
+    window.localStorage.removeItem(STORAGE_KEY);
+    state.frameworkAssetId = urlAssetId || null;
+    state.projectId = null;
+    state.importedFrameworkAsset = null;
+    state.frameworkPlanPackage = null;
+    state.stageOutputs = {};
+    state.stages = {};
+    state.completedStages = [];
+    state.scriptStages = {};
+    state.preferenceSnapshot = {};
+    state.preferenceSource = "none";
+    state.assetPanelOpen = !urlAssetId;
+    state.frameworkSource = "";
+  } else if (urlAssetId && (directFromPlanner || String(urlAssetId) !== String(state.frameworkAssetId || ""))) {
     window.localStorage.removeItem(STORAGE_KEY);
     state.frameworkAssetId = urlAssetId;
     state.frameworkSource = "刚刚完成的框架";
@@ -72,21 +87,10 @@
     state.scriptStages = {};
     state.preferenceSnapshot = {};
     state.preferenceSource = "none";
-  } else if (!urlAssetId) {
-    window.localStorage.removeItem(STORAGE_KEY);
-    state.frameworkAssetId = null;
-    state.projectId = null;
-    state.importedFrameworkAsset = null;
-    state.frameworkPlanPackage = null;
-    state.stageOutputs = {};
-    state.stages = {};
-    state.completedStages = [];
-    state.scriptStages = {};
-    state.preferenceSnapshot = {};
-    state.preferenceSource = "none";
+  } else if (!urlAssetId && !currentAssetReady()) {
     state.assetPanelOpen = true;
-    state.frameworkSource = "";
   }
+  cleanOneTimeUrlParams();
 
   function headers() {
     const value = { "Content-Type": "application/json" };
@@ -99,6 +103,26 @@
     const url = new URL(path, window.location.origin);
     url.searchParams.set("auth_token", authToken);
     return url.pathname + url.search;
+  }
+
+  function cleanOneTimeUrlParams() {
+    try {
+      const url = new URL(window.location.href);
+      const sourceOnlyAssetId = url.searchParams.get("source_framework_project_id");
+      if (sourceOnlyAssetId && !url.searchParams.get("framework_asset_id") && !url.searchParams.get("asset_id")) {
+        url.searchParams.set("framework_asset_id", sourceOnlyAssetId);
+      }
+      ["new", "fresh", "reset", "source_framework_project_id", "project_id"].forEach((key) => {
+        url.searchParams.delete(key);
+      });
+      const next = url.pathname + url.search + url.hash;
+      const current = window.location.pathname + window.location.search + window.location.hash;
+      if (next !== current) {
+        window.history.replaceState(window.history.state, document.title, next);
+      }
+    } catch (error) {
+      console.warn("clean one-time framework-to-script url params failed", error);
+    }
   }
 
   async function requestJson(path, options) {
@@ -341,7 +365,11 @@
 
   function stage11Completion() {
     const expected = expectedStage11Starts();
-    const done = numericKeys(((state.scriptStages || {}).stage11 || {}).batches);
+    const batches = ((state.scriptStages || {}).stage11 || {}).batches || {};
+    const done = numericKeys(batches).filter((key) => {
+      const batch = batches[key] || {};
+      return hasContent(batch.batchCausalConflictPlan || batch.batch_causal_conflict_plan);
+    });
     const doneSet = new Set(done);
     const complete = Boolean(expected.length && expected.every((key) => doneSet.has(String(key))));
     return { expected, done, complete };
@@ -350,7 +378,11 @@
   function stage12Completion() {
     const stage11Progress = stage11Completion();
     const expected = stage11Progress.expected.length ? stage11Progress.expected : numericKeys(((state.scriptStages || {}).stage11 || {}).batches);
-    const done = numericKeys(((state.scriptStages || {}).stage12 || {}).batches);
+    const batches = ((state.scriptStages || {}).stage12 || {}).batches || {};
+    const done = numericKeys(batches).filter((key) => {
+      const batch = batches[key] || {};
+      return hasContent(batch.batchScriptText || batch.batch_script_text);
+    });
     const doneSet = new Set(done);
     const complete = Boolean(expected.length && expected.every((key) => doneSet.has(String(key))));
     return { expected, done, complete };
@@ -371,31 +403,81 @@
     return false;
   }
 
+  function batchContentKeysForStage(stageKey) {
+    if (stageKey === "stage11") return ["batchCausalConflictPlan", "batch_causal_conflict_plan"];
+    if (stageKey === "stage12") return ["batchScriptText", "batch_script_text"];
+    return [];
+  }
+
+  function topLevelBatchStart(stage) {
+    const start = Number((stage || {}).batchStartEpisode || (stage || {}).batch_start_episode || 0);
+    return Number.isFinite(start) && start > 0 ? String(start) : "";
+  }
+
+  function mergeBatchMap(existing, incoming) {
+    const merged = { ...(existing && typeof existing === "object" ? existing : {}) };
+    if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) return merged;
+    Object.keys(incoming).forEach((key) => {
+      if (hasContent(incoming[key])) merged[String(key)] = incoming[key];
+    });
+    return merged;
+  }
+
+  function mergeScriptStageOutput(oldStage, incomingStage, stageKey) {
+    const oldValue = oldStage && typeof oldStage === "object" ? oldStage : {};
+    const incoming = incomingStage && typeof incomingStage === "object" ? incomingStage : {};
+    const merged = { ...oldValue };
+    const incomingHasBatchesKey = Object.prototype.hasOwnProperty.call(incoming, "batches")
+      && incoming.batches
+      && typeof incoming.batches === "object"
+      && !Array.isArray(incoming.batches);
+    const incomingBatches = incomingHasBatchesKey ? incoming.batches : {};
+    const hasTopLevelBatchContent = batchContentKeysForStage(stageKey).some((key) => hasContent(incoming[key]));
+    const clearKeys = [
+      "batches", "completedBatchStarts", "completed_batches", "completedRanges", "completed_ranges",
+      "current_batch", "next_episode", "isComplete", "is_complete",
+      "batchStartEpisode", "batchEndEpisode", "batch_start_episode", "batch_end_episode",
+      "batchCausalConflictPlan", "batch_causal_conflict_plan", "batchScriptText", "batch_script_text",
+      "batchCausalConflictReview", "batch_causal_conflict_review", "batchScriptReview", "batch_script_review",
+    ];
+
+    if (incomingHasBatchesKey && Object.keys(incomingBatches).length === 0 && !hasTopLevelBatchContent) {
+      clearKeys.forEach((key) => delete merged[key]);
+      merged.batches = {};
+      merged.completedBatchStarts = [];
+      merged.updated_at = new Date().toISOString();
+      return merged;
+    }
+
+    Object.keys(incoming).forEach((key) => {
+      if (key === "batches") return;
+      const value = incoming[key];
+      if (value !== undefined && value !== null) merged[key] = value;
+    });
+
+    let batches = mergeBatchMap(oldValue.batches, incomingBatches);
+    if (hasTopLevelBatchContent) {
+      const start = topLevelBatchStart(incoming);
+      if (start) {
+        const batch = { ...incoming };
+        delete batch.batches;
+        batches[start] = batch;
+      }
+    }
+    merged.batches = batches;
+    if (!Array.isArray(merged.completedBatchStarts) || merged.completedBatchStarts.length === 0) {
+      merged.completedBatchStarts = numericKeys(batches).map((key) => Number(key));
+    }
+    merged.updated_at = new Date().toISOString();
+    return stripRaw(merged);
+  }
+
   function mergeStage11(data) {
-    state.scriptStages.stage11 = {
-      batchStartEpisode: data.batchStartEpisode,
-      batchEndEpisode: data.batchEndEpisode,
-      batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan,
-      batchCausalConflictPlan: data.batchCausalConflictPlan,
-      batchCausalConflictReview: data.batchCausalConflictReview,
-      conflictMemory: data.conflictMemory,
-      batches: data.batches || {},
-      updated_at: new Date().toISOString(),
-    };
+    state.scriptStages.stage11 = mergeScriptStageOutput(state.scriptStages.stage11, data, "stage11");
   }
 
   function mergeStage12(data) {
-    state.scriptStages.stage12 = {
-      batchStartEpisode: data.batchStartEpisode,
-      batchEndEpisode: data.batchEndEpisode,
-      batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan,
-      batchCausalConflictPlan: data.batchCausalConflictPlan,
-      batchScriptText: data.batchScriptText,
-      batchScriptReview: data.batchScriptReview,
-      scriptMemory: data.scriptMemory,
-      batches: data.batches || {},
-      updated_at: new Date().toISOString(),
-    };
+    state.scriptStages.stage12 = mergeScriptStageOutput(state.scriptStages.stage12, data, "stage12");
   }
 
   function clearDownstreamStages(stage) {
@@ -797,10 +879,22 @@
       state.importedFrameworkAsset = asset;
       state.frameworkPlanPackage = asset.framework_plan_package || {};
       const workspaceState = asset.framework_to_script_state || {};
-      state.stageOutputs = { ...(asset.stage_outputs || {}), ...(workspaceState.stageOutputs || {}) };
-      state.stages = workspaceState.stages || {};
-      state.completedStages = Array.isArray(workspaceState.completedStages) ? workspaceState.completedStages : [];
-      state.scriptStages = asset.scriptStages || workspaceState.scriptStages || {};
+      state.stageOutputs = {
+        ...(asset.stage_outputs || {}),
+        ...(workspaceState.stage_outputs || {}),
+        ...(workspaceState.stageOutputs || {}),
+      };
+      state.stages = hasObject(workspaceState.stages) ? workspaceState.stages : (asset.stages || {});
+      state.completedStages = Array.isArray(workspaceState.completedStages) && workspaceState.completedStages.length
+        ? workspaceState.completedStages
+        : (Array.isArray(asset.completedStages) ? asset.completedStages : []);
+      state.scriptStages = hasObject(workspaceState.scriptStages) ? workspaceState.scriptStages : (asset.scriptStages || {});
+      if (state.scriptStages.stage11) {
+        state.scriptStages.stage11 = mergeScriptStageOutput({}, state.scriptStages.stage11, "stage11");
+      }
+      if (state.scriptStages.stage12) {
+        state.scriptStages.stage12 = mergeScriptStageOutput({}, state.scriptStages.stage12, "stage12");
+      }
       state.frameworkSource = state.frameworkSource === "刚刚完成的框架" ? "刚刚完成的框架" : "我的资产 / 框架资产";
       setPreferenceSnapshot(asset.preference_snapshot || {}, "framework_asset_snapshot");
       const stage10 = state.scriptStages.stage10 || {};
@@ -824,6 +918,18 @@
       state.isLoadingAsset = false;
       render();
     }
+  }
+
+  async function refreshCurrentAssetAfterStageFailure(message) {
+    const id = String(state.frameworkAssetId || "").trim();
+    if (id) {
+      const panelOpen = state.assetPanelOpen;
+      await importAsset(id, { skipConfirm: true });
+      state.assetPanelOpen = panelOpen;
+    }
+    state.error = `${message} 已刷新后端保存进度，可继续运行。`;
+    saveWorkspace();
+    render();
   }
 
   function normalizeImportedFrameworkJson(source) {
@@ -1244,7 +1350,7 @@
       while (guard < 200) {
         guard += 1;
         const currentStage11 = state.scriptStages.stage11 || {};
-        const beforeCount = numericKeys(currentStage11.batches).length;
+        const beforeCount = stage11Completion().done.length;
         if (expectedStarts.length && beforeCount >= expectedStarts.length) break;
         const data = await requestJson("/api/framework-to-script/stage/11", {
           method: "POST",
@@ -1261,13 +1367,14 @@
         mergeStage11(data);
         saveWorkspace();
         render();
-        const afterCount = numericKeys((state.scriptStages.stage11 || {}).batches).length;
-        if (afterCount <= beforeCount) break;
+        const afterCount = stage11Completion().done.length;
+        if (data.isComplete || data.is_complete || stage11Completion().complete) break;
+        if (afterCount <= beforeCount && !data.next_episode && !data.current_batch) break;
         firstRequest = false;
       }
       saveWorkspace();
     } catch (error) {
-      state.error = error.message || "11 因果冲突失败";
+      await refreshCurrentAssetAfterStageFailure(error.message || "11 因果冲突失败");
     } finally {
       clearRunningStage("11");
       saveWorkspace();
@@ -1305,7 +1412,7 @@
         const currentStage12 = state.scriptStages.stage12 || {};
         const stage11Keys = numericKeys(currentStage11.batches);
         const expectedCount = stage11Keys.length || (hasContent(currentStage11.batchCausalConflictPlan) ? 1 : 0);
-        const beforeCount = numericKeys(currentStage12.batches).length;
+        const beforeCount = stage12Completion().done.length;
         if (expectedCount && beforeCount >= expectedCount) break;
         const data = await requestJson("/api/framework-to-script/stage/12", {
           method: "POST",
@@ -1321,13 +1428,14 @@
         mergeStage12(data);
         saveWorkspace();
         render();
-        const afterCount = numericKeys((state.scriptStages.stage12 || {}).batches).length;
-        if (afterCount <= beforeCount) break;
+        const afterCount = stage12Completion().done.length;
+        if (data.isComplete || data.is_complete || stage12Completion().complete) break;
+        if (afterCount <= beforeCount && !data.next_episode && !data.current_batch) break;
         firstRequest = false;
       }
       saveWorkspace();
     } catch (error) {
-      state.error = error.message || "12 正文及对话失败";
+      await refreshCurrentAssetAfterStageFailure(error.message || "12 正文及对话失败");
     } finally {
       if (!options.autoFromStage11) {
         clearRunningStage("12");
@@ -1809,7 +1917,7 @@
   reconcileRunningStageResult();
   render();
 
-  if (state.frameworkAssetId && (directFromPlanner || state.runningStage || !currentAssetReady())) {
+  if (state.frameworkAssetId) {
     importAsset(state.frameworkAssetId, { skipConfirm: true });
   } else if (!state.frameworkAssetId && !currentAssetReady()) {
     loadAssets();

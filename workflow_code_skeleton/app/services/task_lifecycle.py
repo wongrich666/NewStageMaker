@@ -26,6 +26,72 @@ from .task_manager_common import (
     _string_keyed_batch_map,
 )
 
+_EMPTY_TEXTS = {
+    "",
+    "暂无",
+    "无",
+    "无内容",
+    "未提供",
+    "没有",
+    "null",
+    "none",
+    "undefined",
+    "n/a",
+    "na",
+    "[]",
+    "{}",
+}
+
+_TECHNICAL_CONTENT_KEYS = {
+    "validation_report",
+    "validation_status",
+    "confirmed",
+    "locked",
+    "stageCommitted",
+    "stage_committed",
+    "completedStages",
+    "completed_stages",
+    "status",
+    "asset_state",
+    "stage_state",
+    "metadata",
+    "raw",
+    "raw_output",
+    "raw_stage_responses",
+    "debug",
+    "logs",
+    "cache",
+}
+
+
+def _has_meaningful_value(value: Any) -> bool:
+    if value is None:
+        return False
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return False
+        return text.lower() not in _EMPTY_TEXTS
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        return value != 0
+
+    if isinstance(value, (list, tuple, set)):
+        return any(_has_meaningful_value(item) for item in value)
+
+    if isinstance(value, dict):
+        return any(
+            _has_meaningful_value(item)
+            for key, item in value.items()
+            if str(key or "").strip() not in _TECHNICAL_CONTENT_KEYS
+        )
+
+    return bool(value)
+
 class TaskLifecycleMixin:
     def start_task(
         self,
@@ -388,15 +454,21 @@ class TaskLifecycleMixin:
             task_id = f"framework-planner-{uuid.uuid4().hex[:10]}"
             previous_artifacts = {}
 
-        framework_plan_package = payload.get("framework_plan_package") if isinstance(payload.get("framework_plan_package"), dict) else {}
+        framework_plan_package = payload.get("framework_plan_package") if isinstance(
+            payload.get("framework_plan_package"), dict) else {}
         stage_state = payload.get("stage_state") if isinstance(payload.get("stage_state"), dict) else {}
-        current_stage = str((asset_state or {}).get("current_stage") or "framework_planner").strip() or "framework_planner"
-        confirmed_package = bool((stage_state.get("package") or {}).get("confirmed")) if isinstance(stage_state.get("package"), dict) else False
+        current_stage = str(
+            (asset_state or {}).get("current_stage") or "framework_planner").strip() or "framework_planner"
+
+        has_package = _has_meaningful_value(framework_plan_package)
+
         status = str((asset_state or {}).get("status") or "").strip()
         if status not in {"draft", "in_progress", "completed", "running", "failed", "terminated"}:
-            status = "completed" if framework_plan_package and confirmed_package else "in_progress"
+            status = "completed" if has_package else "in_progress"
         if status == "running":
             status = "in_progress"
+        if status == "draft" and has_package:
+            status = "completed"
 
         total_episodes = _safe_int(
             payload.get("total_episodes")
@@ -431,7 +503,7 @@ class TaskLifecycleMixin:
             "selected_preference_tags": copy.deepcopy(payload.get("selected_preference_tags") if isinstance(payload.get("selected_preference_tags"), list) else []),
             "asset_state": copy.deepcopy(asset_state),
             "stage_state": copy.deepcopy(stage_state),
-            "current_view": str(payload.get("current_view") or "package" if framework_plan_package else "basic"),
+            "current_view": str(payload.get("current_view") or ("package" if has_package else "basic")),
             "created_at": created_at,
             "updated_at": now,
         }
