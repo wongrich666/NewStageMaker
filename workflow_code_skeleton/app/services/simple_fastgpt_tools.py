@@ -522,6 +522,12 @@ def diagnose_simple_tool_environment(
 
 
 def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, Any]:
+    raise ToolExecutionError(
+        "辅助工具的 FastGPT 链路已禁用；当前运行环境只允许调用 Coze 工作流。",
+        tool_id=str(tool_key or ""),
+        debug={"backend": "coze_only", "blocked_legacy_fastgpt_tool": str(tool_key or "")},
+        status_code=501,
+    )
     if tool_key == "character_reskin":
         from .character_reskin_chain import run_character_reskin_chain
 

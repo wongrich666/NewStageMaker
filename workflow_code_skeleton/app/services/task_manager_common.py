@@ -2093,8 +2093,8 @@ def _preferred_character_display_text(natural_text: Any, structured_value: Any) 
 
 
 def use_fastgpt_backend() -> bool:
-    return settings.workflow_backend in {"fastgpt", "hybrid", "fastgpt_hybrid"}
+    return False
 
 
 def use_remote_workflow_backend() -> bool:
-    return settings.workflow_backend in {"fastgpt", "hybrid", "fastgpt_hybrid", "coze"}
+    return True

@@ -31,7 +31,6 @@ from ..services.fastgpt_client import (
     FastGPTPayloadTooLargeError,
     FastGPTStageFormatError,
     FastGPTTransientError,
-    fastgpt_client,
 )
 from ..services.workflow_preference_keys import (
     FRAMEWORK_TO_SCRIPT_STAGE_PREFS,
@@ -482,7 +481,11 @@ def run_fastgpt_hybrid_workflow(
     state.runtime = runtime
     state.preferred_provider = model_option.provider if model_option else None
     state.preferred_model = model_option.model if model_option else None
-    runner = client or fastgpt_client
+    if client is None:
+        from ..services.coze_client import CozeWorkflowClient
+
+        client = CozeWorkflowClient()
+    runner = client
 
     variables = _initial_fastgpt_variables(payload)
     _restore_resume_state(state, variables, resume_snapshot)

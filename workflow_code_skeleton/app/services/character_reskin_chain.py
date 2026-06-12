@@ -128,6 +128,12 @@ def diagnose_character_reskin_environment() -> dict[str, Any]:
 
 
 def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
+    raise ToolExecutionError(
+        "只换人设的 FastGPT 链路已禁用；当前运行环境只允许调用 Coze 工作流。",
+        tool_id="character_reskin",
+        debug={"backend": "coze_only", "blocked_legacy_fastgpt_tool": "character_reskin"},
+        status_code=501,
+    )
     payload = user_payload if isinstance(user_payload, dict) else {}
     state = _initial_state(payload)
     debug: dict[str, Any] = {

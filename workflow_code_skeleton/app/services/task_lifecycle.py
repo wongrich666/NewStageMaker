@@ -1150,18 +1150,13 @@ class TaskLifecycleMixin:
             script_format_mode = str(record.input_payload.get("script_format_mode") or "").strip().lower()
             if script_format_mode:
                 logger.info(
-                    "任务 %s 启用 script_format_mode=%s；正文编写/修订将优先使用对应的专用 FastGPT API key。",
+                    "任务 %s 启用 script_format_mode=%s；当前仅使用 Coze 工作流执行。",
                     record.task_id,
                     script_format_mode,
                 )
-            if settings.workflow_backend == "coze":
-                from .coze_client import CozeWorkflowClient
+            from .coze_client import CozeWorkflowClient
 
-                runner = CozeWorkflowClient()
-            else:
-                from .fastgpt_client import FastGPTClient
-
-                runner = FastGPTClient(script_api_profile=script_format_mode)
+            runner = CozeWorkflowClient()
 
             state = run_configured_workflow(
                 workflow_input,

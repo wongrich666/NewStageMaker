@@ -501,6 +501,9 @@ class FastGPTClient:
         cache[stage_name] = merged
 
     def run_stage(self, stage_name: str, variables: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError(
+            "FastGPT runtime is disabled. Configure and use CozeWorkflowClient for workflow execution."
+        )
         contract = contract_for(stage_name)
         contract.build_input_payload(variables)
         payload_variables = self._build_wire_variables(stage_name, variables, contract)

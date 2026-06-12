@@ -67,7 +67,9 @@ class ModelOption:
 class Settings:
     def __init__(self) -> None:
         self.api_provider = _getenv("API", default="deepseek").lower()
-        self.workflow_backend = _getenv("WORKFLOW_BACKEND", default="fastgpt").lower()
+        # Runtime workflows are Coze-only. Ignore legacy WORKFLOW_BACKEND values
+        # so no code path can fall back to FastGPT requests.
+        self.workflow_backend = "coze"
         self.batch_size = int(_getenv("BATCH_SIZE", default="5"))
         self.max_retries_default = int(_getenv("MAX_RETRIES_DEFAULT", default="10"))
         self.fastgpt_stage_retries = int(_getenv("FASTGPT_STAGE_RETRIES", default="0"))

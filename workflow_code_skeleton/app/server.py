@@ -2630,10 +2630,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error("08 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
             try:
-                from .services.fastgpt_client import fastgpt_client
+                from .services.coze_client import coze_client
                 from .services.fastgpt_contracts import STAGE_FRAMEWORK_SCENE_DICTIONARY
 
-                raw_output = fastgpt_client.run_stage(
+                raw_output = coze_client.run_stage(
                     STAGE_FRAMEWORK_SCENE_DICTIONARY,
                     variables,
                 )
@@ -2641,7 +2641,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 return _json_error(
                     str(exc),
                     status=500,
-                    fallback="08 场景字典提炼调用失败，请检查 FASTGPT_FRAMEWORK_SCENE_DICTIONARY_API_KEY 和工作流变量。",
+                    fallback="08 场景字典提炼调用失败，请检查 Coze token、COZE_WORKFLOW_STAGE_08_ID 和工作流变量。",
                 )
 
             scene_dictionary, rules_digest = _extract_scene_payload(raw_output)
@@ -3088,10 +3088,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error("09 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
             try:
-                from .services.fastgpt_client import fastgpt_client
+                from .services.coze_client import coze_client
                 from .services.fastgpt_contracts import STAGE_FRAMEWORK_APPEARANCE_MAPPING
 
-                raw_output = fastgpt_client.run_stage(
+                raw_output = coze_client.run_stage(
                     STAGE_FRAMEWORK_APPEARANCE_MAPPING,
                     variables,
                 )
@@ -3099,7 +3099,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 return _json_error(
                     str(exc),
                     status=500,
-                    fallback="09 人设服装 alias 映射调用失败，请检查 FASTGPT_FRAMEWORK_APPEARANCE_MAPPING_API_KEY 和工作流变量。",
+                    fallback="09 人设服装 alias 映射调用失败，请检查 Coze token、COZE_WORKFLOW_STAGE_09_ID 和工作流变量。",
                 )
 
             appearanceMapping = _extract_appearance_payload(raw_output)
@@ -3331,10 +3331,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error("10 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
             try:
-                from .services.fastgpt_client import fastgpt_client
+                from .services.coze_client import coze_client
                 from .services.fastgpt_contracts import STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN
 
-                raw_output = fastgpt_client.run_stage(
+                raw_output = coze_client.run_stage(
                     STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
                     variables,
                 )
@@ -3342,7 +3342,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 return _json_error(
                     str(exc),
                     status=500,
-                    fallback="10 分集细化方案调用失败，请检查 FASTGPT_FRAMEWORK_ENRICHED_EPISODE_PLAN_API_KEY 和工作流变量。",
+                    fallback="10 分集细化方案调用失败，请检查 Coze token、COZE_WORKFLOW_STAGE_10_ID 和工作流变量。",
                 )
 
             plan, plan_text = _extract_enriched_payload(raw_output)
@@ -3503,7 +3503,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             base_vars = {}
             total_episodes = 0
             try:
-                from .services.fastgpt_client import FastGPTStageFormatError, fastgpt_client
+                from .services.fastgpt_client import FastGPTStageFormatError
+                from .services.coze_client import coze_client
                 from .services.fastgpt_contracts import (
                     STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
                     STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
@@ -3604,7 +3605,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             write_failure_reason,
                         )
                     try:
-                        write_output = fastgpt_client.run_stage(STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE, base_vars)
+                        write_output = coze_client.run_stage(STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE, base_vars)
                         write_output_data = write_output if isinstance(write_output, dict) else {}
                         write_output_keys = sorted(write_output_data.keys())
                         conflict_plan, conflict_plan_unwrapped, write_failure_reason = _normalize_dict_output_alias(
@@ -3695,7 +3696,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 for review_round in range(1, max_review_rounds + 1):
                     failed_sub_stage = "causal_conflict_review"
                     try:
-                        review_output = fastgpt_client.run_stage(
+                        review_output = coze_client.run_stage(
                             STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
                             {
                                 **base_vars,
@@ -3805,7 +3806,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         framework_asset=framework_asset,
                         workflow_stage="11_rewrite",
                     )
-                    rewrite_output = fastgpt_client.run_stage(
+                    rewrite_output = coze_client.run_stage(
                         STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
                         rewrite_vars,
                     )
@@ -3832,7 +3833,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     )
                 failed_sub_stage = "causal_conflict_memory"
                 try:
-                    memory_output = fastgpt_client.run_stage(
+                    memory_output = coze_client.run_stage(
                         STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
                         {
                             **base_vars,
@@ -4033,7 +4034,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             }
             debug_path = ""
             try:
-                from .services.fastgpt_client import fastgpt_client
+                from .services.coze_client import coze_client
                 from .services.fastgpt_contracts import (
                     STAGE_CONTRACTS,
                     STAGE_FRAMEWORK_SCRIPT_MEMORY,
@@ -4106,7 +4107,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 debug_record.update(
                     {
                         "status": "prepared",
-                        "request_variable_keys_before_fastgpt": sorted(base_vars.keys()),
+                        "request_variable_keys_before_coze": sorted(base_vars.keys()),
                         "variable_length_summary": {
                             key: _stage12_debug_summary(base_vars.get(key))
                             for key in sorted(base_vars.keys())
@@ -4161,7 +4162,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "script_memory": getattr(STAGE_CONTRACTS.get(STAGE_FRAMEWORK_SCRIPT_MEMORY), "stage_name", STAGE_FRAMEWORK_SCRIPT_MEMORY),
                 }
                 logger.info(
-                    "framework-to-script stage12 entering FastGPT asset_id=%s start_episode=%s end_episode=%s "
+                    "framework-to-script stage12 entering Coze asset_id=%s start_episode=%s end_episode=%s "
                     "batch_plan_count=%s has_batchCausalConflictPlan=%s has_sceneDictionary=%s "
                     "has_appearanceMapping=%s appearanceMapping.characters_count=%s base_vars_keys=%s "
                     "first_batchEnrichedEpisodePlan=%s batchCausalConflictPlan_episodes_count=%s "
@@ -4187,17 +4188,17 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "attempt": 1,
                     "review_attempt": 0,
                     "rewrite_attempt": 0,
-                    "fastgpt_request_started_at": _now_iso(),
+                    "coze_request_started_at": _now_iso(),
                     "request_variable_keys": sorted(base_vars.keys()),
                 }
                 debug_record["events"].append(write_event)
-                debug_record.update({"status": "requesting_fastgpt", "failed_sub_stage": failed_sub_stage, "updated_at": _now_iso()})
+                debug_record.update({"status": "requesting_coze", "failed_sub_stage": failed_sub_stage, "updated_at": _now_iso()})
                 debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                 write_started = time.monotonic()
-                write_output = fastgpt_client.run_stage(STAGE_FRAMEWORK_SCRIPT_WRITE, base_vars)
-                write_event["fastgpt_request_ended_at"] = _now_iso()
+                write_output = coze_client.run_stage(STAGE_FRAMEWORK_SCRIPT_WRITE, base_vars)
+                write_event["coze_request_ended_at"] = _now_iso()
                 write_event["duration_ms"] = int((time.monotonic() - write_started) * 1000)
-                write_event["fastgpt_debug"] = _stage12_fastgpt_debug_summary(fastgpt_client, STAGE_FRAMEWORK_SCRIPT_WRITE)
+                write_event["coze_debug"] = _stage12_fastgpt_debug_summary(coze_client, STAGE_FRAMEWORK_SCRIPT_WRITE)
                 write_keys = sorted(write_output.keys()) if isinstance(write_output, dict) else []
                 batch_script_value = _first_present(write_output, "batchScriptText", "batch_script_text", default=None)
                 batch_script = str(batch_script_value or "")
@@ -4256,7 +4257,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     failed_sub_stage = "script_review"
                     debug_record.update(
                         {
-                            "status": "requesting_fastgpt",
+                            "status": "requesting_coze",
                             "failed_sub_stage": failed_sub_stage,
                             "review_attempt": review_round,
                             "rewrite_attempt": rewrite_round,
@@ -4272,7 +4273,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         "attempt": 1,
                         "review_attempt": review_round,
                         "rewrite_attempt": rewrite_round,
-                        "fastgpt_request_started_at": _now_iso(),
+                        "coze_request_started_at": _now_iso(),
                         "request_variable_keys": sorted(review_vars.keys()),
                         "batchScriptText_length": len(batch_script),
                         "batchScriptText_preview": _stage12_debug_preview(batch_script),
@@ -4280,14 +4281,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     debug_record["events"].append(review_event)
                     debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                     review_started = time.monotonic()
-                    review_output = fastgpt_client.run_stage(
+                    review_output = coze_client.run_stage(
                         STAGE_FRAMEWORK_SCRIPT_REVIEW,
                         review_vars,
                     )
-                    review_event["fastgpt_request_ended_at"] = _now_iso()
+                    review_event["coze_request_ended_at"] = _now_iso()
                     review_event["duration_ms"] = int((time.monotonic() - review_started) * 1000)
-                    review_event["fastgpt_debug"] = _stage12_fastgpt_debug_summary(fastgpt_client, STAGE_FRAMEWORK_SCRIPT_REVIEW)
-                    review_event["http_status"] = review_event["fastgpt_debug"].get("http_status")
+                    review_event["coze_debug"] = _stage12_fastgpt_debug_summary(coze_client, STAGE_FRAMEWORK_SCRIPT_REVIEW)
+                    review_event["http_status"] = review_event["coze_debug"].get("http_status")
                     review_keys = sorted(review_output.keys()) if isinstance(review_output, dict) else []
                     if not isinstance(review_output, dict):
                         review_output = {}
@@ -4399,7 +4400,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     rewrite_round += 1
                     debug_record.update(
                         {
-                            "status": "requesting_fastgpt",
+                            "status": "requesting_coze",
                             "failed_sub_stage": failed_sub_stage,
                             "review_attempt": review_round,
                             "rewrite_attempt": rewrite_round,
@@ -4435,7 +4436,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         "review_attempt": review_round,
                         "rewrite_attempt": rewrite_round,
                         "rewrite_reason": _stage12_debug_preview(blocking_issues or rewrite_brief),
-                        "fastgpt_request_started_at": _now_iso(),
+                        "coze_request_started_at": _now_iso(),
                         "request_variable_keys": sorted(rewrite_vars.keys()),
                         "batchScriptText_length": len(batch_script),
                         "batchScriptText_preview": _stage12_debug_preview(batch_script),
@@ -4444,14 +4445,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     debug_record["events"].append(rewrite_event)
                     debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                     rewrite_started = time.monotonic()
-                    rewrite_output = fastgpt_client.run_stage(
+                    rewrite_output = coze_client.run_stage(
                         STAGE_FRAMEWORK_SCRIPT_REWRITE,
                         rewrite_vars,
                     )
-                    rewrite_event["fastgpt_request_ended_at"] = _now_iso()
+                    rewrite_event["coze_request_ended_at"] = _now_iso()
                     rewrite_event["duration_ms"] = int((time.monotonic() - rewrite_started) * 1000)
-                    rewrite_event["fastgpt_debug"] = _stage12_fastgpt_debug_summary(fastgpt_client, STAGE_FRAMEWORK_SCRIPT_REWRITE)
-                    rewrite_event["http_status"] = rewrite_event["fastgpt_debug"].get("http_status")
+                    rewrite_event["coze_debug"] = _stage12_fastgpt_debug_summary(coze_client, STAGE_FRAMEWORK_SCRIPT_REWRITE)
+                    rewrite_event["http_status"] = rewrite_event["coze_debug"].get("http_status")
                     rewrite_keys = sorted(rewrite_output.keys()) if isinstance(rewrite_output, dict) else []
                     rewrite_script_value = _first_present(rewrite_output, "batchScriptText", "batch_script_text", default=None)
                     batch_script = str(rewrite_script_value or "")
@@ -4509,7 +4510,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 }
                 debug_record.update(
                     {
-                        "status": "requesting_fastgpt",
+                        "status": "requesting_coze",
                         "failed_sub_stage": failed_sub_stage,
                         "review_attempt": review_round if "review_round" in locals() else 0,
                         "rewrite_attempt": rewrite_round,
@@ -4521,7 +4522,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "attempt": 1,
                     "review_attempt": review_round if "review_round" in locals() else 0,
                     "rewrite_attempt": rewrite_round,
-                    "fastgpt_request_started_at": _now_iso(),
+                    "coze_request_started_at": _now_iso(),
                     "request_variable_keys": sorted(memory_vars.keys()),
                     "batchScriptText_length": len(batch_script),
                     "batchScriptText_preview": _stage12_debug_preview(batch_script),
@@ -4531,14 +4532,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 debug_record["events"].append(memory_event)
                 debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                 memory_started = time.monotonic()
-                memory_output = fastgpt_client.run_stage(
+                memory_output = coze_client.run_stage(
                     STAGE_FRAMEWORK_SCRIPT_MEMORY,
                     memory_vars,
                 )
-                memory_event["fastgpt_request_ended_at"] = _now_iso()
+                memory_event["coze_request_ended_at"] = _now_iso()
                 memory_event["duration_ms"] = int((time.monotonic() - memory_started) * 1000)
-                memory_event["fastgpt_debug"] = _stage12_fastgpt_debug_summary(fastgpt_client, STAGE_FRAMEWORK_SCRIPT_MEMORY)
-                memory_event["http_status"] = memory_event["fastgpt_debug"].get("http_status")
+                memory_event["coze_debug"] = _stage12_fastgpt_debug_summary(coze_client, STAGE_FRAMEWORK_SCRIPT_MEMORY)
+                memory_event["http_status"] = memory_event["coze_debug"].get("http_status")
                 memory_keys = sorted(memory_output.keys()) if isinstance(memory_output, dict) else []
                 memory_value = _first_present(memory_output, "scriptMemory", "script_memory", default=None)
                 if memory_value is None:
@@ -4924,7 +4925,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(
                 str(exc),
                 status=400,
-                fallback="框架转剧本任务创建失败，请检查新链路 FastGPT API Key 和工作流配置。",
+                fallback="框架转剧本任务创建失败，请检查 Coze token 和 workflow_id 配置。",
             )
 
         return _json_ok(task=snapshot)

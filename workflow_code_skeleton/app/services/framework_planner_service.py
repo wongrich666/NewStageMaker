@@ -1043,7 +1043,7 @@ def framework_planner_backend_ready() -> bool:
 def framework_planner_fastgpt_diagnostics(stage: str = "05") -> dict[str, Any]:
     definition = stage_definition(stage)
     diagnostics = _stage_runtime_diagnostics(definition, {})
-    endpoint = str(diagnostics.get("resolved_url") or DEFAULT_FASTGPT_URL)
+    endpoint = str(diagnostics.get("resolved_url") or DEFAULT_COZE_WORKFLOW_URL)
     host, port = _endpoint_host_port(endpoint)
     return {
         "ok": True,
@@ -1061,14 +1061,9 @@ def framework_planner_fastgpt_diagnostics(stage: str = "05") -> dict[str, Any]:
 
 def stage_has_real_backend(stage: str) -> bool:
     definition = stage_definition(stage)
-    if _is_coze_backend():
-        _, token = _coze_api_token_with_name()
-        _, workflow_id = _env_with_name(*_stage_workflow_id_env_names(definition))
-        return bool(token and workflow_id)
-    for env_name in _stage_api_key_env_names(definition):
-        if _env(env_name):
-            return True
-    return False
+    _, token = _coze_api_token_with_name()
+    _, workflow_id = _env_with_name(*_stage_workflow_id_env_names(definition))
+    return bool(token and workflow_id)
 
 
 def _parse_coze_framework_response(
@@ -1113,11 +1108,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
     diagnostics = _stage_runtime_diagnostics(definition, normalized_payload)
     _log_stage_entry(definition, diagnostics)
     if _should_use_mock_backend(definition):
-        reason = (
-            "FRAMEWORK_PLANNER_USE_MOCK=true，已命中 mock 分支"
-            if diagnostics["mock_enabled"]
-            else "未检测到可用 FastGPT API Key，已回退 mock 分支"
-        )
+        reason = "FRAMEWORK_PLANNER_USE_MOCK=true, using mock output"
         _log_stage_not_entering_fastgpt(definition, diagnostics, reason=reason)
         data, display_text = _build_mock_stage_output(definition.stage, normalized_payload)
         print_stage_debug(
@@ -1150,37 +1141,28 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             diagnostics,
             reason=exc.detail.get("reason") or str(exc),
         )
-        stage_error = _build_fastgpt_stage_error(
-            definition=definition,
-            diagnostics=diagnostics,
-            reason=exc.detail.get("reason") or str(exc),
-            status_code=exc.status_code,
-            entered_fastgpt_request=False,
-            exc=exc,
-            extra_detail=exc.detail,
-        )
         print_stage_debug(
             definition.stage,
             {
                 "ok": False,
                 "stage": definition.stage,
                 "status": "failed",
-                "reason": stage_error.detail.get("reason") or str(stage_error),
+                "reason": exc.detail.get("reason") or str(exc),
                 "exception_type": type(exc).__name__,
                 "exception_message": str(exc),
-                "detail": stage_error.detail,
+                "detail": exc.detail,
                 "traceback": traceback.format_exc(),
             },
             normalized_payload,
         )
-        raise stage_error from exc
+        raise
 
     logger.info(
-        "FastGPT endpoint resolved: stage=%s url_source=%s endpoint=%s workflow_id_missing_but_api_key_mode_enabled=%s",
+        "Coze endpoint resolved: stage=%s url_source=%s endpoint=%s workflow_id_source=%s",
         definition.stage,
         endpoint.url_source or "default",
         endpoint.url,
-        not bool(endpoint.workflow_id) and bool(endpoint.api_key),
+        endpoint.workflow_id_source or "",
     )
     body = _build_request_body(definition, request_variables, endpoint)
     headers = {
@@ -1317,14 +1299,14 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             ) from exc
 
     try:
-        raw_debug_dir = _repo_root() / "cache" / "raw_fastgpt_debug"
+        raw_debug_dir = _repo_root() / "cache" / "raw_coze_debug"
         raw_debug_dir.mkdir(parents=True, exist_ok=True)
         raw_debug_path = raw_debug_dir / f"stage{definition.stage}_raw_response.json"
         raw_debug_path.write_text(
             json.dumps(
                 {
                     "stage": definition.stage,
-                    "backend": "coze" if _is_coze_backend() else "fastgpt",
+                    "backend": "coze",
                     "safe_response_preview": safe_truncated_preview(response_json, limit=4000),
                 },
                 ensure_ascii=False,
@@ -1334,7 +1316,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             encoding="utf-8",
         )
         logger.warning(
-            "[framework_planner_raw_debug] wrote raw FastGPT response stage=%s path=%s",
+            "[framework_planner_raw_debug] wrote raw Coze response stage=%s path=%s",
             definition.stage,
             raw_debug_path,
         )
@@ -1817,10 +1799,7 @@ def _coerce_text_payload(value: Any) -> str:
 
 
 def _should_use_mock_backend(definition: FrameworkPlannerStageDefinition) -> bool:
-    configured = _env_bool("FRAMEWORK_PLANNER_USE_MOCK", default=False)
-    if configured:
-        return True
-    return not stage_has_real_backend(definition.stage)
+    return _env_bool("FRAMEWORK_PLANNER_USE_MOCK", default=False)
 
 
 def _build_stage_request_variables(
@@ -2049,88 +2028,41 @@ def _ensure_coze_public_parameters(
 
 
 def _resolve_stage_endpoint(definition: FrameworkPlannerStageDefinition) -> FrameworkPlannerEndpoint:
-    if _is_coze_backend():
-        api_key_source, api_key = _coze_api_token_with_name()
-        if not api_key:
-            raise FrameworkPlannerStageError(
-                "阶段未配置可用的 Coze API Token",
-                stage=definition.stage,
-                status_code=500,
-                detail={
-                    "reason": "缺少 Coze API Token 配置",
-                    "expected_envs": list(_coze_api_token_env_names()),
-                },
-            )
-        workflow_id_envs = _stage_workflow_id_env_names(definition)
-        workflow_id_source, workflow_id = _env_with_name(*workflow_id_envs)
-        if not workflow_id:
-            raise FrameworkPlannerStageError(
-                "阶段未配置 Coze workflow_id",
-                stage=definition.stage,
-                status_code=500,
-                detail={
-                    "reason": "缺少 Coze workflow_id 配置",
-                    "expected_envs": list(workflow_id_envs),
-                },
-            )
-        url_source, raw_url = _coze_api_base_with_name(api_key_source)
-        timeout = int(_env(f"{definition.env_prefix}_TIMEOUT", "COZE_TIMEOUT_SECONDS", "FASTGPT_TIMEOUT") or 600)
-        chat_id = f"framework-planner-{definition.stage}-{uuid.uuid4().hex[:8]}"
-        return FrameworkPlannerEndpoint(
-            url=_normalize_coze_workflow_url(raw_url or DEFAULT_COZE_WORKFLOW_URL),
-            url_source=url_source or "default",
-            api_key=api_key,
-            api_key_source=api_key_source or "COZE_API_TOKEN",
-            workflow_id=str(workflow_id or "").strip(),
-            workflow_id_source=workflow_id_source or "",
-            chat_id=chat_id,
-            timeout=max(1, timeout),
-        )
-
-    api_key_envs = _stage_api_key_env_names(definition)
-    api_key_source, api_key = _env_with_name(*api_key_envs)
+    api_key_source, api_key = _coze_api_token_with_name()
     if not api_key:
         raise FrameworkPlannerStageError(
-            "阶段未配置可用的 FastGPT API Key",
+            "Coze API token is not configured for this stage",
             stage=definition.stage,
             status_code=500,
             detail={
-                "reason": "缺少 FastGPT API Key 配置",
-                "expected_envs": list(api_key_envs),
+                "reason": "Missing Coze API token configuration",
+                "expected_envs": list(_coze_api_token_env_names()),
             },
         )
-
-    url_envs = _stage_url_env_names(definition)
-    url_source, raw_url = _env_with_name(*url_envs)
-    try:
-        url = _normalize_fastgpt_url(raw_url or DEFAULT_FASTGPT_URL)
-    except ValueError as exc:
-        raise FrameworkPlannerStageError(
-            "阶段 FastGPT URL 配置无效",
-            stage=definition.stage,
-            status_code=500,
-            detail={
-                "reason": f"FastGPT URL 配置无效：{exc}",
-                "expected_envs": list(url_envs),
-                "configured_value": str(raw_url or "").strip(),
-            },
-        ) from exc
 
     workflow_id_envs = _stage_workflow_id_env_names(definition)
     workflow_id_source, workflow_id = _env_with_name(*workflow_id_envs)
+    if not workflow_id:
+        raise FrameworkPlannerStageError(
+            "Coze workflow_id is not configured for this stage",
+            stage=definition.stage,
+            status_code=500,
+            detail={
+                "reason": "Missing Coze workflow_id configuration",
+                "expected_envs": list(workflow_id_envs),
+            },
+        )
 
-    timeout = int(_env(f"{definition.env_prefix}_TIMEOUT", "FASTGPT_TIMEOUT") or getattr(settings, "fastgpt_timeout", 300))
-    chat_id_prefix = _env("FASTGPT_CHAT_ID_PREFIX") or "framework-planner"
-    chat_id = _env(f"{definition.env_prefix}_CHAT_ID") or f"{chat_id_prefix}-{definition.stage}-{uuid.uuid4().hex[:8]}"
-
+    url_source, raw_url = _coze_api_base_with_name(api_key_source)
+    timeout = int(_env("COZE_TIMEOUT_SECONDS") or 600)
     return FrameworkPlannerEndpoint(
-        url=url,
+        url=_normalize_coze_workflow_url(raw_url or DEFAULT_COZE_WORKFLOW_URL),
         url_source=url_source or "default",
         api_key=api_key,
-        api_key_source=api_key_source or "FASTGPT_API_KEY",
+        api_key_source=api_key_source or "COZE_API_TOKEN",
         workflow_id=str(workflow_id or "").strip(),
         workflow_id_source=workflow_id_source or "",
-        chat_id=chat_id,
+        chat_id=f"framework-planner-{definition.stage}-{uuid.uuid4().hex[:8]}",
         timeout=max(1, timeout),
     )
 
@@ -2164,8 +2096,6 @@ def _stage_url_env_names(definition: FrameworkPlannerStageDefinition) -> tuple[s
 def _stage_workflow_id_env_names(definition: FrameworkPlannerStageDefinition) -> tuple[str, ...]:
     return (
         f"COZE_WORKFLOW_STAGE_{definition.stage}_ID",
-        f"{definition.env_prefix}_WORKFLOW_ID",
-        "FASTGPT_FRAMEWORK_WORKFLOW_ID",
     )
 
 
@@ -2174,29 +2104,10 @@ def _build_request_body(
     variables: dict[str, Any],
     endpoint: FrameworkPlannerEndpoint,
 ) -> dict[str, Any]:
-    if _is_coze_backend():
-        return {
-            "workflow_id": endpoint.workflow_id,
-            "parameters": variables,
-        }
-
-    body: dict[str, Any] = {
-        "chatId": endpoint.chat_id,
-        "stream": False,
-        "detail": True,
-        "variables": variables,
-        "messages": [
-            {
-                "role": "user",
-                "content": f"执行剧本框架策划阶段 {definition.stage}：{definition.label}。请只返回约定输出。",
-            }
-        ],
+    return {
+        "workflow_id": endpoint.workflow_id,
+        "parameters": variables,
     }
-    if endpoint.workflow_id:
-        # 兼容“统一 Key + 按 workflow id 指向不同工作流”的场景；
-        # 若上游网关不识别该字段，会忽略它，不影响 app-specific key 场景。
-        body["appId"] = endpoint.workflow_id
-    return body
 
 
 def _post_with_retries(
@@ -2207,23 +2118,54 @@ def _post_with_retries(
     *,
     diagnostics: dict[str, Any] | None = None,
 ) -> requests.Response:
-    attempts = max(1, int(getattr(settings, "fastgpt_http_retries", 2)) + 1)
-    delay = max(0.0, float(getattr(settings, "fastgpt_http_retry_delay", 1.5)))
+    attempts = max(1, int(_env("COZE_HTTP_RETRIES") or 2) + 1)
+    delay = max(0.0, float(_env("COZE_HTTP_RETRY_DELAY") or 1.5))
     last_exception: Exception | None = None
     last_response: requests.Response | None = None
     safe_diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    parameter_keys = sorted(str(key) for key in (body.get("parameters") or {}).keys()) if isinstance(body, dict) else []
+
+    def build_error(
+        *,
+        reason: str,
+        status_code: int,
+        exc: Exception | None = None,
+        response: requests.Response | None = None,
+    ) -> FrameworkPlannerStageError:
+        preview = safe_truncated_preview(_safe_response_text(response), limit=1200) if response is not None else ""
+        detail = {
+            "reason": reason,
+            "stage": definition.stage,
+            "endpoint": endpoint.url,
+            "url_source": endpoint.url_source or "default",
+            "workflow_id_source": endpoint.workflow_id_source or "",
+            "attempts": attempts,
+            "response_status_code": getattr(response, "status_code", None),
+            "response_preview": preview,
+            "diagnostics": safe_diagnostics,
+        }
+        if exc is not None:
+            detail["exception_type"] = type(exc).__name__
+            detail["exception_message"] = str(exc)
+        return FrameworkPlannerStageError(
+            f"Stage {definition.stage} Coze request failed",
+            stage=definition.stage,
+            status_code=status_code,
+            detail=detail,
+        )
 
     for attempt_index in range(1, attempts + 1):
-        _log_fastgpt_pre_request(
-            definition=definition,
-            endpoint=endpoint,
-            headers=headers,
-            body=body,
-            attempt_index=attempt_index,
-            attempts=attempts,
+        logger.info(
+            "Coze request start: stage=%s attempt=%s/%s endpoint=%s timeout_seconds=%s workflow_id_source=%s parameter_keys=%s",
+            definition.stage,
+            attempt_index,
+            attempts,
+            endpoint.url,
+            endpoint.timeout,
+            endpoint.workflow_id_source or "",
+            parameter_keys,
         )
         attempt_started_at = time.monotonic()
-        response: requests.Response | None = None
         try:
             response = requests.post(
                 endpoint.url,
@@ -2236,38 +2178,21 @@ def _post_with_retries(
             response = _exception_response(exc)
             if response is not None:
                 last_response = response
-            elapsed_seconds = time.monotonic() - attempt_started_at
-            _log_fastgpt_request_exception(
-                definition=definition,
-                endpoint=endpoint,
-                exc=exc,
-                attempt_index=attempt_index,
-                attempts=attempts,
-                elapsed_seconds=elapsed_seconds,
-                entered_requests_post=True,
-                response=response,
+            logger.warning(
+                "Coze request timeout: stage=%s attempt=%s/%s elapsed_seconds=%.3f exception=%s",
+                definition.stage,
+                attempt_index,
+                attempts,
+                time.monotonic() - attempt_started_at,
+                exc,
             )
             if attempt_index >= attempts:
-                final_error = _build_fastgpt_stage_error(
-                    definition=definition,
-                    diagnostics=safe_diagnostics,
-                    reason=f"FastGPT 请求超时，已重试 {attempts} 次仍失败",
+                raise build_error(
+                    reason=f"Coze request timed out after {attempts} attempts",
                     status_code=504,
-                    entered_fastgpt_request=True,
-                    exc=exc,
-                    endpoint=endpoint,
-                    response=response,
-                    attempts=attempts,
-                )
-                _log_fastgpt_attempts_exhausted(
-                    definition=definition,
-                    endpoint=endpoint,
-                    attempts=attempts,
                     exc=exc,
                     response=response,
-                    status_code=final_error.status_code,
-                )
-                raise final_error from exc
+                ) from exc
             time.sleep(delay * attempt_index)
             continue
         except requests.RequestException as exc:
@@ -2275,117 +2200,52 @@ def _post_with_retries(
             response = _exception_response(exc)
             if response is not None:
                 last_response = response
-            elapsed_seconds = time.monotonic() - attempt_started_at
-            _log_fastgpt_request_exception(
-                definition=definition,
-                endpoint=endpoint,
-                exc=exc,
-                attempt_index=attempt_index,
-                attempts=attempts,
-                elapsed_seconds=elapsed_seconds,
-                entered_requests_post=True,
-                response=response,
+            logger.warning(
+                "Coze request exception: stage=%s attempt=%s/%s elapsed_seconds=%.3f exception_type=%s exception=%s response_preview=%s",
+                definition.stage,
+                attempt_index,
+                attempts,
+                time.monotonic() - attempt_started_at,
+                type(exc).__name__,
+                exc,
+                safe_truncated_preview(_safe_response_text(response), limit=800) if response is not None else "",
             )
             if attempt_index >= attempts:
-                final_error = _build_fastgpt_stage_error(
-                    definition=definition,
-                    diagnostics=safe_diagnostics,
-                    reason=f"FastGPT 网络请求失败，已重试 {attempts} 次仍失败",
+                raise build_error(
+                    reason=f"Coze network request failed after {attempts} attempts",
                     status_code=502,
-                    entered_fastgpt_request=True,
-                    exc=exc,
-                    endpoint=endpoint,
-                    response=response,
-                    attempts=attempts,
-                )
-                _log_fastgpt_attempts_exhausted(
-                    definition=definition,
-                    endpoint=endpoint,
-                    attempts=attempts,
                     exc=exc,
                     response=response,
-                    status_code=final_error.status_code,
-                )
-                raise final_error from exc
+                ) from exc
             time.sleep(delay * attempt_index)
             continue
 
         last_response = response
-        _log_fastgpt_response(
-            definition=definition,
-            response=response,
-            attempt_index=attempt_index,
-            elapsed_seconds=time.monotonic() - attempt_started_at,
+        logger.info(
+            "Coze request response: stage=%s attempt=%s status_code=%s elapsed_seconds=%.3f response_preview=%s",
+            definition.stage,
+            attempt_index,
+            response.status_code,
+            time.monotonic() - attempt_started_at,
+            safe_truncated_preview(_safe_response_text(response), limit=800),
         )
         if response.status_code in RETRYABLE_HTTP_STATUSES and attempt_index < attempts:
-            _log_fastgpt_request_exception(
-                definition=definition,
-                endpoint=endpoint,
-                exc=None,
-                attempt_index=attempt_index,
-                attempts=attempts,
-                elapsed_seconds=time.monotonic() - attempt_started_at,
-                entered_requests_post=True,
-                response=response,
-                reason=f"HTTP {response.status_code}，准备重试",
-            )
             time.sleep(delay * attempt_index)
             continue
-
         if response.status_code >= 400:
-            final_error = _build_fastgpt_stage_error(
-                definition=definition,
-                diagnostics=safe_diagnostics,
-                reason=f"FastGPT 返回 HTTP {response.status_code}",
+            raise build_error(
+                reason=f"Coze returned HTTP {response.status_code}",
                 status_code=502 if response.status_code >= 500 else 400,
-                entered_fastgpt_request=True,
-                endpoint=endpoint,
                 response=response,
-                attempts=attempts,
             )
-            _log_fastgpt_request_exception(
-                definition=definition,
-                endpoint=endpoint,
-                exc=None,
-                attempt_index=attempt_index,
-                attempts=attempts,
-                elapsed_seconds=time.monotonic() - attempt_started_at,
-                entered_requests_post=True,
-                response=response,
-                reason=f"FastGPT 返回 HTTP {response.status_code}",
-            )
-            if response.status_code >= 500:
-                _log_fastgpt_attempts_exhausted(
-                    definition=definition,
-                    endpoint=endpoint,
-                    attempts=attempts,
-                    exc=None,
-                    response=response,
-                    status_code=final_error.status_code,
-                )
-            raise final_error
         return response
 
-    final_error = _build_fastgpt_stage_error(
-        definition=definition,
-        diagnostics=safe_diagnostics,
-        reason="FastGPT 请求未成功完成",
+    raise build_error(
+        reason="Coze request did not complete successfully",
         status_code=502,
-        entered_fastgpt_request=True,
-        exc=last_exception,
-        endpoint=endpoint,
-        response=last_response,
-        attempts=attempts,
-    )
-    _log_fastgpt_attempts_exhausted(
-        definition=definition,
-        endpoint=endpoint,
-        attempts=attempts,
         exc=last_exception,
         response=last_response,
-        status_code=final_error.status_code,
     )
-    raise final_error
 
 
 def _json_objects_from_text(text: Any) -> list[Any]:
@@ -3939,25 +3799,12 @@ def _stage_runtime_diagnostics(
     definition: FrameworkPlannerStageDefinition,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    if _is_coze_backend():
-        api_key_source, api_key = _coze_api_token_with_name()
-        url_source, configured_url = _coze_api_base_with_name(api_key_source)
-        timeout_raw = _env(f"{definition.env_prefix}_TIMEOUT", "COZE_TIMEOUT_SECONDS", "FASTGPT_TIMEOUT")
-        timeout_seconds = int(timeout_raw or 600)
-        resolved_url = _normalize_coze_workflow_url(configured_url or DEFAULT_COZE_WORKFLOW_URL)
-        url_error = ""
-    else:
-        api_key_source, api_key = _env_with_name(*_stage_api_key_env_names(definition))
-        url_source, configured_url = _env_with_name(*_stage_url_env_names(definition))
-        timeout_raw = _env(f"{definition.env_prefix}_TIMEOUT", "FASTGPT_TIMEOUT")
-        timeout_seconds = int(timeout_raw or getattr(settings, "fastgpt_timeout", 300) or 300)
-        resolved_url = DEFAULT_FASTGPT_URL
-        url_error = ""
-        try:
-            resolved_url = _normalize_fastgpt_url(configured_url or DEFAULT_FASTGPT_URL)
-        except Exception as exc:
-            url_error = f"{type(exc).__name__}: {exc}"
-            resolved_url = str(configured_url or DEFAULT_FASTGPT_URL).strip()
+    api_key_source, api_key = _coze_api_token_with_name()
+    url_source, configured_url = _coze_api_base_with_name(api_key_source)
+    timeout_raw = _env("COZE_TIMEOUT_SECONDS")
+    timeout_seconds = int(timeout_raw or 600)
+    resolved_url = _normalize_coze_workflow_url(configured_url or DEFAULT_COZE_WORKFLOW_URL)
+    url_error = ""
     workflow_id_source, workflow_id = _env_with_name(*_stage_workflow_id_env_names(definition))
     input_pollution = _stage_05_input_pollution(payload) if definition.stage == "05" else {
         "input_pollution_detected": False,
@@ -3969,7 +3816,7 @@ def _stage_runtime_diagnostics(
         "mock_enabled": _env_bool("FRAMEWORK_PLANNER_USE_MOCK", default=False),
         "has_api_key": bool(api_key),
         "api_key_source": api_key_source or "",
-        "api_key_env_candidates": list(_coze_api_token_env_names() if _is_coze_backend() else _stage_api_key_env_names(definition)),
+        "api_key_env_candidates": list(_coze_api_token_env_names()),
         "has_workflow_id": bool(workflow_id),
         "workflow_id_source": workflow_id_source or "",
         "workflow_id_env_candidates": list(_stage_workflow_id_env_names(definition)),
@@ -3999,7 +3846,7 @@ def _log_stage_entry(
         diagnostics.get("has_workflow_id", False),
         diagnostics.get("workflow_id_source") or "未命中",
         diagnostics.get("url_source") or "default",
-        diagnostics.get("resolved_url") or DEFAULT_FASTGPT_URL,
+        diagnostics.get("resolved_url") or DEFAULT_COZE_WORKFLOW_URL,
         diagnostics.get("workflow_id_missing_but_api_key_mode_enabled", False),
     )
 
@@ -4142,7 +3989,7 @@ def _log_stage_not_entering_fastgpt(
         diagnostics.get("api_key_source") or "未命中",
         diagnostics.get("workflow_id_source") or "未命中",
         diagnostics.get("url_source") or "default",
-        diagnostics.get("resolved_url") or DEFAULT_FASTGPT_URL,
+        diagnostics.get("resolved_url") or DEFAULT_COZE_WORKFLOW_URL,
     )
 
 
@@ -5725,7 +5572,7 @@ def _env_with_name(*names: str) -> tuple[str, str]:
 
 
 def _workflow_backend() -> str:
-    return (_env("WORKFLOW_BACKEND") or getattr(settings, "workflow_backend", "fastgpt") or "fastgpt").lower()
+    return "coze"
 
 
 def _is_coze_backend() -> bool:
