@@ -2109,7 +2109,55 @@ startRuntimeDebugPolling();
     return String(assetLike?.asset_kind || "").trim() === "tool_result";
   }
 
+  function isHotReviewAsset(assetLike) {
+    const values = [
+      assetLike?.tool_key,
+      assetLike?.tool_id,
+      assetLike?.tool_label,
+      assetLike?.asset_type,
+      assetLike?.result_type,
+      assetLike?.result?.result_type,
+      assetLike?.artifacts?.result_type,
+      assetLike?.artifacts?.tool_result?.result_type
+    ].map((value) => String(value || "").trim());
+    return values.some((value) =>
+      value === "hot_review"
+      || value === "script_audit_ecg"
+      || value === "爆款文审核"
+      || value.includes("爆款文审核")
+    );
+  }
+
+  function toolResultFromAsset(assetLike) {
+    const artifacts = assetLike?.artifacts || {};
+    const result = assetLike?.result
+      || assetLike?.tool_result
+      || artifacts.tool_result
+      || artifacts.result
+      || artifacts.output
+      || {};
+    const fallbackText = result.text
+      || result.answer_text
+      || artifacts.final_output_text
+      || artifacts.final_script
+      || "";
+    return {
+      ...result,
+      text: String(result.text || fallbackText || "").trim(),
+      answer_text: String(result.answer_text || fallbackText || "").trim(),
+      filename: result.filename || "",
+      result_type: result.result_type || assetLike?.result_type || artifacts.result_type || "",
+      parsed: result.parsed ?? assetLike?.parsed ?? artifacts.parsed ?? false,
+      audit: result.audit || assetLike?.audit || artifacts.audit || null,
+      view: result.view || assetLike?.view || artifacts.view || null,
+      parse_warnings: result.parse_warnings || assetLike?.parse_warnings || artifacts.parse_warnings || [],
+      assetSaved: true,
+      savedAsset: assetLike
+    };
+  }
+
   function assetTypeLabel(assetLike) {
+    if (isHotReviewAsset(assetLike)) return "爆款文审核";
     return isToolAsset(assetLike) ? "辅助工具" : "剧本资产";
   }
 
@@ -2122,14 +2170,256 @@ startRuntimeDebugPolling();
     return Boolean(result?.text && result?.filename);
   }
 
+  /* SCRIPT_AUDIT_ECG_UI_V1 */
+  function isScriptAuditEcgResult(result) {
+    return Boolean(
+      result
+      && String(result.result_type || result.resultType || "").trim() === "script_audit_ecg"
+      && result.parsed !== false
+      && result.view
+    );
+  }
+
+  function auditArray(value) {
+    return Array.isArray(value) ? value : [];
+  }
+
+  function auditText(value, fallback = "") {
+    return String(value ?? fallback).trim();
+  }
+
+  function auditNumber(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+
+  function auditSeverityClass(value) {
+    const text = auditText(value);
+    if (text.includes("高") || text.includes("严重")) return "is-high";
+    if (text.includes("中")) return "is-mid";
+    if (text.includes("低")) return "is-low";
+    return "";
+  }
+
+  function renderAuditSummaryCards(cards) {
+    const normalized = auditArray(cards);
+    if (!normalized.length) return "";
+    return `
+      <section class="audit-card-grid audit-summary-grid">
+        ${normalized.map((card) => `
+          <article class="audit-summary-card">
+            <small>${escapeHtml(card.label || card.key || "")}</small>
+            <strong>${escapeHtml(auditText(card.value, "-"))}${escapeHtml(card.suffix || "")}</strong>
+          </article>
+        `).join("")}
+      </section>
+    `;
+  }
+
+  function renderAuditEcgChart(chart) {
+    const points = auditArray(chart?.points);
+    if (!points.length) {
+      return `<section class="audit-panel"><h4>剧本心电图</h4><p class="audit-empty">暂无心电点位。</p></section>`;
+    }
+
+    const width = 760;
+    const height = 260;
+    const padX = 44;
+    const padY = 34;
+    const plotW = width - padX * 2;
+    const plotH = height - padY * 2;
+    const maxAbs = 5;
+    const xOf = (index) => padX + (points.length <= 1 ? plotW / 2 : index * (plotW / (points.length - 1)));
+    const yOf = (value) => padY + ((maxAbs - Math.max(-maxAbs, Math.min(maxAbs, value))) / (maxAbs * 2)) * plotH;
+    const zeroY = yOf(0);
+
+    const segments = points.slice(1).map((point, index) => {
+      const prev = points[index];
+      const v1 = auditNumber(prev.ecg_value);
+      const v2 = auditNumber(point.ecg_value);
+      const klass = (v1 + v2) / 2 >= 0 ? "audit-ecg-line-pos" : "audit-ecg-line-neg";
+      return `<line class="${klass}" x1="${xOf(index).toFixed(1)}" y1="${yOf(v1).toFixed(1)}" x2="${xOf(index + 1).toFixed(1)}" y2="${yOf(v2).toFixed(1)}"></line>`;
+    }).join("");
+
+    const circles = points.map((point, index) => {
+      const value = auditNumber(point.ecg_value);
+      const klass = value >= 0 ? "audit-ecg-dot-pos" : "audit-ecg-dot-neg";
+      const title = auditText(point?.hover_card?.title || point.short_label || point.event_type || point.point_id, `第${index + 1}点`);
+      const reason = auditText(point.audit_reason || point?.hover_card?.body || "");
+      return `
+        <circle class="audit-ecg-dot ${klass}" cx="${xOf(index).toFixed(1)}" cy="${yOf(value).toFixed(1)}" r="4.6">
+          <title>${escapeHtml(`${title}｜${value > 0 ? "+" : ""}${value}${reason ? "｜" + reason : ""}`)}</title>
+        </circle>
+      `;
+    }).join("");
+
+    const selected = points
+      .map((point, index) => ({ point, index, abs: Math.abs(auditNumber(point.ecg_value)) }))
+      .sort((a, b) => b.abs - a.abs)
+      .slice(0, 10);
+
+    return `
+      <section class="audit-panel audit-ecg-panel">
+        <div class="audit-section-head">
+          <div>
+            <h4>${escapeHtml(chart?.title || "剧本心电图")}</h4>
+            <p>正值表示增强继续观看动力，负值表示降低留存动力。</p>
+          </div>
+          <span class="audit-chip">点位 ${points.length}</span>
+        </div>
+        <div class="audit-ecg-wrap">
+          <svg class="audit-ecg-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="剧本心电图">
+            <line class="audit-ecg-axis" x1="${padX}" y1="${zeroY.toFixed(1)}" x2="${width - padX}" y2="${zeroY.toFixed(1)}"></line>
+            <text class="audit-ecg-label" x="8" y="${yOf(5).toFixed(1)}">+5</text>
+            <text class="audit-ecg-label" x="8" y="${zeroY.toFixed(1)}">0</text>
+            <text class="audit-ecg-label" x="8" y="${yOf(-5).toFixed(1)}">-5</text>
+            ${segments}
+            ${circles}
+          </svg>
+        </div>
+        <div class="audit-point-grid">
+          ${selected.map(({ point, index }) => {
+            const value = auditNumber(point.ecg_value);
+            return `
+              <article class="audit-point-card ${value >= 0 ? "is-positive" : "is-negative"}">
+                <div class="audit-point-score">${value > 0 ? "+" : ""}${escapeHtml(String(value))}</div>
+                <div>
+                  <strong>${escapeHtml(point?.hover_card?.title || point.short_label || point.event_type || `第${index + 1}点`)}</strong>
+                  <p>${escapeHtml(point.audit_reason || point?.hover_card?.body || point.commercial_effect || "")}</p>
+                  <small>${escapeHtml(point.original_text_excerpt || point?.hover_card?.evidence || "")}</small>
+                  ${point.fix_suggestion || point?.hover_card?.fix ? `<small class="audit-fix">建议：${escapeHtml(point.fix_suggestion || point.hover_card.fix)}</small>` : ""}
+                </div>
+              </article>
+            `;
+          }).join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderAuditDimensionCards(cards) {
+    const normalized = auditArray(cards);
+    if (!normalized.length) return "";
+    return `
+      <section class="audit-panel">
+        <div class="audit-section-head"><h4>评分维度</h4></div>
+        <div class="audit-dimension-grid">
+          ${normalized.map((item) => {
+            const score = auditNumber(item.score);
+            const maxScore = auditNumber(item.max_score, 100) || 100;
+            const pct = Math.max(0, Math.min(100, Math.round(score / maxScore * 100)));
+            return `
+              <article class="audit-dimension-card">
+                <div>
+                  <strong>${escapeHtml(item.dimension_name || item.dimension_key || "评分维度")}</strong>
+                  <b>${escapeHtml(String(score))}/${escapeHtml(String(maxScore))}</b>
+                </div>
+                <div class="audit-progress"><i style="width:${pct}%"></i></div>
+                <p>${escapeHtml(item.summary || item.priority_fix || "")}</p>
+                ${auditArray(item.core_deductions).length ? `<small>扣分：${escapeHtml(auditArray(item.core_deductions).join("；"))}</small>` : ""}
+                ${item.priority_fix ? `<small>优先修改：${escapeHtml(item.priority_fix)}</small>` : ""}
+              </article>
+            `;
+          }).join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderAuditList(title, items, options = {}) {
+    const normalized = auditArray(items);
+    if (!normalized.length) return "";
+    const limit = options.limit || 8;
+    return `
+      <section class="audit-panel">
+        <div class="audit-section-head">
+          <h4>${escapeHtml(title)}</h4>
+          <span class="audit-chip">${normalized.length}</span>
+        </div>
+        <div class="audit-list">
+          ${normalized.slice(0, limit).map((item, index) => {
+            const name = item.title || item.issue_title || item.risk_point || item.task_title || item.type || item.point_type || item.content || `条目 ${index + 1}`;
+            const level = item.severity || item.risk_level || item.priority || item.strength || "";
+            const body = item.summary || item.description || item.reason || item.problem || item.impact || item.content || item.fix_suggestion || item.rewrite_action || "";
+            const evidence = item.evidence || item.text_evidence || item.original_text_excerpt || "";
+            const fix = item.fix_suggestion || item.suggestion || item.rewrite_action || item.enhancement_suggestion || "";
+            return `
+              <article class="audit-list-card ${auditSeverityClass(level)}">
+                <div>
+                  <strong>${escapeHtml(name)}</strong>
+                  ${level ? `<span class="audit-chip">${escapeHtml(level)}</span>` : ""}
+                </div>
+                ${body ? `<p>${escapeHtml(body)}</p>` : ""}
+                ${evidence ? `<small>依据：${escapeHtml(evidence)}</small>` : ""}
+                ${fix ? `<small class="audit-fix">建议：${escapeHtml(fix)}</small>` : ""}
+              </article>
+            `;
+          }).join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderScriptAuditEcgResult(result) {
+    const view = result.view || {};
+    const audit = result.audit || {};
+    const overall = audit.overall || {};
+    const meta = audit.meta || view.meta || {};
+    const raw = result.answer_text || result.text || "";
+    return `
+      <div class="audit-result-shell">
+        <section class="audit-hero">
+          <div>
+            <div class="audit-kicker">爆款文审核 / ECG REPORT</div>
+            <h3>${escapeHtml(meta.script_title || "剧本商业潜力审核")}</h3>
+            <p>${escapeHtml(overall.core_judgement || overall.final_judgement || "已解析为结构化审核结果。")}</p>
+          </div>
+          <div class="audit-score-badge">
+            <strong>${escapeHtml(String(overall.total_score ?? view?.summary_cards?.[0]?.value ?? "-"))}</strong>
+            <span>/100</span>
+          </div>
+        </section>
+
+        ${renderAuditSummaryCards(view.summary_cards)}
+        ${renderAuditEcgChart(view.ecg_chart)}
+        ${renderAuditDimensionCards(view.dimension_cards)}
+        ${renderAuditList("关键问题", view.issue_cards || audit.key_issues, { limit: 8 })}
+        ${renderAuditList("爽点与保留项", view.satisfying_point_cards || audit.satisfying_points, { limit: 8 })}
+        ${renderAuditList("风险扫描", view.risk_cards || audit.risk_scan, { limit: 8 })}
+        ${renderAuditList("修改计划", view.rewrite_tasks || audit.rewrite_plan, { limit: 10 })}
+
+        ${auditArray(result.parse_warnings).length ? `
+          <details class="audit-raw-details">
+            <summary>解析提醒</summary>
+            <pre>${escapeHtml(result.parse_warnings.join("\n"))}</pre>
+          </details>
+        ` : ""}
+
+        ${raw ? `
+          <details class="audit-raw-details">
+            <summary>原始返回 / 调试数据</summary>
+            <pre>${escapeHtml(raw)}</pre>
+          </details>
+        ` : ""}
+      </div>
+    `;
+  }
+
+
+
   function renderToolOutput(toolKey = state.activeTool, fallbackText = "") {
     const result = currentToolResult(toolKey);
     if (els.toolOutputBox) {
-      els.toolOutputBox.textContent = result?.text
-        || fallbackText
-        || (isAuthenticated()
-          ? "这里会显示辅助工具结果。"
-          : "登录后可使用辅助工具。");
+      if (isScriptAuditEcgResult(result)) {
+        els.toolOutputBox.innerHTML = renderScriptAuditEcgResult(result);
+      } else {
+        els.toolOutputBox.textContent = result?.text
+          || result?.answer_text
+          || fallbackText
+          || (isAuthenticated()
+            ? "这里会显示辅助工具结果。"
+            : "登录后可使用辅助工具。");
+      }
     }
     if (els.downloadToolBtn) {
       const shouldShow = Boolean(result?.text && result?.filename);
@@ -2142,6 +2432,7 @@ startRuntimeDebugPolling();
       }
     }
   }
+
 
   function downloadTextFile(text, filename) {
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
@@ -3256,8 +3547,10 @@ startRuntimeDebugPolling();
     }
     const categories = [
       ["老剧本平台资产", assets.filter((item) => assetCategory(item) === "old_script")],
-      ["框架资产", assets.filter((item) => assetCategory(item) === "framework")],
-      ["新剧本资产", assets.filter((item) => assetCategory(item) === "new_script")],
+      ["爆款文审核资产", assets.filter((item) => isHotReviewAsset(item))],
+      ["框架资产", assets.filter((item) => assetCategory(item) === "framework" && !isHotReviewAsset(item))],
+      ["新剧本资产", assets.filter((item) => assetCategory(item) === "new_script" && !isHotReviewAsset(item))],
+      ["其他辅助工具资产", assets.filter((item) => isToolAsset(item) && !isHotReviewAsset(item))],
     ];
     els.assetsList.innerHTML = categories.map(([title, items]) => `
       <section class="asset-category">
@@ -3272,6 +3565,7 @@ startRuntimeDebugPolling();
           <span class="status-pill ${item.visibility === "public" ? "status-pill-public" : "status-pill-private"}">${escapeHtml(visibilityLabel(item.visibility))}</span>
         </div>
         <h3>${escapeHtml(projectDisplayTitle(item))}</h3>
+        ${isHotReviewAsset(item) ? `<button class="btn btn-secondary" type="button" data-action="open-hot-review-asset" data-project-id="${escapeHtml(String(item.project_id || item.id || ""))}">打开爆款文审核</button>` : ""}
         <p>${escapeHtml(item.summary)}</p>
         <div class="asset-meta">
           <span>项目 ${escapeHtml(item.project_id)}</span>
@@ -3568,7 +3862,7 @@ startRuntimeDebugPolling();
       }
     }
     state.toolResults[state.activeTool] = null;
-    renderToolOutput(state.activeTool, "生成中，请稍候~");
+    renderToolOutput(state.activeTool, "生成时间很长，请不要刷新，马上就好~");
     const data = await requestJson(currentToolRunUrl(state.activeTool), {
       method: "POST",
       body: JSON.stringify(payload)
@@ -3580,8 +3874,19 @@ startRuntimeDebugPolling();
     const assetSaved = Boolean(result.asset_saved || data.asset_saved);
     const assetSaveError = String(result.asset_save_error || data.asset_save_error || "").trim();
     state.toolResults[state.activeTool] = {
+      ...data,
+      ...result,
       text,
+      answer_text: result.answer_text || data.answer_text || text,
       filename,
+      output,
+      result_type: result.result_type || data.result_type || "",
+      resultType: result.result_type || data.result_type || "",
+      parsed: result.parsed ?? data.parsed ?? false,
+      audit: result.audit || data.audit || null,
+      view: result.view || data.view || null,
+      parse_warnings: result.parse_warnings || data.parse_warnings || [],
+      parseWarnings: result.parse_warnings || data.parse_warnings || [],
       outputType: result.output_type || data.output_type || "text",
       assetSaved,
       savedAsset: result.saved_asset || data.saved_asset || null
@@ -4181,6 +4486,48 @@ startRuntimeDebugPolling();
       els.formHint.textContent = "初始化失败，请检查服务配置。";
     }
   }
+
+
+  async function openHotReviewAssetFromList(projectId) {
+    if (!projectId) return;
+    let asset = findOwnedAsset(projectId)
+      || state.assets.find((item) => String(item.project_id || item.id || "") === String(projectId))
+      || null;
+
+    try {
+      const detail = await requestJson(`/api/projects/${encodeURIComponent(projectId)}`);
+      asset = detail.project || detail.asset || asset;
+    } catch (_) {
+      // 列表快照已经足够展示时，不阻断打开。
+    }
+
+    if (!asset) {
+      showToast("资产未找到", "请刷新资产列表后重试。");
+      return;
+    }
+
+    const payload = asset.input_payload || asset.request_payload || asset.tool_request || {};
+    const reviewText = String(payload.review_text || payload.text || payload.input || "").trim();
+    const draft = ensureToolDraft("hot_review");
+    state.toolDrafts.hot_review = {
+      ...draft,
+      review_text: reviewText,
+      text: reviewText
+    };
+
+    state.toolResults.hot_review = toolResultFromAsset(asset);
+    openToolPanel("hot_review");
+    renderToolForm("hot_review");
+    renderToolOutput("hot_review");
+  }
+
+
+  document.addEventListener("click", (event) => {
+    const button = event.target?.closest?.('[data-action="open-hot-review-asset"]');
+    if (!button) return;
+    event.preventDefault();
+    openHotReviewAssetFromList(button.dataset.projectId || "");
+  });
 
   window.addEventListener("DOMContentLoaded", init);
 })();

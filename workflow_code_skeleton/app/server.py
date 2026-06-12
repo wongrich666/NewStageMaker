@@ -1975,11 +1975,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             ), 503
         except Exception as exc:
             return _json_error(str(exc), status=500, fallback="工具执行失败，请稍后重试。")
-        flattened = dict(result)
+        result, flattened = _maybe_enrich_script_audit_ecg_tool_result(tool_key, result, dict(result))
         asset_saved = False
         saved_asset = None
         asset_save_error = ""
-        if str(flattened.get("text") or "").strip():
+        if str(flattened.get("text") or flattened.get("answer_text") or "").strip() or str(flattened.get("result_type") or "") == "script_audit_ecg":
             try:
                 saved_asset = task_manager.save_auxiliary_asset(
                     user_id=_require_user_id(),
@@ -2004,7 +2004,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             result["saved_asset"] = saved_asset
         if asset_save_error:
             result["asset_save_error"] = asset_save_error
-        result, flattened = _maybe_enrich_script_audit_ecg_tool_result(tool_key, result, flattened)
         ok = bool(flattened.pop("ok", True))
         return _json_ok(ok=ok, result=result, **flattened)
 
