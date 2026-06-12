@@ -2544,6 +2544,7 @@
       </div>
       ${ui.assetImporting ? renderProcessingBanner("导入资产中，请稍后") : ""}
       ${state.current_view === "basic" ? renderKnowledgePanel() : ""}
+      ${renderBrandMotionPanel()}
       <div class="fp-card fp-steps">${renderStepRail()}</div>
       ${renderRunningStageStatus()}
     `;
@@ -2851,6 +2852,28 @@
         </div>
         <span class="fp-running-badge">处理中</span>
       </div>
+    `;
+  }
+
+  function renderBrandMotionPanel() {
+    const stageKey = runningStageKey();
+    const isRunning = Boolean(stageKey || ui.assetImporting || ui.loading.framework_save || ui.loading.framework_script);
+    const statusText = stageKey
+      ? `正在处理 ${stageNoForKey(stageKey)} · ${stageDisplayTitle(stageKey)}`
+      : ui.assetImporting
+        ? "正在导入框架资产"
+        : ui.loading.framework_script
+          ? "正在进入 08-12 剧本生成"
+          : "把创意转成可执行剧本";
+    return `
+      <section class="brand-motion-panel fp-brand-motion ${isRunning ? "is-running" : ""}" data-brand-motion aria-live="polite">
+        <img class="brand-motion-image brand-motion-id" src="/static/assets/brand/ID.gif" alt="Idea to Script" />
+        <img class="brand-motion-image brand-motion-loading" src="/static/assets/brand/loading.gif" alt="生成中" />
+        <div class="brand-motion-text">
+          <div class="brand-motion-title">Idea to Script</div>
+          <div class="brand-motion-subtitle" data-brand-motion-status>${escapeHtml(statusText)}</div>
+        </div>
+      </section>
     `;
   }
 

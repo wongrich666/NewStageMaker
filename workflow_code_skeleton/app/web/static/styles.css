@@ -4623,21 +4623,24 @@ a {
     grid-template-columns: 1fr;
   }
 }
-/* UI_GLOBAL_CLEAN_THEME_V1: unify home / auth / community / tools with gray-white workspace style */
+
+/* Workspace refinement and brand motion */
 
 :root {
   --ui-bg: #f3f5f9;
   --ui-bg-2: #eef2f7;
   --ui-surface: rgba(255, 255, 255, 0.96);
   --ui-surface-soft: #f8fafc;
-  --ui-line: rgba(24, 34, 53, 0.08);
-  --ui-line-strong: rgba(24, 34, 53, 0.14);
+  --ui-line: rgba(24, 34, 53, 0.10);
+  --ui-line-strong: rgba(24, 34, 53, 0.16);
   --ui-text: #161c28;
   --ui-muted: #6b7282;
   --ui-primary: #253247;
   --ui-primary-hover: #1b2636;
-  --ui-shadow: 0 18px 48px rgba(15, 23, 42, 0.07);
+  --ui-success: #067647;
+  --ui-danger: #9f2f24;
   --ui-radius: 24px;
+  --ui-shadow: 0 18px 48px rgba(15, 23, 42, 0.07);
 }
 
 html,
@@ -4648,7 +4651,13 @@ body,
 .auth-page,
 .community-page {
   color: var(--ui-text);
-  background: linear-gradient(180deg, #f7f8fb 0%, var(--ui-bg-2) 100%) !important;
+  background: linear-gradient(180deg, #f7f8fb 0%, var(--ui-bg-2) 100%);
+}
+
+.workspace-body,
+.mono-page {
+  --mono-accent: var(--ui-primary);
+  --mono-accent-strong: var(--ui-primary-hover);
 }
 
 .home-shell,
@@ -4670,20 +4679,25 @@ body,
 .asset-editor,
 .empty-card,
 .community-tile,
-.asset-tile {
-  color: var(--ui-text) !important;
-  border-color: var(--ui-line) !important;
-  background: var(--ui-surface) !important;
-  box-shadow: var(--ui-shadow) !important;
+.asset-tile,
+.workspace-body .workspace-runtime,
+.workspace-body .tool-panel,
+.workspace-body .community-panel,
+.mono-page .runtime,
+.auth-page .card {
+  color: var(--ui-text);
+  border-color: var(--ui-line);
+  background: var(--ui-surface);
+  box-shadow: var(--ui-shadow);
 }
 
 .home-hero-card,
 .hero-panel,
 .mono-page .home-hero-card {
-  color: var(--ui-text) !important;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(247, 249, 253, 0.96)) !important;
-  border: 1px solid var(--ui-line) !important;
-  box-shadow: var(--ui-shadow) !important;
+  color: var(--ui-text);
+  border: 1px solid var(--ui-line);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(247, 249, 253, 0.92));
+  box-shadow: var(--ui-shadow);
 }
 
 .home-hero-copy h1,
@@ -4694,8 +4708,15 @@ body,
 .runtime h2,
 .section-head h2,
 .card-head h3,
-.tool-panel-head h3 {
-  color: var(--ui-text) !important;
+.tool-panel-head h3,
+.workspace-body .runtime-app-label,
+.workspace-body .runtime-brandline strong,
+.workspace-body #projectText,
+.workspace-body #messageText,
+.workspace-body #progressText,
+.workspace-body #taskText,
+.workspace-body .chat-empty-state strong {
+  color: var(--ui-text);
 }
 
 .home-hero-copy p,
@@ -4712,26 +4733,33 @@ body,
 .auth-switch,
 .runtime-foot,
 .composer-hint,
-.prelogin-status-note {
-  color: var(--ui-muted) !important;
+.prelogin-status-note,
+.workspace-body .runtime-kicker,
+.workspace-body .runtime-pill .runtime-kicker,
+.tool-panel-kicker,
+.eyebrow {
+  color: var(--ui-muted);
 }
 
 .home-entry-card,
 .guide-card,
 .asset-tile,
 .community-tile,
-.empty-card {
-  border: 1px solid var(--ui-line) !important;
-  color: var(--ui-text) !important;
-  background: var(--ui-surface) !important;
-  box-shadow: var(--ui-shadow) !important;
+.empty-card,
+.tool-panel,
+.community-panel,
+.workspace-body .tool-panel {
+  border: 1px solid var(--ui-line);
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  box-shadow: var(--ui-shadow);
 }
 
 .workspace-sidebar,
 .workspace-body .workspace-sidebar,
 .prelogin-sidebar {
-  background: rgba(15, 20, 28, 0.94) !important;
-  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(15, 20, 28, 0.94);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .sidebar-brand,
@@ -4739,7 +4767,7 @@ body,
 .sidebar-section-head,
 .sidebar-group-label,
 .workspace-body .workspace-folder summary {
-  color: #edf4fb !important;
+  color: #edf4fb;
 }
 
 .sidebar-brand-text em,
@@ -4748,19 +4776,39 @@ body,
 .workspace-body .workspace-pick-meta,
 .workspace-body .workspace-pick-state,
 .tool-shortcut small {
-  color: #9aa8ba !important;
+  color: #9aa8ba;
 }
 
 .sidebar-brand-mark,
 .sidebar-profile-avatar {
-  background: linear-gradient(135deg, #55657b, #2b3543) !important;
+  background: linear-gradient(135deg, #55657b, #2b3543);
 }
 
 .sidebar-create-btn,
-.workspace-body .sidebar-create-btn {
-  color: #ffffff !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  background: linear-gradient(135deg, #2f3f55, #1c2531) !important;
+.workspace-body .sidebar-create-btn,
+.btn-primary,
+.workspace-body .btn-primary,
+.workspace-body .composer-send-btn,
+.mono-page .btn-primary,
+.composer-send-btn,
+.prelogin-send-link {
+  color: #ffffff;
+  border-color: var(--ui-primary);
+  background: var(--ui-primary);
+  box-shadow: none;
+}
+
+.sidebar-create-btn:hover,
+.workspace-body .sidebar-create-btn:hover,
+.btn-primary:hover:not(:disabled),
+.workspace-body .btn-primary:hover:not(:disabled),
+.workspace-body .composer-send-btn:hover:not(:disabled),
+.mono-page .btn-primary:hover:not(:disabled),
+.composer-send-btn:hover:not(:disabled),
+.prelogin-send-link:hover {
+  color: #ffffff;
+  border-color: var(--ui-primary-hover);
+  background: var(--ui-primary-hover);
 }
 
 .sidebar-profile-btn,
@@ -4771,14 +4819,14 @@ body,
 .workspace-body .workspace-folder,
 .workspace-body .workspace-empty,
 .workspace-body .workspace-pick {
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .workspace-body .workspace-pick.active,
 .tool-shortcut.active {
-  border-color: rgba(148, 163, 184, 0.34) !important;
-  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(148, 163, 184, 0.34);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .btn,
@@ -4791,22 +4839,8 @@ body,
 .btn-neutral,
 .composer-send-btn,
 .prelogin-send-link {
-  border-radius: 999px !important;
+  border-radius: 999px;
   font-weight: 800;
-}
-
-.btn-primary,
-.composer-send-btn,
-.prelogin-send-link {
-  color: #ffffff !important;
-  border-color: transparent !important;
-  background: var(--ui-primary) !important;
-}
-
-.btn-primary:hover,
-.composer-send-btn:hover,
-.prelogin-send-link:hover {
-  background: var(--ui-primary-hover) !important;
 }
 
 .btn-secondary,
@@ -4814,78 +4848,54 @@ body,
 .page-back-link,
 .page-back-link-light,
 .home-nav a,
+.chat-suggestion-btn,
+.composer-action-link,
 .mono-page .btn-secondary,
 .mono-page .btn-ghost {
-  color: var(--ui-text) !important;
-  border-color: var(--ui-line) !important;
-  background: rgba(255, 255, 255, 0.94) !important;
+  color: var(--ui-text);
+  border-color: var(--ui-line);
+  background: rgba(255, 255, 255, 0.94);
 }
 
 .btn-public,
-.status-pill-public,
-.community-tag.status-pill-public {
-  color: #2f3a4b !important;
-  border: 1px solid rgba(24, 34, 53, 0.08) !important;
-  background: #eef2f7 !important;
-}
-
-.btn-danger,
-.mono-page .btn-danger {
-  color: #9f2f24 !important;
-  border: 1px solid rgba(159, 47, 36, 0.14) !important;
-  background: #fff1f0 !important;
-}
-
 .status-pill,
-.status-pill-completed,
 .status-pill-public,
 .status-pill-private,
 .guide-card span,
 .community-tag {
-  color: #334155 !important;
-  background: #eef2f7 !important;
-  border: 1px solid var(--ui-line) !important;
+  color: #334155;
+  border: 1px solid var(--ui-line);
+  background: #eef2f7;
 }
 
 .status-pill-completed {
-  color: #067647 !important;
-  background: #ecfdf3 !important;
-  border-color: #abefc6 !important;
+  color: var(--ui-success);
+  background: #ecfdf3;
+  border-color: #abefc6;
 }
 
-.tool-panel,
-.community-panel,
-.workspace-body .tool-panel {
-  color: var(--ui-text) !important;
-  border-color: var(--ui-line) !important;
-  background: var(--ui-surface) !important;
-  box-shadow: var(--ui-shadow) !important;
+.btn-danger,
+.mono-page .btn-danger,
+.auth-page .auth-error,
+.auth-error {
+  color: var(--ui-danger);
+  border: 1px solid rgba(159, 47, 36, 0.14);
+  background: #fff1f0;
 }
 
-.tool-panel-kicker,
-.eyebrow,
-.runtime-kicker {
-  color: var(--ui-muted) !important;
-}
-
-.tool-panel-output,
 .output-box,
 .detail-output,
-.community-page .detail-output {
-  color: var(--ui-text) !important;
-  border-color: var(--ui-line) !important;
-  background: #ffffff !important;
-}
-
+.community-page .detail-output,
+.tool-panel-output,
 .field input,
 .field select,
 .field textarea,
 .auth-page .field input,
 .workspace-body .tool-field input,
 .workspace-body .tool-field textarea {
-  color: var(--ui-text) !important;
-  border-color: var(--ui-line) !important;
-  background: #ffffff !important;
+  color: var(--ui-text);
+  border-color: var(--ui-line);
+  background: #ffffff;
 }
 
 .field input:focus,
@@ -4894,166 +4904,120 @@ body,
 .auth-page .field input:focus,
 .workspace-body .tool-field input:focus,
 .workspace-body .tool-field textarea:focus {
-  border-color: rgba(37, 50, 71, 0.22) !important;
-  box-shadow: 0 0 0 4px rgba(37, 50, 71, 0.08) !important;
-  background: #ffffff !important;
+  border-color: rgba(37, 50, 71, 0.22);
+  box-shadow: 0 0 0 4px rgba(37, 50, 71, 0.08);
 }
 
-.auth-page .auth-error,
-.auth-error {
-  color: #9f2f24 !important;
-  border: 1px solid rgba(159, 47, 36, 0.14) !important;
-  background: #fff1f0 !important;
+.auth-switch a,
+.chat-composer-plus {
+  color: var(--ui-primary);
 }
 
-.auth-switch a {
-  color: var(--ui-primary) !important;
+.progress-bar,
+.workspace-body .progress-bar {
+  background: rgba(37, 50, 71, 0.08);
 }
 
-.progress-bar {
-  background: rgba(37, 50, 71, 0.08) !important;
-}
-
-.progress-fill {
-  background: linear-gradient(90deg, #253247, #64748b) !important;
+.progress-fill,
+.workspace-body .progress-fill,
+.workspace-body .runtime-progress-top .progress-fill {
+  background: linear-gradient(90deg, #253247, #64748b);
+  box-shadow: none;
 }
 
 .chat-view,
 .prelogin-chat-view,
 .chat-transcript,
 .prelogin-transcript {
-  background: transparent !important;
+  background: transparent;
 }
 
 .chat-empty-state,
 .prelogin-chat-empty {
-  color: var(--ui-text) !important;
-  border-color: var(--ui-line) !important;
-  background: var(--ui-surface) !important;
-  box-shadow: var(--ui-shadow) !important;
-}
-
-.chat-suggestion-btn,
-.composer-action-link {
-  color: var(--ui-text) !important;
-  border-color: var(--ui-line) !important;
-  background: rgba(255, 255, 255, 0.94) !important;
-}
-
-.chat-composer-plus {
-  color: var(--ui-primary) !important;
+  color: var(--ui-text);
+  border-color: var(--ui-line);
+  background: var(--ui-surface);
+  box-shadow: var(--ui-shadow);
 }
 
 .home-hero-orb,
 .mono-page .home-hero-orb,
 .auth-page .bg-orb {
-  opacity: 0.08 !important;
-  background: radial-gradient(circle at 30% 30%, rgba(100, 116, 139, 0.18), rgba(100, 116, 139, 0.06), transparent 70%) !important;
-}
-/* UI_REMOVE_REMAINING_YELLOW_ACCENTS_V2: final override, must stay at end of styles.css */
-
-.workspace-body,
-.mono-page {
-  --mono-accent: #253247 !important;
-  --mono-accent-strong: #1b2636 !important;
+  opacity: 0.08;
+  background: radial-gradient(circle at 30% 30%, rgba(100, 116, 139, 0.18), rgba(100, 116, 139, 0.06), transparent 70%);
 }
 
-/* 顶部标题与状态条 */
-.workspace-body .runtime-app-label,
-.workspace-body .runtime-brandline strong,
-.workspace-body #projectText,
-.workspace-body #messageText,
-.workspace-body #progressText,
-.workspace-body #taskText {
-  color: #253247 !important;
-  background: transparent !important;
+.brand-motion-panel {
+  width: min(100%, 720px);
+  min-height: 132px;
+  margin: 0 auto 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 18px 22px;
+  border: 1px solid rgba(24, 34, 53, 0.08);
+  border-radius: var(--ui-radius);
+  color: var(--ui-text);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(247, 249, 253, 0.84));
+  box-shadow: var(--ui-shadow);
 }
 
-.workspace-body .runtime-pill {
-  color: #161c28 !important;
-  border: 1px solid rgba(24, 34, 53, 0.10) !important;
-  background: rgba(255, 255, 255, 0.92) !important;
-  box-shadow: none !important;
+.brand-motion-image {
+  width: min(34vw, 190px);
+  max-width: 190px;
+  height: auto;
+  max-height: 118px;
+  object-fit: contain;
+  flex: 0 0 auto;
 }
 
-.workspace-body .runtime-pill .runtime-kicker,
-.workspace-body .runtime-kicker {
-  color: #6b7282 !important;
-  background: transparent !important;
-  border: 0 !important;
+.brand-motion-loading {
+  display: none;
 }
 
-.workspace-body .runtime-pill strong {
-  color: #161c28 !important;
-  background: transparent !important;
+.brand-motion-panel.is-running .brand-motion-id {
+  display: none;
 }
 
-/* 取消黄色按钮 / 黄色标签 */
-.status-pill-public,
-.status-pill-pending,
-.workspace-body .btn-primary,
-.workspace-body .sidebar-create-btn,
-.workspace-body .btn-public,
-.mono-page .btn-primary,
-.mono-page .btn-public {
-  color: #ffffff !important;
-  background: #253247 !important;
-  border-color: #253247 !important;
-  box-shadow: none !important;
+.brand-motion-panel.is-running .brand-motion-loading {
+  display: block;
 }
 
-.status-pill-public:hover,
-.status-pill-pending:hover,
-.workspace-body .btn-primary:hover:not(:disabled),
-.workspace-body .sidebar-create-btn:hover,
-.workspace-body .btn-public:hover:not(:disabled),
-.mono-page .btn-primary:hover:not(:disabled),
-.mono-page .btn-public:hover:not(:disabled) {
-  color: #ffffff !important;
-  background: #1b2636 !important;
-  border-color: #1b2636 !important;
+.brand-motion-text {
+  min-width: 0;
+  text-align: left;
 }
 
-/* 如果想让状态小标签不要黑底，而是浅灰胶囊，就用这一组覆盖 */
-.workspace-body .runtime-pill,
-.workspace-body .runtime-meta-strip .runtime-pill {
-  border-radius: 999px !important;
-  background: #ffffff !important;
+.brand-motion-title {
+  color: #111827;
+  font-size: clamp(22px, 3vw, 34px);
+  line-height: 1.08;
+  font-weight: 900;
+  letter-spacing: 0;
 }
 
-/* 进度条也去掉黄光 */
-.workspace-body .progress-fill,
-.workspace-body .runtime-progress-top .progress-fill {
-  background: linear-gradient(90deg, #253247, #64748b) !important;
-  box-shadow: none !important;
+.brand-motion-subtitle {
+  margin-top: 8px;
+  color: var(--ui-muted);
+  font-size: 14px;
+  line-height: 1.6;
 }
-
-/* 社区公开成品标签也统一为灰白 */
-.community-tag.status-pill-public,
-.status-pill.status-pill-public {
-  color: #334155 !important;
-  background: #eef2f7 !important;
-  border: 1px solid rgba(24, 34, 53, 0.08) !important;
-}
-
-/* HOME_MINIMAL_LANDING_V1: replace old chat-like home with clean two-entry landing */
 
 .workspace-main-minimal {
   position: relative;
 }
 
-/* 登录后的 index.html：隐藏旧的对话式主流程区域，但保留 DOM，避免 app.js 缺少 id 报错 */
 .workspace-main-minimal > .workspace-runtime,
 .workspace-main-minimal > .platform-entry-grid,
 .workspace-main-minimal > .chat-view,
 .workspace-main-minimal > .composer-card {
-  display: none !important;
+  display: none;
 }
 
-/* 当辅助工具或社区面板打开时，隐藏首页入口，避免重叠 */
 .workspace-main-minimal:has(#toolPanel.panel-open) > .workspace-landing,
 .workspace-main-minimal:has(#community.panel-open) > .workspace-landing {
-  display: none !important;
+  display: none;
 }
 
 .workspace-landing {
@@ -5063,19 +5027,19 @@ body,
   align-items: center;
   justify-content: center;
   padding: 56px 28px;
-  color: #161c28;
-  background: linear-gradient(180deg, #f7f8fb 0%, #eef2f7 100%);
+  color: var(--ui-text);
+  background: linear-gradient(180deg, #f7f8fb 0%, var(--ui-bg-2) 100%);
 }
 
 .workspace-landing__inner {
   width: 100%;
-  max-width: 920px;
+  max-width: 960px;
   text-align: center;
 }
 
 .workspace-landing__eyebrow {
   margin-bottom: 14px;
-  color: #6b7282;
+  color: var(--ui-muted);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.16em;
@@ -5084,17 +5048,17 @@ body,
 
 .workspace-landing__title {
   margin: 0 0 16px;
-  color: #161c28;
-  font-size: clamp(46px, 6vw, 76px);
+  color: var(--ui-text);
+  font-size: clamp(44px, 6vw, 74px);
   line-height: 1.04;
   font-weight: 900;
-  letter-spacing: -0.07em;
+  letter-spacing: 0;
 }
 
 .workspace-landing__subtitle {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto 38px;
-  color: #6b7282;
+  color: var(--ui-muted);
   font-size: 16px;
   line-height: 1.85;
 }
@@ -5114,12 +5078,12 @@ body,
   justify-content: center;
   gap: 12px;
   padding: 30px 24px;
-  border: 1px solid rgba(24, 34, 53, 0.08);
-  border-radius: 26px;
-  color: #161c28;
+  color: var(--ui-text);
   text-decoration: none;
+  border: 1px solid var(--ui-line);
+  border-radius: 26px;
   background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.07);
+  box-shadow: var(--ui-shadow);
   transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
 }
 
@@ -5131,15 +5095,15 @@ body,
 
 .workspace-landing__card.primary {
   color: #ffffff;
-  border-color: #253247;
-  background: #253247;
+  border-color: var(--ui-primary);
+  background: var(--ui-primary);
 }
 
 .workspace-landing__card-title {
   color: inherit;
   font-size: clamp(28px, 3vw, 38px);
   font-weight: 900;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
 }
 
 .workspace-landing__card-desc {
@@ -5149,13 +5113,6 @@ body,
   line-height: 1.6;
 }
 
-.workspace-landing__footnote {
-  margin-top: 26px;
-  color: #6b7282;
-  font-size: 13px;
-}
-
-/* 登录页表单卡片 */
 .workspace-login-landing {
   align-items: flex-start;
   padding-top: 72px;
@@ -5171,87 +5128,199 @@ body,
   margin: 0 auto;
   padding: 28px;
   text-align: left;
-  color: #161c28 !important;
-  border: 1px solid rgba(24, 34, 53, 0.08) !important;
-  border-radius: 24px !important;
-  background: rgba(255, 255, 255, 0.96) !important;
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.07) !important;
+  color: var(--ui-text);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius);
+  background: var(--ui-surface);
+  box-shadow: var(--ui-shadow);
 }
 
-.workspace-login-card h2 {
-  margin: 0 0 14px;
-  color: #161c28 !important;
+.workspace-body .sidebar-primary,
+.mono-page .sidebar-primary,
+.prelogin-sidebar .sidebar-primary {
+  display: none;
 }
 
-.workspace-login-card .eyebrow {
-  color: #6b7282 !important;
-  background: transparent !important;
+.workspace-sidebar {
+  grid-template-rows: auto 1fr auto;
 }
 
-.workspace-login-card .field span {
-  color: #334155 !important;
+.sidebar-top {
+  margin-bottom: 8px;
 }
 
-.workspace-login-card .field input {
-  color: #161c28 !important;
-  border-color: rgba(24, 34, 53, 0.10) !important;
-  background: #ffffff !important;
+.sidebar-nav {
+  margin-top: 8px;
 }
 
-.workspace-login-card .field input:focus {
-  border-color: rgba(37, 50, 71, 0.24) !important;
-  box-shadow: 0 0 0 4px rgba(37, 50, 71, 0.08) !important;
+.workspace-body .sidebar-nav,
+.mono-page .sidebar-nav {
+  display: grid;
+  gap: 20px;
+  align-content: start;
 }
 
-.workspace-login-card .auth-switch,
-.workspace-login-card .auth-switch a {
-  color: #6b7282 !important;
+.workspace-body .sidebar-group,
+.mono-page .sidebar-group {
+  display: grid;
+  gap: 8px;
 }
 
-.workspace-login-card .auth-switch a {
-  font-weight: 800;
-  color: #253247 !important;
-}
-
-/* 防止旧黄黑主题再次覆盖主页按钮 */
-.workspace-body,
-.mono-page {
-  --mono-accent: #253247 !important;
-  --mono-accent-strong: #1b2636 !important;
-}
-
-.workspace-body .sidebar-create-btn,
-.workspace-body .btn-primary,
-.mono-page .btn-primary,
-.workspace-body .composer-send-btn,
-.prelogin-send-link {
-  color: #ffffff !important;
-  background: #253247 !important;
-  border-color: #253247 !important;
-}
-
-.workspace-body .sidebar-create-btn:hover,
-.workspace-body .btn-primary:hover:not(:disabled),
-.mono-page .btn-primary:hover:not(:disabled),
-.workspace-body .composer-send-btn:hover:not(:disabled),
-.prelogin-send-link:hover {
-  color: #ffffff !important;
-  background: #1b2636 !important;
-  border-color: #1b2636 !important;
-}
-
-.workspace-body .runtime-app-label,
-.workspace-body .sidebar-brand-text strong,
 .workspace-body .sidebar-group-label,
-.workspace-body .sidebar-text-link,
-.workspace-body .sidebar-footer-text,
-.workspace-body .sidebar-logout-link,
-.workspace-body .chat-empty-state strong,
-.workspace-body .composer-action-link,
-.workspace-body .composer-action-link.btn-secondary,
-.workspace-body .composer-action-link.btn-ghost,
-.workspace-body .composer-action-link.btn-danger {
-  color: inherit !important;
+.workspace-body .sidebar-section-head-compact,
+.workspace-body .tools-folder > summary,
+.workspace-body .sidebar-side-link,
+.mono-page .sidebar-group-label,
+.mono-page .sidebar-section-head-compact,
+.mono-page .tools-folder > summary,
+.mono-page .sidebar-side-link {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px;
+  color: #e8eef7;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.workspace-body .sidebar-section-head-compact span,
+.workspace-body .tools-folder > summary span,
+.workspace-body .tools-folder > summary .sidebar-folder-link,
+.mono-page .sidebar-section-head-compact span,
+.mono-page .tools-folder > summary span,
+.mono-page .tools-folder > summary .sidebar-folder-link {
+  color: #e8eef7;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.workspace-body .sidebar-refresh-btn,
+.mono-page .sidebar-refresh-btn {
+  min-height: 22px;
+  padding: 0 6px;
+  color: #9aa8ba;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.06);
+  border: 0;
+  border-radius: 6px;
+}
+
+.workspace-body .sidebar-folders,
+.workspace-body .tools-folder .tool-shortcut-list,
+.mono-page .sidebar-folders,
+.mono-page .tools-folder .tool-shortcut-list {
+  display: grid;
+  gap: 6px;
+  padding: 0 0 0 8px;
+  margin: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.workspace-body .workspace-folder,
+.workspace-body .tool-shortcut,
+.mono-page .workspace-folder,
+.mono-page .tool-shortcut {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.workspace-body .workspace-folder > summary,
+.workspace-body .tool-shortcut,
+.mono-page .workspace-folder > summary,
+.mono-page .tool-shortcut {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  padding: 5px 8px;
+  color: #aab6c7;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: none;
+}
+
+.workspace-body .workspace-folder > summary:hover,
+.workspace-body .tool-shortcut:hover,
+.mono-page .workspace-folder > summary:hover,
+.mono-page .tool-shortcut:hover {
+  color: #eef4fb;
+  background: rgba(255, 255, 255, 0.065);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.workspace-body .workspace-folder[open],
+.mono-page .workspace-folder[open] {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.workspace-body .workspace-compact-list,
+.mono-page .workspace-compact-list {
+  display: grid;
+  gap: 5px;
+  padding: 4px 0 6px 10px;
+  margin: 0;
+}
+
+.workspace-body .workspace-empty,
+.workspace-body .workspace-pick,
+.mono-page .workspace-empty,
+.mono-page .workspace-pick {
+  min-height: 26px;
+  padding: 5px 8px;
+  color: #778397;
+  font-size: 11px;
+  font-weight: 500;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.025);
+  box-shadow: none;
+}
+
+.workspace-body .tool-shortcut small,
+.mono-page .tool-shortcut small {
+  margin-top: 2px;
+  color: #778397;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.workspace-body .sidebar-side-link,
+.mono-page .sidebar-side-link {
+  justify-content: flex-start;
+  color: #e8eef7;
+  text-decoration: none;
+}
+
+.workspace-body .sidebar-group-label,
+.mono-page .sidebar-group-label {
+  color: #cfd8e6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  .brand-motion-loading {
+    opacity: 0.85;
+  }
 }
 
 @media (max-width: 900px) {
@@ -5267,233 +5336,19 @@ body,
   .workspace-landing__card {
     min-height: 132px;
   }
+
+  .brand-motion-panel {
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .brand-motion-text {
+    text-align: center;
+  }
+
+  .brand-motion-image {
+    width: min(58vw, 176px);
+    max-height: 104px;
+  }
 }
-/* HOME_HIDE_SIDEBAR_TOP_ACTIONS_V1: hide duplicated top-left workflow buttons */
-
-.workspace-body .sidebar-primary,
-.mono-page .sidebar-primary,
-.prelogin-sidebar .sidebar-primary {
-  display: none !important;
-}
-
-/* 隐藏后让左侧栏顶部更紧凑 */
-.workspace-sidebar {
-  grid-template-rows: auto 1fr auto !important;
-}
-
-.sidebar-top {
-  margin-bottom: 8px;
-}
-
-.sidebar-nav {
-  margin-top: 8px;
-}
-/* SIDEBAR_SECTION_HIERARCHY_V1: make asset session and assistant tools the same level */
-
-/* 左侧栏整体分组间距 */
-.workspace-body .sidebar-nav,
-.mono-page .sidebar-nav {
-  display: grid !important;
-  gap: 20px !important;
-  align-content: start !important;
-}
-
-/* 每个一级分组 */
-.workspace-body .sidebar-group,
-.mono-page .sidebar-group {
-  display: grid !important;
-  gap: 8px !important;
-}
-
-/* 一级标题：我的资产、辅助工具、外包专属格式、社区好剧 */
-.workspace-body .sidebar-group-label,
-.workspace-body .sidebar-section-head-compact,
-.workspace-body .tools-folder > summary,
-.workspace-body .sidebar-side-link,
-.mono-page .sidebar-group-label,
-.mono-page .sidebar-section-head-compact,
-.mono-page .tools-folder > summary,
-.mono-page .sidebar-side-link {
-  min-height: 26px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  padding: 0 6px !important;
-  color: #e8eef7 !important;
-  font-size: 12px !important;
-  font-weight: 800 !important;
-  line-height: 1.4 !important;
-  letter-spacing: 0 !important;
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-}
-
-/* “资产会话”这一行和“辅助工具”这一行统一成同级标题 */
-.workspace-body .sidebar-section-head-compact span,
-.workspace-body .tools-folder > summary span,
-.workspace-body .tools-folder > summary .sidebar-folder-link,
-.mono-page .sidebar-section-head-compact span,
-.mono-page .tools-folder > summary span,
-.mono-page .tools-folder > summary .sidebar-folder-link {
-  color: #e8eef7 !important;
-  font-size: 12px !important;
-  font-weight: 800 !important;
-}
-
-/* 刷新按钮弱化，避免像子级 */
-.workspace-body .sidebar-refresh-btn,
-.mono-page .sidebar-refresh-btn {
-  min-height: 22px !important;
-  padding: 0 6px !important;
-  color: #9aa8ba !important;
-  font-size: 11px !important;
-  font-weight: 600 !important;
-  background: rgba(255, 255, 255, 0.06) !important;
-  border-radius: 6px !important;
-  border: 0 !important;
-}
-
-/* 二级容器：资产列表和辅助工具列表 */
-.workspace-body .sidebar-folders,
-.workspace-body .tools-folder .tool-shortcut-list,
-.mono-page .sidebar-folders,
-.mono-page .tools-folder .tool-shortcut-list {
-  display: grid !important;
-  gap: 6px !important;
-  padding: 0 0 0 8px !important;
-  margin: 0 !important;
-  border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
-}
-
-/* 二级项：老剧本平台资产、框架资产、新剧本资产、外包格式专属、只换人设、爆款文审核等 */
-.workspace-body .workspace-folder,
-.workspace-body .tool-shortcut,
-.mono-page .workspace-folder,
-.mono-page .tool-shortcut {
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-/* 二级项标题统一 */
-.workspace-body .workspace-folder > summary,
-.workspace-body .tool-shortcut,
-.mono-page .workspace-folder > summary,
-.mono-page .tool-shortcut {
-  min-height: 28px !important;
-  display: flex !important;
-  align-items: center !important;
-  padding: 5px 8px !important;
-  color: #aab6c7 !important;
-  font-size: 11px !important;
-  font-weight: 600 !important;
-  border-radius: 8px !important;
-  background: rgba(255, 255, 255, 0.035) !important;
-  border: 1px solid transparent !important;
-  box-shadow: none !important;
-}
-
-/* 二级项 hover */
-.workspace-body .workspace-folder > summary:hover,
-.workspace-body .tool-shortcut:hover,
-.mono-page .workspace-folder > summary:hover,
-.mono-page .tool-shortcut:hover {
-  color: #eef4fb !important;
-  background: rgba(255, 255, 255, 0.065) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-}
-
-/* 二级项展开后也不要像一级标题 */
-.workspace-body .workspace-folder[open],
-.mono-page .workspace-folder[open] {
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-}
-
-/* 三级内容：空状态/具体资产，比二级再弱一点 */
-.workspace-body .workspace-compact-list,
-.mono-page .workspace-compact-list {
-  display: grid !important;
-  gap: 5px !important;
-  padding: 4px 0 6px 10px !important;
-  margin: 0 !important;
-}
-
-.workspace-body .workspace-empty,
-.workspace-body .workspace-pick,
-.mono-page .workspace-empty,
-.mono-page .workspace-pick {
-  min-height: 26px !important;
-  padding: 5px 8px !important;
-  color: #778397 !important;
-  font-size: 11px !important;
-  font-weight: 500 !important;
-  border-radius: 7px !important;
-  background: rgba(255, 255, 255, 0.025) !important;
-  border: 0 !important;
-  box-shadow: none !important;
-}
-
-/* 辅助工具的小字说明弱化 */
-.workspace-body .tool-shortcut small,
-.mono-page .tool-shortcut small {
-  margin-top: 2px !important;
-  color: #778397 !important;
-  font-size: 10px !important;
-  font-weight: 500 !important;
-}
-
-/* 外包专属格式、社区好剧作为一级入口，不要缩得像子项 */
-.workspace-body .sidebar-side-link,
-.mono-page .sidebar-side-link {
-  justify-content: flex-start !important;
-  color: #e8eef7 !important;
-  text-decoration: none !important;
-}
-
-/* 我的资产这个总标题保留，但比资产会话稍弱一点 */
-.workspace-body .sidebar-group-label,
-.mono-page .sidebar-group-label {
-  color: #cfd8e6 !important;
-  font-size: 12px !important;
-}
-/* FP_ASSET_TITLE_READABILITY_V1: fix framework asset card title contrast */
-
-.fp-asset-item {
-  color: #161c28 !important;
-  background: rgba(255, 255, 255, 0.96) !important;
-  border-color: rgba(24, 34, 53, 0.08) !important;
-}
-
-.fp-asset-title,
-.fp-asset-item .fp-asset-title,
-.fp-asset-item div.fp-asset-title {
-  color: #0f172a !important;
-  font-weight: 800 !important;
-}
-
-.fp-asset-meta,
-.fp-asset-meta span,
-.fp-asset-item p {
-  color: #64748b !important;
-}
-
-.fp-asset-item .fp-tag {
-  color: #067647 !important;
-  background: #ecfdf3 !important;
-  border-color: #abefc6 !important;
-}
-/* FP_HIDE_BOTTOM_FOOTER_NOTE_V1: remove fixed footer that protrudes into sidebar */
-
-.fp-footer {
-  display: none !important;
-}
-
-.fp-main {
-  padding-bottom: 36px !important;
-}
-
-
-

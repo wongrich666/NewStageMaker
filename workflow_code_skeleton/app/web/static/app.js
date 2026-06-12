@@ -344,6 +344,16 @@
     return mapping[status] || status || "待开始";
   }
 
+  function setBrandMotionState(isRunning, statusText) {
+    const panel = document.querySelector("[data-brand-motion]");
+    if (!panel) return;
+    panel.classList.toggle("is-running", Boolean(isRunning));
+    const statusEl = panel.querySelector("[data-brand-motion-status]");
+    if (statusEl && statusText) {
+      statusEl.textContent = statusText;
+    }
+  }
+
   function formatDuration(ms) {
     const totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
     const days = Math.floor(totalSeconds / 86400);
@@ -1677,6 +1687,7 @@ startRuntimeDebugPolling();
       renderRollbackScriptStartOptions([]);
       renderProjectList(state.projects);
       syncButtons();
+      setBrandMotionState(false, "把创意转成可执行剧本");
       return;
     }
 
@@ -1700,6 +1711,7 @@ startRuntimeDebugPolling();
     const finalOutput = displayPayload.output || (RUNNING_STATUSES.has(snapshot.status) ? "" : "暂无内容");
     const projectTitle = runtimeProjectDisplayTitle(snapshot);
     const statusMessage = statusNoteFrom(snapshot);
+    const snapshotRunning = RUNNING_STATUSES.has(snapshot.status);
 
     els.statusText.textContent = statusLabel(snapshot.status);
     els.messageText.textContent = statusMessage;
@@ -1723,6 +1735,16 @@ startRuntimeDebugPolling();
     if (els.cacheNoticeText) {
       els.cacheNoticeText.textContent = snapshot.cache_notice || "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。";
     }
+    setBrandMotionState(
+      snapshotRunning,
+      snapshotRunning
+        ? (statusMessage || displayStageLabel(snapshot) || "正在生成...")
+        : snapshot.status === "failed"
+          ? "生成失败，请查看错误信息"
+          : snapshot.status === "completed"
+            ? "生成完成，可查看或继续编辑"
+            : "把创意转成可执行剧本"
+    );
     const snapshotChanged = (
       Number(previousProjectId || 0) !== Number(state.projectId || 0)
       || String(previousTaskId || "") !== String(state.taskId || "")

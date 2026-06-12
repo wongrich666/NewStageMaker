@@ -1755,6 +1755,27 @@
     `;
   }
 
+  function renderBrandMotionPanel() {
+    const isRunning = Boolean(state.runningStage || state.isRunning);
+    const statusText = isRunning
+      ? `正在运行 ${state.runningStage || ""} 阶段`
+      : state.error
+        ? "处理已停止，请查看错误信息"
+        : currentAssetReady()
+          ? "从框架资产生成可执行剧本"
+          : "导入框架后继续生成剧本";
+    return `
+      <section class="brand-motion-panel wts-brand-motion ${isRunning ? "is-running" : ""}" data-brand-motion aria-live="polite">
+        <img class="brand-motion-image brand-motion-id" src="/static/assets/brand/ID.gif" alt="Idea to Script" />
+        <img class="brand-motion-image brand-motion-loading" src="/static/assets/brand/loading.gif" alt="生成中" />
+        <div class="brand-motion-text">
+          <div class="brand-motion-title">Idea to Script</div>
+          <div class="brand-motion-subtitle" data-brand-motion-status>${escapeHtml(statusText)}</div>
+        </div>
+      </section>
+    `;
+  }
+
   function render() {
     const plannerUrl = `${config.frameworkPlannerUrl || "/framework-planner"}${authToken ? `?auth_token=${encodeURIComponent(authToken)}` : ""}`;
     const workspaceUrl = `${config.workspaceUrl || "/workspace"}${authToken ? `?auth_token=${encodeURIComponent(authToken)}` : ""}`;
@@ -1775,6 +1796,7 @@
           </div>
         </header>
         ${state.error ? `<section class="wts-error" id="frameworkToScriptError">${escapeHtml(state.error)}</section>` : `<section class="wts-error hidden" id="frameworkToScriptError"></section>`}
+        ${renderBrandMotionPanel()}
         ${renderAssetPanel()}
         ${renderImportedSummary()}
         ${renderStages()}

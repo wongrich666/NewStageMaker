@@ -311,7 +311,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .wts-version { justify-content: flex-start; }
   .wts-summary-grid { grid-template-columns: 1fr; }
 }
-/* UI_UNIFIED_THEME_V1: align framework-to-script page with main workspace */
+
+/* Framework-to-script visual polish and brand motion */
 
 :root {
   --color-bg: #f3f5f9;
@@ -323,7 +324,6 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   --color-muted: #6b7282;
   --color-shadow: 0 18px 48px rgba(15, 23, 42, 0.07);
   --color-radius: 22px;
-
   --wts-bg: var(--color-bg);
   --wts-panel: var(--color-panel);
   --wts-soft: #f8fafc;
@@ -342,44 +342,44 @@ body {
 }
 
 .wts-shell {
-  width: min(1320px, calc(100% - 32px));
-  padding: 24px 0 56px;
+  width: min(1440px, calc(100% - 48px));
+  padding: 28px 0 72px;
 }
 
 .wts-header,
 .wts-card {
   border: 1px solid var(--wts-border);
-  border-radius: var(--wts-radius);
+  border-radius: 24px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: var(--wts-shadow);
 }
 
-.wts-card {
-  padding: 22px;
+.wts-header {
+  padding: 24px 28px;
 }
 
-.wts-header {
+.wts-card {
   padding: 24px;
 }
 
 .wts-header h1 {
-  font-size: 26px;
-  letter-spacing: -0.03em;
+  font-size: 30px;
+  letter-spacing: 0;
 }
 
 .wts-card h2,
 .wts-step h3,
 .wts-asset-item h3 {
   color: var(--wts-text);
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .wts-btn,
 .wts-step-actions button {
-  border-radius: 999px;
-  border-color: transparent;
-  background: var(--wts-strong);
   color: #ffffff;
+  border-color: transparent;
+  border-radius: 999px;
+  background: var(--wts-strong);
   font-weight: 800;
   box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
 }
@@ -387,14 +387,16 @@ body {
 .wts-btn.ghost,
 .wts-step-actions button.secondary,
 .wts-step-actions button:disabled {
-  border-color: var(--wts-border);
-  background: rgba(255, 255, 255, 0.94);
   color: var(--wts-text);
+  border-color: rgba(24, 34, 53, 0.10);
+  background: rgba(255, 255, 255, 0.94);
   box-shadow: none;
 }
 
-.wts-step,
 .wts-asset-item,
+.wts-step,
+.wts-output,
+.wts-tree-node,
 .wts-tree-leaf,
 .wts-import-json,
 .wts-empty,
@@ -402,12 +404,32 @@ body {
 .wts-loading {
   border-color: var(--wts-border);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.wts-asset-item,
+.wts-step {
+  padding: 18px;
 }
 
 .wts-step.done {
   border-color: rgba(22, 128, 60, 0.18);
   background: rgba(248, 253, 250, 0.92);
+}
+
+.wts-step > b {
+  background: var(--wts-strong);
+  border-radius: 14px;
+}
+
+.wts-output summary,
+.wts-tree-node summary {
+  padding: 13px 15px;
+}
+
+.wts-output > div,
+.wts-tree-node > div {
+  padding: 14px 15px;
 }
 
 .wts-tree-list {
@@ -428,85 +450,105 @@ body {
   color: #374151;
   line-height: 1.75;
 }
-/* UI_STAGE_SCRIPT_VISIBLE_POLISH_V2 */
 
-body {
-  background: linear-gradient(180deg, #f7f8fb 0%, #eef2f7 100%);
-}
-
-.wts-shell {
-  width: min(1440px, calc(100% - 48px));
-  padding: 28px 0 72px;
-}
-
-.wts-header {
-  padding: 24px 28px;
+.brand-motion-panel {
+  min-height: 124px;
+  margin: 16px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 18px 22px;
+  border: 1px solid var(--wts-border);
   border-radius: 24px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.07);
+  color: var(--wts-text);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(247, 249, 253, 0.82));
+  box-shadow: var(--wts-shadow);
 }
 
-.wts-header h1 {
-  font-size: 30px;
-  letter-spacing: -0.04em;
+.brand-motion-image {
+  width: min(24vw, 178px);
+  max-width: 178px;
+  max-height: 108px;
+  height: auto;
+  object-fit: contain;
+  flex: 0 0 auto;
 }
 
-.wts-card {
-  padding: 24px;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.06);
+.brand-motion-loading {
+  display: none;
 }
 
-.wts-btn,
-.wts-step-actions button {
-  border-radius: 999px;
-  background: #253247;
-  border-color: transparent;
+.brand-motion-panel.is-running .brand-motion-id {
+  display: none;
 }
 
-.wts-btn.ghost,
-.wts-step-actions button.secondary,
-.wts-step-actions button:disabled {
-  background: rgba(255, 255, 255, 0.94);
-  border-color: rgba(24, 34, 53, 0.1);
-  color: #161c28;
+.brand-motion-panel.is-running .brand-motion-loading {
+  display: block;
 }
 
-.wts-asset-item,
-.wts-step,
-.wts-output,
-.wts-tree-node,
-.wts-tree-leaf,
-.wts-import-json {
-  border-color: rgba(24, 34, 53, 0.08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.94);
+.brand-motion-text {
+  min-width: 0;
 }
 
-.wts-asset-item {
-  padding: 18px;
+.brand-motion-title {
+  color: #111827;
+  font-size: clamp(22px, 3vw, 32px);
+  line-height: 1.08;
+  font-weight: 900;
+  letter-spacing: 0;
 }
 
-.wts-step {
-  padding: 18px;
+.brand-motion-subtitle {
+  margin-top: 8px;
+  color: var(--wts-muted);
+  font-size: 14px;
+  line-height: 1.6;
 }
 
-.wts-step > b {
-  background: #253247;
-  border-radius: 14px;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
-.wts-output summary,
-.wts-tree-node summary {
-  padding: 13px 15px;
-}
+@media (max-width: 760px) {
+  .wts-shell {
+    width: min(100% - 24px, 1180px);
+    padding-top: 14px;
+  }
 
-.wts-output > div,
-.wts-tree-node > div {
-  padding: 14px 15px;
-}
+  .wts-header,
+  .wts-card-head,
+  .wts-asset-item,
+  .wts-step,
+  .wts-tree-leaf {
+    grid-template-columns: 1fr;
+  }
 
-.wts-tree-leaf {
-  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+  .wts-header {
+    flex-direction: column;
+  }
+
+  .wts-actions,
+  .wts-version {
+    justify-content: flex-start;
+  }
+
+  .wts-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-motion-panel {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .brand-motion-image {
+    width: min(58vw, 170px);
+  }
 }
