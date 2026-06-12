@@ -2156,6 +2156,81 @@ startRuntimeDebugPolling();
     };
   }
 
+  /* SCRIPT_AUDIT_ECG_SIDEBAR_V1 */
+  function hotReviewSidebarAnchor() {
+    return els.completedProjectList?.closest("details")
+      || els.characterReskinProjectList?.closest("details")
+      || els.waibaoProjectList?.closest("details")
+      || els.newScriptProjectList?.closest("details")
+      || els.activeProjectList?.closest("details")
+      || null;
+  }
+
+  function ensureHotReviewProjectList() {
+    const existing = document.getElementById("hotReviewProjectList");
+    if (existing) return existing;
+
+    const anchor = hotReviewSidebarAnchor();
+    const parent = anchor?.parentElement;
+    if (!parent) return null;
+
+    const details = document.createElement("details");
+    details.className = "workspace-folder hot-review-workspace-folder";
+    details.open = true;
+    details.innerHTML = `
+      <summary>
+        <span>爆款文审核资产</span>
+        <small class="workspace-pick-state" id="hotReviewProjectCount">0</small>
+      </summary>
+      <div class="workspace-compact-list" id="hotReviewProjectList"></div>
+    `;
+
+    if (els.completedProjectList?.closest("details")) {
+      els.completedProjectList.closest("details").insertAdjacentElement("afterend", details);
+    } else {
+      parent.appendChild(details);
+    }
+
+    return details.querySelector("#hotReviewProjectList");
+  }
+
+  function setHotReviewProjectCount(count) {
+    const countEl = document.getElementById("hotReviewProjectCount");
+    if (countEl) {
+      countEl.textContent = String(Math.max(0, Number(count) || 0));
+    }
+  }
+
+  function renderHotReviewCompactItems(items, emptyMessage) {
+    const normalized = Array.isArray(items) ? items : [];
+    if (!normalized.length) {
+      return `<div class="workspace-empty">${escapeHtml(emptyMessage)}</div>`;
+    }
+
+    return normalized.map((item) => {
+      const projectId = String(item.project_id || item.id || "");
+      const updatedAt = String(item.updated_at || item.created_at || item.createdAt || "").trim();
+      const score = item?.result?.audit?.overall?.total_score
+        ?? item?.audit?.overall?.total_score
+        ?? item?.artifacts?.audit?.overall?.total_score
+        ?? "";
+      const scoreText = score !== "" && score !== null && score !== undefined ? ` · ${score}/100` : "";
+      return `
+        <button
+          class="workspace-pick hot-review-workspace-pick"
+          type="button"
+          data-action="open-hot-review-asset"
+          data-project-id="${escapeHtml(projectId)}"
+          title="${escapeHtml(projectTooltip(item))}"
+        >
+          <span class="workspace-pick-title">${escapeHtml(projectDisplayTitle(item))}</span>
+          <span class="workspace-pick-meta">爆款文审核${escapeHtml(scoreText)}</span>
+          <span class="workspace-pick-state">${escapeHtml(updatedAt || statusLabel(item.status))}</span>
+        </button>
+      `;
+    }).join("");
+  }
+
   function assetTypeLabel(assetLike) {
     if (isHotReviewAsset(assetLike)) return "爆款文审核";
     return isToolAsset(assetLike) ? "辅助工具" : "剧本资产";
@@ -2974,16 +3049,20 @@ startRuntimeDebugPolling();
       if (els.newScriptProjectList) els.newScriptProjectList.innerHTML = message;
       if (els.waibaoProjectList) els.waibaoProjectList.innerHTML = message;
       if (els.characterReskinProjectList) els.characterReskinProjectList.innerHTML = message;
+      const hotReviewProjectList = ensureHotReviewProjectList();
+      if (hotReviewProjectList) hotReviewProjectList.innerHTML = message;
+      setHotReviewProjectCount(0);
       if (els.activeProjectCount) els.activeProjectCount.textContent = "0";
       if (els.completedProjectCount) els.completedProjectCount.textContent = "0";
       return;
     }
 
-    const oldScriptProjects = projects.filter((item) => assetCategory(item) === "old_script");
-    const frameworkProjects = projects.filter((item) => assetCategory(item) === "framework");
-    const newScriptProjects = projects.filter((item) => assetCategory(item) === "new_script");
-    const waibaoProjects = projects.filter((item) => assetCategory(item) === "waibao");
-    const characterReskinProjects = projects.filter((item) => assetCategory(item) === "character_reskin");
+    const hotReviewProjects = projects.filter((item) => isHotReviewAsset(item));
+    const oldScriptProjects = projects.filter((item) => assetCategory(item) === "old_script" && !isHotReviewAsset(item));
+    const frameworkProjects = projects.filter((item) => assetCategory(item) === "framework" && !isHotReviewAsset(item));
+    const newScriptProjects = projects.filter((item) => assetCategory(item) === "new_script" && !isHotReviewAsset(item));
+    const waibaoProjects = projects.filter((item) => assetCategory(item) === "waibao" && !isHotReviewAsset(item));
+    const characterReskinProjects = projects.filter((item) => assetCategory(item) === "character_reskin" && !isHotReviewAsset(item));
 
     const renderCompactItems = (items, emptyMessage) => {
       if (!items.length) {
@@ -3035,6 +3114,11 @@ startRuntimeDebugPolling();
     if (els.characterReskinProjectList) {
       els.characterReskinProjectList.innerHTML = renderCompactItems(characterReskinProjects, "当前还没有只换人设资产。");
     }
+    const hotReviewProjectList = ensureHotReviewProjectList();
+    if (hotReviewProjectList) {
+      hotReviewProjectList.innerHTML = renderHotReviewCompactItems(hotReviewProjects, "当前还没有爆款文审核资产。");
+    }
+    setHotReviewProjectCount(hotReviewProjects.length);
     if (els.activeProjectCount) {
       els.activeProjectCount.textContent = String(oldScriptProjects.length);
     }
@@ -3047,6 +3131,7 @@ startRuntimeDebugPolling();
     return [
       els.activeWorkspaceFolder,
       els.completedWorkspaceFolder,
+      document.getElementById("hotReviewProjectList")?.closest("details"),
       els.newScriptProjectList?.closest("details"),
       els.waibaoProjectList?.closest("details"),
       els.characterReskinProjectList?.closest("details")
