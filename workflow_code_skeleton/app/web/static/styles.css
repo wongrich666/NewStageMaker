@@ -5786,3 +5786,71 @@ body,
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* TOOL_OUTPUT_FULL_PAGE_SCROLL_V1: let assistant tool results expand with page instead of inner scroll */
+.workspace-body .tool-panel,
+.tool-panel {
+  grid-template-rows: auto auto auto auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.workspace-body .tool-panel-output,
+.tool-panel-output,
+.workspace-body #toolOutputBox,
+#toolOutputBox {
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+
+.workspace-body .tool-forms,
+.tool-forms {
+  max-height: none !important;
+}
+
+.audit-result-shell {
+  padding-bottom: 40px;
+}
+
+.audit-ecg-wrap {
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+/* TOOL_OUTPUT_FULL_PAGE_SCROLL_V2: make tool/audit/asset-opened results use page scroll */
+.workspace-body .tool-panel,
+.tool-panel {
+  grid-template-rows: auto auto auto auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.workspace-body .tool-panel-output,
+.tool-panel-output,
+.workspace-body #toolOutputBox,
+#toolOutputBox {
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+
+.workspace-body .tool-forms,
+.tool-forms {
+  max-height: none !important;
+}
+
+.workspace-main-minimal,
+.workspace-main,
+.chat-workspace-shell {
+  overflow-y: auto;
+}
+
+.audit-result-shell {
+  padding-bottom: 48px;
+}
+
+.audit-ecg-wrap {
+  overflow-x: auto;
+  overflow-y: visible;
+}

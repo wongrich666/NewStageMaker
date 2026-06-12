@@ -2102,7 +2102,7 @@ startRuntimeDebugPolling();
   }
 
   function currentToolResult(toolKey = state.activeTool) {
-    return state.toolResults[toolKey] || null;
+    return normalizeScriptAuditEcgResult(state.toolResults[toolKey] || null);
   }
 
   function isToolAsset(assetLike) {
@@ -2275,6 +2275,150 @@ startRuntimeDebugPolling();
     if (text.includes("低")) return "is-low";
     return "";
   }
+
+
+  /* SCRIPT_AUDIT_ECG_ASSET_PARSE_V1 */
+  function parseScriptAuditJsonFromText(rawText) {
+    let text = String(rawText || "").trim();
+    if (!text) return null;
+
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced && fenced[1]) {
+      text = fenced[1].trim();
+    }
+
+    const tryParse = (value) => {
+      try {
+        return JSON.parse(value);
+      } catch (_) {
+        return null;
+      }
+    };
+
+    let parsed = tryParse(text);
+    if (!parsed) {
+      const start = text.indexOf("{");
+      const end = text.lastIndexOf("}");
+      if (start >= 0 && end > start) {
+        parsed = tryParse(text.slice(start, end + 1));
+      }
+    }
+
+    if (typeof parsed === "string") {
+      parsed = parseScriptAuditJsonFromText(parsed);
+    }
+
+    if (parsed && typeof parsed === "object") {
+      const nestedText = parsed.answerText
+        || parsed.answer_text
+        || parsed.text
+        || parsed.output
+        || parsed.result
+        || "";
+      if (
+        typeof nestedText === "string"
+        && nestedText.trim()
+        && (nestedText.includes("script_audit_ecg_v2") || nestedText.includes('"overall"'))
+      ) {
+        const nested = parseScriptAuditJsonFromText(nestedText);
+        if (nested && typeof nested === "object") return nested;
+      }
+      return parsed;
+    }
+
+    return null;
+  }
+
+  function looksLikeScriptAuditPayload(payload) {
+    if (!payload || typeof payload !== "object") return false;
+    return String(payload.schema_version || "").includes("script_audit_ecg")
+      || Boolean(payload.overall && (payload.dimension_scores || payload.ecg || payload.key_issues))
+      || Boolean(payload.audit && payload.view);
+  }
+
+  function scriptAuditViewFromAudit(audit) {
+    const overall = audit?.overall || {};
+    const dimensions = auditArray(audit?.dimension_scores || audit?.dimensions || audit?.dimension_cards);
+    const points = auditArray(
+      audit?.ecg?.main_series?.points
+      || audit?.ecg?.points
+      || audit?.ecg_chart?.points
+      || audit?.main_series?.points
+    );
+
+    const totalScore = overall.total_score ?? overall.score ?? audit?.total_score ?? "";
+    const grade = overall.suitability_level || overall.grade || overall.level || "";
+    const revisionCost = overall.revision_cost || overall.modify_cost || overall.cost || "";
+
+    return {
+      summary_cards: [
+        { key: "total_score", label: "总评分", value: totalScore, suffix: totalScore !== "" ? "/100" : "" },
+        { key: "grade", label: "适配等级", value: grade || "-" },
+        { key: "revision_cost", label: "修改成本", value: revisionCost || "-" },
+        { key: "points", label: "心电点位", value: points.length || "-" }
+      ],
+      ecg_chart: {
+        title: audit?.ecg?.title || audit?.ecg_chart?.title || "剧本心电图",
+        points
+      },
+      dimension_cards: dimensions.map((item) => ({
+        dimension_key: item.dimension_key || item.key || item.name || "",
+        dimension_name: item.dimension_name || item.name || item.dimension_key || "评分维度",
+        score: item.score ?? item.value ?? 0,
+        max_score: item.max_score ?? item.full_score ?? 100,
+        summary: item.summary || item.comment || item.reason || "",
+        core_deductions: item.core_deductions || item.deductions || [],
+        priority_fix: item.priority_fix || item.fix_suggestion || item.suggestion || ""
+      })),
+      issue_cards: auditArray(audit?.key_issues || audit?.issues || audit?.issue_cards),
+      satisfying_point_cards: auditArray(audit?.satisfying_points || audit?.selling_points || audit?.satisfying_point_cards),
+      risk_cards: auditArray(audit?.risk_scan || audit?.risks || audit?.risk_cards),
+      rewrite_tasks: auditArray(audit?.rewrite_plan || audit?.rewrite_tasks || audit?.fix_plan)
+    };
+  }
+
+  function normalizeScriptAuditEcgResult(result) {
+    if (!result || typeof result !== "object") return result;
+
+    if (String(result.result_type || result.resultType || "").trim() === "script_audit_ecg" && result.view) {
+      return result;
+    }
+
+    const candidates = [
+      result.audit,
+      result.output,
+      result.result,
+      result.data,
+      parseScriptAuditJsonFromText(result.text),
+      parseScriptAuditJsonFromText(result.answer_text),
+      parseScriptAuditJsonFromText(result.raw_text)
+    ].filter(Boolean);
+
+    let audit = null;
+    for (const candidate of candidates) {
+      if (looksLikeScriptAuditPayload(candidate)) {
+        audit = candidate.audit && candidate.view ? candidate.audit : candidate;
+        break;
+      }
+    }
+
+    if (!audit) return result;
+
+    const view = result.view || scriptAuditViewFromAudit(audit);
+    const rawText = result.text || result.answer_text || "";
+    return {
+      ...result,
+      text: rawText,
+      answer_text: result.answer_text || rawText,
+      result_type: "script_audit_ecg",
+      resultType: "script_audit_ecg",
+      parsed: true,
+      audit,
+      view,
+      parse_warnings: result.parse_warnings || []
+    };
+  }
+
 
   function renderAuditSummaryCards(cards) {
     const normalized = auditArray(cards);
@@ -2462,20 +2606,6 @@ startRuntimeDebugPolling();
         ${renderAuditList("爽点与保留项", view.satisfying_point_cards || audit.satisfying_points, { limit: 8 })}
         ${renderAuditList("风险扫描", view.risk_cards || audit.risk_scan, { limit: 8 })}
         ${renderAuditList("修改计划", view.rewrite_tasks || audit.rewrite_plan, { limit: 10 })}
-
-        ${auditArray(result.parse_warnings).length ? `
-          <details class="audit-raw-details">
-            <summary>解析提醒</summary>
-            <pre>${escapeHtml(result.parse_warnings.join("\n"))}</pre>
-          </details>
-        ` : ""}
-
-        ${raw ? `
-          <details class="audit-raw-details">
-            <summary>原始返回 / 调试数据</summary>
-            <pre>${escapeHtml(raw)}</pre>
-          </details>
-        ` : ""}
       </div>
     `;
   }
@@ -3976,6 +4106,7 @@ startRuntimeDebugPolling();
       assetSaved,
       savedAsset: result.saved_asset || data.saved_asset || null
     };
+    state.toolResults[state.activeTool] = normalizeScriptAuditEcgResult(state.toolResults[state.activeTool]);
     renderToolOutput(state.activeTool);
     if (assetSaved) {
       try {
@@ -4600,7 +4731,7 @@ startRuntimeDebugPolling();
       text: reviewText
     };
 
-    state.toolResults.hot_review = toolResultFromAsset(asset);
+    state.toolResults.hot_review = normalizeScriptAuditEcgResult(toolResultFromAsset(asset));
     openToolPanel("hot_review");
     renderToolForm("hot_review");
     renderToolOutput("hot_review");
