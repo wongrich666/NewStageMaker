@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import copy
+import re
 import threading
 import tempfile
 import time
@@ -1096,7 +1097,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             stripped = line.strip()
 
             # Remove internal adaptation-guide meta text:
-            # "??????????????????..."
+            # "文本：本次整体改编指引..."
             if (
                 stripped.startswith("\u6587\u672c\uff1a\u672c\u6b21\u6574\u4f53\u6539\u7f16\u6307\u5f15")
                 or stripped.startswith("\u6587\u672c:\u672c\u6b21\u6574\u4f53\u6539\u7f16\u6307\u5f15")
@@ -1104,7 +1105,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 continue
 
             # Remove source-trace blocks under scenes:
-            # "?????" and all child lines until the next same/lower-indent field.
+            # "来源依据：" and all child lines until the next same/lower-indent field.
             if (
                 stripped.startswith("\u6765\u6e90\u4f9d\u636e\uff1a")
                 or stripped.startswith("\u6765\u6e90\u4f9d\u636e:")
@@ -2020,12 +2021,119 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             }
         ), status
 
+    def _positive_int_or_none(value) -> int | None:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
+
+    def _framework_basic_config_from_state(existing_state: dict | None) -> dict:
+        if not isinstance(existing_state, dict):
+            return {}
+        direct = existing_state.get("basic_config")
+        if isinstance(direct, dict):
+            return direct
+        framework_state = _framework_state_from_project(existing_state)
+        nested = framework_state.get("basic_config") if isinstance(framework_state, dict) else {}
+        if isinstance(nested, dict):
+            return nested
+        input_payload = existing_state.get("input_payload") if isinstance(existing_state.get("input_payload"), dict) else {}
+        nested = input_payload.get("basic_config") if isinstance(input_payload, dict) else {}
+        if isinstance(nested, dict):
+            return nested
+        return input_payload if isinstance(input_payload, dict) else {}
+
+    def _normalize_framework_episode_config(data: dict, existing_state: dict | None = None) -> dict:
+        if not isinstance(data, dict):
+            raise ValueError("请求体必须是 JSON object。")
+        basic_config = data.get("basic_config") if isinstance(data.get("basic_config"), dict) else {}
+        if basic_config is not data.get("basic_config"):
+            basic_config = {}
+            data["basic_config"] = basic_config
+        existing_basic = _framework_basic_config_from_state(existing_state)
+
+        season_count = (
+            _positive_int_or_none(basic_config.get("season_count"))
+            or _positive_int_or_none(data.get("season_count"))
+            or _positive_int_or_none(existing_basic.get("season_count"))
+        )
+        episodes_per_season = (
+            _positive_int_or_none(basic_config.get("episodes_per_season"))
+            or _positive_int_or_none(data.get("episodes_per_season"))
+            or _positive_int_or_none(existing_basic.get("episodes_per_season"))
+        )
+        missing = []
+        if season_count is None:
+            missing.append("season_count")
+        if episodes_per_season is None:
+            missing.append("episodes_per_season")
+        if missing:
+            raise ValueError(f"04 阶段缺少集数配置：{', '.join(missing)}。请先填写基础信息里的季数和每季集数。")
+
+        total_episodes = int(season_count) * int(episodes_per_season)
+        guard = {
+            "season_count": int(season_count),
+            "episodes_per_season": int(episodes_per_season),
+            "total_episodes": total_episodes,
+        }
+        basic_config.update(guard)
+        data.update(guard)
+        data["episode_count_guard"] = copy.deepcopy(guard)
+        basic_config["episode_count_guard"] = copy.deepcopy(guard)
+        return data
+
+    def _load_framework_planner_existing_state(data: dict, user_id: int) -> dict | None:
+        asset_state = data.get("asset_state") if isinstance(data.get("asset_state"), dict) else {}
+        raw_project_id = data.get("project_id") or data.get("asset_id") or asset_state.get("project_id")
+        project_id = _positive_int_or_none(raw_project_id)
+        if not project_id:
+            return None
+        return task_manager.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+
+    def _stage04_episode_range_detail(stage_payload: dict, total_episodes: int) -> dict:
+        data = stage_payload.get("data") if isinstance(stage_payload.get("data"), dict) else {}
+        timeline = data.get("beat_checkpoint_timeline")
+        if not isinstance(timeline, list):
+            timeline = []
+        bad_ranges = []
+        max_detected = 0
+        for index, item in enumerate(timeline, start=1):
+            if not isinstance(item, dict):
+                continue
+            episode_range = str(item.get("episode_range") or "").strip()
+            detected_numbers = [int(value) for value in re.findall(r"\d+", episode_range)]
+            if not detected_numbers:
+                continue
+            local_max = max(detected_numbers)
+            max_detected = max(max_detected, local_max)
+            if local_max > total_episodes:
+                bad_ranges.append(
+                    {
+                        "beat_no": item.get("beat_no") or index,
+                        "episode_range": episode_range,
+                        "max_episode": local_max,
+                    }
+                )
+        return {
+            "total_episodes": total_episodes,
+            "max_detected_episode": max_detected,
+            "bad_episode_ranges": bad_ranges,
+        }
+
     @app.get("/api/framework-planner/diagnostics/fastgpt")
     @_login_required
     def framework_planner_fastgpt_diagnostics_api():
         stage = str(request.args.get("stage") or "05").zfill(2)
         try:
             payload = framework_planner_fastgpt_diagnostics(stage)
+        except ValueError as exc:
+            return _framework_planner_error(
+                str(stage).zfill(2),
+                str(exc),
+                status=400,
+                detail={"message": str(exc)},
+            )
         except FrameworkPlannerStageError as exc:
             return _framework_planner_error(
                 exc.stage,
@@ -2117,7 +2225,39 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
         try:
             user_id = _require_user_id()
+            if str(stage).zfill(2) == "04":
+                existing_state = _load_framework_planner_existing_state(data, user_id) if isinstance(data, dict) else None
+                data = _normalize_framework_episode_config(data if isinstance(data, dict) else {}, existing_state=existing_state)
+                project_id = data.get("project_id")
+                logger.info(
+                    "framework planner stage04 episode config: project_id=%s season_count=%s episodes_per_season=%s total_episodes=%s",
+                    project_id,
+                    data.get("season_count"),
+                    data.get("episodes_per_season"),
+                    data.get("total_episodes"),
+                )
+                print(
+                    "[framework_planner_stage04_episode_config] "
+                    f"project_id={project_id} season_count={data.get('season_count')} "
+                    f"episodes_per_season={data.get('episodes_per_season')} "
+                    f"total_episodes={data.get('total_episodes')}",
+                    flush=True,
+                )
             payload = run_framework_planner_stage(stage, data)
+            if str(stage).zfill(2) == "04":
+                range_detail = _stage04_episode_range_detail(payload, int(data.get("total_episodes") or 0))
+                if range_detail["bad_episode_ranges"]:
+                    logger.warning(
+                        "framework planner stage04 episode_range exceeded total_episodes: project_id=%s detail=%s",
+                        project_id,
+                        range_detail,
+                    )
+                    return _framework_planner_error(
+                        "04",
+                        "04 阶段输出 episode_range 超出用户输入集数，请重试或调整提示词。",
+                        status=422,
+                        detail=range_detail,
+                    )
             payload["history"] = save_framework_stage_history(
                 project_id=project_id,
                 stage=str(stage).zfill(2),
@@ -2144,6 +2284,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 )
                 payload["autosaved"] = False
                 payload["autosave_error"] = str(autosave_exc)
+        except ValueError as exc:
+            return _framework_planner_error(
+                str(stage).zfill(2),
+                str(exc),
+                status=400,
+                detail={"message": str(exc)},
+            )
         except FrameworkPlannerStageError as exc:
             write_framework_stage_exception_log(
                 project_id=project_id,
@@ -2286,11 +2433,20 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def create_framework_planner_asset_api():
         data = request.get_json(silent=True) or {}
         try:
+            season_count = _positive_int_or_none(data.get("season_count"))
+            episodes_per_season = _positive_int_or_none(data.get("episodes_per_season"))
+            missing = []
+            if season_count is None:
+                missing.append("season_count")
+            if episodes_per_season is None:
+                missing.append("episodes_per_season")
+            if missing:
+                raise ValueError(f"新建框架资产缺少集数配置：{', '.join(missing)}。")
             asset = task_manager.create_framework_planner_asset(
                 user_id=_require_user_id(),
                 title=str(data.get("title") or data.get("project_title") or ""),
-                season_count=int(data.get("season_count") or 1),
-                episodes_per_season=int(data.get("episodes_per_season") or data.get("total_episodes") or 60),
+                season_count=season_count,
+                episodes_per_season=episodes_per_season,
                 target_format=str(data.get("target_format") or data.get("genre") or "短剧"),
                 style=str(data.get("style") or ""),
                 description=str(data.get("description") or data.get("story_outline") or ""),
@@ -2788,8 +2944,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     outfit_versions = item.get("outfit_versions")
                     outfit_variants = item.get("outfit_variants")
 
-                    # 09 ???????? outfit_versions?
-                    # ???????? outfit_variants?????????????????????
+                    # Stage 09 may return outfit_versions only.
+                    # Convert it to outfit_variants so later export paths can reuse the same shape.
                     if isinstance(outfit_versions, list) and outfit_versions and not outfit_variants:
                         converted = []
                         default_name = (

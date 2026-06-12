@@ -44,14 +44,6 @@
           <div class="sidebar-folders">
             <details class="workspace-folder">
               <summary>
-                <span>老剧本平台资产</span>
-              </summary>
-              <div class="workspace-compact-list">
-                <div class="workspace-empty">注册后查看老剧本平台资产。</div>
-              </div>
-            </details>
-            <details class="workspace-folder">
-              <summary>
                 <span>框架资产</span>
               </summary>
               <div class="workspace-compact-list">
@@ -60,44 +52,14 @@
             </details>
             <details class="workspace-folder">
               <summary>
-                <span>新剧本资产</span>
+                <span>剧本资产</span>
               </summary>
               <div class="workspace-compact-list">
-                <div class="workspace-empty">注册后查看 08-12 新剧本资产。</div>
+                <div class="workspace-empty">注册后查看 08-12 剧本资产。</div>
               </div>
             </details>
           </div>
         </section>
-
-        <section class="sidebar-group sidebar-tools-section">
-          <details class="workspace-folder tools-folder" open>
-            <summary>
-              <span class="sidebar-folder-link">辅助工具</span>
-            </summary>
-            <div class="tool-shortcut-list">
-              <a class="tool-shortcut" href="{{ url_for('register_page') }}">
-                <span>爆款文审核</span>
-                <small>注册后可运行</small>
-              </a>
-              <a class="tool-shortcut" href="{{ url_for('register_page') }}">
-                <span>增加爽感</span>
-                <small>注册后可运行</small>
-              </a>
-              <a class="tool-shortcut" href="{{ url_for('register_page') }}">
-                <span>只换人设</span>
-                <small>注册后可运行</small>
-              </a>
-            </div>
-          </details>
-        </section>
-
-        <section class="sidebar-group sidebar-tools-section">
-          <a class="sidebar-text-link sidebar-side-link" href="{{ url_for('register_page') }}">外包专属格式</a>
-        </section>
-
-        <div class="sidebar-group sidebar-tools-section">
-          <a class="sidebar-text-link sidebar-side-link" href="{{ url_for('index') }}#community">社区好剧</a>
-        </div>
       </div>
 
       <div class="sidebar-footer">
@@ -146,11 +108,6 @@
           <section class="chat-empty-state prelogin-chat-empty">
             <strong>剧本创作工作台~</strong>
             <p>直接输入你的创作需求，平台会把剧本框架和剧本正文按对话流展示，中间过程统一显示创作状态。</p>
-            <div class="chat-empty-tools">
-              <a class="chat-suggestion-btn" href="{{ url_for('register_page') }}">爆款文审核</a>
-              <a class="chat-suggestion-btn" href="{{ url_for('register_page') }}">增加爽感</a>
-              <a class="chat-suggestion-btn" href="{{ url_for('register_page') }}">只换人设</a>
-            </div>
           </section>
         </div>
 
@@ -209,9 +166,10 @@
           </div>
           <a class="composer-send-btn prelogin-send-link" href="{{ url_for('register_page') }}">开始</a>
         </div>
-        <p class="composer-hint prelogin-status-note">注册后即可开始生成、查看进度、运行辅助工具。</p>
+        <p class="composer-hint prelogin-status-note">注册后即可开始生成、查看进度。</p>
       </section>
     </section>
   </main>
+  <script src="{{ url_for('static', filename='sidebar.js') }}?v=20260612-sidebar-collapse-v1" defer></script>
 </body>
 </html>

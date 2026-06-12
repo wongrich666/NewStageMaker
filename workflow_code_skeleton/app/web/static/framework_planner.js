@@ -265,10 +265,11 @@
       source_text: "",
       source_title: "",
       target_format: "短剧",
-      season_count: 1,
-      episodes_per_season: 60,
+      season_count: "",
+      episodes_per_season: "",
+      total_episodes: "",
       minutes_per_episode: 2,
-      adaptation_direction: "请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。",
+      adaptation_direction: "",
       user_constraints: "",
       user_requirements: "",
     },
@@ -387,8 +388,8 @@
     assetSort: "updated_desc",
     newScriptForm: {
       title: "",
-      season_count: 1,
-      episodes_per_season: 60,
+      season_count: "",
+      episodes_per_season: "",
       target_format: "短剧",
       style: "",
       description: "",
@@ -904,6 +905,7 @@
     if (explicitFresh) {
       storageRemove(STORAGE_KEY);
       storageRemove(LEGACY_STORAGE_KEY);
+      storageRemove(PREFERENCE_STORAGE_KEY);
       const fresh = normalizeState(null);
       persistLoadedState(fresh);
       normalizeUrlForResume();
@@ -965,8 +967,7 @@
     const next = clone(initialState);
     const storedPreferences = loadPromptPreferences();
     if (!saved || typeof saved !== "object") {
-      next.prompt_preferences = normalizePromptPreferences(storedPreferences);
-      applyPromptPreferencesToBasicConfig(next, true);
+      next.prompt_preferences = normalizePromptPreferences({});
       return syncStageFlow(next);
     }
     mergeInto(next, saved);
@@ -2968,7 +2969,7 @@
           </div>
           <div class="fp-field">
             <label>每季集数</label>
-            <input type="number" min="15" data-config-key="episodes_per_season" value="${escapeHtml(state.basic_config.episodes_per_season)}" ${locked ? "disabled" : ""} />
+            <input type="number" min="1" data-config-key="episodes_per_season" value="${escapeHtml(state.basic_config.episodes_per_season)}" ${locked ? "disabled" : ""} />
           </div>
           <div class="fp-field">
             <label>每集分钟数</label>
@@ -4782,14 +4783,56 @@ function renderPackageBlocks() {
     return Number.isFinite(number) && number > 0 ? number : fallback;
   }
 
+  function requiredPositiveInteger(value, fieldLabel) {
+    const number = Number(value);
+    if (!Number.isInteger(number) || number <= 0) {
+      throw new Error(`${fieldLabel}必须是大于 0 的整数，请先在基础信息中填写。`);
+    }
+    return number;
+  }
+
+  function currentEpisodeConfig() {
+    syncBasicConfigFromDom();
+    const basic = state.basic_config || {};
+    const seasonCount = requiredPositiveInteger(basic.season_count, "季数");
+    const episodesPerSeason = requiredPositiveInteger(basic.episodes_per_season, "每季集数");
+    const totalEpisodes = seasonCount * episodesPerSeason;
+    return {
+      season_count: seasonCount,
+      episodes_per_season: episodesPerSeason,
+      total_episodes: totalEpisodes,
+      episode_count_guard: {
+        season_count: seasonCount,
+        episodes_per_season: episodesPerSeason,
+        total_episodes: totalEpisodes,
+      },
+    };
+  }
+
+  function attachEpisodeConfig(payload) {
+    const config = currentEpisodeConfig();
+    const basicConfig = Object.assign({}, payload.basic_config || state.basic_config || {}, {
+      season_count: config.season_count,
+      episodes_per_season: config.episodes_per_season,
+      total_episodes: config.total_episodes,
+    });
+    return Object.assign({}, payload, config, { basic_config: basicConfig });
+  }
+
   function frameworkToScriptPayload() {
     syncBasicConfigFromDom();
     const basic = state.basic_config || {};
-    const seasonCount = positiveNumber(basic.season_count, 1);
-    const episodesPerSeason = positiveNumber(basic.episodes_per_season, 60);
-    const totalEpisodes = positiveNumber(basic.total_episodes, seasonCount * episodesPerSeason);
+    const episodeConfig = currentEpisodeConfig();
+    const seasonCount = episodeConfig.season_count;
+    const episodesPerSeason = episodeConfig.episodes_per_season;
+    const totalEpisodes = episodeConfig.total_episodes;
     const minutesPerEpisode = positiveNumber(basic.minutes_per_episode, 2);
     const title = String(basic.project_title || basic.source_title || "未命名框架剧本").trim();
+    const normalizedBasic = Object.assign({}, basic, {
+      season_count: seasonCount,
+      episodes_per_season: episodesPerSeason,
+      total_episodes: totalEpisodes,
+    });
     const payload = {
       title,
       project_title: title,
@@ -4809,7 +4852,7 @@ function renderPackageBlocks() {
       ].filter(Boolean).join("\n\n"),
       user_requirements: payloadUserRequirements(),
       adaptation_direction: String(basic.adaptation_direction || "").trim(),
-      basic_config: clone(basic),
+      basic_config: normalizedBasic,
       framework_plan_package: clone(state.framework_plan_package),
       source_brief: clone(state.source_brief),
       worldview_plan: clone(state.worldview_plan),
@@ -4823,6 +4866,7 @@ function renderPackageBlocks() {
       generation_chain: "framework_to_script",
       framework_to_script: true,
       framework_planner_source: true,
+      episode_count_guard: episodeConfig.episode_count_guard,
     };
     return cleanOutgoingPayload(Object.assign(payload, knowledgePayloadFields("scene")), "framework_to_script payload");
   }
@@ -4952,7 +4996,7 @@ function renderPackageBlocks() {
       };
     }
     if (stageKey === "beat") {
-      return {
+      return attachEpisodeConfig({
         mode: revise ? "改写" : "创作",
         source_brief: state.source_brief,
         basic_config: state.basic_config,
@@ -4963,7 +5007,7 @@ function renderPackageBlocks() {
         framework_score_report: state.framework_score_report,
         adaptation_direction: state.basic_config.adaptation_direction,
         user_requirements: payloadUserRequirements(),
-      };
+      });
     }
     if (stageKey === "storylines") {
       return cleanStage05Payload({
@@ -5720,7 +5764,7 @@ function renderPackageBlocks() {
     render();
     try {
       while (round <= rounds) {
-        const payload = cleanOutgoingPayload(attachKnowledgePayload({
+        const payload = cleanOutgoingPayload(attachKnowledgePayload(attachEpisodeConfig({
           mode: current ? "改写" : "创作",
           project_id: currentProjectId(),
           source_brief: state.source_brief,
@@ -5732,7 +5776,7 @@ function renderPackageBlocks() {
           framework_score_report: lastScoreReport,
           adaptation_direction: state.basic_config.adaptation_direction,
           user_requirements: payloadUserRequirements(),
-        }, "beat"), "stage04 score-loop payload");
+        }), "beat"), "stage04 score-loop payload");
         const beatResponse = await planningApi.runStage("04", payload);
         applyStageResponse("04", beatResponse);
         state.beat_revision_round = round;
@@ -5799,8 +5843,8 @@ function renderPackageBlocks() {
     ui.assetSort = "updated_desc";
     ui.newScriptForm = {
       title: "",
-      season_count: 1,
-      episodes_per_season: 60,
+      season_count: "",
+      episodes_per_season: "",
       target_format: "短剧",
       style: "",
       description: "",
@@ -5842,11 +5886,11 @@ function renderPackageBlocks() {
       state.display_texts = {};
       state.raw_stage_responses = {};
 
-      state.prompt_preferences = normalizePromptPreferences(loadPromptPreferences());
-      applyPromptPreferencesToBasicConfig(state, true);
+      state.prompt_preferences = normalizePromptPreferences({});
 
       try {
         window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+        window.localStorage.removeItem(PREFERENCE_STORAGE_KEY);
       } catch (error) {
         // ignore storage cleanup errors
       }
@@ -6243,6 +6287,19 @@ async function saveFrameworkAsset(options) {
       showToast("请填写剧本名称");
       return;
     }
+    try {
+      form.season_count = requiredPositiveInteger(form.season_count, "季数");
+      form.episodes_per_season = requiredPositiveInteger(form.episodes_per_season, "每季集数");
+      form.total_episodes = form.season_count * form.episodes_per_season;
+      form.episode_count_guard = {
+        season_count: form.season_count,
+        episodes_per_season: form.episodes_per_season,
+        total_episodes: form.total_episodes,
+      };
+    } catch (error) {
+      showToast(error.message || "请填写有效集数");
+      return;
+    }
     debugFrontendEvent("new_script_submit", {
       project_title: form.title || "",
       source_title: form.title || "",
@@ -6265,8 +6322,9 @@ async function saveFrameworkAsset(options) {
     state.basic_config.project_title = asset.title || form.title || "未命名剧本";
     state.basic_config.source_title = asset.title || form.title || "";
     state.basic_config.target_format = form.target_format || "短剧";
-    state.basic_config.season_count = Number(form.season_count || 1);
-    state.basic_config.episodes_per_season = Number(form.episodes_per_season || 60);
+    state.basic_config.season_count = form.season_count;
+    state.basic_config.episodes_per_season = form.episodes_per_season;
+    state.basic_config.total_episodes = form.total_episodes;
     state.basic_config.user_requirements = form.style || "";
     state.basic_config.source_text = form.description || "";
     state.project_id = asset.project_id || null;
@@ -6308,10 +6366,11 @@ async function saveFrameworkAsset(options) {
     const data = await requestJson(`/api/projects/${projectId}`);
     const project = data.project || {};
     const input = project.input_payload || {};
+    const basic = input.basic_config && typeof input.basic_config === "object" ? input.basic_config : {};
     ui.newScriptForm = {
       title: `${project.title || input.title || "未命名剧本"} 副本`,
-      season_count: input.season_count || 1,
-      episodes_per_season: input.episodes_per_season || project.total_episodes || 60,
+      season_count: input.season_count || basic.season_count || "",
+      episodes_per_season: input.episodes_per_season || basic.episodes_per_season || project.total_episodes || "",
       target_format: input.target_format || "短剧",
       style: input.style || "",
       description: input.story_outline || "",
@@ -6412,8 +6471,9 @@ async function saveFrameworkAsset(options) {
       state.basic_config.project_title = project.title || input.title || state.basic_config.project_title;
       state.basic_config.source_title = project.title || input.title || state.basic_config.source_title;
       state.basic_config.target_format = input.target_format || state.basic_config.target_format;
-      state.basic_config.season_count = Number(input.season_count || state.basic_config.season_count || 1);
-      state.basic_config.episodes_per_season = Number(input.episodes_per_season || state.basic_config.episodes_per_season || 60);
+      state.basic_config.season_count = input.season_count || state.basic_config.season_count || "";
+      state.basic_config.episodes_per_season = input.episodes_per_season || state.basic_config.episodes_per_season || "";
+      state.basic_config.total_episodes = input.total_episodes || "";
       state.basic_config.user_requirements = input.style || state.basic_config.user_requirements || "";
       state.basic_config.source_text = input.story_outline || state.basic_config.source_text || "";
       state.asset_state.asset_id = project.project_id || null;
@@ -6541,7 +6601,11 @@ async function saveFrameworkAsset(options) {
       return response;
     }
     if (stageNo === "04") {
-      const ranges = splitEpisodeRanges(Number((payload.basic_config || {}).episodes_per_season || 60));
+      const ranges = splitEpisodeRanges(Number(
+        payload.total_episodes
+        || (payload.basic_config || {}).total_episodes
+        || (payload.basic_config || {}).episodes_per_season
+      ));
       response.data.beat_checkpoint_timeline = BEAT_NAMES.map((name, index) => ({
         beat_no: index + 1,
         beat_name: name,
@@ -6631,7 +6695,17 @@ async function saveFrameworkAsset(options) {
   }
 
   function splitEpisodeRanges(totalEpisodes) {
-    const total = Math.max(15, Number(totalEpisodes) || 60);
+    const total = Number(totalEpisodes);
+    if (!Number.isInteger(total) || total <= 0) {
+      throw new Error("缺少有效 total_episodes，不能生成 04 阶段 episode_range。");
+    }
+    if (total < 15) {
+      return Array.from({ length: 15 }, (_, index) => {
+        const start = Math.max(1, Math.min(total, Math.floor((index * total) / 15) + 1));
+        const end = Math.max(start, Math.min(total, Math.ceil(((index + 1) * total) / 15)));
+        return start === end ? `第${start}集` : `第${start}-${end}集`;
+      });
+    }
     const weights = [3, 4, 4, 4, 4, 5, 5, 7, 5, 5, 4, 4, 3, 2, 1];
     const sum = weights.reduce((acc, item) => acc + item, 0);
     let start = 1;

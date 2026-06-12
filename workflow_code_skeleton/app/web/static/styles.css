@@ -3069,32 +3069,6 @@ a {
   line-height: 1.75;
 }
 
-.chat-empty-tools {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 18px;
-}
-
-.chat-suggestion-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 34px;
-  padding: 0 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
-  color: #f4bd2d;
-  background: rgba(255, 255, 255, 0.03);
-  cursor: pointer;
-  text-decoration: none;
-}
-
-.chat-suggestion-btn:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
 .chat-message {
   width: min(900px, 100%);
   gap: 8px;
@@ -3445,9 +3419,6 @@ a {
     flex-basis: 100%;
   }
 
-  .chat-empty-tools {
-    gap: 8px;
-  }
 }
 
 /* Unified monochrome theme for home / auth / community + light-mode safety */
@@ -3813,12 +3784,6 @@ a {
   .workspace-body .sidebar-profile-avatar {
     color: #111111;
     background: #ececec;
-  }
-
-  .workspace-body .chat-suggestion-btn {
-    color: #111111;
-    background: #ffffff;
-    border-color: var(--mono-border);
   }
 
   .workspace-body .composer-send-btn {
@@ -4214,10 +4179,6 @@ a {
   margin-inline: auto;
 }
 
-.prelogin-shell .chat-empty-tools {
-  justify-content: center;
-}
-
 .prelogin-shell .prelogin-chat-view {
   position: relative;
 }
@@ -4351,16 +4312,6 @@ a {
 .workspace-body .progress-fill {
   background: linear-gradient(90deg, var(--mono-accent), var(--mono-accent-strong));
   box-shadow: 0 0 16px color-mix(in srgb, var(--mono-accent) 28%, transparent);
-}
-
-.chat-workspace-shell[data-script-format-mode="waibao"] .runtime-mode-pill {
-  border-color: color-mix(in srgb, var(--mono-accent) 30%, var(--mono-border));
-  background: color-mix(in srgb, var(--mono-surface) 88%, var(--mono-accent) 12%);
-}
-
-.chat-workspace-shell[data-script-format-mode="waibao"] #scriptFormatText,
-.chat-workspace-shell[data-script-format-mode="waibao"] #composerModeText {
-  color: var(--mono-accent-strong);
 }
 
 .workspace-body .chat-message.user .chat-bubble {
@@ -4848,7 +4799,6 @@ body,
 .page-back-link,
 .page-back-link-light,
 .home-nav a,
-.chat-suggestion-btn,
 .composer-action-link,
 .mono-page .btn-secondary,
 .mono-page .btn-ghost {
@@ -5350,5 +5300,95 @@ body,
   .brand-motion-image {
     width: min(58vw, 176px);
     max-height: 104px;
+  }
+}
+
+/* Sidebar responsive refinement */
+
+.chat-workspace-shell {
+  transition: grid-template-columns 0.18s ease;
+}
+
+.chat-workspace-shell.sidebar-collapsed {
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+
+.workspace-sidebar {
+  transition: width 0.18s ease, padding 0.18s ease;
+}
+
+.workspace-sidebar.is-collapsed {
+  width: 72px;
+  min-width: 72px;
+  padding-inline: 10px;
+  overflow-x: hidden;
+}
+
+.workspace-sidebar.is-collapsed .sidebar-brand-row {
+  justify-content: center;
+}
+
+.workspace-sidebar.is-collapsed .sidebar-toggle {
+  margin-inline: auto;
+}
+
+.workspace-sidebar.is-collapsed .sidebar-brand-text,
+.workspace-sidebar.is-collapsed .sidebar-primary,
+.workspace-sidebar.is-collapsed .sidebar-nav,
+.workspace-sidebar.is-collapsed .sidebar-footer-text,
+.workspace-sidebar.is-collapsed .sidebar-logout-link {
+  display: none;
+}
+
+.workspace-sidebar.is-collapsed .sidebar-footer,
+.workspace-sidebar.is-collapsed .sidebar-footer-links {
+  align-items: center;
+}
+
+@media (max-width: 900px) {
+  .chat-workspace-shell,
+  .chat-workspace-shell.sidebar-collapsed {
+    min-height: 100vh;
+    grid-template-columns: minmax(180px, 34vw) minmax(0, 1fr);
+  }
+
+  .chat-workspace-shell.sidebar-collapsed {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .workspace-sidebar {
+    position: sticky;
+    top: 0;
+    width: auto;
+    height: 100vh;
+    min-height: 100vh;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 0;
+  }
+
+  .workspace-sidebar.is-collapsed {
+    width: 64px;
+    min-width: 64px;
+    padding-inline: 8px;
+  }
+
+  .workspace-sidebar.is-collapsed .sidebar-brand-text,
+  .workspace-sidebar.is-collapsed .sidebar-section-head span,
+  .workspace-sidebar.is-collapsed .sidebar-refresh-btn,
+  .workspace-sidebar.is-collapsed .workspace-folder,
+  .workspace-sidebar.is-collapsed .sidebar-footer-text,
+  .workspace-sidebar.is-collapsed .sidebar-logout-link {
+    display: none;
+  }
+
+  .chat-main {
+    min-width: 0;
+    padding-inline: clamp(12px, 3vw, 24px);
+  }
+}
+
+@media (max-width: 560px) {
+  .chat-workspace-shell:not(.sidebar-collapsed) {
+    grid-template-columns: minmax(150px, 42vw) minmax(0, 1fr);
   }
 }

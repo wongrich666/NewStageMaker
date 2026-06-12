@@ -48,7 +48,7 @@ def _auth_headers() -> dict[str, str]:
 
 def _framework_package() -> dict[str, object]:
     return {
-        "basic_config": {"episodes_per_season": 5, "minutes_per_episode": 2},
+        "basic_config": {"season_count": 1, "episodes_per_season": 5, "total_episodes": 5, "minutes_per_episode": 2},
         "worldview_plan": {"world_type": "都市悬疑"},
         "character_plan": {"protagonist": {"name": "林渡"}},
         "beat_checkpoint_timeline": [{"beat_no": 1, "beat_name": "开场"}],
@@ -238,7 +238,7 @@ def test_framework_asset_without_package_can_import_from_stage_outputs() -> None
         headers=headers,
         json={
             "project_title": "旧资产",
-            "basic_config": {"episodes_per_season": 5, "minutes_per_episode": 2},
+            "basic_config": {"season_count": 1, "episodes_per_season": 5, "total_episodes": 5, "minutes_per_episode": 2},
             "source_brief": {"premise": "雨夜旧案"},
             "worldview_plan": {"world_type": "都市悬疑"},
             "character_plan": {"protagonist": {"name": "林渡"}},

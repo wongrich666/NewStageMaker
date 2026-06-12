@@ -19,7 +19,7 @@ def run_configured_workflow(
     client=None,
 ) -> WorkflowState:
     backend = settings.workflow_backend
-    if backend in {"fastgpt", "hybrid", "fastgpt_hybrid"}:
+    if backend in {"fastgpt", "hybrid", "fastgpt_hybrid", "coze"}:
         return run_fastgpt_hybrid_workflow(
             payload,
             workflow_spec_path=workflow_spec_path,
@@ -36,6 +36,6 @@ def run_configured_workflow(
             model_option=model_option,
         )
     raise ValueError(
-        "WORKFLOW_BACKEND 只能是 fastgpt 或 local，"
+        "WORKFLOW_BACKEND 只能是 fastgpt、coze 或 local，"
         f"当前为：{settings.workflow_backend}"
     )

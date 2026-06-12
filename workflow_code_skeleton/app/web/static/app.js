@@ -24,13 +24,10 @@
     workspaceShell: document.querySelector(".chat-workspace-shell"),
     workspaceSidebar: $("workspaceCard"),
     sidebarToggleBtn: $("sidebarToggleBtn"),
-    assistantToolsFolder: $("assistantToolsFolder"),
-    waibaoScriptBtn: $("waibaoScriptBtn"),
     toolList: $("toolList"),
     toolPanel: $("toolPanel"),
     toolPanelTitle: $("toolPanelTitle"),
     closeToolPanelBtn: $("closeToolPanelBtn"),
-    openCommunityPanelLink: $("openCommunityPanelLink"),
     communityPanel: $("community"),
     closeCommunityPanelBtn: $("closeCommunityPanelBtn"),
     modelSelect: $("modelSelect"),
@@ -70,7 +67,6 @@
     activeProjectList: $("activeProjectList"),
     completedProjectList: $("completedProjectList"),
     newScriptProjectList: $("newScriptProjectList"),
-    waibaoProjectList: $("waibaoProjectList"),
     characterReskinProjectList: $("characterReskinProjectList"),
     activeProjectCount: $("activeProjectCount"),
     completedProjectCount: $("completedProjectCount"),
@@ -437,8 +433,7 @@
   }
 
   function normalizeScriptFormatMode(value) {
-    const normalized = String(value || "").trim().toLowerCase();
-    return normalized === "waibao" ? "waibao" : "";
+    return "";
   }
 
   function selectedScriptFormatMode() {
@@ -448,7 +443,7 @@
   }
 
   function scriptFormatModeLabel(value) {
-    return normalizeScriptFormatMode(value) === "waibao" ? "外包专属格式" : "标准格式";
+    return "标准格式";
   }
 
   function syncScriptFormatModeUi(snapshot = null) {
@@ -553,6 +548,7 @@
     if (!els.workspaceSidebar) return;
     els.workspaceSidebar.classList.toggle("is-collapsed", Boolean(collapsed));
     els.workspaceShell?.classList.toggle("sidebar-collapsed", Boolean(collapsed));
+    els.sidebarToggleBtn?.setAttribute("aria-expanded", collapsed ? "false" : "true");
     draftStorage.setItem(STORAGE.sidebarCollapsed, collapsed ? "1" : "0");
   }
 
@@ -1554,16 +1550,10 @@ startRuntimeDebugPolling();
     const previousScrollTop = els.chatTranscript.scrollTop;
     const nextSignature = transcriptSignature(snapshot);
     if (!snapshot) {
-      const suggestions = Object.values(toolDefinitions()).slice(0, 4).map((tool) => `
-        <button class="chat-suggestion-btn" type="button" data-suggestion-tool="${escapeHtml(tool.key)}">
-          ${escapeHtml(tool.label)}
-        </button>
-      `).join("");
       els.chatTranscript.innerHTML = `
         <section class="chat-empty-state">
           <strong>剧本创作工作台</strong>
           <p>直接输入你的创作需求，平台会把剧本框架和剧本正文按对话流展示，中间过程统一显示创作状态。</p>
-          <div class="chat-empty-tools">${suggestions}</div>
         </section>
       `;
       state.lastTranscriptSignature = nextSignature;
@@ -1867,7 +1857,7 @@ startRuntimeDebugPolling();
       .replace(/'/g, "&#39;");
   }
 
-  // 优先使用后端返回的辅助工具定义，拿不到时退回本地默认配置，保证主页面不会被工具区拖垮。
+  // 优先使用后端返回的工具定义，拿不到时退回本地默认配置，保证主页面不会被工具区拖垮。
   function toolDefinitions() {
     return Object.keys(state.toolDefinitions || {}).length
       ? state.toolDefinitions
@@ -2132,7 +2122,7 @@ startRuntimeDebugPolling();
   }
 
   function assetTypeLabel(assetLike) {
-    return isToolAsset(assetLike) ? "辅助工具" : "剧本资产";
+    return isToolAsset(assetLike) ? "工具结果" : "剧本资产";
   }
 
   function assetWorkflowLabel(assetLike) {
@@ -2150,8 +2140,8 @@ startRuntimeDebugPolling();
       els.toolOutputBox.textContent = result?.text
         || fallbackText
         || (isAuthenticated()
-          ? "这里会显示辅助工具结果。"
-          : "登录后可使用辅助工具。");
+          ? "这里会显示工具结果。"
+          : "登录后可使用工具。");
     }
     if (els.downloadToolBtn) {
       const shouldShow = Boolean(result?.text && result?.filename);
@@ -2223,17 +2213,15 @@ startRuntimeDebugPolling();
   }
 
   function openToolPanel(toolKey) {
+    if (!els.toolPanel) return;
     const tool = toolConfig(toolKey);
     state.activeTool = tool.key;
     closeCommunityPanel();
-    if (els.assistantToolsFolder) {
-      els.assistantToolsFolder.open = true;
-    }
     renderToolList();
     renderToolForm(tool.key);
-    els.toolPanel?.classList.remove("hidden");
+    els.toolPanel.classList.remove("hidden");
     window.requestAnimationFrame(() => {
-      els.toolPanel?.classList.add("panel-open");
+      els.toolPanel.classList.add("panel-open");
     });
     updateUrlParams((params) => params.set("section", "tools"));
   }
@@ -2285,7 +2273,7 @@ startRuntimeDebugPolling();
         <p>${escapeHtml(tool.help)}</p>
         ${tool.jsonFile ? `<small class="tool-form-meta">工作流：${escapeHtml(tool.jsonFile)}</small>` : ""}
         ${tool.key === "character_reskin" ? `
-          <div class="tool-linked-actions" aria-label="只换人设后续辅助工具">
+          <div class="tool-linked-actions" aria-label="只换人设后续工具">
             <button class="btn btn-secondary" type="button" disabled>爆款文审核（暂未接入）</button>
             <button class="btn btn-secondary" type="button" disabled>增加爽感（暂未接入）</button>
           </div>
@@ -2320,9 +2308,9 @@ startRuntimeDebugPolling();
     renderToolOutput(
       tool.key,
       !isAuthenticated()
-        ? "登录后可使用辅助工具。"
+        ? "登录后可使用工具。"
         : (tool.configured
-          ? "这里会显示辅助工具结果。"
+          ? "这里会显示工具结果。"
           : "当前工具还未配置 API Key，配置后即可运行。")
     );
     syncButtons();
@@ -2697,24 +2685,18 @@ startRuntimeDebugPolling();
 
   // 把后台项目压成简洁任务列表，方便在同一账号下快速切换工作台。
   function renderProjectList(projects) {
-    if (!els.activeProjectList || !els.completedProjectList) return;
+    if (!els.completedProjectList && !els.newScriptProjectList) return;
     if (!isAuthenticated()) {
-      const message = emptyCard("登录后查看任务");
-      els.activeProjectList.innerHTML = message;
-      els.completedProjectList.innerHTML = message;
+      const message = emptyCard("登录后查看资产");
+      if (els.completedProjectList) els.completedProjectList.innerHTML = message;
       if (els.newScriptProjectList) els.newScriptProjectList.innerHTML = message;
-      if (els.waibaoProjectList) els.waibaoProjectList.innerHTML = message;
-      if (els.characterReskinProjectList) els.characterReskinProjectList.innerHTML = message;
       if (els.activeProjectCount) els.activeProjectCount.textContent = "0";
       if (els.completedProjectCount) els.completedProjectCount.textContent = "0";
       return;
     }
 
-    const oldScriptProjects = projects.filter((item) => assetCategory(item) === "old_script");
     const frameworkProjects = projects.filter((item) => assetCategory(item) === "framework");
     const newScriptProjects = projects.filter((item) => assetCategory(item) === "new_script");
-    const waibaoProjects = projects.filter((item) => assetCategory(item) === "waibao");
-    const characterReskinProjects = projects.filter((item) => assetCategory(item) === "character_reskin");
 
     const renderCompactItems = (items, emptyMessage) => {
       if (!items.length) {
@@ -2749,25 +2731,20 @@ startRuntimeDebugPolling();
               data-project-id="${escapeHtml(item.project_id)}"
               aria-label="${escapeHtml(`删除 ${projectDisplayTitle(item)}`)}"
               title="${escapeHtml(`删除 ${projectDisplayTitle(item)}`)}"
-            >删除</button>
+            >删</button>
           </div>
         `;
       }).join("");
     };
 
-    els.activeProjectList.innerHTML = renderCompactItems(oldScriptProjects, "当前没有老剧本平台资产。");
-    els.completedProjectList.innerHTML = renderCompactItems(frameworkProjects, "当前还没有框架资产。");
+    if (els.completedProjectList) {
+      els.completedProjectList.innerHTML = renderCompactItems(frameworkProjects, "暂无框架资产");
+    }
     if (els.newScriptProjectList) {
-      els.newScriptProjectList.innerHTML = renderCompactItems(newScriptProjects, "当前还没有新剧本平台资产。");
-    }
-    if (els.waibaoProjectList) {
-      els.waibaoProjectList.innerHTML = renderCompactItems(waibaoProjects, "当前还没有外包格式专属资产。");
-    }
-    if (els.characterReskinProjectList) {
-      els.characterReskinProjectList.innerHTML = renderCompactItems(characterReskinProjects, "当前还没有只换人设资产。");
+      els.newScriptProjectList.innerHTML = renderCompactItems(newScriptProjects, "暂无剧本资产");
     }
     if (els.activeProjectCount) {
-      els.activeProjectCount.textContent = String(oldScriptProjects.length);
+      els.activeProjectCount.textContent = String(frameworkProjects.length + newScriptProjects.length);
     }
     if (els.completedProjectCount) {
       els.completedProjectCount.textContent = String(frameworkProjects.length);
@@ -2776,11 +2753,8 @@ startRuntimeDebugPolling();
 
   function workspaceFolders() {
     return [
-      els.activeWorkspaceFolder,
       els.completedWorkspaceFolder,
-      els.newScriptProjectList?.closest("details"),
-      els.waibaoProjectList?.closest("details"),
-      els.characterReskinProjectList?.closest("details")
+      els.newScriptProjectList?.closest("details")
     ].filter(Boolean);
   }
 
@@ -3277,9 +3251,8 @@ startRuntimeDebugPolling();
       return;
     }
     const categories = [
-      ["老剧本平台资产", assets.filter((item) => assetCategory(item) === "old_script")],
       ["框架资产", assets.filter((item) => assetCategory(item) === "framework")],
-      ["新剧本资产", assets.filter((item) => assetCategory(item) === "new_script")],
+      ["剧本资产", assets.filter((item) => assetCategory(item) === "new_script")],
     ];
     els.assetsList.innerHTML = categories.map(([title, items]) => `
       <section class="asset-category">
@@ -3322,17 +3295,16 @@ startRuntimeDebugPolling();
 
   function assetCategory(item) {
     const explicit = String(item.asset_type || item.type || "").trim();
-    if (explicit === "legacy_script") return "old_script";
-    if (["old_script", "framework", "new_script", "character_reskin", "waibao"].includes(explicit)) return explicit;
+    if (explicit === "framework") return "framework";
+    if (["legacy_script", "old_script", "new_script", "waibao"].includes(explicit)) return "new_script";
+    if (explicit === "character_reskin") return "tool_result";
     const assetKind = String(item.asset_kind || "").trim();
     const input = item.input_payload && typeof item.input_payload === "object" ? item.input_payload : {};
     const scriptMode = String(item.script_format_mode || input.script_format_mode || "").trim();
-    const toolKey = String(item.tool_key || "").trim();
-    if (assetKind === "tool_result" && toolKey === "character_reskin") return "character_reskin";
-    if (scriptMode === "waibao") return "waibao";
+    if (assetKind === "tool_result") return "tool_result";
     if (assetKind === "framework_planner") return "framework";
     if (assetKind === "framework_to_script" || scriptMode === "framework_to_script" || input.framework_to_script === true) return "new_script";
-    return "old_script";
+    return "new_script";
   }
 
   function renderAssetTaskActions(item) {
@@ -3617,7 +3589,7 @@ startRuntimeDebugPolling();
       }
     }
     showToast(
-      "辅助工具运行完成",
+      "工具运行完成",
       assetSaveError
         ? `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果，但写入用户资产失败了。`
         : (assetSaved
@@ -3629,7 +3601,7 @@ startRuntimeDebugPolling();
   function downloadActiveToolResult() {
     const result = currentToolResult();
     const tool = toolConfig(state.activeTool);
-    const toolLabel = tool?.label || "辅助工具结果";
+    const toolLabel = tool?.label || "工具结果";
     if (!result?.text || !result?.filename) {
       showToast("暂无可下载内容", `请先成功生成${toolLabel}。`);
       return;
@@ -3724,20 +3696,8 @@ startRuntimeDebugPolling();
     if (panel === "profile" && isAuthenticated()) {
       openProfilePanel();
     }
-    if (section === "tools") {
-      window.setTimeout(() => {
-        if (els.assistantToolsFolder) {
-          els.assistantToolsFolder.open = true;
-        }
-        openToolPanel(state.activeTool);
-      }, 80);
-      return;
-    }
-    if (section === "community") {
-      window.setTimeout(() => {
-        openCommunityPanel();
-      }, 80);
-      return;
+    if (section === "tools" || section === "community") {
+      updateUrlParams((params) => params.delete("section"));
     }
     if (section) {
       window.setTimeout(() => {
@@ -3810,16 +3770,6 @@ startRuntimeDebugPolling();
     els.newScriptBtn?.addEventListener("click", () => {
       if (!requireLogin()) return;
       openWorkspaceInNewPage({ fresh: true });
-    });
-
-    els.waibaoScriptBtn?.addEventListener("click", () => {
-      if (!requireLogin()) return;
-      openWorkspaceInNewPage({ fresh: true, scriptFormatMode: "waibao" });
-    });
-
-    els.openCommunityPanelLink?.addEventListener("click", (event) => {
-      event.preventDefault();
-      openCommunityPanel();
     });
 
     els.viewAssetsBtn?.addEventListener("click", () => {
@@ -4053,9 +4003,6 @@ startRuntimeDebugPolling();
           });
         return;
       }
-      const button = event.target.closest("[data-suggestion-tool]");
-      if (!button) return;
-      openToolPanel(button.dataset.suggestionTool || state.activeTool);
     });
 
     els.closeToolPanelBtn?.addEventListener("click", closeToolPanel);

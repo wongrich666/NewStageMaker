@@ -14,15 +14,22 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
+import yaml
 
 from ..config import settings
 from ..utils.logger import get_logger
 from .json_utils import parse_json, strip_code_fence
 from .runtime_paths import get_runtime_data_dir
+from .workflow_output_parser import (
+    parse_workflow_output,
+    safe_truncated_preview,
+    wrap_payload_for_expected_output,
+)
 
 logger = get_logger("framework_planner_service")
 
 DEFAULT_FASTGPT_URL = "https://api.fastgpt.in/api/v1/chat/completions"
+DEFAULT_COZE_WORKFLOW_URL = "https://api.coze.cn/v1/workflow/run"
 FRAMEWORK_PLANNER_STORAGE_KEY = "frameworkPlannerState.v2"
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 FRAMEWORK_CONTRACT_GLOB = "00_*.md"
@@ -699,7 +706,7 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
         stage="01",
         label="原文信息提取",
         env_prefix="FASTGPT_FRAMEWORK_01_SOURCE_BRIEF",
-        workflow_glob="01_*.json",
+        workflow_glob="extract01*.yaml",
         input_fields=(
             "mode",
             "source_text",
@@ -732,20 +739,19 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "user_requirements": ("user_requirements",),
         },
         output_aliases={
-            "source_brief": ("source_brief",),
+            "source_brief": ("source_brief", "confirmed_info"),
         },
     ),
     "02": FrameworkPlannerStageDefinition(
         stage="02",
         label="世界观方案生成更新",
         env_prefix="FASTGPT_FRAMEWORK_02_WORLDVIEW",
-        workflow_glob="02_*.json",
+        workflow_glob="worldview02*.yaml",
         input_fields=(
             "mode",
             "source_brief",
             "locked_basic_config",
-            "basic_config",
-            "previous_worldview_plan",
+            "previous_worldview",
             "user_feedback",
             "adaptation_direction",
             "user_requirements",
@@ -756,28 +762,26 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "mode": ("mode",),
             "source_brief": ("source_brief",),
             "locked_basic_config": ("locked_basic_config", "basic_config"),
-            "basic_config": ("basic_config", "locked_basic_config"),
-            "previous_worldview_plan": ("previous_worldview_plan",),
+            "previous_worldview": ("previous_worldview", "previous_worldview_plan"),
             "user_feedback": ("user_feedback",),
             "adaptation_direction": ("adaptation_direction",),
             "user_requirements": ("user_requirements",),
         },
         output_aliases={
-            "worldview_plan": ("worldview_plan",),
+            "worldview_plan": ("worldview_plan", "worldview"),
         },
     ),
     "03": FrameworkPlannerStageDefinition(
         stage="03",
         label="人设方案生成更新",
         env_prefix="FASTGPT_FRAMEWORK_03_CHARACTER",
-        workflow_glob="03_*.json",
+        workflow_glob="character03*.yaml",
         input_fields=(
             "mode",
             "source_brief",
             "locked_basic_config",
-            "basic_config",
             "worldview_plan",
-            "previous_character_plan",
+            "previous_character",
             "user_feedback",
             "adaptation_direction",
             "user_requirements",
@@ -788,33 +792,37 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "mode": ("mode",),
             "source_brief": ("source_brief",),
             "locked_basic_config": ("locked_basic_config", "basic_config"),
-            "basic_config": ("basic_config", "locked_basic_config"),
             "worldview_plan": ("worldview_plan",),
-            "previous_character_plan": ("previous_character_plan",),
+            "previous_character": ("previous_character", "previous_character_plan"),
             "user_feedback": ("user_feedback",),
             "adaptation_direction": ("adaptation_direction",),
             "user_requirements": ("user_requirements",),
         },
         output_aliases={
-            "character_plan": ("character_plan",),
+            "character_plan": ("character_plan", "character"),
         },
     ),
     "04": FrameworkPlannerStageDefinition(
         stage="04",
         label="三幕十五节拍卡点规划生成更新",
         env_prefix="FASTGPT_FRAMEWORK_04_BEAT",
-        workflow_glob="04_*.json",
+        workflow_glob="beat04*.yaml",
         input_fields=(
             "mode",
             "source_brief",
             "basic_config",
+            "season_count",
+            "episodes_per_season",
+            "total_episodes",
+            "episode_count_guard",
             "worldview_plan",
             "character_plan",
-            "previous_beat_checkpoint_timeline",
+            "previous_beat",
             "user_feedback",
-            "framework_score_report",
+            "framework_score_repo",
             "adaptation_direction",
             "user_requirements",
+            "keyword",
         ),
         output_fields=("beat_checkpoint_timeline", "checkpoint_explanation"),
         required_fields=("source_brief", "basic_config", "worldview_plan", "character_plan"),
@@ -822,33 +830,61 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "mode": ("mode",),
             "source_brief": ("source_brief",),
             "basic_config": ("basic_config",),
+            "season_count": ("season_count",),
+            "episodes_per_season": ("episodes_per_season",),
+            "total_episodes": ("total_episodes",),
+            "episode_count_guard": ("episode_count_guard",),
             "worldview_plan": ("worldview_plan",),
             "character_plan": ("character_plan",),
-            "previous_beat_checkpoint_timeline": ("previous_beat_checkpoint_timeline",),
+            "previous_beat": ("previous_beat", "previous_beat_checkpoint_timeline"),
             "user_feedback": ("user_feedback",),
-            "framework_score_report": ("framework_score_report",),
+            "framework_score_repo": ("framework_score_repo", "framework_score_report"),
             "adaptation_direction": ("adaptation_direction",),
             "user_requirements": ("user_requirements",),
+            "keyword": ("keyword",),
         },
         output_aliases={
-            "beat_checkpoint_timeline": ("beat_checkpoint_timeline", "timeline"),
-            "checkpoint_explanation": ("checkpoint_explanation", "explanation", "beat_explanation"),
+            "beat_checkpoint_timeline": (
+                "beat_checkpoint_timeline",
+                "beatCheckpointTimeline",
+                "checkpoint_timeline",
+                "checkpointTimeline",
+                "beat_timeline",
+                "beatTimeline",
+                "timeline",
+                "beats",
+                "checkpoints",
+                "beat_checkpoints",
+                "beatCheckpoints",
+                "beat_checkpoint",
+                "beatCheckpoint",
+                "beat",
+            ),
+            "checkpoint_explanation": (
+                "checkpoint_explanation",
+                "checkpointExplanation",
+                "explanation",
+                "beat_explanation",
+                "beatExplanation",
+                "checkpoint_explain",
+                "checkpointExplain",
+            ),
         },
     ),
     "05": FrameworkPlannerStageDefinition(
         stage="05",
         label="人物故事线生成更新",
         env_prefix="FASTGPT_FRAMEWORK_05_STORYLINE",
-        workflow_glob="05_*.json",
+        workflow_glob="storyline05*.yaml",
         input_fields=(
             "mode",
             "source_brief",
             "basic_config",
             "worldview_plan",
             "character_plan",
-            "beat_checkpoint_timeline",
-            "previous_character_storylines",
-            "current_storyline_decisions",
+            "beat_checkpoint_time",
+            "previous_character",
+            "current_storyline",
             "user_feedback",
             "adaptation_direction",
             "user_requirements",
@@ -859,7 +895,7 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "basic_config",
             "worldview_plan",
             "character_plan",
-            "beat_checkpoint_timeline",
+            "beat_checkpoint_time",
         ),
         input_aliases={
             "mode": ("mode",),
@@ -867,32 +903,32 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "basic_config": ("basic_config",),
             "worldview_plan": ("worldview_plan",),
             "character_plan": ("character_plan",),
-            "beat_checkpoint_timeline": ("beat_checkpoint_timeline",),
-            "previous_character_storylines": ("previous_character_storylines",),
-            "current_storyline_decisions": ("current_storyline_decisions", "storyline_decisions"),
+            "beat_checkpoint_time": ("beat_checkpoint_time", "beat_checkpoint_timeline"),
+            "previous_character": ("previous_character", "previous_character_storylines"),
+            "current_storyline": ("current_storyline", "current_storyline_decisions", "storyline_decisions"),
             "user_feedback": ("user_feedback",),
             "adaptation_direction": ("adaptation_direction",),
             "user_requirements": ("user_requirements",),
         },
         output_aliases={
-            "character_storylines": ("character_storylines", "storylines"),
+            "character_storylines": ("character_storylines", "storylines", "storyline"),
         },
     ),
     "06": FrameworkPlannerStageDefinition(
         stage="06",
         label="整体改编指引生成更新",
         env_prefix="FASTGPT_FRAMEWORK_06_GUIDE",
-        workflow_glob="06_*.json",
+        workflow_glob="adaptation06*.yaml",
         input_fields=(
             "mode",
             "source_brief",
             "basic_config",
             "worldview_plan",
             "character_plan",
-            "beat_checkpoint_timeline",
+            "beat_checkpoint_time",
             "character_storylines",
             "storyline_decisions",
-            "previous_adaptation_guide",
+            "previous_adaptation",
             "user_feedback",
             "adaptation_direction",
             "user_requirements",
@@ -903,7 +939,7 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "basic_config",
             "worldview_plan",
             "character_plan",
-            "beat_checkpoint_timeline",
+            "beat_checkpoint_time",
             "character_storylines",
         ),
         input_aliases={
@@ -912,36 +948,36 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "basic_config": ("basic_config",),
             "worldview_plan": ("worldview_plan",),
             "character_plan": ("character_plan",),
-            "beat_checkpoint_timeline": ("beat_checkpoint_timeline",),
+            "beat_checkpoint_time": ("beat_checkpoint_time", "beat_checkpoint_timeline"),
             "character_storylines": ("character_storylines",),
             "storyline_decisions": ("storyline_decisions",),
-            "previous_adaptation_guide": ("previous_adaptation_guide",),
+            "previous_adaptation": ("previous_adaptation", "previous_adaptation_guide"),
             "user_feedback": ("user_feedback",),
             "adaptation_direction": ("adaptation_direction",),
             "user_requirements": ("user_requirements",),
         },
         output_aliases={
-            "adaptation_guide": ("adaptation_guide", "guide"),
+            "adaptation_guide": ("adaptation_guide", "guide", "adaptation"),
         },
     ),
     "07": FrameworkPlannerStageDefinition(
         stage="07",
         label="框架策划包校验",
         env_prefix="FASTGPT_FRAMEWORK_07_PACKAGE",
-        workflow_glob="07_*.json",
+        workflow_glob="framework07*.yaml",
         input_fields=(
             "mode",
             "basic_config",
             "source_brief",
             "worldview_plan",
             "character_plan",
-            "beat_checkpoint_timeline",
-            "checkpoint_explanation",
+            "beat_checkpoint",
+            "checkpoint_explain",
             "character_storylines",
             "storyline_decisions",
             "adaptation_guide",
             "user_edit_history",
-            "previous_framework_plan_package",
+            "previous_framework",
             "user_feedback",
             "adaptation_direction",
             "user_requirements",
@@ -952,7 +988,7 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "source_brief",
             "worldview_plan",
             "character_plan",
-            "beat_checkpoint_timeline",
+            "beat_checkpoint",
             "character_storylines",
             "adaptation_guide",
         ),
@@ -962,8 +998,8 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "source_brief": ("source_brief",),
             "worldview_plan": ("worldview_plan",),
             "character_plan": ("character_plan",),
-            "beat_checkpoint_timeline": ("beat_checkpoint_timeline",),
-            "checkpoint_explanation": ("checkpoint_explanation",),
+            "beat_checkpoint": ("beat_checkpoint", "beat_checkpoint_timeline"),
+            "checkpoint_explain": ("checkpoint_explain", "checkpoint_explanation"),
             "character_storylines": ("character_storylines",),
             "storyline_decisions": ("storyline_decisions",),
             "adaptation_guide": (
@@ -975,14 +1011,14 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
                 "previous_adaptation_guide",
             ),
             "user_edit_history": ("user_edit_history",),
-            "previous_framework_plan_package": ("previous_framework_plan_package",),
+            "previous_framework": ("previous_framework", "previous_framework_plan_package"),
             "user_feedback": ("user_feedback",),
             "adaptation_direction": ("adaptation_direction",),
             "user_requirements": ("user_requirements",),
         },
         output_aliases={
-            "framework_plan_package": ("framework_plan_package", "package"),
-            "validation_report": ("validation_report", "validation"),
+            "framework_plan_package": ("framework_plan_package", "package", "framework"),
+            "validation_report": ("validation_report", "validation", "framework"),
         },
     ),
 }
@@ -1025,10 +1061,42 @@ def framework_planner_fastgpt_diagnostics(stage: str = "05") -> dict[str, Any]:
 
 def stage_has_real_backend(stage: str) -> bool:
     definition = stage_definition(stage)
+    if _is_coze_backend():
+        _, token = _coze_api_token_with_name()
+        _, workflow_id = _env_with_name(*_stage_workflow_id_env_names(definition))
+        return bool(token and workflow_id)
     for env_name in _stage_api_key_env_names(definition):
         if _env(env_name):
             return True
     return False
+
+
+def _parse_coze_framework_response(
+    definition: FrameworkPlannerStageDefinition,
+    response_json: Any,
+) -> Any:
+    if isinstance(response_json, dict):
+        code = response_json.get("code")
+        if code not in (None, 0, "0"):
+            message = response_json.get("msg") or response_json.get("message") or response_json.get("error")
+            raise FrameworkPlannerStageError(
+                "Coze 工作流返回失败",
+                stage=definition.stage,
+                status_code=502,
+                detail={
+                    "reason": str(message or "Coze workflow returned failure"),
+                    "coze_code": code,
+                    "response_preview": safe_truncated_preview(response_json, limit=1000),
+                },
+            )
+
+    parsed = parse_workflow_output(response_json)
+    return wrap_payload_for_expected_output(
+        parsed,
+        output_names=definition.output_fields,
+        output_aliases=definition.output_aliases,
+        stage_name=f"framework_{definition.stage}",
+    )
 
 
 def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -1153,7 +1221,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             exc=exc,
             raw_return_object=response_text,
         )
-        if definition.stage in {"01", "02", "03", "04", "05"}:
+        if _is_coze_backend() or definition.stage in {"01", "02", "03", "04", "05"}:
             response_json = response_text
         else:
             debug_detail = _write_debug_artifact(
@@ -1178,7 +1246,64 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                     "reason": "FastGPT 返回非法 JSON 响应",
                     "exception_type": type(exc).__name__,
                     "exception_message": str(exc),
-                    "response": response_text,
+                    "response": safe_truncated_preview(response_text, limit=1000),
+                    "detail": debug_detail,
+                    "traceback": traceback.format_exc(),
+                },
+                normalized_payload,
+            )
+            raise FrameworkPlannerStageError(
+                "当前阶段返回格式异常，请重试或查看日志",
+                stage=definition.stage,
+                status_code=502,
+                detail=debug_detail,
+            ) from exc
+
+    if _is_coze_backend():
+        try:
+            response_json = _parse_coze_framework_response(definition, response_json)
+        except FrameworkPlannerStageError as exc:
+            print_stage_debug(
+                definition.stage,
+                {
+                    "ok": False,
+                    "stage": definition.stage,
+                    "status": "failed",
+                    "reason": exc.detail.get("reason") or str(exc),
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc),
+                    "detail": exc.detail,
+                    "response": safe_truncated_preview(response_json, limit=1000),
+                    "traceback": traceback.format_exc(),
+                },
+                normalized_payload,
+            )
+            raise
+        except Exception as exc:
+            _log_stage_output_parse_exception(
+                stage=definition.stage,
+                payload_keys=sorted(normalized_payload.keys()),
+                exc=exc,
+                raw_return_object=response_json,
+            )
+            debug_detail = _write_debug_artifact(
+                stage=definition.stage,
+                workflow_spec=workflow_spec,
+                request_variables=request_variables,
+                payload=normalized_payload,
+                response_raw=response_json,
+                parse_error=f"Coze response parse failed: {type(exc).__name__}: {exc}",
+            )
+            print_stage_debug(
+                definition.stage,
+                {
+                    "ok": False,
+                    "stage": definition.stage,
+                    "status": "failed",
+                    "reason": "Coze 工作流返回解析失败",
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc),
+                    "response": safe_truncated_preview(response_json, limit=1000),
                     "detail": debug_detail,
                     "traceback": traceback.format_exc(),
                 },
@@ -1196,7 +1321,16 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         raw_debug_dir.mkdir(parents=True, exist_ok=True)
         raw_debug_path = raw_debug_dir / f"stage{definition.stage}_raw_response.json"
         raw_debug_path.write_text(
-            json.dumps(response_json, ensure_ascii=False, indent=2, default=str),
+            json.dumps(
+                {
+                    "stage": definition.stage,
+                    "backend": "coze" if _is_coze_backend() else "fastgpt",
+                    "safe_response_preview": safe_truncated_preview(response_json, limit=4000),
+                },
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            ),
             encoding="utf-8",
         )
         logger.warning(
@@ -1234,6 +1368,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 definition.stage,
                 safe_output,
                 parse_warnings=parse_warnings,
+                payload=normalized_payload,
             )
             _log_stage_parse_warnings(definition.stage, parse_warnings)
             display_text = _extract_display_text(
@@ -1287,7 +1422,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                     "reason": "阶段输出解析失败",
                     "exception_type": type(exc).__name__,
                     "exception_message": str(exc),
-                    "response": response_json,
+                    "response": safe_truncated_preview(response_json, limit=1000),
                     "detail": debug_detail,
                     "traceback": traceback.format_exc(),
                 },
@@ -1315,6 +1450,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         definition.stage,
         data,
         parse_warnings=parse_warnings,
+        payload=normalized_payload,
     )
 
     data = _repair_stage_output_with_payload(
@@ -1329,6 +1465,14 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
             data,
             stage=definition.stage,
             payload_keys=sorted(normalized_payload.keys()),
+        )
+
+    if definition.stage == "04":
+        _validate_stage04_output_or_raise(
+            data=data,
+            payload=normalized_payload,
+            parse_warnings=parse_warnings,
+            response_json=response_json,
         )
 
     stage_detail = {}
@@ -1433,11 +1577,15 @@ def run_framework_planner_score(payload: dict[str, Any] | None) -> dict[str, Any
 
 @lru_cache(maxsize=1)
 def framework_workflow_dir() -> Path:
-    configured = _env("FRAMEWORK_PLANNER_WORKFLOW_DIR")
+    yaml_default = Path(__file__).resolve().parents[3] / "BETTER_FRAMEWORK_YAML"
+    configured = _env("FRAMEWORK_PLANNER_WORKFLOW_DIR", "BETTER_FRAMEWORK_YAML_DIR")
     if configured:
         path = Path(configured).expanduser().resolve()
+    elif yaml_default.exists():
+        path = yaml_default.resolve()
     else:
-        path = Path(__file__).resolve().parents[3] / "BETTER_FRAMEWORK_YAML"
+        legacy_configured = _env("BETTER_FRAMEWORK_JSONS_DIR")
+        path = Path(legacy_configured).expanduser().resolve() if legacy_configured else yaml_default
     if not path.exists():
         raise FrameworkPlannerStageError(
             "未找到 BETTER_FRAMEWORK_YAML 工作流目录",
@@ -1476,11 +1624,52 @@ def resolve_stage_workflow_path(stage: str) -> Path:
     return matches[0]
 
 
+def _load_workflow_document(path: Path) -> dict[str, Any]:
+    text = path.read_text(encoding="utf-8-sig")
+    if path.suffix.lower() in {".yaml", ".yml"}:
+        loaded = yaml.safe_load(text)
+    else:
+        loaded = json.loads(text)
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _yaml_workflow_public_keys(workflow: dict[str, Any]) -> tuple[str, ...]:
+    keys: list[str] = []
+    for node in workflow.get("nodes") or []:
+        if not isinstance(node, dict) or str(node.get("type") or "") != "start":
+            continue
+        outputs = (node.get("parameters") or {}).get("node_outputs") or {}
+        if not isinstance(outputs, dict):
+            continue
+        for key in outputs.keys():
+            key_text = str(key or "").strip()
+            if key_text:
+                keys.append(key_text)
+    return tuple(dict.fromkeys(keys))
+
+
+def _yaml_workflow_answer_names(workflow: dict[str, Any]) -> tuple[str, ...]:
+    names: list[str] = []
+    for node in workflow.get("nodes") or []:
+        if not isinstance(node, dict) or str(node.get("type") or "") != "end":
+            continue
+        inputs = (node.get("parameters") or {}).get("node_inputs") or []
+        if not isinstance(inputs, list):
+            continue
+        for item in inputs:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if name:
+                names.append(name)
+    return tuple(dict.fromkeys(names))
+
+
 @lru_cache(maxsize=None)
 def load_stage_workflow_spec(stage: str) -> FrameworkPlannerWorkflowSpec:
     path = resolve_stage_workflow_path(stage)
     try:
-        workflow = json.loads(path.read_text(encoding="utf-8-sig"))
+        workflow = _load_workflow_document(path)
     except Exception as exc:
         raise FrameworkPlannerStageError(
             f"无法读取阶段 {stage} 工作流 JSON",
@@ -1488,6 +1677,17 @@ def load_stage_workflow_spec(stage: str) -> FrameworkPlannerWorkflowSpec:
             status_code=500,
             detail={"workflow_json_path": str(path)},
         ) from exc
+
+    yaml_public_keys = _yaml_workflow_public_keys(workflow)
+    if yaml_public_keys:
+        return FrameworkPlannerWorkflowSpec(
+            stage=str(stage).zfill(2),
+            path=path,
+            public_variable_keys=yaml_public_keys,
+            internal_variable_keys=(),
+            answer_node_names=_yaml_workflow_answer_names(workflow),
+            contract_path=resolve_framework_contract_path(),
+        )
 
     public_keys: list[str] = []
     internal_keys: list[str] = []
@@ -1765,6 +1965,7 @@ def _build_stage_request_variables(
             "stage_preference",
             "stage_preference_prompt",
             "user_stage_preference_prompt",
+            "user_feedback",
             "user_preference_prompt",
             "user_preferences",
             "userPreferences",
@@ -1792,6 +1993,9 @@ def _build_stage_request_variables(
         }:
             continue
         variables[key] = _wire_value(value)
+
+    if _is_coze_backend():
+        _ensure_coze_public_parameters(variables, workflow_spec)
 
     stage_key = framework_planner_stage_key(definition.stage)
     selected_tags = payload.get("selected_preference_tags") if isinstance(payload.get("selected_preference_tags"), list) else []
@@ -1833,7 +2037,56 @@ def _build_stage_request_variables(
     return variables
 
 
+def _ensure_coze_public_parameters(
+    variables: dict[str, Any],
+    workflow_spec: FrameworkPlannerWorkflowSpec,
+) -> None:
+    """Coze validates declared start-node parameters by key presence."""
+    for key in workflow_spec.public_variable_keys:
+        key_text = str(key or "").strip()
+        if key_text and key_text not in variables:
+            variables[key_text] = ""
+
+
 def _resolve_stage_endpoint(definition: FrameworkPlannerStageDefinition) -> FrameworkPlannerEndpoint:
+    if _is_coze_backend():
+        api_key_source, api_key = _coze_api_token_with_name()
+        if not api_key:
+            raise FrameworkPlannerStageError(
+                "阶段未配置可用的 Coze API Token",
+                stage=definition.stage,
+                status_code=500,
+                detail={
+                    "reason": "缺少 Coze API Token 配置",
+                    "expected_envs": list(_coze_api_token_env_names()),
+                },
+            )
+        workflow_id_envs = _stage_workflow_id_env_names(definition)
+        workflow_id_source, workflow_id = _env_with_name(*workflow_id_envs)
+        if not workflow_id:
+            raise FrameworkPlannerStageError(
+                "阶段未配置 Coze workflow_id",
+                stage=definition.stage,
+                status_code=500,
+                detail={
+                    "reason": "缺少 Coze workflow_id 配置",
+                    "expected_envs": list(workflow_id_envs),
+                },
+            )
+        url_source, raw_url = _coze_api_base_with_name(api_key_source)
+        timeout = int(_env(f"{definition.env_prefix}_TIMEOUT", "COZE_TIMEOUT_SECONDS", "FASTGPT_TIMEOUT") or 600)
+        chat_id = f"framework-planner-{definition.stage}-{uuid.uuid4().hex[:8]}"
+        return FrameworkPlannerEndpoint(
+            url=_normalize_coze_workflow_url(raw_url or DEFAULT_COZE_WORKFLOW_URL),
+            url_source=url_source or "default",
+            api_key=api_key,
+            api_key_source=api_key_source or "COZE_API_TOKEN",
+            workflow_id=str(workflow_id or "").strip(),
+            workflow_id_source=workflow_id_source or "",
+            chat_id=chat_id,
+            timeout=max(1, timeout),
+        )
+
     api_key_envs = _stage_api_key_env_names(definition)
     api_key_source, api_key = _env_with_name(*api_key_envs)
     if not api_key:
@@ -1910,6 +2163,7 @@ def _stage_url_env_names(definition: FrameworkPlannerStageDefinition) -> tuple[s
 
 def _stage_workflow_id_env_names(definition: FrameworkPlannerStageDefinition) -> tuple[str, ...]:
     return (
+        f"COZE_WORKFLOW_STAGE_{definition.stage}_ID",
         f"{definition.env_prefix}_WORKFLOW_ID",
         "FASTGPT_FRAMEWORK_WORKFLOW_ID",
     )
@@ -1920,6 +2174,12 @@ def _build_request_body(
     variables: dict[str, Any],
     endpoint: FrameworkPlannerEndpoint,
 ) -> dict[str, Any]:
+    if _is_coze_backend():
+        return {
+            "workflow_id": endpoint.workflow_id,
+            "parameters": variables,
+        }
+
     body: dict[str, Any] = {
         "chatId": endpoint.chat_id,
         "stream": False,
@@ -2947,6 +3207,24 @@ def _coerce_list_candidate_to_stage_output(
     return _empty_stage_output(definition.stage), warnings
 
 
+def _unwrap_stage_alias_value(
+    value: Any,
+    field: str,
+    output_aliases: dict[str, tuple[str, ...]],
+) -> Any:
+    parsed_value = _parse_candidate_value(value)
+    if isinstance(parsed_value, dict):
+        nested = _find_value_by_aliases(parsed_value, output_aliases.get(field, (field,)))
+        if nested is not None:
+            return nested
+        data = parsed_value.get("data")
+        if isinstance(data, dict):
+            nested = _find_value_by_aliases(data, output_aliases.get(field, (field,)))
+            if nested is not None:
+                return nested
+    return parsed_value
+
+
 def _coerce_non_list_candidate_to_stage_output(
     definition: FrameworkPlannerStageDefinition,
     parsed: Any,
@@ -2960,11 +3238,11 @@ def _coerce_non_list_candidate_to_stage_output(
         if isinstance(parsed, dict):
             direct = _find_value_by_aliases(parsed, output_aliases.get(field, (field,)))
             if direct is not None:
-                return _with_optional_display_text({field: direct}, parsed), warnings
+                return _with_optional_display_text({field: _unwrap_stage_alias_value(direct, field, output_aliases)}, parsed), warnings
             if "data" in parsed and isinstance(parsed["data"], dict):
                 nested = _find_value_by_aliases(parsed["data"], output_aliases.get(field, (field,)))
                 if nested is not None:
-                    return _with_optional_display_text({field: nested}, parsed, parsed["data"]), warnings
+                    return _with_optional_display_text({field: _unwrap_stage_alias_value(nested, field, output_aliases)}, parsed, parsed["data"]), warnings
             if field in parsed:
                 return _with_optional_display_text({field: parsed[field]}, parsed), warnings
             if allow_dict_as_field:
@@ -2990,7 +3268,7 @@ def _coerce_non_list_candidate_to_stage_output(
         if value is None and field == "validation_report" and "validation" in parsed:
             value = parsed.get("validation")
         if value is not None:
-            mapped[field] = value
+            mapped[field] = _unwrap_stage_alias_value(value, field, output_aliases)
     if mapped:
         mapped = _with_optional_display_text(mapped, parsed, data_source)
         missing_fields = [field for field in definition.output_fields if field not in mapped]
@@ -3002,8 +3280,10 @@ def _coerce_non_list_candidate_to_stage_output(
 
 
 def _parse_candidate_value(candidate: Any) -> Any:
-    if isinstance(candidate, (dict, list)):
-        return candidate
+    parsed = parse_workflow_output(candidate)
+    if isinstance(parsed, (dict, list)):
+        return parsed
+    candidate = parsed
     text = str(candidate or "").strip()
     if not text:
         return None
@@ -3080,6 +3360,7 @@ def _normalize_stage_output(
     data: dict[str, Any],
     *,
     parse_warnings: list[str] | None = None,
+    payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     warnings = parse_warnings if parse_warnings is not None else []
     normalized = dict(data if isinstance(data, dict) else {})
@@ -3107,19 +3388,26 @@ def _normalize_stage_output(
     if stage == "04":
         checkpoint_missing = normalized.get("checkpoint_explanation") in (None, "", [], {})
         if not isinstance(normalized.get("beat_checkpoint_timeline"), list):
-            warnings.append("beat_checkpoint_timeline 不是 list，已回退为 15 条占位节拍")
+            warnings.append("beat_checkpoint_timeline 不是 list，未生成占位节拍，阶段将按解析失败处理")
             _log_field_type_mismatch(stage, "beat_checkpoint_timeline", "list", normalized.get("beat_checkpoint_timeline"))
+            normalized["beat_checkpoint_timeline"] = []
+            normalized["checkpoint_explanation"] = _normalize_checkpoint_explanation(
+                normalized.get("checkpoint_explanation"),
+                [],
+            )
+            return normalized
         if checkpoint_missing:
-            warnings.append("checkpoint_explanation 缺失，已填充说明占位")
+            warnings.append("checkpoint_explanation 缺失，将从有效节拍内容派生说明；若节拍内容不足则阶段失败")
             logger.warning(
-                "框架策划阶段 04 checkpoint_explanation 缺失，已填充占位说明；raw_output=%s",
+                "框架策划阶段 04 checkpoint_explanation 缺失，将尝试从节拍内容派生说明；raw_output=%s",
                 _preview_return_object(data),
             )
         elif not isinstance(normalized.get("checkpoint_explanation"), (dict, str)):
             warnings.append("checkpoint_explanation 不是 dict/str，已回退为说明占位")
             _log_field_type_mismatch(stage, "checkpoint_explanation", "dict/str", normalized.get("checkpoint_explanation"))
         normalized["beat_checkpoint_timeline"] = _normalize_beat_timeline(
-            normalized.get("beat_checkpoint_timeline")
+            normalized.get("beat_checkpoint_timeline"),
+            total_episodes=_total_episodes_from_payload(payload),
         )
         normalized["checkpoint_explanation"] = _normalize_checkpoint_explanation(
             normalized.get("checkpoint_explanation"),
@@ -3361,6 +3649,12 @@ def normalize_stage_response(
         )
 
     if isinstance(parsed, dict):
+        data_value = parsed.get("data")
+        if isinstance(data_value, str) and data_value.strip():
+            nested = _parse_candidate_value(data_value)
+            if isinstance(nested, dict):
+                parsed = dict(parsed)
+                parsed["data"] = nested
         return parsed
     return {}
 
@@ -3626,7 +3920,7 @@ def _log_stage_output_parse_exception(
         payload_keys,
         type(exc).__name__,
         str(exc),
-        _preview_return_object(raw_return_object),
+        safe_truncated_preview(raw_return_object, limit=1200),
     )
 
 
@@ -3645,18 +3939,26 @@ def _stage_runtime_diagnostics(
     definition: FrameworkPlannerStageDefinition,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    api_key_source, api_key = _env_with_name(*_stage_api_key_env_names(definition))
+    if _is_coze_backend():
+        api_key_source, api_key = _coze_api_token_with_name()
+        url_source, configured_url = _coze_api_base_with_name(api_key_source)
+        timeout_raw = _env(f"{definition.env_prefix}_TIMEOUT", "COZE_TIMEOUT_SECONDS", "FASTGPT_TIMEOUT")
+        timeout_seconds = int(timeout_raw or 600)
+        resolved_url = _normalize_coze_workflow_url(configured_url or DEFAULT_COZE_WORKFLOW_URL)
+        url_error = ""
+    else:
+        api_key_source, api_key = _env_with_name(*_stage_api_key_env_names(definition))
+        url_source, configured_url = _env_with_name(*_stage_url_env_names(definition))
+        timeout_raw = _env(f"{definition.env_prefix}_TIMEOUT", "FASTGPT_TIMEOUT")
+        timeout_seconds = int(timeout_raw or getattr(settings, "fastgpt_timeout", 300) or 300)
+        resolved_url = DEFAULT_FASTGPT_URL
+        url_error = ""
+        try:
+            resolved_url = _normalize_fastgpt_url(configured_url or DEFAULT_FASTGPT_URL)
+        except Exception as exc:
+            url_error = f"{type(exc).__name__}: {exc}"
+            resolved_url = str(configured_url or DEFAULT_FASTGPT_URL).strip()
     workflow_id_source, workflow_id = _env_with_name(*_stage_workflow_id_env_names(definition))
-    url_source, configured_url = _env_with_name(*_stage_url_env_names(definition))
-    timeout_raw = _env(f"{definition.env_prefix}_TIMEOUT", "FASTGPT_TIMEOUT")
-    timeout_seconds = int(timeout_raw or getattr(settings, "fastgpt_timeout", 300) or 300)
-    resolved_url = DEFAULT_FASTGPT_URL
-    url_error = ""
-    try:
-        resolved_url = _normalize_fastgpt_url(configured_url or DEFAULT_FASTGPT_URL)
-    except Exception as exc:
-        url_error = f"{type(exc).__name__}: {exc}"
-        resolved_url = str(configured_url or DEFAULT_FASTGPT_URL).strip()
     input_pollution = _stage_05_input_pollution(payload) if definition.stage == "05" else {
         "input_pollution_detected": False,
         "polluted_fields": [],
@@ -3667,7 +3969,7 @@ def _stage_runtime_diagnostics(
         "mock_enabled": _env_bool("FRAMEWORK_PLANNER_USE_MOCK", default=False),
         "has_api_key": bool(api_key),
         "api_key_source": api_key_source or "",
-        "api_key_env_candidates": list(_stage_api_key_env_names(definition)),
+        "api_key_env_candidates": list(_coze_api_token_env_names() if _is_coze_backend() else _stage_api_key_env_names(definition)),
         "has_workflow_id": bool(workflow_id),
         "workflow_id_source": workflow_id_source or "",
         "workflow_id_env_candidates": list(_stage_workflow_id_env_names(definition)),
@@ -3886,7 +4188,7 @@ def _log_fastgpt_response(
         getattr(response, "status_code", 0),
         _safe_header_lookup(response, "Content-Type"),
         elapsed_seconds,
-        _truncate_text(_safe_response_text(response), limit=500),
+        safe_truncated_preview(_safe_response_text(response), limit=500),
         _response_json_decode_success(response),
     )
 
@@ -3919,7 +4221,7 @@ def _log_fastgpt_request_exception(
         response is not None,
         getattr(response, "status_code", 0) if response is not None else 0,
         _safe_header_lookup(response, "Content-Type") if response is not None else "",
-        _truncate_text(_safe_response_text(response), limit=500) if response is not None else "",
+        safe_truncated_preview(_safe_response_text(response), limit=500) if response is not None else "",
     )
 
 
@@ -3942,7 +4244,7 @@ def _log_fastgpt_attempts_exhausted(
         str(exc) if exc else "",
         response is not None,
         getattr(response, "status_code", 0) if response is not None else 0,
-        _truncate_text(_safe_response_text(response), limit=500) if response is not None else "",
+        safe_truncated_preview(_safe_response_text(response), limit=500) if response is not None else "",
     )
 
 
@@ -4054,7 +4356,7 @@ def _ensure_source_brief_core_fields(value: dict[str, Any]) -> dict[str, Any]:
     result.setdefault("source_title", result.get("title") or result.get("project_title") or "未命名项目")
     result.setdefault("target_format", result.get("format") or "短剧")
     result.setdefault("season_count", 1)
-    result.setdefault("episodes_per_season", result.get("total_episodes") or 60)
+    result.setdefault("episodes_per_season", result.get("total_episodes") or "")
     result.setdefault("minutes_per_episode", 2)
     result.setdefault("core_premise", content or "核心故事信息待人工补充")
     result.setdefault("story_outline", result.get("outline") or result["core_premise"])
@@ -4101,18 +4403,73 @@ def _ensure_worldview_core_fields(value: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+CHARACTER_NAME_ALIASES = (
+    "name",
+    "legal_name",
+    "legalName",
+    "character_name",
+    "characterName",
+    "display_name",
+    "displayName",
+    "姓名",
+    "姓名 / 合法称呼",
+    "姓名/合法称呼",
+    "合法称呼",
+    "角色姓名",
+    "角色名",
+    "称呼",
+)
+CHARACTER_ROLE_ALIASES = (
+    "role",
+    "role_type",
+    "roleType",
+    "character_role",
+    "characterRole",
+    "identity",
+    "定位",
+    "角色定位",
+    "身份",
+    "人物定位",
+)
+
+
+def _normalize_character_entry(value: dict[str, Any], *, index: int = 0) -> dict[str, Any]:
+    item = dict(value if isinstance(value, dict) else {})
+    name = _first_present_value(item, CHARACTER_NAME_ALIASES)
+    if name is not None:
+        item["name"] = str(name).strip()
+    role = _first_present_value(item, CHARACTER_ROLE_ALIASES)
+    if role is not None and not str(item.get("role") or "").strip():
+        item["role"] = str(role).strip()
+    if not str(item.get("name") or "").strip() and index > 0:
+        item["name"] = f"角色{index}"
+    return item
+
+
 def _ensure_character_core_fields(value: dict[str, Any]) -> dict[str, Any]:
     result = dict(value if isinstance(value, dict) else {})
 
-    characters = result.get("characters")
+    characters = (
+        result.get("characters")
+        if isinstance(result.get("characters"), list)
+        else result.get("main_characters")
+        if isinstance(result.get("main_characters"), list)
+        else result.get("mainCharacters")
+    )
     if isinstance(characters, list) and characters:
-        normalized_characters = [item for item in characters if isinstance(item, dict)]
+        normalized_characters = [
+            _normalize_character_entry(item, index=index)
+            for index, item in enumerate(characters, start=1)
+            if isinstance(item, dict)
+        ]
+        result["characters"] = normalized_characters
     else:
         normalized_characters = []
 
     protagonist = result.get("protagonist")
     if not isinstance(protagonist, dict):
         protagonist = {}
+    protagonist = _normalize_character_entry(protagonist)
 
     if not protagonist and normalized_characters:
         for item in normalized_characters:
@@ -4124,18 +4481,18 @@ def _ensure_character_core_fields(value: dict[str, Any]) -> dict[str, Any]:
             protagonist = normalized_characters[0]
 
     if not protagonist:
-        protagonist = {
-            "name": "主角",
-            "goal": "完成核心目标并推动主线",
-            "flaw": "关键弱点待人工补充",
-            "arc": "从被动承压转向主动破局",
-        }
+        protagonist = {}
 
     result["protagonist"] = protagonist
 
     main_characters = result.get("main_characters")
     if not isinstance(main_characters, list) or not main_characters:
         main_characters = normalized_characters or [protagonist]
+    main_characters = [
+        _normalize_character_entry(item, index=index)
+        for index, item in enumerate(main_characters, start=1)
+        if isinstance(item, dict)
+    ]
     result["main_characters"] = main_characters
 
     if "character_relationships" not in result or result.get("character_relationships") in (None, "", [], {}):
@@ -4156,26 +4513,62 @@ def _ensure_character_core_fields(value: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _normalize_beat_timeline(value: Any) -> list[dict[str, Any]]:
+def _total_episodes_from_payload(payload: dict[str, Any] | None) -> int:
+    source = payload if isinstance(payload, dict) else {}
+    basic = source.get("basic_config") if isinstance(source.get("basic_config"), dict) else {}
+    for candidate in (
+        source.get("total_episodes"),
+        basic.get("total_episodes"),
+    ):
+        try:
+            number = int(candidate)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            return number
+    season_count = 0
+    episodes_per_season = 0
+    for candidate in (source.get("season_count"), basic.get("season_count")):
+        try:
+            season_count = int(candidate)
+        except (TypeError, ValueError):
+            season_count = 0
+        if season_count > 0:
+            break
+    for candidate in (source.get("episodes_per_season"), basic.get("episodes_per_season")):
+        try:
+            episodes_per_season = int(candidate)
+        except (TypeError, ValueError):
+            episodes_per_season = 0
+        if episodes_per_season > 0:
+            break
+    return season_count * episodes_per_season if season_count > 0 and episodes_per_season > 0 else 0
+
+
+def _normalize_beat_timeline(value: Any, *, total_episodes: int = 0) -> list[dict[str, Any]]:
     items = value if isinstance(value, list) else []
-    ranges = _split_episode_ranges(_episodes_per_season_from_basic_config(None))
+    ranges = (
+        _split_episode_ranges(total_episodes)
+        if total_episodes > 0
+        else ["未明确，需后续确认集数后重排"] * 15
+    )
     normalized: list[dict[str, Any]] = []
     for index in range(15):
         raw = items[index] if index < len(items) and isinstance(items[index], dict) else {}
         beat_no = index + 1
         normalized.append(
             {
-                "beat_no": raw.get("beat_no") or beat_no,
-                "beat_name": str(raw.get("beat_name") or FIFTEEN_BEAT_NAMES[index]),
+                "beat_no": raw.get("beat_no") or raw.get("beatNo") or raw.get("no") or beat_no,
+                "beat_name": str(_first_present_value(raw, ("beat_name", "beatName", "name", "title", "节拍名称")) or FIFTEEN_BEAT_NAMES[index]),
                 "act": str(raw.get("act") or _act_for_beat(beat_no)),
-                "episode_range": str(raw.get("episode_range") or ranges[index]),
-                "checkpoint_title": str(raw.get("checkpoint_title") or f"{FIFTEEN_BEAT_NAMES[index]}卡点"),
-                "narrative_function": str(raw.get("narrative_function") or raw.get("function") or ""),
-                "plot_content": str(raw.get("plot_content") or raw.get("content") or ""),
-                "character_change": str(raw.get("character_change") or ""),
-                "conflict_upgrade": str(raw.get("conflict_upgrade") or ""),
-                "hook_or_reversal": str(raw.get("hook_or_reversal") or raw.get("hook") or ""),
-                "linked_storylines": _normalize_string_list(raw.get("linked_storylines")),
+                "episode_range": str(_first_present_value(raw, ("episode_range", "episodeRange", "range", "episodes", "集数范围")) or ranges[index]),
+                "checkpoint_title": str(_first_present_value(raw, ("checkpoint_title", "checkpointTitle", "title", "card_title", "卡点标题")) or f"{FIFTEEN_BEAT_NAMES[index]}卡点"),
+                "narrative_function": str(_first_present_value(raw, ("narrative_function", "narrativeFunction", "function", "purpose", "叙事功能")) or ""),
+                "plot_content": str(_first_present_value(raw, ("plot_content", "plotContent", "content", "plot", "story", "剧情内容")) or ""),
+                "character_change": str(_first_present_value(raw, ("character_change", "characterChange", "arc_change", "characterArc", "人物变化")) or ""),
+                "conflict_upgrade": str(_first_present_value(raw, ("conflict_upgrade", "conflictUpgrade", "conflict", "conflict_escalation", "冲突升级")) or ""),
+                "hook_or_reversal": str(_first_present_value(raw, ("hook_or_reversal", "hookOrReversal", "hook", "reversal", "twist", "钩子或反转")) or ""),
+                "linked_storylines": _normalize_string_list(_first_present_value(raw, ("linked_storylines", "linkedStorylines", "storylines", "related_storylines", "关联故事线"))),
             }
         )
     return normalized
@@ -4230,6 +4623,155 @@ def _normalize_checkpoint_explanation(value: Any, timeline: list[dict[str, Any]]
         "overview": "该卡点说明与同一条十五节拍时间轴一一对应，用于解释各节拍的叙事功能与阶段作用。",
         "beat_notes": _aligned_notes([]),
     }
+
+
+STAGE04_CONTENT_FIELDS = (
+    "plot_content",
+    "narrative_function",
+    "conflict_upgrade",
+    "hook_or_reversal",
+    "character_change",
+)
+STAGE04_MIN_FILLED_PER_FIELD = 10
+STAGE04_MIN_STRONG_BEATS = 10
+STAGE04_AMBIGUOUS_RANGE_MARKERS = ("未明确", "待确认", "重排", "未知", "?")
+
+
+def _validate_stage04_output_or_raise(
+    *,
+    data: dict[str, Any],
+    payload: dict[str, Any] | None,
+    parse_warnings: list[str],
+    response_json: Any,
+) -> None:
+    timeline = data.get("beat_checkpoint_timeline") if isinstance(data, dict) else None
+    explanation = data.get("checkpoint_explanation") if isinstance(data, dict) else None
+    total_episodes = _total_episodes_from_payload(payload)
+    detail: dict[str, Any] = {
+        "reason": "",
+        "stage": "04",
+        "raw_type": type(response_json).__name__,
+        "normalized_keys": sorted(data.keys()) if isinstance(data, dict) else [],
+        "timeline_type": type(timeline).__name__ if timeline is not None else "none",
+        "timeline_length": len(timeline) if isinstance(timeline, list) else 0,
+        "total_episodes": total_episodes,
+        "checked_timeline_aliases": list(STAGE_DEFINITIONS["04"].output_aliases.get("beat_checkpoint_timeline", ())),
+        "checked_explanation_aliases": list(STAGE_DEFINITIONS["04"].output_aliases.get("checkpoint_explanation", ())),
+        "checked_content_fields": list(STAGE04_CONTENT_FIELDS),
+        "parse_warnings": [str(item) for item in parse_warnings if str(item).strip()],
+        "response_preview": safe_truncated_preview(response_json, limit=1200),
+    }
+    failures: list[str] = []
+
+    if not isinstance(timeline, list):
+        failures.append("beat_checkpoint_timeline_not_list")
+    elif len(timeline) != 15:
+        failures.append("beat_checkpoint_timeline_length_not_15")
+
+    field_non_empty_counts = {field: 0 for field in STAGE04_CONTENT_FIELDS}
+    strong_beats = 0
+    bad_episode_ranges: list[dict[str, Any]] = []
+    max_detected_episode = 0
+    if isinstance(timeline, list):
+        for index, item in enumerate(timeline, start=1):
+            if not isinstance(item, dict):
+                failures.append(f"beat_{index}_not_object")
+                continue
+            filled = 0
+            for field in STAGE04_CONTENT_FIELDS:
+                if str(item.get(field) or "").strip():
+                    field_non_empty_counts[field] += 1
+                    filled += 1
+            if filled >= 4:
+                strong_beats += 1
+            range_detail = _stage04_episode_range_problem(item.get("episode_range"), total_episodes)
+            max_detected_episode = max(max_detected_episode, range_detail.get("max_episode") or 0)
+            if range_detail.get("problem"):
+                bad_episode_ranges.append(
+                    {
+                        "beat_no": item.get("beat_no") or index,
+                        "episode_range": item.get("episode_range"),
+                        **range_detail,
+                    }
+                )
+
+    sparse_fields = [
+        field for field, count in field_non_empty_counts.items()
+        if count < STAGE04_MIN_FILLED_PER_FIELD
+    ]
+    if sparse_fields:
+        failures.append("stage04_content_fields_sparse")
+    if strong_beats < STAGE04_MIN_STRONG_BEATS:
+        failures.append("stage04_too_many_empty_or_weak_beats")
+    if total_episodes <= 0:
+        failures.append("stage04_missing_total_episodes")
+    if bad_episode_ranges:
+        failures.append("stage04_episode_range_invalid")
+
+    beat_notes = []
+    if isinstance(explanation, dict):
+        raw_notes = explanation.get("beat_notes") or explanation.get("beatNotes") or []
+        beat_notes = raw_notes if isinstance(raw_notes, list) else []
+    explanation_non_empty_count = 0
+    for item in beat_notes:
+        if isinstance(item, dict):
+            text = item.get("explanation") or item.get("summary") or item.get("note") or item.get("content")
+        else:
+            text = item
+        if str(text or "").strip():
+            explanation_non_empty_count += 1
+    if explanation_non_empty_count < STAGE04_MIN_FILLED_PER_FIELD:
+        failures.append("checkpoint_explanation_beat_notes_sparse")
+
+    detail.update(
+        {
+            "failures": failures,
+            "field_non_empty_counts": field_non_empty_counts,
+            "strong_beat_count": strong_beats,
+            "explanation_non_empty_count": explanation_non_empty_count,
+            "max_detected_episode": max_detected_episode,
+            "bad_episode_ranges": bad_episode_ranges[:20],
+        }
+    )
+
+    if failures:
+        detail["reason"] = failures[0]
+        logger.warning(
+            "framework planner stage04 invalid output: reason=%s raw_type=%s timeline_type=%s timeline_length=%s total_episodes=%s field_counts=%s bad_ranges=%s parse_warnings=%s preview=%s",
+            detail["reason"],
+            detail["raw_type"],
+            detail["timeline_type"],
+            detail["timeline_length"],
+            total_episodes,
+            field_non_empty_counts,
+            bad_episode_ranges[:5],
+            detail["parse_warnings"],
+            detail["response_preview"],
+        )
+        raise FrameworkPlannerStageError(
+            "04 阶段输出为空壳或集数不合法，未保存为成功结果。",
+            stage="04",
+            status_code=422,
+            detail=detail,
+        )
+
+
+def _stage04_episode_range_problem(raw_range: Any, total_episodes: int) -> dict[str, Any]:
+    text = str(raw_range or "").strip()
+    if not text:
+        return {"problem": "empty_episode_range", "max_episode": 0}
+    for marker in STAGE04_AMBIGUOUS_RANGE_MARKERS:
+        if marker in text:
+            return {"problem": "ambiguous_episode_range", "max_episode": 0}
+    numbers = [int(value) for value in re.findall(r"\d+", text)]
+    if not numbers:
+        return {"problem": "unparseable_episode_range", "max_episode": 0}
+    max_episode = max(numbers)
+    if total_episodes <= 0:
+        return {"problem": "missing_total_episodes", "max_episode": max_episode}
+    if max_episode > total_episodes:
+        return {"problem": "episode_range_exceeds_total", "max_episode": max_episode}
+    return {"problem": "", "max_episode": max_episode}
 
 
 def _normalize_character_storylines(value: Any) -> list[dict[str, Any]]:
@@ -4790,8 +5332,12 @@ def _write_debug_artifact(
         "stage": stage,
         "workflow_json_path": str(workflow_spec.path),
         "payload_keys": sorted(payload.keys()),
-        "request_variables": request_variables,
-        "response_raw": response_raw,
+        "request_variable_keys": sorted(request_variables.keys()),
+        "request_variable_preview": {
+            key: safe_truncated_preview(value, limit=300)
+            for key, value in request_variables.items()
+        },
+        "response_raw_preview": safe_truncated_preview(response_raw, limit=4000),
         "parse_error": parse_error,
     }
     path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -4813,7 +5359,7 @@ def _build_mock_stage_output(stage: str, payload: dict[str, Any]) -> tuple[dict[
             "target_format": target_format,
             "season_plan": {
                 "season_count": int(payload.get("season_count") or 1),
-                "episodes_per_season": int(payload.get("episodes_per_season") or 60),
+                "episodes_per_season": int(payload.get("episodes_per_season") or 0),
                 "minutes_per_episode": int(payload.get("minutes_per_episode") or 2),
             },
             "core_premise": source_text[:180] or "当前为 mock 提取结果，请在接入真实原文后替换。",
@@ -5079,18 +5625,43 @@ def _normalize_storyline_decisions(
 
 def _episodes_per_season_from_basic_config(value: Any) -> int:
     config = value if isinstance(value, dict) else {}
-    try:
-        episodes = int(
-            config.get("episodes_per_season")
-            or config.get("episodesPerSeason")
-            or 60
-        )
-    except (TypeError, ValueError, AttributeError):
-        episodes = 60
-    return max(15, episodes)
+
+    def positive_int(raw: Any) -> int:
+        try:
+            number = int(raw)
+        except (TypeError, ValueError):
+            return 0
+        return number if number > 0 else 0
+
+    total = positive_int(config.get("total_episodes") or config.get("totalEpisodes"))
+    if total > 0:
+        return total
+    season_count = positive_int(config.get("season_count") or config.get("seasonCount"))
+    episodes = positive_int(config.get("episodes_per_season") or config.get("episodesPerSeason"))
+    if season_count > 0 and episodes > 0:
+        return season_count * episodes
+    return episodes
 
 
 def _split_episode_ranges(total_episodes: int) -> list[str]:
+    try:
+        total_episodes = int(total_episodes)
+    except (TypeError, ValueError):
+        total_episodes = 0
+    if total_episodes <= 0:
+        return ["未明确，需后续确认集数后重排"] * 15
+    if total_episodes < 15:
+        ranges: list[str] = []
+        for index in range(15):
+            start = min(total_episodes, (index * total_episodes) // 15 + 1)
+            end = min(total_episodes, ((index + 1) * total_episodes + 14) // 15)
+            end = max(start, end)
+            if start == end:
+                ranges.append(f"第{start}集")
+            else:
+                ranges.append(f"第{start}-{end}集")
+        return ranges
+
     weights = [3, 4, 4, 4, 4, 5, 5, 7, 5, 5, 4, 4, 3, 2, 1]
     weight_sum = sum(weights)
     start = 1
@@ -5151,6 +5722,62 @@ def _env_with_name(*names: str) -> tuple[str, str]:
         if value is not None and str(value).strip():
             return name, str(value).strip()
     return "", ""
+
+
+def _workflow_backend() -> str:
+    return (_env("WORKFLOW_BACKEND") or getattr(settings, "workflow_backend", "fastgpt") or "fastgpt").lower()
+
+
+def _is_coze_backend() -> bool:
+    return _workflow_backend() == "coze"
+
+
+def _coze_api_token_env_names() -> tuple[str, ...]:
+    configured_order = _env("COZE_CREDENTIALS_ORDER")
+    ordered_profiles = [
+        item.strip().lower()
+        for item in (configured_order or "primary,secondary").replace(";", ",").split(",")
+        if item.strip()
+    ]
+    names: list[str] = []
+    for profile in ordered_profiles:
+        if profile in {"primary", "secondary"}:
+            names.append(f"COZE_{profile.upper()}_API_TOKEN")
+    if not configured_order:
+        for profile in ("primary", "secondary"):
+            names.append(f"COZE_{profile.upper()}_API_TOKEN")
+    names.extend(["COZE_API_TOKEN", "COZE_PAT"])
+    return tuple(dict.fromkeys(names))
+
+
+def _coze_api_token_with_name() -> tuple[str, str]:
+    return _env_with_name(*_coze_api_token_env_names())
+
+
+def _coze_api_base_with_name(token_source: str = "") -> tuple[str, str]:
+    profile = ""
+    if token_source.startswith("COZE_PRIMARY_"):
+        profile = "PRIMARY"
+    elif token_source.startswith("COZE_SECONDARY_"):
+        profile = "SECONDARY"
+    names = []
+    if profile:
+        names.append(f"COZE_{profile}_API_BASE")
+    names.extend(["COZE_API_BASE", "COZE_BASE_URL"])
+    return _env_with_name(*names)
+
+
+def _normalize_coze_workflow_url(raw_url: str) -> str:
+    url = str(raw_url or "").strip().rstrip("/")
+    if not url:
+        return DEFAULT_COZE_WORKFLOW_URL
+    if url.endswith("/v1/workflow/run"):
+        return url
+    if url.endswith("/workflow/run"):
+        return url
+    if "/v1/" in url:
+        return f"{url}/workflow/run"
+    return f"{url}/v1/workflow/run"
 
 
 def _normalize_fastgpt_url(raw_url: str) -> str:

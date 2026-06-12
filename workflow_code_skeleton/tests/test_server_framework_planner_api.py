@@ -51,6 +51,38 @@ def _planner_payload() -> dict[str, object]:
     }
 
 
+def _stage04_timeline(episode_range: str) -> list[dict[str, object]]:
+    return [
+        {
+            "beat_no": index + 1,
+            "beat_name": f"节拍{index + 1}",
+            "act": "第一幕" if index < 6 else ("第二幕" if index < 12 else "第三幕"),
+            "episode_range": episode_range,
+            "checkpoint_title": f"卡点{index + 1}",
+            "narrative_function": "推进主线",
+            "plot_content": "剧情推进",
+            "character_change": "人物变化",
+            "conflict_upgrade": "冲突升级",
+            "hook_or_reversal": "钩子",
+            "linked_storylines": ["主线"],
+        }
+        for index in range(15)
+    ]
+
+
+def _stage04_runner_payload(episode_range: str) -> dict[str, object]:
+    return {
+        "ok": True,
+        "stage": "04",
+        "data": {
+            "beat_checkpoint_timeline": _stage04_timeline(episode_range),
+            "checkpoint_explanation": {"overview": "ok"},
+        },
+        "display_text": "ok",
+        "raw": {},
+    }
+
+
 class ServerFrameworkPlannerApiTests(unittest.TestCase):
     def setUp(self) -> None:
         app = create_app()
@@ -86,6 +118,130 @@ class ServerFrameworkPlannerApiTests(unittest.TestCase):
         self.assertTrue(data["ok"])
         self.assertEqual(data["stage"], "04")
         self.assertEqual(len(data["data"]["beat_checkpoint_timeline"]), 15)
+
+    def test_stage_04_payload_uses_one_episode_without_defaulting_to_sixty(self) -> None:
+        basic_config = _basic_config()
+        basic_config.update({"season_count": 1, "episodes_per_season": 1})
+        payload = {
+            "mode": "创作",
+            "source_brief": {"source_title": "一集测试"},
+            "basic_config": basic_config,
+            "worldview_plan": {"world_type": "现实"},
+            "character_plan": {"protagonist": {"name": "主角"}},
+        }
+
+        with patch(
+            "workflow_code_skeleton.app.server.run_framework_planner_stage",
+            return_value=_stage04_runner_payload("第1集"),
+        ) as mocked:
+            response = self.client.post("/api/framework-planner/stage/04", headers=self.headers, json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        sent_payload = mocked.call_args.args[1]
+        self.assertEqual(sent_payload["season_count"], 1)
+        self.assertEqual(sent_payload["episodes_per_season"], 1)
+        self.assertEqual(sent_payload["total_episodes"], 1)
+        self.assertEqual(sent_payload["basic_config"]["episodes_per_season"], 1)
+        self.assertEqual(sent_payload["basic_config"]["total_episodes"], 1)
+        self.assertEqual(sent_payload["episode_count_guard"]["total_episodes"], 1)
+
+    def test_stage_04_uses_saved_asset_episode_config_when_request_omits_counts(self) -> None:
+        create_response = self.client.post(
+            "/api/framework-planner/assets",
+            headers=self.headers,
+            json={
+                "title": "一集资产",
+                "season_count": 1,
+                "episodes_per_season": 1,
+                "target_format": "短剧",
+                "description": "只生成一集",
+            },
+        )
+        self.assertEqual(create_response.status_code, 200)
+        project_id = create_response.get_json()["asset"]["project_id"]
+        payload = {
+            "project_id": project_id,
+            "mode": "创作",
+            "source_brief": {"source_title": "一集资产"},
+            "worldview_plan": {"world_type": "现实"},
+            "character_plan": {"protagonist": {"name": "主角"}},
+        }
+
+        with patch(
+            "workflow_code_skeleton.app.server.run_framework_planner_stage",
+            return_value=_stage04_runner_payload("第1集"),
+        ) as mocked:
+            response = self.client.post("/api/framework-planner/stage/04", headers=self.headers, json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        sent_payload = mocked.call_args.args[1]
+        self.assertEqual(sent_payload["season_count"], 1)
+        self.assertEqual(sent_payload["episodes_per_season"], 1)
+        self.assertEqual(sent_payload["total_episodes"], 1)
+        self.assertEqual(sent_payload["basic_config"]["episodes_per_season"], 1)
+
+    def test_stage_04_rejects_episode_ranges_above_total_episodes(self) -> None:
+        basic_config = _basic_config()
+        basic_config.update({"season_count": 1, "episodes_per_season": 3})
+        payload = {
+            "mode": "创作",
+            "source_brief": {"source_title": "三集测试"},
+            "basic_config": basic_config,
+            "worldview_plan": {"world_type": "现实"},
+            "character_plan": {"protagonist": {"name": "主角"}},
+        }
+
+        with patch(
+            "workflow_code_skeleton.app.server.run_framework_planner_stage",
+            return_value=_stage04_runner_payload("第4集"),
+        ), patch("workflow_code_skeleton.app.server.save_framework_stage_history") as save_history:
+            response = self.client.post("/api/framework-planner/stage/04", headers=self.headers, json=payload)
+
+        self.assertEqual(response.status_code, 422)
+        data = response.get_json()
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["detail"]["total_episodes"], 3)
+        self.assertEqual(data["detail"]["max_detected_episode"], 4)
+        self.assertEqual(data["detail"]["bad_episode_ranges"][0]["episode_range"], "第4集")
+        save_history.assert_not_called()
+
+    def test_stage_04_allows_episode_sixty_only_when_total_is_sixty(self) -> None:
+        basic_config = _basic_config()
+        basic_config.update({"season_count": 1, "episodes_per_season": 60})
+        payload = {
+            "mode": "创作",
+            "source_brief": {"source_title": "六十集测试"},
+            "basic_config": basic_config,
+            "worldview_plan": {"world_type": "现实"},
+            "character_plan": {"protagonist": {"name": "主角"}},
+        }
+
+        with patch(
+            "workflow_code_skeleton.app.server.run_framework_planner_stage",
+            return_value=_stage04_runner_payload("第60集"),
+        ) as mocked:
+            response = self.client.post("/api/framework-planner/stage/04", headers=self.headers, json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        sent_payload = mocked.call_args.args[1]
+        self.assertEqual(sent_payload["total_episodes"], 60)
+
+    def test_stage_04_missing_episode_config_fails_before_runner(self) -> None:
+        payload = {
+            "mode": "创作",
+            "source_brief": {"source_title": "缺集数测试"},
+            "basic_config": {"project_title": "缺集数测试"},
+            "worldview_plan": {"world_type": "现实"},
+            "character_plan": {"protagonist": {"name": "主角"}},
+        }
+
+        with patch("workflow_code_skeleton.app.server.run_framework_planner_stage") as mocked:
+            response = self.client.post("/api/framework-planner/stage/04", headers=self.headers, json=payload)
+
+        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertFalse(data["ok"])
+        mocked.assert_not_called()
 
     def test_stage_04_score_api_returns_string_report(self) -> None:
         with patch.dict(os.environ, {"FRAMEWORK_PLANNER_USE_MOCK": "true"}, clear=False):

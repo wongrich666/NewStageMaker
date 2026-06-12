@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>{% if asset %}{{ asset.title }}{% else %}社区好剧{% endif %}</title>
+  <title>{% if asset %}{{ asset.title }}{% else %}公开作品{% endif %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260430-01">
 </head>
 <body class="home-body community-page mono-page">
@@ -55,7 +55,7 @@
       <section class="card community-detail-card">
         <div class="empty-card">
           <strong>这个公开作品不存在，或已经被取消公开。</strong>
-          <p>你可以返回首页，查看其他社区好剧。</p>
+          <p>你可以返回首页，查看其他公开作品。</p>
         </div>
       </section>
     {% endif %}

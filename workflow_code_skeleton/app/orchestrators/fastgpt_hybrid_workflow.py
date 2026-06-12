@@ -4495,7 +4495,7 @@ def _episode_chunk_has_scene_heading(chunk: str, episode: int) -> bool:
         re.IGNORECASE,
     ):
         return True
-    return "鍦烘櫙" in text
+    return "场景" in text
 
 
 def _validate_script_batch_output(batch_script: Any, *, batch: BatchWindow) -> list[str]:

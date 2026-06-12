@@ -44,14 +44,6 @@
           <div class="sidebar-folders">
             <details class="workspace-folder">
               <summary>
-                <span>老剧本平台资产</span>
-              </summary>
-              <div class="workspace-compact-list">
-                <div class="workspace-empty">登录后查看老剧本平台资产。</div>
-              </div>
-            </details>
-            <details class="workspace-folder">
-              <summary>
                 <span>框架资产</span>
               </summary>
               <div class="workspace-compact-list">
@@ -60,44 +52,14 @@
             </details>
             <details class="workspace-folder">
               <summary>
-                <span>新剧本资产</span>
+                <span>剧本资产</span>
               </summary>
               <div class="workspace-compact-list">
-                <div class="workspace-empty">登录后查看 08-12 新剧本资产。</div>
+                <div class="workspace-empty">登录后查看 08-12 剧本资产。</div>
               </div>
             </details>
           </div>
         </section>
-
-        <section class="sidebar-group sidebar-tools-section">
-          <details class="workspace-folder tools-folder" open>
-            <summary>
-              <span class="sidebar-folder-link">辅助工具</span>
-            </summary>
-            <div class="tool-shortcut-list">
-              <a class="tool-shortcut" href="{{ url_for('login_page') }}">
-                <span>爆款文审核</span>
-                <small>登录后可运行</small>
-              </a>
-              <a class="tool-shortcut" href="{{ url_for('login_page') }}">
-                <span>增加爽感</span>
-                <small>登录后可运行</small>
-              </a>
-              <a class="tool-shortcut" href="{{ url_for('login_page') }}">
-                <span>只换人设</span>
-                <small>登录后可运行</small>
-              </a>
-            </div>
-          </details>
-        </section>
-
-        <section class="sidebar-group sidebar-tools-section">
-          <a class="sidebar-text-link sidebar-side-link" href="{{ url_for('login_page') }}">外包专属格式</a>
-        </section>
-
-        <div class="sidebar-group sidebar-tools-section">
-          <a class="sidebar-text-link sidebar-side-link" href="{{ url_for('index') }}#community">社区好剧</a>
-        </div>
       </div>
 
       <div class="sidebar-footer">
@@ -117,7 +79,7 @@
           <div class="workspace-landing__eyebrow">IDEA TO SCRIPT</div>
           <h1 class="workspace-landing__title">剧本平台</h1>
           <p class="workspace-landing__subtitle">
-            登录后可新建框架、导入框架生成剧本，并在左侧管理资产与辅助工具。
+            登录后可新建框架、导入框架生成剧本，并在左侧管理资产。
           </p>
 
           <div class="workspace-landing__actions workspace-landing__actions-login">
@@ -155,5 +117,6 @@
       </section>
     </section>
   </main>
+  <script src="{{ url_for('static', filename='sidebar.js') }}?v=20260612-sidebar-collapse-v1" defer></script>
 </body>
 </html>

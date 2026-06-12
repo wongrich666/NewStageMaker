@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -63,6 +64,51 @@ def _stage_04_payload() -> dict[str, object]:
         "framework_score_report": "",
         "adaptation_direction": "强化反转",
         "user_requirements": "固定 15 beat",
+    }
+
+
+def _valid_stage04_output(*, total_episodes: int = 60, camel_case: bool = False) -> dict[str, object]:
+    timeline: list[dict[str, object]] = []
+    for index in range(15):
+        episode = 1 if total_episodes == 1 else min(total_episodes, index + 1)
+        beat = {
+            "beat_no": index + 1,
+            "beat_name": service.FIFTEEN_BEAT_NAMES[index],
+            "act": "第一幕" if index < 6 else "第二幕" if index < 12 else "第三幕",
+            "episode_range": f"第{episode}集",
+            "checkpoint_title": f"{service.FIFTEEN_BEAT_NAMES[index]}卡点",
+            "narrative_function": f"第{index + 1}节拍推动主线进入新压力点",
+            "plot_content": f"第{index + 1}节拍中林渡发现新线索并被迫作出选择",
+            "character_change": f"林渡在第{index + 1}节拍完成一次认知或行动转向",
+            "conflict_upgrade": f"反派压力在第{index + 1}节拍升级",
+            "hook_or_reversal": f"第{index + 1}节拍结尾留下反转钩子",
+            "linked_storylines": ["主角成长线"],
+        }
+        if camel_case:
+            beat = {
+                "beatNo": beat["beat_no"],
+                "beatName": beat["beat_name"],
+                "act": beat["act"],
+                "episodeRange": beat["episode_range"],
+                "checkpointTitle": beat["checkpoint_title"],
+                "narrativeFunction": beat["narrative_function"],
+                "plotContent": beat["plot_content"],
+                "characterChange": beat["character_change"],
+                "conflictUpgrade": beat["conflict_upgrade"],
+                "hookOrReversal": beat["hook_or_reversal"],
+                "linkedStorylines": beat["linked_storylines"],
+            }
+        timeline.append(beat)
+    return {
+        "beat_checkpoint_timeline": timeline,
+        "checkpoint_explanation": {
+            "overview": "十五节拍均围绕旧案真相和人物转向推进。",
+            "beat_notes": [
+                {"beat_no": index + 1, "explanation": f"第{index + 1}节拍说明"}
+                for index in range(15)
+            ],
+        },
+        "display_text": "stage04 valid output",
     }
 
 
@@ -146,15 +192,23 @@ def _stage_07_payload() -> dict[str, object]:
 
 class FrameworkPlannerServiceTests(unittest.TestCase):
     def setUp(self) -> None:
+        self._previous_backend = os.environ.get("WORKFLOW_BACKEND")
+        os.environ["WORKFLOW_BACKEND"] = "fastgpt"
         service.framework_workflow_dir.cache_clear()
         service.resolve_framework_contract_path.cache_clear()
         service.resolve_stage_workflow_path.cache_clear()
         service.load_stage_workflow_spec.cache_clear()
 
+    def tearDown(self) -> None:
+        if self._previous_backend is None:
+            os.environ.pop("WORKFLOW_BACKEND", None)
+        else:
+            os.environ["WORKFLOW_BACKEND"] = self._previous_backend
+
     def test_resolve_stage_workflow_path_reads_better_framework_jsons(self) -> None:
         path = service.resolve_stage_workflow_path("04")
         self.assertIsInstance(path, Path)
-        self.assertTrue(path.name.startswith("04_"))
+        self.assertTrue(path.name.startswith("beat04"))
         self.assertIn("BETTER_FRAMEWORK_YAML", str(path))
 
     def test_stage_04_mock_output_contains_15_beats_and_required_fields(self) -> None:
@@ -178,7 +232,25 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
                 self.assertIn(field, item)
                 self.assertNotEqual(item[field], "")
 
-    def test_stage_01_maps_mode_to_legacy_workflow_variable(self) -> None:
+    def test_stage_04_mock_output_respects_one_episode_total(self) -> None:
+        stage_payload = _stage_04_payload()
+        stage_payload["basic_config"] = {
+            **_basic_config(),
+            "season_count": 1,
+            "episodes_per_season": 1,
+            "total_episodes": 1,
+        }
+        with patch.dict(os.environ, {"FRAMEWORK_PLANNER_USE_MOCK": "true"}, clear=False):
+            payload = service.run_framework_planner_stage("04", stage_payload)
+
+        beats = payload["data"]["beat_checkpoint_timeline"]
+        self.assertEqual(len(beats), 15)
+        for item in beats:
+            numbers = [int(value) for value in re.findall(r"\d+", item["episode_range"])]
+            self.assertTrue(numbers)
+            self.assertLessEqual(max(numbers), 1)
+
+    def test_stage_01_sends_yaml_variables_to_coze_parameters(self) -> None:
         captured: dict[str, object] = {}
 
         def _fake_post(url, *, headers=None, json=None, timeout=None):
@@ -188,17 +260,27 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
             captured["timeout"] = timeout
             return _FakeResponse(
                 payload={
-                    "newVariables": {
-                        "d3ixvj8d": "{\"ignored\": true}",
-                    },
-                    "answerText": "{\"source_brief\": {\"source_title\": \"夜行审判\"}}",
+                    "code": 0,
+                    "data": service.json.dumps(
+                        {
+                            "confirmed_info": service.json.dumps(
+                                {"source_brief": {"source_title": "coze-source"}},
+                                ensure_ascii=False,
+                            )
+                        },
+                        ensure_ascii=False,
+                    ),
                 }
             )
-
         with patch.dict(
             os.environ,
             {
+                "WORKFLOW_BACKEND": "coze",
+                "COZE_CREDENTIALS_ORDER": "primary,secondary",
                 "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "COZE_PRIMARY_API_TOKEN": "coze-token",
+                "COZE_PRIMARY_API_BASE": "https://api.coze.cn",
+                "COZE_WORKFLOW_STAGE_01_ID": "stage-01-workflow",
                 "FASTGPT_API_KEY": "fastgpt-global-key",
                 "FASTGPT_CHAT_COMPLETIONS_URL": "https://api.fastgpt.in/api/v1/chat/completions",
             },
@@ -208,13 +290,292 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
                 payload = service.run_framework_planner_stage("01", _basic_config())
 
         self.assertTrue(payload["ok"])
+        self.assertEqual(captured["url"], "https://api.coze.cn/v1/workflow/run")
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer coze-token")
         body = captured["body"]
-        variables = body["variables"]
-        self.assertEqual(variables["mode"], "创作")
-        self.assertEqual(variables["zHrEcynX"], "创作")
-        self.assertEqual(variables["user_requirements"], "主角必须有明显成长弧光。")
+        self.assertEqual(body["workflow_id"], "stage-01-workflow")
+        parameters = body["parameters"]
+        self.assertEqual(parameters["mode"], _basic_config()["mode"])
+        self.assertNotIn("zHrEcynX", parameters)
+        self.assertIn("user_requirements", parameters)
+        self.assertIn("source_brief", payload["data"])
 
-    def test_stage_04_keeps_framework_score_report_and_user_requirements_in_request_variables(self) -> None:
+    def test_stage_01_coze_sends_blank_declared_yaml_parameters(self) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, timeout
+            captured["body"] = json or {}
+            return _FakeResponse(
+                payload={
+                    "code": 0,
+                    "data": service.json.dumps(
+                        {"confirmed_info": {"source_brief": {"source_title": "coze-source"}}},
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+
+        request_payload = _basic_config()
+        request_payload.update(
+            {
+                "source_text": "",
+                "adaptation_direction": "",
+                "user_constraints": "",
+                "user_requirements": "",
+            }
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "WORKFLOW_BACKEND": "coze",
+                "COZE_CREDENTIALS_ORDER": "secondary",
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "COZE_PRIMARY_API_TOKEN": "primary-token",
+                "COZE_SECONDARY_API_TOKEN": "secondary-token",
+                "COZE_SECONDARY_API_BASE": "https://api.coze.cn",
+                "COZE_WORKFLOW_STAGE_01_ID": "stage-01-workflow",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                service.run_framework_planner_stage("01", request_payload)
+
+        parameters = captured["body"]["parameters"]
+        self.assertEqual(parameters["source_text"], "")
+        self.assertEqual(parameters["adaptation_direction"], "")
+        self.assertEqual(parameters["user_constraints"], "")
+        self.assertEqual(parameters["user_requirements"], "")
+
+    def test_coze_credentials_order_secondary_is_strict_for_framework_planner(self) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, json, timeout
+            captured["headers"] = headers or {}
+            return _FakeResponse(
+                payload={
+                    "code": 0,
+                    "data": service.json.dumps(
+                        {"confirmed_info": {"source_brief": {"source_title": "coze-source"}}},
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                "WORKFLOW_BACKEND": "coze",
+                "COZE_CREDENTIALS_ORDER": "secondary",
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "COZE_PRIMARY_API_TOKEN": "primary-token",
+                "COZE_SECONDARY_API_TOKEN": "secondary-token",
+                "COZE_SECONDARY_API_BASE": "https://api.coze.cn",
+                "COZE_WORKFLOW_STAGE_01_ID": "stage-01-workflow",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                service.run_framework_planner_stage("01", _basic_config())
+
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer secondary-token")
+
+    def test_stage_02_coze_wraps_direct_business_object(self) -> None:
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json, timeout
+            return _FakeResponse(
+                payload={
+                    "code": 0,
+                    "data": service.json.dumps(
+                        {
+                            "background": "rules-first world",
+                            "rules": ["one visible rule"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                "WORKFLOW_BACKEND": "coze",
+                "COZE_CREDENTIALS_ORDER": "primary,secondary",
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "COZE_PRIMARY_API_TOKEN": "coze-token",
+                "COZE_WORKFLOW_STAGE_02_ID": "stage-02-workflow",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                payload = service.run_framework_planner_stage("02", _stage_02_payload())
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["data"]["worldview_plan"]["background"], "rules-first world")
+
+    def test_stage_03_coze_preserves_chinese_character_name_aliases(self) -> None:
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json, timeout
+            return _FakeResponse(
+                payload={
+                    "code": 0,
+                    "data": {
+                        "output": "```json\n"
+                        + service.json.dumps(
+                            {
+                                "characters": [
+                                    {"姓名 / 合法称呼": "林渡", "角色定位": "主角", "goal": "查明旧案"},
+                                    {"姓名 / 合法称呼": "沈念", "角色定位": "盟友", "goal": "协助查案"},
+                                ],
+                                "display_text": "character aliases ok",
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n```"
+                    },
+                }
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                "WORKFLOW_BACKEND": "coze",
+                "COZE_CREDENTIALS_ORDER": "primary,secondary",
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "COZE_PRIMARY_API_TOKEN": "coze-token",
+                "COZE_WORKFLOW_STAGE_03_ID": "stage-03-workflow",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                payload = service.run_framework_planner_stage("03", _stage_03_payload())
+
+        characters = payload["data"]["character_plan"]["main_characters"]
+        names = [item.get("name") for item in characters]
+        self.assertIn("林渡", names)
+        self.assertIn("沈念", names)
+        self.assertNotEqual(names, ["主角", "主角"])
+        self.assertEqual(payload["data"]["character_plan"]["protagonist"]["name"], "林渡")
+
+    def test_stage_04_coze_parses_wrapped_markdown_alias_payload(self) -> None:
+        valid = _valid_stage04_output(total_episodes=1, camel_case=True)
+        coze_payload = {
+            "result": {
+                "beatCheckpointTimeline": valid["beat_checkpoint_timeline"],
+                "checkpointExplanation": valid["checkpoint_explanation"],
+                "display_text": "alias stage04 ok",
+            }
+        }
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json, timeout
+            return _FakeResponse(
+                payload={
+                    "code": 0,
+                    "data": {
+                        "output": "```json\n"
+                        + service.json.dumps(coze_payload, ensure_ascii=False)
+                        + "\n```"
+                    },
+                }
+            )
+
+        request_payload = _stage_04_payload()
+        request_payload["basic_config"] = {
+            **_basic_config(),
+            "season_count": 1,
+            "episodes_per_season": 1,
+            "total_episodes": 1,
+            "episode_count_guard": {"season_count": 1, "episodes_per_season": 1, "total_episodes": 1},
+        }
+        request_payload.update(
+            {
+                "season_count": 1,
+                "episodes_per_season": 1,
+                "total_episodes": 1,
+                "episode_count_guard": {"season_count": 1, "episodes_per_season": 1, "total_episodes": 1},
+            }
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "WORKFLOW_BACKEND": "coze",
+                "COZE_CREDENTIALS_ORDER": "primary,secondary",
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "COZE_PRIMARY_API_TOKEN": "coze-token",
+                "COZE_WORKFLOW_STAGE_04_ID": "stage-04-workflow",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                payload = service.run_framework_planner_stage("04", request_payload)
+
+        beats = payload["data"]["beat_checkpoint_timeline"]
+        self.assertEqual(len(beats), 15)
+        self.assertTrue(all(item["episode_range"] == "第1集" for item in beats))
+        self.assertTrue(all(item["plot_content"] for item in beats))
+        self.assertEqual(payload["display_text"], "alias stage04 ok")
+
+    def test_stage_04_coze_rejects_empty_placeholder_timeline(self) -> None:
+        bad_timeline = [
+            {
+                "beatNo": index + 1,
+                "beatName": service.FIFTEEN_BEAT_NAMES[index],
+                "episodeRange": "未明确，需后续确认集数后重排",
+            }
+            for index in range(15)
+        ]
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json, timeout
+            return _FakeResponse(
+                payload={
+                    "code": 0,
+                    "data": {
+                        "output": service.json.dumps(
+                            {
+                                "beatCheckpointTimeline": bad_timeline,
+                                "checkpointExplanation": {
+                                    "beat_notes": [{"beat_no": index + 1, "explanation": ""} for index in range(15)]
+                                },
+                            },
+                            ensure_ascii=False,
+                        )
+                    },
+                }
+            )
+
+        request_payload = _stage_04_payload()
+        request_payload["basic_config"] = {
+            **_basic_config(),
+            "season_count": 1,
+            "episodes_per_season": 1,
+            "total_episodes": 1,
+            "episode_count_guard": {"season_count": 1, "episodes_per_season": 1, "total_episodes": 1},
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                "WORKFLOW_BACKEND": "coze",
+                "COZE_CREDENTIALS_ORDER": "primary,secondary",
+                "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "COZE_PRIMARY_API_TOKEN": "coze-token",
+                "COZE_WORKFLOW_STAGE_04_ID": "stage-04-workflow",
+            },
+            clear=False,
+        ):
+            with patch.object(service.requests, "post", side_effect=_fake_post):
+                with self.assertRaises(service.FrameworkPlannerStageError) as raised:
+                    service.run_framework_planner_stage("04", request_payload)
+
+        self.assertEqual(raised.exception.status_code, 422)
+        self.assertIn("stage04_content_fields_sparse", raised.exception.detail["failures"])
+        self.assertIn("stage04_episode_range_invalid", raised.exception.detail["failures"])
+
+    def test_stage_04_sends_yaml_score_repo_and_user_requirements_to_coze(self) -> None:
         captured: dict[str, object] = {}
 
         def _fake_post(url, *, headers=None, json=None, timeout=None):
@@ -224,22 +585,26 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
             captured["timeout"] = timeout
             return _FakeResponse(
                 payload={
-                    "newVariables": {
-                        "d3ixvj8d": service.json.dumps(
-                            {
-                                "beat_checkpoint_timeline": [],
-                                "checkpoint_explanation": {"overview": "empty"},
-                            },
-                            ensure_ascii=False,
-                        ),
-                    }
+                    "code": 0,
+                    "data": service.json.dumps(
+                        {
+                            "beat": service.json.dumps(
+                                _valid_stage04_output(),
+                                ensure_ascii=False,
+                            )
+                        },
+                        ensure_ascii=False,
+                    ),
                 }
             )
-
         with patch.dict(
             os.environ,
             {
+                "WORKFLOW_BACKEND": "coze",
+                "COZE_CREDENTIALS_ORDER": "primary,secondary",
                 "FRAMEWORK_PLANNER_USE_MOCK": "false",
+                "COZE_PRIMARY_API_TOKEN": "coze-token",
+                "COZE_WORKFLOW_STAGE_04_ID": "stage-04-workflow",
                 "FASTGPT_API_KEY": "fastgpt-global-key",
                 "FASTGPT_CHAT_COMPLETIONS_URL": "https://api.fastgpt.in/api/v1/chat/completions",
             },
@@ -248,16 +613,35 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
             with patch.object(service.requests, "post", side_effect=_fake_post):
                 payload = _stage_04_payload()
                 payload["framework_score_report"] = "REVISE\\n需要补强中点反转。"
+                payload.update(
+                    {
+                        "season_count": 1,
+                        "episodes_per_season": 60,
+                        "total_episodes": 60,
+                        "episode_count_guard": {
+                            "season_count": 1,
+                            "episodes_per_season": 60,
+                            "total_episodes": 60,
+                        },
+                    }
+                )
                 service.run_framework_planner_stage("04", payload)
 
-        variables = captured["body"]["variables"]
-        self.assertEqual(variables["user_requirements"], "固定 15 beat")
-        self.assertEqual(variables["framework_score_report"], "REVISE\\n需要补强中点反转。")
+        parameters = captured["body"]["parameters"]
+        self.assertEqual(captured["body"]["workflow_id"], "stage-04-workflow")
+        self.assertIn("user_requirements", parameters)
+        self.assertIn("framework_score_repo", parameters)
+        self.assertNotIn("framework_score_report", parameters)
+        self.assertEqual(parameters["season_count"], 1)
+        self.assertEqual(parameters["episodes_per_season"], 60)
+        self.assertEqual(parameters["total_episodes"], 60)
+        self.assertEqual(service.json.loads(parameters["episode_count_guard"])["total_episodes"], 60)
 
     def test_stage_has_real_backend_accepts_legacy_and_framework_api_key_envs(self) -> None:
         with patch.dict(
             os.environ,
             {
+                "WORKFLOW_BACKEND": "fastgpt",
                 "FASTGPT_FRAMEWORK_API_KEY": "fastgpt-framework-key",
                 "FASTGPT_BETTER_FRAMEWORK_PLOT_KEY_POINT_PLANNING": "fastgpt-legacy-stage-key",
             },
@@ -785,13 +1169,16 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertIn("basic_config", variables)
         self.assertIn("worldview_plan", variables)
         self.assertIn("character_plan", variables)
-        self.assertIn("beat_checkpoint_timeline", variables)
-        self.assertIn("previous_character_storylines", variables)
-        self.assertIn("current_storyline_decisions", variables)
+        self.assertIn("beat_checkpoint_time", variables)
+        self.assertIn("previous_character", variables)
+        self.assertIn("current_storyline", variables)
         self.assertIn("user_feedback", variables)
         self.assertIn("adaptation_direction", variables)
         self.assertIn("user_requirements", variables)
         self.assertIn("basic_config", variables)
+        self.assertNotIn("beat_checkpoint_timeline", variables)
+        self.assertNotIn("previous_character_storylines", variables)
+        self.assertNotIn("current_storyline_decisions", variables)
         self.assertNotIn("source_text", variables["basic_config"])
         self.assertIn("project_title", variables["basic_config"])
         self.assertNotIn("raw", variables)
@@ -1026,6 +1413,7 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "WORKFLOW_BACKEND": "fastgpt",
                 "FASTGPT_NEW_FRAMEWORK_API_KEY": "framework-new-key",
                 "FASTGPT_API_URL": "https://api.fastgpt.in/api/v1",
             },
@@ -1041,6 +1429,7 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "WORKFLOW_BACKEND": "fastgpt",
                 "FRAMEWORK_PLANNER_USE_MOCK": "false",
                 "FASTGPT_FRAMEWORK_API_KEY": "fastgpt-framework-key",
                 "FASTGPT_API_URL": "https://api.fastgpt.in/api/v1",
@@ -1070,6 +1459,7 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "WORKFLOW_BACKEND": "fastgpt",
                 "FRAMEWORK_PLANNER_USE_MOCK": "false",
                 "FASTGPT_API_KEY": "fastgpt-global-key",
                 "FASTGPT_CHAT_COMPLETIONS_URL": "http://192.168.2.203:3000/api/v1/chat/completions",
@@ -1093,6 +1483,7 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "WORKFLOW_BACKEND": "fastgpt",
                 "FRAMEWORK_PLANNER_USE_MOCK": "false",
                 "FASTGPT_API_KEY": "fastgpt-global-key",
                 "FASTGPT_CHAT_COMPLETIONS_URL": "http://192.168.2.203:3000/api/v1/chat/completions",

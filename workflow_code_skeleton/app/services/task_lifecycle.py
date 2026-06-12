@@ -39,7 +39,7 @@ class TaskLifecycleMixin:
         self._remember_latest_project(user_id, project_id)
         task_id = uuid.uuid4().hex[:12]
         model_option = settings.resolve_model_selection(model_selection_id)
-        spec = None if use_fastgpt_backend() else WorkflowSpec(workflow_spec_path)
+        spec = None if use_remote_workflow_backend() else WorkflowSpec(workflow_spec_path)
 
         snapshot = {
             "user_id": int(user_id),
@@ -282,12 +282,21 @@ class TaskLifecycleMixin:
         *,
         user_id: int,
         title: str,
-        season_count: int = 1,
-        episodes_per_season: int = 60,
+        season_count: int | None = None,
+        episodes_per_season: int | None = None,
         target_format: str = "短剧",
         style: str = "",
         description: str = "",
     ) -> dict[str, Any]:
+        clean_season_count = _safe_int(season_count, 0)
+        clean_episodes_per_season = _safe_int(episodes_per_season, 0)
+        missing = []
+        if clean_season_count <= 0:
+            missing.append("season_count")
+        if clean_episodes_per_season <= 0:
+            missing.append("episodes_per_season")
+        if missing:
+            raise ValueError(f"新建框架资产缺少集数配置：{', '.join(missing)}。")
         clean_title = clean_user_visible_text(title).strip() or "未命名剧本"
         clean_description = clean_multiline_user_visible_text(description).strip()
         clean_format = clean_user_visible_text(target_format).strip() or "短剧"
@@ -300,9 +309,26 @@ class TaskLifecycleMixin:
             "story_outline": clean_description,
             "target_format": clean_format,
             "style": clean_style,
-            "season_count": max(1, int(season_count or 1)),
-            "episodes_per_season": max(1, int(episodes_per_season or 1)),
-            "total_episodes": max(1, int(season_count or 1)) * max(1, int(episodes_per_season or 1)),
+            "season_count": clean_season_count,
+            "episodes_per_season": clean_episodes_per_season,
+            "total_episodes": clean_season_count * clean_episodes_per_season,
+            "episode_count_guard": {
+                "season_count": clean_season_count,
+                "episodes_per_season": clean_episodes_per_season,
+                "total_episodes": clean_season_count * clean_episodes_per_season,
+            },
+        }
+        input_payload["basic_config"] = {
+            "project_title": clean_title,
+            "source_title": clean_title,
+            "target_format": clean_format,
+            "season_count": clean_season_count,
+            "episodes_per_season": clean_episodes_per_season,
+            "total_episodes": input_payload["total_episodes"],
+            "minutes_per_episode": 2,
+            "source_text": clean_description,
+            "user_requirements": clean_style,
+            "episode_count_guard": copy.deepcopy(input_payload["episode_count_guard"]),
         }
         snapshot = {
             "user_id": int(user_id),
@@ -356,7 +382,10 @@ class TaskLifecycleMixin:
     ) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("保存内容格式不正确")
+        framework_plan_package = payload.get("framework_plan_package") if isinstance(payload.get("framework_plan_package"), dict) else {}
         basic_config = payload.get("basic_config") if isinstance(payload.get("basic_config"), dict) else {}
+        if not basic_config and isinstance(framework_plan_package.get("basic_config"), dict):
+            basic_config = framework_plan_package.get("basic_config") or {}
         asset_state = payload.get("asset_state") if isinstance(payload.get("asset_state"), dict) else {}
         raw_project_id = (
             payload.get("project_id")
@@ -382,13 +411,26 @@ class TaskLifecycleMixin:
             created_at = snapshot.get("created_at") or now
             task_id = snapshot.get("task_id") or f"framework-planner-{uuid.uuid4().hex[:10]}"
             previous_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+            previous_framework_state = (
+                snapshot.get("framework_planner_state")
+                or previous_artifacts.get("framework_planner_state")
+                or (snapshot.get("input_payload") or {}).get("framework_planner_state")
+                or {}
+            )
+            previous_basic_config = (
+                previous_framework_state.get("basic_config")
+                if isinstance(previous_framework_state, dict) and isinstance(previous_framework_state.get("basic_config"), dict)
+                else {}
+            )
+            if not previous_basic_config and isinstance((snapshot.get("input_payload") or {}).get("basic_config"), dict):
+                previous_basic_config = (snapshot.get("input_payload") or {}).get("basic_config")
         else:
             project_id = self._next_project_id()
             created_at = now
             task_id = f"framework-planner-{uuid.uuid4().hex[:10]}"
             previous_artifacts = {}
+            previous_basic_config = {}
 
-        framework_plan_package = payload.get("framework_plan_package") if isinstance(payload.get("framework_plan_package"), dict) else {}
         stage_state = payload.get("stage_state") if isinstance(payload.get("stage_state"), dict) else {}
         current_stage = str((asset_state or {}).get("current_stage") or "framework_planner").strip() or "framework_planner"
         confirmed_package = bool((stage_state.get("package") or {}).get("confirmed")) if isinstance(stage_state.get("package"), dict) else False
@@ -398,17 +440,39 @@ class TaskLifecycleMixin:
         if status == "running":
             status = "in_progress"
 
-        total_episodes = _safe_int(
-            payload.get("total_episodes")
-            or basic_config.get("total_episodes")
-            or basic_config.get("episodes_per_season"),
+        season_count = _safe_int(
+            basic_config.get("season_count")
+            or payload.get("season_count")
+            or previous_basic_config.get("season_count"),
             0,
         )
-        if total_episodes <= 0:
-            total_episodes = max(1, _safe_int(basic_config.get("season_count"), 1)) * max(
-                1,
-                _safe_int(basic_config.get("episodes_per_season"), 60),
-            )
+        episodes_per_season = _safe_int(
+            basic_config.get("episodes_per_season")
+            or payload.get("episodes_per_season")
+            or previous_basic_config.get("episodes_per_season"),
+            0,
+        )
+        missing_episode_fields = []
+        if season_count <= 0:
+            missing_episode_fields.append("season_count")
+        if episodes_per_season <= 0:
+            missing_episode_fields.append("episodes_per_season")
+        if missing_episode_fields:
+            raise ValueError(f"框架资产缺少集数配置：{', '.join(missing_episode_fields)}。")
+        total_episodes = season_count * episodes_per_season
+        basic_config = copy.deepcopy(basic_config)
+        basic_config.update(
+            {
+                "season_count": season_count,
+                "episodes_per_season": episodes_per_season,
+                "total_episodes": total_episodes,
+                "episode_count_guard": {
+                    "season_count": season_count,
+                    "episodes_per_season": episodes_per_season,
+                    "total_episodes": total_episodes,
+                },
+            }
+        )
 
         framework_state = {
             "project_id": project_id,
@@ -449,9 +513,10 @@ class TaskLifecycleMixin:
                 "project_title": title,
                 "source_title": str(basic_config.get("source_title") or title),
                 "target_format": str(basic_config.get("target_format") or payload.get("target_format") or "短剧"),
-                "season_count": _safe_int(basic_config.get("season_count") or payload.get("season_count"), 1),
-                "episodes_per_season": _safe_int(basic_config.get("episodes_per_season") or payload.get("episodes_per_season"), total_episodes),
+                "season_count": season_count,
+                "episodes_per_season": episodes_per_season,
                 "total_episodes": total_episodes,
+                "episode_count_guard": copy.deepcopy(basic_config["episode_count_guard"]),
                 "story_outline": clean_multiline_user_visible_text(
                     basic_config.get("source_text")
                     or payload.get("user_expectation")
@@ -1079,10 +1144,8 @@ class TaskLifecycleMixin:
         )
         runtime: WorkflowRuntime | None = None
         try:
-            from .fastgpt_client import FastGPTClient
-
             workflow_input = WorkflowInput.from_dict(record.input_payload)
-            spec = None if use_fastgpt_backend() else WorkflowSpec(record.workflow_spec_path)
+            spec = None if use_remote_workflow_backend() else WorkflowSpec(record.workflow_spec_path)
             runtime = WorkflowRuntime(manager=self, record=record, spec=spec)
             script_format_mode = str(record.input_payload.get("script_format_mode") or "").strip().lower()
             if script_format_mode:
@@ -1091,7 +1154,14 @@ class TaskLifecycleMixin:
                     record.task_id,
                     script_format_mode,
                 )
-            runner = FastGPTClient(script_api_profile=script_format_mode)
+            if settings.workflow_backend == "coze":
+                from .coze_client import CozeWorkflowClient
+
+                runner = CozeWorkflowClient()
+            else:
+                from .fastgpt_client import FastGPTClient
+
+                runner = FastGPTClient(script_api_profile=script_format_mode)
 
             state = run_configured_workflow(
                 workflow_input,
@@ -1485,4 +1555,3 @@ class TaskLifecycleMixin:
         if self._index.get("latest_project_id") == project_id:
             self._index["latest_project_id"] = None
         self._save_index()
-

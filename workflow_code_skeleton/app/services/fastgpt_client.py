@@ -2838,8 +2838,8 @@ def _extract_appearance_stage_output(
     for source, candidate in _iter_appearance_output_candidates(data, contract):
         preview = _truncate_log_text(_json_for_log(candidate), limit=260)
 
-        # ???????????? outfit_versions / alias_rules ?????
-        # ???? _coerce_appearance_candidate / repair??????????
+        # Prefer candidates that already carry rich outfit_versions / alias_rules.
+        # Simpler shapes still go through _coerce_appearance_candidate and repair fallbacks.
         if _is_rich_appearance_candidate(candidate):
             candidates_to_check = [(source, candidate)]
             alias_empty = False
@@ -2870,7 +2870,7 @@ def _extract_appearance_stage_output(
                 )
             ) or [(source, normalized_candidate)]
 
-        last_reason = "??????? appearanceMapping ??"
+        last_reason = "未匹配到 appearanceMapping 输出"
         any_valid_for_source = False
 
         for variant_source, variant_candidate in candidates_to_check:
@@ -2881,7 +2881,7 @@ def _extract_appearance_stage_output(
                 else _payload_from_candidate(variant_candidate, contract)
             )
             if match is None:
-                last_reason = "??????? appearanceMapping ??"
+                last_reason = "未匹配到 appearanceMapping 输出"
                 rejected_candidates.append((variant_source, last_reason, None))
                 continue
 
@@ -2904,10 +2904,10 @@ def _extract_appearance_stage_output(
 
             normalized_payload = _normalize_rich_appearance_payload(match.payload)
 
-            # framework-to-script ? 09 ??????? textOutput / message.content ??
-            # contract.validate_output_payload ??? appearanceMapping ? object?
-            # ???? outfit_versions / alias_rules / scene_trigger_rules ?????????
-            # ??????????????????????????? raw match.payload ???????
+            # framework-to-script stage 09 can return rich JSON in textOutput/message.content.
+            # contract.validate_output_payload only checks appearanceMapping as an object.
+            # Keep raw match.payload so outfit_versions, alias_rules, and scene_trigger_rules
+            # are not lost before normalization and scoring.
             if contract.stage_name == "framework_appearanceMapping" and _is_rich_appearance_candidate(match.payload):
                 normalized_validated_payload = normalized_payload
             else:
@@ -2981,12 +2981,12 @@ def _iter_appearance_output_candidates(
     data: dict[str, Any],
     contract: FastGPTStageContract,
 ) -> Iterable[tuple[str, Any]]:
-    """?? appearanceMapping ???
+    """Iterate appearanceMapping candidates.
 
-    ???
-    framework-to-script ? 09 ????????? answerText/textOutput ??
-    ? newVariables.appearanceMapping ???????
-    ????????? JSON ??????????? newVariables/updateVarResult?
+    Notes:
+    framework-to-script stage 09 may return JSON text in answerText/textOutput,
+    or structured data in newVariables.appearanceMapping.
+    This parses both JSON text and structured newVariables/updateVarResult paths.
     """
 
     if contract.stage_name == STAGE_FRAMEWORK_APPEARANCE_MAPPING:
@@ -3011,8 +3011,8 @@ def _iter_appearance_output_candidates(
             yield from _iter_appearance_answer_node_candidates(data, output_alias)
         yield from _iter_appearance_choice_json_candidates(data)
 
-    # 2. ?????????
-    # ???? newVariables / updateVarResult / responseData ??????
+    # 2. Check structured candidates.
+    # Covers newVariables / updateVarResult / responseData and related paths.
     for source, candidate in _iter_named_structured_candidates(data):
         if contract.stage_name != STAGE_FRAMEWORK_APPEARANCE_MAPPING:
             lowered_source = str(source or "").lower()
@@ -3024,7 +3024,7 @@ def _iter_appearance_output_candidates(
                 continue
         yield (source, candidate)
 
-        # ??????????? textOutput / answerText???????
+        # Also try normalized textOutput / answerText extracted from structured candidates.
         try:
             normalized = _normalize_payload_candidate(candidate, contract)
         except Exception:

@@ -2096,3 +2096,5 @@ def use_fastgpt_backend() -> bool:
     return settings.workflow_backend in {"fastgpt", "hybrid", "fastgpt_hybrid"}
 
 
+def use_remote_workflow_backend() -> bool:
+    return settings.workflow_backend in {"fastgpt", "hybrid", "fastgpt_hybrid", "coze"}
