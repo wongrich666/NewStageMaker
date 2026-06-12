@@ -42,6 +42,12 @@ from .services.framework_planner_service import (
     write_framework_stage_exception_log,
 )
 from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
+from .services.script_audit_ecg_parser import (
+    SCHEMA_VERSION as SCRIPT_AUDIT_ECG_SCHEMA_VERSION,
+    build_script_audit_view_model,
+    normalize_script_audit_ecg,
+    parse_model_json_loose,
+)
 from .services.task_manager import task_manager
 from .services.user_knowledge_store import user_knowledge_store
 from .services.workflow_preference_keys import (
@@ -120,6 +126,98 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def _json_error(message: str, status: int = 400, *, fallback: str | None = None):
         public_message = _sanitize_error_message(message, status=status, fallback=fallback)
         return jsonify({"success": False, "message": public_message}), status
+
+
+    def _script_audit_ecg_extract_text(value, *, limit: int = 200000) -> str:
+        texts = []
+        priority_keys = (
+            "answer_text",
+            "answerText",
+            "text",
+            "textOutput",
+            "output",
+            "response",
+            "content",
+            "result",
+            "data",
+            "raw",
+            "message",
+        )
+
+        def visit(item, depth: int = 0):
+            if depth > 5:
+                return
+            if isinstance(item, str):
+                if item.strip():
+                    texts.append(item)
+                return
+            if isinstance(item, dict):
+                for key in priority_keys:
+                    if key in item:
+                        visit(item.get(key), depth + 1)
+                for key, child in item.items():
+                    if key not in priority_keys:
+                        visit(child, depth + 1)
+                return
+            if isinstance(item, list):
+                for child in item[:50]:
+                    visit(child, depth + 1)
+
+        visit(value)
+        if not texts:
+            return ""
+        return max(texts, key=len)[:limit]
+
+    def _script_audit_ecg_should_try(tool_key: str, parsed: dict | None, raw_text: str) -> bool:
+        if isinstance(parsed, dict) and parsed.get("schema_version") == SCRIPT_AUDIT_ECG_SCHEMA_VERSION:
+            return True
+        key_text = str(tool_key or "").lower()
+        keywords = (
+            "hot_review",
+            "爆款文审核",
+            "剧本审核",
+            "心电图",
+            "script_audit",
+            "audit_ecg",
+            "script_audit_ecg",
+        )
+        return any(keyword.lower() in key_text for keyword in keywords) or SCRIPT_AUDIT_ECG_SCHEMA_VERSION in raw_text
+
+    def _maybe_enrich_script_audit_ecg_tool_result(tool_key: str, result: dict, flattened: dict) -> tuple[dict, dict]:
+        if not isinstance(result, dict):
+            return result, flattened
+
+        raw_text = _script_audit_ecg_extract_text(result)
+        parsed, parse_warnings = parse_model_json_loose(result)
+        if not _script_audit_ecg_should_try(tool_key, parsed, raw_text):
+            return result, flattened
+
+        enriched_result = dict(result)
+        enriched_flattened = dict(flattened)
+        enriched_result.setdefault("answer_text", raw_text)
+        enriched_flattened.setdefault("answer_text", raw_text)
+
+        if not (isinstance(parsed, dict) and parsed.get("schema_version") == SCRIPT_AUDIT_ECG_SCHEMA_VERSION):
+            warnings = parse_warnings or ["未解析到 script_audit_ecg_v2 JSON"]
+            for target in (enriched_result, enriched_flattened):
+                target["result_type"] = "text"
+                target["parsed"] = False
+                target["parse_warnings"] = warnings
+            return enriched_result, enriched_flattened
+
+        audit, normalize_warnings = normalize_script_audit_ecg(parsed, raw_answer_text=raw_text)
+        view = build_script_audit_view_model(audit)
+        warnings = [*parse_warnings, *normalize_warnings]
+
+        for target in (enriched_result, enriched_flattened):
+            target["result_type"] = "script_audit_ecg"
+            target["parsed"] = True
+            target["audit"] = audit
+            target["view"] = view
+            target["parse_warnings"] = warnings
+            target["answer_text"] = raw_text
+
+        return enriched_result, enriched_flattened
 
     raw_fastgpt_response_keys = {
         "responseData",
@@ -1906,6 +2004,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             result["saved_asset"] = saved_asset
         if asset_save_error:
             result["asset_save_error"] = asset_save_error
+        result, flattened = _maybe_enrich_script_audit_ecg_tool_result(tool_key, result, flattened)
         ok = bool(flattened.pop("ok", True))
         return _json_ok(ok=ok, result=result, **flattened)
 
