@@ -858,7 +858,6 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
                 "beatCheckpoints",
                 "beat_checkpoint",
                 "beatCheckpoint",
-                "beat",
             ),
             "checkpoint_explanation": (
                 "checkpoint_explanation",
@@ -1085,6 +1084,18 @@ def _parse_coze_framework_response(
                 },
             )
 
+    if definition.stage == "04":
+        extracted = _stage04_extract_payload_from_nested_coze(response_json)
+
+        if isinstance(extracted, dict):
+            # 不直接 return
+            logger.warning(
+                "stage04 extracted detected, but merged into normal pipeline"
+            )
+
+            # 合并而不是替换
+            response_json = extracted
+
     parsed = parse_workflow_output(response_json)
     return wrap_payload_for_expected_output(
         parsed,
@@ -1194,8 +1205,10 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         )
         raise
     response_text = _safe_response_text(response)
+    http_response_json: Any = None
     try:
         response_json = response.json()
+        http_response_json = response_json
     except ValueError as exc:
         _log_stage_output_parse_exception(
             stage=definition.stage,
@@ -1205,6 +1218,7 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         )
         if _is_coze_backend() or definition.stage in {"01", "02", "03", "04", "05"}:
             response_json = response_text
+            http_response_json = response_text
         else:
             debug_detail = _write_debug_artifact(
                 stage=definition.stage,
@@ -1240,6 +1254,14 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
                 status_code=502,
                 detail=debug_detail,
             ) from exc
+
+    if definition.stage == "04":
+        _write_stage04_coze_http_debug(
+            response=response,
+            endpoint=endpoint,
+            body=body,
+            response_text=response_text,
+        )
 
     if _is_coze_backend():
         try:
@@ -1302,17 +1324,20 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         raw_debug_dir = _repo_root() / "cache" / "raw_coze_debug"
         raw_debug_dir.mkdir(parents=True, exist_ok=True)
         raw_debug_path = raw_debug_dir / f"stage{definition.stage}_raw_response.json"
+        raw_debug_payload = {
+            "stage": definition.stage,
+            "backend": "coze",
+            "data": response_json if definition.stage == "04" else None,
+            "data_keys": sorted(response_json.keys()) if definition.stage == "04" and isinstance(response_json, dict) else [],
+            "response": response_json if definition.stage == "04" else None,
+            "safe_response_preview": safe_truncated_preview(response_json, limit=4000),
+        }
+        if definition.stage != "04":
+            raw_debug_payload.pop("response", None)
+            raw_debug_payload.pop("data", None)
+            raw_debug_payload.pop("data_keys", None)
         raw_debug_path.write_text(
-            json.dumps(
-                {
-                    "stage": definition.stage,
-                    "backend": "coze",
-                    "safe_response_preview": safe_truncated_preview(response_json, limit=4000),
-                },
-                ensure_ascii=False,
-                indent=2,
-                default=str,
-            ),
+            json.dumps(raw_debug_payload, ensure_ascii=False, indent=2, default=str),
             encoding="utf-8",
         )
         logger.warning(
@@ -1450,11 +1475,20 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         )
 
     if definition.stage == "04":
+        _write_stage04_parser_debug(
+            data=data,
+            display_text=display_text,
+            parsed_response=response_json,
+            parse_warnings=parse_warnings,
+        )
+
+    if definition.stage == "04":
         _validate_stage04_output_or_raise(
             data=data,
             payload=normalized_payload,
             parse_warnings=parse_warnings,
             response_json=response_json,
+            raw_response_json=http_response_json,
         )
 
     stage_detail = {}
@@ -3158,6 +3192,250 @@ def _parse_candidate_value(candidate: Any) -> Any:
         return cleaned
 
 
+def _stage04_strip_json_fence(text: str) -> str:
+    """去掉 Coze/LLM 常见的 ```json ... ``` 包裹。"""
+    source = str(text or "").strip()
+    if not source:
+        return ""
+
+    source = re.sub(r"^\s*```(?:json|JSON)?\s*", "", source)
+    source = re.sub(r"\s*```\s*$", "", source)
+    return source.strip()
+
+
+def _stage04_try_parse_json_text(value: Any) -> Any:
+    """尽量把字符串解析成 JSON；解析不了就返回原字符串。"""
+    if not isinstance(value, str):
+        return value
+
+    text = _stage04_strip_json_fence(value)
+    if not text:
+        return value
+
+    # 只对明显像 JSON 的文本尝试解析，避免把普通剧情文本误伤。
+    looks_like_json = (
+        (text.startswith("{") and text.endswith("}"))
+        or (text.startswith("[") and text.endswith("]"))
+    )
+    if not looks_like_json:
+        # 有些 Coze 字符串前后会夹杂少量说明，尝试截取最大 JSON 对象。
+        first_obj = text.find("{")
+        last_obj = text.rfind("}")
+        first_arr = text.find("[")
+        last_arr = text.rfind("]")
+
+        candidates: list[str] = []
+        if first_obj != -1 and last_obj > first_obj:
+            candidates.append(text[first_obj:last_obj + 1])
+        if first_arr != -1 and last_arr > first_arr:
+            candidates.append(text[first_arr:last_arr + 1])
+
+        for candidate in candidates:
+            try:
+                return json.loads(candidate)
+            except Exception:
+                try:
+                    return parse_json(candidate)
+                except Exception:
+                    continue
+
+        return value
+
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    try:
+        return parse_json(text)
+    except Exception:
+        return value
+
+
+def _stage04_deep_parse_json_like(value: Any, *, depth: int = 0) -> Any:
+    """
+    Stage04 专用递归解析。
+
+    目标是兼容 Coze 输出节点只有 beat:String 时的各种形态：
+    1. data 是 dict；
+    2. data 是 JSON string；
+    3. data.beat 是 JSON string；
+    4. data.beat 是 ```json ... ```；
+    5. output/result/content/text/answer 中藏 JSON；
+    6. 直接返回 array。
+    """
+    if depth > 20:
+        return value
+
+    # 先走项目现有解析器，再补自己的字符串解析。
+    try:
+        parsed = _parse_candidate_value(value)
+    except Exception:
+        parsed = value
+
+    reparsed = _stage04_try_parse_json_text(parsed)
+    if reparsed is not parsed:
+        parsed = reparsed
+
+    if isinstance(parsed, dict):
+        return {
+            str(key): _stage04_deep_parse_json_like(child, depth=depth + 1)
+            for key, child in parsed.items()
+        }
+
+    if isinstance(parsed, list):
+        return [
+            _stage04_deep_parse_json_like(item, depth=depth + 1)
+            for item in parsed
+        ]
+
+    return parsed
+
+
+def _stage04_is_beat_object(value: Any) -> bool:
+    """判断是否是单条 beat，而不是 timeline。"""
+    if not isinstance(value, dict):
+        return False
+    return (
+        "beat_no" in value
+        and "beat_name" in value
+        and "episode_range" in value
+        and "plot_content" in value
+    )
+
+
+def _stage04_is_timeline_list(value: Any) -> bool:
+    """判断是否像十五节拍数组。这里只判断形态，不替代最终严格校验。"""
+    if not isinstance(value, list):
+        return False
+    if not value:
+        return False
+    return all(isinstance(item, dict) for item in value) and any(
+        _stage04_is_beat_object(item) for item in value
+    )
+
+
+def _stage04_extract_payload_from_nested_coze(value: Any, *, depth: int = 0) -> dict[str, Any] | None:
+    """
+    从任意 Coze 嵌套返回中提取 Stage04 标准结构。
+
+    只接受：
+    {
+      "beat_checkpoint_timeline": list,
+      "checkpoint_explanation": dict/string/可空,
+      "display_text": string/可空
+    }
+
+    或者直接 list 形式的 timeline。
+
+    明确不接受：
+    data.beat = 单个 beat object
+    """
+    if depth > 24:
+        return None
+
+    parsed = _stage04_deep_parse_json_like(value, depth=depth)
+
+    # 情况：Coze/模型直接返回了 15 条数组。
+    if _stage04_is_timeline_list(parsed):
+        return {
+            "beat_checkpoint_timeline": parsed,
+            "checkpoint_explanation": {},
+            "display_text": "",
+        }
+
+    if isinstance(parsed, dict):
+        # 情况：标准结构在当前层。
+        timeline = parsed.get("beat_checkpoint_timeline")
+        if timeline is None:
+            # 兼容少量命名变体，但不把单个 beat 当 timeline。
+            for alias in (
+                "beatCheckpointTimeline",
+                "checkpoint_timeline",
+                "checkpointTimeline",
+                "beat_timeline",
+                "beatTimeline",
+                "timeline",
+                "beats",
+                "checkpoints",
+                "beat_checkpoints",
+                "beatCheckpoints",
+                "beat_checkpoint",
+                "beatCheckpoint",
+            ):
+                if alias in parsed:
+                    timeline = parsed.get(alias)
+                    break
+
+        if _stage04_is_timeline_list(timeline):
+            explanation = (
+                parsed.get("checkpoint_explanation")
+                or parsed.get("checkpointExplanation")
+                or parsed.get("explanation")
+                or parsed.get("beat_explanation")
+                or parsed.get("beatExplanation")
+                or parsed.get("checkpoint_explain")
+                or parsed.get("checkpointExplain")
+                or {}
+            )
+            display_text = parsed.get("display_text") or parsed.get("displayText") or ""
+
+            return {
+                "beat_checkpoint_timeline": timeline,
+                "checkpoint_explanation": explanation,
+                "display_text": str(display_text or "").strip(),
+            }
+
+        # 重要：如果当前层是单个 beat 对象，不允许伪装成功。
+        if _stage04_is_beat_object(parsed):
+            return None
+
+        # 优先拆 Coze 常见包装字段。
+        for key in (
+            "data",
+            "output",
+            "result",
+            "answer",
+            "content",
+            "text",
+            "message",
+            "response",
+            "raw",
+            "beat",
+        ):
+            if key in parsed:
+                found = _stage04_extract_payload_from_nested_coze(parsed.get(key), depth=depth + 1)
+                if found:
+                    return found
+
+        # 兼容 Coze outputs / variables / newVariables / responseData 等容器。
+        for container_key in (
+            "outputs",
+            "variables",
+            "newVariables",
+            "responseData",
+            "updateVarResult",
+        ):
+            container = parsed.get(container_key)
+            found = _stage04_extract_payload_from_nested_coze(container, depth=depth + 1)
+            if found:
+                return found
+
+        # 最后兜底遍历所有字段。
+        for child in parsed.values():
+            found = _stage04_extract_payload_from_nested_coze(child, depth=depth + 1)
+            if found:
+                return found
+
+    if isinstance(parsed, list):
+        for item in parsed:
+            found = _stage04_extract_payload_from_nested_coze(item, depth=depth + 1)
+            if found:
+                return found
+
+    return None
+
+
 def safe_parse_stage_output(
     stage_response: Any,
     required_keys: tuple[str, ...] | list[str],
@@ -4484,23 +4762,162 @@ STAGE04_MIN_STRONG_BEATS = 10
 STAGE04_AMBIGUOUS_RANGE_MARKERS = ("未明确", "待确认", "重排", "未知", "?")
 
 
+def _write_stage04_coze_http_debug(
+    *,
+    response: requests.Response,
+    endpoint: FrameworkPlannerEndpoint,
+    body: dict[str, Any],
+    response_text: str,
+) -> None:
+    try:
+        raw_debug_dir = _repo_root() / "cache" / "raw_coze_debug"
+        raw_debug_dir.mkdir(parents=True, exist_ok=True)
+        debug_path = raw_debug_dir / "stage04_http_raw_latest.json"
+        debug_path.write_text(
+            json.dumps(
+                {
+                    "stage": "04",
+                    "backend": "coze",
+                    "status_code": getattr(response, "status_code", None),
+                    "endpoint_url": endpoint.url,
+                    "workflow_id": endpoint.workflow_id,
+                    "workflow_id_source": endpoint.workflow_id_source,
+                    "api_key_source": endpoint.api_key_source,
+                    "request_body": body,
+                    "response_text": response_text,
+                },
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            ),
+            encoding="utf-8",
+        )
+        logger.warning("[framework_planner_raw_debug] wrote stage04 raw Coze HTTP response path=%s", debug_path)
+    except Exception:
+        logger.exception("[framework_planner_raw_debug] failed to write stage04 raw Coze HTTP response")
+
+
+def _write_stage04_parser_debug(
+    *,
+    data: dict[str, Any],
+    display_text: str,
+    parsed_response: Any,
+    parse_warnings: list[str],
+) -> None:
+    try:
+        raw_debug_dir = _repo_root() / "cache" / "raw_coze_debug"
+        raw_debug_dir.mkdir(parents=True, exist_ok=True)
+        debug_path = raw_debug_dir / "stage04_raw_response.json"
+        final_data = dict(data if isinstance(data, dict) else {})
+        final_data["display_text"] = display_text or final_data.get("display_text") or ""
+        debug_path.write_text(
+            json.dumps(
+                {
+                    "stage": "04",
+                    "backend": "coze",
+                    "data": final_data,
+                    "data_keys": sorted(final_data.keys()),
+                    "parsed_response": parsed_response,
+                    "parse_warnings": [str(item) for item in parse_warnings if str(item).strip()],
+                },
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            ),
+            encoding="utf-8",
+        )
+        logger.warning("[framework_planner_raw_debug] wrote stage04 parsed Coze response path=%s", debug_path)
+    except Exception:
+        logger.exception("[framework_planner_raw_debug] failed to write stage04 parsed Coze response")
+
+
+def _coze_data_keys(value: Any) -> list[str]:
+    """调试用：尽量展示 Coze data 层的 key。"""
+    parsed = _stage04_deep_parse_json_like(value)
+
+    if isinstance(parsed, dict):
+        data = parsed.get("data")
+        data = _stage04_deep_parse_json_like(data)
+        if isinstance(data, dict):
+            return sorted(str(key) for key in data.keys())
+
+        if isinstance(parsed, dict):
+            return sorted(str(key) for key in parsed.keys())
+
+    return []
+
+
+def _coze_stage04_returned_single_beat_object(value: Any) -> bool:
+    """
+    判断 Coze 是否只返回了单个 beat 对象。
+    这种情况必须失败，不能包装成 1 条 timeline。
+    """
+    parsed = _stage04_deep_parse_json_like(value)
+
+    if isinstance(parsed, dict):
+        data = _stage04_deep_parse_json_like(parsed.get("data"))
+        if isinstance(data, dict):
+            beat = _stage04_deep_parse_json_like(data.get("beat"))
+            if _stage04_is_beat_object(beat):
+                return True
+
+        beat = _stage04_deep_parse_json_like(parsed.get("beat"))
+        if _stage04_is_beat_object(beat):
+            return True
+
+    return False
+
+
+def _stage04_raw_timeline_value(value: Any) -> Any:
+    """
+    从原始/解析后 response 中尽量拿到 beat_checkpoint_timeline。
+    仅用于校验 detail；不负责放行。
+    """
+    extracted = _stage04_extract_payload_from_nested_coze(value)
+    if isinstance(extracted, dict):
+        return extracted.get("beat_checkpoint_timeline")
+
+    parsed = _stage04_deep_parse_json_like(value)
+    if isinstance(parsed, dict):
+        aliases = STAGE_DEFINITIONS["04"].output_aliases.get(
+            "beat_checkpoint_timeline",
+            ("beat_checkpoint_timeline",),
+        )
+        direct = _find_value_by_aliases(parsed, aliases)
+        if direct is not None:
+            return _stage04_deep_parse_json_like(direct)
+
+        data = _stage04_deep_parse_json_like(parsed.get("data"))
+        if isinstance(data, dict):
+            nested = _find_value_by_aliases(data, aliases)
+            if nested is not None:
+                return _stage04_deep_parse_json_like(nested)
+
+    return None
+
+
 def _validate_stage04_output_or_raise(
     *,
     data: dict[str, Any],
     payload: dict[str, Any] | None,
     parse_warnings: list[str],
     response_json: Any,
+    raw_response_json: Any = None,
 ) -> None:
     timeline = data.get("beat_checkpoint_timeline") if isinstance(data, dict) else None
     explanation = data.get("checkpoint_explanation") if isinstance(data, dict) else None
+    raw_timeline = _stage04_raw_timeline_value(response_json)
     total_episodes = _total_episodes_from_payload(payload)
     detail: dict[str, Any] = {
         "reason": "",
         "stage": "04",
         "raw_type": type(response_json).__name__,
+        "coze_data_keys": _coze_data_keys(raw_response_json if raw_response_json is not None else response_json),
         "normalized_keys": sorted(data.keys()) if isinstance(data, dict) else [],
         "timeline_type": type(timeline).__name__ if timeline is not None else "none",
         "timeline_length": len(timeline) if isinstance(timeline, list) else 0,
+        "raw_timeline_type": type(raw_timeline).__name__ if raw_timeline is not None else "none",
+        "raw_timeline_length": len(raw_timeline) if isinstance(raw_timeline, list) else 0,
         "total_episodes": total_episodes,
         "checked_timeline_aliases": list(STAGE_DEFINITIONS["04"].output_aliases.get("beat_checkpoint_timeline", ())),
         "checked_explanation_aliases": list(STAGE_DEFINITIONS["04"].output_aliases.get("checkpoint_explanation", ())),
@@ -4509,6 +4926,14 @@ def _validate_stage04_output_or_raise(
         "response_preview": safe_truncated_preview(response_json, limit=1200),
     }
     failures: list[str] = []
+
+    if _coze_stage04_returned_single_beat_object(raw_response_json if raw_response_json is not None else response_json):
+        failures.append("coze_stage04_returned_single_beat_object")
+
+    if raw_timeline is not None and not isinstance(raw_timeline, list):
+        failures.append("beat_checkpoint_timeline_not_list")
+    elif isinstance(raw_timeline, list) and len(raw_timeline) != 15:
+        failures.append("beat_checkpoint_timeline_length_not_15")
 
     if not isinstance(timeline, list):
         failures.append("beat_checkpoint_timeline_not_list")
@@ -4618,6 +5043,8 @@ def _stage04_episode_range_problem(raw_range: Any, total_episodes: int) -> dict[
         return {"problem": "missing_total_episodes", "max_episode": max_episode}
     if max_episode > total_episodes:
         return {"problem": "episode_range_exceeds_total", "max_episode": max_episode}
+    if total_episodes == 1 and text != "第1集":
+        return {"problem": "single_episode_range_must_equal第1集", "max_episode": max_episode}
     return {"problem": "", "max_episode": max_episode}
 
 
@@ -5586,14 +6013,28 @@ def _coze_api_token_env_names() -> tuple[str, ...]:
         for item in (configured_order or "primary,secondary").replace(";", ",").split(",")
         if item.strip()
     ]
+
     names: list[str] = []
     for profile in ordered_profiles:
         if profile in {"primary", "secondary"}:
             names.append(f"COZE_{profile.upper()}_API_TOKEN")
-    if not configured_order:
-        for profile in ("primary", "secondary"):
-            names.append(f"COZE_{profile.upper()}_API_TOKEN")
-    names.extend(["COZE_API_TOKEN", "COZE_PAT"])
+        elif profile in {"pat", "coze_pat"}:
+            names.append("COZE_PAT")
+        elif profile in {"api_token", "token", "legacy"}:
+            names.append("COZE_API_TOKEN")
+
+    # 关键改动：
+    # 如果显式配置了 COZE_CREDENTIALS_ORDER，就严格按它来，不再追加旧 token。
+    if configured_order:
+        return tuple(dict.fromkeys(names))
+
+    # 没配置 order 时才走兼容兜底。
+    names.extend([
+        "COZE_PRIMARY_API_TOKEN",
+        "COZE_SECONDARY_API_TOKEN",
+        "COZE_API_TOKEN",
+        "COZE_PAT",
+    ])
     return tuple(dict.fromkeys(names))
 
 
