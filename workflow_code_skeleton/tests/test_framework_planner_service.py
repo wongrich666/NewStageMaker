@@ -788,6 +788,19 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertEqual(len(payload["data"]["beat_checkpoint_timeline"]), 15)
         self.assertEqual(payload["data"]["checkpoint_explanation"]["overview"], valid_payload["checkpoint_explanation"]["overview"])
 
+    def test_stage_04_parses_coze_beat_json_string_without_response_override(self) -> None:
+        valid_payload = _valid_stage04_output()
+        beat_text = "```json\n" + service.json.dumps(valid_payload, ensure_ascii=False) + "\n```"
+
+        payload = _run_stage04_with_coze_data({"beat": beat_text})
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(len(payload["data"]["beat_checkpoint_timeline"]), 15)
+        self.assertEqual(payload["data"]["checkpoint_explanation"]["overview"], valid_payload["checkpoint_explanation"]["overview"])
+        self.assertEqual(payload["display_text"], valid_payload["display_text"])
+        self.assertIn("beat", payload["raw"]["response"])
+        self.assertNotIn("beat_checkpoint_timeline", payload["raw"]["response"])
+
     def test_safe_parse_stage_output_accepts_list_string_and_dict(self) -> None:
         parsed_from_list, list_warnings = service.safe_parse_stage_output(
             [{"source_brief": {"source_title": "夜行审判"}}],

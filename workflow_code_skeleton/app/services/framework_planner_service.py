@@ -1088,13 +1088,10 @@ def _parse_coze_framework_response(
         extracted = _stage04_extract_payload_from_nested_coze(response_json)
 
         if isinstance(extracted, dict):
-            # 不直接 return
+            # Debug-only hint; do not replace the response before the normal parser pipeline.
             logger.warning(
-                "stage04 extracted detected, but merged into normal pipeline"
+                "stage04 nested Coze payload hint detected; keeping original response for normal parser pipeline"
             )
-
-            # 合并而不是替换
-            response_json = extracted
 
     parsed = parse_workflow_output(response_json)
     return wrap_payload_for_expected_output(
@@ -2742,6 +2739,12 @@ def _iter_response_candidates(
             return
         yielded.add(marker)
         yield source, value
+
+    if definition is not None and definition.stage == "04":
+        yield from emit("root.beat", root_response.get("beat"))
+        data_value = root_response.get("data")
+        if isinstance(data_value, dict):
+            yield from emit("root.data.beat", data_value.get("beat"))
 
     if definition is not None:
         for index, node in reversed(response_data_items):
