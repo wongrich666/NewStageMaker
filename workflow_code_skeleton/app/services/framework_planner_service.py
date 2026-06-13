@@ -1084,14 +1084,24 @@ def _parse_coze_framework_response(
                 },
             )
 
+    # Stage04 必须先走专用解析。
+    # 原因：Coze 当前返回是 data:String -> beat:String -> 真正业务 JSON。
+    # 通用 parse_workflow_output 很容易只解析到 data.beat 的局部对象，然后丢失 15 节拍。
     if definition.stage == "04":
         extracted = _stage04_extract_payload_from_nested_coze(response_json)
 
-        if isinstance(extracted, dict):
-            # Debug-only hint; do not replace the response before the normal parser pipeline.
+        if isinstance(extracted, dict) and isinstance(extracted.get("beat_checkpoint_timeline"), list):
             logger.warning(
-                "stage04 nested Coze payload hint detected; keeping original response for normal parser pipeline"
+                "[stage04 coze parser] extracted nested payload directly: timeline_len=%s keys=%s",
+                len(extracted.get("beat_checkpoint_timeline") or []),
+                sorted(extracted.keys()),
             )
+            return extracted
+
+        logger.warning(
+            "[stage04 coze parser] nested payload not found, fallback to generic parser; response_preview=%s",
+            safe_truncated_preview(response_json, limit=1000),
+        )
 
     parsed = parse_workflow_output(response_json)
     return wrap_payload_for_expected_output(
@@ -1206,6 +1216,35 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
     try:
         response_json = response.json()
         http_response_json = response_json
+        # ================================
+        # Stage04 Coze unwrap fix（必须）
+        # ================================
+        if definition.stage == "04":
+            try:
+                if isinstance(response_json, dict):
+                    data = response_json.get("data")
+
+                    extracted_beat = None
+
+                    if isinstance(data, dict):
+                        if "beat_checkpoint_timeline" in data:
+                            extracted_beat = data
+                        elif "beat" in data:
+                            extracted_beat = data["beat"]
+
+                            if isinstance(extracted_beat, str):
+                                extracted_beat = json.loads(extracted_beat)
+
+                    if extracted_beat:
+                        # ❗不要覆盖 response_json
+                        response_json["_stage04_unwrapped"] = extracted_beat
+
+                        logger.warning(
+                            f"[stage04 unwrap hint] extracted type={type(extracted_beat).__name__}"
+                        )
+
+            except Exception as e:
+                logger.warning(f"[stage04 unwrap failed] {e}")
     except ValueError as exc:
         _log_stage_output_parse_exception(
             stage=definition.stage,
@@ -2567,6 +2606,24 @@ def _extract_stage_output(
     output_aliases = definition.output_aliases
     parse_warnings: list[str] = []
     stage_payload_keys = sorted(set(payload_keys or []))
+    if definition.stage == "04":
+        extracted = _stage04_extract_payload_from_nested_coze(response_json)
+        if isinstance(extracted, dict) and isinstance(extracted.get("beat_checkpoint_timeline"), list):
+            parse_warnings.append(
+                "Stage04 已通过专用嵌套解析器提取 beat_checkpoint_timeline/checkpoint_explanation"
+            )
+            normalized = _normalize_stage_output(
+                definition.stage,
+                extracted,
+                parse_warnings=parse_warnings,
+            )
+            display_text = _extract_display_text(
+                response_json,
+                normalized,
+                stage=definition.stage,
+                payload_keys=stage_payload_keys,
+            )
+            return normalized, display_text, parse_warnings
     try:
         # Normalize 01~07 root responses before any .get() access in candidate iteration.
         root_response = normalize_stage_response(
@@ -3206,8 +3263,73 @@ def _stage04_strip_json_fence(text: str) -> str:
     return source.strip()
 
 
+def _stage04_repair_unquoted_json_string_values(text: str) -> str:
+    """
+    修复 Stage04 Coze/LLM 偶发的 JSON 漏引号问题。
+
+    典型坏输出：
+    "conflict_upgrade": 主角找到了新的第三幕路径。",
+    "plot_content": 伊芙琳和韦蒙德携手...
+    "display_text": 本规划为20集短剧...
+
+    只修复已知应为字符串的字段，避免误伤数组、对象、数字、布尔值。
+    """
+    source = str(text or "")
+    if not source.strip():
+        return source
+
+    string_fields = (
+        "narrative_function",
+        "plot_content",
+        "character_change",
+        "conflict_upgrade",
+        "hook_or_reversal",
+        "display_text",
+        "act_one_logic",
+        "act_two_logic",
+        "act_three_logic",
+        "opening_hook",
+        "first_three_episodes",
+        "midpoint",
+        "dark_night_and_turn",
+        "ending_closure",
+    )
+
+    repaired = source
+    for field in string_fields:
+        pattern = re.compile(
+            rf'("{re.escape(field)}"\s*:)'
+            rf'(?!\s*(?:"|{{|\[|\-?\d|true\b|false\b|null\b))'
+            rf'\s*([^,\n}}][^\n}}]*?)'
+            rf'(?=\s*,\s*\n|\s*\n\s*}})',
+            re.M,
+        )
+
+        def replace_unquoted(match: re.Match[str]) -> str:
+            prefix = match.group(1)
+            raw_value = match.group(2).strip()
+
+            # 常见坏形态：开头漏了引号，但结尾还残留一个引号
+            if raw_value.endswith('"') and not raw_value.startswith('"'):
+                raw_value = raw_value[:-1].rstrip()
+
+            return prefix + " " + json.dumps(raw_value, ensure_ascii=False)
+
+        repaired = pattern.sub(replace_unquoted, repaired)
+
+    return repaired
+
+
 def _stage04_try_parse_json_text(value: Any) -> Any:
-    """尽量把字符串解析成 JSON；解析不了就返回原字符串。"""
+    """
+    Stage04 专用 JSON 字符串解析。
+
+    注意：这里不能优先调用 parse_workflow_output / _parse_candidate_value。
+    原因是 Stage04 的 Coze 返回经常是：
+    data: "{\"beat\":\"{...beat_checkpoint_timeline...}\"}"
+
+    如果先走通用解析器，坏 JSON 可能会被截断成单个 beat，甚至变成 None。
+    """
     if not isinstance(value, str):
         return value
 
@@ -3215,84 +3337,106 @@ def _stage04_try_parse_json_text(value: Any) -> Any:
     if not text:
         return value
 
-    # 只对明显像 JSON 的文本尝试解析，避免把普通剧情文本误伤。
-    looks_like_json = (
-        (text.startswith("{") and text.endswith("}"))
-        or (text.startswith("[") and text.endswith("]"))
-    )
-    if not looks_like_json:
-        # 有些 Coze 字符串前后会夹杂少量说明，尝试截取最大 JSON 对象。
-        first_obj = text.find("{")
-        last_obj = text.rfind("}")
-        first_arr = text.find("[")
-        last_arr = text.rfind("]")
+    candidates: list[str] = [text]
 
-        candidates: list[str] = []
-        if first_obj != -1 and last_obj > first_obj:
-            candidates.append(text[first_obj:last_obj + 1])
-        if first_arr != -1 and last_arr > first_arr:
-            candidates.append(text[first_arr:last_arr + 1])
+    # 有些 Coze 字符串前后会夹杂少量说明，尝试截取最大 JSON 对象/数组。
+    first_obj = text.find("{")
+    last_obj = text.rfind("}")
+    first_arr = text.find("[")
+    last_arr = text.rfind("]")
 
-        for candidate in candidates:
+    if first_obj != -1 and last_obj > first_obj:
+        candidates.append(text[first_obj:last_obj + 1])
+    if first_arr != -1 and last_arr > first_arr:
+        candidates.append(text[first_arr:last_arr + 1])
+
+    def acceptable(parsed: Any) -> bool:
+        if isinstance(parsed, list):
+            return True
+        if isinstance(parsed, dict):
+            # parse_json 有时会从坏 JSON 里只抠出第一条 beat。
+            # 这种单 beat 不能被当作 Stage04 成功解析。
+            if _stage04_is_beat_object(parsed) and "beat_checkpoint_timeline" not in parsed:
+                return False
+            return True
+        return False
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        candidate = candidate.strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+
+        # 1. 严格 JSON
+        try:
+            parsed = json.loads(candidate)
+            if acceptable(parsed):
+                return parsed
+        except Exception:
+            pass
+
+        # 2. Stage04 专用修复：先修复漏引号，再严格解析
+        repaired = _stage04_repair_unquoted_json_string_values(candidate)
+        if repaired != candidate:
             try:
-                return json.loads(candidate)
+                parsed = json.loads(repaired)
+                if acceptable(parsed):
+                    return parsed
             except Exception:
-                try:
-                    return parse_json(candidate)
-                except Exception:
-                    continue
+                pass
 
-        return value
+            try:
+                parsed = parse_json(repaired)
+                if acceptable(parsed):
+                    return parsed
+            except Exception:
+                pass
 
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
+        # 3. 最后才允许项目通用 parse_json，而且拒绝单 beat 截断结果
+        try:
+            parsed = parse_json(candidate)
+            if acceptable(parsed):
+                return parsed
+        except Exception:
+            pass
 
-    try:
-        return parse_json(text)
-    except Exception:
-        return value
+    return value
 
 
 def _stage04_deep_parse_json_like(value: Any, *, depth: int = 0) -> Any:
     """
     Stage04 专用递归解析。
 
-    目标是兼容 Coze 输出节点只有 beat:String 时的各种形态：
-    1. data 是 dict；
-    2. data 是 JSON string；
-    3. data.beat 是 JSON string；
-    4. data.beat 是 ```json ... ```；
-    5. output/result/content/text/answer 中藏 JSON；
-    6. 直接返回 array。
+    这里故意不先调用 _parse_candidate_value()。
+    _parse_candidate_value() 会进入通用 parse_workflow_output，
+    对 Stage04 的双层 JSON 字符串可能产生截断：完整 timeline 会变成单个 beat 或 None。
     """
     if depth > 20:
         return value
 
-    # 先走项目现有解析器，再补自己的字符串解析。
-    try:
-        parsed = _parse_candidate_value(value)
-    except Exception:
-        parsed = value
+    if isinstance(value, str):
+        parsed = _stage04_try_parse_json_text(value)
 
-    reparsed = _stage04_try_parse_json_text(parsed)
-    if reparsed is not parsed:
-        parsed = reparsed
+        # 没解析动就原样返回。
+        if parsed is value or parsed == value:
+            return value
 
-    if isinstance(parsed, dict):
+        return _stage04_deep_parse_json_like(parsed, depth=depth + 1)
+
+    if isinstance(value, dict):
         return {
             str(key): _stage04_deep_parse_json_like(child, depth=depth + 1)
-            for key, child in parsed.items()
+            for key, child in value.items()
         }
 
-    if isinstance(parsed, list):
+    if isinstance(value, list):
         return [
             _stage04_deep_parse_json_like(item, depth=depth + 1)
-            for item in parsed
+            for item in value
         ]
 
-    return parsed
+    return value
 
 
 def _stage04_is_beat_object(value: Any) -> bool:

@@ -3244,7 +3244,7 @@
           ${stageStatusTag("beat")}
         </div>
         ${confirmed ? `<div class="fp-inline-warning">04 阶段已确认并锁定，05 人物故事线会严格基于这 15 个节拍继续拆解。</div>` : ""}
-        ${isStageLoading("beat") ? renderProcessingBanner("正在生成三幕十五节拍时间轴，请稍候...") : ""}
+        ${isStageLoading("beat") ? renderProcessingBanner("正在生成三幕十五节拍时间轴，时间比较长，不要刷新，请稍候...") : ""}
         ${blocked && !hasTimeline ? `<div class="fp-empty">请先确认人设方案。</div>` : renderBeatTimeline(state.beat_checkpoint_timeline, { editable: !blocked && !confirmed && isStageEditMode("beat") })}
         ${renderStageEditControls("beat", blocked || confirmed)}
         ${renderStagePreRunPanel("beat")}
@@ -3394,7 +3394,7 @@
           </div>
           ${stageStatusTag("beat")}
         </div>
-        ${isStageLoading("beat") ? renderProcessingBanner("正在生成卡点说明，请稍候...") : ""}
+        ${isStageLoading("beat") ? renderProcessingBanner("正在生成卡点说明，时间比较长，不要刷新，请稍候...") : ""}
         ${blocked && !hasExplanation ? `<div class="fp-empty">请先确认人设方案。</div>` : renderCheckpointExplanation(state.checkpoint_explanation, { editable: !blocked && !confirmed && isStageEditMode("beat") })}
         ${renderStageEditControls("beat", blocked || confirmed)}
         ${renderStagePreRunPanel("beat")}
@@ -3420,7 +3420,7 @@
           ${stageStatusTag("storylines")}
         </div>
         ${confirmed ? `<div class="fp-inline-warning">人物故事线已确认并锁定。06 阶段的整体改编指引会以当前故事线取舍为准。</div>` : ""}
-        ${isStageLoading("storylines") ? renderProcessingBanner("正在生成人物故事线，请稍候...") : ""}
+        ${isStageLoading("storylines") ? renderProcessingBanner("正在生成人物故事线，时间比较长，不要刷新，请稍候...") : ""}
         ${blocked && !hasStorylines ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineDecisionGrid()}
         ${renderStageEditControls("storylines", blocked || confirmed)}
         ${renderStagePreRunPanel("storylines")}
@@ -3498,7 +3498,7 @@
           ${stageStatusTag("guide")}
         </div>
         ${confirmed ? `<div class="fp-inline-warning">整体改编指引已确认并锁定。现在可以生成最终策划包。</div>` : ""}
-        ${isStageLoading("guide") ? renderProcessingBanner("正在生成整体改编指引，请稍候...") : ""}
+        ${isStageLoading("guide") ? renderProcessingBanner("正在生成整体改编指引，时间比较长，不要刷新，请稍候...") : ""}
         ${blocked && !hasGuide ? `<div class="fp-empty">请先确认 05 阶段。</div>` : renderGuideCards(state.adaptation_guide, { editable: !blocked && !confirmed && isStageEditMode("guide") })}
         ${renderStageEditControls("guide", blocked || confirmed)}
         ${renderStagePreRunPanel("guide")}
@@ -3524,7 +3524,7 @@
           </div>
           ${stageStatusTag("package")}
         </div>
-        ${isStageLoading("package") ? renderProcessingBanner("正在生成最终策划包，请稍候...") : ""}
+        ${isStageLoading("package") ? renderProcessingBanner("正在生成最终策划包，时间比较长，不要刷新，请稍候...") : ""}
         ${completed ? `<div class="fp-complete-banner">框架已完成，可以进入剧本正文阶段。</div>` : ""}
         ${!hasOutput ? `<div class="fp-empty">尚未生成 07 最终策划包。若缺少上游依赖，生成按钮会显示具体缺口。</div>` : `
           ${renderPackageBlocks()}
