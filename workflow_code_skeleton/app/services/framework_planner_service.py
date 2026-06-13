@@ -6406,14 +6406,63 @@ def _repair_stage_output_with_payload(
 
     if stage == "07":
         package = result.get("framework_plan_package") if isinstance(result.get("framework_plan_package"), dict) else {}
+
         stage_prompts = _merge_stage_prompt_payloads_non_empty(
             package.get("stage_prompts"),
             package.get("user_knowledge_stage_prompts"),
-            (package.get("prompt_preferences") or {}).get("stage_prompts") if isinstance(package.get("prompt_preferences"), dict) else {},
+            (package.get("prompt_preferences") or {}).get("stage_prompts") if isinstance(
+                package.get("prompt_preferences"), dict) else {},
             payload.get("stage_prompts") if isinstance(payload.get("stage_prompts"), dict) else {},
-            payload.get("user_knowledge_stage_prompts") if isinstance(payload.get("user_knowledge_stage_prompts"), dict) else {},
-            (payload.get("prompt_preferences") or {}).get("stage_prompts") if isinstance(payload.get("prompt_preferences"), dict) else {},
+            payload.get("user_knowledge_stage_prompts") if isinstance(payload.get("user_knowledge_stage_prompts"),
+                                                                      dict) else {},
+            (payload.get("prompt_preferences") or {}).get("stage_prompts") if isinstance(
+                payload.get("prompt_preferences"), dict) else {},
         )
+
+        def stage07_package_has_core_fields(pkg: dict[str, Any]) -> bool:
+            return (
+                    isinstance(pkg.get("basic_config"), dict) and bool(pkg.get("basic_config"))
+                    and isinstance(pkg.get("source_brief"), dict) and bool(pkg.get("source_brief"))
+                    and isinstance(pkg.get("worldview_plan"), dict) and bool(pkg.get("worldview_plan"))
+                    and isinstance(pkg.get("character_plan"), dict) and bool(pkg.get("character_plan"))
+                    and isinstance(pkg.get("beat_checkpoint_timeline"), list) and bool(
+                pkg.get("beat_checkpoint_timeline"))
+                    and isinstance(pkg.get("checkpoint_explanation"), dict) and bool(pkg.get("checkpoint_explanation"))
+                    and isinstance(pkg.get("character_storylines"), list) and bool(pkg.get("character_storylines"))
+                    and isinstance(pkg.get("adaptation_guide"), dict) and bool(pkg.get("adaptation_guide"))
+            )
+
+        # Coze Stage07 可能只返回很薄的 framework/package，甚至被清洗成空壳。
+        # 只要最终包缺核心字段，就直接用前 1-6 阶段 payload 重建最终包。
+        if not stage07_package_has_core_fields(package):
+            package = {
+                "mode": payload.get("mode") or "创作",
+                "basic_config": payload.get("basic_config") if isinstance(payload.get("basic_config"), dict) else {},
+                "source_brief": payload.get("source_brief") if isinstance(payload.get("source_brief"), dict) else {},
+                "worldview_plan": payload.get("worldview_plan") if isinstance(payload.get("worldview_plan"),
+                                                                              dict) else {},
+                "character_plan": payload.get("character_plan") if isinstance(payload.get("character_plan"),
+                                                                              dict) else {},
+                "beat_checkpoint_timeline": payload.get("beat_checkpoint_timeline") if isinstance(
+                    payload.get("beat_checkpoint_timeline"), list) else [],
+                "checkpoint_explanation": payload.get("checkpoint_explanation") if isinstance(
+                    payload.get("checkpoint_explanation"), dict) else {},
+                "character_storylines": payload.get("character_storylines") if isinstance(
+                    payload.get("character_storylines"), list) else [],
+                "storyline_decisions": payload.get("storyline_decisions") if isinstance(
+                    payload.get("storyline_decisions"), list) else [],
+                "adaptation_guide": (
+                        payload.get("adaptation_guide")
+                        or payload.get("adaptationGuide")
+                        or payload.get("overallAdaptationGuide")
+                        or payload.get("overall_adaptation_guide")
+                        or payload.get("guide")
+                        or {}
+                ),
+                "user_edit_history": payload.get("user_edit_history") if isinstance(payload.get("user_edit_history"),
+                                                                                    list) else [],
+            }
+
         if any(stage_prompts.values()):
             package = dict(package)
             package["stage_prompts"] = stage_prompts
@@ -6422,6 +6471,82 @@ def _repair_stage_output_with_payload(
                 **(package.get("prompt_preferences") if isinstance(package.get("prompt_preferences"), dict) else {}),
                 "stage_prompts": stage_prompts,
             }
-            result["framework_plan_package"] = package
+
+        package = _sanitize_framework_plan_package(package)
+
+        # 补交接说明，避免 07 直接进入正文生成。
+        package["handoff_to_script_workflow"] = {
+            "target": "framework_asset_pipeline",
+            "ready_for_script_workflow": True,
+            "input_summary": "该框架策划包已整合基础配置、原文提取、世界观、人设、十五节拍、人物故事线和整体改编指引，用于后续资产化流程。",
+            "locked_sections": [
+                "basic_config",
+                "source_brief",
+                "worldview_plan",
+                "character_plan",
+                "beat_checkpoint_timeline",
+                "checkpoint_explanation",
+                "character_storylines",
+                "storyline_decisions",
+                "adaptation_guide",
+            ],
+            "generation_priorities": [
+                "先执行 08 sceneDictionary，提炼 2-3 个核心场景。",
+                "再执行 09 appearanceMapping，固定人物外观、身份识别点、服装版本和 alias。",
+                "再执行 10 enrichedEpisodePlan，将十五节拍和人物故事线转为按集分布的分集计划。",
+                "因果冲突推进计划只读取 batchEnrichedEpisodePlan、sceneDictionary、appearanceMapping、scriptWorldRulesDigest、conflictMemory。",
+                "禁止把完整 framework_plan_package 直接传给因果冲突或正文阶段。",
+            ],
+            "storyline_decision_effects": [
+                "decision=keep 的人物线在后续剧本中完整保留。",
+                "decision=simplify 的人物线只保留核心节点和功能。",
+                "decision=delete 的人物线不得继续展开。",
+            ],
+            "hard_constraints": (
+                package.get("adaptation_guide", {}).get("hard_constraints_for_script_workflow")
+                if isinstance(package.get("adaptation_guide"), dict)
+                   and isinstance(package.get("adaptation_guide", {}).get("hard_constraints_for_script_workflow"), list)
+                else ["遵循 adaptation_guide 中的核心设定、节奏、视觉化和人物情绪约束。"]
+            ),
+            "do_not_change": [
+                "不得推翻已确认世界观规则。",
+                "不得重排十五节拍。",
+                "不得新增与 character_plan 冲突的人物关系。",
+                "不得删除已标记 keep 的核心人物线。",
+            ],
+            "risk_flags": [
+                "framework_plan_package 信息量较大，不应直接传入因果冲突推进计划或剧本正文工作流；必须先压缩为 sceneDictionary、appearanceMapping、enrichedEpisodePlan 和 scriptWorldRulesDigest。"
+            ],
+            "recommended_next_action": "下一步先执行 08 sceneDictionary，基于 worldview_plan、beat_checkpoint_timeline、character_storylines 提炼 2-3 个核心场景；随后执行 09 appearanceMapping；再执行 10 enrichedEpisodePlan；最后进入因果冲突推进计划与剧本正文生成。",
+            "asset_pipeline_order": [
+                "08_sceneDictionary",
+                "09_appearanceMapping",
+                "10_enrichedEpisodePlan",
+                "causalConflictPlan",
+                "scriptWriting",
+            ],
+            "downstream_variable_contract": {
+                "sceneDictionary": "由 worldview_plan + beat_checkpoint_timeline + character_storylines 提炼 2-3 个核心场景字典",
+                "appearanceMapping": "由 character_plan + sceneDictionary + beat_checkpoint_timeline 生成，整合人设、动机、关系、服装、alias",
+                "allEnrichedEpisodePlan": "由 beat_checkpoint_timeline + character_storylines + sceneDictionary + appearanceMapping 生成按集丰富分集计划",
+                "batchEnrichedEpisodePlan": "allEnrichedEpisodePlan 按 5 集切片后传给因果冲突推进计划",
+                "scriptWorldRulesDigest": "从 worldview_plan 压缩得到，只保留规则、限制、危险源和行动逻辑",
+            },
+        }
+
+        result["framework_plan_package"] = package
+
+        # 关键：用修复后的 package 重新生成 validation_report，覆盖 Coze/旧清洗得到的空壳校验。
+        result["validation_report"] = _build_validation_report_from_package(
+            package,
+            parse_warnings=[],
+        )
+
+        if not str(result.get("display_text") or "").strip():
+            result["display_text"] = (
+                "最终框架策划包已完成结构合并和一致性校验，已整合基础配置、原文提取、世界观、人设、十五节拍、人物故事线和整体改编指引。"
+                "当前包应先进入 08 sceneDictionary、09 appearanceMapping、10 enrichedEpisodePlan 的资产化流程，"
+                "再进入因果冲突推进计划和剧本正文生成；禁止直接把完整 framework_plan_package 传给冲突或正文工作流。"
+            )
 
     return result
