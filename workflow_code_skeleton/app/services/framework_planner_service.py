@@ -3780,6 +3780,65 @@ def _normalize_stage_output(
     return normalized
 
 
+def _find_display_text_recursive(value: Any, *, depth: int = 0) -> str:
+    """递归查找 display_text / displayText，用于兼容 Stage06 Coze 嵌套输出。"""
+    if depth > 12:
+        return ""
+
+    if value in (None, "", [], {}):
+        return ""
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ""
+
+        if text.startswith("{") or text.startswith("["):
+            try:
+                parsed = json.loads(text)
+                found = _find_display_text_recursive(parsed, depth=depth + 1)
+                if found:
+                    return found
+            except Exception:
+                pass
+
+        return ""
+
+    if isinstance(value, dict):
+        for key in ("display_text", "displayText"):
+            item = value.get(key)
+            if isinstance(item, str) and item.strip():
+                return item.strip()
+
+        for key in (
+            "data",
+            "output",
+            "result",
+            "adaptation",
+            "content",
+            "text",
+            "message",
+            "response",
+        ):
+            if key in value:
+                found = _find_display_text_recursive(value.get(key), depth=depth + 1)
+                if found:
+                    return found
+
+        for item in value.values():
+            found = _find_display_text_recursive(item, depth=depth + 1)
+            if found:
+                return found
+
+    if isinstance(value, list):
+        for item in value:
+            found = _find_display_text_recursive(item, depth=depth + 1)
+            if found:
+                return found
+
+    return ""
+
+
 def _extract_display_text(
     response_json: Any,
     data: dict[str, Any],
@@ -3789,11 +3848,26 @@ def _extract_display_text(
 ) -> str:
     safe_data = data if isinstance(data, dict) else {}
     stage_payload_keys = sorted(set(payload_keys or []))
+
+    # 1. 原有逻辑：先查最终业务 data 的顶层 display_text。
     for key in ("display_text", "displayText"):
         value = safe_data.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
 
+    # 2. 只对 Stage06 开启递归查找。
+    # 目的：兼容 Coze 返回 data.adaptation.display_text 的情况。
+    # 不影响其他阶段。
+    if str(stage).zfill(2) == "06":
+        found = _find_display_text_recursive(safe_data)
+        if found:
+            return found
+
+        found = _find_display_text_recursive(response_json)
+        if found:
+            return found
+
+    # 3. 保留原来的 normalize 逻辑，兼容旧 FastGPT / OpenAI 风格。
     try:
         root_response = normalize_stage_response(
             response_json,
@@ -3810,15 +3884,23 @@ def _extract_display_text(
             )
         root_response = {}
 
+    # 4. Stage06 的 normalize 之后再兜一次递归。
+    if str(stage).zfill(2) == "06":
+        found = _find_display_text_recursive(root_response)
+        if found:
+            return found
+
     response_data = root_response.get("responseData")
     if not isinstance(response_data, dict):
         response_data = {}
+
     for value in (
         root_response.get("answerText"),
         response_data.get("answerText"),
     ):
         if isinstance(value, str) and value.strip():
             return value.strip()
+
     return _stage_text_placeholder()
 
 
