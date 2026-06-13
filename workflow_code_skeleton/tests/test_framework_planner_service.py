@@ -67,6 +67,26 @@ def _stage_04_payload() -> dict[str, object]:
     }
 
 
+def _run_stage04_with_coze_data(coze_data, request_payload: dict[str, object] | None = None):
+    def _fake_post(url, *, headers=None, json=None, timeout=None):
+        del url, headers, json, timeout
+        return _FakeResponse(payload={"code": 0, "data": coze_data})
+
+    with patch.dict(
+        os.environ,
+        {
+            "WORKFLOW_BACKEND": "coze",
+            "COZE_CREDENTIALS_ORDER": "primary,secondary",
+            "FRAMEWORK_PLANNER_USE_MOCK": "false",
+            "COZE_PRIMARY_API_TOKEN": "coze-token",
+            "COZE_WORKFLOW_STAGE_04_ID": "stage-04-workflow",
+        },
+        clear=False,
+    ):
+        with patch.object(service.requests, "post", side_effect=_fake_post):
+            return service.run_framework_planner_stage("04", request_payload or _stage_04_payload())
+
+
 def _valid_stage04_output(*, total_episodes: int = 60, camel_case: bool = False) -> dict[str, object]:
     timeline: list[dict[str, object]] = []
     for index in range(15):
@@ -518,6 +538,90 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertTrue(all(item["plot_content"] for item in beats))
         self.assertEqual(payload["display_text"], "alias stage04 ok")
 
+    def test_stage_04_rejects_single_beat_object_from_coze_data(self) -> None:
+        single_beat = {
+            "beat_no": 1,
+            "act": "第一幕",
+            "beat_name": "开场",
+            "episode_range": "第1集",
+            "checkpoint_title": "只返回了一个节拍",
+            "narrative_function": "不完整",
+            "plot_content": "不完整",
+            "character_change": "不完整",
+            "conflict_upgrade": "不完整",
+            "hook_or_reversal": "不完整",
+            "linked_storylines": ["主角主线"],
+        }
+
+        with self.assertRaises(service.FrameworkPlannerStageError) as raised:
+            _run_stage04_with_coze_data({"beat": single_beat})
+
+        self.assertEqual(raised.exception.status_code, 422)
+        self.assertEqual(raised.exception.detail["reason"], "coze_stage04_returned_single_beat_object")
+        self.assertIn("beat", raised.exception.detail["coze_data_keys"])
+
+    def test_stage_04_accepts_top_level_contract_from_coze_data(self) -> None:
+        valid = _valid_stage04_output()
+
+        payload = _run_stage04_with_coze_data(valid)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(len(payload["data"]["beat_checkpoint_timeline"]), 15)
+        self.assertEqual(payload["data"]["checkpoint_explanation"]["overview"], valid["checkpoint_explanation"]["overview"])
+        self.assertEqual(payload["display_text"], valid["display_text"])
+
+    def test_stage_04_rejects_non_list_timeline_from_coze_data(self) -> None:
+        valid = _valid_stage04_output()
+        bad = {
+            **valid,
+            "beat_checkpoint_timeline": {"beat_no": 1},
+        }
+
+        with self.assertRaises(service.FrameworkPlannerStageError) as raised:
+            _run_stage04_with_coze_data(bad)
+
+        self.assertEqual(raised.exception.status_code, 422)
+        self.assertIn("beat_checkpoint_timeline_not_list", raised.exception.detail["failures"])
+
+    def test_stage_04_rejects_short_timeline_from_coze_data(self) -> None:
+        valid = _valid_stage04_output()
+        bad = {
+            **valid,
+            "beat_checkpoint_timeline": valid["beat_checkpoint_timeline"][:14],
+        }
+
+        with self.assertRaises(service.FrameworkPlannerStageError) as raised:
+            _run_stage04_with_coze_data(bad)
+
+        self.assertEqual(raised.exception.status_code, 422)
+        self.assertIn("beat_checkpoint_timeline_length_not_15", raised.exception.detail["failures"])
+
+    def test_stage_04_rejects_non_exact_single_episode_range(self) -> None:
+        valid = _valid_stage04_output(total_episodes=1)
+        valid["beat_checkpoint_timeline"][0]["episode_range"] = "第1-1集"
+        request_payload = _stage_04_payload()
+        request_payload.update(
+            {
+                "season_count": 1,
+                "episodes_per_season": 1,
+                "total_episodes": 1,
+                "episode_count_guard": {"season_count": 1, "episodes_per_season": 1, "total_episodes": 1},
+                "basic_config": {
+                    **_basic_config(),
+                    "season_count": 1,
+                    "episodes_per_season": 1,
+                    "total_episodes": 1,
+                },
+            }
+        )
+
+        with self.assertRaises(service.FrameworkPlannerStageError) as raised:
+            _run_stage04_with_coze_data(valid, request_payload=request_payload)
+
+        self.assertEqual(raised.exception.status_code, 422)
+        self.assertIn("stage04_episode_range_invalid", raised.exception.detail["failures"])
+        self.assertEqual(raised.exception.detail["bad_episode_ranges"][0]["problem"], "single_episode_range_must_equal第1集")
+
     def test_stage_04_coze_rejects_empty_placeholder_timeline(self) -> None:
         bad_timeline = [
             {
@@ -586,15 +690,7 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
             return _FakeResponse(
                 payload={
                     "code": 0,
-                    "data": service.json.dumps(
-                        {
-                            "beat": service.json.dumps(
-                                _valid_stage04_output(),
-                                ensure_ascii=False,
-                            )
-                        },
-                        ensure_ascii=False,
-                    ),
+                    "data": _valid_stage04_output(),
                 }
             )
         with patch.dict(
@@ -637,7 +733,7 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
         self.assertEqual(parameters["total_episodes"], 60)
         self.assertEqual(service.json.loads(parameters["episode_count_guard"])["total_episodes"], 60)
 
-    def test_stage_has_real_backend_accepts_legacy_and_framework_api_key_envs(self) -> None:
+    def test_stage_has_real_backend_requires_coze_token_and_workflow_id(self) -> None:
         with patch.dict(
             os.environ,
             {
@@ -647,40 +743,32 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
             },
             clear=True,
         ):
+            self.assertFalse(service.stage_has_real_backend("01"))
+            self.assertFalse(service.stage_has_real_backend("04"))
+
+        with patch.dict(
+            os.environ,
+            {
+                "COZE_PRIMARY_API_TOKEN": "coze-token",
+                "COZE_WORKFLOW_STAGE_01_ID": "stage-01-workflow",
+                "COZE_WORKFLOW_STAGE_04_ID": "stage-04-workflow",
+            },
+            clear=True,
+        ):
             self.assertTrue(service.stage_has_real_backend("01"))
             self.assertTrue(service.stage_has_real_backend("04"))
 
-    def test_stage_04_parses_internal_json_string_from_fastgpt(self) -> None:
-        beat_payload = {
-            "beat_checkpoint_timeline": [
-                {
-                    "beat_no": index + 1,
-                    "beat_name": service.FIFTEEN_BEAT_NAMES[index],
-                    "act": "第一幕" if index < 6 else "第二幕" if index < 12 else "第三幕",
-                    "episode_range": f"第{index + 1}集",
-                    "checkpoint_title": f"{service.FIFTEEN_BEAT_NAMES[index]}卡点",
-                    "narrative_function": "推进主线",
-                    "plot_content": "剧情推进",
-                    "character_change": "人物变化",
-                    "conflict_upgrade": "冲突升级",
-                    "hook_or_reversal": "结尾反转",
-                    "linked_storylines": ["主角成长线"],
-                }
-                for index in range(15)
-            ],
-            "checkpoint_explanation": {
-                "overview": "评分后修订版",
-                "beat_notes": [{"beat_no": 1, "explanation": "说明"}],
-            },
-        }
+    def test_stage_04_parses_nested_coze_output_json_string(self) -> None:
+        valid_payload = _valid_stage04_output()
 
         def _fake_post(url, *, headers=None, json=None, timeout=None):
             del url, headers, json, timeout
             return _FakeResponse(
                 payload={
-                    "newVariables": {
-                        "d3ixvj8d": service.json.dumps(beat_payload, ensure_ascii=False),
-                    }
+                    "code": 0,
+                    "data": {
+                        "output": service.json.dumps(valid_payload, ensure_ascii=False),
+                    },
                 }
             )
 
@@ -688,8 +776,8 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
             os.environ,
             {
                 "FRAMEWORK_PLANNER_USE_MOCK": "false",
-                "FASTGPT_API_KEY": "fastgpt-global-key",
-                "FASTGPT_CHAT_COMPLETIONS_URL": "https://api.fastgpt.in/api/v1/chat/completions",
+                "COZE_PRIMARY_API_TOKEN": "coze-token",
+                "COZE_WORKFLOW_STAGE_04_ID": "stage-04-workflow",
             },
             clear=False,
         ):
@@ -698,7 +786,7 @@ class FrameworkPlannerServiceTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(len(payload["data"]["beat_checkpoint_timeline"]), 15)
-        self.assertEqual(payload["data"]["checkpoint_explanation"]["overview"], "评分后修订版")
+        self.assertEqual(payload["data"]["checkpoint_explanation"]["overview"], valid_payload["checkpoint_explanation"]["overview"])
 
     def test_safe_parse_stage_output_accepts_list_string_and_dict(self) -> None:
         parsed_from_list, list_warnings = service.safe_parse_stage_output(

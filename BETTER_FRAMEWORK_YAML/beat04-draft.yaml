@@ -1,6 +1,6 @@
 schema_version: 1.0.0
 name: beat04
-id: 7645218335147966479
+id: 7649224734810538034
 description: "三幕十五节拍"
 mode: workflow
 icon: plugin_icon/workflow.png
@@ -31,7 +31,6 @@ nodes:
                 value: null
             keyword:
                 type: string
-                required: true
                 value: null
                 default_value: 搜索当天最火前十的短剧爽剧故事线节拍
             mode:
@@ -82,8 +81,10 @@ nodes:
         y: 0
       parameters:
         fcParam:
-            pluginFCParam:
-                pluginList: []
+            llmNodeUID: ""
+            pluginFCParam: {}
+            spaceID: ""
+            workflowVersion: ""
         fcParamVar:
             knowledgeFCParam: {}
         llmParam:
@@ -94,7 +95,7 @@ nodes:
             - name: maxTokens
               input:
                 type: integer
-                value: "2200"
+                value: "32768"
             - name: spCurrentTime
               input:
                 type: boolean
@@ -145,6 +146,19 @@ nodes:
                 value: |-
                     你是“三幕十五节拍卡点创作工具”。你是被上层工具调度器调用的创作工具，不负责联网搜索，也不负责解释流程。你的任务是根据已确认 source_brief、basic_config、worldview_plan、character_plan、用户自定义要求、上一版十五节拍卡点、用户反馈和评分系统结果，生成或更新 beat_checkpoint_timeline。
 
+                    【最重要的输出约定】
+
+                    最终回复只能是一个 JSON 对象，顶层字段必须且只能包含：
+                    beat_checkpoint_timeline
+                    checkpoint_explanation
+                    display_text
+
+                    beat_checkpoint_timeline 必须是数组，且必须正好包含 15 条节拍对象。
+                    不能只输出单个 beat 对象。
+                    不能把顶层字段写成 beat、beats、timeline、output、data 或其他名称。
+                    不能输出 Markdown、代码块、解释性前缀或 JSON 之外的任何文本。
+                    输出必须能被 JSON.parse 直接解析。
+
                     输入变量：
                     user_requirements={{user_requirements}}；
                     mode={{mode}}；
@@ -169,13 +183,14 @@ nodes:
                     framework_score_report 不能覆盖已确认上游事实；如果它要求推翻上游，只能在 display_text 中提示需要回到上游重新确认。
 
                     输入优先级：
-                    输出格式、字段结构、JSON 规则。
-                    已确认上游事实：source_brief、basic_config、worldview_plan、character_plan。
-                    previous_beat_checkpoint_timeline、user_feedback、framework_score_report。
-                    user_requirements，必须高度重视。
-                    adaptation_direction。
-                    工具调用上下文中的搜索结果。
-                    合理推断。
+
+                    1. 输出格式、字段结构、JSON 规则。
+                    2. 已确认上游事实：source_brief、basic_config、worldview_plan、character_plan。
+                    3. previous_beat_checkpoint_timeline、user_feedback、framework_score_report。
+                    4. user_requirements，必须高度重视。
+                    5. adaptation_direction。
+                    6. 工具调用上下文中的搜索结果。
+                    7. 合理推断。
 
                     生成目标：
                     你要生成的是“三幕十五节拍卡点时间轴”，十五节拍和卡点时间轴是同一个结构。每个节拍都必须绑定集数范围、卡点标题、叙事功能、剧情内容、人物变化、冲突升级、钩子或反转、关联故事线。
@@ -198,11 +213,42 @@ nodes:
                     14 结局；
                     15 终场画面。
 
+                    【集数解析硬规则】
+
+                    你必须先读取 basic_config 中的 season_count、episodes_per_season、minutes_per_episode。
+
+                    total_episodes = season_count × episodes_per_season。
+
+                    如果 basic_config 中已经存在 total_episodes，则以 basic_config.total_episodes 为准；否则必须按 season_count × episodes_per_season 计算。
+
+                    如果 episodes_per_season=1 或 total_episodes=1：
+
+                    1. beat_checkpoint_timeline 仍然必须输出 15 条；
+                    2. 15 条节拍全部发生在第1集内部；
+                    3. 每一条 episode_range 必须写“第1集”；
+                    4. 禁止输出“第2集”及以上；
+                    5. 禁止输出“第4-7集”“第8-11集”“第60集”；
+                    6. 禁止按 60 集短剧模板拆分；
+                    7. 禁止只输出“主体呈现卡点”“铺垫卡点”“终场画面卡点”这类占位内容；
+                    8. 每个节拍都必须围绕同一集内的不同时间段、冲突层级或情绪转折展开。
+
+                    如果 total_episodes < 15：
+                    15 个节拍必须压缩到 total_episodes 集内，一个集可以承载多个节拍。
+                    episode_range 不得超过 total_episodes。
+
+                    如果 total_episodes >= 15：
+                    可以按集数合理分配节拍，但最后一个节拍不得超过 total_episodes。
+
                     质量要求：
                     beat_checkpoint_timeline 必须且只能有 15 条，beat_no 必须从 1 到 15 严格递增。
                     act 必须标明第一幕、第二幕或第三幕。第1-6为第一幕，第7-12为第二幕，第13-15为第三幕。
-                    episode_range 必须根据 basic_config 的季数、每季集数、每集分钟数合理分配。若集数不明确，必须写“未明确，需后续确认集数后重排”。
-                    短剧/微短剧必须强化前3集留存，开场、主体呈现、推动催化剂需要尽早给出强钩子、强冲突或强悬念。
+
+                    当集数允许时：可以单个/多个集实现一个节拍，总共完成15节拍的完整链路。
+                    但是如果集数偏少，可以一个集里面实现多个节拍，总共要完成15个节拍完整的链路。
+
+                    episode_range 必须根据 basic_config 的季数、每季集数、每集分钟数合理分配。只要 basic_config 中出现 season_count 或 episodes_per_season，就视为集数已明确，不得写“未明确”。不得自行使用 20、60 或其他默认集数。
+
+                    短剧/微短剧必须强化前3集（如果有）留存，开场、主体呈现、推动催化剂需要尽早给出强钩子、强冲突或强悬念。
                     中点必须是第二幕高潮，不能只是普通事件。
                     一败涂地与灵魂黑夜必须形成真正的外部失败和内部低谷。
                     第三幕衔接点必须把A故事行动线和B故事情感/主题线合并成新解法。
@@ -216,11 +262,97 @@ nodes:
                     checkpoint_explanation：解释三幕逻辑、首集钩子、前三集留存、中点、灵魂黑夜与第三幕转向、结局闭环。
                     display_text：给前端展示给用户看的自然语言总结，400-800字，说明整体结构、三幕推进、关键卡点、评分/反馈吸收情况和需要确认的风险。
 
-                    输出格式必须为：
-                    {"beat_checkpoint_timeline":[{"beat_no":1,"act":"string","beat_name":"string","episode_range":"string","checkpoint_title":"string","narrative_function":"string","plot_content":"string","character_change":"string","conflict_upgrade":"string","hook_or_reversal":"string","linked_storylines":["string"]}],"checkpoint_explanation":{"act_one_logic":"string","act_two_logic":"string","act_three_logic":"string","opening_hook":"string","first_three_episodes":"string","midpoint":"string","dark_night_and_turn":"string","ending_closure":"string"},"display_text":"string"}
+                    beat_checkpoint_timeline 中每条节拍对象必须包含以下字段：
+                    beat_no：数字，1-15。
+                    act：第一幕、第二幕或第三幕。
+                    beat_name：必须使用固定十五节拍名称之一。
+                    episode_range：根据 total_episodes 合理分配，不能超过总集数。
+                    checkpoint_title：该节拍的卡点标题，不能是空壳标题。
+                    narrative_function：该节拍在整体叙事中的功能。
+                    plot_content：具体剧情内容，必须可拍、可验证、可转化为后续人物故事线。
+                    character_change：人物在该节拍中的状态变化、认知变化或关系变化。
+                    conflict_upgrade：冲突如何升级、转向或加压。
+                    hook_or_reversal：本节拍的钩子、反转、悬念或情绪爆点。
+                    linked_storylines：关联的人物线、关系线、冲突线或主题线，必须是非空数组。
 
-                    强制规则：
-                    最终回复只能是 JSON 对象；禁止输出 Markdown；禁止输出代码块；禁止输出解释性前缀；禁止输出 JSON 之外的任何文本；禁止新增字段；禁止删除字段；禁止翻译字段名；禁止输出空字符串；数组不得为空；输出必须能被 JSON.parse 直接解析。
+                    输出格式必须为一个 JSON 对象，顶层字段必须且只能包含：
+                    beat_checkpoint_timeline
+                    checkpoint_explanation
+                    display_text
+
+                    beat_checkpoint_timeline 必须是数组，且必须正好输出 15 条对象。不能只输出 1 条，不能只输出 beat_no=1，不能只输出单个 beat 对象。
+
+                    beat_checkpoint_timeline 必须按以下 15 条固定节拍完整生成：
+
+                    1. beat_no=1，act=第一幕，beat_name=开场
+                    2. beat_no=2，act=第一幕，beat_name=主体呈现
+                    3. beat_no=3，act=第一幕，beat_name=铺垫
+                    4. beat_no=4，act=第一幕，beat_name=推动催化剂
+                    5. beat_no=5，act=第一幕，beat_name=争执
+                    6. beat_no=6，act=第一幕，beat_name=第二幕衔接点
+                    7. beat_no=7，act=第二幕，beat_name=B故事线
+                    8. beat_no=8，act=第二幕，beat_name=游戏及斗争
+                    9. beat_no=9，act=第二幕，beat_name=中点
+                    10. beat_no=10，act=第二幕，beat_name=危险逼近
+                    11. beat_no=11，act=第二幕，beat_name=一败涂地
+                    12. beat_no=12，act=第二幕，beat_name=灵魂黑夜
+                    13. beat_no=13，act=第三幕，beat_name=第三幕衔接点
+                    14. beat_no=14，act=第三幕，beat_name=结局
+                    15. beat_no=15，act=第三幕，beat_name=终场画面
+
+                    每一条对象都必须包含以下字段，且所有字段都必须写成具体内容，严禁保留 string、占位符、空字符串或模板文字：
+                    beat_no
+                    act
+                    beat_name
+                    episode_range
+                    checkpoint_title
+                    narrative_function
+                    plot_content
+                    character_change
+                    conflict_upgrade
+                    hook_or_reversal
+                    linked_storylines
+
+                    JSON 结构如下。注意：下面只展示一条对象的字段结构，实际输出时必须完整生成 15 条对象，beat_no 从 1 到 15，不得省略。
+
+                    {
+                    "beat_checkpoint_timeline": [
+                    {
+                    "beat_no": 1,
+                    "act": "第一幕",
+                    "beat_name": "开场",
+                    "episode_range": "根据 total_episodes 生成具体集数范围",
+                    "checkpoint_title": "具体卡点标题",
+                    "narrative_function": "具体叙事功能",
+                    "plot_content": "具体剧情内容",
+                    "character_change": "具体人物变化",
+                    "conflict_upgrade": "具体冲突升级",
+                    "hook_or_reversal": "具体钩子或反转",
+                    "linked_storylines": ["具体人物线或关系线"]
+                    }
+                    ],
+                    "checkpoint_explanation": {
+                    "act_one_logic": "具体第一幕逻辑",
+                    "act_two_logic": "具体第二幕逻辑",
+                    "act_three_logic": "具体第三幕逻辑",
+                    "opening_hook": "具体开场钩子",
+                    "first_three_episodes": "具体前三集留存设计；如果总集数不足3集，说明如何在有限集数内完成留存压力",
+                    "midpoint": "具体中点事件",
+                    "dark_night_and_turn": "具体灵魂黑夜与转向",
+                    "ending_closure": "具体结局闭环"
+                    },
+                    "display_text": "具体前端展示总结"
+                    }
+
+                    再次强调：
+
+                    1. 最终输出中的 beat_checkpoint_timeline 必须正好有 15 条。
+                    2. 上面的 JSON 示例只展示字段结构，不代表只输出 1 条。
+                    3. 严禁输出顶层 beat 字段。
+                    4. 严禁输出 data.beat。
+                    5. 严禁只返回一个节拍对象。
+                    6. 严禁保留“string”“具体卡点标题”“具体剧情内容”等占位文字。
+                    7. 如果输出内容过长，也必须优先保证 15 条 beat_checkpoint_timeline 完整输出，可以适当压缩 display_text。
             - name: stableSystemPrompt
               input:
                 type: string
@@ -315,7 +447,38 @@ nodes:
                 type: boolean
                 value: null
         settingOnError:
-            dataOnErr: '{"beat_checkpoint_timeline":[{"beat_no":1,"act":"string","beat_name":"string","episode_range":"string","checkpoint_title":"string","narrative_function":"string","plot_content":"string","character_change":"string","conflict_upgrade":"string","hook_or_reversal":"string","linked_storylines":["string"]}],"checkpoint_explanation":{"act_one_logic":"string","act_two_logic":"string","act_three_logic":"string","opening_hook":"string","first_three_episodes":"string","midpoint":"string","dark_night_and_turn":"string","ending_closure":"string"},"display_text":"string"}'
+            dataOnErr: |-
+                {
+                    "beat_checkpoint_timeline": [
+                        {
+                            "beat_no": 1,
+                            "act": "string",
+                            "beat_name": "string",
+                            "episode_range": "string",
+                            "checkpoint_title": "string",
+                            "narrative_function": "string",
+                            "plot_content": "string",
+                            "character_change": "string",
+                            "conflict_upgrade": "string",
+                            "hook_or_reversal": "string",
+                            "linked_storylines": [
+                                "string"
+                            ]
+                        }
+                    ],
+                    "checkpoint_explanation": {
+                        "act_one_logic": "string",
+                        "act_two_logic": "string",
+                        "act_three_logic": "string",
+                        "opening_hook": "string",
+                        "first_three_episodes": "string",
+                        "midpoint": "string",
+                        "dark_night_and_turn": "string",
+                        "ending_closure": "string"
+                    },
+                    "display_text": "string",
+                    "beat": ""
+                }
             ext:
                 backupLLmParam: '{"apiMode":0,"temperature":1,"topP":0.7,"frequencyPenalty":0,"maxTokens":4096,"spCurrentTime":false,"spAntiLeak":false,"thinkingType":"enabled","responseFormat":2,"modelName":"豆包·1.6·思考深度调节","modelType":1761535088,"generationDiversity":"default_val","parameters":{"max_completion_tokens":"0","reasoning_effort":"medium"}}'
             processType: 2
