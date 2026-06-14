@@ -1930,6 +1930,150 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=500, fallback="模型列表加载失败，请稍后重试。")
         return _json_ok(models=models, workflow_spec_path=spec_path)
 
+
+    # HOT_REVIEW_ASSET_PERSIST_V5
+    def _script_audit_asset_title_from_payload(payload: dict) -> str:
+        if not isinstance(payload, dict):
+            return ""
+        audit = payload.get("audit") if isinstance(payload.get("audit"), dict) else {}
+        view = payload.get("view") if isinstance(payload.get("view"), dict) else {}
+        meta = audit.get("meta") if isinstance(audit.get("meta"), dict) else {}
+        view_meta = view.get("meta") if isinstance(view.get("meta"), dict) else {}
+        direct = (
+            meta.get("script_title")
+            or view_meta.get("script_title")
+            or audit.get("script_title")
+            or view.get("script_title")
+            or payload.get("script_title")
+            or ""
+        )
+        if str(direct or "").strip():
+            return str(direct).strip()
+        raw = str(payload.get("answer_text") or payload.get("text") or payload.get("raw_text") or "")
+        match = re.search(r"""["']script_title["']\s*:\s*["']([^"']{1,120})["']""", raw)
+        return match.group(1).strip() if match else ""
+
+    def _script_audit_asset_summary_from_payload(payload: dict) -> str:
+        if not isinstance(payload, dict):
+            return "结构化爆款文审核结果"
+        audit = payload.get("audit") if isinstance(payload.get("audit"), dict) else {}
+        overall = audit.get("overall") if isinstance(audit.get("overall"), dict) else {}
+        return str(
+            overall.get("core_judgement")
+            or overall.get("final_judgement")
+            or overall.get("summary")
+            or payload.get("summary")
+            or "结构化爆款文审核结果"
+        ).strip()
+
+    def _persist_script_audit_ecg_asset_metadata(saved_asset, result, flattened, request_payload, user_id: int):
+        if not isinstance(saved_asset, dict):
+            return saved_asset
+        if not isinstance(result, dict):
+            result = {}
+        if not isinstance(flattened, dict):
+            flattened = {}
+
+        merged = {}
+        merged.update(result)
+        merged.update(flattened)
+
+        is_audit = str(merged.get("result_type") or merged.get("resultType") or "").strip() == "script_audit_ecg"
+        audit = merged.get("audit") if isinstance(merged.get("audit"), dict) else None
+        view = merged.get("view") if isinstance(merged.get("view"), dict) else None
+        if not is_audit and not audit and not view:
+            return saved_asset
+
+        project_id = saved_asset.get("project_id") or saved_asset.get("id")
+        try:
+            project_id_int = int(project_id)
+        except Exception:
+            return saved_asset
+
+        snapshot = task_manager.get_project_snapshot(project_id_int, user_id=user_id)
+        if not isinstance(snapshot, dict):
+            return saved_asset
+
+        script_title = _script_audit_asset_title_from_payload(merged)
+        title = f"爆款文审核｜{script_title}" if script_title else str(saved_asset.get("title") or "爆款文审核").strip()
+        summary = _script_audit_asset_summary_from_payload(merged)
+
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        artifacts = copy.deepcopy(artifacts)
+
+        if audit:
+            artifacts["audit"] = copy.deepcopy(audit)
+            snapshot["audit"] = copy.deepcopy(audit)
+        if view:
+            artifacts["view"] = copy.deepcopy(view)
+            snapshot["view"] = copy.deepcopy(view)
+
+        tool_result = {
+            "tool_key": "hot_review",
+            "asset_type": "hot_review",
+            "asset_kind": "tool_result",
+            "category": "hot_review",
+            "result_type": "script_audit_ecg",
+            "resultType": "script_audit_ecg",
+            "parsed": True,
+            "title": title,
+            "script_title": script_title,
+            "summary": summary,
+            "text": str(merged.get("text") or "").strip(),
+            "answer_text": str(merged.get("answer_text") or merged.get("answerText") or merged.get("text") or "").strip(),
+            "filename": str(merged.get("filename") or saved_asset.get("tool_filename") or "").strip(),
+            "parse_warnings": merged.get("parse_warnings") or merged.get("parseWarnings") or [],
+        }
+        if audit:
+            tool_result["audit"] = copy.deepcopy(audit)
+        if view:
+            tool_result["view"] = copy.deepcopy(view)
+
+        artifacts["tool_result"] = tool_result
+        artifacts["result"] = tool_result
+        if tool_result["answer_text"]:
+            artifacts["final_output_text"] = tool_result["answer_text"]
+        elif tool_result["text"]:
+            artifacts["final_output_text"] = tool_result["text"]
+        snapshot["artifacts"] = artifacts
+
+        input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+        input_payload = copy.deepcopy(input_payload)
+        if isinstance(request_payload, dict):
+            input_payload.update(copy.deepcopy(request_payload))
+        snapshot["input_payload"] = input_payload
+
+        snapshot["tool_key"] = "hot_review"
+        snapshot["tool_label"] = f"爆款文审核｜{script_title}" if script_title else "爆款文审核"
+        snapshot["tool_output_type"] = "script_audit_ecg"
+        snapshot["asset_kind"] = "tool_result"
+        snapshot["asset_type"] = "hot_review"
+        snapshot["category"] = "hot_review"
+        snapshot["workflow_type"] = "hot_review"
+        snapshot["result_type"] = "script_audit_ecg"
+        snapshot["resultType"] = "script_audit_ecg"
+        snapshot["parsed"] = True
+        snapshot["title"] = title
+        snapshot["summary"] = summary
+        if script_title:
+            snapshot["script_title"] = script_title
+
+        snapshot["updated_at"] = _now_iso()
+
+        record = task_manager._projects.get(project_id_int) or task_manager._projects.get(str(project_id_int))
+        if record:
+            with record.lock:
+                record.snapshot = snapshot
+            task_manager._persist_snapshot(record)
+        else:
+            task_manager._project_path(project_id_int).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+
+        return snapshot
+
+
     @app.get("/api/tools")
     @_login_required
     def list_tools():
@@ -1976,6 +2120,58 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         except Exception as exc:
             return _json_error(str(exc), status=500, fallback="工具执行失败，请稍后重试。")
         result, flattened = _maybe_enrich_script_audit_ecg_tool_result(tool_key, result, dict(result))
+        # HOT_REVIEW_ASSET_SAVE_V4
+        if str(flattened.get("result_type") or result.get("result_type") or "").strip() == "script_audit_ecg":
+            import re as _script_audit_re
+
+            def _hot_review_script_title_from_payload(value):
+                if not isinstance(value, dict):
+                    return ""
+                audit = value.get("audit") if isinstance(value.get("audit"), dict) else {}
+                view = value.get("view") if isinstance(value.get("view"), dict) else {}
+                meta = audit.get("meta") if isinstance(audit.get("meta"), dict) else {}
+                view_meta = view.get("meta") if isinstance(view.get("meta"), dict) else {}
+                direct = (
+                    meta.get("script_title")
+                    or view_meta.get("script_title")
+                    or audit.get("script_title")
+                    or view.get("script_title")
+                    or value.get("script_title")
+                    or ""
+                )
+                if str(direct or "").strip():
+                    return str(direct).strip()
+                raw = str(value.get("answer_text") or value.get("text") or "")
+                match = _script_audit_re.search(r"""["']script_title["']\s*:\s*["']([^"']{1,120})["']""", raw)
+                return match.group(1).strip() if match else ""
+
+            _audit_payload = flattened.get("audit") if isinstance(flattened.get("audit"), dict) else {}
+            _overall = _audit_payload.get("overall") if isinstance(_audit_payload.get("overall"), dict) else {}
+            _script_title = _hot_review_script_title_from_payload(flattened) or _hot_review_script_title_from_payload(result)
+            _asset_title = f"爆款文审核｜{_script_title}" if _script_title else "爆款文审核"
+            _asset_summary = str(
+                _overall.get("core_judgement")
+                or _overall.get("final_judgement")
+                or _overall.get("summary")
+                or "结构化爆款文审核结果"
+            ).strip()
+
+            for _target in (result, flattened):
+                if not isinstance(_target, dict):
+                    continue
+                _target["tool_key"] = "hot_review"
+                _target["asset_kind"] = "tool_result"
+                _target["asset_type"] = "hot_review"
+                _target["category"] = "hot_review"
+                _target["workflow_type"] = "hot_review"
+                _target["result_type"] = "script_audit_ecg"
+                _target["resultType"] = "script_audit_ecg"
+                _target["parsed"] = True
+                if _script_title:
+                    _target["script_title"] = _script_title
+                _target["title"] = _asset_title
+                _target["summary"] = _asset_summary
+
         asset_saved = False
         saved_asset = None
         asset_save_error = ""
@@ -1988,6 +2184,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     result=result,
                 )
                 asset_saved = True
+                saved_asset = _persist_script_audit_ecg_asset_metadata(
+                    saved_asset,
+                    result,
+                    flattened,
+                    data if isinstance(data, dict) else {},
+                    _require_user_id(),
+                )
             except Exception as exc:
                 asset_save_error = _sanitize_error_message(
                     str(exc),

@@ -2109,52 +2109,733 @@ startRuntimeDebugPolling();
     return String(assetLike?.asset_kind || "").trim() === "tool_result";
   }
 
-  function isHotReviewAsset(assetLike) {
-    const values = [
-      assetLike?.tool_key,
-      assetLike?.tool_id,
-      assetLike?.tool_label,
-      assetLike?.asset_type,
-      assetLike?.result_type,
-      assetLike?.result?.result_type,
-      assetLike?.artifacts?.result_type,
-      assetLike?.artifacts?.tool_result?.result_type
-    ].map((value) => String(value || "").trim());
-    return values.some((value) =>
-      value === "hot_review"
-      || value === "script_audit_ecg"
-      || value === "爆款文审核"
-      || value.includes("爆款文审核")
-    );
+  /* HOT_REVIEW_ASSETS_V3_SAFE */
+  function hotReviewJsonText(value) {
+    try {
+      return JSON.stringify(value || {});
+    } catch (_) {
+      return "";
+    }
   }
 
-  function toolResultFromAsset(assetLike) {
-    const artifacts = assetLike?.artifacts || {};
-    const result = assetLike?.result
-      || assetLike?.tool_result
+  function hotReviewAssetKey(item) {
+    const key = item?.project_id
+      || item?.id
+      || item?.asset_id
+      || item?.assetId
+      || item?.saved_asset_id
+      || item?.savedAssetId
+      || "";
+    return String(key || "").trim();
+  }
+
+  function hotReviewResultObject(item) {
+    const artifacts = item?.artifacts || {};
+    return item?.result
+      || item?.tool_result
       || artifacts.tool_result
       || artifacts.result
       || artifacts.output
       || {};
-    const fallbackText = result.text
-      || result.answer_text
-      || artifacts.final_output_text
-      || artifacts.final_script
+  }
+
+  function hotReviewFirstText(item) {
+    if (!item || typeof item !== "object") return String(item || "").trim();
+
+    const artifacts = item.artifacts || {};
+    const result = hotReviewResultObject(item);
+    const candidates = [
+      result.text,
+      result.answer_text,
+      result.answerText,
+      result.content,
+      result.output,
+      item.text,
+      item.answer_text,
+      item.answerText,
+      item.content,
+      item.output,
+      item.final_output_text,
+      artifacts.text,
+      artifacts.answer_text,
+      artifacts.answerText,
+      artifacts.content,
+      artifacts.output,
+      artifacts.final_output_text,
+      artifacts.final_script
+    ];
+
+    return String(candidates.find((value) => String(value || "").trim()) || "").trim();
+  }
+
+  function hotReviewDeepText(item) {
+    if (!item || typeof item !== "object") return String(item || "");
+    const artifacts = item.artifacts || {};
+    const result = hotReviewResultObject(item);
+
+    return [
+      item.tool_key,
+      item.tool_id,
+      item.tool_label,
+      item.asset_type,
+      item.asset_kind,
+      item.category,
+      item.type,
+      item.result_type,
+      item.resultType,
+      item.title,
+      item.name,
+      item.summary,
+      hotReviewFirstText(item),
+
+      result.tool_key,
+      result.tool_id,
+      result.tool_label,
+      result.asset_type,
+      result.asset_kind,
+      result.category,
+      result.result_type,
+      result.resultType,
+      result.title,
+      hotReviewFirstText(result),
+
+      artifacts.asset_type,
+      artifacts.asset_kind,
+      artifacts.category,
+      artifacts.result_type,
+      artifacts.resultType,
+      hotReviewFirstText(artifacts),
+
+      hotReviewJsonText(item.audit),
+      hotReviewJsonText(item.view),
+      hotReviewJsonText(result.audit),
+      hotReviewJsonText(result.view),
+      hotReviewJsonText(artifacts.audit),
+      hotReviewJsonText(artifacts.view),
+      hotReviewJsonText(result),
+      hotReviewJsonText(artifacts)
+    ].filter(Boolean).join("\n");
+  }
+
+  function hotReviewLooksLikeAuditPayload(payload) {
+    return looksLikeScriptAuditPayload(payload)
+      || Boolean(
+        payload
+        && typeof payload === "object"
+        && (
+          String(payload.schema_version || "").includes("script_audit_ecg")
+          || String(payload.result_type || payload.resultType || "").includes("script_audit_ecg")
+          || Boolean(payload.audit && payload.view)
+          || Boolean(payload.overall && (payload.dimension_scores || payload.ecg || payload.key_issues || payload.rewrite_plan))
+        )
+      );
+  }
+
+  function hotReviewParsedTextCandidates(text) {
+    const parsed = parseScriptAuditJsonFromText(text);
+    if (!parsed || typeof parsed !== "object") return [];
+    return [
+      parsed,
+      parsed.audit,
+      parsed.result,
+      parsed.output,
+      parsed.data
+    ].filter(Boolean);
+  }
+
+  function hotReviewExtractAuditView(source) {
+    if (!source || typeof source !== "object") {
+      return { audit: null, view: null };
+    }
+
+    const artifacts = source.artifacts || {};
+    const result = hotReviewResultObject(source);
+    const saved = source.savedAsset || source.saved_asset || {};
+    const savedArtifacts = saved.artifacts || {};
+    const savedResult = hotReviewResultObject(saved);
+
+    let view = source.view
+      || result.view
+      || artifacts.view
+      || saved.view
+      || savedResult.view
+      || savedArtifacts.view
+      || null;
+
+    const textCandidates = [
+      hotReviewFirstText(source),
+      hotReviewFirstText(result),
+      hotReviewFirstText(artifacts),
+      hotReviewFirstText(saved),
+      hotReviewFirstText(savedResult),
+      source.text,
+      source.answer_text,
+      source.answerText,
+      source.content,
+      source.output,
+      source.raw_text,
+      source.final_output_text,
+      result.text,
+      result.answer_text,
+      result.answerText,
+      result.content,
+      result.output,
+      artifacts.text,
+      artifacts.content,
+      artifacts.output,
+      artifacts.final_output_text
+    ].filter(Boolean);
+
+    const candidates = [
+      source.audit,
+      result.audit,
+      artifacts.audit,
+      saved.audit,
+      savedResult.audit,
+      savedArtifacts.audit,
+      source,
+      result,
+      artifacts,
+      saved,
+      savedResult,
+      ...textCandidates.flatMap((text) => hotReviewParsedTextCandidates(text))
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+      if (candidate?.audit && candidate?.view) {
+        return { audit: candidate.audit, view: view || candidate.view };
+      }
+      if (hotReviewLooksLikeAuditPayload(candidate)) {
+        return { audit: candidate.audit && candidate.view ? candidate.audit : candidate, view };
+      }
+    }
+
+    return { audit: null, view };
+  }
+
+  function hotReviewAssetTitle(item) {
+    const extracted = hotReviewExtractAuditView(item);
+    const audit = extracted.audit || {};
+    const view = extracted.view || {};
+    const direct = audit?.meta?.script_title
+      || view?.meta?.script_title
+      || audit?.script_title
+      || view?.script_title
       || "";
-    return {
+
+    if (String(direct || "").trim()) return String(direct).trim();
+
+    const raw = hotReviewDeepText(item);
+    const match = raw.match(/["']script_title["']\s*:\s*["']([^"']{1,120})["']/);
+    if (match?.[1]) return match[1].trim();
+
+    const fallback = projectDisplayTitle(item);
+    return fallback && !["未选中", "未命名剧本"].includes(fallback) ? fallback : "未命名爆款文审核";
+  }
+
+  function hotReviewAssetScore(item) {
+    const { audit } = hotReviewExtractAuditView(item);
+    return audit?.overall?.total_score ?? audit?.overall?.score ?? "";
+  }
+
+  function hotReviewUniqueAssets(items) {
+    const map = new Map();
+    for (const item of Array.isArray(items) ? items : []) {
+      if (!isHotReviewAsset(item)) continue;
+      const key = hotReviewAssetKey(item) || hotReviewAssetTitle(item);
+      if (!key) continue;
+      map.set(key, { ...(map.get(key) || {}), ...item });
+    }
+
+    return [...map.values()].sort((a, b) =>
+      String(b.updated_at || b.created_at || b.createdAt || "")
+        .localeCompare(String(a.updated_at || a.created_at || a.createdAt || ""))
+    );
+  }
+
+  function hotReviewFindAsset(key) {
+    const target = String(key || "").trim();
+    if (!target) return null;
+
+    const pool = [
+      ...(Array.isArray(state.assets) ? state.assets : []),
+      ...(Array.isArray(state.projects) ? state.projects : []),
+      state.latestSnapshot
+    ].filter(Boolean);
+
+    return pool.find((item) =>
+      String(hotReviewAssetKey(item)) === target
+      || String(item?.project_id || "") === target
+      || String(item?.id || "") === target
+      || String(item?.asset_id || item?.assetId || "") === target
+      || String(hotReviewAssetTitle(item)) === target
+    ) || null;
+  }
+
+  function hotReviewInputText(item) {
+    const input = item?.input_payload || item?.request_payload || item?.tool_request || {};
+    return String(input.review_text || input.text || input.input || "").trim();
+  }
+
+  /* HOT_REVIEW_ASSET_V4 */
+  function hotReviewJsonTextV4(value) {
+    try {
+      return JSON.stringify(value || {});
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function hotReviewAssetKeyV4(item) {
+    return String(
+      item?.project_id
+      || item?.id
+      || item?.asset_id
+      || item?.assetId
+      || item?.saved_asset_id
+      || item?.savedAssetId
+      || ""
+    ).trim();
+  }
+
+  function hotReviewResultObjectV4(item) {
+    const artifacts = item?.artifacts || {};
+    return item?.result
+      || item?.tool_result
+      || artifacts.tool_result
+      || artifacts.result
+      || artifacts.output
+      || {};
+  }
+
+  function hotReviewFirstTextV4(item) {
+    if (!item || typeof item !== "object") return String(item || "").trim();
+
+    const artifacts = item.artifacts || {};
+    const result = hotReviewResultObjectV4(item);
+    const candidates = [
+      result.text,
+      result.answer_text,
+      result.answerText,
+      result.content,
+      result.output,
+      item.text,
+      item.answer_text,
+      item.answerText,
+      item.content,
+      item.output,
+      item.final_output_text,
+      item.tool_text,
+      item.tool_output,
+      item.raw_text,
+      artifacts.text,
+      artifacts.answer_text,
+      artifacts.answerText,
+      artifacts.content,
+      artifacts.output,
+      artifacts.final_output_text,
+      artifacts.final_script,
+      artifacts.raw_text
+    ];
+
+    return String(candidates.find((value) => String(value || "").trim()) || "").trim();
+  }
+
+  function hotReviewDeepTextV4(item) {
+    if (!item || typeof item !== "object") return String(item || "");
+    const artifacts = item.artifacts || {};
+    const result = hotReviewResultObjectV4(item);
+
+    return [
+      item.tool_key,
+      item.tool_id,
+      item.tool_label,
+      item.tool_filename,
+      item.filename,
+      item.asset_type,
+      item.asset_kind,
+      item.category,
+      item.type,
+      item.workflow_type,
+      item.result_type,
+      item.resultType,
+      item.title,
+      item.name,
+      item.summary,
+      hotReviewFirstTextV4(item),
+
+      result.tool_key,
+      result.tool_id,
+      result.tool_label,
+      result.tool_filename,
+      result.filename,
+      result.asset_type,
+      result.asset_kind,
+      result.category,
+      result.type,
+      result.result_type,
+      result.resultType,
+      result.title,
+      result.name,
+      result.summary,
+      hotReviewFirstTextV4(result),
+
+      artifacts.tool_key,
+      artifacts.tool_id,
+      artifacts.tool_label,
+      artifacts.tool_filename,
+      artifacts.filename,
+      artifacts.asset_type,
+      artifacts.asset_kind,
+      artifacts.category,
+      artifacts.type,
+      artifacts.result_type,
+      artifacts.resultType,
+      hotReviewFirstTextV4(artifacts),
+
+      hotReviewJsonTextV4(item.audit),
+      hotReviewJsonTextV4(item.view),
+      hotReviewJsonTextV4(result.audit),
+      hotReviewJsonTextV4(result.view),
+      hotReviewJsonTextV4(artifacts.audit),
+      hotReviewJsonTextV4(artifacts.view),
+      hotReviewJsonTextV4(result),
+      hotReviewJsonTextV4(artifacts)
+    ].filter(Boolean).join("\n");
+  }
+
+  function hotReviewLooksLikeAuditPayloadV4(payload) {
+    return looksLikeScriptAuditPayload(payload)
+      || Boolean(
+        payload
+        && typeof payload === "object"
+        && (
+          String(payload.schema_version || "").includes("script_audit_ecg")
+          || String(payload.result_type || payload.resultType || "").includes("script_audit_ecg")
+          || Boolean(payload.audit && payload.view)
+          || Boolean(payload.overall && (payload.dimension_scores || payload.ecg || payload.key_issues || payload.rewrite_plan))
+        )
+      );
+  }
+
+  function hotReviewParsedTextCandidatesV4(text) {
+    const parsed = parseScriptAuditJsonFromText(text);
+    if (!parsed || typeof parsed !== "object") return [];
+    return [
+      parsed,
+      parsed.audit,
+      parsed.result,
+      parsed.output,
+      parsed.data
+    ].filter(Boolean);
+  }
+
+  function hotReviewExtractAuditViewV4(source) {
+    if (!source || typeof source !== "object") {
+      return { audit: null, view: null };
+    }
+
+    const artifacts = source.artifacts || {};
+    const result = hotReviewResultObjectV4(source);
+    const saved = source.savedAsset || source.saved_asset || {};
+    const savedArtifacts = saved.artifacts || {};
+    const savedResult = hotReviewResultObjectV4(saved);
+
+    let view = source.view
+      || result.view
+      || artifacts.view
+      || saved.view
+      || savedResult.view
+      || savedArtifacts.view
+      || null;
+
+    const textCandidates = [
+      hotReviewFirstTextV4(source),
+      hotReviewFirstTextV4(result),
+      hotReviewFirstTextV4(artifacts),
+      hotReviewFirstTextV4(saved),
+      hotReviewFirstTextV4(savedResult),
+      source.text,
+      source.answer_text,
+      source.answerText,
+      source.content,
+      source.output,
+      source.raw_text,
+      source.final_output_text,
+      result.text,
+      result.answer_text,
+      result.answerText,
+      result.content,
+      result.output,
+      artifacts.text,
+      artifacts.content,
+      artifacts.output,
+      artifacts.final_output_text
+    ].filter(Boolean);
+
+    const candidates = [
+      source.audit,
+      result.audit,
+      artifacts.audit,
+      saved.audit,
+      savedResult.audit,
+      savedArtifacts.audit,
+      source,
+      result,
+      artifacts,
+      saved,
+      savedResult,
+      ...textCandidates.flatMap((text) => hotReviewParsedTextCandidatesV4(text))
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+      if (candidate?.audit && candidate?.view) {
+        return { audit: candidate.audit, view: view || candidate.view };
+      }
+      if (hotReviewLooksLikeAuditPayloadV4(candidate)) {
+        return { audit: candidate.audit && candidate.view ? candidate.audit : candidate, view };
+      }
+    }
+
+    return { audit: null, view };
+  }
+
+  function hotReviewAssetTitleV4(item) {
+    const extracted = hotReviewExtractAuditViewV4(item);
+    const audit = extracted.audit || {};
+    const view = extracted.view || {};
+    const direct = audit?.meta?.script_title
+      || view?.meta?.script_title
+      || audit?.script_title
+      || view?.script_title
+      || item?.script_title
+      || item?.result?.script_title
+      || item?.artifacts?.script_title
+      || "";
+
+    if (String(direct || "").trim()) return String(direct).trim();
+
+    const raw = hotReviewDeepTextV4(item);
+    const match = raw.match(/["']script_title["']\s*:\s*["']([^"']{1,120})["']/);
+    if (match?.[1]) return match[1].trim();
+
+    const fallback = projectDisplayTitle(item);
+    return fallback && !["未选中", "未命名剧本", "爆款文审核", "辅助工具"].includes(fallback)
+      ? fallback
+      : "未命名爆款文审核";
+  }
+
+  function hotReviewAssetScoreV4(item) {
+    const { audit } = hotReviewExtractAuditViewV4(item);
+    return audit?.overall?.total_score ?? audit?.overall?.score ?? "";
+  }
+
+  function hotReviewUniqueAssetsV4(items) {
+    const map = new Map();
+    for (const item of Array.isArray(items) ? items : []) {
+      if (!isHotReviewAsset(item)) continue;
+      const key = hotReviewAssetKeyV4(item) || hotReviewAssetTitleV4(item);
+      if (!key) continue;
+      map.set(key, { ...(map.get(key) || {}), ...item });
+    }
+
+    return [...map.values()].sort((a, b) =>
+      String(b.updated_at || b.created_at || b.createdAt || "")
+        .localeCompare(String(a.updated_at || a.created_at || a.createdAt || ""))
+    );
+  }
+
+  function hotReviewFindAssetV4(key) {
+    const target = String(key || "").trim();
+    if (!target) return null;
+
+    const pool = [
+      ...(Array.isArray(state.assets) ? state.assets : []),
+      ...(Array.isArray(state.projects) ? state.projects : []),
+      state.latestSnapshot
+    ].filter(Boolean);
+
+    return pool.find((item) =>
+      String(hotReviewAssetKeyV4(item)) === target
+      || String(item?.project_id || "") === target
+      || String(item?.id || "") === target
+      || String(item?.asset_id || item?.assetId || "") === target
+      || String(hotReviewAssetTitleV4(item)) === target
+    ) || null;
+  }
+
+  function hotReviewInputTextV4(item) {
+    const input = item?.input_payload || item?.request_payload || item?.tool_request || {};
+    return String(input.review_text || input.text || input.input || "").trim();
+  }
+
+  /* HOT_REVIEW_ASSET_OPEN_V5 */
+  function hotReviewAssetKeyV5(item) {
+    return String(item?.project_id || item?.id || item?.asset_id || item?.assetId || item?.saved_asset_id || "").trim();
+  }
+
+  function hotReviewResultObjectV5(item) {
+    const artifacts = item?.artifacts || {};
+    return item?.result || item?.tool_result || artifacts.tool_result || artifacts.result || artifacts.output || {};
+  }
+
+  function hotReviewFirstTextV5(item) {
+    if (!item || typeof item !== "object") return String(item || "").trim();
+    const artifacts = item.artifacts || {};
+    const result = hotReviewResultObjectV5(item);
+    const candidates = [
+      result.answer_text,
+      result.answerText,
+      result.text,
+      result.content,
+      result.output,
+      item.answer_text,
+      item.answerText,
+      item.text,
+      item.content,
+      item.output,
+      item.final_output_text,
+      item.final_preview,
+      artifacts.final_output_text,
+      artifacts.answer_text,
+      artifacts.answerText,
+      artifacts.text,
+      artifacts.content,
+      artifacts.output,
+      artifacts.final_script
+    ];
+    return String(candidates.find((value) => String(value || "").trim()) || "").trim();
+  }
+
+  function hotReviewExtractAuditViewV5(item) {
+    if (!item || typeof item !== "object") return { audit: null, view: null };
+    const artifacts = item.artifacts || {};
+    const result = hotReviewResultObjectV5(item);
+
+    let audit = item.audit || result.audit || artifacts.audit || null;
+    let view = item.view || result.view || artifacts.view || null;
+
+    if (!audit) {
+      const parsed = parseScriptAuditJsonFromText(hotReviewFirstTextV5(item));
+      if (parsed?.audit && parsed?.view) {
+        audit = parsed.audit;
+        view = view || parsed.view;
+      } else if (looksLikeScriptAuditPayload(parsed)) {
+        audit = parsed;
+      }
+    }
+
+    if (!view && audit) view = scriptAuditViewFromAudit(audit);
+    return { audit, view };
+  }
+
+  function hotReviewAssetTitleV5(item) {
+    const { audit, view } = hotReviewExtractAuditViewV5(item);
+    const direct = audit?.meta?.script_title
+      || view?.meta?.script_title
+      || audit?.script_title
+      || view?.script_title
+      || item?.script_title
+      || "";
+    if (String(direct || "").trim()) return String(direct).trim();
+
+    const label = String(item?.tool_label || item?.title || "").trim();
+    const labelMatch = label.match(/爆款文审核[｜|]\s*(.+?)(?:[｜|]|$)/);
+    if (labelMatch?.[1]) return labelMatch[1].trim();
+
+    const raw = hotReviewFirstTextV5(item);
+    const textMatch = raw.match(/《[^》]{1,80}》/);
+    if (textMatch?.[0]) return textMatch[0];
+
+    return projectDisplayTitle(item) || "未命名爆款文审核";
+  }
+
+  function hotReviewScoreV5(item) {
+    const { audit } = hotReviewExtractAuditViewV5(item);
+    return audit?.overall?.total_score ?? audit?.overall?.score ?? "";
+  }
+
+  function hotReviewUniqueAssetsV5(items) {
+    const map = new Map();
+    for (const item of Array.isArray(items) ? items : []) {
+      if (!isHotReviewAsset(item)) continue;
+      const key = hotReviewAssetKeyV5(item) || hotReviewAssetTitleV5(item);
+      if (!key) continue;
+      map.set(key, { ...(map.get(key) || {}), ...item });
+    }
+    return [...map.values()].sort((a, b) =>
+      String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || ""))
+    );
+  }
+
+  function isHotReviewAsset(assetLike) {
+    if (!assetLike) return false;
+    const artifacts = assetLike.artifacts || {};
+    const result = hotReviewResultObjectV5(assetLike);
+    const values = [
+      assetLike.tool_key,
+      assetLike.tool_id,
+      assetLike.tool_label,
+      assetLike.tool_filename,
+      assetLike.asset_type,
+      assetLike.asset_kind,
+      assetLike.category,
+      assetLike.workflow_type,
+      assetLike.result_type,
+      assetLike.resultType,
+      result.tool_key,
+      result.tool_id,
+      result.result_type,
+      result.resultType,
+      artifacts.tool_key,
+      artifacts.tool_id,
+      artifacts.result_type,
+      artifacts.tool_result?.result_type
+    ].map((value) => String(value || "").trim());
+
+    if (values.some((value) =>
+      value === "hot_review"
+      || value === "script_audit_ecg"
+      || value.includes("hot_review")
+      || value.includes("script_audit")
+      || value.includes("爆款文审核")
+    )) {
+      return true;
+    }
+
+    if (hotReviewExtractAuditViewV5(assetLike).audit) return true;
+    return /hot_review|script_audit|script_audit_ecg|爆款文审核|剧本心电图/i.test(
+      [assetLike.title, assetLike.summary, hotReviewFirstTextV5(assetLike)].filter(Boolean).join("\\n")
+    );
+  }
+
+
+
+
+  function toolResultFromAsset(assetLike) {
+    const artifacts = assetLike?.artifacts || {};
+    const result = hotReviewResultObjectV5(assetLike);
+    const { audit, view } = hotReviewExtractAuditViewV5(assetLike);
+    const fallbackText = hotReviewFirstTextV5(assetLike) || hotReviewFirstTextV5(result) || hotReviewFirstTextV5(artifacts);
+    return normalizeScriptAuditEcgResult({
+      ...assetLike,
       ...result,
       text: String(result.text || fallbackText || "").trim(),
-      answer_text: String(result.answer_text || fallbackText || "").trim(),
-      filename: result.filename || "",
-      result_type: result.result_type || assetLike?.result_type || artifacts.result_type || "",
-      parsed: result.parsed ?? assetLike?.parsed ?? artifacts.parsed ?? false,
-      audit: result.audit || assetLike?.audit || artifacts.audit || null,
-      view: result.view || assetLike?.view || artifacts.view || null,
+      answer_text: String(result.answer_text || result.answerText || fallbackText || "").trim(),
+      filename: result.filename || assetLike?.filename || assetLike?.tool_filename || "",
+      result_type: result.result_type || assetLike?.result_type || artifacts.result_type || (audit || view ? "script_audit_ecg" : ""),
+      resultType: result.resultType || result.result_type || assetLike?.resultType || assetLike?.result_type || (audit || view ? "script_audit_ecg" : ""),
+      parsed: result.parsed ?? assetLike?.parsed ?? Boolean(audit || view),
+      audit: audit || result.audit || assetLike?.audit || artifacts.audit || null,
+      view: view || result.view || assetLike?.view || artifacts.view || null,
       parse_warnings: result.parse_warnings || assetLike?.parse_warnings || artifacts.parse_warnings || [],
       assetSaved: true,
       savedAsset: assetLike
-    };
+    });
   }
+
+
+
 
   /* SCRIPT_AUDIT_ECG_SIDEBAR_V1 */
   function hotReviewSidebarAnchor() {
@@ -2202,34 +2883,35 @@ startRuntimeDebugPolling();
   }
 
   function renderHotReviewCompactItems(items, emptyMessage) {
-    const normalized = Array.isArray(items) ? items : [];
+    const normalized = hotReviewUniqueAssetsV5(items);
     if (!normalized.length) {
       return `<div class="workspace-empty">${escapeHtml(emptyMessage)}</div>`;
     }
 
     return normalized.map((item) => {
-      const projectId = String(item.project_id || item.id || "");
+      const key = hotReviewAssetKeyV5(item) || hotReviewAssetTitleV5(item);
       const updatedAt = String(item.updated_at || item.created_at || item.createdAt || "").trim();
-      const score = item?.result?.audit?.overall?.total_score
-        ?? item?.audit?.overall?.total_score
-        ?? item?.artifacts?.audit?.overall?.total_score
-        ?? "";
+      const score = hotReviewScoreV5(item);
       const scoreText = score !== "" && score !== null && score !== undefined ? ` · ${score}/100` : "";
       return `
         <button
           class="workspace-pick hot-review-workspace-pick"
           type="button"
           data-action="open-hot-review-asset"
-          data-project-id="${escapeHtml(projectId)}"
-          title="${escapeHtml(projectTooltip(item))}"
+          data-project-id="${escapeHtml(key)}"
+          data-hot-review-asset-key="${escapeHtml(key)}"
+          title="${escapeHtml(hotReviewAssetTitleV5(item))}"
         >
-          <span class="workspace-pick-title">${escapeHtml(projectDisplayTitle(item))}</span>
+          <span class="workspace-pick-title">${escapeHtml(hotReviewAssetTitleV5(item))}</span>
           <span class="workspace-pick-meta">爆款文审核${escapeHtml(scoreText)}</span>
           <span class="workspace-pick-state">${escapeHtml(updatedAt || statusLabel(item.status))}</span>
         </button>
       `;
     }).join("");
   }
+
+
+
 
   function assetTypeLabel(assetLike) {
     if (isHotReviewAsset(assetLike)) return "爆款文审核";
@@ -2380,44 +3062,63 @@ startRuntimeDebugPolling();
   function normalizeScriptAuditEcgResult(result) {
     if (!result || typeof result !== "object") return result;
 
-    if (String(result.result_type || result.resultType || "").trim() === "script_audit_ecg" && result.view) {
-      return result;
-    }
+    const extracted = hotReviewExtractAuditViewV4(result);
+    let audit = result.audit || extracted.audit || null;
+    let view = result.view || extracted.view || null;
 
     const candidates = [
-      result.audit,
+      audit,
       result.output,
       result.result,
       result.data,
+      result.tool_result,
+      result.artifacts,
+      result.savedAsset,
+      result.saved_asset,
       parseScriptAuditJsonFromText(result.text),
       parseScriptAuditJsonFromText(result.answer_text),
-      parseScriptAuditJsonFromText(result.raw_text)
+      parseScriptAuditJsonFromText(result.answerText),
+      parseScriptAuditJsonFromText(result.raw_text),
+      parseScriptAuditJsonFromText(result.content),
+      parseScriptAuditJsonFromText(result.final_output_text)
     ].filter(Boolean);
 
-    let audit = null;
     for (const candidate of candidates) {
-      if (looksLikeScriptAuditPayload(candidate)) {
-        audit = candidate.audit && candidate.view ? candidate.audit : candidate;
+      if (candidate?.audit && candidate?.view) {
+        audit = audit || candidate.audit;
+        view = view || candidate.view;
+        break;
+      }
+      if (hotReviewLooksLikeAuditPayloadV4(candidate)) {
+        audit = audit || (candidate.audit && candidate.view ? candidate.audit : candidate);
         break;
       }
     }
 
-    if (!audit) return result;
+    if (!audit && !view) return result;
+    if (!view && audit) view = scriptAuditViewFromAudit(audit);
 
-    const view = result.view || scriptAuditViewFromAudit(audit);
-    const rawText = result.text || result.answer_text || "";
+    const rawText = result.text
+      || result.answer_text
+      || result.answerText
+      || result.content
+      || hotReviewFirstTextV4(result)
+      || "";
+
     return {
       ...result,
-      text: rawText,
-      answer_text: result.answer_text || rawText,
+      text: String(rawText || "").trim(),
+      answer_text: String(result.answer_text || result.answerText || rawText || "").trim(),
       result_type: "script_audit_ecg",
       resultType: "script_audit_ecg",
       parsed: true,
-      audit,
+      audit: audit || {},
       view,
-      parse_warnings: result.parse_warnings || []
+      parse_warnings: result.parse_warnings || result.parseWarnings || []
     };
   }
+
+
 
 
   function renderAuditSummaryCards(cards) {
@@ -3187,7 +3888,7 @@ startRuntimeDebugPolling();
       return;
     }
 
-    const hotReviewProjects = projects.filter((item) => isHotReviewAsset(item));
+    const hotReviewProjects = hotReviewUniqueAssets([...(Array.isArray(projects) ? projects : []), ...(Array.isArray(state.assets) ? state.assets : [])]);
     const oldScriptProjects = projects.filter((item) => assetCategory(item) === "old_script" && !isHotReviewAsset(item));
     const frameworkProjects = projects.filter((item) => assetCategory(item) === "framework" && !isHotReviewAsset(item));
     const newScriptProjects = projects.filter((item) => assetCategory(item) === "new_script" && !isHotReviewAsset(item));
@@ -3761,7 +4462,7 @@ startRuntimeDebugPolling();
       return;
     }
     const categories = [
-      ["老剧本平台资产", assets.filter((item) => assetCategory(item) === "old_script")],
+      ["老剧本平台资产", assets.filter((item) => assetCategory(item) === "old_script" && !isHotReviewAsset(item))],
       ["爆款文审核资产", assets.filter((item) => isHotReviewAsset(item))],
       ["框架资产", assets.filter((item) => assetCategory(item) === "framework" && !isHotReviewAsset(item))],
       ["新剧本资产", assets.filter((item) => assetCategory(item) === "new_script" && !isHotReviewAsset(item))],
@@ -3779,8 +4480,8 @@ startRuntimeDebugPolling();
             : (item.completion_confirmed ? '<span class="status-pill status-pill-locked">已锁定</span>' : item.awaiting_user_confirmation ? '<span class="status-pill status-pill-pending">待确认</span>' : "")}
           <span class="status-pill ${item.visibility === "public" ? "status-pill-public" : "status-pill-private"}">${escapeHtml(visibilityLabel(item.visibility))}</span>
         </div>
-        <h3>${escapeHtml(projectDisplayTitle(item))}</h3>
-        ${isHotReviewAsset(item) ? `<button class="btn btn-secondary" type="button" data-action="open-hot-review-asset" data-project-id="${escapeHtml(String(item.project_id || item.id || ""))}">打开爆款文审核</button>` : ""}
+        <h3>${escapeHtml(isHotReviewAsset(item) ? hotReviewAssetTitle(item) : projectDisplayTitle(item))}</h3>
+        ${isHotReviewAsset(item) ? `<button class="btn btn-secondary" type="button" data-action="open-hot-review-asset" data-project-id="${escapeHtml(hotReviewAssetKey(item) || hotReviewAssetTitle(item))}" data-hot-review-asset-key="${escapeHtml(hotReviewAssetKey(item) || hotReviewAssetTitle(item))}">打开爆款文审核</button>` : ""}
         <p>${escapeHtml(item.summary)}</p>
         <div class="asset-meta">
           <span>项目 ${escapeHtml(item.project_id)}</span>
@@ -4704,17 +5405,22 @@ startRuntimeDebugPolling();
   }
 
 
-  async function openHotReviewAssetFromList(projectId) {
-    if (!projectId) return;
-    let asset = findOwnedAsset(projectId)
-      || state.assets.find((item) => String(item.project_id || item.id || "") === String(projectId))
+  async function openHotReviewAssetFromList(assetKey) {
+    if (!assetKey) return;
+    let asset = findOwnedAsset(assetKey)
+      || state.assets.find((item) => String(hotReviewAssetKeyV5(item) || item.project_id || item.id || "") === String(assetKey))
+      || state.projects.find((item) => String(hotReviewAssetKeyV5(item) || item.project_id || item.id || "") === String(assetKey))
       || null;
 
-    try {
-      const detail = await requestJson(`/api/projects/${encodeURIComponent(projectId)}`);
-      asset = detail.project || detail.asset || asset;
-    } catch (_) {
-      // 列表快照已经足够展示时，不阻断打开。
+    const projectId = Number(asset?.project_id || assetKey);
+    if (Number.isFinite(projectId) && projectId > 0) {
+      try {
+        const detail = await requestJson(`/api/projects/${encodeURIComponent(projectId)}`);
+        const detailAsset = detail.project || detail.asset || null;
+        if (detailAsset) asset = { ...(asset || {}), ...detailAsset };
+      } catch (_) {
+        // 详情失败时保留列表快照。
+      }
     }
 
     if (!asset) {
@@ -4722,11 +5428,10 @@ startRuntimeDebugPolling();
       return;
     }
 
-    const payload = asset.input_payload || asset.request_payload || asset.tool_request || {};
+    const payload = asset.input_payload || asset.request_payload || asset.tool_request || asset.tool_request_payload || {};
     const reviewText = String(payload.review_text || payload.text || payload.input || "").trim();
-    const draft = ensureToolDraft("hot_review");
     state.toolDrafts.hot_review = {
-      ...draft,
+      ...ensureToolDraft("hot_review"),
       review_text: reviewText,
       text: reviewText
     };
@@ -4738,11 +5443,14 @@ startRuntimeDebugPolling();
   }
 
 
+
+
+
   document.addEventListener("click", (event) => {
     const button = event.target?.closest?.('[data-action="open-hot-review-asset"]');
     if (!button) return;
     event.preventDefault();
-    openHotReviewAssetFromList(button.dataset.projectId || "");
+    openHotReviewAssetFromList(button.dataset.hotReviewAssetKey || button.dataset.assetKey || button.dataset.projectId || "");
   });
 
   window.addEventListener("DOMContentLoaded", init);
