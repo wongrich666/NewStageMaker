@@ -259,6 +259,112 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         except Exception:
             logger.exception("framework-to-script stage12 debug file write failed")
             return ""
+    def _framework_to_script_debug_dir(
+        data: dict,
+        framework_asset: dict | None,
+        stage_no: str,
+    ) -> Path:
+        title = _stage12_debug_project_title(data, framework_asset)
+        path = (
+            Path(__file__).resolve().parents[2]
+            / "cache"
+            / _stage12_debug_safe_name(title)
+            / "framework_to_script"
+            / f"stage{str(stage_no).zfill(2)}"
+        )
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _framework_to_script_raw_debug_dir() -> Path:
+        path = Path(__file__).resolve().parents[2] / "cache" / "raw_coze_debug"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _json_len_for_debug(value) -> int:
+        try:
+            return len(json.dumps(value, ensure_ascii=False, default=str))
+        except Exception:
+            return -1
+
+    def _write_framework_to_script_debug_file(
+        *,
+        stage_no: str,
+        data: dict,
+        framework_asset: dict | None,
+        record: dict,
+        filename: str | None = None,
+    ) -> str:
+        try:
+            stage = str(stage_no).zfill(2)
+            timestamp = record.get("_debug_timestamp") or datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+            record["_debug_timestamp"] = timestamp
+
+            public_record = {
+                key: value
+                for key, value in record.items()
+                if not str(key).startswith("_")
+            }
+            public_record.setdefault("stage", stage)
+            public_record.setdefault("created_at", _now_iso())
+
+            path = _framework_to_script_debug_dir(data, framework_asset, stage) / (
+                filename or f"stage{stage}_{timestamp}.json"
+            )
+            public_record["debug_path"] = str(path)
+            path.write_text(
+                json.dumps(public_record, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            return str(path)
+        except Exception:
+            logger.exception("framework-to-script stage%s debug file write failed", stage_no)
+            return ""
+
+    def _write_framework_to_script_raw_coze_debug(
+        *,
+        stage_no: str,
+        stage_name: str,
+        variables: dict,
+        raw_output,
+        parsed_output=None,
+        error: str = "",
+    ) -> str:
+        try:
+            stage = str(stage_no).zfill(2)
+            path = _framework_to_script_raw_debug_dir() / f"stage{stage}_raw_response.json"
+            payload = {
+                "stage": stage,
+                "stage_name": stage_name,
+                "backend": "coze",
+                "variable_keys": sorted(variables.keys()) if isinstance(variables, dict) else [],
+                "variable_size_summary": {
+                    key: {
+                        "type": type(value).__name__,
+                        "json_length": _json_len_for_debug(value),
+                        "preview": _stage12_debug_preview(value, limit=500),
+                    }
+                    for key, value in (variables.items() if isinstance(variables, dict) else [])
+                },
+                "raw_output_type": type(raw_output).__name__,
+                "raw_output_keys": sorted(raw_output.keys()) if isinstance(raw_output, dict) else [],
+                "raw_output": raw_output,
+                "parsed_output": parsed_output,
+                "error": error,
+                "created_at": _now_iso(),
+            }
+            path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            logger.warning(
+                "[framework_to_script_raw_debug] wrote stage%s raw Coze response path=%s",
+                stage,
+                path,
+            )
+            return str(path)
+        except Exception:
+            logger.exception("[framework_to_script_raw_debug] failed to write stage%s raw response", stage_no)
+            return ""
 
     def _stage12_fastgpt_debug_summary(client, stage_name: str) -> dict:
         try:
@@ -2682,11 +2788,31 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return _json_error("请求体必须是 JSON object。", status=400)
+
+        logger.info(
+            "framework-to-script stage09 raw request received: payload_keys=%s",
+            sorted(data.keys()),
+        )
+
         try:
             user_id = _require_user_id()
             data, framework_asset = _inject_framework_asset(data, user_id)
         except ValueError as exc:
             return _json_error(str(exc), status=400)
+
+        asset_id_for_log = str(
+            (framework_asset or {}).get("asset_id")
+            or data.get("framework_asset_id")
+            or data.get("asset_id")
+            or ""
+        ).strip()
+
+        logger.info(
+            "framework-to-script stage09 asset injected: asset_id=%s data_keys=%s has_framework_plan_package=%s",
+            asset_id_for_log,
+            sorted(data.keys()),
+            isinstance(data.get("framework_plan_package") or data.get("frameworkPlanPackage"), dict),
+        )
 
         framework_plan_package = (
             data.get("framework_plan_package")
@@ -2750,6 +2876,29 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "09",
             framework_asset=framework_asset,
             workflow_stage="09",
+        )
+        scene_count = 0
+        if isinstance(scene_dictionary, dict):
+            core_scenes = scene_dictionary.get("core_scenes") or scene_dictionary.get("coreScenes")
+            scene_count = len(core_scenes) if isinstance(core_scenes, list) else 0
+
+        character_count = 0
+        if isinstance(character_plan, dict):
+            characters = character_plan.get("characters") or character_plan.get("main_characters")
+            character_count = len(characters) if isinstance(characters, list) else 0
+
+        logger.info(
+            "framework-to-script stage09 prepared: asset_id=%s variable_keys=%s "
+            "has_frameworkPlanPackage=%s has_characterPlan=%s has_sceneDictionary=%s "
+            "scene_count=%s character_count=%s beat_count=%s",
+            asset_id_for_log,
+            sorted(variables.keys()),
+            isinstance(variables.get("frameworkPlanPackage"), dict) and bool(variables.get("frameworkPlanPackage")),
+            isinstance(variables.get("characterPlan"), dict) and bool(variables.get("characterPlan")),
+            isinstance(variables.get("sceneDictionary"), dict) and bool(variables.get("sceneDictionary")),
+            scene_count,
+            character_count,
+            len(beat_checkpoint_timeline) if isinstance(beat_checkpoint_timeline, list) else 0,
         )
         def _try_parse_json_text(value):
             if not isinstance(value, str):
@@ -3080,22 +3229,263 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             )
 
             return best_mapping
+        def _stage09_merge_meta(target: dict, source: dict) -> dict:
+            if not isinstance(source, dict):
+                return target
+            for key in ("execute_id", "debug_url", "logid", "workflow_id", "space_id"):
+                if source.get(key) and not target.get(key):
+                    target[key] = str(source.get(key))
+            if source.get("usage") and not target.get("usage"):
+                target["usage"] = source.get("usage")
+            if source.get("token_count") and not target.get("token_count"):
+                target["token_count"] = source.get("token_count")
+            return target
 
+        def _stage09_extract_coze_meta(value, *, _depth: int = 0) -> dict:
+            meta = {
+                "execute_id": "",
+                "debug_url": "",
+                "logid": "",
+                "workflow_id": "",
+                "space_id": "",
+                "usage": None,
+                "token_count": None,
+            }
+            if _depth > 6:
+                return meta
+
+            if isinstance(value, dict):
+                if value.get("execute_id") is not None:
+                    meta["execute_id"] = str(value.get("execute_id") or "")
+                if value.get("debug_url") is not None:
+                    meta["debug_url"] = str(value.get("debug_url") or "")
+                if value.get("workflow_id") is not None:
+                    meta["workflow_id"] = str(value.get("workflow_id") or "")
+                if value.get("space_id") is not None:
+                    meta["space_id"] = str(value.get("space_id") or "")
+                if isinstance(value.get("detail"), dict) and value["detail"].get("logid"):
+                    meta["logid"] = str(value["detail"].get("logid") or "")
+                if value.get("logid") is not None:
+                    meta["logid"] = str(value.get("logid") or "")
+                if isinstance(value.get("usage"), dict):
+                    meta["usage"] = value.get("usage")
+                    if value["usage"].get("token_count") is not None:
+                        meta["token_count"] = value["usage"].get("token_count")
+                if value.get("token_count") is not None:
+                    meta["token_count"] = value.get("token_count")
+
+                for item in value.values():
+                    meta = _stage09_merge_meta(meta, _stage09_extract_coze_meta(item, _depth=_depth + 1))
+                return meta
+
+            if isinstance(value, list):
+                for item in value:
+                    meta = _stage09_merge_meta(meta, _stage09_extract_coze_meta(item, _depth=_depth + 1))
+                return meta
+
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    return meta
+
+                parsed = _try_parse_json_text(text)
+                if parsed is not None:
+                    meta = _stage09_merge_meta(meta, _stage09_extract_coze_meta(parsed, _depth=_depth + 1))
+
+                # 从 debug_url 或异常文本里兜底提取 execute_id。
+                execute_match = re.search(r"execute_id[=\":\s]+(\d{8,})", text)
+                if execute_match and not meta.get("execute_id"):
+                    meta["execute_id"] = execute_match.group(1)
+
+                debug_url_match = re.search(r"https://www\.coze\.cn/work_flow\?[^\"'\s]+", text)
+                if debug_url_match and not meta.get("debug_url"):
+                    meta["debug_url"] = debug_url_match.group(0)
+                    execute_from_url = re.search(r"execute_id=(\d{8,})", meta["debug_url"])
+                    if execute_from_url and not meta.get("execute_id"):
+                        meta["execute_id"] = execute_from_url.group(1)
+
+                logid_match = re.search(r'"logid"\s*:\s*"([^"]+)"', text)
+                if logid_match and not meta.get("logid"):
+                    meta["logid"] = logid_match.group(1)
+
+                return meta
+
+            return meta
+
+        def _stage09_collect_coze_debug_snapshot(client_obj, stage_name: str, exc: Exception | None = None) -> dict:
+            debug_info = {}
+            try:
+                if client_obj is not None and hasattr(client_obj, "get_last_stage_debug_info"):
+                    maybe_debug = client_obj.get_last_stage_debug_info(stage_name)
+                    debug_info = maybe_debug if isinstance(maybe_debug, dict) else {}
+            except Exception as debug_exc:
+                debug_info = {
+                    "debug_collect_error": f"{type(debug_exc).__name__}: {debug_exc}",
+                }
+
+            meta = _stage09_extract_coze_meta(debug_info)
+            if exc is not None:
+                meta = _stage09_merge_meta(meta, _stage09_extract_coze_meta(str(exc)))
+
+            return {
+                "meta": meta,
+                "debug_info_type": type(debug_info).__name__,
+                "debug_info_keys": sorted(debug_info.keys()) if isinstance(debug_info, dict) else [],
+                # 不要只存 preview；这里直接存完整 debug_info，方便你查 execute_id / debug_url / 原始返回预览。
+                "debug_info": debug_info,
+                "exception_text": str(exc or ""),
+            }
 
 
         asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
         if not _try_begin_framework_stage(user_id, asset_id, "09"):
             return _json_error("09 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
+            debug_record = {
+                "stage": "09",
+                "stage_name": "framework_appearanceMapping",
+                "status": "started",
+                "asset_id": asset_id,
+                "request_payload_keys": sorted(data.keys()),
+                "variable_keys": sorted(variables.keys()),
+                "variable_size_summary": {
+                    key: {
+                        "type": type(value).__name__,
+                        "json_length": _json_len_for_debug(value),
+                        "preview": _stage12_debug_preview(value, limit=500),
+                    }
+                    for key, value in variables.items()
+                },
+                "has_frameworkPlanPackage": isinstance(variables.get("frameworkPlanPackage"), dict) and bool(variables.get("frameworkPlanPackage")),
+                "has_characterPlan": isinstance(variables.get("characterPlan"), dict) and bool(variables.get("characterPlan")),
+                "has_sceneDictionary": isinstance(variables.get("sceneDictionary"), dict) and bool(variables.get("sceneDictionary")),
+                "beat_count": len(beat_checkpoint_timeline) if isinstance(beat_checkpoint_timeline, list) else 0,
+                "created_at": _now_iso(),
+                "updated_at": _now_iso(),
+            }
+            debug_path = _write_framework_to_script_debug_file(
+                stage_no="09",
+                data=data,
+                framework_asset=framework_asset,
+                record=debug_record,
+                filename="stage09_latest.json",
+            )
             try:
                 from .services.coze_client import coze_client
                 from .services.fastgpt_contracts import STAGE_FRAMEWORK_APPEARANCE_MAPPING
 
+                debug_record.update(
+                    {
+                        "status": "requesting_coze",
+                        "coze_request_started_at": _now_iso(),
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_framework_to_script_debug_file(
+                    stage_no="09",
+                    data=data,
+                    framework_asset=framework_asset,
+                    record=debug_record,
+                    filename="stage09_latest.json",
+                )
+
+                logger.info(
+                    "framework-to-script stage09 entering Coze: asset_id=%s stage_name=%s variable_keys=%s",
+                    asset_id_for_log,
+                    STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+                    sorted(variables.keys()),
+                )
+
+                stage09_started = time.monotonic()
                 raw_output = coze_client.run_stage(
                     STAGE_FRAMEWORK_APPEARANCE_MAPPING,
                     variables,
                 )
+                stage09_duration_ms = int((time.monotonic() - stage09_started) * 1000)
+
+                debug_record.update(
+                    {
+                        "status": "coze_returned",
+                        "coze_request_ended_at": _now_iso(),
+                        "duration_ms": stage09_duration_ms,
+                        "raw_output_summary": _stage12_debug_summary(raw_output, preview_limit=800),
+                        "raw_output_keys": sorted(raw_output.keys()) if isinstance(raw_output, dict) else [],
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_framework_to_script_debug_file(
+                    stage_no="09",
+                    data=data,
+                    framework_asset=framework_asset,
+                    record=debug_record,
+                    filename="stage09_latest.json",
+                )
+
+                logger.info(
+                    "framework-to-script stage09 Coze returned: asset_id=%s duration_ms=%s raw_type=%s raw_keys=%s",
+                    asset_id_for_log,
+                    stage09_duration_ms,
+                    type(raw_output).__name__,
+                    sorted(raw_output.keys()) if isinstance(raw_output, dict) else [],
+                )
             except Exception as exc:
+                stage09_stage_name = (
+                    STAGE_FRAMEWORK_APPEARANCE_MAPPING
+                    if "STAGE_FRAMEWORK_APPEARANCE_MAPPING" in locals()
+                    else "framework_appearanceMapping"
+                )
+                coze_debug_snapshot = _stage09_collect_coze_debug_snapshot(
+                    coze_client if "coze_client" in locals() else None,
+                    stage09_stage_name,
+                    exc,
+                )
+                coze_meta = coze_debug_snapshot.get("meta") if isinstance(coze_debug_snapshot, dict) else {}
+                if not isinstance(coze_meta, dict):
+                    coze_meta = {}
+
+                raw_error_debug_path = _write_framework_to_script_raw_coze_debug(
+                    stage_no="09",
+                    stage_name=stage09_stage_name,
+                    variables=variables,
+                    raw_output=coze_debug_snapshot,
+                    parsed_output={},
+                    error=str(exc),
+                )
+
+                logger.exception(
+                    "framework-to-script stage09 Coze call failed: asset_id=%s stage_name=%s execute_id=%s debug_url=%s",
+                    asset_id_for_log,
+                    stage09_stage_name,
+                    coze_meta.get("execute_id") or "",
+                    coze_meta.get("debug_url") or "",
+                )
+
+                debug_record.update(
+                    {
+                        "status": "failed",
+                        "failure_phase": "coze_call",
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                        "traceback": traceback.format_exc(),
+                        "execute_id": coze_meta.get("execute_id") or "",
+                        "debug_url": coze_meta.get("debug_url") or "",
+                        "logid": coze_meta.get("logid") or "",
+                        "workflow_id": coze_meta.get("workflow_id") or "",
+                        "space_id": coze_meta.get("space_id") or "",
+                        "usage": coze_meta.get("usage"),
+                        "token_count": coze_meta.get("token_count"),
+                        "coze_raw_error_debug_path": raw_error_debug_path,
+                        "coze_last_stage_debug": coze_debug_snapshot,
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_framework_to_script_debug_file(
+                    stage_no="09",
+                    data=data,
+                    framework_asset=framework_asset,
+                    record=debug_record,
+                    filename="stage09_latest.json",
+                )
                 return _json_error(
                     str(exc),
                     status=500,
@@ -3103,6 +3493,45 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 )
 
             appearanceMapping = _extract_appearance_payload(raw_output)
+            _write_framework_to_script_raw_coze_debug(
+                stage_no="09",
+                stage_name=STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+                variables=variables,
+                raw_output=raw_output,
+                parsed_output={"appearanceMapping": appearanceMapping} if appearanceMapping else {},
+            )
+
+            debug_record.update(
+                {
+                    "status": "parsed",
+                    "appearanceMapping_type": type(appearanceMapping).__name__,
+                    "appearanceMapping_keys": sorted(appearanceMapping.keys()) if isinstance(appearanceMapping, dict) else [],
+                    "characters_count": len(appearanceMapping.get("characters") or []) if isinstance(appearanceMapping, dict) and isinstance(appearanceMapping.get("characters"), list) else 0,
+                    "updated_at": _now_iso(),
+                }
+            )
+            debug_path = _write_framework_to_script_debug_file(
+                stage_no="09",
+                data=data,
+                framework_asset=framework_asset,
+                record=debug_record,
+                filename="stage09_latest.json",
+            )
+
+            parsed_characters = (
+                appearanceMapping.get("characters")
+                if isinstance(appearanceMapping, dict)
+                else []
+            )
+            logger.info(
+                "framework-to-script stage09 parsed: asset_id=%s appearance_type=%s "
+                "appearance_keys=%s characters_count=%s",
+                asset_id_for_log,
+                type(appearanceMapping).__name__,
+                sorted(appearanceMapping.keys()) if isinstance(appearanceMapping, dict) else [],
+                len(parsed_characters) if isinstance(parsed_characters, list) else 0,
+            )
+
             if not appearanceMapping:
                 return _json_error(
                     "09 人设服装 alias 映射输出缺少 appearanceMapping。",
@@ -3124,6 +3553,26 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     stage_key="stage09",
                     output={"appearanceMapping": appearanceMapping},
                 )
+                logger.info(
+                    "framework-to-script stage09 saved: asset_id=%s characters_count=%s",
+                    asset_id,
+                    len(characters) if isinstance(characters, list) else 0,
+                )
+                debug_record.update(
+                    {
+                        "status": "success",
+                        "saved": True,
+                        "characters_count": len(characters) if isinstance(characters, list) else 0,
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_framework_to_script_debug_file(
+                    stage_no="09",
+                    data=data,
+                    framework_asset=framework_asset,
+                    record=debug_record,
+                    filename="stage09_latest.json",
+                )
         finally:
             _end_framework_stage(user_id, asset_id, "09")
 
@@ -3133,16 +3582,237 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             appearanceMapping=appearanceMapping,
         )
 
-
     @app.post("/api/framework-to-script/stage/10")
     @_login_required
     def run_framework_to_script_stage10_api():
         """单独运行 10 分集细化方案。只跑 10，不继续后续因果冲突。"""
         import json as _json
 
+        def _stage10_debug_dir(data: dict, framework_asset: dict | None) -> Path:
+            title = _stage12_debug_project_title(data, framework_asset)
+            path = (
+                    Path(__file__).resolve().parents[2]
+                    / "cache"
+                    / _stage12_debug_safe_name(title)
+                    / "framework_to_script"
+                    / "stage10"
+            )
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+
+        def _stage10_raw_debug_dir() -> Path:
+            path = Path(__file__).resolve().parents[2] / "cache" / "raw_coze_debug"
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+
+        def _stage10_json_len(value) -> int:
+            try:
+                return len(_json.dumps(value, ensure_ascii=False, default=str))
+            except Exception:
+                return -1
+
+        def _write_stage10_debug(record: dict, *, filename: str = "stage10_latest.json") -> str:
+            try:
+                path = _stage10_debug_dir(data, framework_asset) / filename
+                public_record = {
+                    key: value
+                    for key, value in record.items()
+                    if not str(key).startswith("_")
+                }
+                public_record["debug_path"] = str(path)
+                path.write_text(
+                    _json.dumps(public_record, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8",
+                )
+                return str(path)
+            except Exception:
+                logger.exception("framework-to-script stage10 debug file write failed")
+                return ""
+
+        def _write_stage10_raw_debug(*, raw_output=None, parsed_output=None, error: str = "", coze_debug_snapshot=None, coze_meta=None) -> str:
+            try:
+                path = _stage10_raw_debug_dir() / "stage10_raw_response.json"
+                meta = coze_meta if isinstance(coze_meta, dict) else {}
+                debug_snapshot = coze_debug_snapshot if isinstance(coze_debug_snapshot, dict) else {}
+                debug_info = debug_snapshot.get("debug_info") if isinstance(debug_snapshot.get("debug_info"), dict) else {}
+                coze_raw_response = debug_info.get("raw_response")
+                payload = {
+                    "stage": "10",
+                    "stage_name": "framework_enriched_episode_plan",
+                    "backend": "coze",
+                    "asset_id": asset_id if "asset_id" in locals() else "",
+                    "execute_id": meta.get("execute_id") or "",
+                    "debug_url": meta.get("debug_url") or "",
+                    "logid": meta.get("logid") or "",
+                    "workflow_id": meta.get("workflow_id") or "",
+                    "space_id": meta.get("space_id") or "",
+                    "usage": meta.get("usage"),
+                    "input_count": meta.get("input_count"),
+                    "output_count": meta.get("output_count"),
+                    "token_count": meta.get("token_count"),
+                    "coze_meta": meta,
+                    "coze_debug_info_keys": sorted(debug_info.keys()) if isinstance(debug_info, dict) else [],
+                    "coze_raw_response_type": type(coze_raw_response).__name__,
+                    "coze_raw_response_keys": sorted(coze_raw_response.keys()) if isinstance(coze_raw_response, dict) else [],
+                    "coze_raw_response": coze_raw_response,
+                    "coze_last_stage_debug": debug_snapshot,
+                    "variable_keys": sorted(variables.keys()) if isinstance(variables, dict) else [],
+                    "variable_size_summary": {
+                        key: {
+                            "type": type(value).__name__,
+                            "json_length": _stage10_json_len(value),
+                            "preview": _stage12_debug_preview(value, limit=500),
+                        }
+                        for key, value in (variables.items() if isinstance(variables, dict) else [])
+                    },
+                    "raw_output_type": type(raw_output).__name__,
+                    "raw_output_keys": sorted(raw_output.keys()) if isinstance(raw_output, dict) else [],
+                    "raw_output": raw_output,
+                    "parsed_output": parsed_output,
+                    "error": error,
+                    "created_at": _now_iso(),
+                }
+                path.write_text(
+                    _json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8",
+                )
+                logger.warning(
+                    "[framework_to_script_raw_debug] wrote stage10 raw Coze response path=%s",
+                    path,
+                )
+                return str(path)
+            except Exception:
+                logger.exception("[framework_to_script_raw_debug] failed to write stage10 raw response")
+                return ""
+
+
+        def _stage10_merge_meta(target: dict, source: dict) -> dict:
+            if not isinstance(source, dict):
+                return target
+            for key in ("execute_id", "debug_url", "logid", "workflow_id", "space_id"):
+                if source.get(key) and not target.get(key):
+                    target[key] = str(source.get(key))
+            for key in ("usage", "input_count", "output_count", "token_count"):
+                if source.get(key) is not None and target.get(key) is None:
+                    target[key] = source.get(key)
+            return target
+
+        def _stage10_try_parse_json_text(value):
+            if not isinstance(value, str):
+                return None
+            text = value.strip()
+            if not text:
+                return None
+            if text.startswith("```"):
+                text = text.strip("`").strip()
+                if text.lower().startswith("json"):
+                    text = text[4:].strip()
+            try:
+                return _json.loads(text)
+            except Exception:
+                return None
+
+        def _stage10_extract_coze_meta(value, *, _depth: int = 0) -> dict:
+            meta = {
+                "execute_id": "",
+                "debug_url": "",
+                "logid": "",
+                "workflow_id": "",
+                "space_id": "",
+                "usage": None,
+                "input_count": None,
+                "output_count": None,
+                "token_count": None,
+            }
+            if _depth > 8:
+                return meta
+
+            if isinstance(value, dict):
+                if value.get("execute_id") is not None:
+                    meta["execute_id"] = str(value.get("execute_id") or "")
+                if value.get("debug_url") is not None:
+                    meta["debug_url"] = str(value.get("debug_url") or "")
+                if value.get("workflow_id") is not None:
+                    meta["workflow_id"] = str(value.get("workflow_id") or "")
+                if value.get("space_id") is not None:
+                    meta["space_id"] = str(value.get("space_id") or "")
+                if isinstance(value.get("detail"), dict) and value["detail"].get("logid"):
+                    meta["logid"] = str(value["detail"].get("logid") or "")
+                if value.get("logid") is not None:
+                    meta["logid"] = str(value.get("logid") or "")
+                if isinstance(value.get("usage"), dict):
+                    meta["usage"] = value.get("usage")
+                    for key in ("input_count", "output_count", "token_count"):
+                        if value["usage"].get(key) is not None:
+                            meta[key] = value["usage"].get(key)
+                for key in ("input_count", "output_count", "token_count"):
+                    if value.get(key) is not None:
+                        meta[key] = value.get(key)
+
+                for item in value.values():
+                    meta = _stage10_merge_meta(meta, _stage10_extract_coze_meta(item, _depth=_depth + 1))
+                return meta
+
+            if isinstance(value, list):
+                for item in value:
+                    meta = _stage10_merge_meta(meta, _stage10_extract_coze_meta(item, _depth=_depth + 1))
+                return meta
+
+            if isinstance(value, str):
+                text_value = value.strip()
+                if not text_value:
+                    return meta
+
+                parsed = _stage10_try_parse_json_text(text_value)
+                if parsed is not None:
+                    meta = _stage10_merge_meta(meta, _stage10_extract_coze_meta(parsed, _depth=_depth + 1))
+
+                execute_match = re.search(r"execute_id[=\":\s]+(\d{8,})", text_value)
+                if execute_match and not meta.get("execute_id"):
+                    meta["execute_id"] = execute_match.group(1)
+
+                debug_url_match = re.search(r"https://www\.coze\.cn/work_flow\?[^\"'\s]+", text_value)
+                if debug_url_match and not meta.get("debug_url"):
+                    meta["debug_url"] = debug_url_match.group(0)
+                    execute_from_url = re.search(r"execute_id=(\d{8,})", meta["debug_url"])
+                    if execute_from_url and not meta.get("execute_id"):
+                        meta["execute_id"] = execute_from_url.group(1)
+
+                logid_match = re.search(r'"logid"\s*:\s*"([^"]+)"', text_value)
+                if logid_match and not meta.get("logid"):
+                    meta["logid"] = logid_match.group(1)
+
+                return meta
+
+            return meta
+
+        def _stage10_collect_coze_debug_snapshot(client_obj, stage_name: str, exc: Exception | None = None) -> dict:
+            debug_info = {}
+            try:
+                if client_obj is not None and hasattr(client_obj, "get_last_stage_debug_info"):
+                    maybe_debug = client_obj.get_last_stage_debug_info(stage_name)
+                    debug_info = maybe_debug if isinstance(maybe_debug, dict) else {}
+            except Exception as debug_exc:
+                debug_info = {
+                    "debug_collect_error": f"{type(debug_exc).__name__}: {debug_exc}",
+                }
+
+            meta = _stage10_extract_coze_meta(debug_info)
+            if exc is not None:
+                meta = _stage10_merge_meta(meta, _stage10_extract_coze_meta(str(exc)))
+
+            return {
+                "meta": meta,
+                "debug_info_type": type(debug_info).__name__,
+                "debug_info_keys": sorted(debug_info.keys()) if isinstance(debug_info, dict) else [],
+                "debug_info": debug_info,
+                "exception_text": str(exc or ""),
+            }
+
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return _json_error("请求体必须是 JSON object。", status=400)
+
         try:
             user_id = _require_user_id()
             data, framework_asset = _inject_framework_asset(data, user_id)
@@ -3150,55 +3820,89 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=400)
 
         framework_plan_package = (
-            data.get("framework_plan_package")
-            or data.get("frameworkPlanPackage")
-            or {}
+                data.get("framework_plan_package")
+                or data.get("frameworkPlanPackage")
+                or {}
         )
         if not isinstance(framework_plan_package, dict) or not framework_plan_package:
             return _json_error("缺少 framework_plan_package，请先导入框架资产。", status=400)
 
         stage08 = _framework_script_stage_cache(framework_asset, "stage08")
         stage09 = _framework_script_stage_cache(framework_asset, "stage09")
-        scene_dictionary = data.get("sceneDictionary") or data.get("scene_dictionary") or stage08.get("sceneDictionary") or {}
+        scene_dictionary = data.get("sceneDictionary") or data.get("scene_dictionary") or stage08.get(
+            "sceneDictionary") or {}
         if not isinstance(scene_dictionary, dict) or not scene_dictionary:
             return _json_error("缺少 sceneDictionary，请先完成 08 场景字典提炼。", status=400)
 
         rules_digest = (
-            data.get("scriptWorldRulesDigest")
-            or data.get("script_world_rules_digest")
-            or stage08.get("scriptWorldRulesDigest")
-            or {}
+                data.get("scriptWorldRulesDigest")
+                or data.get("script_world_rules_digest")
+                or stage08.get("scriptWorldRulesDigest")
+                or {}
         )
         if not isinstance(rules_digest, dict) or not rules_digest:
             return _json_error("缺少 scriptWorldRulesDigest，请先完成 08 场景字典提炼。", status=400)
 
         appearance_mapping = (
-            data.get("appearanceMapping")
-            or data.get("appearance_mapping")
-            or stage09.get("appearanceMapping")
-            or {}
+                data.get("appearanceMapping")
+                or data.get("appearance_mapping")
+                or stage09.get("appearanceMapping")
+                or {}
         )
         if not isinstance(appearance_mapping, dict) or not appearance_mapping:
             return _json_error("缺少 appearanceMapping，请先完成 09 角色外观映射。", status=400)
 
         beat_checkpoint_timeline = (
-            data.get("beat_checkpoint_timeline")
-            or data.get("beatCheckpointTimeline")
-            or framework_plan_package.get("beat_checkpoint_timeline")
-            or framework_plan_package.get("beatCheckpointTimeline")
-            or []
+                data.get("beat_checkpoint_timeline")
+                or data.get("beatCheckpointTimeline")
+                or framework_plan_package.get("beat_checkpoint_timeline")
+                or framework_plan_package.get("beatCheckpointTimeline")
+                or []
         )
         character_storylines = (
-            data.get("character_storylines")
-            or data.get("characterStorylines")
-            or framework_plan_package.get("character_storylines")
-            or framework_plan_package.get("characterStorylines")
-            or []
+                data.get("character_storylines")
+                or data.get("characterStorylines")
+                or framework_plan_package.get("character_storylines")
+                or framework_plan_package.get("characterStorylines")
+                or []
         )
 
+        basic_config = framework_plan_package.get("basic_config") if isinstance(
+            framework_plan_package.get("basic_config"), dict) else {}
+        source_brief = framework_plan_package.get("source_brief") if isinstance(
+            framework_plan_package.get("source_brief"), dict) else {}
+        adaptation_guide = framework_plan_package.get("adaptation_guide") if isinstance(
+            framework_plan_package.get("adaptation_guide"), dict) else {}
+
+        stage10_framework_context = {
+            "project_title": (
+                    framework_plan_package.get("project_title")
+                    or framework_plan_package.get("title")
+                    or basic_config.get("project_title")
+                    or basic_config.get("source_title")
+                    or data.get("project_title")
+                    or data.get("title")
+                    or ""
+            ),
+            "target_format": basic_config.get("target_format") or "短剧",
+            "season_count": basic_config.get("season_count"),
+            "episodes_per_season": basic_config.get("episodes_per_season"),
+            "minutes_per_episode": basic_config.get("minutes_per_episode"),
+            "core_logline": source_brief.get("core_logline") or source_brief.get("logline") or "",
+            "genre": source_brief.get("genre") or "",
+            "core_conflict": source_brief.get("core_conflict") or "",
+            "must_keep_elements": source_brief.get("must_keep_elements") or [],
+            "forbidden_deviations": source_brief.get("forbidden_deviations") or [],
+            "hard_constraints_for_script_workflow": (
+                adaptation_guide.get("hard_constraints_for_script_workflow")
+                if isinstance(adaptation_guide.get("hard_constraints_for_script_workflow"), list)
+                else []
+            ),
+        }
+
         variables = {
-            "frameworkPlanPackage": framework_plan_package,
-            "framework_plan_package": framework_plan_package,
+            "frameworkPlanPackage": stage10_framework_context,
+            "framework_plan_package": stage10_framework_context,
             "sceneDictionary": scene_dictionary,
             "scene_dictionary": scene_dictionary,
             "scriptWorldRulesDigest": rules_digest,
@@ -3209,7 +3913,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "beat_checkpoint_timeline": beat_checkpoint_timeline,
             "characterStorylines": character_storylines,
             "character_storylines": character_storylines,
-            "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get("sourceFrameworkProjectId") or "",
+            "sourceFrameworkProjectId": data.get("source_framework_project_id") or data.get(
+                "sourceFrameworkProjectId") or "",
         }
         variables = _inject_snapshot_stage_preference(
             variables,
@@ -3218,6 +3923,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             framework_asset=framework_asset,
             workflow_stage="10",
         )
+
         def _try_parse_json_text(value):
             if not isinstance(value, str):
                 return None
@@ -3260,10 +3966,53 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         def _extract_enriched_payload(payload):
             candidates = []
 
+            def _normalize_plan_value(value):
+                if isinstance(value, str):
+                    parsed = _try_parse_json_text(value)
+                    if parsed is not None:
+                        value = parsed
+                if isinstance(value, list):
+                    return [item for item in value if isinstance(item, dict)]
+                if isinstance(value, dict):
+                    nested_plan = (
+                            value.get("allEnrichedEpisodePlan")
+                            or value.get("enrichedEpisodePlan")
+                            or value.get("all_enriched_episode_plan")
+                            or value.get("enriched_episode_plan")
+                    )
+                    if nested_plan is not None:
+                        nested = _normalize_plan_value(nested_plan)
+                        if nested:
+                            return nested
+                    lowered = {str(key).lower() for key in value.keys()}
+                    if lowered & {"episode", "episodenumber", "episode_number", "title", "specific_plot", "text_view", "ending_hook"}:
+                        return [value]
+                return []
+
+            def _plan_text_from_items(plan, explicit_text=""):
+                if isinstance(explicit_text, str) and explicit_text.strip():
+                    return explicit_text.strip()
+                parts = []
+                for item in plan or []:
+                    if not isinstance(item, dict):
+                        continue
+                    text = str(
+                        item.get("text_view")
+                        or item.get("textView")
+                        or item.get("episode_text")
+                        or item.get("episodeText")
+                        or ""
+                    ).strip()
+                    if text:
+                        parts.append(text)
+                if parts:
+                    return "\n\n".join(parts)
+                return ""
+
             def visit(obj):
                 if isinstance(obj, dict):
                     candidates.append(obj)
-                    for text_key in ("answerText", "text", "content"):
+                    for text_key in ("answerText", "textOutput", "text", "content"):
                         parsed = _try_parse_json_text(obj.get(text_key))
                         if parsed is not None:
                             visit(parsed)
@@ -3274,7 +4023,21 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             parsed = _try_parse_json_text(value)
                             if parsed is not None:
                                 visit(parsed)
-                    for key in ("data", "result", "output", "response", "responseData", "enrichedEpisodePlanResult", "enriched_episode_plan_result"):
+                    for key in (
+                            "episodeplan",
+                            "episodePlan",
+                            "episode_plan",
+                            "data",
+                            "result",
+                            "output",
+                            "outputs",
+                            "response",
+                            "responseData",
+                            "newVariables",
+                            "variables",
+                            "enrichedEpisodePlanResult",
+                            "enriched_episode_plan_result",
+                    ):
                         value = obj.get(key)
                         if isinstance(value, (dict, list)):
                             visit(value)
@@ -3296,49 +4059,215 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             for item in candidates:
                 if not isinstance(item, dict):
                     continue
-                nested = item.get("enrichedEpisodePlanResult") or item.get("enriched_episode_plan_result")
-                if isinstance(nested, str):
-                    nested = _try_parse_json_text(nested) or {}
-                if isinstance(nested, dict):
-                    candidates.append(nested)
-
-            for item in candidates:
-                if not isinstance(item, dict):
-                    continue
-                plan = (
-                    item.get("allEnrichedEpisodePlan")
-                    or item.get("enrichedEpisodePlan")
-                    or item.get("all_enriched_episode_plan")
-                    or item.get("enriched_episode_plan")
+                plan_value = (
+                        item.get("allEnrichedEpisodePlan")
+                        or item.get("enrichedEpisodePlan")
+                        or item.get("all_enriched_episode_plan")
+                        or item.get("enriched_episode_plan")
+                        or item.get("batchEnrichedEpisodePlan")
+                        or item.get("batch_enriched_episode_plan")
+                        or item.get("episodeplan")
+                        or item.get("episodePlan")
+                        or item.get("episode_plan")
                 )
                 text = (
-                    item.get("allEnrichedEpisodePlanText")
-                    or item.get("enrichedEpisodePlanText")
-                    or item.get("all_enriched_episode_plan_text")
-                    or item.get("enriched_episode_plan_text")
-                    or ""
+                        item.get("allEnrichedEpisodePlanText")
+                        or item.get("enrichedEpisodePlanText")
+                        or item.get("all_enriched_episode_plan_text")
+                        or item.get("enriched_episode_plan_text")
+                        or ""
                 )
-                if isinstance(plan, str):
-                    parsed_plan = _try_parse_json_text(plan)
-                    if isinstance(parsed_plan, list):
-                        plan = parsed_plan
-                if isinstance(plan, list) and plan:
-                    return plan, str(text or "")
+                plan = _normalize_plan_value(plan_value)
+                if not plan and isinstance(item, dict):
+                    plan = _normalize_plan_value(item)
+                if plan:
+                    return plan, _plan_text_from_items(plan, str(text or ""))
             return None, ""
 
         asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
         if not _try_begin_framework_stage(user_id, asset_id, "10"):
             return _json_error("10 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
+
+        debug_record = {
+            "stage": "10",
+            "stage_name": "framework_enriched_episode_plan",
+            "status": "started",
+            "asset_id": asset_id,
+            "request_payload_keys": sorted(data.keys()),
+            "variable_keys": sorted(variables.keys()),
+            "variable_size_summary": {
+                key: {
+                    "type": type(value).__name__,
+                    "json_length": _stage10_json_len(value),
+                    "preview": _stage12_debug_preview(value, limit=500),
+                }
+                for key, value in variables.items()
+            },
+            "has_frameworkPlanPackage": isinstance(variables.get("frameworkPlanPackage"), dict) and bool(
+                variables.get("frameworkPlanPackage")),
+            "has_sceneDictionary": isinstance(variables.get("sceneDictionary"), dict) and bool(
+                variables.get("sceneDictionary")),
+            "has_scriptWorldRulesDigest": isinstance(variables.get("scriptWorldRulesDigest"), dict) and bool(
+                variables.get("scriptWorldRulesDigest")),
+            "has_appearanceMapping": isinstance(variables.get("appearanceMapping"), dict) and bool(
+                variables.get("appearanceMapping")),
+            "beat_count": len(beat_checkpoint_timeline) if isinstance(beat_checkpoint_timeline, list) else 0,
+            "character_storyline_count": len(character_storylines) if isinstance(character_storylines, list) else 0,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        }
+        debug_path = _write_stage10_debug(debug_record)
+
         try:
             try:
                 from .services.coze_client import coze_client
                 from .services.fastgpt_contracts import STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN
 
+                debug_record.update(
+                    {
+                        "status": "requesting_coze",
+                        "coze_request_started_at": _now_iso(),
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage10_debug(debug_record)
+
+                logger.info(
+                    "framework-to-script stage10 entering Coze: asset_id=%s stage_name=%s variable_keys=%s",
+                    asset_id,
+                    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+                    sorted(variables.keys()),
+                )
+
+                started = time.monotonic()
                 raw_output = coze_client.run_stage(
                     STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
                     variables,
                 )
+                duration_ms = int((time.monotonic() - started) * 1000)
+
+                coze_debug_snapshot = _stage10_collect_coze_debug_snapshot(
+                    coze_client,
+                    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+                )
+                coze_meta = coze_debug_snapshot.get("meta") if isinstance(coze_debug_snapshot, dict) else {}
+                if not isinstance(coze_meta, dict):
+                    coze_meta = {}
+
+                debug_record.update(
+                    {
+                        "status": "coze_returned",
+                        "execute_id": coze_meta.get("execute_id") or "",
+                        "debug_url": coze_meta.get("debug_url") or "",
+                        "logid": coze_meta.get("logid") or "",
+                        "workflow_id": coze_meta.get("workflow_id") or "",
+                        "space_id": coze_meta.get("space_id") or "",
+                        "usage": coze_meta.get("usage"),
+                        "input_count": coze_meta.get("input_count"),
+                        "output_count": coze_meta.get("output_count"),
+                        "token_count": coze_meta.get("token_count"),
+                        "coze_debug_info_keys": coze_debug_snapshot.get("debug_info_keys") if isinstance(coze_debug_snapshot, dict) else [],
+                        "coze_request_ended_at": _now_iso(),
+                        "duration_ms": duration_ms,
+                        "raw_output_summary": _stage12_debug_summary(raw_output, preview_limit=800),
+                        "raw_output_keys": sorted(raw_output.keys()) if isinstance(raw_output, dict) else [],
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage10_debug(debug_record)
+
+                logger.info(
+                    "framework-to-script stage10 Coze returned: asset_id=%s duration_ms=%s raw_type=%s raw_keys=%s execute_id=%s debug_url=%s",
+                    asset_id,
+                    duration_ms,
+                    type(raw_output).__name__,
+                    sorted(raw_output.keys()) if isinstance(raw_output, dict) else [],
+                    coze_meta.get("execute_id") or "",
+                    coze_meta.get("debug_url") or "",
+                )
             except Exception as exc:
+                debug_record.update(
+                    {
+                        "status": "failed",
+                        "failure_phase": "coze_call",
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                        "traceback": traceback.format_exc(),
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage10_debug(debug_record)
+                try:
+                    stage10_stage_name = (
+                        STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN
+                        if "STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN" in locals()
+                        else "framework_enriched_episode_plan"
+                    )
+                    if "_stage10_collect_coze_debug_snapshot" in locals():
+                        coze_debug_snapshot = _stage10_collect_coze_debug_snapshot(
+                            coze_client if "coze_client" in locals() else None,
+                            stage10_stage_name,
+                            exc,
+                        )
+                    else:
+                        coze_debug_snapshot = {}
+                except Exception as debug_exc:
+                    coze_debug_snapshot = {
+                        "debug_collect_error": f"{type(debug_exc).__name__}: {debug_exc}",
+                        "exception_text": str(exc),
+                    }
+
+                coze_meta = (
+                    coze_debug_snapshot.get("meta")
+                    if isinstance(coze_debug_snapshot, dict)
+                    else {}
+                )
+                if not isinstance(coze_meta, dict):
+                    coze_meta = {}
+
+                try:
+                    stage10_stage_name = (
+                        STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN
+                        if "STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN" in locals()
+                        else "framework_enriched_episode_plan"
+                    )
+
+                    stage10_debug_info = {}
+                    if "coze_client" in locals() and hasattr(coze_client, "get_last_stage_debug_info"):
+                        maybe_debug = coze_client.get_last_stage_debug_info(stage10_stage_name)
+                        if isinstance(maybe_debug, dict):
+                            stage10_debug_info = maybe_debug
+
+                    coze_raw_response = (
+                        stage10_debug_info.get("raw_response")
+                        if isinstance(stage10_debug_info, dict)
+                        else None
+                    )
+
+                    raw_error_debug_path = _write_framework_to_script_raw_coze_debug(
+                        stage_no="10",
+                        stage_name=stage10_stage_name,
+                        variables=variables,
+                        raw_output={
+                            "exception_type": type(exc).__name__,
+                            "exception_message": str(exc),
+                            "traceback": traceback.format_exc(),
+                            "last_stage_debug_info": stage10_debug_info,
+                            "coze_raw_response": coze_raw_response,
+                        },
+                        parsed_output={},
+                        error=str(exc),
+                    )
+
+                    debug_record["coze_raw_error_debug_path"] = raw_error_debug_path
+                    debug_record["coze_last_stage_debug"] = stage10_debug_info
+                    debug_path = _write_stage10_debug(debug_record)
+                except Exception as raw_debug_exc:
+                    logger.exception(
+                        "framework-to-script stage10 raw debug write failed after Coze error: %s",
+                        raw_debug_exc,
+                    )
+                logger.exception("framework-to-script stage10 Coze call failed: asset_id=%s", asset_id)
                 return _json_error(
                     str(exc),
                     status=500,
@@ -3346,12 +4275,43 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 )
 
             plan, plan_text = _extract_enriched_payload(raw_output)
+            _write_stage10_raw_debug(
+                raw_output=raw_output,
+                parsed_output={
+                    "allEnrichedEpisodePlan": plan or [],
+                    "allEnrichedEpisodePlanText": plan_text or "",
+                },
+                coze_debug_snapshot=coze_debug_snapshot if "coze_debug_snapshot" in locals() else {},
+                coze_meta=coze_meta if "coze_meta" in locals() else {},
+            )
+
+            debug_record.update(
+                {
+                    "status": "parsed",
+                    "plan_type": type(plan).__name__,
+                    "plan_count": len(plan) if isinstance(plan, list) else 0,
+                    "plan_text_length": len(plan_text or ""),
+                    "updated_at": _now_iso(),
+                }
+            )
+            debug_path = _write_stage10_debug(debug_record)
+
             if not plan:
+                debug_record.update(
+                    {
+                        "status": "failed",
+                        "failure_phase": "parse",
+                        "exception_message": "10 分集细化方案输出缺少 allEnrichedEpisodePlan。",
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage10_debug(debug_record)
                 return _json_error(
                     "10 分集细化方案输出缺少 allEnrichedEpisodePlan。",
                     status=500,
                     fallback="请检查 10 工作流是否把 allEnrichedEpisodePlan 写入变量或 answerText JSON。",
                 )
+
             if asset_id:
                 _save_framework_to_script_stage(
                     user_id=user_id,
@@ -3370,6 +4330,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         "enrichedEpisodePlanText": plan_text,
                     },
                 )
+                debug_record.update(
+                    {
+                        "status": "success",
+                        "saved": True,
+                        "plan_count": len(plan) if isinstance(plan, list) else 0,
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage10_debug(debug_record)
         finally:
             _end_framework_stage(user_id, asset_id, "10")
 
@@ -3404,9 +4373,108 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @_login_required
     def run_framework_to_script_stage11_api():
         """单独运行 11 当前批次因果冲突：write -> review -> rewrite(必要时) -> memory。"""
+        import json as _json
+
+        def _stage11_debug_dir(data: dict, framework_asset: dict | None) -> Path:
+            title = _stage12_debug_project_title(data, framework_asset)
+            path = (
+                    Path(__file__).resolve().parents[2]
+                    / "cache"
+                    / _stage12_debug_safe_name(title)
+                    / "framework_to_script"
+                    / "stage11"
+            )
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+
+        def _stage11_raw_debug_dir() -> Path:
+            path = Path(__file__).resolve().parents[2] / "cache" / "raw_coze_debug"
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+
+        def _stage11_json_len(value) -> int:
+            try:
+                return len(_json.dumps(value, ensure_ascii=False, default=str))
+            except Exception:
+                return -1
+
+        def _write_stage11_debug(record: dict, *, filename: str | None = None) -> str:
+            try:
+                start = record.get("start_episode") or "unknown"
+                path = _stage11_debug_dir(data, framework_asset) / (filename or f"stage11_batch_{start}_latest.json")
+                public_record = {
+                    key: value
+                    for key, value in record.items()
+                    if not str(key).startswith("_")
+                }
+                public_record["debug_path"] = str(path)
+                path.write_text(
+                    _json.dumps(public_record, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8",
+                )
+                return str(path)
+            except Exception:
+                logger.exception("framework-to-script stage11 debug file write failed")
+                return ""
+
+        def _write_stage11_raw_debug(
+                *,
+                sub_stage: str,
+                stage_name: str,
+                variables: dict,
+                raw_output=None,
+                parsed_output=None,
+                error: str = "",
+        ) -> str:
+            try:
+                path = _stage11_raw_debug_dir() / f"stage11_{sub_stage}_raw_response.json"
+                payload = {
+                    "stage": "11",
+                    "sub_stage": sub_stage,
+                    "stage_name": stage_name,
+                    "backend": "coze",
+                    "asset_id": asset_id if "asset_id" in locals() else "",
+                    "variable_keys": sorted(variables.keys()) if isinstance(variables, dict) else [],
+                    "variable_size_summary": {
+                        key: {
+                            "type": type(value).__name__,
+                            "json_length": _stage11_json_len(value),
+                            "preview": _stage12_debug_preview(value, limit=500),
+                        }
+                        for key, value in (variables.items() if isinstance(variables, dict) else [])
+                    },
+                    "raw_output_type": type(raw_output).__name__,
+                    "raw_output_keys": sorted(raw_output.keys()) if isinstance(raw_output, dict) else [],
+                    "raw_output": raw_output,
+                    "parsed_output": parsed_output,
+                    "error": error,
+                    "created_at": _now_iso(),
+                }
+                path.write_text(
+                    _json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8",
+                )
+
+                latest_path = _stage11_raw_debug_dir() / "stage11_raw_response.json"
+                latest_path.write_text(
+                    _json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8",
+                )
+
+                logger.warning(
+                    "[framework_to_script_raw_debug] wrote stage11 %s raw Coze response path=%s",
+                    sub_stage,
+                    path,
+                )
+                return str(path)
+            except Exception:
+                logger.exception("[framework_to_script_raw_debug] failed to write stage11 raw response")
+                return ""
+
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return _json_error("请求体必须是 JSON object。", status=400)
+
         try:
             user_id = _require_user_id()
             data, framework_asset = _inject_framework_asset(data, user_id)
@@ -3414,17 +4482,17 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=400)
 
         framework_plan_package = (
-            data.get("framework_plan_package")
-            or data.get("frameworkPlanPackage")
-            or {}
+                data.get("framework_plan_package")
+                or data.get("frameworkPlanPackage")
+                or {}
         )
         stage10 = _framework_script_stage_cache(framework_asset, "stage10")
         plan = (
-            data.get("allEnrichedEpisodePlan")
-            or data.get("enrichedEpisodePlan")
-            or stage10.get("allEnrichedEpisodePlan")
-            or stage10.get("enrichedEpisodePlan")
-            or []
+                data.get("allEnrichedEpisodePlan")
+                or data.get("enrichedEpisodePlan")
+                or stage10.get("allEnrichedEpisodePlan")
+                or stage10.get("enrichedEpisodePlan")
+                or []
         )
         if not isinstance(plan, list) or not plan:
             return _json_error("缺少 allEnrichedEpisodePlan，请先完成 10 分集细化方案。", status=400)
@@ -3434,6 +4502,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         scene_dictionary = data.get("sceneDictionary") or stage08.get("sceneDictionary") or {}
         rules_digest = data.get("scriptWorldRulesDigest") or stage08.get("scriptWorldRulesDigest") or {}
         appearance_mapping = data.get("appearanceMapping") or stage09.get("appearanceMapping") or {}
+
         if not isinstance(scene_dictionary, dict) or not scene_dictionary:
             return _json_error("缺少 sceneDictionary，请先完成 08 场景字典提炼。", status=400)
         if not isinstance(appearance_mapping, dict) or not appearance_mapping:
@@ -3443,11 +4512,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         existing_stage11 = _framework_script_stage_cache(framework_asset, "stage11")
         existing_batches = existing_stage11.get("batches") if isinstance(existing_stage11.get("batches"), dict) else {}
+
         reset_stage11 = bool(data.get("reset_stage11") or data.get("resetStage11"))
         if reset_stage11:
             existing_batches = {}
             existing_stage11 = {}
-            reset_asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
+            reset_asset_id = str(
+                (framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
             if reset_asset_id:
                 _save_framework_to_script_stage(
                     user_id=user_id,
@@ -3487,6 +4558,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     continue
                 valid_existing_batches[str(existing_start)] = existing_batch
             existing_batches = valid_existing_batches
+
         start_episode, end_episode, batch_plan = _framework_batch_from_plan(
             plan,
             data.get("batchStartEpisode") or data.get("batch_start_episode"),
@@ -3498,10 +4570,26 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
         if not _try_begin_framework_stage(user_id, asset_id, "11"):
             return _json_error("11 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
+
+        debug_record = {
+            "stage": "11",
+            "stage_name": "framework_causal_conflict_plan",
+            "status": "started",
+            "asset_id": asset_id,
+            "start_episode": start_episode,
+            "end_episode": end_episode,
+            "batch_plan_count": len(batch_plan) if isinstance(batch_plan, list) else 0,
+            "events": [],
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        }
+        debug_path = _write_stage11_debug(debug_record)
+
         try:
             failed_sub_stage = "stage11_prepare"
             base_vars = {}
             total_episodes = 0
+
             try:
                 from .services.fastgpt_client import FastGPTStageFormatError
                 from .services.coze_client import coze_client
@@ -3523,6 +4611,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 )
                 if reset_stage11:
                     conflict_memory = ""
+
                 base_vars = {
                     **_framework_context_vars(data, framework_plan_package),
                     "totalEpisodes": total_episodes,
@@ -3551,8 +4640,29 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     framework_asset=framework_asset,
                     workflow_stage="11_write",
                 )
+
+                debug_record.update(
+                    {
+                        "status": "prepared",
+                        "base_vars_keys": sorted(base_vars.keys()),
+                        "base_vars_size_summary": {
+                            key: {
+                                "type": type(value).__name__,
+                                "json_length": _stage11_json_len(value),
+                                "preview": _stage12_debug_preview(value, limit=500),
+                            }
+                            for key, value in base_vars.items()
+                        },
+                        "total_episodes": total_episodes,
+                        "conflictMemory_length": len(conflict_memory),
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage11_debug(debug_record)
+
                 first_batch_item = batch_plan[0] if batch_plan and isinstance(batch_plan[0], dict) else {}
-                appearance_characters = appearance_mapping.get("characters") if isinstance(appearance_mapping, dict) else []
+                appearance_characters = appearance_mapping.get("characters") if isinstance(appearance_mapping,
+                                                                                           dict) else []
                 appearance_character_count = (
                     len(appearance_characters)
                     if isinstance(appearance_characters, list)
@@ -3560,6 +4670,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     if isinstance(appearance_mapping, dict)
                     else 0
                 )
+
                 logger.info(
                     "framework-to-script stage11 start: asset_id=%s start_episode=%s end_episode=%s "
                     "batch_plan_count=%s total_episodes=%s has_sceneDictionary=%s "
@@ -3584,6 +4695,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         "memory": STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
                     },
                 )
+
                 failed_sub_stage = "causal_conflict_write"
                 write_output_data = {}
                 conflict_plan = {}
@@ -3592,6 +4704,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 write_output_keys = []
                 write_retry_count = 0
                 max_write_retries = 3
+
                 for retry_count in range(max_write_retries + 1):
                     write_retry_count = retry_count
                     if retry_count:
@@ -3604,8 +4717,31 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             end_episode,
                             write_failure_reason,
                         )
+
+                    debug_record["events"].append(
+                        {
+                            "sub_stage": "causal_conflict_write",
+                            "attempt": retry_count + 1,
+                            "status": "requesting_coze",
+                            "started_at": _now_iso(),
+                            "reason_before_retry": write_failure_reason,
+                        }
+                    )
+                    debug_record.update(
+                        {
+                            "status": "requesting_coze",
+                            "failed_sub_stage": failed_sub_stage,
+                            "write_attempt": retry_count + 1,
+                            "updated_at": _now_iso(),
+                        }
+                    )
+                    debug_path = _write_stage11_debug(debug_record)
+
                     try:
+                        started = time.monotonic()
                         write_output = coze_client.run_stage(STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE, base_vars)
+                        duration_ms = int((time.monotonic() - started) * 1000)
+
                         write_output_data = write_output if isinstance(write_output, dict) else {}
                         write_output_keys = sorted(write_output_data.keys())
                         conflict_plan, conflict_plan_unwrapped, write_failure_reason = _normalize_dict_output_alias(
@@ -3613,6 +4749,39 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "batchCausalConflictPlan",
                             "batch_causal_conflict_plan",
                         )
+
+                        _write_stage11_raw_debug(
+                            sub_stage="write",
+                            stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE,
+                            variables=base_vars,
+                            raw_output=write_output,
+                            parsed_output={"batchCausalConflictPlan": conflict_plan} if conflict_plan else {},
+                            error=write_failure_reason,
+                        )
+
+                        debug_record["events"][-1].update(
+                            {
+                                "status": "returned",
+                                "duration_ms": duration_ms,
+                                "write_output_keys": write_output_keys,
+                                "conflict_plan_type": type(conflict_plan).__name__,
+                                "conflict_plan_empty": not bool(conflict_plan),
+                                "write_failure_reason": write_failure_reason,
+                                "ended_at": _now_iso(),
+                            }
+                        )
+                        debug_record.update(
+                            {
+                                "status": "write_returned",
+                                "write_output_keys": write_output_keys,
+                                "conflict_plan_type": type(conflict_plan).__name__,
+                                "conflict_plan_empty": not bool(conflict_plan),
+                                "write_failure_reason": write_failure_reason,
+                                "updated_at": _now_iso(),
+                            }
+                        )
+                        debug_path = _write_stage11_debug(debug_record)
+
                     except FastGPTStageFormatError as exc:
                         write_output_data = {}
                         write_output_keys = []
@@ -3621,14 +4790,47 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             f"probable_truncated_json={exc.probable_truncated_json}; "
                             f"raw_output_source={exc.raw_output_source}"
                         )
+                        debug_record["events"][-1].update(
+                            {
+                                "status": "format_error",
+                                "error": write_failure_reason,
+                                "ended_at": _now_iso(),
+                            }
+                        )
+                        debug_record.update(
+                            {
+                                "status": "write_format_error",
+                                "write_failure_reason": write_failure_reason,
+                                "updated_at": _now_iso(),
+                            }
+                        )
+                        debug_path = _write_stage11_debug(debug_record)
                         if retry_count >= max_write_retries:
                             break
                         continue
+
                     except Exception as exc:
                         write_failure_reason = f"{type(exc).__name__}: {exc}"
+                        debug_record["events"][-1].update(
+                            {
+                                "status": "exception",
+                                "error": write_failure_reason,
+                                "traceback": traceback.format_exc(),
+                                "ended_at": _now_iso(),
+                            }
+                        )
+                        debug_record.update(
+                            {
+                                "status": "write_exception",
+                                "write_failure_reason": write_failure_reason,
+                                "updated_at": _now_iso(),
+                            }
+                        )
+                        debug_path = _write_stage11_debug(debug_record)
                         if retry_count >= max_write_retries:
                             break
                         continue
+
                     if isinstance(conflict_plan, dict) and conflict_plan:
                         contract_issues = _validate_stage11_causal_conflict_plan(
                             conflict_plan,
@@ -3639,13 +4841,23 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             break
                         write_failure_reason = "contract validation failed: " + "; ".join(contract_issues[:8])
                         conflict_plan = {}
+                        debug_record.update(
+                            {
+                                "status": "write_contract_failed",
+                                "write_failure_reason": write_failure_reason,
+                                "updated_at": _now_iso(),
+                            }
+                        )
+                        debug_path = _write_stage11_debug(debug_record)
                         if retry_count >= max_write_retries:
                             break
                         continue
+
                     if not write_failure_reason:
                         write_failure_reason = "normalized batchCausalConflictPlan is empty"
                     if retry_count >= max_write_retries:
                         break
+
                 conflict_episodes = conflict_plan.get("episodes") if isinstance(conflict_plan, dict) else []
                 logger.info(
                     "framework-to-script stage11 write done: asset_id=%s write_output_keys=%s "
@@ -3661,7 +4873,19 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     sorted(base_vars.keys()),
                     write_failure_reason,
                 )
+
                 if not isinstance(conflict_plan, dict) or not conflict_plan:
+                    debug_record.update(
+                        {
+                            "status": "failed",
+                            "failure_phase": "causal_conflict_write",
+                            "write_retry_count": write_retry_count,
+                            "write_failure_reason": write_failure_reason,
+                            "write_output_keys": write_output_keys,
+                            "updated_at": _now_iso(),
+                        }
+                    )
+                    debug_path = _write_stage11_debug(debug_record)
                     logger.error(
                         "framework-to-script stage11 causal_conflict_write failed after retries: asset_id=%s "
                         "start_episode=%s end_episode=%s retry_count=%s max_write_retries=%s "
@@ -3687,22 +4911,57 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                                 "end_episode": end_episode,
                                 "write_failure_reason": write_failure_reason,
                                 "write_output_keys": write_output_keys,
+                                "debug_path": debug_path,
                             },
                         }
                     ), 500
+
                 max_review_rounds = 5
                 conflict_review = {}
                 rewrite_round = 0
+
                 for review_round in range(1, max_review_rounds + 1):
                     failed_sub_stage = "causal_conflict_review"
+
+                    debug_record["events"].append(
+                        {
+                            "sub_stage": "causal_conflict_review",
+                            "review_round": review_round,
+                            "rewrite_round": rewrite_round,
+                            "status": "requesting_coze",
+                            "started_at": _now_iso(),
+                        }
+                    )
+                    debug_record.update(
+                        {
+                            "status": "requesting_coze",
+                            "failed_sub_stage": failed_sub_stage,
+                            "review_round": review_round,
+                            "rewrite_round": rewrite_round,
+                            "updated_at": _now_iso(),
+                        }
+                    )
+                    debug_path = _write_stage11_debug(debug_record)
+
                     try:
+                        review_vars = {
+                            **base_vars,
+                            "batchCausalConflictPlan": conflict_plan,
+                        }
+                        started = time.monotonic()
                         review_output = coze_client.run_stage(
                             STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
-                            {
-                                **base_vars,
-                                "batchCausalConflictPlan": conflict_plan,
-                            },
+                            review_vars,
                         )
+                        duration_ms = int((time.monotonic() - started) * 1000)
+
+                        _write_stage11_raw_debug(
+                            sub_stage="review",
+                            stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
+                            variables=review_vars,
+                            raw_output=review_output,
+                        )
+
                     except FastGPTStageFormatError as exc:
                         logger.warning(
                             "framework-to-script stage11 review missing fields, using defaults: "
@@ -3712,23 +4971,28 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             str(exc),
                         )
                         review_output = {}
+                        duration_ms = 0
+
                     review_output_data = review_output if isinstance(review_output, dict) else {}
                     review_passed = _get_bool_alias(review_output_data, "reviewPassed", "passed", default=None)
-                    rewrite_required = _get_bool_alias(review_output_data, "rewriteRequired", "rewrite_required", default=None)
+                    rewrite_required = _get_bool_alias(review_output_data, "rewriteRequired", "rewrite_required",
+                                                       default=None)
                     blocking_issues = _get_list_alias(review_output_data, "blockingIssues", "blocking_issues")
-                    non_blocking_issues = _get_list_alias(review_output_data, "nonBlockingIssues", "non_blocking_issues")
+                    non_blocking_issues = _get_list_alias(review_output_data, "nonBlockingIssues",
+                                                          "non_blocking_issues")
                     rewrite_brief = _first_present(review_output_data, "rewriteBrief", "rewrite_brief", default="")
+
                     if review_passed is None and rewrite_required is None:
                         logger.warning(
                             "framework-to-script stage11 review output missing reviewPassed/passed and rewriteRequired/rewrite_required; "
-                            "treating as rewrite needed: "
-                            "asset_id=%s review_output_keys=%s",
+                            "treating as rewrite needed: asset_id=%s review_output_keys=%s",
                             asset_id,
                             sorted(review_output_data.keys()),
                         )
                         review_passed = False
                         rewrite_required = True
                         blocking_issues = []
+
                     conflict_review = {
                         "reviewPassed": review_passed,
                         "passed": review_passed,
@@ -3742,6 +5006,34 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         "rewrite_brief": rewrite_brief,
                     }
                     rewrite_triggered = _framework_review_needs_rewrite(conflict_review)
+
+                    debug_record["events"][-1].update(
+                        {
+                            "status": "returned",
+                            "duration_ms": duration_ms,
+                            "review_output_keys": sorted(review_output_data.keys()),
+                            "reviewPassed": review_passed,
+                            "rewriteRequired": rewrite_required,
+                            "blockingIssues_count": len(blocking_issues),
+                            "rewriteBrief_length": len(str(rewrite_brief or "")),
+                            "rewrite_triggered": rewrite_triggered,
+                            "ended_at": _now_iso(),
+                        }
+                    )
+                    debug_record.update(
+                        {
+                            "status": "review_returned",
+                            "review_round": review_round,
+                            "rewrite_round": rewrite_round,
+                            "reviewPassed": review_passed,
+                            "rewriteRequired": rewrite_required,
+                            "blockingIssues_count": len(blocking_issues),
+                            "rewriteBrief_length": len(str(rewrite_brief or "")),
+                            "updated_at": _now_iso(),
+                        }
+                    )
+                    debug_path = _write_stage11_debug(debug_record)
+
                     logger.info(
                         "framework-to-script stage11 review loop: stage=%s batchStartEpisode=%s review_round=%s "
                         "rewrite_round=%s reviewPassed=%s rewriteRequired=%s blockingIssues_count=%s "
@@ -3761,9 +5053,22 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         rewrite_triggered,
                         sorted(base_vars.keys()),
                     )
+
                     if review_passed is True and rewrite_required is False:
                         break
+
                     if review_round >= max_review_rounds:
+                        debug_record.update(
+                            {
+                                "status": "failed",
+                                "failure_phase": "causal_conflict_review",
+                                "review_round": review_round,
+                                "rewrite_round": rewrite_round,
+                                "last_review": conflict_review,
+                                "updated_at": _now_iso(),
+                            }
+                        )
+                        debug_path = _write_stage11_debug(debug_record)
                         return jsonify(
                             {
                                 "success": False,
@@ -3778,11 +5083,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                                     "last_review": conflict_review,
                                     "blockingIssues": blocking_issues,
                                     "blocking_issues": blocking_issues,
+                                    "debug_path": debug_path,
                                 },
                             }
                         ), 422
+
                     failed_sub_stage = "causal_conflict_rewrite"
                     rewrite_round += 1
+
                     logger.info(
                         "framework-to-script stage11 rewrite loop: stage=%s batchStartEpisode=%s review_round=%s "
                         "rewrite_round=%s reviewPassed=%s rewriteRequired=%s blockingIssues_count=%s asset_id=%s",
@@ -3795,6 +5103,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         len(blocking_issues),
                         asset_id,
                     )
+
                     rewrite_vars = _inject_snapshot_stage_preference(
                         {
                             **base_vars,
@@ -3806,15 +5115,47 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         framework_asset=framework_asset,
                         workflow_stage="11_rewrite",
                     )
+
+                    debug_record["events"].append(
+                        {
+                            "sub_stage": "causal_conflict_rewrite",
+                            "review_round": review_round,
+                            "rewrite_round": rewrite_round,
+                            "status": "requesting_coze",
+                            "started_at": _now_iso(),
+                        }
+                    )
+                    debug_record.update(
+                        {
+                            "status": "requesting_coze",
+                            "failed_sub_stage": failed_sub_stage,
+                            "review_round": review_round,
+                            "rewrite_round": rewrite_round,
+                            "updated_at": _now_iso(),
+                        }
+                    )
+                    debug_path = _write_stage11_debug(debug_record)
+
+                    started = time.monotonic()
                     rewrite_output = coze_client.run_stage(
                         STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
                         rewrite_vars,
                     )
+                    duration_ms = int((time.monotonic() - started) * 1000)
+
+                    _write_stage11_raw_debug(
+                        sub_stage="rewrite",
+                        stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
+                        variables=rewrite_vars,
+                        raw_output=rewrite_output,
+                    )
+
                     logger.info(
                         "framework-to-script stage11 rewrite done: asset_id=%s rewrite_output_keys=%s",
                         asset_id,
                         sorted(rewrite_output.keys()) if isinstance(rewrite_output, dict) else [],
                     )
+
                     rewrite_output_data = rewrite_output if isinstance(rewrite_output, dict) else {}
                     rewrite_conflict_plan, rewrite_unwrapped = _unwrap_dict_alias(
                         rewrite_output_data,
@@ -3823,6 +5164,28 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     )
                     conflict_plan = rewrite_conflict_plan or conflict_plan
                     rewrite_episodes = conflict_plan.get("episodes") if isinstance(conflict_plan, dict) else []
+
+                    debug_record["events"][-1].update(
+                        {
+                            "status": "returned",
+                            "duration_ms": duration_ms,
+                            "rewrite_output_keys": sorted(rewrite_output_data.keys()),
+                            "normalized_keys": sorted(conflict_plan.keys()) if isinstance(conflict_plan, dict) else [],
+                            "batchCausalConflictPlan_episodes_count": len(rewrite_episodes) if isinstance(
+                                rewrite_episodes, list) else 0,
+                            "ended_at": _now_iso(),
+                        }
+                    )
+                    debug_record.update(
+                        {
+                            "status": "rewrite_returned",
+                            "rewrite_output_keys": sorted(rewrite_output_data.keys()),
+                            "normalized_keys": sorted(conflict_plan.keys()) if isinstance(conflict_plan, dict) else [],
+                            "updated_at": _now_iso(),
+                        }
+                    )
+                    debug_path = _write_stage11_debug(debug_record)
+
                     logger.info(
                         "framework-to-script stage11 rewrite normalized: asset_id=%s normalized_keys=%s "
                         "unwrapped=%s batchCausalConflictPlan_episodes_count=%s",
@@ -3831,17 +5194,46 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         rewrite_unwrapped,
                         len(rewrite_episodes) if isinstance(rewrite_episodes, list) else 0,
                     )
+
                 failed_sub_stage = "causal_conflict_memory"
                 try:
+                    memory_vars = {
+                        **base_vars,
+                        "batchCausalConflictPlan": conflict_plan,
+                        "conflictMemory": conflict_memory,
+                        "conflictStartEpisode": start_episode,
+                    }
+
+                    debug_record["events"].append(
+                        {
+                            "sub_stage": "causal_conflict_memory",
+                            "status": "requesting_coze",
+                            "started_at": _now_iso(),
+                        }
+                    )
+                    debug_record.update(
+                        {
+                            "status": "requesting_coze",
+                            "failed_sub_stage": failed_sub_stage,
+                            "updated_at": _now_iso(),
+                        }
+                    )
+                    debug_path = _write_stage11_debug(debug_record)
+
+                    started = time.monotonic()
                     memory_output = coze_client.run_stage(
                         STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
-                        {
-                            **base_vars,
-                            "batchCausalConflictPlan": conflict_plan,
-                            "conflictMemory": conflict_memory,
-                            "conflictStartEpisode": start_episode,
-                        },
+                        memory_vars,
                     )
+                    duration_ms = int((time.monotonic() - started) * 1000)
+
+                    _write_stage11_raw_debug(
+                        sub_stage="memory",
+                        stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
+                        variables=memory_vars,
+                        raw_output=memory_output,
+                    )
+
                 except FastGPTStageFormatError as exc:
                     logger.warning(
                         "framework-to-script stage11 memory missing conflictMemory, keeping previous memory: "
@@ -3851,6 +5243,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         str(exc),
                     )
                     memory_output = {}
+                    duration_ms = 0
+
                 memory_output_data = memory_output if isinstance(memory_output, dict) else {}
                 memory_value = _first_present(memory_output_data, "conflictMemory", "conflict_memory", default=None)
                 if memory_value is None:
@@ -3862,6 +5256,26 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     )
                 else:
                     conflict_memory = str(memory_value)
+
+                debug_record["events"][-1].update(
+                    {
+                        "status": "returned",
+                        "duration_ms": duration_ms,
+                        "memory_output_keys": sorted(memory_output_data.keys()),
+                        "conflictMemory_length": len(conflict_memory),
+                        "ended_at": _now_iso(),
+                    }
+                )
+                debug_record.update(
+                    {
+                        "status": "memory_returned",
+                        "memory_output_keys": sorted(memory_output_data.keys()),
+                        "conflictMemory_length": len(conflict_memory),
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage11_debug(debug_record)
+
                 logger.info(
                     "framework-to-script stage11 memory done: asset_id=%s memory_output_keys=%s normalized_keys=%s conflictMemory_length=%s",
                     asset_id,
@@ -3869,7 +5283,20 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     ["conflictMemory", "conflict_memory"],
                     len(conflict_memory),
                 )
+
             except Exception as exc:
+                debug_record.update(
+                    {
+                        "status": "failed",
+                        "failure_phase": failed_sub_stage,
+                        "failed_sub_stage": failed_sub_stage,
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                        "traceback": traceback.format_exc(),
+                        "updated_at": _now_iso(),
+                    }
+                )
+                debug_path = _write_stage11_debug(debug_record)
                 logger.exception(
                     "framework-to-script stage11 failed: failed_sub_stage=%s asset_id=%s start_episode=%s "
                     "end_episode=%s batch_plan_count=%s base_vars_keys=%s error_type=%s error=%s",
@@ -3895,6 +5322,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "end_episode": end_episode,
                             "batch_plan_count": len(batch_plan) if isinstance(batch_plan, list) else 0,
                             "base_var_keys": sorted(base_vars.keys()) if isinstance(base_vars, dict) else [],
+                            "debug_path": debug_path,
                         },
                     }
                 ), 500
@@ -3914,6 +5342,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             }
             batches[batch_key] = batch_output
             output = {**batch_output, "batches": batches}
+
             if asset_id:
                 _save_framework_to_script_stage(
                     user_id=user_id,
@@ -3921,6 +5350,19 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     stage_key="stage11",
                     output=output,
                 )
+
+            debug_record.update(
+                {
+                    "status": "success",
+                    "saved": bool(asset_id),
+                    "final_output_keys": sorted(output.keys()),
+                    "conflict_plan_keys": sorted(conflict_plan.keys()) if isinstance(conflict_plan, dict) else [],
+                    "conflictMemory_length": len(conflict_memory),
+                    "updated_at": _now_iso(),
+                }
+            )
+            debug_path = _write_stage11_debug(debug_record)
+
         finally:
             _end_framework_stage(user_id, asset_id, "11")
 

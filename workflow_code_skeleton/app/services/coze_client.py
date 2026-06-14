@@ -209,8 +209,21 @@ COZE_OUTPUT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
         APPEARANCE_MAPPING: ("alias", "appearanceMapping"),
     },
     STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: {
-        ALL_ENRICHED_EPISODE_PLAN: ("episodeplan", "allEnrichedEpisodePlan"),
-        "allEnrichedEpisodePlanText": ("episodeplan", "allEnrichedEpisodePlanText"),
+        # Coze 的结束节点会返回 {"episodeplan": "...json string..."}。
+        # episodeplan 是外壳变量名，不是 allEnrichedEpisodePlan 本身。
+        # 因此这里不再把 episodeplan 注册为字段别名，避免把整个业务 JSON 当成单集/数组字段。
+        ALL_ENRICHED_EPISODE_PLAN: (
+            "allEnrichedEpisodePlan",
+            "enrichedEpisodePlan",
+            "all_enriched_episode_plan",
+            "enriched_episode_plan",
+        ),
+        "allEnrichedEpisodePlanText": (
+            "allEnrichedEpisodePlanText",
+            "enrichedEpisodePlanText",
+            "all_enriched_episode_plan_text",
+            "enriched_episode_plan_text",
+        ),
     },
     STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE: {
         BATCH_CAUSAL_CONFLICT_PLAN: ("conflicts", "batchCausalConflictPlan"),
@@ -269,6 +282,18 @@ class CozeWorkflowClient(FastGPTClient):
                 raise RuntimeError(f"Coze stage {stage_name} returned empty non-JSON response")
 
         _raise_for_coze_error(stage_name, response_json)
+
+        # Keep the raw Coze response before parsing.
+        # Stage10 may raise during strict episodeplan parsing; the server still needs
+        # execute_id/debug_url/raw response for diagnosis.
+        self._remember_stage_debug_info(
+            stage_name,
+            status="coze_response_received",
+            raw_response=response_json,
+            response_preview=safe_truncated_preview(response_json, limit=2000),
+            conversation_log_available=False,
+        )
+
         extraction_payload = _coze_response_as_fastgpt_payload(response_json, contract)
         raw_output = self._extract_output_payload(
             extraction_payload,
@@ -400,6 +425,26 @@ def _coze_contract_for(stage_name: str, contract: FastGPTStageContract) -> FastG
 
 
 def _coze_response_as_fastgpt_payload(response_json: Any, contract: FastGPTStageContract) -> dict[str, Any]:
+    # Stage10 的 Coze 结束节点形态是：
+    # {"episodeplan": "{\"allEnrichedEpisodePlan\":[...],\"allEnrichedEpisodePlanText\":\"...\"}"}
+    # episodeplan 是变量外壳；真正业务字段在字符串内部。
+    # 必须先拆 episodeplan，再交给 FastGPTClient 的契约校验层。
+    if contract.stage_name == STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN:
+        stage10_payload = _extract_stage10_episodeplan_payload_from_coze_response(response_json)
+        if isinstance(stage10_payload, dict) and stage10_payload.get(ALL_ENRICHED_EPISODE_PLAN):
+            answer_text = json.dumps(stage10_payload, ensure_ascii=False, default=str)
+            return {
+                "answerText": answer_text,
+                "textOutput": answer_text,
+                "newVariables": dict(stage10_payload),
+                "responseData": {
+                    "answerText": answer_text,
+                    "textOutput": answer_text,
+                    "variables": dict(stage10_payload),
+                },
+                **stage10_payload,
+            }
+
     parsed = parse_workflow_output(response_json)
     returned = wrap_payload_for_expected_output(
         parsed,
@@ -421,6 +466,337 @@ def _coze_response_as_fastgpt_payload(response_json: Any, contract: FastGPTStage
         },
         **flattened,
     }
+
+
+_STAGE10_EPISODEPLAN_CONTAINER_KEYS = (
+    "episodeplan",
+    "episodePlan",
+    "episode_plan",
+)
+_STAGE10_PLAN_KEYS = (
+    ALL_ENRICHED_EPISODE_PLAN,
+    "enrichedEpisodePlan",
+    "all_enriched_episode_plan",
+    "enriched_episode_plan",
+    BATCH_ENRICHED_EPISODE_PLAN,
+    "batch_enriched_episode_plan",
+)
+_STAGE10_TEXT_KEYS = (
+    "allEnrichedEpisodePlanText",
+    "enrichedEpisodePlanText",
+    "all_enriched_episode_plan_text",
+    "enriched_episode_plan_text",
+)
+_STAGE10_SEARCH_KEYS = (
+    "data",
+    "result",
+    "output",
+    "outputs",
+    "response",
+    "responseData",
+    "newVariables",
+    "variables",
+    "answerText",
+    "textOutput",
+    "text",
+    "content",
+)
+
+
+def _extract_stage10_episodeplan_payload_from_coze_response(response_json: Any) -> dict[str, Any] | None:
+    """Extract Stage10 business payload from Coze's episodeplan wrapper.
+
+    Coze may return:
+      {"episodeplan": "{\"allEnrichedEpisodePlan\":[...], ...}"}
+
+    The wrapper name episodeplan is not the business field itself.
+    """
+    saw_stage10_business_text = False
+
+    for candidate in _iter_stage10_candidate_values(response_json):
+        if isinstance(candidate, str) and (
+            "allEnrichedEpisodePlan" in candidate
+            or "all_enriched_episode_plan" in candidate
+            or "enrichedEpisodePlan" in candidate
+        ):
+            saw_stage10_business_text = True
+
+        normalized = _normalize_stage10_episodeplan_payload(candidate)
+        if isinstance(normalized, dict) and normalized.get(ALL_ENRICHED_EPISODE_PLAN):
+            plan = normalized.get(ALL_ENRICHED_EPISODE_PLAN)
+            if isinstance(plan, list) and len(plan) == 1:
+                # 如果原始文本明显包含多集迹象，但最后只解析出 1 集，说明很可能是截断 JSON 被抢救成单集。
+                raw_text = json.dumps(response_json, ensure_ascii=False, default=str)
+                if '"episode": 2' in raw_text or '\\"episode\\": 2' in raw_text or '"episode":2' in raw_text or '\\"episode\\":2' in raw_text:
+                    raise ValueError(
+                        "Stage10 Coze episodeplan 原始响应包含第2集迹象，但后端只解析出1集。"
+                        "这通常表示 episodeplan JSON 字符串被截断或被宽松解析器错误抢救。"
+                        "请检查 Coze 原始输出是否是完整合法 JSON，并提高输出上限或改为分批生成。"
+                    )
+            return normalized
+
+    if saw_stage10_business_text:
+        raise ValueError(
+            "Stage10 Coze episodeplan 包含 allEnrichedEpisodePlan 文本，但不是完整合法 JSON，"
+            "后端拒绝把截断 JSON 抢救成单集。请检查 Coze 原始输出是否被截断。"
+        )
+
+    return None
+
+
+def _iter_stage10_candidate_values(value: Any, *, _depth: int = 0):
+    if _depth > 8:
+        return
+
+    parsed = _parse_stage10_json_like(value)
+
+    if isinstance(parsed, dict):
+        # 最高优先级：先拆 Coze 结束节点的 episodeplan 外壳。
+        for key in _STAGE10_EPISODEPLAN_CONTAINER_KEYS:
+            actual_key = _stage10_find_key(parsed, key)
+            if actual_key is not None and parsed.get(actual_key) not in (None, "", [], {}):
+                yield parsed.get(actual_key)
+
+        # 其次再尝试当前 dict 本身。它可能已经是业务 JSON。
+        yield parsed
+
+        # 最后遍历常见包装层。
+        for key in _STAGE10_SEARCH_KEYS:
+            actual_key = _stage10_find_key(parsed, key)
+            if actual_key is None:
+                continue
+            nested_value = parsed.get(actual_key)
+            if nested_value in (None, "", [], {}):
+                continue
+            yield from _iter_stage10_candidate_values(nested_value, _depth=_depth + 1)
+
+    elif isinstance(parsed, list):
+        yield parsed
+        for item in parsed:
+            yield from _iter_stage10_candidate_values(item, _depth=_depth + 1)
+
+
+def _normalize_stage10_episodeplan_payload(value: Any) -> dict[str, Any] | None:
+    parsed = _parse_stage10_json_like(value)
+
+    if isinstance(parsed, list):
+        plan = [item for item in parsed if isinstance(item, dict)]
+        if plan:
+            return {
+                ALL_ENRICHED_EPISODE_PLAN: plan,
+                "allEnrichedEpisodePlanText": _stage10_plan_text("", plan),
+            }
+        return None
+
+    if not isinstance(parsed, dict):
+        return None
+
+    # 如果当前 dict 仍然有 episodeplan 外壳，先打开外壳。
+    for key in _STAGE10_EPISODEPLAN_CONTAINER_KEYS:
+        actual_key = _stage10_find_key(parsed, key)
+        if actual_key is not None and parsed.get(actual_key) not in (None, "", [], {}):
+            nested = _normalize_stage10_episodeplan_payload(parsed.get(actual_key))
+            if isinstance(nested, dict) and nested.get(ALL_ENRICHED_EPISODE_PLAN):
+                return nested
+
+    plan_value = _stage10_first_present(parsed, _STAGE10_PLAN_KEYS)
+    text_value = _stage10_first_present(parsed, _STAGE10_TEXT_KEYS)
+
+    plan = _stage10_plan_list(plan_value)
+    if plan:
+        return {
+            ALL_ENRICHED_EPISODE_PLAN: plan,
+            "allEnrichedEpisodePlanText": _stage10_plan_text(text_value, plan),
+        }
+
+    # 最后兜底：如果 episodeplan 本身就是单集对象，才包成数组。
+    # 这个兜底必须放在 allEnrichedEpisodePlan 解析之后，避免把完整业务 JSON 当成单集。
+    if _stage10_looks_like_episode_item(parsed):
+        plan = [parsed]
+        return {
+            ALL_ENRICHED_EPISODE_PLAN: plan,
+            "allEnrichedEpisodePlanText": _stage10_plan_text(text_value, plan),
+        }
+
+    return None
+
+
+def _stage10_plan_list(value: Any) -> list[dict[str, Any]]:
+    parsed = _parse_stage10_json_like(value)
+
+    if isinstance(parsed, list):
+        return [item for item in parsed if isinstance(item, dict)]
+
+    if isinstance(parsed, dict):
+        nested = _normalize_stage10_episodeplan_payload(parsed)
+        if isinstance(nested, dict) and isinstance(nested.get(ALL_ENRICHED_EPISODE_PLAN), list):
+            return [
+                item for item in nested.get(ALL_ENRICHED_EPISODE_PLAN, [])
+                if isinstance(item, dict)
+            ]
+        if _stage10_looks_like_episode_item(parsed):
+            return [parsed]
+
+    return []
+
+
+def _parse_stage10_json_like(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if not isinstance(value, str):
+        return value
+
+    text = _strip_stage10_json_fence(value)
+    if not text:
+        return value
+
+    # Stage10 的 episodeplan 是 Coze 变量外壳里的业务 JSON 字符串。
+    # 这里必须严格解析；不能用 parse_workflow_output / parse_json 去“抢救”局部 JSON。
+    # 否则多集 JSON 一旦被截断，通用解析器可能只捞出第一个完整 episode，
+    # 导致后端误判为只有 1 集并保存成功。
+    looks_like_stage10_business_json = (
+        "allEnrichedEpisodePlan" in text
+        or "all_enriched_episode_plan" in text
+        or "enrichedEpisodePlan" in text
+        or "allEnrichedEpisodePlanText" in text
+    )
+
+    candidates = [text]
+    first_obj, last_obj = text.find("{"), text.rfind("}")
+    first_arr, last_arr = text.find("["), text.rfind("]")
+
+    if first_obj != -1 and last_obj > first_obj:
+        candidates.append(text[first_obj:last_obj + 1])
+    if first_arr != -1 and last_arr > first_arr:
+        candidates.append(text[first_arr:last_arr + 1])
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        candidate = candidate.strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+
+        try:
+            return json.loads(candidate)
+        except Exception:
+            continue
+
+    if looks_like_stage10_business_json:
+        # 明确返回原字符串，让上层判定为不可消费；
+        # 禁止继续走 parse_workflow_output 抢救第一集。
+        return value
+
+    # 非 Stage10 业务 JSON 的普通包装文本，才允许通用解析兜底。
+    for candidate in candidates:
+        candidate = candidate.strip()
+        if not candidate:
+            continue
+        try:
+            parsed = parse_workflow_output(candidate)
+            if isinstance(parsed, (dict, list)):
+                return parsed
+        except Exception:
+            pass
+
+    return value
+
+
+def _strip_stage10_json_fence(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith("```"):
+        text = text.strip("`").strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    return text
+
+
+def _stage10_find_key(mapping: dict[str, Any], key: str) -> str | None:
+    if key in mapping:
+        return key
+    lowered = key.lower()
+    for existing_key in mapping.keys():
+        if str(existing_key).lower() == lowered:
+            return str(existing_key)
+    return None
+
+
+def _stage10_first_present(mapping: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        actual_key = _stage10_find_key(mapping, key)
+        if actual_key is None:
+            continue
+        value = mapping.get(actual_key)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _stage10_looks_like_episode_item(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+
+    lowered = {str(key).lower() for key in value.keys()}
+
+    # 带有这些业务容器键的对象不是单集。
+    container_keys = {
+        str(key).lower()
+        for key in (
+            *_STAGE10_EPISODEPLAN_CONTAINER_KEYS,
+            *_STAGE10_PLAN_KEYS,
+            *_STAGE10_TEXT_KEYS,
+        )
+    }
+    if lowered & container_keys:
+        return False
+
+    return bool(
+        lowered
+        & {
+            "episode",
+            "episodenumber",
+            "episode_number",
+            "title",
+            "specific_plot",
+            "text_view",
+            "ending_hook",
+        }
+    )
+
+
+def _stage10_plan_text(text_value: Any, plan: list[dict[str, Any]]) -> str:
+    if isinstance(text_value, str) and text_value.strip():
+        return text_value.strip()
+
+    if isinstance(text_value, (dict, list)) and text_value:
+        try:
+            return json.dumps(text_value, ensure_ascii=False, default=str)
+        except Exception:
+            return str(text_value)
+
+    parts: list[str] = []
+    for item in plan:
+        if not isinstance(item, dict):
+            continue
+        text = str(
+            item.get("text_view")
+            or item.get("textView")
+            or item.get("episode_text")
+            or item.get("episodeText")
+            or ""
+        ).strip()
+        if text:
+            parts.append(text)
+
+    if parts:
+        return "\n\n".join(parts)
+
+    try:
+        return json.dumps(plan, ensure_ascii=False, default=str)
+    except Exception:
+        return str(plan)
 
 
 def _coze_answer_text(flattened: dict[str, Any], returned: Any) -> str:

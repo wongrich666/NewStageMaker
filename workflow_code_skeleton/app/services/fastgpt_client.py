@@ -3528,6 +3528,8 @@ def _normalize_stage_specific_output_candidate(
         return _normalize_episode_plan_normalize_output_candidate(candidate, contract)
     if contract.stage_name == STAGE_SCENES:
         return _normalize_scenes_output_candidate(candidate, contract)
+    if contract.stage_name == STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN:
+        return _normalize_framework_enriched_episode_plan_output_candidate(candidate, contract)
     if _is_dialogue_payload_stage(contract.stage_name):
         return _normalize_dialogues_output_candidate(candidate, contract)
     if contract.stage_name in PASS_REVIEW_OUTPUT_STAGES:
@@ -3856,6 +3858,188 @@ def _normalize_episode_plan_alias_switch_item(item: dict[str, Any]) -> dict[str,
 def _looks_like_episode_plan_normalize_body(candidate: dict[str, Any]) -> bool:
     episodes = candidate.get("episodes")
     return isinstance(episodes, list)
+
+
+def _normalize_framework_enriched_episode_plan_output_candidate(
+    candidate: dict[str, Any],
+    contract: FastGPTStageContract,
+) -> dict[str, Any]:
+    if not isinstance(candidate, dict):
+        return candidate
+    normalized = _framework_enriched_episode_plan_payload_from_value(candidate)
+    if not isinstance(normalized, dict) or not normalized.get("allEnrichedEpisodePlan"):
+        return candidate
+    return {**candidate, **normalized}
+
+
+def _framework_enriched_episode_plan_payload_from_value(value: Any, *, _depth: int = 0) -> dict[str, Any] | None:
+    if _depth > 8:
+        return None
+
+    parsed = value
+    if isinstance(parsed, str):
+        text = strip_code_fence(parsed).strip()
+        if not text:
+            return None
+
+        looks_like_stage10_business_json = (
+                "allEnrichedEpisodePlan" in text
+                or "all_enriched_episode_plan" in text
+                or "enrichedEpisodePlan" in text
+                or "allEnrichedEpisodePlanText" in text
+        )
+
+        if looks_like_stage10_business_json:
+            # Stage10 业务 JSON 必须严格完整解析。
+            # 禁止 _try_parse_json / parse_json 从截断文本里抢救出第一个 episode。
+            try:
+                parsed_json = json.loads(text)
+            except Exception:
+                return None
+        else:
+            parsed_json = _try_parse_json(text)
+
+        if parsed_json is None:
+            return None
+        parsed = parsed_json
+
+    if isinstance(parsed, list):
+        plan = [item for item in parsed if isinstance(item, dict)]
+        if plan:
+            return {
+                "allEnrichedEpisodePlan": plan,
+                "allEnrichedEpisodePlanText": _framework_enriched_episode_plan_text("", plan),
+            }
+        return None
+
+    if not isinstance(parsed, dict):
+        return None
+
+    plan_value = _first_non_empty_by_keys(
+        parsed,
+        (
+            "allEnrichedEpisodePlan",
+            "enrichedEpisodePlan",
+            "all_enriched_episode_plan",
+            "enriched_episode_plan",
+            "batchEnrichedEpisodePlan",
+            "batch_enriched_episode_plan",
+        ),
+    )
+    text_value = _first_non_empty_by_keys(
+        parsed,
+        (
+            "allEnrichedEpisodePlanText",
+            "enrichedEpisodePlanText",
+            "all_enriched_episode_plan_text",
+            "enriched_episode_plan_text",
+        ),
+    )
+
+    plan = _framework_enriched_episode_plan_list(plan_value)
+    if plan:
+        return {
+            "allEnrichedEpisodePlan": plan,
+            "allEnrichedEpisodePlanText": _framework_enriched_episode_plan_text(text_value, plan),
+        }
+
+    if _looks_like_framework_episode_plan_item(parsed):
+        plan = [parsed]
+        return {
+            "allEnrichedEpisodePlan": plan,
+            "allEnrichedEpisodePlanText": _framework_enriched_episode_plan_text(text_value, plan),
+        }
+
+    for key in (
+        "episodeplan",
+        "episodePlan",
+        "episode_plan",
+        "data",
+        "result",
+        "output",
+        "outputs",
+        "response",
+        "responseData",
+        "newVariables",
+        "variables",
+        "enrichedEpisodePlanResult",
+        "enriched_episode_plan_result",
+    ):
+        if key not in parsed:
+            continue
+        nested = _framework_enriched_episode_plan_payload_from_value(parsed.get(key), _depth=_depth + 1)
+        if isinstance(nested, dict) and nested.get("allEnrichedEpisodePlan"):
+            return nested
+
+    return None
+
+
+def _first_non_empty_by_keys(mapping: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    lowered = {str(key).lower(): key for key in mapping.keys()}
+    for key in keys:
+        actual = key if key in mapping else lowered.get(key.lower())
+        if actual is None:
+            continue
+        value = mapping.get(actual)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _framework_enriched_episode_plan_list(value: Any) -> list[dict[str, Any]]:
+    parsed = value
+    if isinstance(parsed, str):
+        parsed_json = _try_parse_json(parsed)
+        if parsed_json is not None:
+            parsed = parsed_json
+    if isinstance(parsed, list):
+        return [item for item in parsed if isinstance(item, dict)]
+    if isinstance(parsed, dict):
+        nested = _framework_enriched_episode_plan_payload_from_value(parsed, _depth=1)
+        if isinstance(nested, dict) and isinstance(nested.get("allEnrichedEpisodePlan"), list):
+            return [item for item in nested["allEnrichedEpisodePlan"] if isinstance(item, dict)]
+        if _looks_like_framework_episode_plan_item(parsed):
+            return [parsed]
+    return []
+
+
+def _looks_like_framework_episode_plan_item(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    lowered = {str(key).lower() for key in value.keys()}
+    return bool(
+        {"episode", "episodenumber", "episode_number", "title", "specific_plot", "text_view", "ending_hook"}
+        & lowered
+    )
+
+
+def _framework_enriched_episode_plan_text(text_value: Any, plan: list[dict[str, Any]]) -> str:
+    if isinstance(text_value, str) and text_value.strip():
+        return text_value.strip()
+    if isinstance(text_value, (dict, list)) and text_value:
+        try:
+            return json.dumps(text_value, ensure_ascii=False, default=str)
+        except Exception:
+            return str(text_value)
+    parts: list[str] = []
+    for item in plan:
+        if not isinstance(item, dict):
+            continue
+        text = str(
+            item.get("text_view")
+            or item.get("textView")
+            or item.get("episode_text")
+            or item.get("episodeText")
+            or ""
+        ).strip()
+        if text:
+            parts.append(text)
+    if parts:
+        return "\\n\\n".join(parts)
+    try:
+        return json.dumps(plan, ensure_ascii=False, default=str)
+    except Exception:
+        return str(plan)
 
 
 def _normalize_dialogues_output_candidate(

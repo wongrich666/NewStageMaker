@@ -1758,7 +1758,7 @@
   function renderBrandMotionPanel() {
     const isRunning = Boolean(state.runningStage || state.isRunning);
     const statusText = isRunning
-      ? `正在运行 ${state.runningStage || ""} 阶段`
+      ? `正在运行 ${state.runningStage || ""} 阶段，时间较长，请不要刷新。由于模型性能不稳定，出现错误时请重试生成。`
       : state.error
         ? "处理已停止，请查看错误信息"
         : currentAssetReady()

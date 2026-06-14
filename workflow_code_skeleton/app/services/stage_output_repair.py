@@ -604,20 +604,103 @@ def describe_repairable_stage_output_issue(
         return describe_appearanceMapping_output_issue(value)
     return None
 
+def _try_parse_appearance_json_text(value: Any) -> Any:
+    """解析 appearanceMapping/alias 中可能嵌套的 JSON 字符串。"""
+    if not isinstance(value, str):
+        return value
+
+    text = value.strip()
+    if not text:
+        return value
+
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    current: Any = text
+    for _ in range(5):
+        if not isinstance(current, str):
+            return current
+
+        candidate = current.strip()
+        if not candidate or not (candidate.startswith("{") or candidate.startswith("[")):
+            return value
+
+        try:
+            parsed = json.loads(candidate)
+        except Exception:
+            return value
+
+        if isinstance(parsed, str):
+            current = parsed
+            continue
+
+        return parsed
+
+    return value
+
+
+def _unwrap_appearance_mapping_alias(value: Any) -> Any:
+    """
+    兼容 09 工作流输出：
+    {
+      "alias": "{\"appearanceMapping\": {...}}"
+    }
+
+    alias 在这里是 Coze 工作流变量名，不是角色别名规则。
+    """
+    current = value
+
+    for _ in range(8):
+        if isinstance(current, str):
+            parsed = _try_parse_appearance_json_text(current)
+            if parsed is current or parsed == current:
+                return current
+            current = parsed
+            continue
+
+        if not isinstance(current, dict):
+            return current
+
+        if isinstance(current.get("characters"), list):
+            return current
+
+        wrapped = (
+            current.get("appearanceMapping")
+            or current.get("appearance_mapping")
+            or current.get("appearanceMappingResult")
+            or current.get("appearance_mapping_result")
+        )
+        if wrapped not in (None, "", [], {}):
+            current = wrapped
+            continue
+
+        alias_value = (
+            current.get("alias")
+            or current.get("Alias")
+            or current.get("appearanceAlias")
+            or current.get("appearance_alias")
+        )
+        if alias_value not in (None, "", [], {}):
+            current = alias_value
+            continue
+
+        return current
+
+    return current
+
 
 def normalize_appearanceMapping_candidate(value: Any) -> dict[str, Any] | None:
+    # 兼容 09 框架转剧本工作流：
+    # 1) { "appearanceMapping": {...} }
+    # 2) { "alias": "{\"appearanceMapping\": {...}}" }
+    # 3) alias 本身就是 JSON string
+    value = _unwrap_appearance_mapping_alias(value)
 
-    # framework_manual_unwrap_appearanceMapping
-    # 兼容 09 框架转剧本工作流：answerText 返回 { "appearanceMapping": {...} } 的情况。
-    if isinstance(value, dict):
-        _wrapped_appearanceMapping = (
-            value.get("appearanceMapping")
-            or value.get("appearanceMapping")
-            or value.get("appearanceMappingResult")
-            or value.get("appearanceMapping_result")
-        )
-        if isinstance(_wrapped_appearanceMapping, dict):
-            value = _wrapped_appearanceMapping
     body = _normalize_appearanceMapping_body(value)
     if not isinstance(body, dict):
         return None
