@@ -3447,7 +3447,523 @@ startRuntimeDebugPolling();
     renderToolForm(state.activeTool);
   }
 
-  function renderToolForm(toolKey) {
+  
+  /* HOT_REVIEW_FILE_UPLOAD_V1 */
+  const HOT_REVIEW_UPLOAD_ALLOWED_EXTENSIONS = new Set([
+    "txt",
+    "md",
+    "json",
+    "docx",
+    "pdf",
+  ]);
+
+  const HOT_REVIEW_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+
+  function hotReviewFileExtension(filename) {
+    const parts = String(filename || "")
+      .toLowerCase()
+      .split(".");
+
+    return parts.length > 1
+      ? String(parts.pop() || "")
+      : "";
+  }
+
+  function hotReviewUploadTextField() {
+    if (!els.toolForms) return null;
+
+    const preferredNames = [
+      "review_text",
+      "script_text",
+      "script",
+      "content",
+      "text",
+      "input",
+    ];
+
+    for (const fieldName of preferredNames) {
+      const field = els.toolForms.querySelector(
+        `[data-tool-field="${fieldName}"]`
+      );
+
+      if (
+        field
+        && (
+          field.tagName === "TEXTAREA"
+          || field.tagName === "INPUT"
+        )
+      ) {
+        return field;
+      }
+    }
+
+    return els.toolForms.querySelector(
+      "textarea[data-tool-field]"
+    );
+  }
+
+  function hotReviewUploadStatusElement() {
+    return document.getElementById(
+      "hotReviewUploadStatus"
+    );
+  }
+
+  function setHotReviewUploadStatus(
+    message,
+    type = "",
+  ) {
+    const status = hotReviewUploadStatusElement();
+
+    if (!status) return;
+
+    status.textContent = String(message || "");
+
+    if (type) {
+      status.dataset.type = type;
+    } else {
+      delete status.dataset.type;
+    }
+  }
+
+  function hotReviewUploadErrorMessage(
+    error,
+    fallback = "文件读取失败。",
+  ) {
+    const message = String(
+      error?.message || ""
+    ).trim();
+
+    return message || fallback;
+  }
+
+  async function requestHotReviewFileExtraction(
+    file,
+  ) {
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+
+    const authToken = currentAuthToken();
+    const headers = authToken
+      ? {
+          Authorization: `Bearer ${authToken}`,
+        }
+      : {};
+
+    const response = await fetch(
+      "/api/tools/hot_review/extract-file",
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers,
+        body: formData,
+      },
+    );
+
+    const raw = await response.text();
+
+    let data = null;
+
+    try {
+      data = raw
+        ? JSON.parse(raw)
+        : null;
+    } catch (_) {
+      data = null;
+    }
+
+    if (response.status === 401) {
+      window.location.href = "/login";
+      throw new Error("请先登录。");
+    }
+
+    if (
+      !response.ok
+      || !data
+      || data.success !== true
+    ) {
+      throw new Error(
+        data?.message
+        || `文件解析失败：${response.status}`
+      );
+    }
+
+    return data;
+  }
+
+  function applyHotReviewUploadedText(
+    text,
+    filename,
+  ) {
+    const field = hotReviewUploadTextField();
+
+    if (!field) {
+      throw new Error(
+        "没有找到爆款文审核文本输入框。"
+      );
+    }
+
+    const normalizedText = String(text || "");
+    const normalizedFilename = String(
+      filename || ""
+    ).trim();
+
+    field.value = normalizedText;
+    field.dataset.uploadedFilename =
+      normalizedFilename;
+    field.dataset.inputSource =
+      "uploaded_file";
+
+    const fieldName = String(
+      field.dataset.toolField
+      || "review_text"
+    );
+
+    state.toolDrafts.hot_review = {
+      ...(state.toolDrafts.hot_review || {}),
+      [fieldName]: normalizedText,
+      uploaded_filename: normalizedFilename,
+      input_source: "uploaded_file",
+    };
+
+    field.dispatchEvent(
+      new Event("input", {
+        bubbles: true,
+      }),
+    );
+
+    field.dispatchEvent(
+      new Event("change", {
+        bubbles: true,
+      }),
+    );
+
+    field.focus();
+    field.setSelectionRange?.(
+      0,
+      0,
+    );
+  }
+
+  async function handleHotReviewSelectedFile(
+    file,
+  ) {
+    if (!file) return;
+
+    if (!Number.isFinite(file.size) || file.size <= 0) {
+      setHotReviewUploadStatus(
+        "文件为空，无法读取。",
+        "error",
+      );
+      return;
+    }
+
+    if (file.size > HOT_REVIEW_UPLOAD_MAX_BYTES) {
+      setHotReviewUploadStatus(
+        "文件超过 20 MB，无法上传。",
+        "error",
+      );
+      return;
+    }
+
+    const extension = hotReviewFileExtension(
+      file.name
+    );
+
+    if (
+      !HOT_REVIEW_UPLOAD_ALLOWED_EXTENSIONS.has(
+        extension
+      )
+    ) {
+      setHotReviewUploadStatus(
+        "暂不支持该格式，请上传 TXT、MD、JSON、DOCX 或 PDF。",
+        "error",
+      );
+      return;
+    }
+
+    setHotReviewUploadStatus(
+      `正在读取：${file.name}`,
+      "loading",
+    );
+
+    const card = document.getElementById(
+      "hotReviewUploadCard"
+    );
+
+    card?.classList.add("is-loading");
+
+    try {
+      const data =
+        await requestHotReviewFileExtraction(
+          file
+        );
+
+      const text = String(
+        data.text || ""
+      ).trim();
+
+      if (!text) {
+        throw new Error(
+          "没有从文件中提取到可用文字。"
+        );
+      }
+
+      applyHotReviewUploadedText(
+        text,
+        data.filename || file.name,
+      );
+
+      const characterCount = Number(
+        data.char_count || text.length
+      ).toLocaleString();
+
+      setHotReviewUploadStatus(
+        `已读取 ${data.filename || file.name}，共 ${characterCount} 个字符。可以继续编辑或直接运行审核。`,
+        "success",
+      );
+    } catch (error) {
+      console.error(
+        "[hot-review-file-upload]",
+        error,
+      );
+
+      setHotReviewUploadStatus(
+        hotReviewUploadErrorMessage(
+          error,
+          "文件读取失败，请检查文件格式。",
+        ),
+        "error",
+      );
+    } finally {
+      card?.classList.remove("is-loading");
+    }
+  }
+
+  function mountHotReviewFileUploader(toolKey) {
+    if (
+      String(toolKey || "") !== "hot_review"
+      || !els.toolForms
+    ) {
+      return;
+    }
+
+    if (
+      document.getElementById(
+        "hotReviewUploadCard"
+      )
+    ) {
+      return;
+    }
+
+    const field = hotReviewUploadTextField();
+
+    if (!field) return;
+
+    const fieldWrapper =
+      field.closest(".field")
+      || field.parentElement;
+
+    if (
+      !fieldWrapper
+      || !fieldWrapper.parentElement
+    ) {
+      return;
+    }
+
+    const card = document.createElement(
+      "section"
+    );
+
+    card.id = "hotReviewUploadCard";
+    card.className =
+      "hot-review-upload-card";
+
+    card.innerHTML = `
+      <input
+        id="hotReviewFileInput"
+        class="hot-review-file-input"
+        type="file"
+        accept=".txt,.md,.json,.docx,.pdf,text/plain,text/markdown,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
+      />
+
+      <div
+        id="hotReviewDropzone"
+        class="hot-review-dropzone"
+        role="button"
+        tabindex="0"
+        aria-label="拖拽或选择剧本文件"
+      >
+        <div class="hot-review-dropzone-copy">
+          <strong>拖拽剧本文件到这里</strong>
+          <span>
+            支持 TXT、MD、JSON、DOCX、PDF，最大 20 MB
+          </span>
+          <span>
+            文件读取后会自动填入下方剧本文本框，仍可手动修改
+          </span>
+        </div>
+
+        <button
+          id="hotReviewChooseFileBtn"
+          class="btn btn-secondary hot-review-choose-file-btn"
+          type="button"
+        >
+          选择本地文件
+        </button>
+      </div>
+
+      <div
+        id="hotReviewUploadStatus"
+        class="hot-review-upload-status"
+        aria-live="polite"
+      ></div>
+    `;
+
+    fieldWrapper.parentElement.insertBefore(
+      card,
+      fieldWrapper,
+    );
+
+    const fileInput = card.querySelector(
+      "#hotReviewFileInput"
+    );
+
+    const dropzone = card.querySelector(
+      "#hotReviewDropzone"
+    );
+
+    const chooseButton = card.querySelector(
+      "#hotReviewChooseFileBtn"
+    );
+
+    const openFileDialog = () => {
+      if (!fileInput) return;
+      fileInput.value = "";
+      fileInput.click();
+    };
+
+    chooseButton?.addEventListener(
+      "click",
+      (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openFileDialog();
+      },
+    );
+
+    dropzone?.addEventListener(
+      "click",
+      (event) => {
+        if (
+          event.target.closest(
+            "#hotReviewChooseFileBtn"
+          )
+        ) {
+          return;
+        }
+
+        openFileDialog();
+      },
+    );
+
+    dropzone?.addEventListener(
+      "keydown",
+      (event) => {
+        if (
+          event.key !== "Enter"
+          && event.key !== " "
+        ) {
+          return;
+        }
+
+        event.preventDefault();
+        openFileDialog();
+      },
+    );
+
+    fileInput?.addEventListener(
+      "change",
+      async () => {
+        const file = fileInput.files?.[0];
+
+        await handleHotReviewSelectedFile(
+          file,
+        );
+
+        fileInput.value = "";
+      },
+    );
+
+    const preventDragDefaults = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    for (const eventName of [
+      "dragenter",
+      "dragover",
+    ]) {
+      dropzone?.addEventListener(
+        eventName,
+        (event) => {
+          preventDragDefaults(event);
+          event.dataTransfer.dropEffect =
+            "copy";
+          dropzone.classList.add(
+            "is-dragging"
+          );
+        },
+      );
+    }
+
+    dropzone?.addEventListener(
+      "dragleave",
+      (event) => {
+        preventDragDefaults(event);
+
+        if (
+          !dropzone.contains(
+            event.relatedTarget
+          )
+        ) {
+          dropzone.classList.remove(
+            "is-dragging"
+          );
+        }
+      },
+    );
+
+    dropzone?.addEventListener(
+      "drop",
+      async (event) => {
+        preventDragDefaults(event);
+
+        dropzone.classList.remove(
+          "is-dragging"
+        );
+
+        const files = [
+          ...(event.dataTransfer?.files || []),
+        ];
+
+        if (!files.length) return;
+
+        if (files.length > 1) {
+          setHotReviewUploadStatus(
+            "一次只能上传一个剧本文件。",
+            "error",
+          );
+          return;
+        }
+
+        await handleHotReviewSelectedFile(
+          files[0]
+        );
+      },
+    );
+  }
+
+function renderToolForm(toolKey) {
     if (!els.toolForms) return;
     const tool = toolConfig(toolKey);
     state.activeTool = tool.key;
@@ -3486,6 +4002,7 @@ startRuntimeDebugPolling();
         }).join("")}
       </div>
     `;
+    mountHotReviewFileUploader(tool.key);
     if (els.runToolBtn) {
       els.runToolBtn.disabled = !isAuthenticated() || !tool.configured;
       els.runToolBtn.textContent = !isAuthenticated()
@@ -3503,14 +4020,45 @@ startRuntimeDebugPolling();
     syncButtons();
   }
 
+  
   function collectToolPayload() {
     const payload = {};
-    document.querySelectorAll("[data-tool-field]").forEach((field) => {
-      const key = field.dataset.toolField;
-      payload[key] = field.type === "number" ? Number(field.value || 0) : field.value.trim();
-    });
+
+    document
+      .querySelectorAll("[data-tool-field]")
+      .forEach((field) => {
+        const key = field.dataset.toolField;
+
+        payload[key] = field.type === "number"
+          ? Number(field.value || 0)
+          : String(field.value || "").trim();
+      });
+
+    if (state.activeTool === "hot_review") {
+      const textField =
+        hotReviewUploadTextField();
+
+      const uploadedFilename = String(
+        textField?.dataset.uploadedFilename
+        || state.toolDrafts.hot_review
+          ?.uploaded_filename
+        || ""
+      ).trim();
+
+      if (uploadedFilename) {
+        payload.uploaded_filename =
+          uploadedFilename;
+        payload.input_source =
+          "uploaded_file";
+      } else {
+        payload.input_source =
+          "manual_text";
+      }
+    }
+
     return payload;
   }
+
 
   function openProfilePanel() {
     if (!requireLogin()) return;

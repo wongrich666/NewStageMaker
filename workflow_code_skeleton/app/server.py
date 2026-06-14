@@ -2074,6 +2074,198 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         return snapshot
 
 
+
+    # HOT_REVIEW_FILE_UPLOAD_V1
+    HOT_REVIEW_UPLOAD_MAX_BYTES = 20 * 1024 * 1024
+    HOT_REVIEW_UPLOAD_MAX_CHARS = 500_000
+    HOT_REVIEW_UPLOAD_EXTENSIONS = {
+        ".txt",
+        ".md",
+        ".json",
+        ".docx",
+        ".pdf",
+    }
+
+    def _decode_hot_review_text_file(raw: bytes) -> str:
+        for encoding in (
+            "utf-8-sig",
+            "utf-8",
+            "gb18030",
+            "gbk",
+        ):
+            try:
+                return raw.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+
+        raise ValueError(
+            "无法识别文本文件编码，请将文件转换为 UTF-8 后重试。"
+        )
+
+    def _extract_hot_review_docx_text(raw: bytes) -> str:
+        from docx import Document
+
+        document = Document(BytesIO(raw))
+        parts: list[str] = []
+
+        for paragraph in document.paragraphs:
+            text = str(paragraph.text or "").strip()
+            if text:
+                parts.append(text)
+
+        for table in document.tables:
+            for row in table.rows:
+                cells = [
+                    str(cell.text or "").strip()
+                    for cell in row.cells
+                    if str(cell.text or "").strip()
+                ]
+                if cells:
+                    parts.append("\t".join(cells))
+
+        return "\n".join(parts).strip()
+
+    def _extract_hot_review_pdf_text(raw: bytes) -> str:
+        from pypdf import PdfReader
+
+        reader = PdfReader(BytesIO(raw))
+
+        if reader.is_encrypted:
+            try:
+                reader.decrypt("")
+            except Exception as exc:
+                raise ValueError("暂不支持加密 PDF。") from exc
+
+        pages: list[str] = []
+
+        for page_number, page in enumerate(reader.pages, start=1):
+            text = str(page.extract_text() or "").strip()
+
+            if not text:
+                continue
+
+            pages.append(
+                f"【第 {page_number} 页】\n{text}"
+            )
+
+        return "\n\n".join(pages).strip()
+
+    def _extract_hot_review_uploaded_text(
+        raw: bytes,
+        extension: str,
+    ) -> str:
+        if extension in {".txt", ".md", ".json"}:
+            return _decode_hot_review_text_file(raw)
+
+        if extension == ".docx":
+            return _extract_hot_review_docx_text(raw)
+
+        if extension == ".pdf":
+            return _extract_hot_review_pdf_text(raw)
+
+        raise ValueError("暂不支持该文件格式。")
+
+    @app.post("/api/tools/hot_review/extract-file")
+    def extract_hot_review_file():
+        _require_user_id()
+
+        uploaded = request.files.get("file")
+
+        if uploaded is None:
+            return _json_error(
+                "没有收到上传文件。",
+                status=400,
+            )
+
+        original_filename = str(
+            uploaded.filename or ""
+        ).replace("\\", "/").rsplit("/", 1)[-1].strip()
+
+        if not original_filename:
+            return _json_error(
+                "文件名无效。",
+                status=400,
+            )
+
+        extension = Path(original_filename).suffix.lower()
+
+        if extension not in HOT_REVIEW_UPLOAD_EXTENSIONS:
+            return _json_error(
+                "暂不支持该文件格式，请上传 TXT、MD、JSON、DOCX 或 PDF。",
+                status=400,
+            )
+
+        raw = uploaded.read(
+            HOT_REVIEW_UPLOAD_MAX_BYTES + 1
+        )
+
+        if not raw:
+            return _json_error(
+                "上传文件为空。",
+                status=400,
+            )
+
+        if len(raw) > HOT_REVIEW_UPLOAD_MAX_BYTES:
+            return _json_error(
+                "文件超过 20 MB，无法上传。",
+                status=413,
+            )
+
+        try:
+            text = _extract_hot_review_uploaded_text(
+                raw,
+                extension,
+            )
+        except ValueError as exc:
+            return _json_error(
+                str(exc),
+                status=400,
+            )
+        except Exception:
+            logger.exception(
+                "爆款文审核文件解析失败：filename=%s extension=%s",
+                original_filename,
+                extension,
+            )
+            return _json_error(
+                "文件解析失败，请检查文件是否损坏。",
+                status=400,
+            )
+
+        text = str(text or "").strip()
+
+        if not text:
+            if extension == ".pdf":
+                message = (
+                    "没有从 PDF 中提取到文字。"
+                    "该文件可能是扫描版 PDF，目前暂不执行 OCR。"
+                )
+            else:
+                message = "没有从文件中提取到可用文字。"
+
+            return _json_error(
+                message,
+                status=400,
+            )
+
+        if len(text) > HOT_REVIEW_UPLOAD_MAX_CHARS:
+            return _json_error(
+                (
+                    f"文件提取后共有 {len(text)} 个字符，"
+                    f"超过 {HOT_REVIEW_UPLOAD_MAX_CHARS} 字符限制。"
+                ),
+                status=400,
+            )
+
+        return _json_ok(
+            filename=original_filename,
+            extension=extension,
+            mime_type=str(uploaded.mimetype or ""),
+            text=text,
+            char_count=len(text),
+            byte_count=len(raw),
+        )
+
     @app.get("/api/tools")
     @_login_required
     def list_tools():

@@ -5854,3 +5854,122 @@ body,
   overflow-x: auto;
   overflow-y: visible;
 }
+
+/* HOT_REVIEW_FILE_UPLOAD_V1 */
+.hot-review-upload-card {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.hot-review-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.hot-review-dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 112px;
+  padding: 18px 20px;
+  cursor: pointer;
+  border: 1px dashed var(--line);
+  border-radius: 18px;
+  outline: none;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(49, 181, 253, 0.06),
+      rgba(255, 255, 255, 0.84)
+    );
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.hot-review-dropzone:hover,
+.hot-review-dropzone:focus-visible {
+  border-color: var(--c-blue);
+  box-shadow:
+    0 0 0 4px rgba(49, 181, 253, 0.12);
+}
+
+.hot-review-dropzone.is-dragging {
+  border-color: var(--c-blue);
+  background: rgba(49, 181, 253, 0.12);
+  box-shadow:
+    0 0 0 5px rgba(49, 181, 253, 0.14);
+  transform: translateY(-1px);
+}
+
+.hot-review-upload-card.is-loading
+.hot-review-dropzone {
+  cursor: progress;
+  opacity: 0.76;
+  pointer-events: none;
+}
+
+.hot-review-dropzone-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.hot-review-dropzone-copy strong {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.hot-review-dropzone-copy span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.hot-review-choose-file-btn {
+  flex: 0 0 auto;
+}
+
+.hot-review-upload-status {
+  min-height: 20px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.hot-review-upload-status[data-type="loading"] {
+  color: var(--c-blue);
+}
+
+.hot-review-upload-status[data-type="success"] {
+  color: #17855b;
+}
+
+.hot-review-upload-status[data-type="error"] {
+  color: #c43f4f;
+}
+
+@media (max-width: 720px) {
+  .hot-review-dropzone {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .hot-review-choose-file-btn {
+    width: 100%;
+  }
+}
