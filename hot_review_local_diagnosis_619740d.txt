@@ -1,0 +1,640 @@
+
+==========================================================================================
+GIT STATUS
+==========================================================================================
+
+619740d 增加辅助工作流的可视化
+4032e25 feat: add hot review assets to sidebar
+c2adffe feat: visualize script audit ecg results
+335c8a8 feat: parse script audit ecg results
+a12d442 现在这个版本非常的好，如果后面改坏了可以从这里恢复
+30d4d33 优化UI
+cbb1861 优化UI
+b927912 优化UI
+
+
+==========================================================================================
+MARKERS IN app.js
+==========================================================================================
+SCRIPT_AUDIT_ECG_UI_V1: 1
+SCRIPT_AUDIT_ECG_ASSET_PARSE_V1: 1
+SCRIPT_AUDIT_ECG_SIDEBAR_V1: 1
+HOT_REVIEW_ASSET_WIRE_SAFE_V2: 0
+HOT_REVIEW_REAL_ASSET_FIX_SAFE_V1: 0
+HOT_REVIEW_ASSET_SAFE_NARROW_V1: 0
+TOOL_SHORTCUT_LAYOUT_FIX_V1: 0
+
+==========================================================================================
+FUNCTION app.js::currentToolResult
+==========================================================================================
+  function currentToolResult(toolKey = state.activeTool) {
+    return normalizeScriptAuditEcgResult(state.toolResults[toolKey] || null);
+  }
+
+==========================================================================================
+FUNCTION app.js::normalizeScriptAuditEcgResult
+==========================================================================================
+  function normalizeScriptAuditEcgResult(result) {
+    if (!result || typeof result !== "object") return result;
+
+    if (String(result.result_type || result.resultType || "").trim() === "script_audit_ecg" && result.view) {
+      return result;
+    }
+
+    const candidates = [
+      result.audit,
+      result.output,
+      result.result,
+      result.data,
+      parseScriptAuditJsonFromText(result.text),
+      parseScriptAuditJsonFromText(result.answer_text),
+      parseScriptAuditJsonFromText(result.raw_text)
+    ].filter(Boolean);
+
+    let audit = null;
+    for (const candidate of candidates) {
+      if (looksLikeScriptAuditPayload(candidate)) {
+        audit = candidate.audit && candidate.view ? candidate.audit : candidate;
+        break;
+      }
+    }
+
+    if (!audit) return result;
+
+    const view = result.view || scriptAuditViewFromAudit(audit);
+    const rawText = result.text || result.answer_text || "";
+    return {
+      ...result,
+      text: rawText,
+      answer_text: result.answer_text || rawText,
+      result_type: "script_audit_ecg",
+      resultType: "script_audit_ecg",
+      parsed: true,
+      audit,
+      view,
+      parse_warnings: result.parse_warnings || []
+    };
+  }
+
+==========================================================================================
+FUNCTION app.js::parseScriptAuditJsonFromText
+==========================================================================================
+  function parseScriptAuditJsonFromText(rawText) {
+    let text = String(rawText || "").trim();
+    if (!text) return null;
+
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced && fenced[1]) {
+      text = fenced[1].trim();
+    }
+
+    const tryParse = (value) => {
+      try {
+        return JSON.parse(value);
+      } catch (_) {
+        return null;
+      }
+    };
+
+    let parsed = tryParse(text);
+    if (!parsed) {
+      const start = text.indexOf("{");
+      const end = text.lastIndexOf("}");
+      if (start >= 0 && end > start) {
+        parsed = tryParse(text.slice(start, end + 1));
+      }
+    }
+
+    if (typeof parsed === "string") {
+      parsed = parseScriptAuditJsonFromText(parsed);
+    }
+
+    if (parsed && typeof parsed === "object") {
+      const nestedText = parsed.answerText
+        || parsed.answer_text
+        || parsed.text
+        || parsed.output
+        || parsed.result
+        || "";
+      if (
+        typeof nestedText === "string"
+        && nestedText.trim()
+        && (nestedText.includes("script_audit_ecg_v2") || nestedText.includes('"overall"'))
+      ) {
+        const nested = parseScriptAuditJsonFromText(nestedText);
+        if (nested && typeof nested === "object") return nested;
+      }
+      return parsed;
+    }
+
+    return null;
+  }
+
+==========================================================================================
+FUNCTION app.js::scriptAuditViewFromAudit
+==========================================================================================
+  function scriptAuditViewFromAudit(audit) {
+    const overall = audit?.overall || {};
+    const dimensions = auditArray(audit?.dimension_scores || audit?.dimensions || audit?.dimension_cards);
+    const points = auditArray(
+      audit?.ecg?.main_series?.points
+      || audit?.ecg?.points
+      || audit?.ecg_chart?.points
+      || audit?.main_series?.points
+    );
+
+    const totalScore = overall.total_score ?? overall.score ?? audit?.total_score ?? "";
+    const grade = overall.suitability_level || overall.grade || overall.level || "";
+    const revisionCost = overall.revision_cost || overall.modify_cost || overall.cost || "";
+
+    return {
+      summary_cards: [
+        { key: "total_score", label: "总评分", value: totalScore, suffix: totalScore !== "" ? "/100" : "" },
+        { key: "grade", label: "适配等级", value: grade || "-" },
+        { key: "revision_cost", label: "修改成本", value: revisionCost || "-" },
+        { key: "points", label: "心电点位", value: points.length || "-" }
+      ],
+      ecg_chart: {
+        title: audit?.ecg?.title || audit?.ecg_chart?.title || "剧本心电图",
+        points
+      },
+      dimension_cards: dimensions.map((item) => ({
+        dimension_key: item.dimension_key || item.key || item.name || "",
+        dimension_name: item.dimension_name || item.name || item.dimension_key || "评分维度",
+        score: item.score ?? item.value ?? 0,
+        max_score: item.max_score ?? item.full_score ?? 100,
+        summary: item.summary || item.comment || item.reason || "",
+        core_deductions: item.core_deductions || item.deductions || [],
+        priority_fix: item.priority_fix || item.fix_suggestion || item.suggestion || ""
+      })),
+      issue_cards: auditArray(audit?.key_issues || audit?.issues || audit?.issue_cards),
+      satisfying_point_cards: auditArray(audit?.satisfying_points || audit?.selling_points || audit?.satisfying_point_cards),
+      risk_cards: auditArray(audit?.risk_scan || audit?.risks || audit?.risk_cards),
+      rewrite_tasks: auditArray(audit?.rewrite_plan || audit?.rewrite_tasks || audit?.fix_plan)
+    };
+  }
+
+==========================================================================================
+FUNCTION app.js::renderScriptAuditEcgResult
+==========================================================================================
+  function renderScriptAuditEcgResult(result) {
+    const view = result.view || {};
+    const audit = result.audit || {};
+    const overall = audit.overall || {};
+    const meta = audit.meta || view.meta || {};
+    const raw = result.answer_text || result.text || "";
+    return `
+      <div class="audit-result-shell">
+        <section class="audit-hero">
+          <div>
+            <div class="audit-kicker">爆款文审核 / ECG REPORT</div>
+            <h3>${escapeHtml(meta.script_title || "剧本商业潜力审核")}</h3>
+            <p>${escapeHtml(overall.core_judgement || overall.final_judgement || "已解析为结构化审核结果。")}</p>
+          </div>
+          <div class="audit-score-badge">
+            <strong>${escapeHtml(String(overall.total_score ?? view?.summary_cards?.[0]?.value ?? "-"))}</strong>
+            <span>/100</span>
+          </div>
+        </section>
+
+        ${renderAuditSummaryCards(view.summary_cards)}
+        ${renderAuditEcgChart(view.ecg_chart)}
+        ${renderAuditDimensionCards(view.dimension_cards)}
+        ${renderAuditList("关键问题", view.issue_cards || audit.key_issues, { limit: 8 })}
+        ${renderAuditList("爽点与保留项", view.satisfying_point_cards || audit.satisfying_points, { limit: 8 })}
+        ${renderAuditList("风险扫描", view.risk_cards || audit.risk_scan, { limit: 8 })}
+        ${renderAuditList("修改计划", view.rewrite_tasks || audit.rewrite_plan, { limit: 10 })}
+      </div>
+    `;
+  }
+
+==========================================================================================
+FUNCTION app.js::renderToolOutput
+==========================================================================================
+  function renderToolOutput(toolKey = state.activeTool, fallbackText = "") {
+    const result = currentToolResult(toolKey);
+    if (els.toolOutputBox) {
+      if (isScriptAuditEcgResult(result)) {
+        els.toolOutputBox.innerHTML = renderScriptAuditEcgResult(result);
+      } else {
+        els.toolOutputBox.textContent = result?.text
+          || result?.answer_text
+          || fallbackText
+          || (isAuthenticated()
+            ? "这里会显示辅助工具结果。"
+            : "登录后可使用辅助工具。");
+      }
+    }
+    if (els.downloadToolBtn) {
+      const shouldShow = Boolean(result?.text && result?.filename);
+      els.downloadToolBtn.classList.toggle("hidden", !shouldShow);
+      els.downloadToolBtn.disabled = !shouldShow || isActionLoading("runTool");
+      if (shouldShow) {
+        els.downloadToolBtn.textContent = toolKey === "character_reskin" && result?.savedAsset?.project_id
+          ? "下载 DOCX"
+          : "下载 TXT";
+      }
+    }
+  }
+
+==========================================================================================
+FUNCTION app.js::isHotReviewAsset
+==========================================================================================
+  function isHotReviewAsset(assetLike) {
+    const values = [
+      assetLike?.tool_key,
+      assetLike?.tool_id,
+      assetLike?.tool_label,
+      assetLike?.asset_type,
+      assetLike?.result_type,
+      assetLike?.result?.result_type,
+      assetLike?.artifacts?.result_type,
+      assetLike?.artifacts?.tool_result?.result_type
+    ].map((value) => String(value || "").trim());
+    return values.some((value) =>
+      value === "hot_review"
+      || value === "script_audit_ecg"
+      || value === "爆款文审核"
+      || value.includes("爆款文审核")
+    );
+  }
+
+==========================================================================================
+FUNCTION app.js::toolResultFromAsset
+==========================================================================================
+  function toolResultFromAsset(assetLike) {
+    const artifacts = assetLike?.artifacts || {};
+    const result = assetLike?.result
+      || assetLike?.tool_result
+      || artifacts.tool_result
+      || artifacts.result
+      || artifacts.output
+      || {};
+    const fallbackText = result.text
+      || result.answer_text
+      || artifacts.final_output_text
+      || artifacts.final_script
+      || "";
+    return {
+      ...result,
+      text: String(result.text || fallbackText || "").trim(),
+      answer_text: String(result.answer_text || fallbackText || "").trim(),
+      filename: result.filename || "",
+      result_type: result.result_type || assetLike?.result_type || artifacts.result_type || "",
+      parsed: result.parsed ?? assetLike?.parsed ?? artifacts.parsed ?? false,
+      audit: result.audit || assetLike?.audit || artifacts.audit || null,
+      view: result.view || assetLike?.view || artifacts.view || null,
+      parse_warnings: result.parse_warnings || assetLike?.parse_warnings || artifacts.parse_warnings || [],
+      assetSaved: true,
+      savedAsset: assetLike
+    };
+  }
+
+==========================================================================================
+FUNCTION app.js::renderHotReviewCompactItems
+==========================================================================================
+  function renderHotReviewCompactItems(items, emptyMessage) {
+    const normalized = Array.isArray(items) ? items : [];
+    if (!normalized.length) {
+      return `<div class="workspace-empty">${escapeHtml(emptyMessage)}</div>`;
+    }
+
+    return normalized.map((item) => {
+      const projectId = String(item.project_id || item.id || "");
+      const updatedAt = String(item.updated_at || item.created_at || item.createdAt || "").trim();
+      const score = item?.result?.audit?.overall?.total_score
+        ?? item?.audit?.overall?.total_score
+        ?? item?.artifacts?.audit?.overall?.total_score
+        ?? "";
+      const scoreText = score !== "" && score !== null && score !== undefined ? ` · ${score}/100` : "";
+      return `
+        <button
+          class="workspace-pick hot-review-workspace-pick"
+          type="button"
+          data-action="open-hot-review-asset"
+          data-project-id="${escapeHtml(projectId)}"
+          title="${escapeHtml(projectTooltip(item))}"
+        >
+          <span class="workspace-pick-title">${escapeHtml(projectDisplayTitle(item))}</span>
+          <span class="workspace-pick-meta">爆款文审核${escapeHtml(scoreText)}</span>
+          <span class="workspace-pick-state">${escapeHtml(updatedAt || statusLabel(item.status))}</span>
+        </button>
+      `;
+    }).join("");
+  }
+
+==========================================================================================
+FUNCTION app.js::openHotReviewAssetFromList
+==========================================================================================
+  async function openHotReviewAssetFromList(projectId) {
+    if (!projectId) return;
+    let asset = findOwnedAsset(projectId)
+      || state.assets.find((item) => String(item.project_id || item.id || "") === String(projectId))
+      || null;
+
+    try {
+      const detail = await requestJson(`/api/projects/${encodeURIComponent(projectId)}`);
+      asset = detail.project || detail.asset || asset;
+    } catch (_) {
+      // 列表快照已经足够展示时，不阻断打开。
+    }
+
+    if (!asset) {
+      showToast("资产未找到", "请刷新资产列表后重试。");
+      return;
+    }
+
+    const payload = asset.input_payload || asset.request_payload || asset.tool_request || {};
+    const reviewText = String(payload.review_text || payload.text || payload.input || "").trim();
+    const draft = ensureToolDraft("hot_review");
+    state.toolDrafts.hot_review = {
+      ...draft,
+      review_text: reviewText,
+      text: reviewText
+    };
+
+    state.toolResults.hot_review = normalizeScriptAuditEcgResult(toolResultFromAsset(asset));
+    openToolPanel("hot_review");
+    renderToolForm("hot_review");
+    renderToolOutput("hot_review");
+  }
+
+==========================================================================================
+FUNCTION app.js::renderAssets
+==========================================================================================
+  function renderAssets(assets) {
+    if (!els.assetsList) return;
+    if (state.assetsStatus === "loading") {
+      els.assetsList.innerHTML = renderListSkeleton("asset-tile");
+      return;
+    }
+    if (state.assetsStatus === "error") {
+      els.assetsList.innerHTML = errorCard(state.assetsError || "资产列表加载失败，请稍后重试。");
+      return;
+    }
+    if (!assets.length) {
+      els.assetsList.innerHTML = emptyCard("还没有用户资产");
+      return;
+    }
+    const categories = [
+      ["老剧本平台资产", assets.filter((item) => assetCategory(item) === "old_script")],
+      ["爆款文审核资产", assets.filter((item) => isHotReviewAsset(item))],
+      ["框架资产", assets.filter((item) => assetCategory(item) === "framework" && !isHotReviewAsset(item))],
+      ["新剧本资产", assets.filter((item) => assetCategory(item) === "new_script" && !isHotReviewAsset(item))],
+      ["其他辅助工具资产", assets.filter((item) => isToolAsset(item) && !isHotReviewAsset(item))],
+    ];
+    els.assetsList.innerHTML = categories.map(([title, items]) => `
+      <section class="asset-category">
+        <div class="asset-category-head">${escapeHtml(title)}</div>
+        ${items.length ? items.map((item) => `
+      <article class="asset-tile">
+        <div class="asset-topline">
+          <span class="status-pill ${item.status === "completed" ? "status-pill-completed" : ""}">${escapeHtml(statusLabel(item.status))}</span>
+          ${isToolAsset(item)
+            ? `<span class="status-pill status-pill-pending">${escapeHtml(assetTypeLabel(item))}</span>`
+            : (item.completion_confirmed ? '<span class="status-pill status-pill-locked">已锁定</span>' : item.awaiting_user_confirmation ? '<span class="status-pill status-pill-pending">待确认</span>' : "")}
+          <span class="status-pill ${item.visibility === "public" ? "status-pill-public" : "status-pill-private"}">${escapeHtml(visibilityLabel(item.visibility))}</span>
+        </div>
+        <h3>${escapeHtml(projectDisplayTitle(item))}</h3>
+        ${isHotReviewAsset(item) ? `<button class="btn btn-secondary" type="button" data-action="open-hot-review-asset" data-project-id="${escapeHtml(String(item.project_id || item.id || ""))}">打开爆款文审核</button>` : ""}
+        <p>${escapeHtml(item.summary)}</p>
+        <div class="asset-meta">
+          <span>项目 ${escapeHtml(item.project_id)}</span>
+          <span>${escapeHtml(isToolAsset(item) ? assetWorkflowLabel(item) : (item.current_stage_label || "待开始"))}</span>
+          <span>${escapeHtml(isToolAsset(item)
+            ? (item.tool_filename || "已保存结果")
+            : `${item.generated_episodes || 0} / ${item.total_episodes || 0}`)}</span>
+        </div>
+        <div class="asset-actions">
+          <div class="asset-action-group">
+            <span class="asset-action-label">资产操作</span>
+            ${isToolAsset(item) ? "" : `<button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>`}
+            ${isToolAsset(item) ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>`}
+            <button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>
+            ${assetCategory(item) === "framework" ? `<a class="btn btn-secondary" href="/framework-to-script?framework_asset_id=${encodeURIComponent(item.project_id)}${currentAuthToken() ? `&auth_token=${encodeURIComponent(currentAuthToken())}` : ""}">进入框架到剧本</a>` : ""}
+            <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : (isToolAsset(item) ? "公开结果" : "公开成品")}</button>
+            <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除资产</button>
+          </div>
+          ${renderAssetTaskActions(item)}
+        </div>
+      </article>
+    `).join("") : emptyCard(`暂无${title}`)}
+      </section>
+    `).join("");
+  }
+
+==========================================================================================
+FUNCTION app.js::renderProjectList
+==========================================================================================
+  function renderProjectList(projects) {
+    if (!els.activeProjectList || !els.completedProjectList) return;
+    if (!isAuthenticated()) {
+      const message = emptyCard("登录后查看任务");
+      els.activeProjectList.innerHTML = message;
+      els.completedProjectList.innerHTML = message;
+      if (els.newScriptProjectList) els.newScriptProjectList.innerHTML = message;
+      if (els.waibaoProjectList) els.waibaoProjectList.innerHTML = message;
+      if (els.characterReskinProjectList) els.characterReskinProjectList.innerHTML = message;
+      const hotReviewProjectList = ensureHotReviewProjectList();
+      if (hotReviewProjectList) hotReviewProjectList.innerHTML = message;
+      setHotReviewProjectCount(0);
+      if (els.activeProjectCount) els.activeProjectCount.textContent = "0";
+      if (els.completedProjectCount) els.completedProjectCount.textContent = "0";
+      return;
+    }
+
+    const hotReviewProjects = projects.filter((item) => isHotReviewAsset(item));
+    const oldScriptProjects = projects.filter((item) => assetCategory(item) === "old_script" && !isHotReviewAsset(item));
+    const frameworkProjects = projects.filter((item) => assetCategory(item) === "framework" && !isHotReviewAsset(item));
+    const newScriptProjects = projects.filter((item) => assetCategory(item) === "new_script" && !isHotReviewAsset(item));
+    const waibaoProjects = projects.filter((item) => assetCategory(item) === "waibao" && !isHotReviewAsset(item));
+    const characterReskinProjects = projects.filter((item) => assetCategory(item) === "character_reskin" && !isHotReviewAsset(item));
+
+    const renderCompactItems = (items, emptyMessage) => {
+      if (!items.length) {
+        return `<div class="workspace-empty">${escapeHtml(emptyMessage)}</div>`;
+      }
+      return items.map((item) => {
+        const activeClass = Number(item.project_id) === Number(state.projectId) ? " active" : "";
+        const statusClass = item.status === "failed"
+          ? " failed"
+          : item.status === "completed"
+            ? " completed"
+            : "";
+        return `
+          <div class="workspace-pick-row">
+            <button
+              class="workspace-pick${activeClass}${statusClass}"
+              type="button"
+              data-action="select-project"
+              data-project-id="${escapeHtml(item.project_id)}"
+              title="${escapeHtml(projectTooltip(item))}"
+            >
+              <span class="workspace-pick-main">
+                <span class="workspace-pick-title">${escapeHtml(projectDisplayTitle(item))}</span>
+                <span class="workspace-pick-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${item.current_stage_label || statusLabel(item.status)}`)}</span>
+              </span>
+              <span class="workspace-pick-state">${escapeHtml(statusLabel(item.status))}</span>
+            </button>
+            <button
+              class="btn btn-danger workspace-pick-delete"
+              type="button"
+              data-action="delete-asset"
+              data-project-id="${escapeHtml(item.project_id)}"
+              aria-label="${escapeHtml(`删除 ${projectDisplayTitle(item)}`)}"
+              title="${escapeHtml(`删除 ${projectDisplayTitle(item)}`)}"
+            >删除</button>
+          </div>
+        `;
+      }).join("");
+    };
+
+    els.activeProjectList.innerHTML = renderCompactItems(oldScriptProjects, "当前没有老剧本平台资产。");
+    els.completedProjectList.innerHTML = renderCompactItems(frameworkProjects, "当前还没有框架资产。");
+    if (els.newScriptProjectList) {
+      els.newScriptProjectList.innerHTML = renderCompactItems(newScriptProjects, "当前还没有新剧本平台资产。");
+    }
+    if (els.waibaoProjectList) {
+      els.waibaoProjectList.innerHTML = renderCompactItems(waibaoProjects, "当前还没有外包格式专属资产。");
+    }
+    if (els.characterReskinProjectList) {
+      els.characterReskinProjectList.innerHTML = renderCompactItems(characterReskinProjects, "当前还没有只换人设资产。");
+    }
+    const hotReviewProjectList = ensureHotReviewProjectList();
+    if (hotReviewProjectList) {
+      hotReviewProjectList.innerHTML = renderHotReviewCompactItems(hotReviewProjects, "当前还没有爆款文审核资产。");
+    }
+    setHotReviewProjectCount(hotReviewProjects.length);
+    if (els.activeProjectCount) {
+      els.activeProjectCount.textContent = String(oldScriptProjects.length);
+    }
+    if (els.completedProjectCount) {
+      els.completedProjectCount.textContent = String(frameworkProjects.length);
+    }
+  }
+
+==========================================================================================
+FUNCTION app.js::loadAssets
+==========================================================================================
+  async function loadAssets({ resetPage = false }
+
+==========================================================================================
+FUNCTION app.js::runActiveTool
+==========================================================================================
+  async function runActiveTool() {
+    if (!requireLogin()) return;
+    const payload = collectToolPayload();
+    if (state.activeTool === "new_framework") {
+      const projectTitle = projectTitleCandidate();
+      if (projectTitle) {
+        payload.project_title = projectTitle;
+      }
+    }
+    state.toolResults[state.activeTool] = null;
+    renderToolOutput(state.activeTool, "生成时间很长，请不要刷新，马上就好~");
+    const data = await requestJson(currentToolRunUrl(state.activeTool), {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    const result = data.result || data;
+    const output = result.output ?? data.output ?? result.result ?? "";
+    const text = String(result.text || data.text || formatToolOutput(output) || "").trim();
+    const filename = String(result.filename || data.filename || "").trim();
+    const assetSaved = Boolean(result.asset_saved || data.asset_saved);
+    const assetSaveError = String(result.asset_save_error || data.asset_save_error || "").trim();
+    state.toolResults[state.activeTool] = {
+      ...data,
+      ...result,
+      text,
+      answer_text: result.answer_text || data.answer_text || text,
+      filename,
+      output,
+      result_type: result.result_type || data.result_type || "",
+      resultType: result.result_type || data.result_type || "",
+      parsed: result.parsed ?? data.parsed ?? false,
+      audit: result.audit || data.audit || null,
+      view: result.view || data.view || null,
+      parse_warnings: result.parse_warnings || data.parse_warnings || [],
+      parseWarnings: result.parse_warnings || data.parse_warnings || [],
+      outputType: result.output_type || data.output_type || "text",
+      assetSaved,
+      savedAsset: result.saved_asset || data.saved_asset || null
+    };
+    state.toolResults[state.activeTool] = normalizeScriptAuditEcgResult(state.toolResults[state.activeTool]);
+    renderToolOutput(state.activeTool);
+    if (assetSaved) {
+      try {
+        await loadAssets();
+      } catch (_) {
+        // 结果已经生成并写入后端，不阻断当前工具面板的成功态展示。
+      }
+    }
+    showToast(
+      "辅助工具运行完成",
+      assetSaveError
+        ? `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果，但写入用户资产失败了。`
+        : (assetSaved
+          ? `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果，并已保存到用户资产。`
+          : `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果。`),
+    );
+  }
+
+==========================================================================================
+SERVER LINES CONTAINING _maybe_enrich_script_audit_ecg_tool_result
+==========================================================================================
+186:     def _maybe_enrich_script_audit_ecg_tool_result(tool_key: str, result: dict, flattened: dict) -> tuple[dict, dict]:
+1978:         result, flattened = _maybe_enrich_script_audit_ecg_tool_result(tool_key, result, dict(result))
+
+==========================================================================================
+SERVER LINES CONTAINING save_auxiliary_asset
+==========================================================================================
+1984:                 saved_asset = task_manager.save_auxiliary_asset(
+
+==========================================================================================
+SERVER LINES CONTAINING run_simple_tool
+==========================================================================================
+44: from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
+1951:             result = run_simple_tool(tool_key, data)
+
+==========================================================================================
+SERVER LINES CONTAINING script_audit_ecg
+==========================================================================================
+45: from .services.script_audit_ecg_parser import (
+48:     normalize_script_audit_ecg,
+131:     def _script_audit_ecg_extract_text(value, *, limit: int = 200000) -> str:
+171:     def _script_audit_ecg_should_try(tool_key: str, parsed: dict | None, raw_text: str) -> bool:
+182:             "script_audit_ecg",
+186:     def _maybe_enrich_script_audit_ecg_tool_result(tool_key: str, result: dict, flattened: dict) -> tuple[dict, dict]:
+190:         raw_text = _script_audit_ecg_extract_text(result)
+192:         if not _script_audit_ecg_should_try(tool_key, parsed, raw_text):
+201:             warnings = parse_warnings or ["未解析到 script_audit_ecg_v2 JSON"]
+208:         audit, normalize_warnings = normalize_script_audit_ecg(parsed, raw_answer_text=raw_text)
+213:             target["result_type"] = "script_audit_ecg"
+1978:         result, flattened = _maybe_enrich_script_audit_ecg_tool_result(tool_key, result, dict(result))
+1982:         if str(flattened.get("text") or flattened.get("answer_text") or "").strip() or str(flattened.get("result_type") or "") == "script_audit_ecg":
+
+==========================================================================================
+SERVER LINES CONTAINING hot_review
+==========================================================================================
+176:             "hot_review",
+1939:                 if str(tool.get("tool_id") or "") != "hot_review":
+
+==========================================================================================
+SERVER LINES CONTAINING assets
+==========================================================================================
+1798:             community_assets=task_manager.list_public_assets(),
+2351:     @app.get("/api/assets")
+2353:     def list_assets():
+2354:         assets = task_manager.list_user_assets(user_id=_require_user_id())
+2355:         return _json_ok(assets=assets)
+2357:     @app.get("/api/framework-assets")
+2359:     def list_framework_assets_api():
+2367:         assets = [
+2371:         assets.sort(key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+2372:         return _json_ok(assets=_strip_raw_fastgpt_fields(assets))
+2374:     @app.get("/api/framework-assets/<asset_id>")
+2382:     @app.post("/api/framework-planner/assets")
+4691:     @app.post("/api/framework-planner/assets/save")
+4710:     def community_assets():
+4711:         assets = task_manager.list_public_assets()
+4712:         return _json_ok(assets=assets)
