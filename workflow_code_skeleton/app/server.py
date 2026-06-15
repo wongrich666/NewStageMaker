@@ -748,7 +748,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "framework_plan_package": _strip_raw_fastgpt_fields(copy.deepcopy(package)),
                     "stage_outputs": _strip_raw_fastgpt_fields({**copy.deepcopy(stage_outputs), **copy.deepcopy(workspace_stage_outputs)}),
                     "framework_to_script_state": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state)),
-                    "scriptStages": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state.get("scriptStages") or {})),
+                    "scriptStages": _strip_raw_fastgpt_fields(
+    copy.deepcopy(
+        workspace_state.get("scriptStages")
+        or workspace_state.get("script_stages")
+        or {}
+    )
+),
                     "stage_prompts": _strip_raw_fastgpt_fields(copy.deepcopy(stage_prompts)),
                     "preference_snapshot": _strip_raw_fastgpt_fields(copy.deepcopy(preference_snapshot)),
                 }
@@ -6273,8 +6279,238 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error("缺少第09阶段人设服装映射，请先重新运行09。", status=400)
 
         asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
-        if not _try_begin_framework_stage(user_id, asset_id, "12"):
+
+        stage12_worker_run_id = str(data.get("_stage12_run_id") or "").strip()
+        stage12_worker_token = str(data.get("_stage12_worker_token") or "").strip()
+        stage12_worker_requested = str(request.headers.get("X-Framework-Stage12-Worker") or "").strip() == "1"
+        is_stage12_worker = stage12_worker_requested and _framework_stage_worker_allowed(
+            run_id=stage12_worker_run_id,
+            worker_token=stage12_worker_token,
+            user_id=user_id,
+            asset_id=asset_id,
+            stage="12",
+        )
+
+        if stage12_worker_requested and not is_stage12_worker:
+            return _json_error("无效的 12 阶段后台运行请求。", status=403)
+
+        def _stage12_set_run(**updates) -> dict:
+            if not is_stage12_worker or not stage12_worker_run_id:
+                return {}
+            try:
+                return _update_framework_stage_run(run_id=stage12_worker_run_id, **updates)
+            except Exception:
+                logger.exception("framework-to-script stage12 run state update failed")
+                return {}
+
+        if not is_stage12_worker and asset_id:
+            expected_starts = _sorted_numeric_batch_keys(stage11_batches)
+            if requested_start:
+                expected_starts = [str(batch_key)]
+            if not expected_starts and batch_key:
+                expected_starts = [str(batch_key)]
+
+            run, created = _begin_or_get_framework_stage_run(
+                user_id=user_id,
+                asset_id=asset_id,
+                stage="12",
+                current_sub_stage="stage12_prepare",
+                progress_text=f"第 12 阶段准备后台运行：第 {batch_key} 集起",
+                latest_partial_result={
+                    "selected_batch_source": selected_batch_source,
+                    "selected_batch_start": batch_key,
+                    "expected_batch_starts": expected_starts,
+                    "completed_batch_starts": _sorted_numeric_batch_keys(existing_batches),
+                    "remaining_batch_starts": [
+                        key for key in expected_starts
+                        if key not in set(_sorted_numeric_batch_keys(existing_batches))
+                    ],
+                },
+                retain_completed=True,
+            )
+
+            if not created:
+                return jsonify({"success": True, "existing": True, "run": run}), 202
+
+            private_run = _framework_stage_run_private(str(run.get("run_id") or ""))
+            worker_token = str(private_run.get("worker_token") or "")
+            worker_payload = copy.deepcopy(data)
+            worker_payload["_stage12_run_id"] = str(run.get("run_id") or "")
+            worker_payload["_stage12_worker_token"] = worker_token
+            auth_token = _current_auth_token()
+
+            def _stage12_worker_loop() -> None:
+                run_id = str(run.get("run_id") or "")
+                latest_result = {}
+                try:
+                    _update_framework_stage_run(
+                        run_id=run_id,
+                        status="running",
+                        current_sub_stage="stage12_prepare",
+                        progress_text=f"第 12 阶段后台运行中：第 {batch_key} 集起",
+                        latest_partial_result={
+                            "selected_batch_start": batch_key,
+                            "expected_batch_starts": expected_starts,
+                            "completed_batch_starts": _sorted_numeric_batch_keys(existing_batches),
+                        },
+                    )
+
+                    first_request = True
+                    guard = 0
+                    completed_starts = set(_sorted_numeric_batch_keys(existing_batches))
+
+                    while guard < 200:
+                        guard += 1
+                        request_payload = copy.deepcopy(worker_payload)
+
+                        request_payload["reset_stage12"] = bool(reset_stage12 and first_request)
+                        request_payload["resetStage12"] = bool(reset_stage12 and first_request)
+
+                        # 关键：不要一直带前端旧 stage12，否则每轮都可能看到旧 batches。
+                        if not first_request:
+                            request_payload.pop("stage12", None)
+                            request_payload.pop("stage_12", None)
+
+                        path = "/api/framework-to-script/stage/12"
+                        if auth_token:
+                            path = f"{path}?auth_token={quote(auth_token)}"
+
+                        with app.app_context():
+                            with app.test_client() as worker_client:
+                                response = worker_client.post(
+                                    path,
+                                    headers={"X-Framework-Stage12-Worker": "1"},
+                                    json=request_payload,
+                                )
+                                response_data = response.get_json(silent=True) or {}
+
+                        latest_result = response_data if isinstance(response_data, dict) else {}
+
+                        if response.status_code >= 400 or latest_result.get("success") is False:
+                            detail = latest_result.get("detail") if isinstance(latest_result.get("detail"),
+                                                                               dict) else {}
+                            message = (
+                                    detail.get("error_message")
+                                    or detail.get("message")
+                                    or latest_result.get("message")
+                                    or latest_result.get("error")
+                                    or f"stage12 worker returned HTTP {response.status_code}"
+                            )
+                            _finish_framework_stage_run(
+                                run_id=run_id,
+                                status="failed",
+                                progress_text="第 12 阶段运行失败",
+                                latest_error=str(message),
+                                latest_result_preview=latest_result,
+                            )
+                            return
+
+                        batches = latest_result.get("batches") if isinstance(latest_result.get("batches"), dict) else {}
+                        completed_starts = set(_sorted_numeric_batch_keys(batches))
+                        missing = [key for key in expected_starts if key not in completed_starts]
+
+                        debug_path = str(
+                            latest_result.get("stage12DebugPath")
+                            or latest_result.get("stage12_debug_path")
+                            or ""
+                        ).strip()
+
+                        latest_partial = {
+                            "latest_batch_done": latest_result.get("batchStartEpisode"),
+                            "start_episode": latest_result.get("batchStartEpisode"),
+                            "end_episode": latest_result.get("batchEndEpisode"),
+                            "completed_batch_starts": sorted(
+                                completed_starts,
+                                key=lambda item: int(item) if str(item).isdigit() else 999,
+                            ),
+                            "expected_batch_starts": expected_starts,
+                            "remaining_batch_starts": missing,
+                        }
+
+                        _update_framework_stage_run(
+                            run_id=run_id,
+                            status="running",
+                            current_sub_stage="stage12_batch_saved",
+                            progress_text=(
+                                f"第 12 阶段已保存第 {latest_partial['start_episode']}-"
+                                f"{latest_partial['end_episode']} 集，"
+                                f"进度 {len(completed_starts)}/{len(expected_starts) or '?'}"
+                            ),
+                            raw_debug_path=debug_path,
+                            latest_partial_result=latest_partial,
+                            latest_result_preview={
+                                "batchStartEpisode": latest_result.get("batchStartEpisode"),
+                                "batchEndEpisode": latest_result.get("batchEndEpisode"),
+                                "batches": sorted(
+                                    completed_starts,
+                                    key=lambda item: int(item) if str(item).isdigit() else 999,
+                                ),
+                            },
+                        )
+
+                        if not missing:
+                            break
+
+                        first_request = False
+
+                    else:
+                        _finish_framework_stage_run(
+                            run_id=run_id,
+                            status="failed",
+                            progress_text="第 12 阶段运行超出批次数保护上限",
+                            latest_error="stage12 worker exceeded batch guard limit",
+                            latest_result_preview=latest_result,
+                        )
+                        return
+
+                    _finish_framework_stage_run(
+                        run_id=run_id,
+                        status="succeeded",
+                        progress_text="第 12 阶段已完成",
+                        latest_result_preview={
+                            "completed_batch_starts": sorted(
+                                completed_starts,
+                                key=lambda item: int(item) if str(item).isdigit() else 999,
+                            ),
+                        },
+                        latest_partial_result={
+                            "completed_batch_starts": sorted(
+                                completed_starts,
+                                key=lambda item: int(item) if str(item).isdigit() else 999,
+                            ),
+                            "expected_batch_starts": expected_starts,
+                            "remaining_batch_starts": [],
+                        },
+                    )
+
+                except Exception as exc:
+                    logger.exception("framework-to-script stage12 background worker failed")
+                    _finish_framework_stage_run(
+                        run_id=run_id,
+                        status="failed",
+                        progress_text="第 12 阶段后台运行失败",
+                        latest_error=str(exc),
+                    )
+
+            thread = threading.Thread(
+                target=_stage12_worker_loop,
+                name=f"framework-stage12-{run.get('run_id')}",
+                daemon=True,
+            )
+            thread.start()
+
+            run = _update_framework_stage_run(
+                run_id=str(run.get("run_id") or ""),
+                status="running",
+                current_sub_stage="stage12_prepare",
+                progress_text=f"第 12 阶段已开始后台运行：第 {batch_key} 集起",
+            )
+
+            return jsonify({"success": True, "accepted": True, "run": run}), 202
+
+        if not is_stage12_worker and not _try_begin_framework_stage(user_id, asset_id, "12"):
             return _json_error("12 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
+
         try:
             failed_sub_stage = "stage12_prepare"
             start_episode = None
@@ -6456,6 +6692,17 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 debug_record["events"].append(write_event)
                 debug_record.update({"status": "requesting_coze", "failed_sub_stage": failed_sub_stage, "updated_at": _now_iso()})
                 debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
+                _stage12_set_run(
+                    status="running",
+                    current_sub_stage="script_write",
+                    progress_text=f"第 12 阶段正文写作中：第 {start_episode}-{end_episode} 集",
+                    raw_debug_path=debug_path,
+                    latest_partial_result={
+                        "sub_stage": "script_write",
+                        "start_episode": start_episode,
+                        "end_episode": end_episode,
+                    },
+                )
                 write_started = time.monotonic()
                 write_output = coze_client.run_stage(STAGE_FRAMEWORK_SCRIPT_WRITE, base_vars)
                 write_event["coze_request_ended_at"] = _now_iso()
@@ -6478,6 +6725,19 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     }
                 )
                 debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
+                _stage12_set_run(
+                    status="running",
+                    current_sub_stage="script_write_done",
+                    progress_text=f"第 12 阶段正文 write 已返回：第 {start_episode}-{end_episode} 集",
+                    raw_debug_path=debug_path,
+                    latest_partial_result={
+                        "sub_stage": "script_write",
+                        "start_episode": start_episode,
+                        "end_episode": end_episode,
+                        "batchScriptText_length": len(batch_script),
+                        "batchScriptText_empty": not bool(batch_script.strip()),
+                    },
+                )
                 logger.info(
                     "framework-to-script stage12 script_write output write_output_keys=%s batchScriptText_type=%s "
                     "batchScriptText_length=%s batchScriptText_empty=%s normalized_keys=%s input_keys=%s",
@@ -6926,10 +7186,28 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             success_debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset, success=True)
             if debug_path:
                 output["stage12DebugPath"] = debug_path
+            _stage12_set_run(
+                status="running",
+                current_sub_stage="stage12_batch_saved",
+                progress_text=f"第 12 阶段第 {start_episode}-{end_episode} 集已保存",
+                raw_debug_path=debug_path,
+                latest_partial_result={
+                    "start_episode": start_episode,
+                    "end_episode": end_episode,
+                    "completed_batch_starts": _sorted_numeric_batch_keys(batches),
+                    "latest_batch_done": start_episode,
+                },
+                latest_result_preview={
+                    "batchStartEpisode": start_episode,
+                    "batchEndEpisode": end_episode,
+                    "batches": _sorted_numeric_batch_keys(batches),
+                },
+            )
             if success_debug_path:
                 output["stage12SuccessDebugPath"] = success_debug_path
         finally:
-            _end_framework_stage(user_id, asset_id, "12")
+            if not is_stage12_worker:
+                _end_framework_stage(user_id, asset_id, "12")
 
         return _json_ok(stage="12", framework_asset_id=asset_id, **output)
 

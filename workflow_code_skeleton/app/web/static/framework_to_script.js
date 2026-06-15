@@ -421,10 +421,11 @@
   }
 
   function numericKeys(value) {
-    return Object.keys(value || {})
-      .filter((key) => /^\d+$/.test(String(key)))
-      .sort((a, b) => Number(a) - Number(b));
-  }
+  return Object.keys(value || {})
+    .map((key) => String(key))
+    .filter((key) => /^\d+$/.test(key))
+    .sort((a, b) => Number(a) - Number(b));
+}
 
   function expectedBatchStartsFromPlan(plan) {
     const starts = new Set();
@@ -445,18 +446,142 @@
     return expectedBatchStartsFromPlan(stage10Plan(stage10));
   }
 
-  function stage11Completion() {
-    const expected = expectedStage11Starts();
-    const done = numericKeys(((state.scriptStages || {}).stage11 || {}).batches);
-    return { expected, done, complete: Boolean(expected.length && done.length >= expected.length) };
+  function stage11PlanFromBatch(batch) {
+  if (!batch || typeof batch !== "object") return null;
+  return batch.batchCausalConflictPlan
+    || batch.batch_causal_conflict_plan
+    || batch.batchCausalConflict
+    || batch.batch_causal_conflict
+    || null;
+}
+
+function stage11BatchStartFromPlan(plan, fallback = "") {
+  if (!plan || typeof plan !== "object") return String(fallback || "");
+  const meta = plan.batch_meta || plan.batchMeta || {};
+  return String(
+    meta.start_episode
+    || meta.startEpisode
+    || plan.start_episode
+    || plan.startEpisode
+    || fallback
+    || ""
+  ).trim();
+}
+
+function addStage11BatchToMap(map, key, batch) {
+  if (!batch || typeof batch !== "object") return;
+
+  const plan = stage11PlanFromBatch(batch) || batch;
+  if (!hasContent(plan)) return;
+
+  const start = String(
+    batch.batchStartEpisode
+    || batch.batch_start_episode
+    || batch.startEpisode
+    || batch.start_episode
+    || stage11BatchStartFromPlan(plan, key)
+    || key
+    || ""
+  ).trim();
+
+  if (!start) return;
+
+  const normalizedKey = /^\d+$/.test(start) ? start : String(key || start);
+  map[normalizedKey] = Object.assign({}, map[normalizedKey] || {}, batch);
+}
+
+function stage11BatchMap() {
+  const stages = state.scriptStages || {};
+  const outputs = state.stageOutputs || {};
+  const stage11 = stages.stage11 || {};
+  const map = {};
+
+  [
+    stage11.batches,
+    stage11.batchCausalConflictBatches,
+    stage11.batch_causal_conflict_batches,
+    (outputs.stage11 || {}).batches,
+    (outputs.framework_causal_conflict || {}).batches,
+    (outputs.frameworkCausalConflict || {}).batches
+  ].forEach((source) => {
+    if (!source || typeof source !== "object" || Array.isArray(source)) return;
+    Object.entries(source).forEach(([key, batch]) => addStage11BatchToMap(map, key, batch));
+  });
+
+  const topPlan =
+    stage11.batchCausalConflictPlan
+    || stage11.batch_causal_conflict_plan
+    || (outputs.stage11 || {}).batchCausalConflictPlan
+    || (outputs.stage11 || {}).batch_causal_conflict_plan;
+
+  if (hasContent(topPlan)) {
+    const start = String(
+      stage11.batchStartEpisode
+      || stage11.batch_start_episode
+      || stage11BatchStartFromPlan(topPlan, "1")
+      || "1"
+    );
+    addStage11BatchToMap(map, start, Object.assign({}, stage11, {
+      batchCausalConflictPlan: topPlan
+    }));
   }
 
-  function stage12Completion() {
-    const stage11 = ((state.scriptStages || {}).stage11 || {});
-    const expected = numericKeys(stage11.batches);
-    const done = numericKeys(((state.scriptStages || {}).stage12 || {}).batches);
-    return { expected, done, complete: Boolean(expected.length && done.length >= expected.length) };
+  return map;
+}
+
+  function ensureStage11BatchesOnState() {
+  const normalizedBatches = stage11BatchMap();
+  const current = (state.scriptStages || {}).stage11 || {};
+
+  if (!Object.keys(normalizedBatches).length) {
+    return current;
   }
+
+  const currentBatches =
+    current.batches && typeof current.batches === "object" && !Array.isArray(current.batches)
+      ? current.batches
+      : {};
+
+  state.scriptStages.stage11 = {
+    ...current,
+    batches: Object.assign({}, currentBatches, normalizedBatches),
+    updated_at: current.updated_at || new Date().toISOString()
+  };
+
+  return state.scriptStages.stage11;
+}
+
+  function stage11Completion() {
+  const expected = expectedStage11Starts();
+  const batches = stage11BatchMap();
+  const done = numericKeys(batches);
+  const completed = new Set((state.completedStages || []).map((item) => String(item)));
+
+  const expectedForCheck = expected.length ? expected : done;
+  const missing = missingBatchStarts(expectedForCheck, done);
+  const completeByBatches = Boolean(expectedForCheck.length && missing.length === 0);
+  const completeByFlag = completed.has("11") && done.length > 0;
+
+  return {
+    expected: expectedForCheck,
+    done,
+    missing,
+    complete: completeByBatches || completeByFlag
+  };
+}
+
+function stage12Completion() {
+  const expected = numericKeys(stage11BatchMap());
+  const done = numericKeys(((state.scriptStages || {}).stage12 || {}).batches);
+  const missing = missingBatchStarts(expected, done);
+
+  return {
+    expected,
+    done,
+    missing,
+    complete: Boolean(expected.length && missing.length === 0)
+  };
+}
 
   function missingBatchStarts(expected, done) {
     const completed = new Set((done || []).map((key) => String(key)));
@@ -479,17 +604,59 @@
   }
 
   function mergeStage11(data) {
-    state.scriptStages.stage11 = {
-      batchStartEpisode: data.batchStartEpisode,
-      batchEndEpisode: data.batchEndEpisode,
-      batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan,
-      batchCausalConflictPlan: data.batchCausalConflictPlan,
-      batchCausalConflictReview: data.batchCausalConflictReview,
-      conflictMemory: data.conflictMemory,
-      batches: data.batches || {},
-      updated_at: new Date().toISOString(),
-    };
+  const current = (state.scriptStages || {}).stage11 || {};
+  const currentBatches =
+    current.batches && typeof current.batches === "object" && !Array.isArray(current.batches)
+      ? current.batches
+      : {};
+
+  const incomingBatches =
+    data && data.batches && typeof data.batches === "object" && !Array.isArray(data.batches)
+      ? data.batches
+      : {};
+
+  const mergedBatches = Object.assign({}, currentBatches);
+
+  Object.entries(incomingBatches).forEach(([key, batch]) => {
+    addStage11BatchToMap(mergedBatches, key, batch);
+  });
+
+  const topPlan = data.batchCausalConflictPlan || data.batch_causal_conflict_plan;
+  const startEpisode =
+    data.batchStartEpisode
+    || data.batch_start_episode
+    || data.startEpisode
+    || data.start_episode
+    || stage11BatchStartFromPlan(topPlan, "");
+
+  if (startEpisode && hasContent(topPlan)) {
+    addStage11BatchToMap(mergedBatches, String(startEpisode), {
+      batchStartEpisode: startEpisode,
+      batchEndEpisode: data.batchEndEpisode || data.batch_end_episode,
+      batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan || data.batch_enriched_episode_plan,
+      batchCausalConflictPlan: topPlan,
+      batchCausalConflictReview: data.batchCausalConflictReview || data.batch_causal_conflict_review,
+      conflictMemory: data.conflictMemory || data.conflict_memory
+    });
   }
+
+  state.scriptStages.stage11 = {
+    ...current,
+    batchStartEpisode: data.batchStartEpisode || data.batch_start_episode || current.batchStartEpisode,
+    batchEndEpisode: data.batchEndEpisode || data.batch_end_episode || current.batchEndEpisode,
+    batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan || data.batch_enriched_episode_plan || current.batchEnrichedEpisodePlan,
+    batchCausalConflictPlan: topPlan || current.batchCausalConflictPlan,
+    batchCausalConflictReview: data.batchCausalConflictReview || data.batch_causal_conflict_review || current.batchCausalConflictReview,
+    conflictMemory: data.conflictMemory || data.conflict_memory || current.conflictMemory,
+    batches: mergedBatches,
+    updated_at: new Date().toISOString()
+  };
+
+  if (!Array.isArray(state.completedStages)) state.completedStages = [];
+  if (stage11Completion().complete && !state.completedStages.map(String).includes("11")) {
+    state.completedStages.push("11");
+  }
+}
 
   // FP_STAGE12_MERGE_BATCHES_PATCH_V1
   function mergeStage12(data) {
@@ -834,7 +1001,7 @@
   }
 
   function renderStage11Batches(stage11) {
-    const batches = stage11.batches || {};
+    const batches = stage11BatchMap();
     const keys = numericKeys(batches);
     if (!keys.length && hasContent(stage11.batchCausalConflictPlan)) {
       return `
@@ -941,7 +1108,12 @@
       state.stageOutputs = { ...(asset.stage_outputs || {}), ...(workspaceState.stageOutputs || {}) };
       state.stages = workspaceState.stages || {};
       state.completedStages = Array.isArray(workspaceState.completedStages) ? workspaceState.completedStages : [];
-      state.scriptStages = asset.scriptStages || workspaceState.scriptStages || {};
+      state.scriptStages =
+          asset.scriptStages
+          || asset.script_stages
+          || workspaceState.scriptStages
+          || workspaceState.script_stages
+          || {};
       state.frameworkSource = state.frameworkSource === "刚刚完成的框架" ? "刚刚完成的框架" : "我的资产 / 框架资产";
       setPreferenceSnapshot(asset.preference_snapshot || {}, "framework_asset_snapshot");
       const stage10 = state.scriptStages.stage10 || {};
@@ -1444,14 +1616,17 @@
     saveRunningStage("12");
     state.error = null;
     render();
+
+    let acceptedRun = false;
+
     try {
       let firstRequest = true;
       let guard = 0;
       while (guard < 200) {
         guard += 1;
-        const currentStage11 = state.scriptStages.stage11 || {};
+        const currentStage11 = ensureStage11BatchesOnState();
         const currentStage12 = state.scriptStages.stage12 || {};
-        const stage11Keys = numericKeys(currentStage11.batches);
+        const stage11Keys = numericKeys(stage11BatchMap());
         const expectedCount = stage11Keys.length || (hasContent(currentStage11.batchCausalConflictPlan) ? 1 : 0);
         const beforeCount = numericKeys(currentStage12.batches).length;
         const beforeMissing = missingBatchStarts(stage11Keys, numericKeys(currentStage12.batches));
@@ -1467,6 +1642,16 @@
             reset_stage12: resetStage12 && firstRequest,
           }, "12")),
         });
+
+        if (data.run) {
+          acceptedRun = true;
+          applyRunState(data.run);
+          startRunPolling(data.run);
+          saveWorkspace();
+          render();
+          return;
+        }
+
         mergeStage12(data);
         saveWorkspace();
         render();
@@ -1477,7 +1662,8 @@
         }
         firstRequest = false;
       }
-      const finalStage11Keys = numericKeys((state.scriptStages.stage11 || {}).batches);
+      ensureStage11BatchesOnState();
+      const finalStage11Keys = numericKeys(stage11BatchMap());
       const finalMissing = missingBatchStarts(finalStage11Keys, numericKeys((state.scriptStages.stage12 || {}).batches));
       if (finalMissing.length) {
         throw new Error(`12 未完成全部正文批次，剩余第 ${finalMissing.join("、")} 集起。`);
@@ -1486,11 +1672,13 @@
     } catch (error) {
       state.error = error.message || "12 正文及对话失败";
     } finally {
-      if (!options.autoFromStage11) {
-        clearRunningStage("12");
-      } else {
-        state.runningStage = "";
-        state.runningStartedAt = "";
+      if (!acceptedRun) {
+        if (!options.autoFromStage11) {
+          clearRunningStage("12");
+        } else {
+          state.runningStage = "";
+          state.runningStartedAt = "";
+        }
       }
       render();
     }

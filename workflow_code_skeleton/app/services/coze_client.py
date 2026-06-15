@@ -269,6 +269,37 @@ class CozeWorkflowClient(FastGPTClient):
             "workflow_id": endpoint.workflow_id,
             "parameters": parameters,
         }
+
+        if stage_name == "framework_script_write":
+            expected_params = {
+                "episode_num",
+                "start_epi",
+                "character_count",
+                "according_conflict",
+                "according_epiplan",
+                "worldview",
+                "alias",
+                "memory",
+                "user_feedback",
+            }
+            actual_params = set(parameters.keys()) if isinstance(parameters, dict) else set()
+            missing_params = sorted(expected_params - actual_params)
+            empty_params = sorted([
+                key for key, value in (parameters or {}).items()
+                if value is None or value == "" or value == [] or value == {}
+            ])
+
+            logger.warning(
+                "[COZE REQUEST DEBUG] stage=%s workflow_id=%r param_keys=%s missing_expected=%s empty_params=%s param_types=%s param_preview=%s",
+                stage_name,
+                endpoint.workflow_id,
+                sorted(actual_params),
+                missing_params,
+                empty_params,
+                {key: type(value).__name__ for key, value in (parameters or {}).items()},
+                safe_truncated_preview(parameters, limit=3000),
+            )
+
         headers = {
             "Authorization": f"Bearer {endpoint.token}",
             "Content-Type": "application/json",
