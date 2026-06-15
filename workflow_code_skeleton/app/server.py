@@ -7,6 +7,7 @@ import threading
 import tempfile
 import time
 import traceback
+import uuid
 from io import BytesIO
 from functools import wraps
 import os
@@ -138,7 +139,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         "logs",
         "cache",
     }
-    framework_stage_runs: set[tuple[int, str, str]] = set()
+    framework_stage_runs: dict[tuple[int, str, str], dict] = {}
+    framework_stage_runs_by_id: dict[str, tuple[int, str, str]] = {}
     framework_stage_runs_lock = threading.Lock()
 
     def _now_iso() -> str:
@@ -767,20 +769,276 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         asset = _framework_asset_payload(project, include_detail=True)
         return asset if asset.get("can_import") else None
 
+    def _framework_stage_run_key(user_id: int, asset_id: str, stage: str) -> tuple[int, str, str]:
+        return (int(user_id), str(asset_id or "").strip(), str(stage or "").strip())
+
+    def _framework_stage_run_public(record: dict | None) -> dict:
+        if not isinstance(record, dict):
+            return {}
+        public_keys = (
+            "run_id",
+            "asset_id",
+            "stage",
+            "status",
+            "current_sub_stage",
+            "progress_text",
+            "started_at",
+            "updated_at",
+            "completed_at",
+            "latest_result_preview",
+            "latest_partial_result",
+            "latest_error",
+            "raw_debug_paths",
+            "history_debug_paths",
+        )
+        return {
+            key: copy.deepcopy(record.get(key))
+            for key in public_keys
+            if key in record
+        }
+
+    def _framework_stage_run_snapshot(
+        *,
+        run_id: str | None = None,
+        user_id: int | None = None,
+        asset_id: str = "",
+        stage: str = "",
+    ) -> dict:
+        with framework_stage_runs_lock:
+            record = None
+            if run_id:
+                key = framework_stage_runs_by_id.get(str(run_id))
+                record = framework_stage_runs.get(key) if key else None
+            elif user_id is not None:
+                key = _framework_stage_run_key(user_id, asset_id, stage)
+                record = framework_stage_runs.get(key)
+            return _framework_stage_run_public(record)
+
+    def _merge_framework_stage_run_paths(record: dict, key: str, values) -> None:
+        if not values:
+            return
+        current = record.get(key)
+        if not isinstance(current, list):
+            current = []
+        incoming = values if isinstance(values, list) else [values]
+        seen = {str(item) for item in current}
+        for item in incoming:
+            text = str(item or "").strip()
+            if text and text not in seen:
+                current.append(text)
+                seen.add(text)
+        record[key] = current[-80:]
+
+    def _begin_or_get_framework_stage_run(
+        *,
+        user_id: int,
+        asset_id: str,
+        stage: str,
+        current_sub_stage: str = "",
+        progress_text: str = "",
+        latest_result_preview=None,
+        latest_partial_result=None,
+        retain_completed: bool = True,
+    ) -> tuple[dict, bool]:
+        key = _framework_stage_run_key(user_id, asset_id, stage)
+        now = _now_iso()
+        if not key[1] or not key[2]:
+            run_id = uuid.uuid4().hex
+            return _framework_stage_run_public(
+                {
+                    "run_id": run_id,
+                    "user_id": int(user_id),
+                    "asset_id": key[1],
+                    "stage": key[2],
+                    "status": "running",
+                    "current_sub_stage": current_sub_stage,
+                    "progress_text": progress_text,
+                    "started_at": now,
+                    "updated_at": now,
+                    "completed_at": "",
+                    "latest_result_preview": latest_result_preview,
+                    "latest_partial_result": latest_partial_result,
+                    "latest_error": "",
+                    "raw_debug_paths": [],
+                    "history_debug_paths": [],
+                    "retain_completed": retain_completed,
+                    "worker_token": uuid.uuid4().hex,
+                }
+            ), True
+        with framework_stage_runs_lock:
+            existing = framework_stage_runs.get(key)
+            if isinstance(existing, dict) and existing.get("status") in {"pending", "running"}:
+                return _framework_stage_run_public(existing), False
+            if isinstance(existing, dict):
+                old_run_id = str(existing.get("run_id") or "")
+                if old_run_id:
+                    framework_stage_runs_by_id.pop(old_run_id, None)
+            run_id = uuid.uuid4().hex
+            record = {
+                "run_id": run_id,
+                "user_id": int(user_id),
+                "asset_id": key[1],
+                "stage": key[2],
+                "status": "pending",
+                "current_sub_stage": current_sub_stage,
+                "progress_text": progress_text,
+                "started_at": now,
+                "updated_at": now,
+                "completed_at": "",
+                "latest_result_preview": latest_result_preview,
+                "latest_partial_result": latest_partial_result,
+                "latest_error": "",
+                "raw_debug_paths": [],
+                "history_debug_paths": [],
+                "retain_completed": retain_completed,
+                "worker_token": uuid.uuid4().hex,
+            }
+            framework_stage_runs[key] = record
+            framework_stage_runs_by_id[run_id] = key
+            return _framework_stage_run_public(record), True
+
+    def _framework_stage_run_private(run_id: str) -> dict:
+        with framework_stage_runs_lock:
+            key = framework_stage_runs_by_id.get(str(run_id or ""))
+            record = framework_stage_runs.get(key) if key else None
+            return copy.deepcopy(record) if isinstance(record, dict) else {}
+
+    def _framework_stage_worker_allowed(
+        *,
+        run_id: str,
+        worker_token: str,
+        user_id: int,
+        asset_id: str,
+        stage: str,
+    ) -> bool:
+        key = _framework_stage_run_key(user_id, asset_id, stage)
+        with framework_stage_runs_lock:
+            record = framework_stage_runs.get(key)
+            if not isinstance(record, dict):
+                return False
+            return (
+                str(record.get("run_id") or "") == str(run_id or "")
+                and str(record.get("worker_token") or "") == str(worker_token or "")
+                and record.get("status") in {"pending", "running"}
+            )
+
+    def _update_framework_stage_run(
+        *,
+        run_id: str,
+        status: str | None = None,
+        current_sub_stage: str | None = None,
+        progress_text: str | None = None,
+        latest_result_preview=None,
+        latest_partial_result=None,
+        latest_error: str | None = None,
+        raw_debug_path: str = "",
+        history_debug_path: str = "",
+        raw_debug_paths=None,
+        history_debug_paths=None,
+    ) -> dict:
+        now = _now_iso()
+        with framework_stage_runs_lock:
+            key = framework_stage_runs_by_id.get(str(run_id or ""))
+            record = framework_stage_runs.get(key) if key else None
+            if not isinstance(record, dict):
+                return {}
+            if status is not None:
+                record["status"] = status
+            if current_sub_stage is not None:
+                record["current_sub_stage"] = current_sub_stage
+            if progress_text is not None:
+                record["progress_text"] = progress_text
+            if latest_result_preview is not None:
+                record["latest_result_preview"] = _strip_raw_fastgpt_fields(copy.deepcopy(latest_result_preview))
+            if latest_partial_result is not None:
+                record["latest_partial_result"] = _strip_raw_fastgpt_fields(copy.deepcopy(latest_partial_result))
+            if latest_error is not None:
+                record["latest_error"] = str(latest_error or "")
+            _merge_framework_stage_run_paths(record, "raw_debug_paths", raw_debug_path)
+            _merge_framework_stage_run_paths(record, "history_debug_paths", history_debug_path)
+            _merge_framework_stage_run_paths(record, "raw_debug_paths", raw_debug_paths)
+            _merge_framework_stage_run_paths(record, "history_debug_paths", history_debug_paths)
+            record["updated_at"] = now
+            return _framework_stage_run_public(record)
+
+    def _finish_framework_stage_run(
+        *,
+        run_id: str,
+        status: str,
+        progress_text: str = "",
+        latest_result_preview=None,
+        latest_partial_result=None,
+        latest_error: str = "",
+        forget: bool = False,
+    ) -> dict:
+        now = _now_iso()
+        with framework_stage_runs_lock:
+            key = framework_stage_runs_by_id.get(str(run_id or ""))
+            record = framework_stage_runs.get(key) if key else None
+            if not isinstance(record, dict):
+                return {}
+            record["status"] = status
+            record["updated_at"] = now
+            record["completed_at"] = now
+            if progress_text:
+                record["progress_text"] = progress_text
+            if latest_result_preview is not None:
+                record["latest_result_preview"] = _strip_raw_fastgpt_fields(copy.deepcopy(latest_result_preview))
+            if latest_partial_result is not None:
+                record["latest_partial_result"] = _strip_raw_fastgpt_fields(copy.deepcopy(latest_partial_result))
+            if latest_error:
+                record["latest_error"] = str(latest_error)
+            public = _framework_stage_run_public(record)
+            if forget or not record.get("retain_completed", True):
+                framework_stage_runs.pop(key, None)
+                framework_stage_runs_by_id.pop(str(run_id or ""), None)
+            return public
+
+    def _list_framework_stage_runs(
+        *,
+        user_id: int,
+        asset_id: str = "",
+        stage: str = "",
+        include_completed: bool = True,
+    ) -> list[dict]:
+        asset = str(asset_id or "").strip()
+        stage_text = str(stage or "").strip()
+        with framework_stage_runs_lock:
+            records = []
+            for (record_user_id, record_asset_id, record_stage), record in framework_stage_runs.items():
+                if int(record_user_id) != int(user_id):
+                    continue
+                if asset and str(record_asset_id) != asset:
+                    continue
+                if stage_text and str(record_stage) != stage_text:
+                    continue
+                if not include_completed and record.get("status") not in {"pending", "running"}:
+                    continue
+                records.append(_framework_stage_run_public(record))
+        records.sort(key=lambda item: str(item.get("updated_at") or item.get("started_at") or ""), reverse=True)
+        return records
+
     def _try_begin_framework_stage(user_id: int, asset_id: str, stage: str) -> bool:
-        key = (int(user_id), str(asset_id or "").strip(), str(stage or "").strip())
+        key = _framework_stage_run_key(user_id, asset_id, stage)
         if not key[1] or not key[2]:
             return True
-        with framework_stage_runs_lock:
-            if key in framework_stage_runs:
-                return False
-            framework_stage_runs.add(key)
-        return True
+        _, created = _begin_or_get_framework_stage_run(
+            user_id=user_id,
+            asset_id=asset_id,
+            stage=stage,
+            current_sub_stage=f"stage{stage}",
+            progress_text=f"{stage} 正在运行",
+            retain_completed=False,
+        )
+        return created
 
     def _end_framework_stage(user_id: int, asset_id: str, stage: str) -> None:
-        key = (int(user_id), str(asset_id or "").strip(), str(stage or "").strip())
+        key = _framework_stage_run_key(user_id, asset_id, stage)
         with framework_stage_runs_lock:
-            framework_stage_runs.discard(key)
+            record = framework_stage_runs.get(key)
+            run_id = str((record or {}).get("run_id") or "")
+        if run_id:
+            _finish_framework_stage_run(run_id=run_id, status="succeeded", forget=True)
 
     def _save_framework_to_script_stage(
         *,
@@ -1035,28 +1293,155 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def _normalize_dict_output_alias(mapping, *keys):
         value = _first_present(mapping, *keys, default=None)
         unwrapped = False
-        if isinstance(value, str):
-            text = value.strip()
-            if text.startswith("```"):
-                text = text.strip("`").strip()
-                if text.lower().startswith("json"):
-                    text = text[4:].strip()
-            try:
-                value = json.loads(text)
-            except Exception as exc:
-                return {}, unwrapped, f"string JSON parse failed: {exc}"
+        if value is None and isinstance(mapping, (dict, list, str)):
+            value = mapping
+
+        def _parse_json_like(candidate):
+            if isinstance(candidate, str):
+                text = candidate.strip()
+                if text.startswith("```"):
+                    text = text.strip("`").strip()
+                    if text.lower().startswith("json"):
+                        text = text[4:].strip()
+                try:
+                    return json.loads(text), ""
+                except Exception as exc:
+                    return candidate, f"string JSON parse failed: {exc}"
+            return candidate, ""
+
+        def _looks_like_batch_causal_conflict_plan(candidate):
+            if not isinstance(candidate, dict):
+                return False
+            episodes = candidate.get("episodes")
+            if not isinstance(episodes, list) or not episodes:
+                return False
+            return (
+                isinstance(candidate.get("batch_meta"), dict)
+                or isinstance(candidate.get("global_conflict_engine"), dict)
+                or "episode_title" in episodes[0]
+                or "scene_cause_chain" in episodes[0]
+            )
+
+        def _is_target_candidate(candidate):
+            if not isinstance(candidate, dict):
+                return False
+
+            normalized_keys = {str(key) for key in keys}
+
+            if (
+                "batchCausalConflictPlan" in normalized_keys
+                or "batch_causal_conflict_plan" in normalized_keys
+            ):
+                return _looks_like_batch_causal_conflict_plan(candidate)
+
+            return False
+
+        def _iter_nested_candidates(candidate):
+            if not isinstance(candidate, dict):
+                return
+
+            # ????????????
+            # {"batchCausalConflictPlan": {...}}
+            for key in keys:
+                if key in candidate:
+                    yield candidate.get(key)
+
+            # ?? Coze/code ??????????
+            # {"data":{"conflicts":{"batchCausalConflictPlan": {...}}}}
+            # {"conflicts":{"batchCausalConflictPlan": {...}}}
+            wrapper_keys = (
+                "data",
+                "conflicts",
+                "result",
+                "output",
+                "outputs",
+                "response",
+                "responseData",
+                "newVariables",
+                "variables",
+                "payload",
+                "review",
+                "rewrite",
+                "conflictreview",
+                "conflictrewrite",
+                "conflictsReview",
+                "conflictsRewrite",
+            )
+            for key in wrapper_keys:
+                if key in candidate:
+                    yield candidate.get(key)
+
+            # ??????? value??????????
+            for nested_key, nested_value in candidate.items():
+                if nested_key in keys or nested_key in wrapper_keys:
+                    continue
+                if isinstance(nested_value, (dict, list, str)):
+                    yield nested_value
+
+        def _find_target_candidate(candidate, *, depth=0, seen=None):
+            if seen is None:
+                seen = set()
+            if depth > 12:
+                return None, False, ""
+
+            candidate, parse_error = _parse_json_like(candidate)
+            if parse_error and not isinstance(candidate, (dict, list)):
+                return None, False, parse_error
+
+            marker = id(candidate)
+            if marker in seen:
+                return None, False, ""
+            seen.add(marker)
+
+            if _is_target_candidate(candidate):
+                return candidate, depth > 0, ""
+
+            if isinstance(candidate, dict):
+                for nested in _iter_nested_candidates(candidate):
+                    found, nested_unwrapped, nested_error = _find_target_candidate(
+                        nested,
+                        depth=depth + 1,
+                        seen=seen,
+                    )
+                    if isinstance(found, dict):
+                        return found, True, ""
+                return None, False, ""
+
+            if isinstance(candidate, list):
+                for item in candidate:
+                    found, nested_unwrapped, nested_error = _find_target_candidate(
+                        item,
+                        depth=depth + 1,
+                        seen=seen,
+                    )
+                    if isinstance(found, dict):
+                        return found, True, ""
+                return None, False, ""
+
+            return None, False, ""
+
+        value, parse_error = _parse_json_like(value)
+        if parse_error and not isinstance(value, (dict, list)):
+            return {}, unwrapped, parse_error
+
+        found, found_unwrapped, found_error = _find_target_candidate(value)
+        if isinstance(found, dict) and found:
+            return found, bool(found_unwrapped), ""
+
+        # ??????? stage11 ????????????????
         for key in keys:
             if isinstance(value, dict) and isinstance(value.get(key), dict):
                 value = value.get(key)
                 unwrapped = True
                 break
             if isinstance(value, dict) and isinstance(value.get(key), str):
-                try:
-                    value = json.loads(value.get(key).strip())
-                    unwrapped = True
-                    break
-                except Exception as exc:
-                    return {}, unwrapped, f"wrapped string JSON parse failed: {exc}"
+                parsed, parse_error = _parse_json_like(value.get(key))
+                if parse_error and not isinstance(parsed, dict):
+                    return {}, unwrapped, f"wrapped string JSON parse failed: {parse_error}"
+                value = parsed
+                unwrapped = True
+                break
+
         if isinstance(value, dict) and value:
             return value, unwrapped, ""
         if value is None:
@@ -2533,6 +2918,43 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not asset:
             return _json_error("框架资产不存在，或尚未完成 07 最终策划包。", status=404)
         return _json_ok(asset=_strip_raw_fastgpt_fields(asset))
+
+    @app.get("/api/framework-to-script/runs")
+    @_login_required
+    def list_framework_to_script_runs_api():
+        user_id = _require_user_id()
+        asset_id = str(
+            request.args.get("framework_asset_id")
+            or request.args.get("asset_id")
+            or ""
+        ).strip()
+        stage = str(request.args.get("stage") or "").strip()
+        runs = _list_framework_stage_runs(user_id=user_id, asset_id=asset_id, stage=stage)
+        return _json_ok(runs=runs)
+
+    @app.get("/api/framework-to-script/runs/<run_id>")
+    @_login_required
+    def get_framework_to_script_run_api(run_id: str):
+        user_id = _require_user_id()
+        record = _framework_stage_run_private(run_id)
+        if not record or int(record.get("user_id") or 0) != int(user_id):
+            return _json_error("运行记录不存在。", status=404)
+        return _json_ok(run=_framework_stage_run_public(record))
+
+    @app.get("/api/framework-to-script/stage/11/status")
+    @_login_required
+    def get_framework_to_script_stage11_status_api():
+        user_id = _require_user_id()
+        asset_id = str(
+            request.args.get("framework_asset_id")
+            or request.args.get("asset_id")
+            or ""
+        ).strip()
+        if not asset_id:
+            return _json_error("缺少 framework_asset_id。", status=400)
+        runs = _list_framework_stage_runs(user_id=user_id, asset_id=asset_id, stage="11")
+        run = runs[0] if runs else {}
+        return _json_ok(run=run, runs=runs)
 
     @app.post("/api/framework-planner/assets")
     @_login_required
@@ -4425,15 +4847,58 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 raw_output=None,
                 parsed_output=None,
                 error: str = "",
+                review_round=None,
+                rewrite_round=None,
         ) -> str:
             try:
-                path = _stage11_raw_debug_dir() / f"stage11_{sub_stage}_raw_response.json"
+                debug_dir = _stage11_raw_debug_dir()
+                latest_path = debug_dir / f"stage11_{sub_stage}_raw_response.json"
+                generic_latest_path = debug_dir / "stage11_raw_response.json"
+                created_at = _now_iso()
+                timestamp = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+
+                def _filename_part(value, *, prefix: str = "") -> str:
+                    text = str(value if value is not None and value != "" else "unknown").strip() or "unknown"
+                    text = _stage12_debug_safe_name(text).replace(" ", "_")
+                    return f"{prefix}{text}" if prefix else text
+
+                def _round_part(value, label: str) -> str:
+                    try:
+                        number = int(value)
+                    except Exception:
+                        return f"{label}unknown"
+                    return f"{label}{number:02d}"
+
+                history_filename = "_".join(
+                    [
+                        "stage11",
+                        _filename_part(sub_stage),
+                        _filename_part(asset_id if "asset_id" in locals() else "", prefix="asset"),
+                        (
+                            f"ep{int(start_episode):03d}-{int(end_episode):03d}"
+                            if "start_episode" in locals() and "end_episode" in locals()
+                            else "epunknown"
+                        ),
+                        _round_part(review_round, "review"),
+                        _round_part(rewrite_round, "rewrite"),
+                        timestamp,
+                        "raw_response.json",
+                    ]
+                )
+                history_path = debug_dir / history_filename
                 payload = {
                     "stage": "11",
                     "sub_stage": sub_stage,
                     "stage_name": stage_name,
                     "backend": "coze",
                     "asset_id": asset_id if "asset_id" in locals() else "",
+                    "start_episode": start_episode if "start_episode" in locals() else None,
+                    "end_episode": end_episode if "end_episode" in locals() else None,
+                    "review_round": review_round,
+                    "rewrite_round": rewrite_round,
+                    "created_at": created_at,
+                    "latest_path": str(latest_path),
+                    "history_path": str(history_path),
                     "variable_keys": sorted(variables.keys()) if isinstance(variables, dict) else [],
                     "variable_size_summary": {
                         key: {
@@ -4448,25 +4913,55 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "raw_output": raw_output,
                     "parsed_output": parsed_output,
                     "error": error,
-                    "created_at": _now_iso(),
                 }
-                path.write_text(
-                    _json.dumps(payload, ensure_ascii=False, indent=2, default=str),
-                    encoding="utf-8",
-                )
-
-                latest_path = _stage11_raw_debug_dir() / "stage11_raw_response.json"
                 latest_path.write_text(
                     _json.dumps(payload, ensure_ascii=False, indent=2, default=str),
                     encoding="utf-8",
                 )
+                generic_latest_path.write_text(
+                    _json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8",
+                )
+                history_path.write_text(
+                    _json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8",
+                )
+                index_record = {
+                    "created_at": created_at,
+                    "asset_id": payload.get("asset_id"),
+                    "stage": "11",
+                    "sub_stage": sub_stage,
+                    "stage_name": stage_name,
+                    "start_episode": payload.get("start_episode"),
+                    "end_episode": payload.get("end_episode"),
+                    "review_round": review_round,
+                    "rewrite_round": rewrite_round,
+                    "latest_path": str(latest_path),
+                    "generic_latest_path": str(generic_latest_path),
+                    "history_path": str(history_path),
+                    "error": error,
+                }
+                with (debug_dir / "stage11_debug_index.jsonl").open("a", encoding="utf-8") as index_file:
+                    index_file.write(_json.dumps(index_record, ensure_ascii=False, default=str) + "\n")
+                try:
+                    _stage11_set_run(
+                        raw_debug_paths=[str(latest_path), str(generic_latest_path)],
+                        history_debug_paths=[str(history_path)],
+                        latest_result_preview={
+                            "sub_stage": sub_stage,
+                            "latest_path": str(latest_path),
+                            "history_path": str(history_path),
+                        },
+                    )
+                except Exception:
+                    logger.exception("framework-to-script stage11 run debug path update failed")
 
                 logger.warning(
                     "[framework_to_script_raw_debug] wrote stage11 %s raw Coze response path=%s",
                     sub_stage,
-                    path,
+                    latest_path,
                 )
-                return str(path)
+                return str(latest_path)
             except Exception:
                 logger.exception("[framework_to_script_raw_debug] failed to write stage11 raw response")
                 return ""
@@ -4568,7 +5063,213 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error("当前批次缺少 batchEnrichedEpisodePlan，请检查 10 输出集数。", status=400)
 
         asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
-        if not _try_begin_framework_stage(user_id, asset_id, "11"):
+        stage11_worker_run_id = str(data.get("_stage11_run_id") or "").strip()
+        stage11_worker_token = str(data.get("_stage11_worker_token") or "").strip()
+        stage11_worker_requested = str(request.headers.get("X-Framework-Stage11-Worker") or "").strip() == "1"
+        is_stage11_worker = stage11_worker_requested and _framework_stage_worker_allowed(
+            run_id=stage11_worker_run_id,
+            worker_token=stage11_worker_token,
+            user_id=user_id,
+            asset_id=asset_id,
+            stage="11",
+        )
+        if stage11_worker_requested and not is_stage11_worker:
+            return _json_error("无效的 11 阶段后台运行请求。", status=403)
+
+        def _stage11_set_run(**updates) -> dict:
+            if not is_stage11_worker or not stage11_worker_run_id:
+                return {}
+            try:
+                return _update_framework_stage_run(run_id=stage11_worker_run_id, **updates)
+            except Exception:
+                logger.exception("framework-to-script stage11 run state update failed")
+                return {}
+
+        if not is_stage11_worker and asset_id:
+            requested_start = data.get("batchStartEpisode") or data.get("batch_start_episode")
+            expected_starts = _sorted_numeric_batch_keys(
+                {
+                    str(_positive_int(
+                        item.get("episode")
+                        or item.get("episodeNumber")
+                        or item.get("episode_number")
+                        or item.get("ep")
+                        or index,
+                        index,
+                    ) - 1 - ((_positive_int(
+                        item.get("episode")
+                        or item.get("episodeNumber")
+                        or item.get("episode_number")
+                        or item.get("ep")
+                        or index,
+                        index,
+                    ) - 1) % 5) + 1): True
+                    for index, item in enumerate(plan, start=1)
+                    if isinstance(item, dict)
+                }
+            )
+            if requested_start:
+                expected_starts = [str(start_episode)]
+            run, created = _begin_or_get_framework_stage_run(
+                user_id=user_id,
+                asset_id=asset_id,
+                stage="11",
+                current_sub_stage="stage11_prepare",
+                progress_text=f"第 11 阶段准备运行：第 {start_episode}-{end_episode} 集",
+                latest_partial_result={
+                    "start_episode": start_episode,
+                    "end_episode": end_episode,
+                    "expected_batch_starts": expected_starts,
+                    "completed_batch_starts": _sorted_numeric_batch_keys(existing_batches),
+                },
+                retain_completed=True,
+            )
+            if not created:
+                return jsonify({"success": True, "existing": True, "run": run}), 202
+
+            private_run = _framework_stage_run_private(str(run.get("run_id") or ""))
+            worker_token = str(private_run.get("worker_token") or "")
+            worker_payload = copy.deepcopy(data)
+            worker_payload["_stage11_run_id"] = str(run.get("run_id") or "")
+            worker_payload["_stage11_worker_token"] = worker_token
+            auth_token = _current_auth_token()
+
+            def _stage11_worker_loop() -> None:
+                run_id = str(run.get("run_id") or "")
+                latest_result = {}
+                conflict_memory_value = worker_payload.get("conflictMemory") or worker_payload.get("conflict_memory") or ""
+                try:
+                    _update_framework_stage_run(
+                        run_id=run_id,
+                        status="running",
+                        current_sub_stage="stage11_prepare",
+                        progress_text=f"第 11 阶段后台运行中：第 {start_episode}-{end_episode} 集",
+                    )
+                    first_request = True
+                    guard = 0
+                    completed_starts = set(_sorted_numeric_batch_keys(existing_batches))
+                    while guard < 200:
+                        guard += 1
+                        request_payload = copy.deepcopy(worker_payload)
+                        request_payload["reset_stage11"] = bool(reset_stage11 and first_request)
+                        request_payload["resetStage11"] = bool(reset_stage11 and first_request)
+                        if conflict_memory_value:
+                            request_payload["conflictMemory"] = conflict_memory_value
+                        elif not first_request:
+                            request_payload.pop("conflictMemory", None)
+                            request_payload.pop("conflict_memory", None)
+                        path = "/api/framework-to-script/stage/11"
+                        if auth_token:
+                            path = f"{path}?auth_token={quote(auth_token)}"
+                        with app.app_context():
+                            with app.test_client() as worker_client:
+                                response = worker_client.post(
+                                    path,
+                                    headers={"X-Framework-Stage11-Worker": "1"},
+                                    json=request_payload,
+                                )
+                                response_data = response.get_json(silent=True) or {}
+                        latest_result = response_data if isinstance(response_data, dict) else {}
+                        if response.status_code >= 400 or latest_result.get("success") is False:
+                            detail = latest_result.get("detail") if isinstance(latest_result.get("detail"), dict) else {}
+                            message = (
+                                detail.get("error_message")
+                                or detail.get("message")
+                                or latest_result.get("message")
+                                or latest_result.get("error")
+                                or f"stage11 worker returned HTTP {response.status_code}"
+                            )
+                            _finish_framework_stage_run(
+                                run_id=run_id,
+                                status="failed",
+                                progress_text="第 11 阶段运行失败",
+                                latest_error=str(message),
+                                latest_result_preview=latest_result,
+                            )
+                            return
+                        batches = latest_result.get("batches") if isinstance(latest_result.get("batches"), dict) else {}
+                        completed_starts = set(_sorted_numeric_batch_keys(batches))
+                        conflict_memory_value = str(
+                            latest_result.get("conflictMemory")
+                            or latest_result.get("conflict_memory")
+                            or conflict_memory_value
+                            or ""
+                        )
+                        missing = [key for key in expected_starts if key not in completed_starts]
+                        latest_partial = {
+                            "start_episode": latest_result.get("batchStartEpisode") or start_episode,
+                            "end_episode": latest_result.get("batchEndEpisode") or end_episode,
+                            "completed_batch_starts": sorted(completed_starts, key=lambda item: int(item) if str(item).isdigit() else 999),
+                            "expected_batch_starts": expected_starts,
+                            "remaining_batch_starts": missing,
+                            "latest_batch_done": latest_result.get("batchStartEpisode"),
+                        }
+                        _update_framework_stage_run(
+                            run_id=run_id,
+                            status="running",
+                            current_sub_stage="stage11_batch_saved",
+                            progress_text=(
+                                f"第 11 阶段已保存第 {latest_partial['start_episode']}-{latest_partial['end_episode']} 集，"
+                                f"进度 {len(completed_starts)}/{len(expected_starts) or '?'}"
+                            ),
+                            latest_partial_result=latest_partial,
+                            latest_result_preview={
+                                "batchStartEpisode": latest_result.get("batchStartEpisode"),
+                                "batchEndEpisode": latest_result.get("batchEndEpisode"),
+                                "batches": sorted(completed_starts, key=lambda item: int(item) if str(item).isdigit() else 999),
+                            },
+                        )
+                        if not missing:
+                            break
+                        first_request = False
+                    else:
+                        _finish_framework_stage_run(
+                            run_id=run_id,
+                            status="failed",
+                            progress_text="第 11 阶段运行超出批次数保护上限",
+                            latest_error="stage11 worker exceeded batch guard limit",
+                            latest_result_preview=latest_result,
+                        )
+                        return
+                    _finish_framework_stage_run(
+                        run_id=run_id,
+                        status="succeeded",
+                        progress_text="第 11 阶段已完成",
+                        latest_result_preview={
+                            "batchStartEpisode": latest_result.get("batchStartEpisode"),
+                            "batchEndEpisode": latest_result.get("batchEndEpisode"),
+                            "completed_batch_starts": sorted(completed_starts, key=lambda item: int(item) if str(item).isdigit() else 999),
+                        },
+                        latest_partial_result={
+                            "completed_batch_starts": sorted(completed_starts, key=lambda item: int(item) if str(item).isdigit() else 999),
+                            "expected_batch_starts": expected_starts,
+                            "remaining_batch_starts": [],
+                        },
+                    )
+                except Exception as exc:
+                    logger.exception("framework-to-script stage11 background worker failed")
+                    _finish_framework_stage_run(
+                        run_id=run_id,
+                        status="failed",
+                        progress_text="第 11 阶段后台运行失败",
+                        latest_error=str(exc),
+                    )
+
+            thread = threading.Thread(
+                target=_stage11_worker_loop,
+                name=f"framework-stage11-{run.get('run_id')}",
+                daemon=True,
+            )
+            thread.start()
+            run = _update_framework_stage_run(
+                run_id=str(run.get("run_id") or ""),
+                status="running",
+                current_sub_stage="stage11_prepare",
+                progress_text=f"第 11 阶段已开始后台运行：第 {start_episode}-{end_episode} 集",
+            )
+            return jsonify({"success": True, "accepted": True, "run": run}), 202
+
+        if not is_stage11_worker and not _try_begin_framework_stage(user_id, asset_id, "11"):
             return _json_error("11 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
 
         debug_record = {
@@ -4584,6 +5285,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "updated_at": _now_iso(),
         }
         debug_path = _write_stage11_debug(debug_record)
+        _stage11_set_run(
+            status="running",
+            current_sub_stage="stage11_prepare",
+            progress_text=f"第 11 阶段准备中：第 {start_episode}-{end_episode} 集",
+            latest_partial_result={
+                "start_episode": start_episode,
+                "end_episode": end_episode,
+            },
+        )
 
         try:
             failed_sub_stage = "stage11_prepare"
@@ -4736,6 +5446,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         }
                     )
                     debug_path = _write_stage11_debug(debug_record)
+                    _stage11_set_run(
+                        status="running",
+                        current_sub_stage="causal_conflict_write",
+                        progress_text=f"第 11 阶段创作中：第 {start_episode}-{end_episode} 集（第 {retry_count + 1} 次）",
+                    )
 
                     try:
                         started = time.monotonic()
@@ -4757,6 +5472,22 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             raw_output=write_output,
                             parsed_output={"batchCausalConflictPlan": conflict_plan} if conflict_plan else {},
                             error=write_failure_reason,
+                            review_round=0,
+                            rewrite_round=0,
+                        )
+                        _stage11_set_run(
+                            current_sub_stage="causal_conflict_write",
+                            progress_text=f"第 11 阶段创作已返回：第 {start_episode}-{end_episode} 集",
+                            latest_partial_result={
+                                "sub_stage": "write",
+                                "start_episode": start_episode,
+                                "end_episode": end_episode,
+                                "batchCausalConflictPlan_episodes_count": (
+                                    len(conflict_plan.get("episodes"))
+                                    if isinstance(conflict_plan, dict) and isinstance(conflict_plan.get("episodes"), list)
+                                    else 0
+                                ),
+                            },
                         )
 
                         debug_record["events"][-1].update(
@@ -4942,6 +5673,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         }
                     )
                     debug_path = _write_stage11_debug(debug_record)
+                    _stage11_set_run(
+                        status="running",
+                        current_sub_stage="causal_conflict_review",
+                        progress_text=f"第 11 阶段审核中：第 {start_episode}-{end_episode} 集，第 {review_round} 轮",
+                    )
 
                     try:
                         review_vars = {
@@ -4960,6 +5696,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
                             variables=review_vars,
                             raw_output=review_output,
+                            review_round=review_round,
+                            rewrite_round=rewrite_round,
                         )
 
                     except FastGPTStageFormatError as exc:
@@ -4974,6 +5712,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         duration_ms = 0
 
                     review_output_data = review_output if isinstance(review_output, dict) else {}
+                    review_conflict_plan, review_plan_unwrapped, review_plan_error = _normalize_dict_output_alias(
+                        review_output_data,
+                        "batchCausalConflictPlan",
+                        "batch_causal_conflict_plan",
+                    )
                     review_passed = _get_bool_alias(review_output_data, "reviewPassed", "passed", default=None)
                     rewrite_required = _get_bool_alias(review_output_data, "rewriteRequired", "rewrite_required",
                                                        default=None)
@@ -4983,15 +5726,30 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     rewrite_brief = _first_present(review_output_data, "rewriteBrief", "rewrite_brief", default="")
 
                     if review_passed is None and rewrite_required is None:
-                        logger.warning(
-                            "framework-to-script stage11 review output missing reviewPassed/passed and rewriteRequired/rewrite_required; "
-                            "treating as rewrite needed: asset_id=%s review_output_keys=%s",
-                            asset_id,
-                            sorted(review_output_data.keys()),
-                        )
-                        review_passed = False
-                        rewrite_required = True
-                        blocking_issues = []
+                        if review_conflict_plan and not blocking_issues:
+                            logger.warning(
+                                "framework-to-script stage11 review output missing explicit pass/rewrite fields but contains usable "
+                                "batchCausalConflictPlan; treating as passed: asset_id=%s review_output_keys=%s unwrapped=%s",
+                                asset_id,
+                                sorted(review_output_data.keys()),
+                                review_plan_unwrapped,
+                            )
+                            if not conflict_plan:
+                                conflict_plan = review_conflict_plan
+                            review_passed = True
+                            rewrite_required = False
+                            blocking_issues = []
+                        else:
+                            logger.warning(
+                                "framework-to-script stage11 review output missing reviewPassed/passed and rewriteRequired/rewrite_required; "
+                                "treating as rewrite needed: asset_id=%s review_output_keys=%s parse_error=%s",
+                                asset_id,
+                                sorted(review_output_data.keys()),
+                                review_plan_error,
+                            )
+                            review_passed = False
+                            rewrite_required = True
+                            blocking_issues = []
 
                     conflict_review = {
                         "reviewPassed": review_passed,
@@ -5033,6 +5791,23 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         }
                     )
                     debug_path = _write_stage11_debug(debug_record)
+                    _stage11_set_run(
+                        current_sub_stage="causal_conflict_review",
+                        progress_text=(
+                            f"第 11 阶段审核已返回：第 {start_episode}-{end_episode} 集，"
+                            f"{'通过' if review_passed is True and rewrite_required is False else '需要 rewrite'}"
+                        ),
+                        latest_partial_result={
+                            "sub_stage": "review",
+                            "start_episode": start_episode,
+                            "end_episode": end_episode,
+                            "review_round": review_round,
+                            "rewrite_round": rewrite_round,
+                            "reviewPassed": review_passed,
+                            "rewriteRequired": rewrite_required,
+                            "blockingIssues_count": len(blocking_issues),
+                        },
+                    )
 
                     logger.info(
                         "framework-to-script stage11 review loop: stage=%s batchStartEpisode=%s review_round=%s "
@@ -5135,6 +5910,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         }
                     )
                     debug_path = _write_stage11_debug(debug_record)
+                    _stage11_set_run(
+                        status="running",
+                        current_sub_stage="causal_conflict_rewrite",
+                        progress_text=f"第 11 阶段修订中：第 {start_episode}-{end_episode} 集，第 {rewrite_round} 轮",
+                    )
 
                     started = time.monotonic()
                     rewrite_output = coze_client.run_stage(
@@ -5148,6 +5928,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
                         variables=rewrite_vars,
                         raw_output=rewrite_output,
+                        review_round=review_round,
+                        rewrite_round=rewrite_round,
                     )
 
                     logger.info(
@@ -5157,7 +5939,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     )
 
                     rewrite_output_data = rewrite_output if isinstance(rewrite_output, dict) else {}
-                    rewrite_conflict_plan, rewrite_unwrapped = _unwrap_dict_alias(
+                    rewrite_conflict_plan, rewrite_unwrapped, rewrite_parse_error = _normalize_dict_output_alias(
                         rewrite_output_data,
                         "batchCausalConflictPlan",
                         "batch_causal_conflict_plan",
@@ -5185,6 +5967,21 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         }
                     )
                     debug_path = _write_stage11_debug(debug_record)
+                    _stage11_set_run(
+                        current_sub_stage="causal_conflict_rewrite",
+                        progress_text=f"第 11 阶段修订已返回：第 {start_episode}-{end_episode} 集",
+                        latest_partial_result={
+                            "sub_stage": "rewrite",
+                            "start_episode": start_episode,
+                            "end_episode": end_episode,
+                            "review_round": review_round,
+                            "rewrite_round": rewrite_round,
+                            "batchCausalConflictPlan_episodes_count": (
+                                len(rewrite_episodes) if isinstance(rewrite_episodes, list) else 0
+                            ),
+                            "parse_error": rewrite_parse_error,
+                        },
+                    )
 
                     logger.info(
                         "framework-to-script stage11 rewrite normalized: asset_id=%s normalized_keys=%s "
@@ -5219,6 +6016,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         }
                     )
                     debug_path = _write_stage11_debug(debug_record)
+                    _stage11_set_run(
+                        status="running",
+                        current_sub_stage="causal_conflict_memory",
+                        progress_text=f"第 11 阶段记忆写入中：第 {start_episode}-{end_episode} 集",
+                    )
 
                     started = time.monotonic()
                     memory_output = coze_client.run_stage(
@@ -5232,6 +6034,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         stage_name=STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
                         variables=memory_vars,
                         raw_output=memory_output,
+                        review_round=review_round if "review_round" in locals() else None,
+                        rewrite_round=rewrite_round if "rewrite_round" in locals() else None,
                     )
 
                 except FastGPTStageFormatError as exc:
@@ -5362,9 +6166,25 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 }
             )
             debug_path = _write_stage11_debug(debug_record)
+            _stage11_set_run(
+                current_sub_stage="stage11_batch_saved",
+                progress_text=f"第 11 阶段第 {start_episode}-{end_episode} 集已保存",
+                latest_partial_result={
+                    "start_episode": start_episode,
+                    "end_episode": end_episode,
+                    "completed_batch_starts": _sorted_numeric_batch_keys(batches),
+                    "latest_batch_done": start_episode,
+                },
+                latest_result_preview={
+                    "batchStartEpisode": start_episode,
+                    "batchEndEpisode": end_episode,
+                    "batches": _sorted_numeric_batch_keys(batches),
+                },
+            )
 
         finally:
-            _end_framework_stage(user_id, asset_id, "11")
+            if not is_stage11_worker:
+                _end_framework_stage(user_id, asset_id, "11")
 
         return _json_ok(stage="11", framework_asset_id=asset_id, **output)
 

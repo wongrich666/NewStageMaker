@@ -46,10 +46,14 @@
     isRunning: false,
     runningStage: "",
     runningStartedAt: "",
+    stageRuns: [],
+    activeRun: null,
+    runPollTimer: null,
     error: null,
     importStatus: "",
     frameworkSource: "",
   }, loadWorkspace());
+  state.runPollTimer = null;
 
   const urlAssetId = params.get("framework_asset_id") || params.get("asset_id") || "";
   const directFromPlanner = Boolean(urlAssetId && (params.has("source_framework_project_id") || params.has("project_id")));
@@ -220,8 +224,10 @@
     saveWorkspace();
   }
 
-    const RUNNING_STAGE_STORAGE_KEY = "frameworkToScriptRunningStage.v1";
+  const RUNNING_STAGE_STORAGE_KEY = "frameworkToScriptRunningStage.v1";
   const RUNNING_STAGE_TIMEOUT_MS = 1000 * 60 * 60;
+  const RUN_POLL_INTERVAL_MS = 2000;
+  const RUNNING_STATUSES = new Set(["pending", "running"]);
 
   function saveRunningStage(stage) {
     const payload = {
@@ -282,17 +288,127 @@
         return;
       }
 
-      window.localStorage.removeItem(RUNNING_STAGE_STORAGE_KEY);
-      state.runningStage = "";
-      state.runningStartedAt = "";
-      state.isRunning = false;
-      state.error = `已清除上次遗留的 ${payload.runningStage} 阶段运行锁，可重新点击运行。`;
+      state.runningStage = String(payload.runningStage || "");
+      state.runningStartedAt = payload.startedAt;
+      state.isRunning = Boolean(state.runningStage);
     } catch (error) {
       console.warn("restore running stage failed", error);
       try {
         window.localStorage.removeItem(RUNNING_STAGE_STORAGE_KEY);
       } catch (_) {}
     }
+  }
+
+  function isRunActive(run) {
+    return Boolean(run && RUNNING_STATUSES.has(String(run.status || "")));
+  }
+
+  function runDebugSummary(run) {
+    if (!run || typeof run !== "object") return "";
+    const paths = []
+      .concat(Array.isArray(run.raw_debug_paths) ? run.raw_debug_paths : [])
+      .concat(Array.isArray(run.history_debug_paths) ? run.history_debug_paths : []);
+    if (!paths.length) return "";
+    return `debug: ${paths.slice(-4).join("；")}`;
+  }
+
+  function runErrorMessage(run) {
+    const debugText = runDebugSummary(run);
+    return [
+      run && (run.latest_error || run.progress_text) ? (run.latest_error || run.progress_text) : "阶段运行失败",
+      debugText,
+    ].filter(Boolean).join(" ");
+  }
+
+  function applyRunState(run) {
+    if (!run || typeof run !== "object" || !run.run_id) {
+      state.activeRun = null;
+      state.stageRuns = Array.isArray(state.stageRuns) ? state.stageRuns : [];
+      return;
+    }
+    state.activeRun = run;
+    state.stageRuns = [run].concat((state.stageRuns || []).filter((item) => item && item.run_id !== run.run_id));
+    if (isRunActive(run)) {
+      state.runningStage = String(run.stage || "");
+      state.runningStartedAt = run.started_at || state.runningStartedAt || "";
+      state.isRunning = Boolean(state.runningStage);
+      state.error = null;
+      saveRunningStage(state.runningStage);
+      return;
+    }
+    if (run.status === "failed") {
+      state.error = runErrorMessage(run);
+      clearRunningStage(run.stage);
+      return;
+    }
+    if (run.status === "succeeded" && state.runningStage === String(run.stage || "")) {
+      clearRunningStage(run.stage);
+      state.error = null;
+    }
+  }
+
+  async function fetchStageRuns() {
+    if (!state.frameworkAssetId) return [];
+    const data = await requestJson(`/api/framework-to-script/runs?framework_asset_id=${encodeURIComponent(state.frameworkAssetId)}`);
+    const runs = Array.isArray(data.runs) ? data.runs : [];
+    state.stageRuns = runs;
+    const active = runs.find((run) => isRunActive(run) && ["11", "12"].includes(String(run.stage || "")));
+    if (active) {
+      applyRunState(active);
+      startRunPolling(active);
+    } else if (state.runningStage) {
+      clearRunningStage(state.runningStage);
+    }
+    return runs;
+  }
+
+  function stopRunPolling() {
+    if (state.runPollTimer) {
+      window.clearInterval(state.runPollTimer);
+      state.runPollTimer = null;
+    }
+  }
+
+  async function refreshAssetAfterRunUpdate() {
+    if (!state.frameworkAssetId) return;
+    await importAsset(state.frameworkAssetId, { skipConfirm: true, skipRunRefresh: true });
+  }
+
+  async function pollRun(runId) {
+    const id = String(runId || (state.activeRun || {}).run_id || "");
+    if (!id) return;
+    try {
+      const data = await requestJson(`/api/framework-to-script/runs/${encodeURIComponent(id)}`);
+      const run = data.run || {};
+      applyRunState(run);
+      if (isRunActive(run)) {
+        render();
+        return;
+      }
+      stopRunPolling();
+      if (run.status === "succeeded") {
+        await refreshAssetAfterRunUpdate();
+        clearRunningStage(run.stage);
+        state.error = null;
+      } else if (run.status === "failed") {
+        state.error = runErrorMessage(run);
+        clearRunningStage(run.stage);
+      }
+      render();
+    } catch (error) {
+      state.error = error.message || "运行状态刷新失败";
+      render();
+    }
+  }
+
+  function startRunPolling(run) {
+    if (!run || !run.run_id) return;
+    applyRunState(run);
+    stopRunPolling();
+    state.runPollTimer = window.setInterval(() => {
+      pollRun(run.run_id);
+    }, RUN_POLL_INTERVAL_MS);
+    pollRun(run.run_id);
   }
 
   function hasStage12ScriptText() {
@@ -843,6 +959,9 @@
       state.assetPanelOpen = false;
       reconcileRunningStageResult();
       saveWorkspace();
+      if (!options.skipRunRefresh) {
+        await fetchStageRuns();
+      }
     } catch (error) {
       state.error = error.message || "框架资产导入失败";
     } finally {
@@ -1205,12 +1324,14 @@
     if (rewriteExistingScript) {
       await runStage11({ resetStage11: true, skipConfirm: true });
       if (state.error) return;
+      if (state.runningStage === "11" || (state.activeRun && isRunActive(state.activeRun) && String(state.activeRun.stage || "") === "11")) return;
       await runStage12({ resetStage12: true, skipConfirm: true });
       return;
     }
     if (!stage11Completion().complete) {
       await runStage11();
       if (state.error) return;
+      if (state.runningStage === "11" || (state.activeRun && isRunActive(state.activeRun) && String(state.activeRun.stage || "") === "11")) return;
     }
     if (!stage12Completion().complete) {
       await runStage12();
@@ -1260,46 +1381,45 @@
     saveRunningStage("11");
     state.error = null;
     render();
+    let acceptedRun = false;
     try {
-      let firstRequest = true;
-      let guard = 0;
-      while (guard < 200) {
-        guard += 1;
-        const currentStage11 = state.scriptStages.stage11 || {};
-        const beforeCount = numericKeys(currentStage11.batches).length;
-        const beforeMissing = missingBatchStarts(expectedStarts, numericKeys(currentStage11.batches));
-        if (expectedStarts.length && !beforeMissing.length) break;
-        const data = await requestJson("/api/framework-to-script/stage/11", {
-          method: "POST",
-          body: JSON.stringify(attachKnowledgePayload({
-            ...frameworkRequestBase(),
-            allEnrichedEpisodePlan,
-            sceneDictionary: stage08.sceneDictionary,
-            scriptWorldRulesDigest: stage08.scriptWorldRulesDigest,
-            appearanceMapping: stage09.appearanceMapping,
-            reset_stage11: resetStage11 && firstRequest,
-            conflictMemory: resetStage11 && firstRequest ? "" : (currentStage11.conflictMemory || ""),
-          }, "11")),
-        });
-        mergeStage11(data);
+      const currentStage11 = state.scriptStages.stage11 || {};
+      const data = await requestJson("/api/framework-to-script/stage/11", {
+        method: "POST",
+        body: JSON.stringify(attachKnowledgePayload({
+          ...frameworkRequestBase(),
+          allEnrichedEpisodePlan,
+          sceneDictionary: stage08.sceneDictionary,
+          scriptWorldRulesDigest: stage08.scriptWorldRulesDigest,
+          appearanceMapping: stage09.appearanceMapping,
+          reset_stage11: resetStage11,
+          conflictMemory: resetStage11 ? "" : (currentStage11.conflictMemory || ""),
+        }, "11")),
+      });
+      if (data.run) {
+        acceptedRun = true;
+        applyRunState(data.run);
+        startRunPolling(data.run);
         saveWorkspace();
         render();
-        const afterCount = numericKeys((state.scriptStages.stage11 || {}).batches).length;
-        const afterMissing = missingBatchStarts(expectedStarts, numericKeys((state.scriptStages.stage11 || {}).batches));
-        if (afterMissing.length && afterCount <= beforeCount) {
-          throw new Error(`11 未能继续生成剩余批次：第 ${afterMissing[0]} 集起。`);
+        return;
+      }
+      if (data.batchCausalConflictPlan || data.batches) {
+        mergeStage11(data);
+        saveWorkspace();
+        const finalMissing = missingBatchStarts(expectedStarts, numericKeys((state.scriptStages.stage11 || {}).batches));
+        if (finalMissing.length) {
+          throw new Error(`11 未完成全部批次，剩余第 ${finalMissing.join("、")} 集起。`);
         }
-        firstRequest = false;
+        return;
       }
-      const finalMissing = missingBatchStarts(expectedStarts, numericKeys((state.scriptStages.stage11 || {}).batches));
-      if (finalMissing.length) {
-        throw new Error(`11 未完成全部批次，剩余第 ${finalMissing.join("、")} 集起。`);
-      }
-      saveWorkspace();
+      throw new Error("11 未返回可轮询的运行状态。");
     } catch (error) {
       state.error = error.message || "11 开头冲突钩子失败";
     } finally {
-      clearRunningStage("11");
+      if (!acceptedRun) {
+        clearRunningStage("11");
+      }
       render();
     }
   }
@@ -1314,6 +1434,7 @@
     if (!stage11Completion().complete) {
       await runStage11();
       if (state.error) return;
+      if (state.runningStage === "11" || (state.activeRun && isRunActive(state.activeRun) && String(state.activeRun.stage || "") === "11")) return;
     }
     const resetStage12 = Boolean(options.resetStage12);
     if (resetStage12 && !options.skipConfirm && !window.confirm("重新运行 12 会覆盖已生成的正文批次。继续吗？")) return;
@@ -1632,6 +1753,29 @@
     `;
   }
 
+  function activeRunForStage(stage) {
+    const stageText = String(stage || "");
+    if (state.activeRun && String(state.activeRun.stage || "") === stageText) return state.activeRun;
+    return (state.stageRuns || []).find((run) => run && String(run.stage || "") === stageText && isRunActive(run)) || null;
+  }
+
+  function renderRunStatus(stage) {
+    const run = activeRunForStage(stage);
+    if (!run || !isRunActive(run)) return "";
+    const partial = run.latest_partial_result && typeof run.latest_partial_result === "object" ? run.latest_partial_result : {};
+    const partialText = partial.sub_stage === "write" || partial.batchCausalConflictPlan_episodes_count
+      ? "write 已生成，正在 review/rewrite/memory。"
+      : "";
+    const debugText = runDebugSummary(run);
+    return `
+      <div class="wts-run-status">
+        <p class="wts-hint">第 ${escapeHtml(stage)} 阶段正在运行：${escapeHtml(run.progress_text || run.current_sub_stage || "后台处理中")}</p>
+        ${partialText ? `<p class="wts-hint">${escapeHtml(partialText)}</p>` : ""}
+        ${debugText ? `<p class="wts-hint">${escapeHtml(debugText)}</p>` : ""}
+      </div>
+    `;
+  }
+
   function renderStages() {
     const locked = !currentAssetReady() || state.isRunning || Boolean(state.runningStage);
     const stage08 = state.scriptStages.stage08 || {};
@@ -1650,7 +1794,9 @@
     const has12 = hasContent(stage12.batchScriptText) || stage12Progress.done.length > 0;
     const has11Complete = stage11Progress.complete;
     const has12Complete = stage12Progress.complete;
-    const stage11Status = state.runningStage === "11"
+    const stage11Run = activeRunForStage("11");
+    const stage12Run = activeRunForStage("12");
+    const stage11Status = isRunActive(stage11Run)
       ? `运行中 ${stage11Progress.done.length}/${stage11Progress.expected.length || "?"}`
       : has11Complete
         ? "已完成"
@@ -1659,7 +1805,7 @@
           : has10Output
             ? "待运行"
             : "等待 10";
-    const stage12Status = state.runningStage === "12"
+    const stage12Status = isRunActive(stage12Run)
       ? `运行中 ${stage12Progress.done.length}/${stage12Progress.expected.length || "?"}`
       : has12Complete
         ? "已完成"
@@ -1737,7 +1883,7 @@
             has11Complete ? "重新运行 11" : "运行全部 11 开头冲突钩子",
             has11Complete ? "rerun-stage-11" : "run-stage-11",
             locked || !stage10Valid,
-            has11 ? renderStage11Batches(stage11) : `<p class="wts-hint">${state.runningStage ? `当前 ${escapeHtml(state.runningStage)} 阶段运行态锁定，完成或超时后可继续。` : ""}</p>`,
+            `${renderRunStatus("11")}${has11 ? renderStage11Batches(stage11) : `<p class="wts-hint">${state.runningStage ? `当前 ${escapeHtml(state.runningStage)} 阶段后台运行中。` : ""}</p>`}`,
             { secondary: has11Complete }
           )}
           ${renderStageCard(
@@ -1747,7 +1893,7 @@
             stage12ButtonText,
             stage12Action,
             locked || !has11Complete,
-            has12 ? renderStage12Batches(stage12) : `<p class="wts-hint"></p>`,
+            `${renderRunStatus("12")}${has12 ? renderStage12Batches(stage12) : `<p class="wts-hint"></p>`}`,
             { secondary: has12Complete }
           )}
         </div>
@@ -1757,8 +1903,9 @@
 
   function renderBrandMotionPanel() {
     const isRunning = Boolean(state.runningStage || state.isRunning);
+    const activeRun = state.activeRun && isRunActive(state.activeRun) ? state.activeRun : null;
     const statusText = isRunning
-      ? `正在运行 ${state.runningStage || ""} 阶段，时间较长，请不要刷新。由于模型性能不稳定，出现错误时请重试生成。`
+      ? `正在运行 ${state.runningStage || ""} 阶段：${activeRun ? (activeRun.progress_text || activeRun.current_sub_stage || "后台处理中") : "后台处理中"}。刷新页面不会中断。`
       : state.error
         ? "处理已停止，请查看错误信息"
         : currentAssetReady()
@@ -1872,6 +2019,13 @@
 
   if (state.frameworkAssetId && (directFromPlanner || state.runningStage || !currentAssetReady())) {
     importAsset(state.frameworkAssetId, { skipConfirm: true });
+  } else if (state.frameworkAssetId) {
+    fetchStageRuns()
+      .then(() => render())
+      .catch((error) => {
+        state.error = error.message || "运行状态恢复失败";
+        render();
+      });
   } else if (!state.frameworkAssetId && !currentAssetReady()) {
     loadAssets();
   }

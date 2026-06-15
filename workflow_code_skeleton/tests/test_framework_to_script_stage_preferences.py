@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from pathlib import Path
 from unittest.mock import patch
@@ -28,7 +29,10 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     SCRIPT_START_EPISODE,
     SCRIPT_WORLD_RULES_DIGEST,
     STAGE_FRAMEWORK_APPEARANCE_MAPPING,
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW,
     STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE,
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE,
     STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
     STAGE_FRAMEWORK_SCRIPT_MEMORY,
     STAGE_FRAMEWORK_SCRIPT_REVIEW,
@@ -500,3 +504,224 @@ def test_stage12_sub_stages_keep_memory_alias_worldview_and_preference_context()
     assert memory_vars[SCRIPT_MEMORY] == "上一批正文记忆"
     assert memory_vars[SCENE_DICTIONARY] == {"core_scenes": [{"scene_id": "scene_A"}]}
     assert memory_vars[APPEARANCE_MAPPING] == {"characters": [{"name": "林渡", "alias_name": "林渡(A)"}]}
+
+
+def _stage11_episode(episode: int, marker: str = "write") -> dict[str, object]:
+    return {
+        "episode": episode,
+        "episode_title": f"第{episode}集",
+        "active_characters": ["林渡"],
+        "scene_refs": ["scene_A"],
+        "carry_in": marker,
+        "why_now": "旧案线索出现",
+        "character_motivation": "查明真相",
+        "emotional_precondition": "不甘",
+        "scene_cause_chain": [{"cause": "线索", "effect": "追查"}],
+        "non_conflict_moment": "短暂喘息",
+        "natural_transition": "转入下一场",
+        "opening_image": "雨夜街口",
+        "opening_action": "林渡翻看档案",
+        "current_goal": "找到证人",
+        "core_obstacle": "证人失踪",
+        "episode_state_change": "掌握新方向",
+        "ending_hook": "匿名电话响起",
+        "dialogue_strategy": "克制推进",
+    }
+
+
+def _stage11_plan(marker: str = "write") -> dict[str, object]:
+    return {
+        "batch_meta": {"batchStartEpisode": 1, "batchEndEpisode": 5},
+        "global_conflict_engine": {"main_drive": marker},
+        "episodes": [_stage11_episode(index, marker) for index in range(1, 6)],
+    }
+
+
+def _stage10_plan() -> list[dict[str, object]]:
+    return [{"episode": index, "title": f"第{index}集", "characters": ["林渡"]} for index in range(1, 6)]
+
+
+def _save_stage11_ready_asset(client, headers: dict[str, str]) -> str:
+    save_response = client.post(
+        "/api/framework-planner/assets/save",
+        headers=headers,
+        json={
+            "project_title": "夜行审判",
+            "framework_plan_package": _framework_package(),
+            "validation_report": {"status": "pass"},
+        },
+    )
+    assert save_response.status_code == 200
+    asset_id = str(save_response.get_json()["project_id"])
+    for stage in ("08", "09", "10"):
+        response = client.post(f"/api/framework-to-script/stage/{stage}", headers=headers, json={"framework_asset_id": asset_id})
+        assert response.status_code == 200
+    return asset_id
+
+
+def _stage11_setup_and_run_stage(stage_name: str, variables: dict[str, object]):
+    if stage_name == "framework_scene_dictionary":
+        return {
+            "sceneDictionary": {"core_scenes": [{"scene_id": "scene_A"}]},
+            "scriptWorldRulesDigest": {"world_type": "都市悬疑"},
+        }
+    if stage_name == "framework_appearanceMapping":
+        return {"appearanceMapping": {"characters": [{"name": "林渡", "alias": "A"}]}}
+    if stage_name == "framework_enriched_episode_plan":
+        return {
+            "allEnrichedEpisodePlan": _stage10_plan(),
+            "allEnrichedEpisodePlanText": "1-5集",
+        }
+    raise AssertionError(stage_name)
+
+
+def _wait_for_run(client, headers: dict[str, str], run_id: str) -> dict[str, object]:
+    for _ in range(100):
+        response = client.get(f"/api/framework-to-script/runs/{run_id}", headers=headers)
+        assert response.status_code == 200
+        run = response.get_json()["run"]
+        if run["status"] not in {"pending", "running"}:
+            return run
+        time.sleep(0.05)
+    raise AssertionError(f"run did not finish: {run_id}")
+
+
+def _backup_stage11_raw_debug() -> tuple[Path, dict[Path, bytes]]:
+    debug_dir = Path("cache") / "raw_coze_debug"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    return debug_dir, {path: path.read_bytes() for path in debug_dir.glob("stage11*") if path.is_file()}
+
+
+def _restore_stage11_raw_debug(debug_dir: Path, backups: dict[Path, bytes]) -> None:
+    for path in debug_dir.glob("stage11*"):
+        if path.is_file() and path not in backups:
+            path.unlink()
+    for path, content in backups.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+
+def test_stage11_async_run_reuses_existing_run_writes_raw_history_and_review_plan_fallback() -> None:
+    app = create_app()
+    app.config["TESTING"] = True
+    client = app.test_client()
+    headers = _auth_headers()
+    calls: list[str] = []
+    plan = _stage11_plan("review-fallback")
+    debug_dir, backups = _backup_stage11_raw_debug()
+
+    def fake_run_stage(stage_name: str, variables: dict[str, object]):
+        calls.append(stage_name)
+        if stage_name in {
+            "framework_scene_dictionary",
+            "framework_appearanceMapping",
+            "framework_enriched_episode_plan",
+        }:
+            return _stage11_setup_and_run_stage(stage_name, variables)
+        if stage_name == STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE:
+            time.sleep(0.15)
+            return {"data": {"conflicts": {"batchCausalConflictPlan": plan}}}
+        if stage_name == STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW:
+            return {"conflictreview": {"batchCausalConflictPlan": plan}}
+        if stage_name == STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY:
+            return {"conflictMemory": "review fallback memory"}
+        if stage_name == STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE:
+            raise AssertionError("review fallback should not rewrite")
+        raise AssertionError(stage_name)
+
+    try:
+        with patch("workflow_code_skeleton.app.services.coze_client.coze_client.run_stage", side_effect=fake_run_stage):
+            asset_id = _save_stage11_ready_asset(client, headers)
+            response = client.post("/api/framework-to-script/stage/11", headers=headers, json={"framework_asset_id": asset_id})
+            assert response.status_code == 202
+            first_run = response.get_json()["run"]
+            duplicate = client.post("/api/framework-to-script/stage/11", headers=headers, json={"framework_asset_id": asset_id})
+            assert duplicate.status_code == 202
+            duplicate_json = duplicate.get_json()
+            assert duplicate_json["existing"] is True
+            assert duplicate_json["run"]["run_id"] == first_run["run_id"]
+
+            status = client.get(f"/api/framework-to-script/stage/11/status?framework_asset_id={asset_id}", headers=headers)
+            assert status.status_code == 200
+            assert status.get_json()["run"]["run_id"] == first_run["run_id"]
+
+            run = _wait_for_run(client, headers, first_run["run_id"])
+
+        assert run["status"] == "succeeded"
+        assert STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE not in calls
+        detail = client.get(f"/api/framework-assets/{asset_id}", headers=headers).get_json()["asset"]
+        stage11 = detail["scriptStages"]["stage11"]
+        assert "1" in stage11["batches"]
+        assert stage11["batchCausalConflictReview"]["reviewPassed"] is True
+        assert stage11["batchCausalConflictReview"]["rewriteRequired"] is False
+
+        latest_write_path = debug_dir / "stage11_write_raw_response.json"
+        assert latest_write_path.exists()
+        latest_payload = json.loads(latest_write_path.read_text(encoding="utf-8"))
+        assert latest_payload["sub_stage"] == "write"
+        assert latest_payload["asset_id"] == asset_id
+        assert latest_payload["start_episode"] == 1
+        assert latest_payload["end_episode"] == 5
+        history_path = Path(latest_payload["history_path"])
+        assert history_path.exists()
+        assert "stage11_write_asset" in history_path.name
+        index_records = [
+            json.loads(line)
+            for line in (debug_dir / "stage11_debug_index.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert any(Path(record["history_path"]) == history_path for record in index_records)
+    finally:
+        _restore_stage11_raw_debug(debug_dir, backups)
+
+
+def test_stage11_rewrite_unwraps_nested_rewrite_batch_causal_conflict_plan() -> None:
+    app = create_app()
+    app.config["TESTING"] = True
+    client = app.test_client()
+    headers = _auth_headers()
+    review_calls = 0
+    write_plan = _stage11_plan("write")
+    rewrite_plan = _stage11_plan("rewrite")
+    debug_dir, backups = _backup_stage11_raw_debug()
+
+    def fake_run_stage(stage_name: str, variables: dict[str, object]):
+        nonlocal review_calls
+        if stage_name in {
+            "framework_scene_dictionary",
+            "framework_appearanceMapping",
+            "framework_enriched_episode_plan",
+        }:
+            return _stage11_setup_and_run_stage(stage_name, variables)
+        if stage_name == STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE:
+            return {"batchCausalConflictPlan": write_plan}
+        if stage_name == STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW:
+            review_calls += 1
+            if review_calls == 1:
+                return {
+                    "passed": False,
+                    "rewrite_required": True,
+                    "blocking_issues": ["需要改写"],
+                    "rewrite_brief": "使用嵌套 rewrite 输出",
+                }
+            return {"passed": True, "rewrite_required": False, "blocking_issues": []}
+        if stage_name == STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE:
+            return {"data": {"rewrite": {"batchCausalConflictPlan": rewrite_plan}}}
+        if stage_name == STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY:
+            return {"conflictMemory": "rewrite memory"}
+        raise AssertionError(stage_name)
+
+    try:
+        with patch("workflow_code_skeleton.app.services.coze_client.coze_client.run_stage", side_effect=fake_run_stage):
+            asset_id = _save_stage11_ready_asset(client, headers)
+            response = client.post("/api/framework-to-script/stage/11", headers=headers, json={"framework_asset_id": asset_id})
+            assert response.status_code == 202
+            run = _wait_for_run(client, headers, response.get_json()["run"]["run_id"])
+
+        assert run["status"] == "succeeded"
+        detail = client.get(f"/api/framework-assets/{asset_id}", headers=headers).get_json()["asset"]
+        stage11 = detail["scriptStages"]["stage11"]
+        assert stage11["batchCausalConflictPlan"]["global_conflict_engine"]["main_drive"] == "rewrite"
+        assert stage11["batchCausalConflictPlan"]["episodes"][0]["carry_in"] == "rewrite"
+    finally:
+        _restore_stage11_raw_debug(debug_dir, backups)
