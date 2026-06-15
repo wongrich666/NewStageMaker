@@ -891,25 +891,7 @@ def _env(*names: str) -> str | None:
 
 
 def _env_with_name(*names: str) -> tuple[str, str]:
-    expanded_names = []
     for name in names:
-        text = str(name or "").strip()
-        if not text:
-            continue
-
-        # Deployment-safe alias:
-        # Some platforms reject secret variable names beginning with COZE.
-        # Keep old code/env compatibility, but allow ns_primary_api_token.
-        if text == "COZE_PRIMARY_API_TOKEN":
-            expanded_names.append("ns_primary_api_token")
-
-        expanded_names.append(text)
-
-    seen = set()
-    for name in expanded_names:
-        if name in seen:
-            continue
-        seen.add(name)
         value = os.getenv(name)
         if value is not None and str(value).strip():
             return name, str(value).strip()
