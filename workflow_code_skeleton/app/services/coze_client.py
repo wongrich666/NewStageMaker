@@ -51,6 +51,14 @@ from .fastgpt_contracts import (
     contract_for,
     to_jsonable_value,
 )
+from .coze_defaults import (
+    DEFAULT_NS_API_BASE,
+    DEFAULT_NS_HTTP_RETRIES,
+    DEFAULT_NS_HTTP_RETRY_DELAY_SECONDS,
+    DEFAULT_NS_TIMEOUT_SECONDS,
+    DEFAULT_NS_WORKFLOW_URL,
+    FRAMEWORK_TO_SCRIPT_WORKFLOW_IDS,
+)
 from .workflow_output_parser import (
     parse_workflow_output,
     safe_truncated_preview,
@@ -59,7 +67,6 @@ from .workflow_output_parser import (
 
 logger = get_logger("coze_client")
 
-DEFAULT_NS_WORKFLOW_URL = "https://api.coze.cn/v1/workflow/run"
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
 PREFERENCE_SOURCE_KEYS = (
@@ -88,18 +95,18 @@ class CozeEndpoint:
     timeout: int
 
 
-NS_STAGE_WORKFLOW_ID_ENVS: dict[str, tuple[str, ...]] = {
-    STAGE_FRAMEWORK_SCENE_DICTIONARY: ("ns_workflow_stage_08_id",),
-    STAGE_FRAMEWORK_APPEARANCE_MAPPING: ("ns_workflow_stage_09_id",),
-    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: ("ns_workflow_stage_10_id",),
-    STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE: ("ns_workflow_stage_11_write_id",),
-    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW: ("ns_workflow_stage_11_review_id",),
-    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE: ("ns_workflow_stage_11_rewrite_id",),
-    STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY: ("ns_workflow_stage_11_memory_id",),
-    STAGE_FRAMEWORK_SCRIPT_WRITE: ("ns_workflow_stage_12_write_id",),
-    STAGE_FRAMEWORK_SCRIPT_REVIEW: ("ns_workflow_stage_12_review_id",),
-    STAGE_FRAMEWORK_SCRIPT_REWRITE: ("ns_workflow_stage_12_rewrite_id",),
-    STAGE_FRAMEWORK_SCRIPT_MEMORY: ("ns_workflow_stage_12_memory_id",),
+NS_STAGE_WORKFLOW_IDS: dict[str, str] = {
+    STAGE_FRAMEWORK_SCENE_DICTIONARY: FRAMEWORK_TO_SCRIPT_WORKFLOW_IDS["scene_dictionary"],
+    STAGE_FRAMEWORK_APPEARANCE_MAPPING: FRAMEWORK_TO_SCRIPT_WORKFLOW_IDS["appearance_mapping"],
+    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: FRAMEWORK_TO_SCRIPT_WORKFLOW_IDS["enriched_episode_plan"],
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE: FRAMEWORK_TO_SCRIPT_WORKFLOW_IDS["causal_conflict_write"],
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW: FRAMEWORK_TO_SCRIPT_WORKFLOW_IDS["causal_conflict_review"],
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE: FRAMEWORK_TO_SCRIPT_WORKFLOW_IDS["causal_conflict_rewrite"],
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY: FRAMEWORK_TO_SCRIPT_WORKFLOW_IDS["causal_conflict_memory"],
+    STAGE_FRAMEWORK_SCRIPT_WRITE: FRAMEWORK_TO_SCRIPT_WORKFLOW_IDS["script_write"],
+    STAGE_FRAMEWORK_SCRIPT_REVIEW: FRAMEWORK_TO_SCRIPT_WORKFLOW_IDS["script_review"],
+    STAGE_FRAMEWORK_SCRIPT_REWRITE: FRAMEWORK_TO_SCRIPT_WORKFLOW_IDS["script_rewrite"],
+    STAGE_FRAMEWORK_SCRIPT_MEMORY: FRAMEWORK_TO_SCRIPT_WORKFLOW_IDS["script_memory"],
 }
 
 NS_STAGE_INPUT_SOURCES: dict[str, dict[str, tuple[str, ...]]] = {
@@ -387,13 +394,10 @@ class CozeWorkflowClient(FastGPTClient):
     def _endpoint_for_coze(self, stage_name: str) -> CozeEndpoint:
         token_source, token = _coze_token_with_name()
         if not token:
-            raise ValueError(
-                "Missing Coze API token. Configure ns_*_api_token in workflow_code_skeleton/.env"
-            )
-        workflow_source, workflow_id = _env_with_name(*NS_STAGE_WORKFLOW_ID_ENVS.get(stage_name, ()))
+            raise ValueError("Missing Coze API token. Configure ns_primary_api_token in workflow_code_skeleton/.env")
+        workflow_source, workflow_id = _stage_workflow_id_with_name(stage_name)
         if not workflow_id:
-            expected = ", ".join(NS_STAGE_WORKFLOW_ID_ENVS.get(stage_name, ()))
-            raise ValueError(f"Missing Coze workflow id for {stage_name}. Expected env: {expected}")
+            raise ValueError(f"Missing hardcoded Coze workflow id for {stage_name}")
         url_source, raw_url = _coze_api_base_with_name(token_source)
         return CozeEndpoint(
             url=_normalize_coze_workflow_url(raw_url or DEFAULT_NS_WORKFLOW_URL),
@@ -402,7 +406,7 @@ class CozeWorkflowClient(FastGPTClient):
             token_source=token_source,
             workflow_id=workflow_id,
             workflow_id_source=workflow_source,
-            timeout=int(_env("ns_timeout_seconds") or 600),
+            timeout=DEFAULT_NS_TIMEOUT_SECONDS,
         )
 
     def _post_with_retries(
@@ -412,8 +416,8 @@ class CozeWorkflowClient(FastGPTClient):
         body: dict[str, Any],
         stage_name: str,
     ) -> requests.Response:
-        attempts = max(1, int(_env("ns_http_retries") or 2) + 1)
-        delay = max(0.0, float(_env("ns_http_retry_delay") or 1.5))
+        attempts = max(1, DEFAULT_NS_HTTP_RETRIES + 1)
+        delay = max(0.0, DEFAULT_NS_HTTP_RETRY_DELAY_SECONDS)
         last_error: Exception | None = None
         for attempt in range(1, attempts + 1):
             try:
@@ -899,12 +903,6 @@ def _env_with_name(*names: str) -> tuple[str, str]:
         if not text:
             continue
 
-        # Deployment-safe alias:
-        # Some platforms reject secret variable names beginning with COZE.
-        # Keep old code/env compatibility, but allow ns_primary_api_token.
-        if text == "ns_primary_api_token":
-            expanded_names.append("ns_primary_api_token")
-
         expanded_names.append(text)
 
     seen = set()
@@ -918,32 +916,12 @@ def _env_with_name(*names: str) -> tuple[str, str]:
     return "", ""
 
 
+def _stage_workflow_id_with_name(stage_name: str) -> tuple[str, str]:
+    return "hardcoded", str(NS_STAGE_WORKFLOW_IDS.get(stage_name, "") or "").strip()
+
+
 def _coze_token_env_names() -> tuple[str, ...]:
-    configured_order = _env("ns_credentials_order")
-    order = configured_order or "primary,secondary"
-    profiles = [item.strip().lower() for item in order.replace(";", ",").split(",") if item.strip()]
-
-    names: list[str] = []
-    for profile in profiles:
-        if profile in {"primary", "secondary"}:
-            names.append(f"ns_{profile}_api_token")
-        elif profile in {"pat", "coze_pat"}:
-            names.append("ns_pat")
-        elif profile in {"api_token", "token", "legacy"}:
-            names.append("ns_api_token")
-
-    # 关键改动：
-    # 显式配置 order 后，只按 order 取，不再 fallback。
-    if configured_order:
-        return tuple(dict.fromkeys(names))
-
-    names.extend([
-        "ns_primary_api_token",
-        "ns_secondary_api_token",
-        "ns_api_token",
-        "ns_pat",
-    ])
-    return tuple(dict.fromkeys(names))
+    return ("ns_primary_api_token",)
 
 
 def _coze_token_with_name() -> tuple[str, str]:
@@ -951,17 +929,7 @@ def _coze_token_with_name() -> tuple[str, str]:
 
 
 def _coze_api_base_with_name(token_source: str = "") -> tuple[str, str]:
-    profile = ""
-    token_source_lower = token_source.lower()
-    if token_source_lower.startswith("ns_primary_"):
-        profile = "primary"
-    elif token_source_lower.startswith("ns_secondary_"):
-        profile = "secondary"
-    names = []
-    if profile:
-        names.append(f"ns_{profile}_api_base")
-    names.extend(["ns_api_base", "ns_base_url"])
-    return _env_with_name(*names)
+    return "hardcoded", DEFAULT_NS_API_BASE
 
 
 def _normalize_coze_workflow_url(raw_url: str) -> str:

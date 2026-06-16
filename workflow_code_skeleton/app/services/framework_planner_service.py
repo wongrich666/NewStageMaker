@@ -20,6 +20,14 @@ from ..config import settings
 from ..utils.logger import get_logger
 from .json_utils import parse_json, strip_code_fence
 from .runtime_paths import get_runtime_data_dir
+from .coze_defaults import (
+    DEFAULT_NS_API_BASE,
+    DEFAULT_NS_HTTP_RETRIES,
+    DEFAULT_NS_HTTP_RETRY_DELAY_SECONDS,
+    DEFAULT_NS_TIMEOUT_SECONDS,
+    DEFAULT_NS_WORKFLOW_URL,
+    FRAMEWORK_PLANNER_WORKFLOW_IDS,
+)
 from .workflow_output_parser import (
     parse_workflow_output,
     safe_truncated_preview,
@@ -29,7 +37,6 @@ from .workflow_output_parser import (
 logger = get_logger("framework_planner_service")
 
 DEFAULT_FASTGPT_URL = "https://api.fastgpt.in/api/v1/chat/completions"
-DEFAULT_NS_WORKFLOW_URL = "https://api.coze.cn/v1/workflow/run"
 FRAMEWORK_PLANNER_STORAGE_KEY = "frameworkPlannerState.v2"
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 FRAMEWORK_CONTRACT_GLOB = "00_*.md"
@@ -1061,7 +1068,7 @@ def framework_planner_fastgpt_diagnostics(stage: str = "05") -> dict[str, Any]:
 def stage_has_real_backend(stage: str) -> bool:
     definition = stage_definition(stage)
     _, token = _coze_api_token_with_name()
-    _, workflow_id = _env_with_name(*_stage_workflow_id_env_names(definition))
+    _, workflow_id = _stage_workflow_id_with_name(definition)
     return bool(token and workflow_id)
 
 
@@ -2110,31 +2117,29 @@ def _resolve_stage_endpoint(definition: FrameworkPlannerStageDefinition) -> Fram
             },
         )
 
-    workflow_id_envs = _stage_workflow_id_env_names(definition)
-    workflow_id_source, workflow_id = _env_with_name(*workflow_id_envs)
+    workflow_id_source, workflow_id = _stage_workflow_id_with_name(definition)
     if not workflow_id:
         raise FrameworkPlannerStageError(
-            "Coze workflow_id is not configured for this stage",
+            "Coze workflow_id is not hardcoded for this stage",
             stage=definition.stage,
             status_code=500,
             detail={
-                "reason": "Missing Coze workflow_id configuration",
-                "expected_envs": list(workflow_id_envs),
+                "reason": "Missing hardcoded Coze workflow_id configuration",
+                "expected_config": _stage_workflow_id_config_key(definition),
             },
         )
 
 
     url_source, raw_url = _coze_api_base_with_name(api_key_source)
-    timeout = int(_env("ns_timeout_seconds") or 600)
     return FrameworkPlannerEndpoint(
         url=_normalize_coze_workflow_url(raw_url or DEFAULT_NS_WORKFLOW_URL),
         url_source=url_source or "default",
         api_key=api_key,
-        api_key_source=api_key_source or "ns_api_token",
+        api_key_source=api_key_source or "ns_primary_api_token",
         workflow_id=str(workflow_id or "").strip(),
         workflow_id_source=workflow_id_source or "",
         chat_id=f"framework-planner-{definition.stage}-{uuid.uuid4().hex[:8]}",
-        timeout=max(1, timeout),
+        timeout=DEFAULT_NS_TIMEOUT_SECONDS,
     )
 
 
@@ -2166,8 +2171,16 @@ def _stage_url_env_names(definition: FrameworkPlannerStageDefinition) -> tuple[s
 
 def _stage_workflow_id_env_names(definition: FrameworkPlannerStageDefinition) -> tuple[str, ...]:
     return (
-        f"ns_workflow_stage_{definition.stage}_id",
+        _stage_workflow_id_config_key(definition),
     )
+
+
+def _stage_workflow_id_config_key(definition: FrameworkPlannerStageDefinition) -> str:
+    return f"ns_workflow_stage_{definition.stage}_id"
+
+
+def _stage_workflow_id_with_name(definition: FrameworkPlannerStageDefinition) -> tuple[str, str]:
+    return "hardcoded", str(FRAMEWORK_PLANNER_WORKFLOW_IDS.get(definition.stage, "") or "").strip()
 
 
 def _build_request_body(
@@ -2189,8 +2202,8 @@ def _post_with_retries(
     *,
     diagnostics: dict[str, Any] | None = None,
 ) -> requests.Response:
-    attempts = max(1, int(_env("ns_http_retries") or 2) + 1)
-    delay = max(0.0, float(_env("ns_http_retry_delay") or 1.5))
+    attempts = max(1, DEFAULT_NS_HTTP_RETRIES + 1)
+    delay = max(0.0, DEFAULT_NS_HTTP_RETRY_DELAY_SECONDS)
     last_exception: Exception | None = None
     last_response: requests.Response | None = None
     safe_diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
@@ -4309,11 +4322,10 @@ def _stage_runtime_diagnostics(
 ) -> dict[str, Any]:
     api_key_source, api_key = _coze_api_token_with_name()
     url_source, configured_url = _coze_api_base_with_name(api_key_source)
-    timeout_raw = _env("ns_timeout_seconds")
-    timeout_seconds = int(timeout_raw or 600)
+    timeout_seconds = DEFAULT_NS_TIMEOUT_SECONDS
     resolved_url = _normalize_coze_workflow_url(configured_url or DEFAULT_NS_WORKFLOW_URL)
     url_error = ""
-    workflow_id_source, workflow_id = _env_with_name(*_stage_workflow_id_env_names(definition))
+    workflow_id_source, workflow_id = _stage_workflow_id_with_name(definition)
     input_pollution = _stage_05_input_pollution(payload) if definition.stage == "05" else {
         "input_pollution_detected": False,
         "polluted_fields": [],
@@ -4327,7 +4339,8 @@ def _stage_runtime_diagnostics(
         "api_key_env_candidates": list(_coze_api_token_env_names()),
         "has_workflow_id": bool(workflow_id),
         "workflow_id_source": workflow_id_source or "",
-        "workflow_id_env_candidates": list(_stage_workflow_id_env_names(definition)),
+        "workflow_id_env_candidates": [],
+        "workflow_id_config_key": _stage_workflow_id_config_key(definition),
         "base_url_configured": bool(configured_url),
         "url_source": url_source or ("default" if not configured_url else ""),
         "configured_url": str(configured_url or "").strip(),
@@ -6226,13 +6239,6 @@ def _env_with_name(*names: str) -> tuple[str, str]:
         text = str(name or "").strip()
         if not text:
             continue
-
-        # Deployment-safe alias:
-        # Some platforms reject secret variable names beginning with COZE.
-        # Keep old code/env compatibility, but allow ns_primary_api_token.
-        if text == "ns_primary_api_token":
-            expanded_names.append("ns_primary_api_token")
-
         expanded_names.append(text)
 
     seen = set()
@@ -6255,35 +6261,7 @@ def _is_coze_backend() -> bool:
 
 
 def _coze_api_token_env_names() -> tuple[str, ...]:
-    configured_order = _env("ns_credentials_order")
-    ordered_profiles = [
-        item.strip().lower()
-        for item in (configured_order or "primary,secondary").replace(";", ",").split(",")
-        if item.strip()
-    ]
-
-    names: list[str] = []
-    for profile in ordered_profiles:
-        if profile in {"primary", "secondary"}:
-            names.append(f"ns_{profile}_api_token")
-        elif profile in {"pat", "coze_pat"}:
-            names.append("ns_pat")
-        elif profile in {"api_token", "token", "legacy"}:
-            names.append("ns_api_token")
-
-    # 关键改动：
-    # 如果显式配置了 ns_credentials_order，就严格按它来，不再追加旧 token。
-    if configured_order:
-        return tuple(dict.fromkeys(names))
-
-    # 没配置 order 时才走兼容兜底。
-    names.extend([
-        "ns_primary_api_token",
-        "ns_secondary_api_token",
-        "ns_api_token",
-        "ns_pat",
-    ])
-    return tuple(dict.fromkeys(names))
+    return ("ns_primary_api_token",)
 
 
 def _coze_api_token_with_name() -> tuple[str, str]:
@@ -6291,17 +6269,7 @@ def _coze_api_token_with_name() -> tuple[str, str]:
 
 
 def _coze_api_base_with_name(token_source: str = "") -> tuple[str, str]:
-    profile = ""
-    token_source_lower = token_source.lower()
-    if token_source_lower.startswith("ns_primary_"):
-        profile = "primary"
-    elif token_source_lower.startswith("ns_secondary_"):
-        profile = "secondary"
-    names = []
-    if profile:
-        names.append(f"ns_{profile}_api_base")
-    names.extend(["ns_api_base", "ns_base_url"])
-    return _env_with_name(*names)
+    return "hardcoded", DEFAULT_NS_API_BASE
 
 
 def _normalize_coze_workflow_url(raw_url: str) -> str:

@@ -3189,7 +3189,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 return _json_error(
                     str(exc),
                     status=500,
-                    fallback="08 场景字典提炼调用失败，请检查 Coze token、ns_workflow_stage_08_id 和工作流变量。",
+                    fallback="08 场景字典提炼调用失败，请检查 Coze token 和工作流变量。",
                 )
 
             scene_dictionary, rules_digest = _extract_scene_payload(raw_output)
@@ -3931,7 +3931,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 return _json_error(
                     str(exc),
                     status=500,
-                        fallback="09 人设服装 alias 映射调用失败，请检查 Coze token、ns_workflow_stage_09_id 和工作流变量。",
+                        fallback="09 人设服装 alias 映射调用失败，请检查 Coze token 和工作流变量。",
                 )
 
             appearanceMapping = _extract_appearance_payload(raw_output)
@@ -4713,7 +4713,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 return _json_error(
                     str(exc),
                     status=500,
-                    fallback="10 分集细化方案调用失败，请检查 Coze token、ns_workflow_stage_10_id 和工作流变量。",
+                    fallback="10 分集细化方案调用失败，请检查 Coze token 和工作流变量。",
                 )
 
             plan, plan_text = _extract_enriched_payload(raw_output)
