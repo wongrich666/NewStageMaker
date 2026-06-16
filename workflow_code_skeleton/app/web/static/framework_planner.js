@@ -4060,7 +4060,42 @@ function renderPackageBlocks() {
   function renderCharacterCards(data) {
     if (isEmptyValue(data)) return `<div class="fp-empty">尚未生成人设方案。</div>`;
     const source = data && typeof data === "object" ? data : {};
+    const topLevelCharacterFields = [
+      "id",
+      "name",
+      "legal_name",
+      "displayName",
+      "role",
+      "identity",
+      "external_goal",
+      "goal",
+      "internal_need",
+      "desire",
+      "motivation",
+      "weakness",
+      "fear",
+      "ability_or_resource",
+      "growth_arc",
+      "arc",
+      "change_arc",
+      "relationship_hooks",
+      "character_relationships",
+      "relationship",
+      "relationships",
+      "story_function",
+      "forbidden_write",
+      "emotion_engine",
+      "speech_style",
+      "downstream_notes",
+    ];
+    const topLevelCharacter = {};
+    topLevelCharacterFields.forEach((key) => {
+      if (isRenderableValue(source[key])) topLevelCharacter[key] = source[key];
+    });
     const characters = []
+      .concat(Object.keys(topLevelCharacter).length > 1 ? [topLevelCharacter] : [])
+      .concat(Array.isArray(source.characters) ? source.characters : [])
+      .concat(Array.isArray(source.mainCharacters) ? source.mainCharacters : [])
       .concat(Array.isArray(source.main_characters) ? source.main_characters : [])
       .concat(Array.isArray(source.supporting_characters) ? source.supporting_characters : []);
     ["protagonist", "antagonist"].forEach((key) => {
@@ -4069,7 +4104,7 @@ function renderPackageBlocks() {
     const unique = [];
     const seen = new Set();
     characters.forEach((item, index) => {
-      if (!item || typeof item !== "object") return;
+      if (!item || typeof item !== "object" || !isRenderableValue(item)) return;
       const id = String(item.name || item.title || item.role || index);
       if (seen.has(id)) return;
       seen.add(id);
@@ -4077,25 +4112,24 @@ function renderPackageBlocks() {
     });
     if (!unique.length) return renderWhitelistFields("character", source);
     const fields = [
-      ["name", "姓名 / 合法称呼"],
-      ["legal_name", "姓名 / 合法称呼"],
-      ["role", "身份定位"],
-      ["goal", "人物目标"],
-      ["desire", "核心欲望"],
-      ["motivation", "核心欲望"],
-      ["weakness", "弱点 / 恐惧"],
-      ["fear", "弱点 / 恐惧"],
-      ["relationship", "人物关系"],
-      ["relationships", "人物关系"],
-      ["arc", "人物变化线"],
-      ["change_arc", "人物变化线"],
-      ["speech_style", "说话风格"],
-      ["downstream_notes", "下游注意事项"],
+      ["name", "legal_name", "displayName", "title"],
+      ["role", "identity"],
+      ["external_goal", "goal"],
+      ["internal_need", "desire", "motivation"],
+      ["weakness", "fear"],
+      ["ability_or_resource"],
+      ["growth_arc", "arc", "change_arc"],
+      ["relationship_hooks", "character_relationships", "relationship", "relationships"],
+      ["story_function"],
+      ["forbidden_write"],
+      ["emotion_engine"],
+      ["speech_style"],
+      ["downstream_notes"],
     ];
     return `<div class="fp-character-grid">${unique.map((item) => `
       <article class="fp-character-card">
         <h3>${escapeHtml(item.name || item.legal_name || item.title || "未命名人物")}</h3>
-        ${fields.map(([key, label]) => renderReadableFieldCard(label, item[key])).join("")}
+        ${fields.map((aliases) => renderReadableFieldCard(fieldLabel(aliases[0]), valueByAliases(item, aliases))).join("")}
       </article>
     `).join("")}</div>`;
   }
@@ -5124,7 +5158,7 @@ function renderPackageBlocks() {
     const parsedData = safeJsonValue(safeResponse.data);
     const safeData = parsedData && typeof parsedData === "object" && !Array.isArray(parsedData) ? parsedData : {};
     state.raw_stage_responses[stageNo] = safeResponse.raw || {};
-    state.display_texts[stageNo] = safeResponse.display_text || "";
+    state.display_texts[stageNo] = safeResponse.display_text || safeData.display_text || "";
     if (stageNo === "01") {
       const extracted = extractSourceBriefPayload(safeResponse);
       state.source_brief = extracted.source_brief && typeof extracted.source_brief === "object" && !Array.isArray(extracted.source_brief)
