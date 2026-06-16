@@ -89,17 +89,17 @@ class CozeEndpoint:
 
 
 COZE_STAGE_WORKFLOW_ID_ENVS: dict[str, tuple[str, ...]] = {
-    STAGE_FRAMEWORK_SCENE_DICTIONARY: ("COZE_WORKFLOW_STAGE_08_ID",),
-    STAGE_FRAMEWORK_APPEARANCE_MAPPING: ("COZE_WORKFLOW_STAGE_09_ID",),
-    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: ("COZE_WORKFLOW_STAGE_10_ID",),
-    STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE: ("COZE_WORKFLOW_STAGE_11_WRITE_ID",),
-    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW: ("COZE_WORKFLOW_STAGE_11_REVIEW_ID",),
-    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE: ("COZE_WORKFLOW_STAGE_11_REWRITE_ID",),
-    STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY: ("COZE_WORKFLOW_STAGE_11_MEMORY_ID",),
-    STAGE_FRAMEWORK_SCRIPT_WRITE: ("COZE_WORKFLOW_STAGE_12_WRITE_ID",),
-    STAGE_FRAMEWORK_SCRIPT_REVIEW: ("COZE_WORKFLOW_STAGE_12_REVIEW_ID",),
-    STAGE_FRAMEWORK_SCRIPT_REWRITE: ("COZE_WORKFLOW_STAGE_12_REWRITE_ID",),
-    STAGE_FRAMEWORK_SCRIPT_MEMORY: ("COZE_WORKFLOW_STAGE_12_MEMORY_ID",),
+    STAGE_FRAMEWORK_SCENE_DICTIONARY: ("ns_workflow_stage_08_id",),
+    STAGE_FRAMEWORK_APPEARANCE_MAPPING: ("ns_workflow_stage_09_id",),
+    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: ("ns_workflow_stage_10_id",),
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_WRITE: ("ns_workflow_stage_11_write_id",),
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REVIEW: ("ns_workflow_stage_11_review_id",),
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_REWRITE: ("ns_workflow_stage_11_rewrite_id",),
+    STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY: ("ns_workflow_stage_11_memory_id",),
+    STAGE_FRAMEWORK_SCRIPT_WRITE: ("ns_workflow_stage_12_write_id",),
+    STAGE_FRAMEWORK_SCRIPT_REVIEW: ("ns_workflow_stage_12_review_id",),
+    STAGE_FRAMEWORK_SCRIPT_REWRITE: ("ns_workflow_stage_12_rewrite_id",),
+    STAGE_FRAMEWORK_SCRIPT_MEMORY: ("ns_workflow_stage_12_memory_id",),
 }
 
 COZE_STAGE_INPUT_SOURCES: dict[str, dict[str, tuple[str, ...]]] = {
@@ -400,7 +400,7 @@ class CozeWorkflowClient(FastGPTClient):
             token_source=token_source,
             workflow_id=workflow_id,
             workflow_id_source=workflow_source,
-            timeout=int(_env("COZE_TIMEOUT_SECONDS") or 600),
+            timeout=int(_env("ns_timeout_seconds") or 600),
         )
 
     def _post_with_retries(
@@ -410,8 +410,8 @@ class CozeWorkflowClient(FastGPTClient):
         body: dict[str, Any],
         stage_name: str,
     ) -> requests.Response:
-        attempts = max(1, int(_env("COZE_HTTP_RETRIES") or 2) + 1)
-        delay = max(0.0, float(_env("COZE_HTTP_RETRY_DELAY") or 1.5))
+        attempts = max(1, int(_env("ns_http_retries") or 2) + 1)
+        delay = max(0.0, float(_env("ns_http_retry_delay") or 1.5))
         last_error: Exception | None = None
         for attempt in range(1, attempts + 1):
             try:
@@ -900,7 +900,7 @@ def _env_with_name(*names: str) -> tuple[str, str]:
         # Deployment-safe alias:
         # Some platforms reject secret variable names beginning with COZE.
         # Keep old code/env compatibility, but allow ns_primary_api_token.
-        if text == "COZE_PRIMARY_API_TOKEN":
+        if text == "ns_primary_api_token":
             expanded_names.append("ns_primary_api_token")
 
         expanded_names.append(text)
@@ -917,7 +917,7 @@ def _env_with_name(*names: str) -> tuple[str, str]:
 
 
 def _coze_token_env_names() -> tuple[str, ...]:
-    configured_order = _env("COZE_CREDENTIALS_ORDER")
+    configured_order = _env("ns_credentials_order")
     order = configured_order or "primary,secondary"
     profiles = [item.strip().lower() for item in order.replace(";", ",").split(",") if item.strip()]
 
@@ -926,9 +926,9 @@ def _coze_token_env_names() -> tuple[str, ...]:
         if profile in {"primary", "secondary"}:
             names.append(f"COZE_{profile.upper()}_API_TOKEN")
         elif profile in {"pat", "coze_pat"}:
-            names.append("COZE_PAT")
+            names.append("ns_pat")
         elif profile in {"api_token", "token", "legacy"}:
-            names.append("COZE_API_TOKEN")
+            names.append("ns_api_token")
 
     # 关键改动：
     # 显式配置 order 后，只按 order 取，不再 fallback。
@@ -936,10 +936,10 @@ def _coze_token_env_names() -> tuple[str, ...]:
         return tuple(dict.fromkeys(names))
 
     names.extend([
-        "COZE_PRIMARY_API_TOKEN",
-        "COZE_SECONDARY_API_TOKEN",
-        "COZE_API_TOKEN",
-        "COZE_PAT",
+        "ns_primary_api_token",
+        "ns_secondary_api_token",
+        "ns_api_token",
+        "ns_pat",
     ])
     return tuple(dict.fromkeys(names))
 
@@ -957,7 +957,7 @@ def _coze_api_base_with_name(token_source: str = "") -> tuple[str, str]:
     names = []
     if profile:
         names.append(f"COZE_{profile}_API_BASE")
-    names.extend(["COZE_API_BASE", "COZE_BASE_URL"])
+    names.extend(["ns_api_base", "ns_base_url"])
     return _env_with_name(*names)
 
 

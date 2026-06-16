@@ -2123,13 +2123,14 @@ def _resolve_stage_endpoint(definition: FrameworkPlannerStageDefinition) -> Fram
             },
         )
 
+
     url_source, raw_url = _coze_api_base_with_name(api_key_source)
-    timeout = int(_env("COZE_TIMEOUT_SECONDS") or 600)
+    timeout = int(_env("ns_timeout_seconds") or 600)
     return FrameworkPlannerEndpoint(
         url=_normalize_coze_workflow_url(raw_url or DEFAULT_COZE_WORKFLOW_URL),
         url_source=url_source or "default",
         api_key=api_key,
-        api_key_source=api_key_source or "COZE_API_TOKEN",
+        api_key_source=api_key_source or "ns_api_token",
         workflow_id=str(workflow_id or "").strip(),
         workflow_id_source=workflow_id_source or "",
         chat_id=f"framework-planner-{definition.stage}-{uuid.uuid4().hex[:8]}",
@@ -2188,8 +2189,8 @@ def _post_with_retries(
     *,
     diagnostics: dict[str, Any] | None = None,
 ) -> requests.Response:
-    attempts = max(1, int(_env("COZE_HTTP_RETRIES") or 2) + 1)
-    delay = max(0.0, float(_env("COZE_HTTP_RETRY_DELAY") or 1.5))
+    attempts = max(1, int(_env("ns_http_retries") or 2) + 1)
+    delay = max(0.0, float(_env("ns_http_retry_delay") or 1.5))
     last_exception: Exception | None = None
     last_response: requests.Response | None = None
     safe_diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
@@ -4308,7 +4309,7 @@ def _stage_runtime_diagnostics(
 ) -> dict[str, Any]:
     api_key_source, api_key = _coze_api_token_with_name()
     url_source, configured_url = _coze_api_base_with_name(api_key_source)
-    timeout_raw = _env("COZE_TIMEOUT_SECONDS")
+    timeout_raw = _env("ns_timeout_seconds")
     timeout_seconds = int(timeout_raw or 600)
     resolved_url = _normalize_coze_workflow_url(configured_url or DEFAULT_COZE_WORKFLOW_URL)
     url_error = ""
@@ -6229,7 +6230,7 @@ def _env_with_name(*names: str) -> tuple[str, str]:
         # Deployment-safe alias:
         # Some platforms reject secret variable names beginning with COZE.
         # Keep old code/env compatibility, but allow ns_primary_api_token.
-        if text == "COZE_PRIMARY_API_TOKEN":
+        if text == "ns_primary_api_token":
             expanded_names.append("ns_primary_api_token")
 
         expanded_names.append(text)
@@ -6254,7 +6255,7 @@ def _is_coze_backend() -> bool:
 
 
 def _coze_api_token_env_names() -> tuple[str, ...]:
-    configured_order = _env("COZE_CREDENTIALS_ORDER")
+    configured_order = _env("ns_credentials_order")
     ordered_profiles = [
         item.strip().lower()
         for item in (configured_order or "primary,secondary").replace(";", ",").split(",")
@@ -6266,21 +6267,21 @@ def _coze_api_token_env_names() -> tuple[str, ...]:
         if profile in {"primary", "secondary"}:
             names.append(f"COZE_{profile.upper()}_API_TOKEN")
         elif profile in {"pat", "coze_pat"}:
-            names.append("COZE_PAT")
+            names.append("ns_pat")
         elif profile in {"api_token", "token", "legacy"}:
-            names.append("COZE_API_TOKEN")
+            names.append("ns_api_token")
 
     # 关键改动：
-    # 如果显式配置了 COZE_CREDENTIALS_ORDER，就严格按它来，不再追加旧 token。
+    # 如果显式配置了 ns_credentials_order，就严格按它来，不再追加旧 token。
     if configured_order:
         return tuple(dict.fromkeys(names))
 
     # 没配置 order 时才走兼容兜底。
     names.extend([
-        "COZE_PRIMARY_API_TOKEN",
-        "COZE_SECONDARY_API_TOKEN",
-        "COZE_API_TOKEN",
-        "COZE_PAT",
+        "ns_primary_api_token",
+        "ns_secondary_api_token",
+        "ns_api_token",
+        "ns_pat",
     ])
     return tuple(dict.fromkeys(names))
 
@@ -6298,7 +6299,7 @@ def _coze_api_base_with_name(token_source: str = "") -> tuple[str, str]:
     names = []
     if profile:
         names.append(f"COZE_{profile}_API_BASE")
-    names.extend(["COZE_API_BASE", "COZE_BASE_URL"])
+    names.extend(["ns_api_base", "ns_base_url"])
     return _env_with_name(*names)
 
 
