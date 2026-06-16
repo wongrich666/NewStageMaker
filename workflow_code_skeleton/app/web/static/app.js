@@ -134,6 +134,7 @@
     availableModels: [],
     latestSnapshot: null,
     projects: [],
+    workspaceItems: [],
     projectStatusMap: {},
     projectsInitialized: false,
     assets: [],
@@ -1675,7 +1676,7 @@ startRuntimeDebugPolling();
       }
       renderRollbackOptions([]);
       renderRollbackScriptStartOptions([]);
-      renderProjectList(state.projects);
+      renderProjectList(state.workspaceItems.length ? state.workspaceItems : state.projects);
       syncButtons();
       setBrandMotionState(false, "把创意转成可执行剧本");
       return;
@@ -1768,7 +1769,7 @@ startRuntimeDebugPolling();
       els.rollbackScriptStartSelect.value = "";
     }
     persistSelectedProjectId(snapshot.project_id);
-    renderProjectList(state.projects);
+    renderProjectList(state.workspaceItems.length ? state.workspaceItems : state.projects);
     syncButtons();
   }
 
@@ -2695,8 +2696,9 @@ startRuntimeDebugPolling();
       return;
     }
 
-    const frameworkProjects = projects.filter((item) => assetCategory(item) === "framework");
-    const newScriptProjects = projects.filter((item) => assetCategory(item) === "new_script");
+    const workspaceItems = mergeWorkspaceItems(projects, state.assets);
+    const frameworkProjects = workspaceItems.filter((item) => assetCategory(item) === "framework");
+    const newScriptProjects = workspaceItems.filter((item) => assetCategory(item) === "new_script" || frameworkHasScriptOutput(item));
 
     const renderCompactItems = (items, emptyMessage) => {
       if (!items.length) {
@@ -2749,6 +2751,32 @@ startRuntimeDebugPolling();
     if (els.completedProjectCount) {
       els.completedProjectCount.textContent = String(frameworkProjects.length);
     }
+  }
+
+  function mergeWorkspaceItems(projects = state.projects, assets = state.assets) {
+    const byId = new Map();
+    const append = (item) => {
+      if (!item || typeof item !== "object") return;
+      const projectId = String(item.project_id || item.asset_id || "").trim();
+      if (!projectId) return;
+      const category = assetCategory(item);
+      if (!["framework", "new_script"].includes(category) && !frameworkHasScriptOutput(item)) return;
+      const current = byId.get(projectId) || {};
+      const normalizedProjectId = Number(item.project_id || current.project_id || projectId) || projectId;
+      byId.set(projectId, { ...current, ...item, project_id: normalizedProjectId });
+    };
+    (Array.isArray(projects) ? projects : []).forEach(append);
+    (Array.isArray(assets) ? assets : []).forEach(append);
+    return Array.from(byId.values()).sort((a, b) => {
+      const left = String(a.updated_at || a.created_at || "");
+      const right = String(b.updated_at || b.created_at || "");
+      return right.localeCompare(left);
+    });
+  }
+
+  function refreshWorkspaceItems() {
+    state.workspaceItems = mergeWorkspaceItems(state.projects, state.assets);
+    return state.workspaceItems;
   }
 
   function workspaceFolders() {
@@ -2805,6 +2833,7 @@ startRuntimeDebugPolling();
   async function loadProjects({ restoreSelection = true, restoreInputs = false } = {}) {
     if (!isAuthenticated()) {
       state.projects = [];
+      state.workspaceItems = [];
       renderProjectList([]);
       renderSnapshot(null);
       return [];
@@ -2812,16 +2841,17 @@ startRuntimeDebugPolling();
 
     const data = await requestJson(window.scriptMakerConfig.projectsUrl);
     state.projects = data.projects || [];
-    summarizeProjectStatusChanges(state.projects);
-    renderProjectList(state.projects);
+    const workspaceItems = refreshWorkspaceItems();
+    summarizeProjectStatusChanges(workspaceItems);
+    renderProjectList(workspaceItems);
 
     const freshWorkspace = isFreshWorkspaceMode();
     let targetProjectId = restoreSelection
-      ? (state.projectId || readSelectedProjectId() || (freshWorkspace ? null : pickPreferredProjectId(state.projects)))
+      ? (state.projectId || readSelectedProjectId() || (freshWorkspace ? null : pickPreferredProjectId(workspaceItems)))
       : state.projectId;
 
-    if (targetProjectId && !state.projects.some((item) => Number(item.project_id) === Number(targetProjectId))) {
-      targetProjectId = pickPreferredProjectId(state.projects);
+    if (targetProjectId && !workspaceItems.some((item) => Number(item.project_id) === Number(targetProjectId))) {
+      targetProjectId = pickPreferredProjectId(workspaceItems);
     }
 
     if (targetProjectId) {
@@ -2833,11 +2863,11 @@ startRuntimeDebugPolling();
       }
       renderSnapshot(null);
     }
-    return state.projects;
+    return workspaceItems;
   }
 
   function shouldContinuePolling() {
-    return state.projects.some((item) => RUNNING_STATUSES.has(item.status));
+    return (state.workspaceItems.length ? state.workspaceItems : state.projects).some((item) => RUNNING_STATUSES.has(item.status));
   }
 
   // 新建任务或在原资产 ID 上重新启动失败任务。
@@ -3206,6 +3236,8 @@ startRuntimeDebugPolling();
       const data = await requestJson(window.scriptMakerConfig.assetsUrl);
       state.assets = data.assets || [];
       state.assetsStatus = state.assets.length ? "success" : "empty";
+      refreshWorkspaceItems();
+      renderProjectList(state.workspaceItems);
       renderAssets(state.assets);
     } catch (error) {
       state.assetsStatus = "error";
@@ -3305,6 +3337,21 @@ startRuntimeDebugPolling();
     if (assetKind === "framework_planner") return "framework";
     if (assetKind === "framework_to_script" || scriptMode === "framework_to_script" || input.framework_to_script === true) return "new_script";
     return "new_script";
+  }
+
+  function frameworkHasScriptOutput(item) {
+    if (!item || typeof item !== "object") return false;
+    if (item.has_framework_script_output || item.framework_to_script_ready || item.framework_script_ready) return true;
+    if (assetCategory(item) === "new_script") return true;
+    const artifacts = item.artifacts && typeof item.artifacts === "object" ? item.artifacts : {};
+    const workspace = item.framework_to_script_state || artifacts.framework_to_script_state || {};
+    const stages = workspace && typeof workspace === "object" ? (workspace.scriptStages || workspace.script_stages || {}) : {};
+    const stage12 = stages && typeof stages === "object" ? (stages.stage12 || {}) : {};
+    if (stage12.batchScriptText || stage12.batch_script_text) return true;
+    const batches = stage12.batches && typeof stage12.batches === "object" && !Array.isArray(stage12.batches)
+      ? stage12.batches
+      : {};
+    return Object.values(batches).some((batch) => batch && typeof batch === "object" && (batch.batchScriptText || batch.batch_script_text));
   }
 
   function renderAssetTaskActions(item) {
@@ -3682,6 +3729,7 @@ startRuntimeDebugPolling();
   async function restoreWorkspace() {
     if (!isAuthenticated()) {
       state.projects = [];
+      state.workspaceItems = [];
       renderProjectList([]);
       renderSnapshot(null);
       return;

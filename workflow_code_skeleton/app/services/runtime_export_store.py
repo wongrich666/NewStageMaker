@@ -19,6 +19,36 @@ from .unstructured_naturalize import (
 )
 from ..utils.readable_labels import readable_text
 class RuntimeExportStoreMixin:
+    def _framework_to_script_final_text(self, snapshot: dict[str, Any]) -> str:
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        workspace_state = artifacts.get("framework_to_script_state")
+        if not isinstance(workspace_state, dict):
+            workspace_state = snapshot.get("framework_to_script_state")
+        if not isinstance(workspace_state, dict):
+            return ""
+        script_stages = workspace_state.get("scriptStages") or workspace_state.get("script_stages")
+        if not isinstance(script_stages, dict):
+            return ""
+        stage12 = script_stages.get("stage12")
+        if not isinstance(stage12, dict):
+            return ""
+
+        direct_text = str(stage12.get("batchScriptText") or stage12.get("batch_script_text") or "").strip()
+        if direct_text:
+            return direct_text
+
+        batches = stage12.get("batches")
+        if not isinstance(batches, dict):
+            return ""
+        parts: list[str] = []
+        for key, batch in sorted(batches.items(), key=lambda item: _safe_int(item[0], 999999)):
+            if not isinstance(batch, dict):
+                continue
+            text = str(batch.get("batchScriptText") or batch.get("batch_script_text") or "").strip()
+            if text:
+                parts.append(text)
+        return "\n\n".join(parts).strip()
+
     def _best_final_script_text(self, snapshot: dict[str, Any]) -> str:
         artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
         if str(snapshot.get("asset_kind") or "").strip() == AUXILIARY_TOOL_ASSET_KIND:
@@ -27,6 +57,10 @@ class RuntimeExportStoreMixin:
                 or artifacts.get("final_script")
                 or ""
             )
+        if str(snapshot.get("asset_kind") or "").strip() == "framework_planner":
+            framework_script = self._framework_to_script_final_text(snapshot)
+            if framework_script:
+                return clean_multiline_user_visible_text(framework_script)
         debug_state = snapshot.get("debug_state") if isinstance(snapshot.get("debug_state"), dict) else {}
         variables = debug_state.get("variables") if isinstance(debug_state.get("variables"), dict) else {}
         input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
@@ -1414,4 +1448,3 @@ class RuntimeExportStoreMixin:
             logger.exception("导出只换人设 Word 失败: %s", project_id)
             raise ValueError(f"导出只换人设 DOCX 失败：{exc}") from exc
         return docx_path
-

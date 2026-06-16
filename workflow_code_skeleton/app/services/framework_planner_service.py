@@ -29,7 +29,7 @@ from .workflow_output_parser import (
 logger = get_logger("framework_planner_service")
 
 DEFAULT_FASTGPT_URL = "https://api.fastgpt.in/api/v1/chat/completions"
-DEFAULT_COZE_WORKFLOW_URL = "https://api.coze.cn/v1/workflow/run"
+DEFAULT_NS_WORKFLOW_URL = "https://api.coze.cn/v1/workflow/run"
 FRAMEWORK_PLANNER_STORAGE_KEY = "frameworkPlannerState.v2"
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 FRAMEWORK_CONTRACT_GLOB = "00_*.md"
@@ -1042,7 +1042,7 @@ def framework_planner_backend_ready() -> bool:
 def framework_planner_fastgpt_diagnostics(stage: str = "05") -> dict[str, Any]:
     definition = stage_definition(stage)
     diagnostics = _stage_runtime_diagnostics(definition, {})
-    endpoint = str(diagnostics.get("resolved_url") or DEFAULT_COZE_WORKFLOW_URL)
+    endpoint = str(diagnostics.get("resolved_url") or DEFAULT_NS_WORKFLOW_URL)
     host, port = _endpoint_host_port(endpoint)
     return {
         "ok": True,
@@ -2127,7 +2127,7 @@ def _resolve_stage_endpoint(definition: FrameworkPlannerStageDefinition) -> Fram
     url_source, raw_url = _coze_api_base_with_name(api_key_source)
     timeout = int(_env("ns_timeout_seconds") or 600)
     return FrameworkPlannerEndpoint(
-        url=_normalize_coze_workflow_url(raw_url or DEFAULT_COZE_WORKFLOW_URL),
+        url=_normalize_coze_workflow_url(raw_url or DEFAULT_NS_WORKFLOW_URL),
         url_source=url_source or "default",
         api_key=api_key,
         api_key_source=api_key_source or "ns_api_token",
@@ -2166,7 +2166,7 @@ def _stage_url_env_names(definition: FrameworkPlannerStageDefinition) -> tuple[s
 
 def _stage_workflow_id_env_names(definition: FrameworkPlannerStageDefinition) -> tuple[str, ...]:
     return (
-        f"COZE_WORKFLOW_STAGE_{definition.stage}_ID",
+        f"ns_workflow_stage_{definition.stage}_id",
     )
 
 
@@ -4311,7 +4311,7 @@ def _stage_runtime_diagnostics(
     url_source, configured_url = _coze_api_base_with_name(api_key_source)
     timeout_raw = _env("ns_timeout_seconds")
     timeout_seconds = int(timeout_raw or 600)
-    resolved_url = _normalize_coze_workflow_url(configured_url or DEFAULT_COZE_WORKFLOW_URL)
+    resolved_url = _normalize_coze_workflow_url(configured_url or DEFAULT_NS_WORKFLOW_URL)
     url_error = ""
     workflow_id_source, workflow_id = _env_with_name(*_stage_workflow_id_env_names(definition))
     input_pollution = _stage_05_input_pollution(payload) if definition.stage == "05" else {
@@ -4354,7 +4354,7 @@ def _log_stage_entry(
         diagnostics.get("has_workflow_id", False),
         diagnostics.get("workflow_id_source") or "未命中",
         diagnostics.get("url_source") or "default",
-        diagnostics.get("resolved_url") or DEFAULT_COZE_WORKFLOW_URL,
+        diagnostics.get("resolved_url") or DEFAULT_NS_WORKFLOW_URL,
         diagnostics.get("workflow_id_missing_but_api_key_mode_enabled", False),
     )
 
@@ -4497,7 +4497,7 @@ def _log_stage_not_entering_fastgpt(
         diagnostics.get("api_key_source") or "未命中",
         diagnostics.get("workflow_id_source") or "未命中",
         diagnostics.get("url_source") or "default",
-        diagnostics.get("resolved_url") or DEFAULT_COZE_WORKFLOW_URL,
+        diagnostics.get("resolved_url") or DEFAULT_NS_WORKFLOW_URL,
     )
 
 
@@ -6265,7 +6265,7 @@ def _coze_api_token_env_names() -> tuple[str, ...]:
     names: list[str] = []
     for profile in ordered_profiles:
         if profile in {"primary", "secondary"}:
-            names.append(f"COZE_{profile.upper()}_API_TOKEN")
+            names.append(f"ns_{profile}_api_token")
         elif profile in {"pat", "coze_pat"}:
             names.append("ns_pat")
         elif profile in {"api_token", "token", "legacy"}:
@@ -6292,13 +6292,14 @@ def _coze_api_token_with_name() -> tuple[str, str]:
 
 def _coze_api_base_with_name(token_source: str = "") -> tuple[str, str]:
     profile = ""
-    if token_source.startswith("COZE_PRIMARY_"):
-        profile = "PRIMARY"
-    elif token_source.startswith("COZE_SECONDARY_"):
-        profile = "SECONDARY"
+    token_source_lower = token_source.lower()
+    if token_source_lower.startswith("ns_primary_"):
+        profile = "primary"
+    elif token_source_lower.startswith("ns_secondary_"):
+        profile = "secondary"
     names = []
     if profile:
-        names.append(f"COZE_{profile}_API_BASE")
+        names.append(f"ns_{profile}_api_base")
     names.extend(["ns_api_base", "ns_base_url"])
     return _env_with_name(*names)
 
@@ -6306,7 +6307,7 @@ def _coze_api_base_with_name(token_source: str = "") -> tuple[str, str]:
 def _normalize_coze_workflow_url(raw_url: str) -> str:
     url = str(raw_url or "").strip().rstrip("/")
     if not url:
-        return DEFAULT_COZE_WORKFLOW_URL
+        return DEFAULT_NS_WORKFLOW_URL
     if url.endswith("/v1/workflow/run"):
         return url
     if url.endswith("/workflow/run"):

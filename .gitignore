@@ -25,4 +25,5 @@ fix_*.py
 
 *.bak
 *.bak_*
+*.bak-*
 *_verify.png

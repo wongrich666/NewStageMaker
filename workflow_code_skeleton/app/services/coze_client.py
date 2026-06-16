@@ -59,7 +59,7 @@ from .workflow_output_parser import (
 
 logger = get_logger("coze_client")
 
-DEFAULT_COZE_WORKFLOW_URL = "https://api.coze.cn/v1/workflow/run"
+DEFAULT_NS_WORKFLOW_URL = "https://api.coze.cn/v1/workflow/run"
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
 PREFERENCE_SOURCE_KEYS = (
@@ -88,7 +88,7 @@ class CozeEndpoint:
     timeout: int
 
 
-COZE_STAGE_WORKFLOW_ID_ENVS: dict[str, tuple[str, ...]] = {
+NS_STAGE_WORKFLOW_ID_ENVS: dict[str, tuple[str, ...]] = {
     STAGE_FRAMEWORK_SCENE_DICTIONARY: ("ns_workflow_stage_08_id",),
     STAGE_FRAMEWORK_APPEARANCE_MAPPING: ("ns_workflow_stage_09_id",),
     STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN: ("ns_workflow_stage_10_id",),
@@ -102,7 +102,7 @@ COZE_STAGE_WORKFLOW_ID_ENVS: dict[str, tuple[str, ...]] = {
     STAGE_FRAMEWORK_SCRIPT_MEMORY: ("ns_workflow_stage_12_memory_id",),
 }
 
-COZE_STAGE_INPUT_SOURCES: dict[str, dict[str, tuple[str, ...]]] = {
+NS_STAGE_INPUT_SOURCES: dict[str, dict[str, tuple[str, ...]]] = {
     STAGE_FRAMEWORK_SCENE_DICTIONARY: {
         "framework": (FRAMEWORK_PLAN_PACKAGE,),
         "worldview": (WORLDVIEW_PLAN,),
@@ -200,7 +200,7 @@ COZE_STAGE_INPUT_SOURCES: dict[str, dict[str, tuple[str, ...]]] = {
     },
 }
 
-COZE_OUTPUT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
+NS_OUTPUT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
     STAGE_FRAMEWORK_SCENE_DICTIONARY: {
         SCENE_DICTIONARY: ("output", "sceneDictionary"),
         SCRIPT_WORLD_RULES_DIGEST: ("output", "scriptWorldRulesDigest"),
@@ -370,7 +370,7 @@ class CozeWorkflowClient(FastGPTClient):
         return validated_output
 
     def _build_coze_parameters(self, stage_name: str, variables: dict[str, Any]) -> dict[str, Any]:
-        mapping = COZE_STAGE_INPUT_SOURCES.get(stage_name)
+        mapping = NS_STAGE_INPUT_SOURCES.get(stage_name)
         if not mapping:
             raise ValueError(f"Coze workflow stage is not mapped: {stage_name}")
         payload: dict[str, Any] = {}
@@ -387,14 +387,16 @@ class CozeWorkflowClient(FastGPTClient):
     def _endpoint_for_coze(self, stage_name: str) -> CozeEndpoint:
         token_source, token = _coze_token_with_name()
         if not token:
-            raise ValueError("Missing Coze API token. Configure COZE_*_API_TOKEN in workflow_code_skeleton/.env")
-        workflow_source, workflow_id = _env_with_name(*COZE_STAGE_WORKFLOW_ID_ENVS.get(stage_name, ()))
+            raise ValueError(
+                "Missing Coze API token. Configure ns_*_api_token in workflow_code_skeleton/.env"
+            )
+        workflow_source, workflow_id = _env_with_name(*NS_STAGE_WORKFLOW_ID_ENVS.get(stage_name, ()))
         if not workflow_id:
-            expected = ", ".join(COZE_STAGE_WORKFLOW_ID_ENVS.get(stage_name, ()))
+            expected = ", ".join(NS_STAGE_WORKFLOW_ID_ENVS.get(stage_name, ()))
             raise ValueError(f"Missing Coze workflow id for {stage_name}. Expected env: {expected}")
         url_source, raw_url = _coze_api_base_with_name(token_source)
         return CozeEndpoint(
-            url=_normalize_coze_workflow_url(raw_url or DEFAULT_COZE_WORKFLOW_URL),
+            url=_normalize_coze_workflow_url(raw_url or DEFAULT_NS_WORKFLOW_URL),
             url_source=url_source or "default",
             token=token,
             token_source=token_source,
@@ -434,7 +436,7 @@ class CozeWorkflowClient(FastGPTClient):
 
 
 def _coze_contract_for(stage_name: str, contract: FastGPTStageContract) -> FastGPTStageContract:
-    extra_aliases = COZE_OUTPUT_ALIASES.get(stage_name, {})
+    extra_aliases = NS_OUTPUT_ALIASES.get(stage_name, {})
     output_aliases: dict[str, tuple[str, ...]] = {}
     for field_name in contract.output_names:
         merged = (
@@ -924,7 +926,7 @@ def _coze_token_env_names() -> tuple[str, ...]:
     names: list[str] = []
     for profile in profiles:
         if profile in {"primary", "secondary"}:
-            names.append(f"COZE_{profile.upper()}_API_TOKEN")
+            names.append(f"ns_{profile}_api_token")
         elif profile in {"pat", "coze_pat"}:
             names.append("ns_pat")
         elif profile in {"api_token", "token", "legacy"}:
@@ -950,13 +952,14 @@ def _coze_token_with_name() -> tuple[str, str]:
 
 def _coze_api_base_with_name(token_source: str = "") -> tuple[str, str]:
     profile = ""
-    if token_source.startswith("COZE_PRIMARY_"):
-        profile = "PRIMARY"
-    elif token_source.startswith("COZE_SECONDARY_"):
-        profile = "SECONDARY"
+    token_source_lower = token_source.lower()
+    if token_source_lower.startswith("ns_primary_"):
+        profile = "primary"
+    elif token_source_lower.startswith("ns_secondary_"):
+        profile = "secondary"
     names = []
     if profile:
-        names.append(f"COZE_{profile}_API_BASE")
+        names.append(f"ns_{profile}_api_base")
     names.extend(["ns_api_base", "ns_base_url"])
     return _env_with_name(*names)
 
@@ -964,7 +967,7 @@ def _coze_api_base_with_name(token_source: str = "") -> tuple[str, str]:
 def _normalize_coze_workflow_url(raw_url: str) -> str:
     url = str(raw_url or "").strip().rstrip("/")
     if not url:
-        return DEFAULT_COZE_WORKFLOW_URL
+        return DEFAULT_NS_WORKFLOW_URL
     if url.endswith("/v1/workflow/run") or url.endswith("/workflow/run"):
         return url
     if "/v1" in url:

@@ -790,6 +790,11 @@ class StageCacheMixin:
         )
         rollback_script_start_options = rollback_stage_start_options.get("script", [])
         rollback_stage_options = self._available_rollback_stage_options(snapshot) if can_stage_rollback else []
+        best_final_script = self._best_final_script_text(snapshot)
+        has_framework_script_output = bool(
+            str(snapshot.get("asset_kind") or "").strip() == "framework_planner"
+            and str(getattr(self, "_framework_to_script_final_text", lambda _snapshot: "")(snapshot) or "").strip()
+        )
         payload: dict[str, Any] = {
             "project_id": snapshot.get("project_id"),
             "task_id": snapshot.get("task_id"),
@@ -836,9 +841,9 @@ class StageCacheMixin:
             "display_stage_title": display_payload["stage_title"],
             "display_stage_output": display_payload["output"],
             "display_stage_output_natural": display_payload["natural_output"],
-            "has_final": bool(
-                str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip()
-            ),
+            "has_final": bool(best_final_script),
+            "has_framework_script_output": has_framework_script_output,
+            "framework_to_script_ready": has_framework_script_output,
         }
         if str(snapshot.get("asset_kind") or "").strip() == "framework_planner":
             input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
@@ -1542,6 +1547,14 @@ class StageCacheMixin:
             or ""
         ).strip()
         final_script = self._best_final_script_text(snapshot)
+        asset_kind = str(snapshot.get("asset_kind") or "project").strip()
+        raw_asset_type = str(snapshot.get("asset_type") or input_payload.get("asset_type") or "").strip()
+        if not raw_asset_type:
+            raw_asset_type = "framework" if asset_kind == "framework_planner" else "new_script"
+        has_framework_script_output = bool(
+            asset_kind == "framework_planner"
+            and str(getattr(self, "_framework_to_script_final_text", lambda _snapshot: "")(snapshot) or "").strip()
+        )
         summary_source = story_outline or (final_script if is_tool_asset else "")
         summary = self._fallback_story_teaser(summary_source) if use_teaser else ""
         if not summary:
@@ -1567,7 +1580,10 @@ class StageCacheMixin:
             "completion_confirmed": _completion_confirmed(snapshot),
             "awaiting_user_confirmation": _awaiting_completion_confirmation(snapshot),
             "cache_notice": _cache_notice(snapshot),
-            "asset_kind": snapshot.get("asset_kind") or "project",
+            "asset_kind": asset_kind,
+            "asset_type": raw_asset_type,
+            "has_framework_script_output": has_framework_script_output,
+            "framework_to_script_ready": has_framework_script_output,
             "tool_key": str(snapshot.get("tool_key") or "").strip(),
             "tool_label": str(snapshot.get("tool_label") or "").strip(),
             "tool_filename": str(artifacts.get("tool_filename") or "").strip(),
@@ -1637,4 +1653,3 @@ class StageCacheMixin:
             encoding="utf-8",
         )
         snapshot.setdefault("artifacts", {}).update(artifacts_update)
-

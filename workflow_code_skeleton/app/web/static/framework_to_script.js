@@ -572,14 +572,21 @@ function stage11BatchMap() {
 
 function stage12Completion() {
   const expected = numericKeys(stage11BatchMap());
-  const done = numericKeys(((state.scriptStages || {}).stage12 || {}).batches);
+  const stage12 = ((state.scriptStages || {}).stage12 || {});
+  const done = numericKeys(stage12.batches);
+  const completed = new Set((state.completedStages || []).map((item) => String(item)));
+  const hasScript = hasStage12ScriptText();
   const missing = missingBatchStarts(expected, done);
 
   return {
     expected,
     done,
     missing,
-    complete: Boolean(expected.length && missing.length === 0)
+    complete: Boolean(
+      (expected.length && missing.length === 0 && (done.length > 0 || hasScript))
+      || (!expected.length && hasScript)
+      || (completed.has("12") && hasScript)
+    )
   };
 }
 
@@ -704,6 +711,11 @@ function stage12Completion() {
       batches: mergedBatches,
       updated_at: new Date().toISOString(),
     };
+
+    if (!Array.isArray(state.completedStages)) state.completedStages = [];
+    if (stage12Completion().complete && !state.completedStages.map(String).includes("12")) {
+      state.completedStages.push("12");
+    }
   }
 
   function clearDownstreamStages(stage) {
@@ -1579,6 +1591,7 @@ function stage12Completion() {
       if (data.batchCausalConflictPlan || data.batches) {
         mergeStage11(data);
         saveWorkspace();
+        await refreshAssetAfterRunUpdate();
         const finalMissing = missingBatchStarts(expectedStarts, numericKeys((state.scriptStages.stage11 || {}).batches));
         if (finalMissing.length) {
           throw new Error(`11 未完成全部批次，剩余第 ${finalMissing.join("、")} 集起。`);
@@ -1663,6 +1676,7 @@ function stage12Completion() {
         firstRequest = false;
       }
       ensureStage11BatchesOnState();
+      await refreshAssetAfterRunUpdate();
       const finalStage11Keys = numericKeys(stage11BatchMap());
       const finalMissing = missingBatchStarts(finalStage11Keys, numericKeys((state.scriptStages.stage12 || {}).batches));
       if (finalMissing.length) {
@@ -1979,7 +1993,7 @@ function stage12Completion() {
     const stage11Progress = stage11Completion();
     const stage12Progress = stage12Completion();
     const has11 = hasContent(stage11.batchCausalConflictPlan) || stage11Progress.done.length > 0;
-    const has12 = hasContent(stage12.batchScriptText) || stage12Progress.done.length > 0;
+    const has12 = hasStage12ScriptText() || stage12Progress.done.length > 0;
     const has11Complete = stage11Progress.complete;
     const has12Complete = stage12Progress.complete;
     const stage11Run = activeRunForStage("11");

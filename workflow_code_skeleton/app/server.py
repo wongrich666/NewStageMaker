@@ -1154,6 +1154,20 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         workspace_state["project_id"] = project_id
         workspace_state["updated_at"] = now
         artifacts["framework_to_script_state"] = workspace_state
+        if str(stage_key) == "stage12":
+            try:
+                export_asset = _framework_asset_payload(snapshot, include_detail=True)
+                final_text = _framework_to_script_txt(export_asset)
+            except Exception:
+                logger.exception("framework-to-script final text projection failed project_id=%s", project_id)
+                final_text = ""
+            if str(final_text or "").strip():
+                artifacts["framework_to_script_final_text"] = final_text
+                artifacts["final_output_text"] = final_text
+                artifacts["final_script"] = final_text
+                snapshot["status"] = "completed"
+                snapshot["current_stage"] = "framework_to_script"
+                snapshot["current_stage_label"] = "08-12 剧本生成完成"
         snapshot["updated_at"] = now
         record = task_manager._projects.get(project_id)
         if record:
@@ -3175,7 +3189,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 return _json_error(
                     str(exc),
                     status=500,
-                    fallback="08 场景字典提炼调用失败，请检查 Coze token、COZE_WORKFLOW_STAGE_08_ID 和工作流变量。",
+                    fallback="08 场景字典提炼调用失败，请检查 Coze token、ns_workflow_stage_08_id 和工作流变量。",
                 )
 
             scene_dictionary, rules_digest = _extract_scene_payload(raw_output)
@@ -3917,7 +3931,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 return _json_error(
                     str(exc),
                     status=500,
-                    fallback="09 人设服装 alias 映射调用失败，请检查 Coze token、COZE_WORKFLOW_STAGE_09_ID 和工作流变量。",
+                        fallback="09 人设服装 alias 映射调用失败，请检查 Coze token、ns_workflow_stage_09_id 和工作流变量。",
                 )
 
             appearanceMapping = _extract_appearance_payload(raw_output)
@@ -4699,7 +4713,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 return _json_error(
                     str(exc),
                     status=500,
-                    fallback="10 分集细化方案调用失败，请检查 Coze token、COZE_WORKFLOW_STAGE_10_ID 和工作流变量。",
+                    fallback="10 分集细化方案调用失败，请检查 Coze token、ns_workflow_stage_10_id 和工作流变量。",
                 )
 
             plan, plan_text = _extract_enriched_payload(raw_output)

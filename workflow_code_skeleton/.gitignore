@@ -66,3 +66,4 @@ patch_*.py
 *_verify.png
 *.bak
 *.bak_*
+*.bak-*
