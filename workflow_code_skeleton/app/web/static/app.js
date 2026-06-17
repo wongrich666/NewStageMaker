@@ -3441,17 +3441,18 @@ startRuntimeDebugPolling();
   function renderAuditPopoverButton(title, bodyHtml, count = "") {
     if (!auditText(bodyHtml)) return "";
     return `
-      <button class="audit-popover-trigger" type="button" data-action="toggle-audit-popover">
-        <span>${escapeHtml(title)}</span>
-        ${count !== "" ? `<small>${escapeHtml(count)}</small>` : ""}
-        <b aria-hidden="true">⌄</b>
-      </button>
-      <div class="audit-popover" data-audit-popover hidden>
-        <div class="audit-popover-card">
-          <button class="audit-popover-close" type="button" data-action="close-audit-popover" aria-label="关闭">×</button>
-          ${bodyHtml}
+      <section class="audit-inline-section">
+        <button class="audit-popover-trigger" type="button" data-action="toggle-audit-popover" aria-expanded="false">
+          <span>${escapeHtml(title)}</span>
+          ${count !== "" ? `<small>${escapeHtml(count)}</small>` : ""}
+          <b aria-hidden="true">⌄</b>
+        </button>
+        <div class="audit-popover audit-inline-card" data-audit-popover hidden>
+          <div class="audit-popover-card">
+            ${bodyHtml}
+          </div>
         </div>
-      </div>
+      </section>
     `;
   }
 
@@ -3862,8 +3863,16 @@ startRuntimeDebugPolling();
     }
     const popovers = [...shell.querySelectorAll("[data-audit-popover]")];
     const previousHidden = popovers.map((item) => item.hidden);
+    const triggers = [...shell.querySelectorAll("[data-action='toggle-audit-popover']")];
+    const previousExpanded = triggers.map((item) => item.getAttribute("aria-expanded") || "false");
+    const previousIcons = triggers.map((item) => item.querySelector("b")?.textContent || "⌄");
     shell.classList.add("audit-exporting");
     popovers.forEach((item) => { item.hidden = false; });
+    triggers.forEach((item) => {
+      item.setAttribute("aria-expanded", "true");
+      const icon = item.querySelector("b");
+      if (icon) icon.textContent = "⌃";
+    });
     try {
       const html2canvas = await loadHtml2Canvas();
       const canvas = await html2canvas(shell, {
@@ -3879,6 +3888,11 @@ startRuntimeDebugPolling();
       link.remove();
     } finally {
       popovers.forEach((item, index) => { item.hidden = previousHidden[index]; });
+      triggers.forEach((item, index) => {
+        item.setAttribute("aria-expanded", previousExpanded[index] || "false");
+        const icon = item.querySelector("b");
+        if (icon) icon.textContent = previousIcons[index] || "⌄";
+      });
       shell.classList.remove("audit-exporting");
     }
   }
@@ -6405,8 +6419,10 @@ function renderToolForm(toolKey) {
         const popover = actionButton.nextElementSibling;
         if (popover?.matches("[data-audit-popover]")) {
           const shouldOpen = popover.hidden;
-          els.toolOutputBox.querySelectorAll("[data-audit-popover]").forEach((item) => { item.hidden = true; });
           popover.hidden = !shouldOpen;
+          actionButton.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+          const icon = actionButton.querySelector("b");
+          if (icon) icon.textContent = shouldOpen ? "⌃" : "⌄";
         }
         return;
       }
@@ -6433,8 +6449,7 @@ function renderToolForm(toolKey) {
       }
     });
     document.addEventListener("click", (event) => {
-      if (event.target.closest(".audit-popover-card, .audit-popover-trigger, .audit-ecg-node, .audit-point-sticky")) return;
-      document.querySelectorAll("[data-audit-popover]").forEach((item) => { item.hidden = true; });
+      if (event.target.closest(".audit-ecg-node, .audit-point-sticky")) return;
       document.querySelectorAll("[data-audit-point-card]").forEach((item) => { item.hidden = true; });
     });
 

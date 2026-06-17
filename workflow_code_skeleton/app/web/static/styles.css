@@ -5932,39 +5932,47 @@ body,
 }
 
 .audit-popover-bar {
-  position: relative;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  gap: 10px;
 }
 
 .audit-popover-trigger {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  width: 100%;
   min-height: 34px;
-  padding: 0 11px;
+  padding: 9px 12px;
+  border-radius: 8px;
   color: #3a2a1d;
   font-weight: 800;
   cursor: pointer;
 }
 
 .audit-popover-trigger small {
+  margin-left: auto;
   color: #8b6842;
 }
 
+.audit-inline-section {
+  display: grid;
+  gap: 8px;
+}
+
 .audit-popover {
-  position: absolute;
-  z-index: 12;
-  top: 44px;
-  left: 0;
-  width: min(760px, calc(100vw - 340px));
+  position: static;
+  width: 100%;
 }
 
 .audit-popover-card {
-  max-height: min(72vh, 680px);
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
   padding: 14px;
+  border: 1px solid rgba(92, 65, 35, 0.12);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 252, 245, 0.94), rgba(255, 247, 234, 0.9));
+  box-shadow: 0 14px 34px rgba(92, 65, 35, 0.10);
 }
 
 .audit-popover-close {
@@ -6015,22 +6023,12 @@ body,
   justify-content: flex-end;
 }
 
-.audit-exporting .audit-popover {
-  position: relative;
-  top: auto;
-  left: auto;
-  width: 100%;
-  margin-top: 8px;
-}
-
 .audit-exporting .audit-popover-card {
   max-height: none;
 }
 
 @media (max-width: 900px) {
   .audit-popover {
-    position: fixed;
-    inset: auto 12px 12px;
     width: auto;
   }
 }

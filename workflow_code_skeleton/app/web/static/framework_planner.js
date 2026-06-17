@@ -2679,6 +2679,7 @@
               <button class="fp-btn small" data-action="new-knowledge-tag">${ui.knowledge.formOpen && !ui.knowledge.editingId ? "收起新建" : "新建自定义标签"}</button>
             </div>
             ${ui.knowledge.status ? `<div class="fp-inline-warning compact">${escapeHtml(ui.knowledge.status)}</div>` : ""}
+            ${ui.knowledge.formOpen ? renderKnowledgeForm() : ""}
             ${renderKnowledgeSelected(selectedTags, missingIds)}
             <div class="fp-knowledge-grid">
               <div>
@@ -2695,7 +2696,6 @@
               </div>
             </div>
             ${renderKnowledgeStagePreview()}
-            ${ui.knowledge.formOpen ? renderKnowledgeForm() : ""}
           </div>
         ` : ""}
       </section>
@@ -6244,6 +6244,10 @@ async function saveFrameworkAsset(options) {
       stage_prompts: normalizeStagePrompts(tag.stage_prompts || {}),
     } : emptyKnowledgeTagForm();
     render();
+    window.requestAnimationFrame(() => {
+      app.querySelector(".fp-knowledge-form")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      app.querySelector("[data-knowledge-form-key='name']")?.focus({ preventScroll: true });
+    });
   }
 
   function openCurrentStagePreferenceEditor(stageKey) {
