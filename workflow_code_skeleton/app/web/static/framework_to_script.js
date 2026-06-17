@@ -7,6 +7,9 @@
   const authToken = params.get("auth_token") || "";
   const STORAGE_KEY = "frameworkToScriptWorkspace.v1";
   const RAW_KEYS = new Set(["responseData", "choices", "reasoningText", "historyPreview", "newVariables", "updateVarResult", "raw_stage_responses", "raw_output", "raw", "answerText", "debug", "logs", "cache"]);
+  const RESILIENT_STAGE_RETRY_DELAY_MS = 60 * 1000;
+  const RESILIENT_STAGE_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
+  const RESILIENT_STAGE_MAX_RETRY_ATTEMPTS = 30;
   const FIELD_LABELS = {
     framework_plan_package: "最终框架策划包",
     source_brief: "原文信息",
@@ -19,7 +22,7 @@
     adaptation_guide: "整体改编指引",
     sceneDictionary: "场景字典",
     scriptWorldRulesDigest: "世界观规则摘要",
-    appearanceMapping: "角色外观映射",
+    appearanceMapping: "确定角色外观",
     enrichedEpisodePlan: "分集细化文本",
     batchCausalConflictPlan: "因果冲突推进计划",
     batchCausalConflictReview: "因果冲突审核",
@@ -46,6 +49,10 @@
     isRunning: false,
     runningStage: "",
     runningStartedAt: "",
+    runningProgress: null,
+    runningProgressTimer: null,
+    runningRetryMessage: "",
+    runningRetryCountdown: 0,
     error: null,
     importStatus: "",
     frameworkSource: "",
@@ -110,6 +117,21 @@
       );
     }
     return stripRaw(data);
+  }
+
+  async function requestJsonWithTimeout(path, options, timeoutMs) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), Math.max(1, Number(timeoutMs) || RESILIENT_STAGE_REQUEST_TIMEOUT_MS));
+    try {
+      return await requestJson(path, Object.assign({}, options || {}, { signal: controller.signal }));
+    } catch (error) {
+      if (error && error.name === "AbortError") {
+        throw new Error("请求长时间无响应，可能是后端中断或网络异常。");
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
   }
 
   function stripRaw(value) {
@@ -257,6 +279,33 @@
     }
   }
 
+  function scheduleInterruptedStageResume(stage, attempt = 0) {
+    const stageValue = String(stage || "");
+    if (!["11", "12"].includes(stageValue)) return;
+    window.setTimeout(() => {
+      if (stageHasCompleted(stageValue)) {
+        state.error = null;
+        render();
+        return;
+      }
+      if (!currentAssetReady()) {
+        if (attempt < 20) {
+          scheduleInterruptedStageResume(stageValue, attempt + 1);
+        } else {
+          state.error = `检测到 ${stageValue} 阶段中断，但框架资产尚未就绪。请重新导入框架资产后继续。`;
+          render();
+        }
+        return;
+      }
+      state.error = null;
+      if (stageValue === "11") {
+        runStage11({ skipConfirm: true });
+      } else {
+        runStage12({ skipConfirm: true });
+      }
+    }, attempt ? 3000 : 1000);
+  }
+
   function restoreRunningStage() {
     try {
       const raw = window.localStorage.getItem(RUNNING_STAGE_STORAGE_KEY);
@@ -286,7 +335,12 @@
       state.runningStage = "";
       state.runningStartedAt = "";
       state.isRunning = false;
-      state.error = `已清除上次遗留的 ${payload.runningStage} 阶段运行锁，可重新点击运行。`;
+      if (["11", "12"].includes(String(payload.runningStage))) {
+        state.error = `检测到上次 ${payload.runningStage} 阶段可能中断，正在自动从已完成批次断点续跑。`;
+        scheduleInterruptedStageResume(payload.runningStage);
+      } else {
+        state.error = `已清除上次遗留的 ${payload.runningStage} 阶段运行锁，可重新点击运行。`;
+      }
     } catch (error) {
       console.warn("restore running stage failed", error);
       try {
@@ -345,6 +399,119 @@
   function missingBatchStarts(expected, done) {
     const completed = new Set((done || []).map((key) => String(key)));
     return (expected || []).filter((key) => !completed.has(String(key)));
+  }
+
+  function batchRangeForStart(startEpisode) {
+    const start = Number(startEpisode) || 0;
+    if (!start) return "";
+    const plan = stage10Plan((state.scriptStages || {}).stage10 || {});
+    const total = inferTotalEpisodes(plan, state.importedFrameworkAsset);
+    const end = total ? Math.min(total, start + 4) : start + 4;
+    return `${start}-${end}集`;
+  }
+
+  function runningProgressText(stage) {
+    const progress = state.runningProgress || {};
+    if (String(progress.stage || "") !== String(stage || "")) return "";
+    if (state.runningRetryMessage) return state.runningRetryMessage;
+    const phases = ["撰写", "审核", "修改", "保存记忆"];
+    const phase = progress.phase || phases[0];
+    const range = progress.range || batchRangeForStart(progress.startEpisode);
+    const round = Math.max(1, Number(progress.round) || 1);
+    return `${range || "当前批次"}第${round}轮${phase}中...`;
+  }
+
+  function stopRunningProgress() {
+    if (state.runningProgressTimer) {
+      window.clearInterval(state.runningProgressTimer);
+    }
+    state.runningProgressTimer = null;
+    state.runningProgress = null;
+    state.runningRetryMessage = "";
+    state.runningRetryCountdown = 0;
+  }
+
+  function startRunningProgress(stage, startEpisode) {
+    const phases = ["撰写", "审核", "修改", "保存记忆"];
+    if (state.runningProgressTimer) {
+      window.clearInterval(state.runningProgressTimer);
+    }
+    state.runningProgress = {
+      stage: String(stage || ""),
+      startEpisode: Number(startEpisode) || 0,
+      range: batchRangeForStart(startEpisode),
+      tick: 0,
+      round: 1,
+      phase: phases[0],
+    };
+    state.runningProgressTimer = window.setInterval(() => {
+      const progress = state.runningProgress;
+      if (!progress || String(progress.stage || "") !== String(stage || "")) return;
+      if (state.runningRetryMessage) return;
+      const tick = Number(progress.tick || 0) + 1;
+      progress.tick = tick;
+      progress.phase = phases[tick % phases.length];
+      progress.round = Math.floor(tick / phases.length) + 1;
+      render();
+    }, 1800);
+  }
+
+  function resilientStageLabel(stage) {
+    return String(stage || "") === "12" ? "12 正文及对话" : "11 开头冲突钩子";
+  }
+
+  function formatRetryError(error) {
+    return String((error && error.message) || error || "请求失败").replace(/\s+/g, " ").trim();
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+  }
+
+  async function waitBeforeStageRetry(stage, startEpisode, attempt, error) {
+    const range = batchRangeForStart(startEpisode) || "当前批次";
+    const reason = formatRetryError(error);
+    const totalSeconds = Math.max(1, Math.ceil(RESILIENT_STAGE_RETRY_DELAY_MS / 1000));
+    state.runningRetryCountdown = totalSeconds;
+    for (let seconds = totalSeconds; seconds > 0; seconds -= 1) {
+      state.runningRetryCountdown = seconds;
+      state.runningRetryMessage = `${range}第${attempt}次自动重试准备中，${seconds}秒后继续...（${reason}）`;
+      render();
+      await delay(1000);
+    }
+    state.runningRetryCountdown = 0;
+    state.runningRetryMessage = "";
+    startRunningProgress(stage, startEpisode);
+    render();
+  }
+
+  async function runResilientStageBatch(stage, startEpisode, operation) {
+    let attempt = 1;
+    while (attempt <= RESILIENT_STAGE_MAX_RETRY_ATTEMPTS) {
+      try {
+        startRunningProgress(stage, startEpisode);
+        render();
+        return await operation(attempt);
+      } catch (error) {
+        if (attempt >= RESILIENT_STAGE_MAX_RETRY_ATTEMPTS) {
+          throw new Error(`${resilientStageLabel(stage)}自动重试 ${attempt} 次后仍未完成：${formatRetryError(error)}。已保留已完成批次，可重新点击继续。`);
+        }
+        await waitBeforeStageRetry(stage, startEpisode, attempt + 1, error);
+        attempt += 1;
+      }
+    }
+    throw new Error(`${resilientStageLabel(stage)}自动重试未完成。`);
+  }
+
+  function renderRunningProgress(stage) {
+    const text = runningProgressText(stage);
+    if (!text) return "";
+    return `
+      <div class="wts-running-detail" role="status" aria-live="polite">
+        <span class="wts-running-dot" aria-hidden="true"></span>
+        <span>${escapeHtml(text)}</span>
+      </div>
+    `;
   }
 
   function stageHasCompleted(stage) {
@@ -464,6 +631,28 @@
       .replace(/([a-z])([A-Z])/g, "$1 $2")
       .replaceAll("_", " ")
       .trim() || "内容";
+  }
+
+  function truncate(text, maxLength) {
+    const value = String(text || "").trim();
+    const limit = Math.max(1, Number(maxLength) || 120);
+    return value.length > limit ? `${value.slice(0, limit)}...` : value;
+  }
+
+  function readableValue(value) {
+    if (window.fieldLabelsCn && typeof window.fieldLabelsCn.readableText === "function") {
+      return window.fieldLabelsCn.readableText(value);
+    }
+    if (Array.isArray(value)) {
+      return value.map((item, index) => `${index + 1}. ${readableValue(item)}`).join("\n");
+    }
+    if (value && typeof value === "object") {
+      return Object.keys(value)
+        .filter((key) => !RAW_KEYS.has(key) && hasContent(value[key]))
+        .map((key) => `${labelFor(key)}：${readableValue(value[key])}`)
+        .join("\n");
+    }
+    return String(value ?? "");
   }
 
   function hasObject(value) {
@@ -1012,7 +1201,7 @@
       clearDownstreamStages("stage08");
       saveWorkspace();
     } catch (error) {
-      state.error = error.message || "08 场景字典提炼失败";
+      state.error = error.message || "08 提炼核心场景失败";
     } finally {
       clearRunningStage("08");
       render();
@@ -1027,7 +1216,7 @@
     }
     const stage08 = state.scriptStages.stage08 || {};
     if (!hasObject(stage08.sceneDictionary)) {
-      state.error = "请先完成 08 场景字典提炼。";
+      state.error = "请先完成 08 提炼核心场景。";
       render();
       return;
     }
@@ -1050,7 +1239,7 @@
       clearDownstreamStages("stage09");
       saveWorkspace();
     } catch (error) {
-      state.error = error.message || "09 角色外观映射失败";
+      state.error = error.message || "09 确定角色外观失败";
     } finally {
       clearRunningStage("09");
       render();
@@ -1068,13 +1257,13 @@
     const stage09 = state.scriptStages.stage09 || {};
 
     if (!hasObject(stage08.sceneDictionary)) {
-      state.error = "请先完成 08 场景字典提炼。";
+      state.error = "请先完成 08 提炼核心场景。";
       render();
       return;
     }
 
     if (!hasObject(stage09.appearanceMapping)) {
-      state.error = "请先完成 09 角色外观映射。";
+      state.error = "请先完成 09 确定角色外观。";
       render();
       return;
     }
@@ -1170,7 +1359,7 @@
 
       saveWorkspace();
     } catch (error) {
-      state.error = error.message || "10 分集细化方案失败";
+      state.error = error.message || "10 优化分集计划失败";
     } finally {
       clearRunningStage("10");
       render();
@@ -1241,12 +1430,12 @@
       return;
     }
     if (!hasObject(stage08.sceneDictionary)) {
-      state.error = "请先完成 08 场景字典提炼。";
+      state.error = "请先完成 08 提炼核心场景。";
       render();
       return;
     }
     if (!hasObject(stage09.appearanceMapping)) {
-      state.error = "请先完成 09 角色外观映射。";
+      state.error = "请先完成 09 确定角色外观。";
       render();
       return;
     }
@@ -1269,26 +1458,31 @@
         const beforeCount = numericKeys(currentStage11.batches).length;
         const beforeMissing = missingBatchStarts(expectedStarts, numericKeys(currentStage11.batches));
         if (expectedStarts.length && !beforeMissing.length) break;
-        const data = await requestJson("/api/framework-to-script/stage/11", {
-          method: "POST",
-          body: JSON.stringify(attachKnowledgePayload({
-            ...frameworkRequestBase(),
-            allEnrichedEpisodePlan,
-            sceneDictionary: stage08.sceneDictionary,
-            scriptWorldRulesDigest: stage08.scriptWorldRulesDigest,
-            appearanceMapping: stage09.appearanceMapping,
-            reset_stage11: resetStage11 && firstRequest,
-            conflictMemory: resetStage11 && firstRequest ? "" : (currentStage11.conflictMemory || ""),
-          }, "11")),
+        const batchStart = beforeMissing[0] || expectedStarts[beforeCount] || expectedStarts[0];
+        await runResilientStageBatch("11", batchStart, async () => {
+          const latestStage11 = state.scriptStages.stage11 || {};
+          const latestBeforeCount = numericKeys(latestStage11.batches).length;
+          const data = await requestJsonWithTimeout("/api/framework-to-script/stage/11", {
+            method: "POST",
+            body: JSON.stringify(attachKnowledgePayload({
+              ...frameworkRequestBase(),
+              allEnrichedEpisodePlan,
+              sceneDictionary: stage08.sceneDictionary,
+              scriptWorldRulesDigest: stage08.scriptWorldRulesDigest,
+              appearanceMapping: stage09.appearanceMapping,
+              reset_stage11: resetStage11 && firstRequest,
+              conflictMemory: resetStage11 && firstRequest ? "" : (latestStage11.conflictMemory || ""),
+            }, "11")),
+          }, RESILIENT_STAGE_REQUEST_TIMEOUT_MS);
+          mergeStage11(data);
+          saveWorkspace();
+          render();
+          const latestAfterCount = numericKeys((state.scriptStages.stage11 || {}).batches).length;
+          const latestAfterMissing = missingBatchStarts(expectedStarts, numericKeys((state.scriptStages.stage11 || {}).batches));
+          if (latestAfterMissing.length && latestAfterCount <= latestBeforeCount) {
+            throw new Error(`后端返回后未新增批次，仍缺少第 ${latestAfterMissing[0]} 集起。`);
+          }
         });
-        mergeStage11(data);
-        saveWorkspace();
-        render();
-        const afterCount = numericKeys((state.scriptStages.stage11 || {}).batches).length;
-        const afterMissing = missingBatchStarts(expectedStarts, numericKeys((state.scriptStages.stage11 || {}).batches));
-        if (afterMissing.length && afterCount <= beforeCount) {
-          throw new Error(`11 未能继续生成剩余批次：第 ${afterMissing[0]} 集起。`);
-        }
         firstRequest = false;
       }
       const finalMissing = missingBatchStarts(expectedStarts, numericKeys((state.scriptStages.stage11 || {}).batches));
@@ -1299,6 +1493,7 @@
     } catch (error) {
       state.error = error.message || "11 开头冲突钩子失败";
     } finally {
+      stopRunningProgress();
       clearRunningStage("11");
       render();
     }
@@ -1335,25 +1530,32 @@
         const beforeCount = numericKeys(currentStage12.batches).length;
         const beforeMissing = missingBatchStarts(stage11Keys, numericKeys(currentStage12.batches));
         if (expectedCount && !beforeMissing.length) break;
-        const data = await requestJson("/api/framework-to-script/stage/12", {
-          method: "POST",
-          body: JSON.stringify(attachKnowledgePayload({
-            ...frameworkRequestBase(),
-            stage08: state.scriptStages.stage08 || {},
-            stage09: state.scriptStages.stage09 || {},
-            stage11: currentStage11,
-            stage12: currentStage12,
-            reset_stage12: resetStage12 && firstRequest,
-          }, "12")),
+        const batchStart = beforeMissing[0] || stage11Keys[beforeCount] || stage11Keys[0];
+        await runResilientStageBatch("12", batchStart, async () => {
+          const latestStage11 = state.scriptStages.stage11 || {};
+          const latestStage12 = state.scriptStages.stage12 || {};
+          const latestStage11Keys = numericKeys(latestStage11.batches);
+          const latestBeforeCount = numericKeys(latestStage12.batches).length;
+          const data = await requestJsonWithTimeout("/api/framework-to-script/stage/12", {
+            method: "POST",
+            body: JSON.stringify(attachKnowledgePayload({
+              ...frameworkRequestBase(),
+              stage08: state.scriptStages.stage08 || {},
+              stage09: state.scriptStages.stage09 || {},
+              stage11: latestStage11,
+              stage12: latestStage12,
+              reset_stage12: resetStage12 && firstRequest,
+            }, "12")),
+          }, RESILIENT_STAGE_REQUEST_TIMEOUT_MS);
+          mergeStage12(data);
+          saveWorkspace();
+          render();
+          const latestAfterCount = numericKeys((state.scriptStages.stage12 || {}).batches).length;
+          const latestAfterMissing = missingBatchStarts(latestStage11Keys, numericKeys((state.scriptStages.stage12 || {}).batches));
+          if (latestAfterMissing.length && latestAfterCount <= latestBeforeCount) {
+            throw new Error(`后端返回后未新增正文批次，仍缺少第 ${latestAfterMissing[0]} 集起。`);
+          }
         });
-        mergeStage12(data);
-        saveWorkspace();
-        render();
-        const afterCount = numericKeys((state.scriptStages.stage12 || {}).batches).length;
-        const afterMissing = missingBatchStarts(stage11Keys, numericKeys((state.scriptStages.stage12 || {}).batches));
-        if (afterMissing.length && afterCount <= beforeCount) {
-          throw new Error(`12 未能继续生成剩余正文批次：第 ${afterMissing[0]} 集起。`);
-        }
         firstRequest = false;
       }
       const finalStage11Keys = numericKeys((state.scriptStages.stage11 || {}).batches);
@@ -1365,6 +1567,7 @@
     } catch (error) {
       state.error = error.message || "12 正文及对话失败";
     } finally {
+      stopRunningProgress();
       if (!options.autoFromStage11) {
         clearRunningStage("12");
       } else {
@@ -1509,6 +1712,40 @@
     `;
   }
 
+  function renderFrameworkPackageField(label, value, key, index) {
+    if (!hasContent(value)) return "";
+    const text = typeof value === "string" ? value : readableValue(value);
+    const count = Array.isArray(value)
+      ? `${value.filter(hasContent).length} 条`
+      : (value && typeof value === "object" ? `${Object.keys(value).filter((itemKey) => !RAW_KEYS.has(itemKey) && hasContent(value[itemKey])).length} 项` : "");
+    return `
+      <details class="wts-package-field" data-framework-package-field="${escapeHtml(key || String(index))}">
+        <summary>
+          <span class="wts-package-arrow" aria-hidden="true"></span>
+          <strong>${escapeHtml(label)}</strong>
+          <small>${escapeHtml(count || truncate(text, 96) || "点击展开查看")}</small>
+        </summary>
+        <div class="wts-package-field-body">${renderTreeText(text || "暂无")}</div>
+      </details>
+    `;
+  }
+
+  function renderFrameworkPackageStack(packageValue) {
+    const source = packageValue && typeof packageValue === "object" && !Array.isArray(packageValue) ? packageValue : {};
+    const fields = [];
+    Object.keys(source)
+      .filter((key) => !RAW_KEYS.has(key) && hasContent(source[key]))
+      .forEach((key) => fields.push({ key, label: labelFor(key), value: source[key] }));
+    if (!fields.length && hasContent(packageValue)) {
+      fields.push({ key: "framework_plan_package", label: "最终策划包", value: packageValue });
+    }
+    return `
+      <div class="wts-package-stack">
+        ${fields.map((item, index) => renderFrameworkPackageField(item.label, item.value, item.key, index)).join("") || `<div class="wts-empty-inline">暂无最终策划包内容</div>`}
+      </div>
+    `;
+  }
+
   function renderAssetPanel() {
     if (!state.assetPanelOpen) return "";
     return `
@@ -1587,25 +1824,9 @@
             <button type="button" class="wts-btn ghost" data-action="save-workspace">保存当前版本</button>
           </div>
         </div>
-        <div class="wts-summary-grid">
-          <div class="wts-asset-current">
-            <strong>当前使用的框架资产</strong>
-            <span>名称：${escapeHtml(asset.title || "未命名框架资产")}</span>
-            <span>ID：${escapeHtml(state.frameworkAssetId || "未记录")}</span>
-          </div>
-          ${[
-            ["worldview_plan", "世界观"],
-            ["character_plan", "人物"],
-            ["beat_checkpoint_timeline", "节拍"],
-            ["character_storylines", "故事线"],
-            ["adaptation_guide", "改编指引"],
-            ["framework_plan_package", "最终策划包"],
-          ].map(([key, title]) => `
-            <details class="wts-output">
-              <summary>${escapeHtml(title)}</summary>
-              ${renderTree(key === "framework_plan_package" ? state.frameworkPlanPackage : frameworkStageValue(key), key)}
-            </details>
-          `).join("")}
+        <div class="wts-framework-package-only">
+          <h3>最终策划包</h3>
+          ${renderFrameworkPackageStack(state.frameworkPlanPackage)}
         </div>
       </section>
     `;
@@ -1651,7 +1872,7 @@
     const has11Complete = stage11Progress.complete;
     const has12Complete = stage12Progress.complete;
     const stage11Status = state.runningStage === "11"
-      ? `运行中 ${stage11Progress.done.length}/${stage11Progress.expected.length || "?"}`
+      ? (runningProgressText("11") || `运行中 ${stage11Progress.done.length}/${stage11Progress.expected.length || "?"}`)
       : has11Complete
         ? "已完成"
         : has11
@@ -1660,7 +1881,7 @@
             ? "待运行"
             : "等待 10";
     const stage12Status = state.runningStage === "12"
-      ? `运行中 ${stage12Progress.done.length}/${stage12Progress.expected.length || "?"}`
+      ? (runningProgressText("12") || `运行中 ${stage12Progress.done.length}/${stage12Progress.expected.length || "?"}`)
       : has12Complete
         ? "已完成"
         : has12
@@ -1686,7 +1907,7 @@
                <div class="wts-steps">
           ${renderStageCard(
             "08",
-            "场景字典提炼",
+            "提炼核心场景",
             state.runningStage === "08" ? "运行中" : has08 ? "已完成" : "待运行",
             has08 ? "重新运行 08" : "运行 08",
             "run-stage-08",
@@ -1699,7 +1920,7 @@
 
           ${renderStageCard(
             "09",
-            "角色外观映射",
+            "确定角色外观",
             state.runningStage === "09" ? "运行中" : has09 ? "已完成" : has08 ? "待运行" : "等待 08",
             has09 ? "重新运行 09" : "运行 09",
             "run-stage-09",
@@ -1711,18 +1932,18 @@
           )}
           ${renderStageCard(
             "10",
-            "分集细化方案",
+            "优化分集计划",
             state.runningStage === "10" ? "运行中" : has10 ? "已完成" : has09 ? "待运行" : "等待 09",
             has10 ? "重新运行 10" : "运行 10",
             "run-stage-10",
             locked || !has09,
             has10 ? `
               <details class="wts-output" ${outputDetailsAttrs("stage10:enrichedEpisodePlanText")}>
-                <summary>分集细化文本</summary>
+                <summary><span class="wts-output-arrow" aria-hidden="true"></span><span>分集细化文本</span></summary>
                 ${renderTree(
                   stage10.enrichedEpisodePlanText ||
                   stage10.allEnrichedEpisodePlanText ||
-                  "已生成结构化分集细化方案，供 11/12 阶段继续使用；本次未返回分集细化文本。",
+                  "已生成结构化优化分集计划，供 11/12 阶段继续使用；本次未返回分集细化文本。",
                   "enrichedEpisodePlanText"
                 )}
               </details>
@@ -1737,7 +1958,7 @@
             has11Complete ? "重新运行 11" : "运行全部 11 开头冲突钩子",
             has11Complete ? "rerun-stage-11" : "run-stage-11",
             locked || !stage10Valid,
-            has11 ? renderStage11Batches(stage11) : `<p class="wts-hint">${state.runningStage ? `当前 ${escapeHtml(state.runningStage)} 阶段运行态锁定，完成或超时后可继续。` : ""}</p>`,
+            `${renderRunningProgress("11")}${has11 ? renderStage11Batches(stage11) : `<p class="wts-hint">${state.runningStage ? `当前 ${escapeHtml(state.runningStage)} 阶段运行态锁定，完成或任务中断后才能点击按钮。` : ""}</p>`}`,
             { secondary: has11Complete }
           )}
           ${renderStageCard(
@@ -1747,7 +1968,7 @@
             stage12ButtonText,
             stage12Action,
             locked || !has11Complete,
-            has12 ? renderStage12Batches(stage12) : `<p class="wts-hint"></p>`,
+            `${renderRunningProgress("12")}${has12 ? renderStage12Batches(stage12) : `<p class="wts-hint"></p>`}`,
             { secondary: has12Complete }
           )}
         </div>

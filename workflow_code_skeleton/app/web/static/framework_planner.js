@@ -171,7 +171,7 @@
     season_count: "季数",
     episodes_per_season: "每季集数",
     minutes_per_episode: "单集分钟数",
-    adaptation_direction: "改编方向",
+    adaptation_direction: "写作方向",
     core_logline: "故事核心",
     protagonist: "主角",
     main_opposition: "主要阻力 / 对立力量",
@@ -184,7 +184,7 @@
   };
   const SOURCE_BRIEF_GROUPS = [
     ["基础信息", ["title", "source_type", "genre", "tone", "target_format", "season_count", "episodes_per_season", "minutes_per_episode"]],
-    ["改编方向", ["adaptation_direction", "core_logline"]],
+    ["写作方向", ["adaptation_direction", "core_logline"]],
     ["核心人物与冲突", ["protagonist", "main_opposition", "core_conflict"]],
     ["保留与禁区", ["must_keep_elements", "forbidden_deviations"]],
     ["材料情况", ["available_material_summary", "missing_information_risks"]],
@@ -1851,7 +1851,7 @@
       guide: "06 改编指引",
       package: "07 最终策划包",
       scene: "08 场景字典",
-      appearance: "09 角色外观映射",
+      appearance: "09 确定角色外观",
       episode: "10 分集细化",
       conflict: "11 开头冲突钩子",
       script_text: "12 正文写作",
@@ -1868,7 +1868,7 @@
       guide: "填写该标签在 06 改编指引阶段要额外注入的偏好，例如删改原则、视觉化策略、节奏要求。",
       package: "填写该标签在 07 框架校验阶段要额外注入的偏好，例如结构完整性、字段规范和落地校验。",
       scene: "填写该标签在 08 场景字典阶段要额外注入的偏好，例如场景颗粒度、可拍空间和规则摘要。",
-      appearance: "填写该标签在 09 角色外观映射阶段要额外注入的偏好，例如外观识别点、服装风格和别名一致性。",
+      appearance: "填写该标签在 09 确定角色外观阶段要额外注入的偏好，例如外观识别点、服装风格和别名一致性。",
       episode: "填写该标签在 10 分集细化阶段要额外注入的偏好，例如每集冲突推进、情绪回报和结尾牵引。",
       conflict: "填写该标签在 11 开头冲突钩子阶段要额外注入的偏好，例如批次开头爆点、因果推进和悬念。",
       script_text: "填写该标签在 12 正文写作阶段要额外注入的偏好，例如对白语气、动作可视化和节奏控制。",
@@ -2239,7 +2239,7 @@
     season_count: "季数",
     episodes_per_season: "每季集数",
     minutes_per_episode: "每集分钟数",
-    adaptation_direction: "改编方向",
+    adaptation_direction: "写作方向",
     user_constraints: "限制条件",
     story_outline: "故事描述",
     status: "状态",
@@ -2958,7 +2958,7 @@
         </div>
         <div class="fp-grid two" style="margin-top:14px">
           <div class="fp-field">
-            <label>改编方向</label>
+            <label>写作方向</label>
             <textarea data-config-key="adaptation_direction" placeholder="例如：压缩支线，强化中点反转，偏短剧强情绪推进。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.adaptation_direction)}</textarea>
           </div>
           <div class="fp-field">
@@ -3893,12 +3893,58 @@ function renderPackageBlocks() {
     `;
   }
 
-  function renderReadableFieldCard(label, value) {
+  function renderReadableFieldCard(label, value, options) {
     if (!isRenderableValue(value)) return "";
+    const classes = ["fp-readable-item"];
+    if (options && options.fullWidth) classes.push("fp-readable-item-wide");
     return `
-      <div class="fp-readable-item">
+      <div class="${classes.join(" ")}">
         <strong>${escapeHtml(label)}</strong>
         <div>${formatText(summarizeReadableValue(value))}</div>
+      </div>
+    `;
+  }
+
+  function renderPackageFieldPanel(label, value, key, index) {
+    if (!isRenderableValue(value)) return "";
+    const summary = summarizeReadableValue(value);
+    const count = Array.isArray(value)
+      ? `${value.filter(isRenderableValue).length} 条`
+      : (value && typeof value === "object" ? `${Object.keys(value).filter((itemKey) => !isHiddenTechnicalKey(itemKey) && isRenderableValue(value[itemKey])).length} 项` : "");
+    return `
+      <details class="fp-package-field-panel" data-package-field="${escapeHtml(key || String(index))}">
+        <summary>
+          <span class="fp-package-field-arrow" aria-hidden="true"></span>
+          <strong>${escapeHtml(label)}</strong>
+          <small>${escapeHtml(count || truncateText(summary, 96) || "点击展开查看")}</small>
+        </summary>
+        <div class="fp-package-field-body">${formatText(summary || "暂无")}</div>
+      </details>
+    `;
+  }
+
+  function renderPackageReadableBlocks(data) {
+    const root = pickDisplayRoot(data, { stageKey: "package", dataKey: "framework_plan_package" });
+    if (!root || typeof root !== "object" || Array.isArray(root)) {
+      return renderPackageFieldPanel("最终策划包", root, "framework_plan_package", 0);
+    }
+
+    const fields = [];
+    const usedKeys = new Set();
+    const addField = (key, label) => {
+      if (!Object.prototype.hasOwnProperty.call(root, key) || usedKeys.has(key) || !isRenderableValue(root[key])) return;
+      fields.push({ key, label, value: root[key] });
+      usedKeys.add(key);
+    };
+
+    (STAGE_READABLE_FIELDS.package || []).forEach(([key, label]) => addField(key, label));
+    Object.keys(root)
+      .filter((key) => !isHiddenTechnicalKey(key) && !usedKeys.has(key) && isRenderableValue(root[key]))
+      .forEach((key) => addField(key, fieldLabel(key)));
+
+    return `
+      <div class="fp-package-stack">
+        ${fields.map((item, index) => renderPackageFieldPanel(item.label, item.value, item.key, index)).join("") || `<div class="fp-empty small">暂无可读字段。</div>`}
       </div>
     `;
   }
@@ -4030,7 +4076,9 @@ function renderPackageBlocks() {
       Object.keys(data).filter((key) => !isHiddenTechnicalKey(key) && isRenderableValue(data[key])).slice(0, 6)
         .forEach((key) => cards.push({ label: fieldLabel(key), value: data[key] }));
     }
-    return `<div class="fp-readable-grid">${cards.map((item) => renderReadableFieldCard(item.label, item.value)).join("") || `<div class="fp-empty small">暂无可读字段。</div>`}</div>`;
+    return `<div class="fp-readable-grid">${cards.map((item) => renderReadableFieldCard(item.label, item.value, {
+      fullWidth: stageKey === "worldview" && item.label === "核心规则",
+    })).join("") || `<div class="fp-empty small">暂无可读字段。</div>`}</div>`;
   }
 
   function renderCharacterCards(data) {
@@ -4079,6 +4127,7 @@ function renderPackageBlocks() {
   function renderReadableStageOutput(data, options) {
     const stageKey = options && options.stageKey;
     const root = pickDisplayRoot(data, options || {});
+    if (stageKey === "package") return renderPackageReadableBlocks(data);
     if (stageKey === "character") return renderCharacterCards(root);
     if (stageKey === "beat") return renderBeatTimeline(state.beat_checkpoint_timeline, { editable: Boolean(options && options.editable) });
     if (stageKey === "storylines") return renderStorylineCards(state.character_storylines, { detailed: true });
@@ -6576,7 +6625,7 @@ async function saveFrameworkAsset(options) {
         character_emotion_shaping: "强调主角由屈辱到反攻的情绪线。",
         hard_constraints_for_script_workflow: ["后续正式剧本生成必须延续强钩子和清晰反转。"],
       };
-      response.data.display_text = "整体改编方向已收束为强冲突、强节奏、可拍摄的剧本约束。";
+      response.data.display_text = "整体写作方向已收束为强冲突、强节奏、可拍摄的剧本约束。";
       response.display_text = prettyJson(response.data.adaptation_guide);
       return response;
     }
