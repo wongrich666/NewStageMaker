@@ -1052,6 +1052,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             merged.setdefault(key, value)
         return merged, asset
 
+    def _login_required(view_func):
+        @wraps(view_func)
+        def wrapper(*args, **kwargs):
+            if not session.get("user_id"):
+                return _json_error("请先登录。", 401)
+            return view_func(*args, **kwargs)
+
+        return wrapper
+
     @app.post("/api/framework-to-script/running-stage")
     @_login_required
     def mark_framework_to_script_running_stage():
