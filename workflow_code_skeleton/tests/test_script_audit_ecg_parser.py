@@ -324,6 +324,26 @@ def test_compact_global_chart_includes_episode_points_for_each_episode():
     assert len(result["audit"]["episode_reviews"]) == 2
 
 
+def test_compact_global_chart_fills_missing_episodes_from_segments():
+    payload = compact_payload()
+    payload["segments"] = [
+        {"segment_id": "s1", "episode_no": 1, "segment_index_global": 1, "segment_function": "强开场", "original_text_excerpt": "第一集开场。"},
+        {"segment_id": "s2", "episode_no": 2, "segment_index_global": 2, "segment_function": "第二集推进", "original_text_excerpt": "第二集推进。"},
+        {"segment_id": "s3", "episode_no": 3, "segment_index_global": 3, "segment_function": "第三集转折", "original_text_excerpt": "第三集转折。"},
+    ]
+    payload["global_review"]["global_ecg_points"] = [
+        {"point_id": "p1", "segment_id": "s1", "episode_no": 1, "ecg_value": 4, "short_label": "强开场"}
+    ]
+    payload["episode_reviews"] = [payload["episode_reviews"][0]]
+
+    result = compact_result_from(json.dumps(payload, ensure_ascii=False))
+    global_points = result["visualization"]["ecg_chart"]["global"]["points"]
+    assert [point["episode_no"] for point in global_points] == [1, 2, 3]
+    assert global_points[1]["derived_from_segment"] is True
+    assert global_points[1]["segment_id"] == "s2"
+    assert global_points[1]["ecg_value"] == 0
+
+
 def test_compact_episode_mapping_and_fallback_point_for_missing_ecg():
     payload = compact_payload()
     payload["global_review"]["global_ecg_points"] = []

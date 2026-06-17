@@ -1581,6 +1581,44 @@ def _fallback_episode_ecg_point(episode: dict) -> dict:
     }
 
 
+def _fallback_segment_ecg_point(episode_no: int, segment: dict | None, score_record: dict | None = None) -> dict:
+    segment = segment if isinstance(segment, dict) else {}
+    score_record = score_record if isinstance(score_record, dict) else {}
+    segment_id = _str(segment.get("segment_id"))
+    segment_index_global = _int(segment.get("segment_index_global"), episode_no)
+    episode_score = score_record.get("episode_score")
+    has_score = episode_score not in (None, "")
+    ecg_value = _episode_score_to_ecg_value(episode_score) if has_score else 0
+    segment_function = _str(segment.get("segment_function"))
+    excerpt = _str(segment.get("original_text_excerpt"))
+    return {
+        "point_id": f"episode_{episode_no:03d}_segment_fallback",
+        "segment_id": segment_id,
+        "episode_no": episode_no,
+        "scene_no": _int(segment.get("scene_no"), 0),
+        "segment_index_global": segment_index_global,
+        "segment_index_in_episode": _int(segment.get("segment_index_in_episode"), 1),
+        "start_offset": _int(segment.get("start_offset"), 0),
+        "end_offset": _int(segment.get("end_offset"), 0),
+        "x_label": f"第{episode_no}集",
+        "ecg_value": ecg_value,
+        "short_label": segment_function or f"第{episode_no}集兜底点",
+        "audit_reason": (
+            "模型未返回该集心电点，后端已根据该集段落补齐展示点。"
+            if not has_score
+            else "模型未返回该集心电点，后端已根据该集评分补齐展示点。"
+        ),
+        "commercial_effect": "用于保证每集在心电图中都有对应点位。",
+        "problem_if_any": _str(score_record.get("main_problem")),
+        "fix_suggestion": _str(score_record.get("next_priority_fix")),
+        "original_text_excerpt": excerpt,
+        "tags": ["每集点位兜底"],
+        "score_impacts": [],
+        "derived_from_segment": not has_score,
+        "derived_from_episode_score": has_score,
+    }
+
+
 def _point_identity(point: dict) -> tuple:
     return (
         _str(point.get("point_id")),
@@ -1608,6 +1646,97 @@ def _merge_global_episode_points(global_points: list[dict], episode_charts: list
             merged.append(dict(point))
             seen.add(identity)
         represented_episodes.add(episode_no)
+    merged.sort(key=lambda point: (
+        _int(point.get("episode_no"), 0),
+        _int(point.get("segment_index_global"), 0),
+        _int(point.get("segment_index_in_episode"), 0),
+        _int(point.get("x"), 0),
+        _str(point.get("point_id")),
+    ))
+    for index, point in enumerate(merged, start=1):
+        point["x"] = index
+    return merged
+
+
+def _episode_segment_map(segments: list[dict]) -> dict[int, dict]:
+    result: dict[int, dict] = {}
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        episode_no = _int(segment.get("episode_no"), 0)
+        if not episode_no:
+            continue
+        current = result.get(episode_no)
+        if current is None or _int(segment.get("segment_index_global"), 0) < _int(current.get("segment_index_global"), 0):
+            result[episode_no] = segment
+    return result
+
+
+def _expected_episode_numbers(
+    audit: dict,
+    *,
+    segments: list[dict],
+    global_points: list[dict],
+    episode_charts: list[dict],
+    episode_score_map: list[dict],
+) -> list[int]:
+    numbers: set[int] = set()
+    meta = _dict(audit.get("meta"))
+    detection = _dict(meta.get("episode_detection"))
+    numbers.update(_int(item, 0) for item in _list(detection.get("detected_episode_numbers")))
+    numbers.update(_int(segment.get("episode_no"), 0) for segment in segments if isinstance(segment, dict))
+    numbers.update(_int(point.get("episode_no"), 0) for point in global_points if isinstance(point, dict))
+    numbers.update(_int(chart.get("episode_no"), 0) for chart in episode_charts if isinstance(chart, dict))
+    numbers.update(_int(item.get("episode_no"), 0) for item in episode_score_map if isinstance(item, dict))
+    total_episode_count = _int(meta.get("total_episode_count"), 0)
+    if total_episode_count > 0:
+        numbers.update(range(1, total_episode_count + 1))
+    return sorted(number for number in numbers if number > 0)
+
+
+def _ensure_global_points_for_episodes(
+    global_points: list[dict],
+    *,
+    audit: dict,
+    segments: list[dict],
+    segment_by_id: dict[str, dict],
+    episode_charts: list[dict],
+    episode_score_map: list[dict],
+) -> list[dict]:
+    expected_episode_numbers = _expected_episode_numbers(
+        audit,
+        segments=segments,
+        global_points=global_points,
+        episode_charts=episode_charts,
+        episode_score_map=episode_score_map,
+    )
+    if not expected_episode_numbers:
+        return global_points
+    represented_episodes = {
+        _int(point.get("episode_no"), 0)
+        for point in global_points
+        if isinstance(point, dict) and _int(point.get("episode_no"), 0)
+    }
+    if all(episode_no in represented_episodes for episode_no in expected_episode_numbers):
+        return global_points
+    segment_by_episode = _episode_segment_map(segments)
+    score_by_episode = {
+        _int(item.get("episode_no"), 0): item
+        for item in episode_score_map
+        if isinstance(item, dict) and _int(item.get("episode_no"), 0)
+    }
+    fallback_points = []
+    for episode_no in expected_episode_numbers:
+        if episode_no in represented_episodes:
+            continue
+        fallback_points.extend(_derived_ecg_points(
+            [_fallback_segment_ecg_point(episode_no, segment_by_episode.get(episode_no), score_by_episode.get(episode_no))],
+            segment_by_id,
+        ))
+    if not fallback_points:
+        return global_points
+    merged = [dict(point) for point in global_points if isinstance(point, dict)]
+    merged.extend(fallback_points)
     merged.sort(key=lambda point: (
         _int(point.get("episode_no"), 0),
         _int(point.get("segment_index_global"), 0),
@@ -1725,6 +1854,14 @@ def build_audit_visualization_payload(audit: dict) -> dict:
             "risk_color": RISK_COLOR_MAP.get(_str(item.get("risk_level")), ""),
         } for item in _list(episode.get("risk_scan")) if isinstance(item, dict))
     global_points = _merge_global_episode_points(global_points, episode_charts)
+    global_points = _ensure_global_points_for_episodes(
+        global_points,
+        audit=audit,
+        segments=segments,
+        segment_by_id=segment_by_id,
+        episode_charts=episode_charts,
+        episode_score_map=episode_score_map,
+    )
 
     return {
         "ecg_chart": {
