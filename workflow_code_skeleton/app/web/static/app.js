@@ -716,6 +716,15 @@
 
   function friendlyErrorText(error, fallback = "操作失败，请稍后重试。") {
     const text = String(error?.message || "").trim();
+    if (error?.name === "AbortError") {
+      return "请求等待时间过长，已停止等待。请稍后重试，或减少提交文本长度后再运行。";
+    }
+    if (/timeout|timed\s*out|超时/i.test(text)) {
+      return "请求超时了。爆款文审核耗时较长，请稍后重试，或减少提交文本长度后再运行。";
+    }
+    if (/failed\s*to\s*fetch|networkerror|network\s*error|load\s*failed|断开|网络/i.test(text)) {
+      return "网络连接中断，结果没有传回前端。请检查后端是否仍在运行，然后重新点击运行。";
+    }
     if (!text || isTechnicalErrorText(text)) {
       return fallback;
     }
@@ -734,7 +743,26 @@
 
   function showToolError(error, fallback = "工具执行失败，请稍后重试。") {
     if (!els.toolOutputBox) return;
-    els.toolOutputBox.textContent = friendlyErrorText(error, fallback);
+    els.toolOutputBox.innerHTML = renderToolErrorCard(error, fallback);
+  }
+
+  function renderToolErrorCard(error, fallback = "工具执行失败，请稍后重试。") {
+    const message = friendlyErrorText(error, fallback);
+    const raw = String(error?.message || "").trim();
+    const showRaw = raw && raw !== message && !isTechnicalErrorText(raw);
+    return `
+      <section class="tool-error-card" role="alert">
+        <div class="tool-error-icon">!</div>
+        <div>
+          <h4>运行失败</h4>
+          <p>${escapeHtml(message)}</p>
+          ${showRaw ? `<small>${escapeHtml(raw)}</small>` : ""}
+          <div class="tool-error-actions">
+            <span>当前输入已保留，可以直接重新运行。</span>
+          </div>
+        </div>
+      </section>
+    `;
   }
 
   function runtimeDebugUrl(taskId) {
@@ -4727,13 +4755,27 @@ function renderToolForm(toolKey) {
 
   async function requestJson(url, options = {}) {
     const authToken = currentAuthToken();
+    const timeoutMs = Number(options.timeoutMs || 0);
+    const controller = timeoutMs > 0 ? new AbortController() : null;
+    const timeoutId = controller
+      ? window.setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+    const { timeoutMs: _timeoutMs, signal: optionSignal, headers: optionHeaders, ...fetchOptions } = options;
+    if (controller && optionSignal) {
+      optionSignal.addEventListener?.("abort", () => controller.abort(), { once: true });
+    }
     const response = await fetch(url, {
       headers: {
         "Content-Type": "application/json",
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        ...(options.headers || {})
+        ...(optionHeaders || {})
       },
-      ...options
+      ...fetchOptions,
+      ...(controller ? { signal: controller.signal } : {})
+    }).finally(() => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
     });
     const data = await response.json().catch(() => null);
     if (response.status === 401) {
@@ -4741,7 +4783,10 @@ function renderToolForm(toolKey) {
       throw new Error("请先登录。");
     }
     if (!response.ok || !data?.success) {
-      throw new Error(data?.message || `请求失败：${response.status}`);
+      const error = new Error(data?.message || `请求失败：${response.status}`);
+      error.status = response.status;
+      error.payload = data;
+      throw error;
     }
     return data;
   }
@@ -5987,60 +6032,73 @@ function renderToolForm(toolKey) {
         payload.project_title = projectTitle;
       }
     }
+    const activeToolKey = state.activeTool;
     state.toolResults[state.activeTool] = null;
-    renderToolOutput(state.activeTool, "生成时间很长，请不要刷新，马上就好~");
-    const data = await requestJson(currentToolRunUrl(state.activeTool), {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
-    const result = data.result || data;
-    const output = result.output ?? data.output ?? result.result ?? "";
-    const text = String(result.text || data.text || formatToolOutput(output) || "").trim();
-    const filename = String(result.filename || data.filename || "").trim();
-    const assetSaved = Boolean(result.asset_saved || data.asset_saved);
-    const assetSaveError = String(result.asset_save_error || data.asset_save_error || "").trim();
-    state.toolResults[state.activeTool] = {
-      ...data,
-      ...result,
-      text,
-      answer_text: result.answer_text || data.answer_text || text,
-      filename,
-      output,
-      result_type: result.result_type || data.result_type || "",
-      resultType: result.result_type || data.result_type || "",
-      parsed: result.parsed ?? data.parsed ?? false,
-      audit: result.audit || data.audit || null,
-      view: result.view || data.view || null,
-      parse_warnings: result.parse_warnings || data.parse_warnings || [],
-      parseWarnings: result.parse_warnings || data.parse_warnings || [],
-      outputType: result.output_type || data.output_type || "text",
-      assetSaved,
-      savedAsset: result.saved_asset || data.saved_asset || null
-    };
-    state.toolResults[state.activeTool] = normalizeScriptAuditEcgResult(state.toolResults[state.activeTool]);
-    if (state.activeTool === "hot_review") {
-      persistHotReviewSession(state.toolResults.hot_review);
-    }
-    renderToolOutput(state.activeTool);
-    if (assetSaved) {
-      if (state.toolResults[state.activeTool]?.savedAsset) {
-        mergeProjectListAsset(state.toolResults[state.activeTool].savedAsset);
+    renderToolOutput(activeToolKey, activeToolKey === "hot_review"
+      ? "爆款文审核通常需要较长时间，请不要刷新。若超时或出错，这里会显示失败原因。"
+      : "生成时间很长，请不要刷新，马上就好~");
+    try {
+      const data = await requestJson(currentToolRunUrl(activeToolKey), {
+        method: "POST",
+        body: JSON.stringify(payload),
+        timeoutMs: activeToolKey === "hot_review" ? 420000 : 0
+      });
+      const result = data.result || data;
+      const output = result.output ?? data.output ?? result.result ?? "";
+      const text = String(result.text || data.text || formatToolOutput(output) || "").trim();
+      const filename = String(result.filename || data.filename || "").trim();
+      const assetSaved = Boolean(result.asset_saved || data.asset_saved);
+      const assetSaveError = String(result.asset_save_error || data.asset_save_error || "").trim();
+      state.toolResults[activeToolKey] = {
+        ...data,
+        ...result,
+        text,
+        answer_text: result.answer_text || data.answer_text || text,
+        filename,
+        output,
+        result_type: result.result_type || data.result_type || "",
+        resultType: result.result_type || data.result_type || "",
+        parsed: result.parsed ?? data.parsed ?? false,
+        audit: result.audit || data.audit || null,
+        view: result.view || data.view || null,
+        parse_warnings: result.parse_warnings || data.parse_warnings || [],
+        parseWarnings: result.parse_warnings || data.parse_warnings || [],
+        outputType: result.output_type || data.output_type || "text",
+        assetSaved,
+        savedAsset: result.saved_asset || data.saved_asset || null
+      };
+      state.toolResults[activeToolKey] = normalizeScriptAuditEcgResult(state.toolResults[activeToolKey]);
+      if (activeToolKey === "hot_review") {
+        persistHotReviewSession(state.toolResults.hot_review);
       }
-      try {
-        await loadAssets();
-        await loadProjects({ restoreSelection: true, restoreInputs: false });
-      } catch (_) {
-        // 结果已经生成并写入后端，不阻断当前工具面板的成功态展示。
+      renderToolOutput(activeToolKey);
+      if (assetSaved) {
+        if (state.toolResults[activeToolKey]?.savedAsset) {
+          mergeProjectListAsset(state.toolResults[activeToolKey].savedAsset);
+        }
+        try {
+          await loadAssets();
+          await loadProjects({ restoreSelection: true, restoreInputs: false });
+        } catch (_) {
+          // 结果已经生成并写入后端，不阻断当前工具面板的成功态展示。
+        }
       }
+      showToast(
+        "辅助工具运行完成",
+        assetSaveError
+          ? `${result.title || toolConfig(activeToolKey)?.label || "当前工具"} 已返回结果，但写入用户资产失败了。`
+          : (assetSaved
+            ? `${result.title || toolConfig(activeToolKey)?.label || "当前工具"} 已返回结果，并已保存到用户资产。`
+            : `${result.title || toolConfig(activeToolKey)?.label || "当前工具"} 已返回结果。`),
+      );
+    } catch (error) {
+      console.error("[tool-run]", error);
+      const fallback = activeToolKey === "hot_review"
+        ? "爆款文审核运行失败，可能是请求超时、后端中断或网络抖动。当前输入已保留，请稍后重试。"
+        : "辅助工具运行失败，请稍后重试。";
+      showToolError(error, fallback);
+      showToast("辅助工具运行失败", friendlyErrorText(error, fallback));
     }
-    showToast(
-      "辅助工具运行完成",
-      assetSaveError
-        ? `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果，但写入用户资产失败了。`
-        : (assetSaved
-          ? `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果，并已保存到用户资产。`
-          : `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果。`),
-    );
   }
 
   function downloadActiveToolResult() {

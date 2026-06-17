@@ -735,6 +735,56 @@ a {
   max-height: 520px;
 }
 
+.tool-error-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  border: 1px solid rgba(184, 79, 67, 0.28);
+  border-radius: 14px;
+  background: rgba(255, 245, 239, 0.94);
+  color: #321d16;
+  box-shadow: 0 14px 32px rgba(92, 56, 25, 0.08);
+}
+
+.tool-error-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: #fffaf5;
+  background: #b84f43;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.tool-error-card h4 {
+  margin: 0 0 6px;
+  color: #321d16;
+}
+
+.tool-error-card p,
+.tool-error-card small,
+.tool-error-actions {
+  color: #6f4f3f;
+}
+
+.tool-error-card p {
+  margin: 0;
+}
+
+.tool-error-card small {
+  display: block;
+  margin-top: 8px;
+}
+
+.tool-error-actions {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
 .guide-grid,
 .community-grid,
 .asset-grid {
