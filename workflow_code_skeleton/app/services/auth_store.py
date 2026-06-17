@@ -12,6 +12,24 @@ from .runtime_paths import get_runtime_data_dir
 
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_\-\u4e00-\u9fff]{2,20}$")
+COMMON_PASSWORDS = {
+    "000000",
+    "111111",
+    "123123",
+    "123456",
+    "1234567",
+    "12345678",
+    "123456789",
+    "1234567890",
+    "abc123",
+    "admin",
+    "admin123",
+    "iloveyou",
+    "password",
+    "password123",
+    "qwerty",
+    "qwerty123",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,8 +52,16 @@ def validate_username(username: str) -> str:
 
 
 def validate_password(password: str) -> str:
-    if len(str(password or "")) < 6:
-        return "密码至少需要 6 位"
+    value = str(password or "")
+    if len(value) < 8:
+        return "密码至少需要 8 位"
+    normalized = value.strip().lower()
+    if normalized in COMMON_PASSWORDS:
+        return "这个密码过于常见，容易被浏览器标记为泄露，请换一个更独特的密码"
+    has_letter = any(ch.isalpha() for ch in value)
+    has_digit = any(ch.isdigit() for ch in value)
+    if not has_letter or not has_digit:
+        return "密码需要同时包含字母和数字，降低被误判为弱密码或泄露密码的概率"
     return ""
 
 

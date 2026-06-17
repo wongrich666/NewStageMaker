@@ -294,33 +294,33 @@
       </div>
 
       <div class="profile-grid">
-        <form id="usernameForm" class="card mini-card">
+        <form id="usernameForm" class="card mini-card" autocomplete="on">
           <div class="card-head">
             <h3>修改用户名</h3>
           </div>
           <label class="field">
             <span>新用户名</span>
-            <input id="profileUsernameInput" type="text" value="{{ current_user.username if current_user else '' }}">
+            <input id="profileUsernameInput" type="text" value="{{ current_user.username if current_user else '' }}" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80">
           </label>
           <button class="btn btn-primary" type="submit">保存用户名</button>
           <p id="profileMessage" class="hint"></p>
         </form>
 
-        <form id="passwordForm" class="card mini-card">
+        <form id="passwordForm" class="card mini-card" autocomplete="on">
           <div class="card-head">
             <h3>修改密码</h3>
           </div>
           <label class="field">
             <span>当前密码</span>
-            <input id="currentPasswordInput" type="password">
+            <input id="currentPasswordInput" type="password" autocomplete="current-password" maxlength="256">
           </label>
           <label class="field">
             <span>新密码</span>
-            <input id="newPasswordInput" type="password">
+            <input id="newPasswordInput" type="password" autocomplete="new-password" minlength="8" maxlength="256">
           </label>
           <label class="field">
             <span>确认新密码</span>
-            <input id="confirmPasswordInput" type="password">
+            <input id="confirmPasswordInput" type="password" autocomplete="new-password" minlength="8" maxlength="256">
           </label>
           <button class="btn btn-primary" type="submit">保存密码</button>
         </form>

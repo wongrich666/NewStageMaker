@@ -154,18 +154,18 @@
             {% if error %}
               <div class="auth-error">{{ error }}</div>
             {% endif %}
-            <form method="post" class="auth-form">
+            <form method="post" class="auth-form" autocomplete="on">
               <label class="field">
                 <span>用户名</span>
-                <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" required>
+                <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80" required>
               </label>
               <label class="field">
                 <span>密码</span>
-                <input name="password" type="password" autocomplete="new-password" minlength="6" required>
+                <input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="256" required>
               </label>
               <label class="field">
                 <span>确认密码</span>
-                <input name="confirm_password" type="password" autocomplete="new-password" minlength="6" required>
+                <input name="confirm_password" type="password" autocomplete="new-password" minlength="8" maxlength="256" required>
               </label>
               <button class="btn btn-primary" type="submit">注册并进入</button>
             </form>

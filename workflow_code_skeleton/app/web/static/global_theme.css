@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   --theme-bg: #fff7ee;
   --theme-panel: rgba(255, 252, 247, 0.9);
   --theme-panel-strong: rgba(255, 252, 247, 0.96);
@@ -73,6 +74,7 @@
 
 html {
   background: var(--theme-bg);
+  color-scheme: light;
 }
 
 body,
@@ -82,6 +84,15 @@ body,
   isolation: isolate;
   color: var(--theme-text);
   background: var(--theme-bg) !important;
+  color-scheme: light;
+}
+
+body,
+button,
+input,
+textarea,
+select {
+  color-scheme: light;
 }
 
 .fp-app {
@@ -287,6 +298,7 @@ body > * {
 
 .sidebar-brand,
 .sidebar-brand-text strong,
+.sidebar-brand-text,
 .sidebar-group-label,
 .sidebar-section-head,
 .sidebar-folder-link,
@@ -305,7 +317,22 @@ body > * {
 .fp-title,
 .fp-card-title,
 .wts-header h1,
-.wts-card h2 {
+.wts-card h2,
+.auth-card,
+.auth-card h2,
+.auth-card p,
+.auth-form label,
+.auth-form span,
+.auth-switch,
+.profile-drawer,
+.profile-drawer h2,
+.profile-drawer h3,
+.mini-card,
+.mini-card h3,
+.workspace-landing__card-desc,
+.workspace-pick-title,
+.tool-panel h3,
+.tool-panel h4 {
   color: var(--theme-text) !important;
 }
 
@@ -450,6 +477,29 @@ select,
   color: var(--theme-text) !important;
   background: rgba(255, 253, 249, 0.96) !important;
   border-color: var(--theme-border-strong) !important;
+  -webkit-text-fill-color: var(--theme-text);
+  caret-color: var(--theme-accent-dark);
+}
+
+input::placeholder,
+textarea::placeholder,
+.workspace-body input::placeholder,
+.workspace-body textarea::placeholder,
+.fp-field input::placeholder,
+.fp-field textarea::placeholder,
+.wts-card input::placeholder,
+.wts-card textarea::placeholder {
+  color: #8e7667 !important;
+  opacity: 1;
+  -webkit-text-fill-color: #8e7667;
+}
+
+input:-webkit-autofill,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--theme-text) !important;
+  box-shadow: 0 0 0 1000px #fffdf9 inset !important;
+  caret-color: var(--theme-accent-dark);
 }
 
 input:focus,
@@ -565,5 +615,28 @@ select:focus,
 
   .cat-theme-ripple {
     display: none;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root,
+  html,
+  body {
+    color-scheme: light;
+  }
+
+  body,
+  .workspace-body,
+  .home-body,
+  .fp-app {
+    color: var(--theme-text) !important;
+    background: var(--theme-bg) !important;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    color-scheme: light;
   }
 }

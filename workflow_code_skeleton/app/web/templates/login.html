@@ -131,14 +131,14 @@
             {% if error %}
               <div class="auth-error">{{ error }}</div>
             {% endif %}
-            <form method="post" class="auth-form">
+            <form method="post" class="auth-form" autocomplete="on">
               <label class="field">
                 <span>用户名</span>
-                <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" required>
+                <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80" required>
               </label>
               <label class="field">
                 <span>密码</span>
-                <input name="password" type="password" autocomplete="current-password" required>
+                <input name="password" type="password" autocomplete="current-password" maxlength="256" required>
               </label>
               <button class="btn btn-primary" type="submit">登录</button>
             </form>
