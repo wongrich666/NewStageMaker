@@ -8,7 +8,57 @@ from typing import Any
 
 SCHEMA_VERSION = "script_audit_ecg_v2"
 SCHEMA_VERSION_V3 = "script_audit_ecg_v3_episode_global"
-SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION, SCHEMA_VERSION_V3}
+COMPACT_SCHEMA_VERSION = "script_audit_compact_v1"
+SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION, SCHEMA_VERSION_V3, COMPACT_SCHEMA_VERSION}
+
+AUDIT_DIMENSIONS = [
+    {
+        "dimension_key": "opening_hook",
+        "dimension_name": "开场吸引力",
+        "max_score": 15,
+    },
+    {
+        "dimension_key": "conflict_pacing",
+        "dimension_name": "冲突与节奏",
+        "max_score": 25,
+    },
+    {
+        "dimension_key": "satisfying_payoff",
+        "dimension_name": "爽点兑现",
+        "max_score": 25,
+    },
+    {
+        "dimension_key": "character_dialogue_filming",
+        "dimension_name": "人物对白与可拍性",
+        "max_score": 20,
+    },
+    {
+        "dimension_key": "market_compliance",
+        "dimension_name": "市场适配与平台合规",
+        "max_score": 15,
+    },
+]
+
+ECG_COLOR_MAP = {
+    "positive": "#16a34a",
+    "negative": "#dc2626",
+    "neutral": "#6b7280",
+}
+
+RISK_COLOR_MAP = {
+    "必须修改": "#dc2626",
+    "建议修改": "#f97316",
+    "可以保留": "#16a34a",
+    "证据不足": "#6b7280",
+}
+
+LEVEL_COLOR_MAP = {
+    "S": "#16a34a",
+    "A": "#22c55e",
+    "B": "#eab308",
+    "C": "#f97316",
+    "D": "#dc2626",
+}
 
 
 def _as_text(value: Any) -> str:
@@ -718,6 +768,619 @@ def _build_negative_zone(index: int, points: list[dict]) -> dict:
     }
 
 
+def parse_compact_audit_json(raw_text: str) -> dict:
+    """
+    解析模型返回的 script_audit_compact_v1 JSON。
+    兼容前后空白、BOM、代码块、文本包壳、answerText/data/output/result
+    包装字段，以及字符串化 JSON 嵌套。
+    """
+    if raw_text is None or (isinstance(raw_text, str) and not raw_text.strip()):
+        raise ValueError("爆款文审核 compact JSON 为空，无法解析。")
+
+    wrapper_keys = (
+        "answerText",
+        "answer_text",
+        "data",
+        "output",
+        "result",
+        "response",
+        "content",
+        "text",
+    )
+
+    def parse_any(value: Any, depth: int = 0) -> dict:
+        if depth > 8:
+            raise ValueError("爆款文审核 compact JSON 嵌套过深，无法继续解析。")
+        if isinstance(value, dict):
+            if value.get("schema_version") == COMPACT_SCHEMA_VERSION:
+                return value
+            for key in wrapper_keys:
+                nested = value.get(key)
+                if isinstance(nested, dict) and nested.get("schema_version") == COMPACT_SCHEMA_VERSION:
+                    return nested
+                if isinstance(nested, str) and nested.strip():
+                    try:
+                        return parse_any(nested, depth + 1)
+                    except Exception:
+                        continue
+            return value
+        if isinstance(value, list):
+            for item in value:
+                try:
+                    return parse_any(item, depth + 1)
+                except Exception:
+                    continue
+            raise ValueError("爆款文审核 compact JSON 数组中没有可解析对象。")
+        if not isinstance(value, str):
+            raise ValueError(f"爆款文审核 compact JSON 类型不支持：{type(value).__name__}")
+
+        text = value.lstrip("\ufeff").strip()
+        if not text:
+            raise ValueError("爆款文审核 compact JSON 文本为空。")
+        candidates = [_strip_code_fence(text), *_iter_balanced_json_candidates(text)]
+        last_error: Exception | None = None
+        seen: set[str] = set()
+        for candidate in candidates:
+            candidate = candidate.lstrip("\ufeff").strip()
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            try:
+                parsed = _json_loads_maybe_nested(candidate)
+            except Exception as exc:
+                last_error = exc
+                continue
+            if isinstance(parsed, str):
+                return parse_any(parsed, depth + 1)
+            if isinstance(parsed, dict):
+                return parse_any(parsed, depth + 1)
+        raise ValueError(f"无法解析爆款文审核 compact JSON：{last_error or '未找到 JSON 对象'}")
+
+    parsed = parse_any(raw_text)
+    if not isinstance(parsed, dict):
+        raise ValueError("爆款文审核 compact JSON 最终结果不是对象。")
+    return parsed
+
+
+def _compact_default() -> dict:
+    return {
+        "schema_version": COMPACT_SCHEMA_VERSION,
+        "meta": {
+            "script_title": "",
+            "text_type": "",
+            "total_episode_count": 0,
+            "total_segment_count": 0,
+            "is_partial_review": False,
+            "episode_detection": {
+                "has_explicit_episode_titles": False,
+                "detected_episode_numbers": [],
+                "missing_episode_numbers": [],
+                "duplicate_episode_numbers": [],
+                "episode_order_is_valid": True,
+                "detection_evidence": "",
+            },
+        },
+        "overall": {
+            "total_score": 0,
+            "level": "",
+            "modification_cost": "",
+            "core_judgement": "",
+            "largest_problem": "",
+            "best_retained_part": "",
+            "final_judgement": "",
+            "priority_fix": "",
+        },
+        "dimension_scores": [],
+        "segments": [],
+        "global_review": {
+            "main_genre": "",
+            "main_emotional_contract": "",
+            "main_conflict_chain": "",
+            "protagonist_arc": "",
+            "payoff_chain": "",
+            "global_retention_problem": "",
+            "global_revision_priority": "",
+            "global_ecg_points": [],
+            "global_satisfying_points": [],
+            "global_key_issues": [],
+            "global_risk_scan": [],
+            "global_rewrite_plan": [],
+        },
+        "episode_reviews": [],
+        "cross_episode_analysis": {
+            "retention_curve_summary": "",
+            "weak_episode_numbers": [],
+            "payoff_distribution_problem": "",
+            "hook_continuity_problem": "",
+            "character_arc_problem": "",
+            "fix_suggestion": "",
+        },
+    }
+
+
+def _compact_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "是"}:
+            return True
+        if lowered in {"false", "0", "no", "否"}:
+            return False
+    if value is None or value == "":
+        return default
+    return bool(value)
+
+
+def _compact_alias_dimension(item: dict) -> dict:
+    result = dict(item)
+    if "dimension_key" not in result and "key" in result:
+        result["dimension_key"] = result.get("key")
+    if "deduction_reason" not in result:
+        result["deduction_reason"] = result.get("main_deduction") or result.get("deduction") or ""
+    if "fix_direction" not in result:
+        result["fix_direction"] = result.get("priority_fix") or result.get("fix") or result.get("fix_suggestion") or ""
+    if "evidence_segment_ids" not in result:
+        result["evidence_segment_ids"] = (
+            result.get("related_segment_ids")
+            or result.get("affected_segments")
+            or []
+        )
+    return result
+
+
+def _compact_missing_dimension(spec: dict) -> dict:
+    return {
+        "dimension_key": spec["dimension_key"],
+        "dimension_name": spec["dimension_name"],
+        "max_score": spec["max_score"],
+        "score": 0,
+        "summary": "模型未返回该维度，后端已补齐",
+        "deduction_reason": "证据不足",
+        "fix_direction": "",
+        "evidence_segment_ids": [],
+    }
+
+
+def _normalize_compact_dimensions(items: Any, warnings: list[str], *, scope: str) -> list[dict]:
+    raw_by_key: dict[str, dict] = {}
+    loose_items: list[dict] = []
+    for item in _list(items):
+        if not isinstance(item, dict):
+            warnings.append(f"{scope} 评分维度包含非对象条目，已忽略。")
+            continue
+        aliased = _compact_alias_dimension(item)
+        key = _str(aliased.get("dimension_key"))
+        if key:
+            raw_by_key[key] = aliased
+        else:
+            loose_items.append(aliased)
+
+    normalized: list[dict] = []
+    for index, spec in enumerate(AUDIT_DIMENSIONS):
+        source = raw_by_key.get(spec["dimension_key"])
+        if source is None and index < len(loose_items):
+            source = loose_items[index]
+            warnings.append(f"{scope} 第{index + 1}个评分维度缺少 dimension_key，已按固定维度顺序兼容。")
+        if source is None:
+            warnings.append(f"{scope} 缺少评分维度：{spec['dimension_name']}，后端已补齐。")
+            normalized.append(_compact_missing_dimension(spec))
+            continue
+
+        max_score = _num(source.get("max_score"), spec["max_score"]) or spec["max_score"]
+        max_score = max(0, max_score)
+        score = _clamp(source.get("score"), 0, max_score)
+        normalized.append({
+            "dimension_key": spec["dimension_key"],
+            "dimension_name": _str(source.get("dimension_name"), spec["dimension_name"]),
+            "max_score": max_score,
+            "score": round(score, 2),
+            "summary": _str(source.get("summary")),
+            "deduction_reason": _str(source.get("deduction_reason")),
+            "fix_direction": _str(source.get("fix_direction")),
+            "evidence_segment_ids": _list(source.get("evidence_segment_ids")),
+            "core_deductions": _list(source.get("core_deductions")),
+            "priority_fix": _str(source.get("priority_fix") or source.get("fix_direction")),
+            "sub_items": _list(source.get("sub_items")),
+        })
+    return normalized
+
+
+def _normalize_compact_ecg_points(items: Any, warnings: list[str], *, scope: str) -> list[dict]:
+    normalized = []
+    for index, item in enumerate(_list(items), start=1):
+        if not isinstance(item, dict):
+            warnings.append(f"{scope} 心电点位第{index}项不是对象，已忽略。")
+            continue
+        ecg_value = _clamp(item.get("ecg_value", item.get("value")), -5, 5)
+        normalized.append({
+            **item,
+            "point_id": _str(item.get("point_id"), f"{scope}_p_{index:06d}"),
+            "segment_id": _str(item.get("segment_id")),
+            "episode_no": _int(item.get("episode_no"), 0),
+            "scene_no": _int(item.get("scene_no"), 0),
+            "segment_index_global": _int(item.get("segment_index_global") or item.get("segment_index"), index),
+            "segment_index_in_episode": _int(item.get("segment_index_in_episode"), index),
+            "start_offset": _int(item.get("start_offset"), 0),
+            "end_offset": _int(item.get("end_offset"), 0),
+            "x_label": _str(item.get("x_label") or item.get("label"), f"第{index}点"),
+            "ecg_value": ecg_value,
+            "short_label": _str(item.get("short_label") or item.get("label")),
+            "audit_reason": _str(item.get("audit_reason") or item.get("reason")),
+            "fix_suggestion": _str(item.get("fix_suggestion") or item.get("fix")),
+            "commercial_effect": _str(item.get("commercial_effect")),
+            "problem_if_any": _str(item.get("problem_if_any")),
+            "event_type": _str(item.get("event_type")),
+            "event_subtype": _str(item.get("event_subtype")),
+            "original_text_excerpt": _str(item.get("original_text_excerpt")),
+            "tags": _list(item.get("tags")),
+            "score_impacts": _list(item.get("score_impacts")),
+        })
+    return sorted(normalized, key=lambda point: (
+        _int(point.get("episode_no"), 0),
+        _int(point.get("segment_index_global"), 0),
+        _int(point.get("start_offset"), 0),
+    ))
+
+
+def _extract_compact_global_points(global_review: dict, data: dict) -> list:
+    direct = global_review.get("global_ecg_points")
+    if isinstance(direct, list):
+        return direct
+    if isinstance(global_review.get("ecg_points"), list):
+        return global_review.get("ecg_points")
+    old_points = _dict(_dict(global_review.get("ecg")).get("main_series")).get("points")
+    if isinstance(old_points, list):
+        return old_points
+    old_global = _dict(data.get("ecg"))
+    return _list(_dict(old_global.get("main_series")).get("points") or old_global.get("points"))
+
+
+def _extract_compact_episode_points(episode: dict) -> list:
+    if isinstance(episode.get("ecg_points"), list):
+        return episode.get("ecg_points")
+    return _list(_dict(_dict(episode.get("ecg")).get("main_series")).get("points"))
+
+
+def normalize_compact_audit_payload(data: dict) -> tuple[dict, list[str]]:
+    """
+    将模型输出标准化为 canonical script_audit_compact_v1。
+    返回 audit 和 warnings。
+    """
+    warnings: list[str] = []
+    if not isinstance(data, dict):
+        raise ValueError("爆款文审核 compact payload 必须是 JSON object。")
+
+    if data.get("schema_version") != COMPACT_SCHEMA_VERSION:
+        warnings.append("模型输出 schema_version 缺失或不是 script_audit_compact_v1，已按 compact v1 兼容解析。")
+
+    audit = _compact_default()
+
+    meta = _dict(data.get("meta"))
+    detection = _dict(meta.get("episode_detection"))
+    audit["meta"] = {
+        "script_title": _str(meta.get("script_title") or data.get("script_title")),
+        "text_type": _str(meta.get("text_type")),
+        "total_episode_count": 0,
+        "total_segment_count": _int(meta.get("total_segment_count"), 0),
+        "is_partial_review": _compact_bool(meta.get("is_partial_review"), False),
+        "episode_detection": {
+            "has_explicit_episode_titles": _compact_bool(detection.get("has_explicit_episode_titles"), False),
+            "detected_episode_numbers": _list(detection.get("detected_episode_numbers")),
+            "missing_episode_numbers": _list(detection.get("missing_episode_numbers")),
+            "duplicate_episode_numbers": _list(detection.get("duplicate_episode_numbers")),
+            "episode_order_is_valid": _compact_bool(detection.get("episode_order_is_valid"), True),
+            "detection_evidence": _str(detection.get("detection_evidence")),
+        },
+    }
+
+    dimension_source = data.get("dimension_scores")
+    if dimension_source is None and data.get("global_dimensions") is not None:
+        dimension_source = data.get("global_dimensions")
+        warnings.append("已将 global_dimensions 转换为 dimension_scores。")
+    dimensions = _normalize_compact_dimensions(dimension_source, warnings, scope="全局")
+    audit["dimension_scores"] = dimensions
+
+    segments = _normalize_segments(data.get("segments"))
+    audit["segments"] = segments
+
+    overall_source = _dict(data.get("overall"))
+    total_score = round(sum(_num(item.get("score"), 0) for item in dimensions), 2)
+    audit["overall"] = {
+        "total_score": total_score,
+        "level": _str(overall_source.get("level")),
+        "modification_cost": _str(overall_source.get("modification_cost")),
+        "core_judgement": _str(overall_source.get("core_judgement")),
+        "largest_problem": _str(overall_source.get("largest_problem") or overall_source.get("largest_hard_problem")),
+        "best_retained_part": _str(overall_source.get("best_retained_part")),
+        "final_judgement": _str(overall_source.get("final_judgement")),
+        "priority_fix": _str(overall_source.get("priority_fix")),
+    }
+
+    global_source = _dict(data.get("global_review"))
+    structure = _dict(global_source.get("global_structure_judgement"))
+    global_points = _normalize_compact_ecg_points(
+        _extract_compact_global_points(global_source, data),
+        warnings,
+        scope="global",
+    )
+    audit["global_review"] = {
+        "main_genre": _str(global_source.get("main_genre") or structure.get("main_genre")),
+        "main_emotional_contract": _str(global_source.get("main_emotional_contract") or structure.get("main_emotional_contract")),
+        "main_conflict_chain": _str(global_source.get("main_conflict_chain") or structure.get("main_conflict_chain")),
+        "protagonist_arc": _str(global_source.get("protagonist_arc") or structure.get("protagonist_arc")),
+        "payoff_chain": _str(global_source.get("payoff_chain") or structure.get("payoff_chain")),
+        "global_retention_problem": _str(global_source.get("global_retention_problem") or structure.get("global_retention_problem")),
+        "global_revision_priority": _str(global_source.get("global_revision_priority") or structure.get("global_revision_priority")),
+        "global_ecg_points": global_points,
+        "global_satisfying_points": _list(global_source.get("global_satisfying_points")),
+        "global_key_issues": _list(global_source.get("global_key_issues")),
+        "global_risk_scan": _list(global_source.get("global_risk_scan")),
+        "global_rewrite_plan": _list(global_source.get("global_rewrite_plan")),
+    }
+
+    episode_source = data.get("episode_reviews")
+    if episode_source is None and data.get("episodes") is not None:
+        episode_source = data.get("episodes")
+        warnings.append("已将 episodes 转换为 episode_reviews。")
+    episodes = []
+    for index, episode in enumerate(_list(episode_source), start=1):
+        if not isinstance(episode, dict):
+            warnings.append(f"第{index}个单集评价不是对象，已忽略。")
+            continue
+        episode_no = _int(episode.get("episode_no"), index)
+        episode_dimensions_source = episode.get("dimension_scores")
+        if episode_dimensions_source is None and episode.get("dimensions") is not None:
+            episode_dimensions_source = episode.get("dimensions")
+            warnings.append(f"第{episode_no}集已将 dimensions 转换为 dimension_scores。")
+        episode_dimensions = _normalize_compact_dimensions(
+            episode_dimensions_source,
+            warnings,
+            scope=f"第{episode_no}集",
+        )
+        episode_score = round(sum(_num(item.get("score"), 0) for item in episode_dimensions), 2)
+        rewrite_plan = episode.get("rewrite_plan")
+        if rewrite_plan is None and episode.get("rewrite_tasks") is not None:
+            rewrite_plan = episode.get("rewrite_tasks")
+            warnings.append(f"第{episode_no}集已将 rewrite_tasks 转换为 rewrite_plan。")
+        episode_overall = _dict(episode.get("episode_overall"))
+        episodes.append({
+            "episode_no": episode_no,
+            "episode_title": _str(episode.get("episode_title"), f"第{episode_no}集"),
+            "episode_score": episode_score,
+            "level": _str(episode.get("level") or episode_overall.get("level")),
+            "core_judgement": _str(episode.get("core_judgement") or episode_overall.get("core_judgement")),
+            "main_hook": _str(episode.get("main_hook") or episode_overall.get("main_hook")),
+            "main_conflict": _str(episode.get("main_conflict") or episode_overall.get("main_conflict")),
+            "main_payoff": _str(episode.get("main_payoff") or episode_overall.get("main_payoff")),
+            "largest_retention_loss": _str(episode.get("largest_retention_loss") or episode_overall.get("largest_retention_loss")),
+            "best_retained_part": _str(episode.get("best_retained_part") or episode_overall.get("best_retained_part")),
+            "next_episode_pull": _str(episode.get("next_episode_pull") or episode_overall.get("next_episode_pull")),
+            "priority_fix": _str(episode.get("priority_fix") or episode_overall.get("priority_fix")),
+            "dimension_scores": episode_dimensions,
+            "ecg_points": _normalize_compact_ecg_points(
+                _extract_compact_episode_points(episode),
+                warnings,
+                scope=f"episode_{episode_no}",
+            ),
+            "ending_hook": _dict(episode.get("ending_hook")),
+            "satisfying_points": _list(episode.get("satisfying_points")),
+            "key_issues": _list(episode.get("key_issues")),
+            "risk_scan": _list(episode.get("risk_scan")),
+            "rewrite_plan": _list(rewrite_plan),
+        })
+    audit["episode_reviews"] = sorted(episodes, key=lambda item: _int(item.get("episode_no"), 0))
+    audit["meta"]["total_episode_count"] = len(audit["episode_reviews"])
+    if not audit["meta"]["total_segment_count"]:
+        audit["meta"]["total_segment_count"] = len(segments)
+
+    cross = _dict(data.get("cross_episode_analysis"))
+    payoff = _dict(cross.get("payoff_distribution"))
+    hook = _dict(cross.get("hook_continuity"))
+    character = _dict(cross.get("character_arc_continuity"))
+    audit["cross_episode_analysis"] = {
+        "retention_curve_summary": _str(cross.get("retention_curve_summary")),
+        "weak_episode_numbers": _list(cross.get("weak_episode_numbers") or hook.get("weak_episode_numbers")),
+        "payoff_distribution_problem": _str(cross.get("payoff_distribution_problem") or payoff.get("evidence") or payoff.get("fix_suggestion")),
+        "hook_continuity_problem": _str(cross.get("hook_continuity_problem") or hook.get("evidence") or hook.get("fix_suggestion")),
+        "character_arc_problem": _str(cross.get("character_arc_problem") or character.get("problem") or character.get("fix_suggestion")),
+        "fix_suggestion": _str(cross.get("fix_suggestion") or payoff.get("fix_suggestion") or hook.get("fix_suggestion") or character.get("fix_suggestion")),
+    }
+
+    warnings.extend(validate_compact_audit_schema(audit))
+    return audit, warnings
+
+
+def validate_compact_audit_schema(audit: dict) -> list[str]:
+    warnings: list[str] = []
+    if not isinstance(audit, dict):
+        raise ValueError("标准化后的 compact audit 必须是对象。")
+    if audit.get("schema_version") != COMPACT_SCHEMA_VERSION:
+        raise ValueError("标准化后的 compact audit schema_version 必须是 script_audit_compact_v1。")
+
+    required = (
+        "meta",
+        "overall",
+        "dimension_scores",
+        "segments",
+        "global_review",
+        "episode_reviews",
+        "cross_episode_analysis",
+    )
+    for key in required:
+        if key not in audit:
+            warnings.append(f"缺少顶层字段 {key}，已由后端补齐默认值。")
+
+    dimension_keys = {item.get("dimension_key") for item in _list(audit.get("dimension_scores")) if isinstance(item, dict)}
+    for spec in AUDIT_DIMENSIONS:
+        if spec["dimension_key"] not in dimension_keys:
+            warnings.append(f"全局评分维度仍缺失：{spec['dimension_name']}。")
+
+    for episode in _list(audit.get("episode_reviews")):
+        if not isinstance(episode, dict):
+            continue
+        episode_keys = {item.get("dimension_key") for item in _list(episode.get("dimension_scores")) if isinstance(item, dict)}
+        for spec in AUDIT_DIMENSIONS:
+            if spec["dimension_key"] not in episode_keys:
+                warnings.append(f"第{episode.get('episode_no') or '?'}集评分维度仍缺失：{spec['dimension_name']}。")
+
+    seen_segments: set[str] = set()
+    duplicate_segments: set[str] = set()
+    for segment in _list(audit.get("segments")):
+        if not isinstance(segment, dict):
+            continue
+        segment_id = _str(segment.get("segment_id"))
+        if not segment_id:
+            continue
+        if segment_id in seen_segments:
+            duplicate_segments.add(segment_id)
+        seen_segments.add(segment_id)
+    if duplicate_segments:
+        warnings.append(f"segments.segment_id 存在重复：{', '.join(sorted(duplicate_segments))}")
+
+    all_points = list(_list(_dict(audit.get("global_review")).get("global_ecg_points")))
+    for episode in _list(audit.get("episode_reviews")):
+        if isinstance(episode, dict):
+            all_points.extend(_list(episode.get("ecg_points")))
+    if seen_segments:
+        for point in all_points:
+            if not isinstance(point, dict):
+                continue
+            segment_id = _str(point.get("segment_id"))
+            if segment_id and segment_id not in seen_segments:
+                warnings.append(f"心电点位引用了不存在的 segment_id：{segment_id}，已保留点位供前端展示。")
+    return warnings
+
+
+def _derived_ecg_points(points: list[dict], segment_by_id: dict[str, dict]) -> list[dict]:
+    derived = []
+    for index, point in enumerate(points, start=1):
+        if not isinstance(point, dict):
+            continue
+        ecg_value = _clamp(point.get("ecg_value"), -5, 5)
+        value_type = _value_type(ecg_value)
+        segment = segment_by_id.get(_str(point.get("segment_id")))
+        segment_excerpt = _first_text(
+            point.get("original_text_excerpt"),
+            segment.get("original_text_excerpt") if segment else "",
+        )
+        hover_title = _first_text(
+            point.get("short_label"),
+            point.get("event_type"),
+            point.get("x_label"),
+            "心电图节点",
+        )
+        hover_body = "\n".join([
+            f"分值：{_score_text(ecg_value)}",
+            f"原因：{_str(point.get('audit_reason'))}",
+            f"商业效果：{_str(point.get('commercial_effect'))}",
+            f"问题：{_str(point.get('problem_if_any'))}",
+            f"建议：{_str(point.get('fix_suggestion'))}",
+        ]).strip()
+        derived.append({
+            **point,
+            "x": index,
+            "y": ecg_value,
+            "ecg_value": ecg_value,
+            "value_type": value_type,
+            "color": ECG_COLOR_MAP[value_type],
+            "hover_title": hover_title,
+            "hover_body": hover_body,
+            "segment_excerpt": segment_excerpt,
+            "original_text_excerpt": segment_excerpt,
+            "hover_card": {
+                "title": hover_title,
+                "subtitle": f"第{point.get('episode_no') or '?'}集",
+                "score_text": _score_text(ecg_value),
+                "body": _str(point.get("audit_reason")),
+                "evidence": segment_excerpt,
+                "fix": _str(point.get("fix_suggestion")),
+            },
+        })
+    return derived
+
+
+def _point_extremes(points: list[dict], *, reverse: bool) -> list[dict]:
+    if not points:
+        return []
+    values = [_num(point.get("ecg_value"), 0) for point in points]
+    target = max(values) if reverse else min(values)
+    return [
+        point
+        for point in points
+        if _num(point.get("ecg_value"), 0) == target
+    ][:3]
+
+
+def build_audit_visualization_payload(audit: dict) -> dict:
+    """
+    根据标准化后的 compact audit 派生前端图表和卡片需要的数据。
+    这不是模型输出，而是后端生成的 derived payload。
+    """
+    if not isinstance(audit, dict):
+        audit = {}
+    segments = _list(audit.get("segments"))
+    segment_by_id = {
+        _str(segment.get("segment_id")): segment
+        for segment in segments
+        if isinstance(segment, dict) and _str(segment.get("segment_id"))
+    }
+    global_review = _dict(audit.get("global_review"))
+    global_points = _derived_ecg_points(_list(global_review.get("global_ecg_points")), segment_by_id)
+
+    episode_charts = []
+    episode_score_map = []
+    for episode in _list(audit.get("episode_reviews")):
+        if not isinstance(episode, dict):
+            continue
+        episode_points = _derived_ecg_points(_list(episode.get("ecg_points")), segment_by_id)
+        episode_charts.append({
+            "episode_no": _int(episode.get("episode_no"), 0),
+            "episode_title": _str(episode.get("episode_title")),
+            "points": episode_points,
+            "peak_points": _point_extremes(episode_points, reverse=True),
+            "valley_points": _point_extremes(episode_points, reverse=False),
+        })
+        episode_score_map.append({
+            "episode_no": _int(episode.get("episode_no"), 0),
+            "episode_title": _str(episode.get("episode_title")),
+            "episode_score": _num(episode.get("episode_score"), 0),
+            "level": _str(episode.get("level")),
+            "main_problem": _str(episode.get("largest_retention_loss")),
+            "next_priority_fix": _str(episode.get("priority_fix")),
+        })
+
+    return {
+        "ecg_chart": {
+            "global": {
+                "points": global_points,
+                "peak_points": _point_extremes(global_points, reverse=True),
+                "valley_points": _point_extremes(global_points, reverse=False),
+            },
+            "episodes": episode_charts,
+        },
+        "episode_score_map": episode_score_map,
+        "dimension_cards": [
+            {
+                **item,
+                "level_color": LEVEL_COLOR_MAP.get(_str(item.get("level")), ""),
+            }
+            for item in _list(audit.get("dimension_scores"))
+            if isinstance(item, dict)
+        ],
+        "issue_cards": _list(global_review.get("global_key_issues")),
+        "rewrite_cards": _list(global_review.get("global_rewrite_plan")),
+        "risk_cards": [
+            {
+                **item,
+                "risk_color": RISK_COLOR_MAP.get(_str(item.get("risk_level")), ""),
+            }
+            for item in _list(global_review.get("global_risk_scan"))
+            if isinstance(item, dict)
+        ],
+    }
+
+
 def normalize_script_audit_ecg(data: dict, raw_answer_text: str = "") -> tuple[dict, list[str]]:
     warnings: list[str] = []
     if not isinstance(data, dict):
@@ -801,12 +1464,24 @@ def build_script_audit_view_model(audit: dict) -> dict:
     overall = _dict(audit.get("overall"))
     meta = _dict(audit.get("meta"))
     global_review = _dict(audit.get("global_review"))
+    visualization = build_audit_visualization_payload(audit) if audit.get("schema_version") == COMPACT_SCHEMA_VERSION else {}
+    compact_global_chart = _dict(_dict(visualization.get("ecg_chart")).get("global"))
     ecg = _dict(global_review.get("ecg") or audit.get("ecg"))
     main_series = _dict(ecg.get("main_series"))
-    points = _list(main_series.get("points"))
-    episode_score_map = _list(global_review.get("episode_score_map"))
+    points = _list(compact_global_chart.get("points") or main_series.get("points"))
+    episode_score_map = _list(visualization.get("episode_score_map") or global_review.get("episode_score_map"))
     episode_cards = _list(audit.get("episode_reviews")) or _list(audit.get("episode_summaries"))
     structure = _dict(global_review.get("global_structure_judgement"))
+    if not structure and audit.get("schema_version") == COMPACT_SCHEMA_VERSION:
+        structure = {
+            "main_genre": global_review.get("main_genre", ""),
+            "main_emotional_contract": global_review.get("main_emotional_contract", ""),
+            "main_conflict_chain": global_review.get("main_conflict_chain", ""),
+            "protagonist_arc": global_review.get("protagonist_arc", ""),
+            "payoff_chain": global_review.get("payoff_chain", ""),
+            "global_retention_problem": global_review.get("global_retention_problem", ""),
+            "global_revision_priority": global_review.get("global_revision_priority", ""),
+        }
     cross_episode = _dict(audit.get("cross_episode_analysis"))
 
     export_lines = [
@@ -817,7 +1492,8 @@ def build_script_audit_view_model(audit: dict) -> dict:
         f"评级：{overall.get('level', '')}",
         f"修改成本：{overall.get('modification_cost', '')}",
         f"核心判断：{overall.get('core_judgement', '')}",
-        f"最大硬伤：{overall.get('largest_hard_problem', '')}",
+        f"最大问题：{overall.get('largest_problem') or overall.get('largest_hard_problem', '')}",
+        f"最佳保留：{overall.get('best_retained_part', '')}",
         f"最终判断：{overall.get('final_judgement', '')}",
         "",
         "二、全剧心电图节点摘要",
@@ -832,7 +1508,7 @@ def build_script_audit_view_model(audit: dict) -> dict:
     for episode in episode_cards:
         if not isinstance(episode, dict):
             continue
-        episode_overall = _dict(episode.get("episode_overall"))
+        episode_overall = _dict(episode.get("episode_overall") or episode)
         export_lines.append(
             f"- 第{episode.get('episode_no', '')}集 {episode.get('episode_title', '')}: "
             f"{episode_overall.get('episode_score', '')}/100，{episode_overall.get('core_judgement', '')} "
@@ -862,10 +1538,10 @@ def build_script_audit_view_model(audit: dict) -> dict:
             "points": points,
             "episode_markers": _episode_markers(points, episode_score_map),
             "negative_zones": _list(ecg.get("negative_zones")),
-            "peak_points": _list(ecg.get("peak_points")),
-            "valley_points": _list(ecg.get("valley_points")),
+            "peak_points": _list(compact_global_chart.get("peak_points") or ecg.get("peak_points")),
+            "valley_points": _list(compact_global_chart.get("valley_points") or ecg.get("valley_points")),
         },
-        "dimension_cards": _list(audit.get("dimension_scores")),
+        "dimension_cards": _list(visualization.get("dimension_cards") or audit.get("dimension_scores")),
         "global_review": {
             "structure": structure,
             "satisfying_points": _list(global_review.get("global_satisfying_points")),

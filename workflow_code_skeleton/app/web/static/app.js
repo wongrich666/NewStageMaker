@@ -3090,11 +3090,12 @@ startRuntimeDebugPolling();
         || parsed.text
         || parsed.output
         || parsed.result
+        || parsed.data
         || "";
       if (
         typeof nestedText === "string"
         && nestedText.trim()
-        && (nestedText.includes("script_audit_ecg_v2") || nestedText.includes("script_audit_ecg_v3") || nestedText.includes('"overall"'))
+        && (nestedText.includes("script_audit_ecg_v2") || nestedText.includes("script_audit_ecg_v3") || nestedText.includes("script_audit_compact_v1") || nestedText.includes('"overall"'))
       ) {
         const nested = parseScriptAuditJsonFromText(nestedText);
         if (nested && typeof nested === "object") return nested;
@@ -3107,18 +3108,31 @@ startRuntimeDebugPolling();
 
   function looksLikeScriptAuditPayload(payload) {
     if (!payload || typeof payload !== "object") return false;
-    return String(payload.schema_version || "").includes("script_audit_ecg")
-      || Boolean(payload.overall && (payload.dimension_scores || payload.ecg || payload.global_review || payload.episode_reviews || payload.key_issues))
-      || Boolean(payload.audit && payload.view);
+    const schema = String(payload.schema_version || "");
+    return schema.includes("script_audit_ecg")
+      || schema === "script_audit_compact_v1"
+      || Boolean(payload.overall && (payload.dimension_scores || payload.global_dimensions || payload.ecg || payload.global_review || payload.episode_reviews || payload.episodes || payload.key_issues))
+      || Boolean(payload.audit && (payload.view || payload.visualization));
   }
 
-  function scriptAuditViewFromAudit(audit) {
+  function scriptAuditViewFromAudit(audit, visualization = null) {
     const overall = audit?.overall || {};
-    const dimensions = auditArray(audit?.dimension_scores || audit?.dimensions || audit?.dimension_cards);
+    const dimensions = auditArray(visualization?.dimension_cards || audit?.dimension_scores || audit?.dimensions || audit?.dimension_cards);
     const globalReview = audit?.global_review || {};
+    const compactGlobalReview = {
+      main_genre: globalReview.main_genre,
+      main_emotional_contract: globalReview.main_emotional_contract,
+      main_conflict_chain: globalReview.main_conflict_chain,
+      protagonist_arc: globalReview.protagonist_arc,
+      payoff_chain: globalReview.payoff_chain,
+      global_retention_problem: globalReview.global_retention_problem,
+      global_revision_priority: globalReview.global_revision_priority
+    };
     const globalEcg = globalReview?.ecg || audit?.ecg || audit?.ecg_chart || {};
     const points = auditArray(
-      globalEcg?.main_series?.points
+      visualization?.ecg_chart?.global?.points
+      || globalReview?.global_ecg_points
+      || globalEcg?.main_series?.points
       || globalEcg?.points
       || audit?.ecg_chart?.points
       || audit?.main_series?.points
@@ -3131,7 +3145,7 @@ startRuntimeDebugPolling();
     const totalScore = overall.total_score ?? overall.score ?? audit?.total_score ?? "";
     const grade = overall.suitability_level || overall.grade || overall.level || "";
     const revisionCost = overall.revision_cost || overall.modify_cost || overall.cost || "";
-    const episodeScoreMap = auditArray(globalReview.episode_score_map);
+    const episodeScoreMap = auditArray(visualization?.episode_score_map || globalReview.episode_score_map);
     const episodeCards = auditArray(audit?.episode_reviews || audit?.episode_summaries);
     const episodeNos = [...new Set([
       ...points.map((point) => auditNumber(point.episode_no, 0)).filter(Boolean),
@@ -3159,7 +3173,8 @@ startRuntimeDebugPolling();
       globalReview,
       totalScore,
       grade,
-      revisionCost
+      revisionCost,
+      structure: globalReview.global_structure_judgement || compactGlobalReview
     });
 
     return {
@@ -3175,7 +3190,9 @@ startRuntimeDebugPolling();
         points,
         episode_markers: episodeMarkers,
         y_axis_range: globalEcg?.y_axis_range || [-5, 5],
-        baseline: globalEcg?.baseline ?? 0
+        baseline: globalEcg?.baseline ?? 0,
+        peak_points: auditArray(visualization?.ecg_chart?.global?.peak_points || globalEcg?.peak_points),
+        valley_points: auditArray(visualization?.ecg_chart?.global?.valley_points || globalEcg?.valley_points)
       },
       dimension_cards: dimensions.map((item) => ({
         dimension_key: item.dimension_key || item.key || item.name || "",
@@ -3187,7 +3204,7 @@ startRuntimeDebugPolling();
         priority_fix: item.priority_fix || item.fix_suggestion || item.suggestion || ""
       })),
       global_review: {
-        structure: globalReview.global_structure_judgement || {},
+        structure: globalReview.global_structure_judgement || compactGlobalReview || {},
         satisfying_points: auditArray(globalReview.global_satisfying_points || audit?.satisfying_points || audit?.selling_points),
         key_issues: auditArray(globalReview.global_key_issues || audit?.key_issues || audit?.issues),
         risk_scan: auditArray(globalReview.global_risk_scan || audit?.risk_scan || audit?.risks),
@@ -3218,7 +3235,15 @@ startRuntimeDebugPolling();
     const dimensions = auditArray(context.dimensions);
     const episodeCards = auditArray(context.episodeCards);
     const globalReview = context.globalReview || audit?.global_review || {};
-    const structure = globalReview.global_structure_judgement || {};
+    const structure = context.structure || globalReview.global_structure_judgement || {
+      main_genre: globalReview.main_genre,
+      main_emotional_contract: globalReview.main_emotional_contract,
+      main_conflict_chain: globalReview.main_conflict_chain,
+      protagonist_arc: globalReview.protagonist_arc,
+      payoff_chain: globalReview.payoff_chain,
+      global_retention_problem: globalReview.global_retention_problem,
+      global_revision_priority: globalReview.global_revision_priority
+    };
     const lines = [
       `《${meta.script_title || "未命名剧本"}》爆款文审核报告`,
       "",
@@ -3227,7 +3252,7 @@ startRuntimeDebugPolling();
       `评级：${overall.level || "-"}`,
       `修改成本：${overall.modification_cost || "-"}`,
       `核心判断：${overall.core_judgement || "-"}`,
-      `最大硬伤：${overall.largest_hard_problem || "-"}`,
+      `最大问题：${overall.largest_problem || overall.largest_hard_problem || "-"}`,
       `最佳保留：${overall.best_retained_part || "-"}`,
       `最终判断：${overall.final_judgement || "-"}`,
       "",
@@ -3259,6 +3284,7 @@ startRuntimeDebugPolling();
 
     let audit = result.audit || null;
     let view = result.view || null;
+    let visualization = result.visualization || null;
     const resultType = String(result.result_type || result.resultType || "").trim();
 
     const candidates = [
@@ -3282,10 +3308,18 @@ startRuntimeDebugPolling();
       if (candidate?.audit && candidate?.view) {
         audit = audit || candidate.audit;
         view = view || candidate.view;
+        visualization = visualization || candidate.visualization || null;
+        break;
+      }
+      if (candidate?.audit && candidate?.visualization) {
+        audit = audit || candidate.audit;
+        visualization = visualization || candidate.visualization;
+        view = view || candidate.view || null;
         break;
       }
       if (looksLikeScriptAuditPayload(candidate)) {
-        audit = audit || (candidate.audit && candidate.view ? candidate.audit : candidate);
+        audit = audit || (candidate.audit && (candidate.view || candidate.visualization) ? candidate.audit : candidate);
+        visualization = visualization || candidate.visualization || null;
         break;
       }
     }
@@ -3302,7 +3336,7 @@ startRuntimeDebugPolling();
     }
 
     if (!audit && !view) return result;
-    if (!view && audit) view = scriptAuditViewFromAudit(audit);
+    if (!view && audit) view = scriptAuditViewFromAudit(audit, visualization);
 
     return {
       ...result,
@@ -3312,8 +3346,10 @@ startRuntimeDebugPolling();
       resultType: "script_audit_ecg",
       parsed: result.parsed === false ? false : true,
       audit: audit || {},
+      visualization: visualization || {},
       view,
-      parse_warnings: result.parse_warnings || result.parseWarnings || []
+      warnings: result.warnings || result.parse_warnings || result.parseWarnings || [],
+      parse_warnings: result.parse_warnings || result.parseWarnings || result.warnings || []
     };
   }
 
@@ -3471,8 +3507,8 @@ startRuntimeDebugPolling();
     const circles = points.map((point, index) => {
       const value = auditNumber(point.ecg_value);
       const klass = value >= 0 ? "audit-ecg-dot-pos" : "audit-ecg-dot-neg";
-      const title = auditText(point?.hover_card?.title || point.short_label || point.event_type || point.point_id, `第${index + 1}点`);
-      const reason = auditText(point.audit_reason || point?.hover_card?.body || point.commercial_effect || "");
+      const title = auditText(point.hover_title || point?.hover_card?.title || point.short_label || point.event_type || point.point_id, `第${index + 1}点`);
+      const reason = auditText(point.audit_reason || point.hover_body || point?.hover_card?.body || point.commercial_effect || "");
       const tooltip = `第${point.episode_no || "?"}集｜${auditScoreText(value)}｜${title}${reason ? "｜" + reason : ""}`;
       return `
         <g class="audit-ecg-node" data-action="show-audit-point" data-point-index="${index}" tabindex="0">
@@ -3515,9 +3551,9 @@ startRuntimeDebugPolling();
         <button class="audit-popover-close" type="button" data-action="close-audit-point" aria-label="关闭">×</button>
         <div class="audit-point-score">${escapeHtml(auditScoreText(point.ecg_value))}</div>
         <div>
-          <strong>${escapeHtml(point?.hover_card?.title || point.short_label || point.event_type || `第${index + 1}点`)}</strong>
-          <p>${escapeHtml(point.audit_reason || point?.hover_card?.body || point.commercial_effect || "")}</p>
-          ${point.original_text_excerpt || point?.hover_card?.evidence ? `<small>证据：${escapeHtml(point.original_text_excerpt || point.hover_card.evidence)}</small>` : ""}
+          <strong>${escapeHtml(point.hover_title || point?.hover_card?.title || point.short_label || point.event_type || `第${index + 1}点`)}</strong>
+          <p>${escapeHtml(point.audit_reason || point.hover_body || point?.hover_card?.body || point.commercial_effect || "")}</p>
+          ${point.segment_excerpt || point.original_text_excerpt || point?.hover_card?.evidence ? `<small>证据：${escapeHtml(point.segment_excerpt || point.original_text_excerpt || point.hover_card.evidence)}</small>` : ""}
           ${point.problem_if_any ? `<small>问题：${escapeHtml(point.problem_if_any)}</small>` : ""}
           ${point.fix_suggestion || point?.hover_card?.fix ? `<small class="audit-fix">建议：${escapeHtml(point.fix_suggestion || point.hover_card.fix)}</small>` : ""}
           ${impacts.length ? `<small>评分影响：${escapeHtml(impacts.map((item) => `${item.dimension_key || item.sub_key || "维度"} ${item.impact || ""} ${item.reason || ""}`).join("；"))}</small>` : ""}
@@ -3646,9 +3682,10 @@ startRuntimeDebugPolling();
       <h4>跨集结构分析</h4>
       ${renderAuditKeyValueList([
         { label: "留存曲线", value: cross.retention_curve_summary },
-        { label: "爽点分布", value: cross.payoff_distribution?.evidence || cross.payoff_distribution?.fix_suggestion },
-        { label: "钩子连续性", value: cross.hook_continuity?.evidence || cross.hook_continuity?.fix_suggestion },
-        { label: "人物弧光连续性", value: cross.character_arc_continuity?.problem || cross.character_arc_continuity?.fix_suggestion },
+        { label: "爽点分布", value: cross.payoff_distribution_problem || cross.payoff_distribution?.evidence || cross.payoff_distribution?.fix_suggestion },
+        { label: "钩子连续性", value: cross.hook_continuity_problem || cross.hook_continuity?.evidence || cross.hook_continuity?.fix_suggestion },
+        { label: "人物弧光连续性", value: cross.character_arc_problem || cross.character_arc_continuity?.problem || cross.character_arc_continuity?.fix_suggestion },
+        { label: "修改建议", value: cross.fix_suggestion },
       ])}
       ${renderAuditList("掉点风险", cross.episode_dropoff_risks || [], { limit: 10 })}
     `, "展开");

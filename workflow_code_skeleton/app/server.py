@@ -43,12 +43,17 @@ from .services.framework_planner_service import (
 )
 from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
 from .services.script_audit_ecg_parser import (
+    COMPACT_SCHEMA_VERSION as SCRIPT_AUDIT_COMPACT_SCHEMA_VERSION,
     SCHEMA_VERSION as SCRIPT_AUDIT_ECG_SCHEMA_VERSION,
     SCHEMA_VERSION_V3 as SCRIPT_AUDIT_ECG_SCHEMA_VERSION_V3,
+    build_audit_visualization_payload,
     build_script_audit_view_model,
     fallback_audit_from_text,
+    normalize_compact_audit_payload,
     normalize_script_audit_ecg,
+    parse_compact_audit_json,
     parse_model_json_loose,
+    validate_compact_audit_schema,
 )
 from .services.task_manager import task_manager
 from .services.user_knowledge_store import user_knowledge_store
@@ -171,7 +176,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         return max(texts, key=len)[:limit]
 
     def _script_audit_ecg_should_try(tool_key: str, parsed: dict | None, raw_text: str) -> bool:
-        if isinstance(parsed, dict) and parsed.get("schema_version") in {SCRIPT_AUDIT_ECG_SCHEMA_VERSION, SCRIPT_AUDIT_ECG_SCHEMA_VERSION_V3}:
+        if isinstance(parsed, dict) and parsed.get("schema_version") in {
+            SCRIPT_AUDIT_ECG_SCHEMA_VERSION,
+            SCRIPT_AUDIT_ECG_SCHEMA_VERSION_V3,
+            SCRIPT_AUDIT_COMPACT_SCHEMA_VERSION,
+        }:
             return True
         key_text = str(tool_key or "").lower()
         keywords = (
@@ -187,6 +196,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             any(keyword.lower() in key_text for keyword in keywords)
             or SCRIPT_AUDIT_ECG_SCHEMA_VERSION in raw_text
             or SCRIPT_AUDIT_ECG_SCHEMA_VERSION_V3 in raw_text
+            or SCRIPT_AUDIT_COMPACT_SCHEMA_VERSION in raw_text
         )
 
 
@@ -220,13 +230,74 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             raw_text,
         )
 
+        compact_candidate = None
+        compact_parse_warnings = []
+        if (
+            isinstance(parsed, dict)
+            and parsed.get("schema_version") == SCRIPT_AUDIT_COMPACT_SCHEMA_VERSION
+        ):
+            compact_candidate = parsed
+        else:
+            compact_sources = []
+            if raw_text:
+                compact_sources.append(raw_text)
+            try:
+                compact_sources.append(json.dumps(result, ensure_ascii=False, default=str))
+            except Exception:
+                pass
+            for compact_source in compact_sources:
+                try:
+                    compact_candidate = parse_compact_audit_json(compact_source)
+                    break
+                except Exception as exc:
+                    compact_parse_warnings.append(str(exc))
+
+        if (
+            isinstance(compact_candidate, dict)
+            and (
+                compact_candidate.get("schema_version") == SCRIPT_AUDIT_COMPACT_SCHEMA_VERSION
+                or "global_dimensions" in compact_candidate
+                or "episodes" in compact_candidate
+            )
+        ):
+            audit, normalize_warnings = normalize_compact_audit_payload(compact_candidate)
+            validation_warnings = validate_compact_audit_schema(audit)
+            visualization = build_audit_visualization_payload(audit)
+            view = build_script_audit_view_model(audit)
+            warnings = [
+                *(parse_warnings or []),
+                *compact_parse_warnings[:1],
+                *normalize_warnings,
+                *validation_warnings,
+            ]
+            for target in (
+                enriched_result,
+                enriched_flattened,
+            ):
+                target["result_type"] = "script_audit_ecg"
+                target["resultType"] = "script_audit_ecg"
+                target["schema_version"] = SCRIPT_AUDIT_COMPACT_SCHEMA_VERSION
+                target["parsed"] = True
+                target["audit"] = audit
+                target["visualization"] = visualization
+                target["view"] = view
+                target["warnings"] = warnings
+                target["parse_warnings"] = warnings
+                target["answer_text"] = raw_text
+
+            return enriched_result, enriched_flattened
+
         def looks_like_audit_payload(value) -> bool:
             if not isinstance(value, dict):
                 return False
 
             if (
                 value.get("schema_version")
-                in {SCRIPT_AUDIT_ECG_SCHEMA_VERSION, SCRIPT_AUDIT_ECG_SCHEMA_VERSION_V3}
+                in {
+                    SCRIPT_AUDIT_ECG_SCHEMA_VERSION,
+                    SCRIPT_AUDIT_ECG_SCHEMA_VERSION_V3,
+                    SCRIPT_AUDIT_COMPACT_SCHEMA_VERSION,
+                }
             ):
                 return True
 
@@ -2173,6 +2244,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         is_audit = str(merged.get("result_type") or merged.get("resultType") or "").strip() == "script_audit_ecg"
         audit = merged.get("audit") if isinstance(merged.get("audit"), dict) else None
         view = merged.get("view") if isinstance(merged.get("view"), dict) else None
+        visualization = merged.get("visualization") if isinstance(merged.get("visualization"), dict) else None
         if not is_audit and not audit and not view:
             return saved_asset
 
@@ -2199,6 +2271,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if view:
             artifacts["view"] = copy.deepcopy(view)
             snapshot["view"] = copy.deepcopy(view)
+        if visualization:
+            artifacts["visualization"] = copy.deepcopy(visualization)
+            snapshot["visualization"] = copy.deepcopy(visualization)
 
         tool_result = {
             "tool_key": "hot_review",
@@ -2215,11 +2290,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "answer_text": str(merged.get("answer_text") or merged.get("answerText") or merged.get("text") or "").strip(),
             "filename": str(merged.get("filename") or saved_asset.get("tool_filename") or "").strip(),
             "parse_warnings": merged.get("parse_warnings") or merged.get("parseWarnings") or [],
+            "warnings": merged.get("warnings") or merged.get("parse_warnings") or merged.get("parseWarnings") or [],
         }
         if audit:
             tool_result["audit"] = copy.deepcopy(audit)
         if view:
             tool_result["view"] = copy.deepcopy(view)
+        if visualization:
+            tool_result["visualization"] = copy.deepcopy(visualization)
 
         artifacts["tool_result"] = tool_result
         artifacts["result"] = tool_result

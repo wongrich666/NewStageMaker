@@ -3,11 +3,15 @@ from __future__ import annotations
 import json
 
 from app.services.script_audit_ecg_parser import (
+    COMPACT_SCHEMA_VERSION,
     SCHEMA_VERSION,
     SCHEMA_VERSION_V3,
+    build_audit_visualization_payload,
     build_script_audit_view_model,
     fallback_audit_from_text,
+    normalize_compact_audit_payload,
     normalize_script_audit_ecg,
+    parse_compact_audit_json,
     parse_model_json_loose,
 )
 
@@ -176,3 +180,115 @@ def test_fallback_audit_from_unparseable_text_still_builds_view():
     assert audit["parse_fallback"]["enabled"] is True
     assert view["summary_cards"]
     assert view["global_review"]["key_issues"][0]["title"] == "模型输出未能完整解析"
+
+
+def compact_payload():
+    return {
+        "schema_version": COMPACT_SCHEMA_VERSION,
+        "meta": {"script_title": "紧凑测试", "text_type": "短剧"},
+        "overall": {"level": "B", "core_judgement": "开场有效，中段需要加压。"},
+        "dimension_scores": [
+            {"dimension_key": "opening_hook", "score": 12, "summary": "开场清楚"},
+            {"dimension_key": "conflict_pacing", "score": 18, "summary": "中段略松"},
+            {"dimension_key": "satisfying_payoff", "score": 17},
+            {"dimension_key": "character_dialogue_filming", "score": 15},
+            {"dimension_key": "market_compliance", "score": 12},
+        ],
+        "segments": [
+            {"segment_id": "s1", "episode_no": 1, "segment_index_global": 1, "original_text_excerpt": "医生冲进病房。"},
+            {"segment_id": "s2", "episode_no": 1, "segment_index_global": 2, "original_text_excerpt": "主角犹豫解释。"},
+        ],
+        "global_review": {
+            "main_genre": "都市逆袭",
+            "global_retention_problem": "解释段偏长",
+            "global_ecg_points": [
+                {"point_id": "p1", "segment_id": "s1", "episode_no": 1, "ecg_value": 4, "short_label": "强开场", "audit_reason": "目标明确"},
+                {"point_id": "p2", "segment_id": "s2", "episode_no": 1, "ecg_value": -2, "short_label": "解释拖慢", "fix_suggestion": "压缩对白"},
+            ],
+            "global_key_issues": [{"title": "解释偏多", "risk_level": "建议修改"}],
+            "global_rewrite_plan": [{"task_id": "r1", "specific_action": "前置冲突"}],
+        },
+        "episode_reviews": [
+            {
+                "episode_no": 1,
+                "episode_title": "第一集",
+                "level": "B",
+                "core_judgement": "钩子成立",
+                "largest_retention_loss": "解释拖慢",
+                "priority_fix": "加选择代价",
+                "dimension_scores": [
+                    {"dimension_key": "opening_hook", "score": 12},
+                    {"dimension_key": "conflict_pacing", "score": 18},
+                    {"dimension_key": "satisfying_payoff", "score": 17},
+                    {"dimension_key": "character_dialogue_filming", "score": 15},
+                    {"dimension_key": "market_compliance", "score": 12},
+                ],
+                "ecg_points": [{"segment_id": "s1", "episode_no": 1, "ecg_value": 4, "label": "集内高点"}],
+            }
+        ],
+        "cross_episode_analysis": {"retention_curve_summary": "第一集开场较强。"},
+    }
+
+
+def compact_result_from(raw):
+    data = parse_compact_audit_json(raw)
+    audit, warnings = normalize_compact_audit_payload(data)
+    visualization = build_audit_visualization_payload(audit)
+    return {"audit": audit, "visualization": visualization, "warnings": warnings}
+
+
+def test_compact_parse_valid_raw_json():
+    result = compact_result_from(json.dumps(compact_payload(), ensure_ascii=False))
+    assert result["audit"]["schema_version"] == COMPACT_SCHEMA_VERSION
+    assert result["audit"]["overall"]["total_score"] == 74
+    assert result["visualization"]["ecg_chart"]["global"]["points"][0]["hover_title"] == "强开场"
+    assert result["visualization"]["episode_score_map"][0]["episode_score"] == 74
+
+
+def test_compact_parse_fenced_bom_and_surrounding_text():
+    raw = "\ufeff下面是审核结果：```json\n" + json.dumps(compact_payload(), ensure_ascii=False) + "\n```谢谢"
+    result = compact_result_from(raw)
+    assert result["audit"]["meta"]["script_title"] == "紧凑测试"
+    assert result["visualization"]["ecg_chart"]["global"]["peak_points"][0]["point_id"] == "p1"
+    assert result["visualization"]["ecg_chart"]["global"]["valley_points"][0]["point_id"] == "p2"
+
+
+def test_compact_alias_payload_normalizes_to_canonical():
+    alias_payload = {
+        "schema_version": COMPACT_SCHEMA_VERSION,
+        "meta": {"script_title": "短字段测试"},
+        "overall": {"level": "C"},
+        "global_dimensions": [
+            {"key": "opening_hook", "score": 10, "main_deduction": "开头不够锐"},
+            {"key": "conflict_pacing", "score": 16},
+            {"key": "satisfying_payoff", "score": 15},
+            {"key": "character_dialogue_filming", "score": 14},
+            {"key": "market_compliance", "score": 12},
+        ],
+        "global_review": {
+            "global_ecg_points": [
+                {"segment_id": "sx", "episode_no": 1, "value": 3, "label": "小高潮", "reason": "反击清楚", "fix": "补后果"}
+            ]
+        },
+        "episodes": [
+            {
+                "episode_no": 1,
+                "dimensions": [
+                    {"key": "opening_hook", "score": 10, "deduction": "开头慢"},
+                    {"key": "conflict_pacing", "score": 16},
+                    {"key": "satisfying_payoff", "score": 15},
+                    {"key": "character_dialogue_filming", "score": 14},
+                    {"key": "market_compliance", "score": 12},
+                ],
+                "rewrite_tasks": [{"specific_action": "减少解释"}],
+                "ecg_points": [{"value": 3, "label": "集内点", "reason": "有效"}],
+            }
+        ],
+    }
+    wrapped = {"answerText": json.dumps(alias_payload, ensure_ascii=False)}
+    result = compact_result_from(json.dumps(wrapped, ensure_ascii=False))
+    assert result["audit"]["dimension_scores"][0]["dimension_key"] == "opening_hook"
+    assert result["audit"]["dimension_scores"][0]["deduction_reason"] == "开头不够锐"
+    assert result["audit"]["episode_reviews"][0]["rewrite_plan"][0]["specific_action"] == "减少解释"
+    assert result["visualization"]["ecg_chart"]["global"]["points"][0]["ecg_value"] == 3
+    assert result["warnings"]
