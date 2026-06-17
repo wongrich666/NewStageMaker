@@ -5787,6 +5787,222 @@ body,
   }
 }
 
+/* SCRIPT_AUDIT_ECG_V3_UI */
+.audit-result-shell {
+  position: relative;
+  gap: 12px;
+  color: var(--mono-text, #211b14);
+}
+
+.audit-hero,
+.audit-panel,
+.audit-summary-card,
+.audit-popover-trigger,
+.audit-popover-card,
+.audit-point-card,
+.audit-list-card {
+  border-color: rgba(92, 65, 35, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 250, 241, 0.94);
+  box-shadow: 0 12px 30px rgba(68, 45, 24, 0.08);
+}
+
+.audit-hero {
+  padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(255, 250, 241, 0.98), rgba(245, 232, 210, 0.94));
+}
+
+.audit-kicker {
+  color: #9a7247;
+}
+
+.audit-hero h3,
+.audit-panel h4,
+.audit-popover-card h4 {
+  color: #2b2118;
+}
+
+.audit-score-badge {
+  min-width: 96px;
+  border: 1px solid rgba(122, 84, 43, 0.18);
+  background: #3b2a1b;
+}
+
+.audit-score-badge strong {
+  font-size: 34px;
+}
+
+.audit-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+}
+
+.audit-summary-card {
+  padding: 10px 12px;
+}
+
+.audit-summary-card strong {
+  color: #2b2118;
+  font-size: 19px;
+}
+
+.audit-panel {
+  padding: 12px;
+}
+
+.audit-ecg-wrap {
+  position: relative;
+  padding: 8px 0 18px;
+}
+
+.audit-ecg-svg {
+  min-width: 820px;
+}
+
+.audit-episode-marker {
+  stroke: rgba(155, 113, 65, 0.24);
+  stroke-width: 1;
+  stroke-dasharray: 4 5;
+}
+
+.audit-episode-label {
+  fill: #8b6842;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.audit-ecg-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.audit-ecg-node:hover .audit-ecg-dot,
+.audit-ecg-node:focus .audit-ecg-dot {
+  stroke: #3b2a1b;
+  stroke-width: 3;
+}
+
+.audit-point-sticky {
+  position: sticky;
+  left: 8px;
+  bottom: 8px;
+  z-index: 4;
+  width: min(520px, calc(100% - 16px));
+  margin-top: -8px;
+}
+
+.audit-point-sticky[hidden] {
+  display: none;
+}
+
+.audit-point-card {
+  position: relative;
+  padding: 12px 42px 12px 12px;
+}
+
+.audit-popover-bar {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.audit-popover-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 11px;
+  color: #3a2a1d;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.audit-popover-trigger small {
+  color: #8b6842;
+}
+
+.audit-popover {
+  position: absolute;
+  z-index: 12;
+  top: 44px;
+  left: 0;
+  width: min(760px, calc(100vw - 340px));
+}
+
+.audit-popover-card {
+  max-height: min(72vh, 680px);
+  overflow: auto;
+  padding: 14px;
+}
+
+.audit-popover-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(92, 65, 35, 0.16);
+  border-radius: 999px;
+  color: #5c4123;
+  background: rgba(255, 255, 255, 0.76);
+  cursor: pointer;
+}
+
+.audit-kv-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.audit-kv-list div {
+  padding: 9px;
+  border: 1px solid rgba(92, 65, 35, 0.10);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.audit-kv-list small {
+  display: block;
+  color: #8b6842;
+  font-size: 11px;
+}
+
+.audit-kv-list strong {
+  display: block;
+  margin-top: 4px;
+  color: #2b2118;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.audit-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.audit-exporting .audit-popover {
+  position: relative;
+  top: auto;
+  left: auto;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.audit-exporting .audit-popover-card {
+  max-height: none;
+}
+
+@media (max-width: 900px) {
+  .audit-popover {
+    position: fixed;
+    inset: auto 12px 12px;
+    width: auto;
+  }
+}
+
 /* TOOL_OUTPUT_FULL_PAGE_SCROLL_V1: let assistant tool results expand with page instead of inner scroll */
 .workspace-body .tool-panel,
 .tool-panel {

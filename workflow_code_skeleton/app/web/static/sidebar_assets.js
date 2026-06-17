@@ -7,6 +7,7 @@
     old_script: document.getElementById("activeProjectList"),
     framework: document.getElementById("completedProjectList"),
     new_script: document.getElementById("newScriptProjectList"),
+    hot_review: null,
   };
 
   function escapeHtml(value) {
@@ -16,6 +17,65 @@
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#39;");
+  }
+
+  function hotReviewAssetTitle(item) {
+    const artifacts = item && typeof item.artifacts === "object" ? item.artifacts : {};
+    const result = item.result || item.tool_result || artifacts.tool_result || artifacts.result || {};
+    const audit = item.audit || result.audit || artifacts.audit || {};
+    const view = item.view || result.view || artifacts.view || {};
+    return String(
+      audit?.meta?.script_title
+      || view?.meta?.script_title
+      || item.script_title
+      || result.script_title
+      || item.title
+      || "未命名爆款文审核"
+    ).trim();
+  }
+
+  function isHotReviewAsset(item) {
+    const artifacts = item && typeof item.artifacts === "object" ? item.artifacts : {};
+    const result = item.result || item.tool_result || artifacts.tool_result || artifacts.result || {};
+    const values = [
+      item.tool_key,
+      item.tool_id,
+      item.tool_label,
+      item.asset_type,
+      item.category,
+      item.workflow_type,
+      item.result_type,
+      item.resultType,
+      result.tool_key,
+      result.result_type,
+      result.resultType,
+      artifacts.result_type,
+      artifacts.tool_result && artifacts.tool_result.result_type,
+    ].map((value) => String(value || "").trim());
+    return values.some((value) =>
+      value === "hot_review"
+      || value === "script_audit_ecg"
+      || value.includes("hot_review")
+      || value.includes("script_audit")
+      || value.includes("爆款文审核")
+    ) || Boolean(item.audit || result.audit || artifacts.audit);
+  }
+
+  function ensureHotReviewList() {
+    if (lists.hot_review) return lists.hot_review;
+    const anchor = lists.framework?.closest("details") || lists.new_script?.closest("details") || lists.old_script?.closest("details");
+    const parent = anchor?.parentElement;
+    if (!parent) return null;
+    const details = document.createElement("details");
+    details.className = "workspace-folder hot-review-workspace-folder";
+    details.innerHTML = `
+      <summary><span>爆款文审核资产</span></summary>
+      <div id="hotReviewProjectList" class="workspace-compact-list"></div>
+    `;
+    if (anchor) anchor.insertAdjacentElement("afterend", details);
+    else parent.appendChild(details);
+    lists.hot_review = details.querySelector("#hotReviewProjectList");
+    return lists.hot_review;
   }
 
   function hasFrameworkToScriptState(item) {
@@ -28,6 +88,7 @@
   }
 
   function assetCategory(item) {
+    if (isHotReviewAsset(item)) return "hot_review";
     const explicit = String(item.asset_type || item.type || "").trim();
     if (explicit === "legacy_script") return "old_script";
     if (["old_script", "framework", "new_script"].includes(explicit)) return explicit;
@@ -60,6 +121,7 @@
   }
 
   function projectTitle(item) {
+    if (isHotReviewAsset(item)) return hotReviewAssetTitle(item);
     return String(item.title || item.project_title || item.source_title || "未命名资产").trim();
   }
 
@@ -76,6 +138,9 @@
     const url = new URL(config.workspaceUrl || "/workspace", window.location.origin);
     if (authToken) url.searchParams.set("auth_token", authToken);
     url.searchParams.set("project_id", id);
+    if (isHotReviewAsset(item)) {
+      url.searchParams.set("section", "tools");
+    }
     return url.pathname + url.search;
   }
 
@@ -105,6 +170,7 @@
     const projects = Array.isArray(data.projects) ? data.projects : [];
     renderList(lists.old_script, projects.filter((item) => assetCategory(item) === "old_script"), "当前没有老剧本平台资产。");
     renderList(lists.framework, projects.filter((item) => assetCategory(item) === "framework"), "当前还没有框架资产。");
+    renderList(ensureHotReviewList(), projects.filter((item) => assetCategory(item) === "hot_review"), "当前还没有爆款文审核资产。");
     renderList(lists.new_script, projects.filter((item) => assetCategory(item) === "new_script"), "当前还没有新剧本平台资产。");
   }
 

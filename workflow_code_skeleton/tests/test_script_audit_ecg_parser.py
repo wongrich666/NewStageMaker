@@ -4,6 +4,7 @@ import json
 
 from app.services.script_audit_ecg_parser import (
     SCHEMA_VERSION,
+    SCHEMA_VERSION_V3,
     build_script_audit_view_model,
     normalize_script_audit_ecg,
     parse_model_json_loose,
@@ -101,3 +102,63 @@ def test_build_view_model():
 def test_non_schema_dict_can_fall_back_without_crashing():
     parsed, warnings = parse_model_json_loose({"text": "普通文本"})
     assert isinstance(parsed, dict)
+
+
+def sample_v3_payload():
+    return {
+        "schema_version": SCHEMA_VERSION_V3,
+        "meta": {"script_title": "测试短剧", "total_episode_count": 2},
+        "overall": {"total_score": 72, "level": "可改", "core_judgement": "有钩子但中段松。"},
+        "dimension_scores": [
+            {"dimension_key": "hook", "dimension_name": "钩子", "max_score": 20, "score": 14}
+        ],
+        "segments": [
+            {"segment_id": "s1", "episode_no": 1, "segment_index_global": 1, "start_offset": 0, "end_offset": 10},
+            {"segment_id": "s2", "episode_no": 2, "segment_index_global": 2, "start_offset": 10, "end_offset": 20},
+        ],
+        "global_review": {
+            "global_structure_judgement": {
+                "main_genre": "都市反转",
+                "global_retention_problem": "第二集压力不足",
+            },
+            "ecg": {
+                "title": "全剧总心电图",
+                "main_series": {
+                    "points": [
+                        {"point_id": "p1", "segment_id": "s1", "episode_no": 1, "segment_index_global": 1, "ecg_value": 4, "audit_reason": "开场强"},
+                        {"point_id": "p2", "segment_id": "s2", "episode_no": 2, "segment_index_global": 2, "ecg_value": -2, "audit_reason": "解释偏多"},
+                    ]
+                },
+            },
+            "episode_score_map": [
+                {"episode_no": 1, "episode_score": 78, "main_problem": "钩子可更强"},
+                {"episode_no": 2, "episode_score": 63, "main_problem": "压力不足"},
+            ],
+            "global_key_issues": [{"title": "中段松", "fix_strategy": "压缩解释"}],
+        },
+        "episode_reviews": [
+            {
+                "episode_no": 1,
+                "episode_title": "第一集",
+                "episode_overall": {"episode_score": 78, "core_judgement": "开场有效", "priority_fix": "加代价"},
+                "key_issues": [{"title": "代价不足"}],
+            }
+        ],
+        "cross_episode_analysis": {"retention_curve_summary": "第二集掉点"},
+    }
+
+
+def test_parse_and_normalize_v3_episode_global():
+    audit, warnings = normalize_script_audit_ecg(sample_v3_payload())
+    view = build_script_audit_view_model(audit)
+    assert audit["schema_version"] == SCHEMA_VERSION_V3
+    assert audit["global_review"]["ecg"]["main_series"]["points"][0]["episode_no"] == 1
+    assert view["ecg_chart"]["episode_markers"][1]["episode_no"] == 2
+    assert view["episode_cards"][0]["episode_overall"]["episode_score"] == 78
+    assert "第二集掉点" in view["export_text"]
+
+
+def test_parse_v3_from_nested_answer_text():
+    raw = {"answerText": "```json\n" + json.dumps(sample_v3_payload(), ensure_ascii=False) + "\n```"}
+    parsed, warnings = parse_model_json_loose(raw)
+    assert parsed["schema_version"] == SCHEMA_VERSION_V3

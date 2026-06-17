@@ -2928,14 +2928,24 @@ startRuntimeDebugPolling();
   }
 
   /* SCRIPT_AUDIT_ECG_UI_V1 */
+
   function isScriptAuditEcgResult(result) {
+    if (!result || result.parsed === false || !result.view) {
+      return false;
+    }
+
+    const resultType = String(
+      result.result_type
+      || result.resultType
+      || ""
+    ).trim();
+
     return Boolean(
-      result
-      && String(result.result_type || result.resultType || "").trim() === "script_audit_ecg"
-      && result.parsed !== false
-      && result.view
+      resultType === "script_audit_ecg"
+      || result.audit
     );
   }
+
 
   function auditArray(value) {
     return Array.isArray(value) ? value : [];
@@ -2956,6 +2966,34 @@ startRuntimeDebugPolling();
     if (text.includes("中")) return "is-mid";
     if (text.includes("低")) return "is-low";
     return "";
+  }
+
+  function auditFirstText(...values) {
+    for (const value of values) {
+      const text = auditText(value);
+      if (text) return text;
+    }
+    return "";
+  }
+
+  function auditScoreText(value) {
+    const number = auditNumber(value, 0);
+    return `${number > 0 ? "+" : ""}${Number.isInteger(number) ? number : number.toFixed(1)}`;
+  }
+
+  function auditListSummary(items, fields = []) {
+    return auditArray(items).map((item, index) => {
+      if (!item || typeof item !== "object") return auditText(item);
+      return auditFirstText(
+        ...fields.map((field) => item[field]),
+        item.title,
+        item.description,
+        item.problem,
+        item.content,
+        item.fix_suggestion,
+        `条目 ${index + 1}`
+      );
+    }).filter(Boolean);
   }
 
 
@@ -3000,7 +3038,7 @@ startRuntimeDebugPolling();
       if (
         typeof nestedText === "string"
         && nestedText.trim()
-        && (nestedText.includes("script_audit_ecg_v2") || nestedText.includes('"overall"'))
+        && (nestedText.includes("script_audit_ecg_v2") || nestedText.includes("script_audit_ecg_v3") || nestedText.includes('"overall"'))
       ) {
         const nested = parseScriptAuditJsonFromText(nestedText);
         if (nested && typeof nested === "object") return nested;
@@ -3014,34 +3052,74 @@ startRuntimeDebugPolling();
   function looksLikeScriptAuditPayload(payload) {
     if (!payload || typeof payload !== "object") return false;
     return String(payload.schema_version || "").includes("script_audit_ecg")
-      || Boolean(payload.overall && (payload.dimension_scores || payload.ecg || payload.key_issues))
+      || Boolean(payload.overall && (payload.dimension_scores || payload.ecg || payload.global_review || payload.episode_reviews || payload.key_issues))
       || Boolean(payload.audit && payload.view);
   }
 
   function scriptAuditViewFromAudit(audit) {
     const overall = audit?.overall || {};
     const dimensions = auditArray(audit?.dimension_scores || audit?.dimensions || audit?.dimension_cards);
+    const globalReview = audit?.global_review || {};
+    const globalEcg = globalReview?.ecg || audit?.ecg || audit?.ecg_chart || {};
     const points = auditArray(
-      audit?.ecg?.main_series?.points
-      || audit?.ecg?.points
+      globalEcg?.main_series?.points
+      || globalEcg?.points
       || audit?.ecg_chart?.points
       || audit?.main_series?.points
+    ).slice().sort((a, b) =>
+      (auditNumber(a.episode_no) - auditNumber(b.episode_no))
+      || (auditNumber(a.segment_index_global || a.segment_index) - auditNumber(b.segment_index_global || b.segment_index))
+      || (auditNumber(a.start_offset) - auditNumber(b.start_offset))
     );
 
     const totalScore = overall.total_score ?? overall.score ?? audit?.total_score ?? "";
     const grade = overall.suitability_level || overall.grade || overall.level || "";
     const revisionCost = overall.revision_cost || overall.modify_cost || overall.cost || "";
+    const episodeScoreMap = auditArray(globalReview.episode_score_map);
+    const episodeCards = auditArray(audit?.episode_reviews || audit?.episode_summaries);
+    const episodeNos = [...new Set([
+      ...points.map((point) => auditNumber(point.episode_no, 0)).filter(Boolean),
+      ...episodeCards.map((item) => auditNumber(item.episode_no, 0)).filter(Boolean),
+      ...episodeScoreMap.map((item) => auditNumber(item.episode_no, 0)).filter(Boolean)
+    ])].sort((a, b) => a - b);
+    const scoreByEpisode = new Map(episodeScoreMap.map((item) => [auditNumber(item.episode_no, 0), item]));
+    const episodeMarkers = episodeNos.map((episodeNo) => {
+      const group = points.filter((point) => auditNumber(point.episode_no, 0) === episodeNo);
+      const score = scoreByEpisode.get(episodeNo) || {};
+      return {
+        episode_no: episodeNo,
+        episode_title: score.episode_title || `第${episodeNo}集`,
+        point_count: group.length,
+        episode_score: score.episode_score ?? "",
+        retention_status: score.retention_status || "",
+        main_problem: score.main_problem || "",
+        next_priority_fix: score.next_priority_fix || ""
+      };
+    });
+    const exportText = buildAuditExportText(audit, {
+      points,
+      dimensions,
+      episodeCards,
+      globalReview,
+      totalScore,
+      grade,
+      revisionCost
+    });
 
     return {
       summary_cards: [
         { key: "total_score", label: "总评分", value: totalScore, suffix: totalScore !== "" ? "/100" : "" },
         { key: "grade", label: "适配等级", value: grade || "-" },
         { key: "revision_cost", label: "修改成本", value: revisionCost || "-" },
+        { key: "episodes", label: "总集数", value: audit?.meta?.total_episode_count || episodeNos.length || "-" },
         { key: "points", label: "心电点位", value: points.length || "-" }
       ],
       ecg_chart: {
-        title: audit?.ecg?.title || audit?.ecg_chart?.title || "剧本心电图",
-        points
+        title: globalEcg?.title || audit?.ecg_chart?.title || "全剧总心电图",
+        points,
+        episode_markers: episodeMarkers,
+        y_axis_range: globalEcg?.y_axis_range || [-5, 5],
+        baseline: globalEcg?.baseline ?? 0
       },
       dimension_cards: dimensions.map((item) => ({
         dimension_key: item.dimension_key || item.key || item.name || "",
@@ -3052,19 +3130,79 @@ startRuntimeDebugPolling();
         core_deductions: item.core_deductions || item.deductions || [],
         priority_fix: item.priority_fix || item.fix_suggestion || item.suggestion || ""
       })),
-      issue_cards: auditArray(audit?.key_issues || audit?.issues || audit?.issue_cards),
-      satisfying_point_cards: auditArray(audit?.satisfying_points || audit?.selling_points || audit?.satisfying_point_cards),
-      risk_cards: auditArray(audit?.risk_scan || audit?.risks || audit?.risk_cards),
-      rewrite_tasks: auditArray(audit?.rewrite_plan || audit?.rewrite_tasks || audit?.fix_plan)
+      global_review: {
+        structure: globalReview.global_structure_judgement || {},
+        satisfying_points: auditArray(globalReview.global_satisfying_points || audit?.satisfying_points || audit?.selling_points),
+        key_issues: auditArray(globalReview.global_key_issues || audit?.key_issues || audit?.issues),
+        risk_scan: auditArray(globalReview.global_risk_scan || audit?.risk_scan || audit?.risks),
+        rewrite_plan: auditArray(globalReview.global_rewrite_plan || audit?.rewrite_plan || audit?.fix_plan),
+        episode_score_map: episodeScoreMap
+      },
+      issue_cards: auditArray(globalReview.global_key_issues || audit?.key_issues || audit?.issues || audit?.issue_cards),
+      satisfying_point_cards: auditArray(globalReview.global_satisfying_points || audit?.satisfying_points || audit?.selling_points || audit?.satisfying_point_cards),
+      risk_cards: auditArray(globalReview.global_risk_scan || audit?.risk_scan || audit?.risks || audit?.risk_cards),
+      rewrite_tasks: auditArray(globalReview.global_rewrite_plan || audit?.rewrite_plan || audit?.rewrite_tasks || audit?.fix_plan),
+      episode_cards: episodeCards,
+      cross_episode_analysis: audit?.cross_episode_analysis || {},
+      export_text: exportText,
+      meta: {
+        script_title: audit?.meta?.script_title || audit?.script_title || "",
+        text_type: audit?.meta?.text_type || "",
+        audit_scope: audit?.meta?.audit_scope || "",
+        total_episode_count: audit?.meta?.total_episode_count || episodeNos.length || 0,
+        total_segment_count: audit?.meta?.total_segment_count || points.length || 0
+      }
     };
+  }
+
+  function buildAuditExportText(audit, context = {}) {
+    const overall = audit?.overall || {};
+    const meta = audit?.meta || {};
+    const points = auditArray(context.points);
+    const dimensions = auditArray(context.dimensions);
+    const episodeCards = auditArray(context.episodeCards);
+    const globalReview = context.globalReview || audit?.global_review || {};
+    const structure = globalReview.global_structure_judgement || {};
+    const lines = [
+      `《${meta.script_title || "未命名剧本"}》爆款文审核报告`,
+      "",
+      "一、整体剧本评价",
+      `总评分：${overall.total_score ?? overall.score ?? "-"} / 100`,
+      `评级：${overall.level || "-"}`,
+      `修改成本：${overall.modification_cost || "-"}`,
+      `核心判断：${overall.core_judgement || "-"}`,
+      `最大硬伤：${overall.largest_hard_problem || "-"}`,
+      `最佳保留：${overall.best_retained_part || "-"}`,
+      `最终判断：${overall.final_judgement || "-"}`,
+      "",
+      "二、全局结构判断",
+      `主类型：${structure.main_genre || "-"}`,
+      `情绪契约：${structure.main_emotional_contract || "-"}`,
+      `主冲突链：${structure.main_conflict_chain || "-"}`,
+      `主角弧线：${structure.protagonist_arc || "-"}`,
+      `留存问题：${structure.global_retention_problem || "-"}`,
+      `修改优先级：${structure.global_revision_priority || "-"}`,
+      "",
+      "三、评分维度",
+      ...dimensions.map((item) => `- ${item.dimension_name || item.dimension_key || "评分维度"}：${item.score ?? "-"} / ${item.max_score ?? "-"}。${item.summary || item.priority_fix || ""}`),
+      "",
+      "四、心电图节点摘要",
+      ...points.map((point) => `- 第${point.episode_no || "?"}集 ${point.x_label || point.short_label || point.point_id || ""}：${auditScoreText(point.ecg_value)}。${point.audit_reason || point.commercial_effect || point.problem_if_any || ""}${point.fix_suggestion ? ` 建议：${point.fix_suggestion}` : ""}`),
+      "",
+      "五、单集重点评价",
+      ...episodeCards.map((episode) => {
+        const eo = episode.episode_overall || episode;
+        return `- 第${episode.episode_no || "?"}集 ${episode.episode_title || ""}：${eo.episode_score ?? "-"} / 100。${eo.core_judgement || ""} 主钩子：${eo.main_hook || "-"}；主冲突：${eo.main_conflict || "-"}；优先修改：${eo.priority_fix || "-"}`;
+      })
+    ];
+    return lines.filter((line) => line !== null && line !== undefined).join("\n").trim();
   }
 
   function normalizeScriptAuditEcgResult(result) {
     if (!result || typeof result !== "object") return result;
 
-    const extracted = hotReviewExtractAuditViewV4(result);
-    let audit = result.audit || extracted.audit || null;
-    let view = result.view || extracted.view || null;
+    let audit = result.audit || null;
+    let view = result.view || null;
 
     const candidates = [
       audit,
@@ -3089,7 +3227,7 @@ startRuntimeDebugPolling();
         view = view || candidate.view;
         break;
       }
-      if (hotReviewLooksLikeAuditPayloadV4(candidate)) {
+      if (looksLikeScriptAuditPayload(candidate)) {
         audit = audit || (candidate.audit && candidate.view ? candidate.audit : candidate);
         break;
       }
@@ -3136,15 +3274,45 @@ startRuntimeDebugPolling();
     `;
   }
 
+  function renderAuditPopoverButton(title, bodyHtml, count = "") {
+    if (!auditText(bodyHtml)) return "";
+    return `
+      <button class="audit-popover-trigger" type="button" data-action="toggle-audit-popover">
+        <span>${escapeHtml(title)}</span>
+        ${count !== "" ? `<small>${escapeHtml(count)}</small>` : ""}
+        <b aria-hidden="true">⌄</b>
+      </button>
+      <div class="audit-popover" data-audit-popover hidden>
+        <div class="audit-popover-card">
+          <button class="audit-popover-close" type="button" data-action="close-audit-popover" aria-label="关闭">×</button>
+          ${bodyHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderAuditKeyValueList(items) {
+    return `
+      <div class="audit-kv-list">
+        ${items.filter((item) => auditText(item.value)).map((item) => `
+          <div>
+            <small>${escapeHtml(item.label)}</small>
+            <strong>${escapeHtml(item.value)}</strong>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+
   function renderAuditEcgChart(chart) {
     const points = auditArray(chart?.points);
     if (!points.length) {
       return `<section class="audit-panel"><h4>剧本心电图</h4><p class="audit-empty">暂无心电点位。</p></section>`;
     }
 
-    const width = 760;
-    const height = 260;
-    const padX = 44;
+    const width = Math.max(820, points.length * 38 + 120);
+    const height = 300;
+    const padX = 54;
     const padY = 34;
     const plotW = width - padX * 2;
     const plotH = height - padY * 2;
@@ -3161,59 +3329,72 @@ startRuntimeDebugPolling();
       return `<line class="${klass}" x1="${xOf(index).toFixed(1)}" y1="${yOf(v1).toFixed(1)}" x2="${xOf(index + 1).toFixed(1)}" y2="${yOf(v2).toFixed(1)}"></line>`;
     }).join("");
 
+    const episodeNos = [...new Set(points.map((point) => auditNumber(point.episode_no, 0)).filter(Boolean))];
+    const episodeLines = episodeNos.map((episodeNo) => {
+      const firstIndex = points.findIndex((point) => auditNumber(point.episode_no, 0) === episodeNo);
+      if (firstIndex < 0) return "";
+      const x = xOf(firstIndex);
+      return `
+        <line class="audit-episode-marker" x1="${x.toFixed(1)}" y1="${padY}" x2="${x.toFixed(1)}" y2="${height - padY}"></line>
+        <text class="audit-episode-label" x="${(x + 4).toFixed(1)}" y="${height - 8}">第${episodeNo}集</text>
+      `;
+    }).join("");
+
     const circles = points.map((point, index) => {
       const value = auditNumber(point.ecg_value);
       const klass = value >= 0 ? "audit-ecg-dot-pos" : "audit-ecg-dot-neg";
       const title = auditText(point?.hover_card?.title || point.short_label || point.event_type || point.point_id, `第${index + 1}点`);
-      const reason = auditText(point.audit_reason || point?.hover_card?.body || "");
+      const reason = auditText(point.audit_reason || point?.hover_card?.body || point.commercial_effect || "");
+      const tooltip = `第${point.episode_no || "?"}集｜${auditScoreText(value)}｜${title}${reason ? "｜" + reason : ""}`;
       return `
-        <circle class="audit-ecg-dot ${klass}" cx="${xOf(index).toFixed(1)}" cy="${yOf(value).toFixed(1)}" r="4.6">
-          <title>${escapeHtml(`${title}｜${value > 0 ? "+" : ""}${value}${reason ? "｜" + reason : ""}`)}</title>
-        </circle>
+        <g class="audit-ecg-node" data-action="show-audit-point" data-point-index="${index}" tabindex="0">
+          <circle class="audit-ecg-dot ${klass}" cx="${xOf(index).toFixed(1)}" cy="${yOf(value).toFixed(1)}" r="5.5"></circle>
+          <title>${escapeHtml(tooltip)}</title>
+        </g>
       `;
     }).join("");
-
-    const selected = points
-      .map((point, index) => ({ point, index, abs: Math.abs(auditNumber(point.ecg_value)) }))
-      .sort((a, b) => b.abs - a.abs)
-      .slice(0, 10);
 
     return `
       <section class="audit-panel audit-ecg-panel">
         <div class="audit-section-head">
           <div>
             <h4>${escapeHtml(chart?.title || "剧本心电图")}</h4>
-            <p>正值表示增强继续观看动力，负值表示降低留存动力。</p>
+            <p>按实际集数划分点位；悬停看摘要，点击节点看详细便签。</p>
           </div>
           <span class="audit-chip">点位 ${points.length}</span>
         </div>
-        <div class="audit-ecg-wrap">
+        <div class="audit-ecg-wrap" data-audit-chart='${escapeHtml(JSON.stringify(points))}'>
           <svg class="audit-ecg-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="剧本心电图">
             <line class="audit-ecg-axis" x1="${padX}" y1="${zeroY.toFixed(1)}" x2="${width - padX}" y2="${zeroY.toFixed(1)}"></line>
             <text class="audit-ecg-label" x="8" y="${yOf(5).toFixed(1)}">+5</text>
             <text class="audit-ecg-label" x="8" y="${zeroY.toFixed(1)}">0</text>
             <text class="audit-ecg-label" x="8" y="${yOf(-5).toFixed(1)}">-5</text>
+            ${episodeLines}
             ${segments}
             ${circles}
           </svg>
-        </div>
-        <div class="audit-point-grid">
-          ${selected.map(({ point, index }) => {
-            const value = auditNumber(point.ecg_value);
-            return `
-              <article class="audit-point-card ${value >= 0 ? "is-positive" : "is-negative"}">
-                <div class="audit-point-score">${value > 0 ? "+" : ""}${escapeHtml(String(value))}</div>
-                <div>
-                  <strong>${escapeHtml(point?.hover_card?.title || point.short_label || point.event_type || `第${index + 1}点`)}</strong>
-                  <p>${escapeHtml(point.audit_reason || point?.hover_card?.body || point.commercial_effect || "")}</p>
-                  <small>${escapeHtml(point.original_text_excerpt || point?.hover_card?.evidence || "")}</small>
-                  ${point.fix_suggestion || point?.hover_card?.fix ? `<small class="audit-fix">建议：${escapeHtml(point.fix_suggestion || point.hover_card.fix)}</small>` : ""}
-                </div>
-              </article>
-            `;
-          }).join("")}
+          <div class="audit-point-sticky" data-audit-point-card hidden></div>
         </div>
       </section>
+    `;
+  }
+
+  function renderAuditPointSticky(point, index) {
+    if (!point) return "";
+    const impacts = auditArray(point.score_impacts);
+    return `
+      <article class="audit-point-card ${auditNumber(point.ecg_value) >= 0 ? "is-positive" : "is-negative"}">
+        <button class="audit-popover-close" type="button" data-action="close-audit-point" aria-label="关闭">×</button>
+        <div class="audit-point-score">${escapeHtml(auditScoreText(point.ecg_value))}</div>
+        <div>
+          <strong>${escapeHtml(point?.hover_card?.title || point.short_label || point.event_type || `第${index + 1}点`)}</strong>
+          <p>${escapeHtml(point.audit_reason || point?.hover_card?.body || point.commercial_effect || "")}</p>
+          ${point.original_text_excerpt || point?.hover_card?.evidence ? `<small>证据：${escapeHtml(point.original_text_excerpt || point.hover_card.evidence)}</small>` : ""}
+          ${point.problem_if_any ? `<small>问题：${escapeHtml(point.problem_if_any)}</small>` : ""}
+          ${point.fix_suggestion || point?.hover_card?.fix ? `<small class="audit-fix">建议：${escapeHtml(point.fix_suggestion || point.hover_card.fix)}</small>` : ""}
+          ${impacts.length ? `<small>评分影响：${escapeHtml(impacts.map((item) => `${item.dimension_key || item.sub_key || "维度"} ${item.impact || ""} ${item.reason || ""}`).join("；"))}</small>` : ""}
+        </div>
+      </article>
     `;
   }
 
@@ -3280,6 +3461,71 @@ startRuntimeDebugPolling();
     `;
   }
 
+  function renderGlobalReviewPopover(view, audit) {
+    const globalReview = view.global_review || {};
+    const structure = globalReview.structure || {};
+    return renderAuditPopoverButton("全局评价", `
+      <h4>全局评价</h4>
+      ${renderAuditKeyValueList([
+        { label: "主类型", value: structure.main_genre },
+        { label: "情绪契约", value: structure.main_emotional_contract },
+        { label: "主冲突链", value: structure.main_conflict_chain },
+        { label: "主角弧线", value: structure.protagonist_arc },
+        { label: "爽点兑现链", value: structure.payoff_chain },
+        { label: "留存问题", value: structure.global_retention_problem },
+        { label: "修改优先级", value: structure.global_revision_priority },
+      ])}
+      ${renderAuditList("评分维度", view.dimension_cards || [], { limit: 12 })}
+      ${renderAuditList("爽点与保留项", globalReview.satisfying_points || [], { limit: 8 })}
+    `, "展开");
+  }
+
+  function renderEpisodeReviewsPopover(view) {
+    const episodes = auditArray(view.episode_cards);
+    return renderAuditPopoverButton("单集评价", `
+      <h4>单集评价</h4>
+      <div class="audit-episode-list">
+        ${episodes.length ? episodes.map((episode) => {
+          const overall = episode.episode_overall || episode;
+          return `
+            <article class="audit-list-card">
+              <div>
+                <strong>第${escapeHtml(episode.episode_no || "?")}集 ${escapeHtml(episode.episode_title || "")}</strong>
+                <span class="audit-chip">${escapeHtml(auditText(overall.episode_score, "-"))}/100</span>
+              </div>
+              ${renderAuditKeyValueList([
+                { label: "核心判断", value: overall.core_judgement },
+                { label: "主钩子", value: overall.main_hook },
+                { label: "主冲突", value: overall.main_conflict },
+                { label: "主爽点", value: overall.main_payoff },
+                { label: "最大流失点", value: overall.largest_retention_loss },
+                { label: "集尾拉力", value: overall.next_episode_pull },
+                { label: "优先修改", value: overall.priority_fix },
+                { label: "集尾钩子", value: episode.ending_hook?.content || episode.ending_hook?.strength },
+              ])}
+              ${renderAuditList("关键问题", episode.key_issues || [], { limit: 4 })}
+              ${renderAuditList("修改计划", episode.rewrite_plan || [], { limit: 4 })}
+            </article>
+          `;
+        }).join("") : `<p class="audit-empty">暂无单集评价。</p>`}
+      </div>
+    `, episodes.length);
+  }
+
+  function renderCrossEpisodePopover(view) {
+    const cross = view.cross_episode_analysis || {};
+    return renderAuditPopoverButton("跨集结构分析", `
+      <h4>跨集结构分析</h4>
+      ${renderAuditKeyValueList([
+        { label: "留存曲线", value: cross.retention_curve_summary },
+        { label: "爽点分布", value: cross.payoff_distribution?.evidence || cross.payoff_distribution?.fix_suggestion },
+        { label: "钩子连续性", value: cross.hook_continuity?.evidence || cross.hook_continuity?.fix_suggestion },
+        { label: "人物弧光连续性", value: cross.character_arc_continuity?.problem || cross.character_arc_continuity?.fix_suggestion },
+      ])}
+      ${renderAuditList("掉点风险", cross.episode_dropoff_risks || [], { limit: 10 })}
+    `, "展开");
+  }
+
   function renderScriptAuditEcgResult(result) {
     const view = result.view || {};
     const audit = result.audit || {};
@@ -3302,11 +3548,19 @@ startRuntimeDebugPolling();
 
         ${renderAuditSummaryCards(view.summary_cards)}
         ${renderAuditEcgChart(view.ecg_chart)}
-        ${renderAuditDimensionCards(view.dimension_cards)}
-        ${renderAuditList("关键问题", view.issue_cards || audit.key_issues, { limit: 8 })}
-        ${renderAuditList("爽点与保留项", view.satisfying_point_cards || audit.satisfying_points, { limit: 8 })}
-        ${renderAuditList("风险扫描", view.risk_cards || audit.risk_scan, { limit: 8 })}
-        ${renderAuditList("修改计划", view.rewrite_tasks || audit.rewrite_plan, { limit: 10 })}
+        <section class="audit-popover-bar">
+          ${renderGlobalReviewPopover(view, audit)}
+          ${renderEpisodeReviewsPopover(view)}
+          ${renderCrossEpisodePopover(view)}
+          ${renderAuditPopoverButton("关键问题", renderAuditList("关键问题", view.issue_cards || audit.key_issues, { limit: 20 }), auditArray(view.issue_cards || audit.key_issues).length)}
+          ${renderAuditPopoverButton("风险扫描", renderAuditList("风险扫描", view.risk_cards || audit.risk_scan, { limit: 20 }), auditArray(view.risk_cards || audit.risk_scan).length)}
+          ${renderAuditPopoverButton("修改计划", renderAuditList("修改计划", view.rewrite_tasks || audit.rewrite_plan, { limit: 20 }), auditArray(view.rewrite_tasks || audit.rewrite_plan).length)}
+        </section>
+        <section class="audit-export-actions">
+          <button class="btn btn-secondary" type="button" data-action="download-audit-txt">导出 TXT</button>
+          <button class="btn btn-secondary" type="button" data-action="download-audit-docx">导出 DOCX</button>
+          <button class="btn btn-secondary" type="button" data-action="download-audit-image">导出长图</button>
+        </section>
       </div>
     `;
   }
@@ -3328,7 +3582,7 @@ startRuntimeDebugPolling();
       }
     }
     if (els.downloadToolBtn) {
-      const shouldShow = Boolean(result?.text && result?.filename);
+      const shouldShow = Boolean(result?.text && result?.filename) && !isScriptAuditEcgResult(result);
       els.downloadToolBtn.classList.toggle("hidden", !shouldShow);
       els.downloadToolBtn.disabled = !shouldShow || isActionLoading("runTool");
       if (shouldShow) {
@@ -3350,6 +3604,107 @@ startRuntimeDebugPolling();
     link.click();
     link.remove();
     window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 0);
+  }
+
+  function activeAuditReportText() {
+    const result = currentToolResult("hot_review") || currentToolResult();
+    if (!isScriptAuditEcgResult(result)) return "";
+    return String(result.view?.export_text || buildAuditExportText(result.audit || {}, {
+      points: result.view?.ecg_chart?.points || [],
+      dimensions: result.view?.dimension_cards || [],
+      episodeCards: result.view?.episode_cards || [],
+      globalReview: result.audit?.global_review || {}
+    }) || "").trim();
+  }
+
+  function activeAuditReportTitle() {
+    const result = currentToolResult("hot_review") || currentToolResult();
+    const title = auditFirstText(
+      result?.audit?.meta?.script_title,
+      result?.view?.meta?.script_title,
+      result?.script_title,
+      result?.savedAsset?.script_title,
+      "爆款文审核报告"
+    );
+    return title.replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80) || "爆款文审核报告";
+  }
+
+  async function downloadAuditDocx() {
+    const text = activeAuditReportText();
+    if (!text) {
+      showToast("暂无可导出报告", "请先生成或打开爆款文审核结果。");
+      return;
+    }
+    const authToken = currentAuthToken();
+    const response = await fetch(apiUrl("/api/tools/hot_review/export/docx"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
+      },
+      body: JSON.stringify({ title: activeAuditReportTitle(), text })
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.message || data.error || "DOCX 导出失败。");
+    }
+    const blob = await response.blob();
+    const objectUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = `${activeAuditReportTitle()}.docx`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 0);
+  }
+
+  function loadHtml2Canvas() {
+    if (window.html2canvas) return Promise.resolve(window.html2canvas);
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector("script[data-html2canvas-loader]");
+      if (existing) {
+        existing.addEventListener("load", () => resolve(window.html2canvas));
+        existing.addEventListener("error", reject);
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
+      script.async = true;
+      script.dataset.html2canvasLoader = "1";
+      script.onload = () => window.html2canvas ? resolve(window.html2canvas) : reject(new Error("截图组件加载失败。"));
+      script.onerror = () => reject(new Error("截图组件加载失败，请检查网络后重试。"));
+      document.head.appendChild(script);
+    });
+  }
+
+  async function downloadAuditImage() {
+    const shell = document.querySelector(".audit-result-shell");
+    if (!shell) {
+      showToast("暂无可截图内容", "请先生成或打开爆款文审核结果。");
+      return;
+    }
+    const popovers = [...shell.querySelectorAll("[data-audit-popover]")];
+    const previousHidden = popovers.map((item) => item.hidden);
+    shell.classList.add("audit-exporting");
+    popovers.forEach((item) => { item.hidden = false; });
+    try {
+      const html2canvas = await loadHtml2Canvas();
+      const canvas = await html2canvas(shell, {
+        backgroundColor: "#fffaf1",
+        scale: Math.min(2, window.devicePixelRatio || 1.5),
+        useCORS: true,
+      });
+      const link = document.createElement("a");
+      link.download = `${activeAuditReportTitle()}_爆款文审核长图.png`;
+      link.href = canvas.toDataURL("image/png");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      popovers.forEach((item, index) => { item.hidden = previousHidden[index]; });
+      shell.classList.remove("audit-exporting");
+    }
   }
 
   function renderToolList() {
@@ -4595,6 +4950,21 @@ function renderToolForm(toolKey) {
     return state.projects;
   }
 
+  function mergeProjectListAsset(asset) {
+    if (!asset || typeof asset !== "object") return;
+    const key = String(asset.project_id || asset.id || hotReviewAssetKeyV5(asset) || "").trim();
+    if (!key) return;
+    const projects = Array.isArray(state.projects) ? state.projects.slice() : [];
+    const index = projects.findIndex((item) => String(item.project_id || item.id || hotReviewAssetKeyV5(item) || "") === key);
+    if (index >= 0) {
+      projects[index] = { ...projects[index], ...asset };
+    } else {
+      projects.unshift(asset);
+    }
+    state.projects = projects;
+    renderProjectList(state.projects);
+  }
+
   function shouldContinuePolling() {
     return state.projects.some((item) => RUNNING_STATUSES.has(item.status));
   }
@@ -5366,8 +5736,12 @@ function renderToolForm(toolKey) {
     state.toolResults[state.activeTool] = normalizeScriptAuditEcgResult(state.toolResults[state.activeTool]);
     renderToolOutput(state.activeTool);
     if (assetSaved) {
+      if (state.toolResults[state.activeTool]?.savedAsset) {
+        mergeProjectListAsset(state.toolResults[state.activeTool].savedAsset);
+      }
       try {
         await loadAssets();
+        await loadProjects({ restoreSelection: true, restoreInputs: false });
       } catch (_) {
         // 结果已经生成并写入后端，不阻断当前工具面板的成功态展示。
       }
@@ -5485,7 +5859,12 @@ function renderToolForm(toolKey) {
         if (els.assistantToolsFolder) {
           els.assistantToolsFolder.open = true;
         }
-        openToolPanel(state.activeTool);
+        const projectId = params.get("project_id");
+        if (projectId) {
+          openHotReviewAssetFromList(projectId);
+        } else {
+          openToolPanel(state.activeTool);
+        }
       }, 80);
       return;
     }
@@ -5817,6 +6196,61 @@ function renderToolForm(toolKey) {
     els.closeToolPanelBtn?.addEventListener("click", closeToolPanel);
     els.closeCommunityPanelBtn?.addEventListener("click", closeCommunityPanel);
     els.downloadToolBtn?.addEventListener("click", downloadActiveToolResult);
+    els.toolOutputBox?.addEventListener("click", async (event) => {
+      const pointNode = event.target.closest("[data-action='show-audit-point']");
+      if (pointNode) {
+        const wrap = pointNode.closest("[data-audit-chart]");
+        const card = wrap?.querySelector("[data-audit-point-card]");
+        if (!wrap || !card) return;
+        const points = JSON.parse(wrap.dataset.auditChart || "[]");
+        const index = Number(pointNode.dataset.pointIndex || 0);
+        card.innerHTML = renderAuditPointSticky(points[index], index);
+        card.hidden = false;
+        return;
+      }
+      const actionButton = event.target.closest("[data-action]");
+      const action = actionButton?.dataset.action || "";
+      if (action === "close-audit-point") {
+        const card = actionButton.closest("[data-audit-point-card]");
+        if (card) card.hidden = true;
+        return;
+      }
+      if (action === "toggle-audit-popover") {
+        const popover = actionButton.nextElementSibling;
+        if (popover?.matches("[data-audit-popover]")) {
+          const shouldOpen = popover.hidden;
+          els.toolOutputBox.querySelectorAll("[data-audit-popover]").forEach((item) => { item.hidden = true; });
+          popover.hidden = !shouldOpen;
+        }
+        return;
+      }
+      if (action === "close-audit-popover") {
+        const popover = actionButton.closest("[data-audit-popover]");
+        if (popover) popover.hidden = true;
+        return;
+      }
+      try {
+        if (action === "download-audit-txt") {
+          const text = activeAuditReportText();
+          if (!text) throw new Error("暂无可导出的报告正文。");
+          downloadTextFile(text, `${activeAuditReportTitle()}.txt`);
+          showToast("TXT 已开始下载", `${activeAuditReportTitle()}.txt`);
+        } else if (action === "download-audit-docx") {
+          await downloadAuditDocx();
+          showToast("DOCX 已开始下载", `${activeAuditReportTitle()}.docx`);
+        } else if (action === "download-audit-image") {
+          await downloadAuditImage();
+          showToast("长图已开始下载", `${activeAuditReportTitle()}_爆款文审核长图.png`);
+        }
+      } catch (error) {
+        showToast("导出失败", friendlyErrorText(error, "请稍后重试。"));
+      }
+    });
+    document.addEventListener("click", (event) => {
+      if (event.target.closest(".audit-popover-card, .audit-popover-trigger, .audit-ecg-node, .audit-point-sticky")) return;
+      document.querySelectorAll("[data-audit-popover]").forEach((item) => { item.hidden = true; });
+      document.querySelectorAll("[data-audit-point-card]").forEach((item) => { item.hidden = true; });
+    });
 
     els.runToolBtn?.addEventListener("click", async () => {
       try {

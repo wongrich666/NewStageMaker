@@ -44,6 +44,7 @@ from .services.framework_planner_service import (
 from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
 from .services.script_audit_ecg_parser import (
     SCHEMA_VERSION as SCRIPT_AUDIT_ECG_SCHEMA_VERSION,
+    SCHEMA_VERSION_V3 as SCRIPT_AUDIT_ECG_SCHEMA_VERSION_V3,
     build_script_audit_view_model,
     normalize_script_audit_ecg,
     parse_model_json_loose,
@@ -169,7 +170,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         return max(texts, key=len)[:limit]
 
     def _script_audit_ecg_should_try(tool_key: str, parsed: dict | None, raw_text: str) -> bool:
-        if isinstance(parsed, dict) and parsed.get("schema_version") == SCRIPT_AUDIT_ECG_SCHEMA_VERSION:
+        if isinstance(parsed, dict) and parsed.get("schema_version") in {SCRIPT_AUDIT_ECG_SCHEMA_VERSION, SCRIPT_AUDIT_ECG_SCHEMA_VERSION_V3}:
             return True
         key_text = str(tool_key or "").lower()
         keywords = (
@@ -181,36 +182,142 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "audit_ecg",
             "script_audit_ecg",
         )
-        return any(keyword.lower() in key_text for keyword in keywords) or SCRIPT_AUDIT_ECG_SCHEMA_VERSION in raw_text
+        return (
+            any(keyword.lower() in key_text for keyword in keywords)
+            or SCRIPT_AUDIT_ECG_SCHEMA_VERSION in raw_text
+            or SCRIPT_AUDIT_ECG_SCHEMA_VERSION_V3 in raw_text
+        )
 
-    def _maybe_enrich_script_audit_ecg_tool_result(tool_key: str, result: dict, flattened: dict) -> tuple[dict, dict]:
+
+    def _maybe_enrich_script_audit_ecg_tool_result(
+        tool_key: str,
+        result: dict,
+        flattened: dict,
+    ) -> tuple[dict, dict]:
         if not isinstance(result, dict):
             return result, flattened
 
         raw_text = _script_audit_ecg_extract_text(result)
         parsed, parse_warnings = parse_model_json_loose(result)
-        if not _script_audit_ecg_should_try(tool_key, parsed, raw_text):
+
+        if not _script_audit_ecg_should_try(
+            tool_key,
+            parsed,
+            raw_text,
+        ):
             return result, flattened
 
         enriched_result = dict(result)
         enriched_flattened = dict(flattened)
-        enriched_result.setdefault("answer_text", raw_text)
-        enriched_flattened.setdefault("answer_text", raw_text)
 
-        if not (isinstance(parsed, dict) and parsed.get("schema_version") == SCRIPT_AUDIT_ECG_SCHEMA_VERSION):
-            warnings = parse_warnings or ["未解析到 script_audit_ecg_v2 JSON"]
-            for target in (enriched_result, enriched_flattened):
+        enriched_result.setdefault(
+            "answer_text",
+            raw_text,
+        )
+        enriched_flattened.setdefault(
+            "answer_text",
+            raw_text,
+        )
+
+        def looks_like_audit_payload(value) -> bool:
+            if not isinstance(value, dict):
+                return False
+
+            if (
+                value.get("schema_version")
+                in {SCRIPT_AUDIT_ECG_SCHEMA_VERSION, SCRIPT_AUDIT_ECG_SCHEMA_VERSION_V3}
+            ):
+                return True
+
+            overall = value.get("overall")
+            if not isinstance(overall, dict):
+                return False
+
+            structural_keys = (
+                "dimension_scores",
+                "segments",
+                "ecg",
+                "global_review",
+                "episode_reviews",
+                "cross_episode_analysis",
+                "episode_summaries",
+                "satisfying_points",
+                "key_issues",
+                "risk_scan",
+                "rewrite_plan",
+                "visualization_config",
+            )
+
+            return any(
+                key in value
+                for key in structural_keys
+            )
+
+        candidate = parsed
+
+        # 兼容模型在标准结果外面再包 audit/data/result/output。
+        if isinstance(candidate, dict):
+            for nested_key in (
+                "audit",
+                "data",
+                "result",
+                "output",
+            ):
+                nested = candidate.get(nested_key)
+                if looks_like_audit_payload(nested):
+                    candidate = nested
+                    break
+
+        if not looks_like_audit_payload(candidate):
+            warnings = (
+                parse_warnings
+                or ["未解析到可识别的剧本心电图 JSON"]
+            )
+
+            for target in (
+                enriched_result,
+                enriched_flattened,
+            ):
                 target["result_type"] = "text"
+                target["resultType"] = "text"
                 target["parsed"] = False
                 target["parse_warnings"] = warnings
+
             return enriched_result, enriched_flattened
 
-        audit, normalize_warnings = normalize_script_audit_ecg(parsed, raw_answer_text=raw_text)
-        view = build_script_audit_view_model(audit)
-        warnings = [*parse_warnings, *normalize_warnings]
+        compatibility_warnings = list(
+            parse_warnings or []
+        )
 
-        for target in (enriched_result, enriched_flattened):
+        if (
+            candidate.get("schema_version")
+            not in {SCRIPT_AUDIT_ECG_SCHEMA_VERSION, SCRIPT_AUDIT_ECG_SCHEMA_VERSION_V3}
+        ):
+            compatibility_warnings.append(
+                "模型输出缺少或改变了 schema_version，"
+                "已根据审核结果结构兼容解析。"
+            )
+
+        audit, normalize_warnings = (
+            normalize_script_audit_ecg(
+                candidate,
+                raw_answer_text=raw_text,
+            )
+        )
+
+        view = build_script_audit_view_model(audit)
+
+        warnings = [
+            *compatibility_warnings,
+            *normalize_warnings,
+        ]
+
+        for target in (
+            enriched_result,
+            enriched_flattened,
+        ):
             target["result_type"] = "script_audit_ecg"
+            target["resultType"] = "script_audit_ecg"
             target["parsed"] = True
             target["audit"] = audit
             target["view"] = view
@@ -1979,9 +2086,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
 
     # HOT_REVIEW_ASSET_PERSIST_V5
-    def _script_audit_asset_title_from_payload(payload: dict) -> str:
+    def _script_audit_asset_title_from_payload(payload: dict, request_payload: dict | None = None) -> str:
         if not isinstance(payload, dict):
             return ""
+        request_payload = request_payload if isinstance(request_payload, dict) else {}
         audit = payload.get("audit") if isinstance(payload.get("audit"), dict) else {}
         view = payload.get("view") if isinstance(payload.get("view"), dict) else {}
         meta = audit.get("meta") if isinstance(audit.get("meta"), dict) else {}
@@ -1996,6 +2104,26 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
         if str(direct or "").strip():
             return str(direct).strip()
+        filename = str(
+            payload.get("filename")
+            or request_payload.get("filename")
+            or request_payload.get("file_name")
+            or request_payload.get("source_filename")
+            or ""
+        ).replace("\\", "/").rsplit("/", 1)[-1].strip()
+        if filename:
+            return Path(filename).stem.strip()[:120]
+        source_text = str(
+            request_payload.get("text")
+            or request_payload.get("review_text")
+            or payload.get("text")
+            or payload.get("answer_text")
+            or ""
+        )
+        for line in source_text.splitlines():
+            cleaned = line.strip().strip("#").strip()
+            if cleaned:
+                return cleaned[:80]
         raw = str(payload.get("answer_text") or payload.get("text") or payload.get("raw_text") or "")
         match = re.search(r"""["']script_title["']\s*:\s*["']([^"']{1,120})["']""", raw)
         return match.group(1).strip() if match else ""
@@ -2041,7 +2169,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not isinstance(snapshot, dict):
             return saved_asset
 
-        script_title = _script_audit_asset_title_from_payload(merged)
+        script_title = _script_audit_asset_title_from_payload(merged, request_payload)
         title = f"爆款文审核｜{script_title}" if script_title else str(saved_asset.get("title") or "爆款文审核").strip()
         summary = _script_audit_asset_summary_from_payload(merged)
 
@@ -2392,6 +2520,20 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 )
                 if str(direct or "").strip():
                     return str(direct).strip()
+                filename = str(
+                    value.get("filename")
+                    or data.get("filename")
+                    or data.get("file_name")
+                    or data.get("source_filename")
+                    or ""
+                ).replace("\\", "/").rsplit("/", 1)[-1].strip()
+                if filename:
+                    return Path(filename).stem.strip()[:120]
+                source_text = str(data.get("text") or data.get("review_text") or value.get("text") or "")
+                for line in source_text.splitlines():
+                    cleaned = line.strip().strip("#").strip()
+                    if cleaned:
+                        return cleaned[:80]
                 raw = str(value.get("answer_text") or value.get("text") or "")
                 match = _script_audit_re.search(r"""["']script_title["']\s*:\s*["']([^"']{1,120})["']""", raw)
                 return match.group(1).strip() if match else ""
@@ -2466,6 +2608,45 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def run_tool(tool_key: str):
         data = request.get_json(silent=True) or {}
         return _run_tool_request(tool_key, data)
+
+    @app.post("/api/tools/hot_review/export/docx")
+    @_login_required
+    def export_hot_review_docx():
+        data = request.get_json(silent=True) or {}
+        title = str(data.get("title") or "爆款文审核报告").strip()[:120] or "爆款文审核报告"
+        text = str(data.get("text") or "").strip()
+        if not text:
+            return _json_error("缺少可导出的报告正文。", status=400)
+        try:
+            from docx import Document
+        except ModuleNotFoundError as exc:
+            if exc.name == "docx":
+                return _json_error("当前环境缺少 python-docx，暂时无法导出 DOCX。", status=500)
+            raise
+        document = Document()
+        document.add_heading(title, level=1)
+        for block in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+            line = block.strip()
+            if not line:
+                document.add_paragraph("")
+            elif line.startswith("# "):
+                document.add_heading(line[2:].strip(), level=1)
+            elif line.startswith("## "):
+                document.add_heading(line[3:].strip(), level=2)
+            elif line.startswith("- "):
+                document.add_paragraph(line[2:].strip(), style="List Bullet")
+            else:
+                document.add_paragraph(line)
+        buffer = BytesIO()
+        document.save(buffer)
+        buffer.seek(0)
+        safe_title = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in title)[:48] or "hot_review"
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name=f"{safe_title}.docx",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
     @app.post("/api/tools/new-framework")
     @_login_required
