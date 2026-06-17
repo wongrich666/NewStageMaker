@@ -6,7 +6,7 @@
   const lists = {
     framework: document.getElementById("completedProjectList"),
     new_script: document.getElementById("newScriptProjectList"),
-    hot_review: null,
+    hot_review: document.getElementById("hotReviewProjectList"),
   };
 
   function escapeHtml(value) {
@@ -45,6 +45,7 @@
       item.workflow_type,
       item.result_type,
       item.resultType,
+      item.tool_output_type,
       result.tool_key,
       result.result_type,
       result.resultType,
@@ -77,6 +78,11 @@
     return lists.hot_review;
   }
 
+  function setHotReviewCount(count) {
+    const countEl = document.getElementById("hotReviewProjectCount");
+    if (countEl) countEl.textContent = String(Math.max(0, Number(count) || 0));
+  }
+
   function hasFrameworkToScriptState(item) {
     const artifacts = item && typeof item.artifacts === "object" ? item.artifacts : {};
     const state = artifacts.framework_to_script_state || item.framework_to_script_state;
@@ -90,7 +96,7 @@
     if (isHotReviewAsset(item)) return "hot_review";
     const explicit = String(item.asset_type || item.type || "").trim();
     if (explicit === "legacy_script") return "";
-    if (["old_script", "framework", "new_script"].includes(explicit)) return explicit;
+    if (["old_script", "framework", "new_script", "character_reskin", "waibao"].includes(explicit)) return explicit;
     const input = item.input_payload && typeof item.input_payload === "object" ? item.input_payload : {};
     const assetKind = String(item.asset_kind || "").trim();
     const scriptMode = String(item.script_format_mode || input.script_format_mode || "").trim();
@@ -139,6 +145,7 @@
     url.searchParams.set("project_id", id);
     if (isHotReviewAsset(item)) {
       url.searchParams.set("section", "tools");
+      url.searchParams.set("tool", "hot_review");
     }
     return url.pathname + url.search;
   }
@@ -167,8 +174,10 @@
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.success === false || data.ok === false) throw new Error(data.message || data.error || "资产列表加载失败");
     const projects = Array.isArray(data.projects) ? data.projects : [];
+    const hotReviews = projects.filter((item) => assetCategory(item) === "hot_review");
     renderList(lists.framework, projects.filter((item) => assetCategory(item) === "framework"), "当前还没有框架资产。");
-    renderList(ensureHotReviewList(), projects.filter((item) => assetCategory(item) === "hot_review"), "当前还没有爆款文审核资产。");
+    renderList(ensureHotReviewList(), hotReviews, "当前还没有爆款文审核资产。");
+    setHotReviewCount(hotReviews.length);
     renderList(lists.new_script, projects.filter((item) => assetCategory(item) === "new_script"), "当前还没有新剧本平台资产。");
   }
 

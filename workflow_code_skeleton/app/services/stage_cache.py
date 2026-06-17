@@ -40,6 +40,23 @@ class StageCacheMixin:
         if str(snapshot.get("status") or "") == "completed":
             allowed_keys.extend(PUBLIC_COMPLETED_ARTIFACT_KEYS)
         is_tool_asset = self._is_auxiliary_tool_asset(snapshot)
+        is_hot_review_asset = (
+            str(snapshot.get("tool_key") or "").strip() == "hot_review"
+            or str(snapshot.get("asset_type") or "").strip() == "hot_review"
+            or str(snapshot.get("category") or "").strip() == "hot_review"
+            or str(snapshot.get("workflow_type") or "").strip() == "hot_review"
+        )
+        if is_hot_review_asset:
+            allowed_keys.extend(
+                (
+                    "audit",
+                    "view",
+                    "tool_result",
+                    "result",
+                    "parse_warnings",
+                    "final_output_text",
+                )
+            )
         raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
         artifacts = _select_non_empty_fields(
             raw_artifacts,
@@ -779,7 +796,12 @@ class StageCacheMixin:
             or (isinstance(framework_script_state.get("scriptStages"), dict) and framework_script_state.get("scriptStages"))
             or (isinstance(framework_script_state.get("stageOutputs"), dict) and framework_script_state.get("stageOutputs"))
         )
-        if raw_asset_type in {"old_script", "legacy_script", "framework", "new_script", "character_reskin"}:
+        raw_category = str(snapshot.get("category") or input_payload_for_type.get("category") or "").strip()
+        raw_workflow_type = str(snapshot.get("workflow_type") or input_payload_for_type.get("workflow_type") or "").strip()
+        raw_tool_key = str(snapshot.get("tool_key") or input_payload_for_type.get("tool_key") or "").strip()
+        if raw_asset_type == "hot_review" or raw_category == "hot_review" or raw_workflow_type == "hot_review" or raw_tool_key == "hot_review":
+            asset_type = "hot_review"
+        elif raw_asset_type in {"old_script", "legacy_script", "framework", "new_script", "character_reskin"}:
             asset_type = "old_script" if raw_asset_type == "legacy_script" else raw_asset_type
             if asset_type == "framework" and framework_script_has_progress:
                 asset_type = "new_script"
@@ -824,6 +846,10 @@ class StageCacheMixin:
             "current_batch": snapshot.get("current_batch"),
             "asset_kind": snapshot.get("asset_kind") or "project",
             "asset_type": asset_type,
+            "category": raw_category or str(snapshot.get("category") or "").strip(),
+            "workflow_type": raw_workflow_type or str(snapshot.get("workflow_type") or "").strip(),
+            "result_type": str(snapshot.get("result_type") or snapshot.get("resultType") or "").strip(),
+            "resultType": str(snapshot.get("resultType") or snapshot.get("result_type") or "").strip(),
             "script_format_mode": script_format_mode_for_type,
             "tool_key": str(snapshot.get("tool_key") or "").strip(),
             "tool_label": str(snapshot.get("tool_label") or "").strip(),
@@ -1580,10 +1606,19 @@ class StageCacheMixin:
             "awaiting_user_confirmation": _awaiting_completion_confirmation(snapshot),
             "cache_notice": _cache_notice(snapshot),
             "asset_kind": snapshot.get("asset_kind") or "project",
+            "asset_type": str(snapshot.get("asset_type") or "").strip(),
+            "category": str(snapshot.get("category") or "").strip(),
+            "workflow_type": str(snapshot.get("workflow_type") or "").strip(),
+            "result_type": str(snapshot.get("result_type") or snapshot.get("resultType") or "").strip(),
+            "resultType": str(snapshot.get("resultType") or snapshot.get("result_type") or "").strip(),
             "tool_key": str(snapshot.get("tool_key") or "").strip(),
             "tool_label": str(snapshot.get("tool_label") or "").strip(),
             "tool_filename": str(artifacts.get("tool_filename") or "").strip(),
         }
+        if is_tool_asset:
+            payload["asset_type"] = payload["asset_type"] or (
+                "character_reskin" if payload["tool_key"] == "character_reskin" else "old_script"
+            )
         if is_tool_asset:
             payload["current_stage_label"] = str(snapshot.get("tool_label") or snapshot.get("current_stage_label") or "辅助工具结果")
             payload["generated_episodes"] = 0

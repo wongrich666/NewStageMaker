@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>剧本生成平台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260617-hot-review-v5">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260617-hot-review-v6">
   <link rel="stylesheet" href="{{ url_for('static', filename='global_theme.css') }}?v=20260617-cat-theme-v4">
 </head>
 <body class="workspace-body mono-page">
@@ -49,6 +49,15 @@
               </summary>
               <div id="completedProjectList" class="workspace-compact-list">
                 <div class="workspace-empty">登录后查看 01-07 框架资产。</div>
+              </div>
+            </details>
+            <details class="workspace-folder hot-review-workspace-folder">
+              <summary>
+                <span>爆款文审核资产</span>
+                <small class="workspace-pick-state" id="hotReviewProjectCount">0</small>
+              </summary>
+              <div id="hotReviewProjectList" class="workspace-compact-list">
+                <div class="workspace-empty">登录后查看爆款文审核资产。</div>
               </div>
             </details>
             <details class="workspace-folder">
@@ -154,7 +163,7 @@
       frameworkToScriptUrl: "/framework-to-script"
     };
   </script>
-  <script src="{{ url_for('static', filename='sidebar_assets.js') }}?v=20260617-hot-review-v5"></script>
+  <script src="{{ url_for('static', filename='sidebar_assets.js') }}?v=20260617-hot-review-v6"></script>
   {% endif %}
   <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v4"></script>
 </body>

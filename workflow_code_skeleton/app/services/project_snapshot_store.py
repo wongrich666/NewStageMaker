@@ -590,7 +590,8 @@ class ProjectSnapshotStoreMixin:
             if self._snapshot_belongs_to_user(snapshot, user_id)
             and (
                 str(snapshot.get("asset_kind") or "").strip() != AUXILIARY_TOOL_ASSET_KIND
-                or str(snapshot.get("tool_key") or "").strip() == "character_reskin"
+                or str(snapshot.get("tool_key") or "").strip() in {"character_reskin", "hot_review"}
+                or str(snapshot.get("asset_type") or "").strip() == "hot_review"
             )
         ]
         projects.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
