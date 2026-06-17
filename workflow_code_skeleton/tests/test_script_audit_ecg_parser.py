@@ -292,3 +292,60 @@ def test_compact_alias_payload_normalizes_to_canonical():
     assert result["audit"]["episode_reviews"][0]["rewrite_plan"][0]["specific_action"] == "减少解释"
     assert result["visualization"]["ecg_chart"]["global"]["points"][0]["ecg_value"] == 3
     assert result["warnings"]
+
+
+def test_compact_global_chart_includes_episode_points_for_each_episode():
+    payload = compact_payload()
+    payload["episode_reviews"].append({
+        "episode_no": 2,
+        "episode_title": "第二集",
+        "level": "C",
+        "core_judgement": "本集压力不足",
+        "largest_retention_loss": "缺少新阻力",
+        "priority_fix": "补一个新选择",
+        "dimension_scores": [
+            {"dimension_key": "opening_hook", "score": 8},
+            {"dimension_key": "conflict_pacing", "score": 12},
+            {"dimension_key": "satisfying_payoff", "score": 13},
+            {"dimension_key": "character_dialogue_filming", "score": 12},
+            {"dimension_key": "market_compliance", "score": 12},
+        ],
+        "ecg_points": [
+            {"episode_no": 2, "value": -2, "label": "第二集低点", "reason": "解释偏多"}
+        ],
+    })
+    result = compact_result_from(json.dumps(payload, ensure_ascii=False))
+    episodes = {
+        point["episode_no"]
+        for point in result["visualization"]["ecg_chart"]["global"]["points"]
+    }
+    assert episodes == {1, 2}
+    assert len(result["visualization"]["episode_score_map"]) == 2
+    assert len(result["audit"]["episode_reviews"]) == 2
+
+
+def test_compact_episode_mapping_and_fallback_point_for_missing_ecg():
+    payload = compact_payload()
+    payload["global_review"]["global_ecg_points"] = []
+    payload["episode_reviews"] = {
+        "1": payload["episode_reviews"][0],
+        "2": {
+            "episode_no": 2,
+            "episode_title": "第二集",
+            "core_judgement": "没有返回心电点",
+            "largest_retention_loss": "节奏平",
+            "priority_fix": "增加段尾钩子",
+            "dimension_scores": [
+                {"dimension_key": "opening_hook", "score": 7},
+                {"dimension_key": "conflict_pacing", "score": 10},
+                {"dimension_key": "satisfying_payoff", "score": 11},
+                {"dimension_key": "character_dialogue_filming", "score": 10},
+                {"dimension_key": "market_compliance", "score": 12},
+            ],
+        },
+    }
+    result = compact_result_from(json.dumps(payload, ensure_ascii=False))
+    assert [item["episode_no"] for item in result["audit"]["episode_reviews"]] == [1, 2]
+    global_points = result["visualization"]["ecg_chart"]["global"]["points"]
+    assert {point["episode_no"] for point in global_points} == {1, 2}
+    assert any(point.get("derived_from_episode_score") for point in global_points)

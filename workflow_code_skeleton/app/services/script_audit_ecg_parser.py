@@ -912,6 +912,26 @@ def _compact_bool(value: Any, default: bool = False) -> bool:
     return bool(value)
 
 
+def _compact_sequence(value: Any, preferred_keys: tuple[str, ...] = ()) -> list:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        for key in preferred_keys:
+            nested = value.get(key)
+            if isinstance(nested, list):
+                return nested
+        entries = list(value.items())
+        if entries and all(isinstance(item[1], dict) for item in entries):
+            return [
+                item[1]
+                for item in sorted(entries, key=lambda pair: (
+                    _int(pair[0], 999999),
+                    str(pair[0]),
+                ))
+            ]
+    return []
+
+
 def _compact_alias_dimension(item: dict) -> dict:
     result = dict(item)
     if "dimension_key" not in result and "key" in result:
@@ -945,7 +965,7 @@ def _compact_missing_dimension(spec: dict) -> dict:
 def _normalize_compact_dimensions(items: Any, warnings: list[str], *, scope: str) -> list[dict]:
     raw_by_key: dict[str, dict] = {}
     loose_items: list[dict] = []
-    for item in _list(items):
+    for item in _compact_sequence(items, ("dimension_scores", "dimensions", "items")):
         if not isinstance(item, dict):
             warnings.append(f"{scope} 评分维度包含非对象条目，已忽略。")
             continue
@@ -986,9 +1006,15 @@ def _normalize_compact_dimensions(items: Any, warnings: list[str], *, scope: str
     return normalized
 
 
-def _normalize_compact_ecg_points(items: Any, warnings: list[str], *, scope: str) -> list[dict]:
+def _normalize_compact_ecg_points(
+    items: Any,
+    warnings: list[str],
+    *,
+    scope: str,
+    default_episode_no: int = 0,
+) -> list[dict]:
     normalized = []
-    for index, item in enumerate(_list(items), start=1):
+    for index, item in enumerate(_compact_sequence(items, ("ecg_points", "points", "items")), start=1):
         if not isinstance(item, dict):
             warnings.append(f"{scope} 心电点位第{index}项不是对象，已忽略。")
             continue
@@ -997,7 +1023,7 @@ def _normalize_compact_ecg_points(items: Any, warnings: list[str], *, scope: str
             **item,
             "point_id": _str(item.get("point_id"), f"{scope}_p_{index:06d}"),
             "segment_id": _str(item.get("segment_id")),
-            "episode_no": _int(item.get("episode_no"), 0),
+            "episode_no": _int(item.get("episode_no"), default_episode_no),
             "scene_no": _int(item.get("scene_no"), 0),
             "segment_index_global": _int(item.get("segment_index_global") or item.get("segment_index"), index),
             "segment_index_in_episode": _int(item.get("segment_index_in_episode"), index),
@@ -1124,7 +1150,7 @@ def normalize_compact_audit_payload(data: dict) -> tuple[dict, list[str]]:
         episode_source = data.get("episodes")
         warnings.append("已将 episodes 转换为 episode_reviews。")
     episodes = []
-    for index, episode in enumerate(_list(episode_source), start=1):
+    for index, episode in enumerate(_compact_sequence(episode_source, ("episode_reviews", "episodes", "items")), start=1):
         if not isinstance(episode, dict):
             warnings.append(f"第{index}个单集评价不是对象，已忽略。")
             continue
@@ -1162,6 +1188,7 @@ def normalize_compact_audit_payload(data: dict) -> tuple[dict, list[str]]:
                 _extract_compact_episode_points(episode),
                 warnings,
                 scope=f"episode_{episode_no}",
+                default_episode_no=episode_no,
             ),
             "ending_hook": _dict(episode.get("ending_hook")),
             "satisfying_points": _list(episode.get("satisfying_points")),
@@ -1312,6 +1339,74 @@ def _point_extremes(points: list[dict], *, reverse: bool) -> list[dict]:
     ][:3]
 
 
+def _episode_score_to_ecg_value(score: Any) -> float:
+    return round(_clamp((_num(score, 50) - 50) / 10, -5, 5), 1)
+
+
+def _fallback_episode_ecg_point(episode: dict) -> dict:
+    episode_no = _int(episode.get("episode_no"), 0)
+    score = _num(episode.get("episode_score"), 0)
+    return {
+        "point_id": f"episode_{episode_no:03d}_score_point",
+        "segment_id": "",
+        "episode_no": episode_no,
+        "scene_no": 0,
+        "segment_index_global": episode_no,
+        "segment_index_in_episode": 1,
+        "start_offset": 0,
+        "end_offset": 0,
+        "x_label": f"第{episode_no}集",
+        "ecg_value": _episode_score_to_ecg_value(score),
+        "short_label": f"第{episode_no}集评分",
+        "audit_reason": _first_text(episode.get("core_judgement"), episode.get("largest_retention_loss"), "模型未返回该集心电点，后端已用单集评分生成展示点。"),
+        "commercial_effect": "",
+        "problem_if_any": _str(episode.get("largest_retention_loss")),
+        "fix_suggestion": _str(episode.get("priority_fix")),
+        "tags": ["单集评分派生"],
+        "score_impacts": [],
+        "derived_from_episode_score": True,
+    }
+
+
+def _point_identity(point: dict) -> tuple:
+    return (
+        _str(point.get("point_id")),
+        _str(point.get("segment_id")),
+        _int(point.get("episode_no"), 0),
+        _int(point.get("segment_index_global"), 0),
+        _str(point.get("short_label") or point.get("x_label")),
+    )
+
+
+def _merge_global_episode_points(global_points: list[dict], episode_charts: list[dict]) -> list[dict]:
+    merged = [dict(point) for point in global_points if isinstance(point, dict)]
+    seen = {_point_identity(point) for point in merged}
+    represented_episodes = {_int(point.get("episode_no"), 0) for point in merged if _int(point.get("episode_no"), 0)}
+    for chart in episode_charts:
+        episode_no = _int(chart.get("episode_no"), 0)
+        if not episode_no or episode_no in represented_episodes:
+            continue
+        for point in _list(chart.get("points")):
+            if not isinstance(point, dict):
+                continue
+            identity = _point_identity(point)
+            if identity in seen:
+                continue
+            merged.append(dict(point))
+            seen.add(identity)
+        represented_episodes.add(episode_no)
+    merged.sort(key=lambda point: (
+        _int(point.get("episode_no"), 0),
+        _int(point.get("segment_index_global"), 0),
+        _int(point.get("segment_index_in_episode"), 0),
+        _int(point.get("x"), 0),
+        _str(point.get("point_id")),
+    ))
+    for index, point in enumerate(merged, start=1):
+        point["x"] = index
+    return merged
+
+
 def build_audit_visualization_payload(audit: dict) -> dict:
     """
     根据标准化后的 compact audit 派生前端图表和卡片需要的数据。
@@ -1333,7 +1428,10 @@ def build_audit_visualization_payload(audit: dict) -> dict:
     for episode in _list(audit.get("episode_reviews")):
         if not isinstance(episode, dict):
             continue
-        episode_points = _derived_ecg_points(_list(episode.get("ecg_points")), segment_by_id)
+        raw_episode_points = _list(episode.get("ecg_points"))
+        if not raw_episode_points:
+            raw_episode_points = [_fallback_episode_ecg_point(episode)]
+        episode_points = _derived_ecg_points(raw_episode_points, segment_by_id)
         episode_charts.append({
             "episode_no": _int(episode.get("episode_no"), 0),
             "episode_title": _str(episode.get("episode_title")),
@@ -1349,6 +1447,7 @@ def build_audit_visualization_payload(audit: dict) -> dict:
             "main_problem": _str(episode.get("largest_retention_loss")),
             "next_priority_fix": _str(episode.get("priority_fix")),
         })
+    global_points = _merge_global_episode_points(global_points, episode_charts)
 
     return {
         "ecg_chart": {
