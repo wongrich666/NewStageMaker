@@ -1086,7 +1086,7 @@ body,
   color: var(--fp-text);
   background:
     linear-gradient(rgba(255, 250, 243, 0.22), rgba(255, 244, 231, 0.34)),
-    url("cat-wallpaper.png") 24px 0 / 300px auto repeat fixed;
+    url("cat-wallpaper.png") center center / cover no-repeat fixed;
 }
 
 .fp-app {
@@ -1098,7 +1098,7 @@ body,
   position: fixed;
   inset: 0;
   pointer-events: none;
-  background: url("cat-wallpaper.png") 24px 0 / 300px auto repeat;
+  background: url("cat-wallpaper.png") center center / cover no-repeat;
   opacity: 0.32;
   z-index: 0;
 }
