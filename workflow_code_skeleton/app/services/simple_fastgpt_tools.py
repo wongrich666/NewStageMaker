@@ -117,6 +117,15 @@ class ToolExecutionError(RuntimeError):
         self.status_code = status_code
 
 
+def _tool_timeout_seconds(definition: "SimpleToolDefinition") -> int:
+    default_timeout = 900 if definition.key == "hot_review" else int(getattr(settings, "fastgpt_timeout", 300))
+    raw = os.getenv(f"{definition.env_prefix}_TIMEOUT") or os.getenv("FASTGPT_TIMEOUT") or str(default_timeout)
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return default_timeout
+
+
 TOOL_DEFINITIONS: dict[str, SimpleToolDefinition] = {
     "hot_review": SimpleToolDefinition(
         key="hot_review",
@@ -575,6 +584,7 @@ def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, An
     last_candidate_paths: list[str] = []
     last_updated_variables: dict[str, Any] = {}
     last_data: Any = None
+    timeout_seconds = _tool_timeout_seconds(definition)
 
     for attempt_index in range(1, max(1, definition.max_attempts) + 1):
         content = _tool_message_content_for_attempt(base_content, definition.retry_instruction, attempt_index)
@@ -591,7 +601,7 @@ def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, An
                 url,
                 headers=headers,
                 json=body,
-                timeout=int(getattr(settings, "fastgpt_timeout", 300)),
+                timeout=timeout_seconds,
             )
         except requests.Timeout as exc:
             failure_reason = "timeout"

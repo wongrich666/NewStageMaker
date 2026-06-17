@@ -4127,6 +4127,7 @@ startRuntimeDebugPolling();
   ]);
 
   const HOT_REVIEW_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+  const HOT_REVIEW_RUN_TIMEOUT_MS = 900000;
 
   function hotReviewFileExtension(filename) {
     const parts = String(filename || "")
@@ -6041,7 +6042,7 @@ function renderToolForm(toolKey) {
       const data = await requestJson(currentToolRunUrl(activeToolKey), {
         method: "POST",
         body: JSON.stringify(payload),
-        timeoutMs: activeToolKey === "hot_review" ? 420000 : 0
+        timeoutMs: activeToolKey === "hot_review" ? HOT_REVIEW_RUN_TIMEOUT_MS : 0
       });
       const result = data.result || data;
       const output = result.output ?? data.output ?? result.result ?? "";
