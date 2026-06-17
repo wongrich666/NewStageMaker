@@ -771,8 +771,20 @@ class StageCacheMixin:
         raw_asset_type = str(snapshot.get("asset_type") or input_payload_for_type.get("asset_type") or "").strip()
         asset_kind_for_type = str(snapshot.get("asset_kind") or input_payload_for_type.get("asset_kind") or "").strip()
         script_format_mode_for_type = str(input_payload_for_type.get("script_format_mode") or "").strip()
+        framework_script_state = artifacts.get("framework_to_script_state") if isinstance(artifacts.get("framework_to_script_state"), dict) else {}
+        framework_script_has_progress = bool(
+            framework_script_state.get("runningStage")
+            or framework_script_state.get("lastFailedStage")
+            or framework_script_state.get("last_failed_stage")
+            or (isinstance(framework_script_state.get("scriptStages"), dict) and framework_script_state.get("scriptStages"))
+            or (isinstance(framework_script_state.get("stageOutputs"), dict) and framework_script_state.get("stageOutputs"))
+        )
         if raw_asset_type in {"old_script", "legacy_script", "framework", "new_script", "character_reskin"}:
             asset_type = "old_script" if raw_asset_type == "legacy_script" else raw_asset_type
+            if asset_type == "framework" and framework_script_has_progress:
+                asset_type = "new_script"
+        elif framework_script_has_progress:
+            asset_type = "new_script"
         elif asset_kind_for_type == "framework_planner":
             asset_type = "framework"
         elif script_format_mode_for_type == "framework_to_script" or bool(input_payload_for_type.get("framework_to_script")):

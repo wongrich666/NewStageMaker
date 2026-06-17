@@ -937,6 +937,53 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             merged.setdefault(key, value)
         return merged, asset
 
+    @app.post("/api/framework-to-script/running-stage")
+    @_login_required
+    def mark_framework_to_script_running_stage():
+        data = request.get_json(silent=True) or {}
+        user_id = _require_user_id()
+        asset_id = str(data.get("framework_asset_id") or data.get("asset_id") or "").strip()
+        running_stage = str(data.get("running_stage") or data.get("runningStage") or "").strip()
+        try:
+            project_id = int(asset_id)
+        except Exception:
+            project_id = 0
+        if project_id <= 0:
+            return _json_error("缺少有效 framework_asset_id。", status=400)
+        snapshot = task_manager.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+        if not snapshot or str(snapshot.get("asset_kind") or "").strip() != "framework_planner":
+            return _json_error("框架资产不存在。", status=404)
+        now = _now_iso()
+        artifacts = snapshot.setdefault("artifacts", {})
+        if not isinstance(artifacts, dict):
+            artifacts = {}
+            snapshot["artifacts"] = artifacts
+        workspace_state = artifacts.get("framework_to_script_state")
+        if not isinstance(workspace_state, dict):
+            workspace_state = {"scriptStages": {}, "stageOutputs": {}}
+        workspace_state["runningStage"] = running_stage
+        workspace_state["running_stage"] = running_stage
+        if "last_failed_stage" in data or "lastFailedStage" in data:
+            last_failed_stage = str(data.get("last_failed_stage") or data.get("lastFailedStage") or "").strip()
+            workspace_state["lastFailedStage"] = last_failed_stage
+            workspace_state["last_failed_stage"] = last_failed_stage
+        workspace_state["framework_asset_id"] = asset_id
+        workspace_state["project_id"] = project_id
+        workspace_state["updated_at"] = now
+        artifacts["framework_to_script_state"] = workspace_state
+        snapshot["updated_at"] = now
+        record = task_manager._projects.get(project_id)
+        if record:
+            with record.lock:
+                record.snapshot = snapshot
+            task_manager._persist_snapshot(record)
+        else:
+            task_manager._project_path(project_id).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        return _json_ok(running_stage=running_stage, project_id=project_id)
+
     def _framework_script_stage_cache(framework_asset: dict | None, stage_key: str) -> dict:
         if not isinstance(framework_asset, dict):
             return {}
@@ -2165,11 +2212,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         raise ValueError("暂不支持该文件格式。")
 
-    @app.post("/api/tools/hot_review/extract-file")
-    def extract_hot_review_file():
+    def _uploaded_text_response(uploaded, *, log_label: str):
         _require_user_id()
-
-        uploaded = request.files.get("file")
 
         if uploaded is None:
             return _json_error(
@@ -2223,7 +2267,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             )
         except Exception:
             logger.exception(
-                "爆款文审核文件解析失败：filename=%s extension=%s",
+                "%s 文件解析失败：filename=%s extension=%s",
+                log_label,
                 original_filename,
                 extension,
             )
@@ -2264,6 +2309,20 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             text=text,
             char_count=len(text),
             byte_count=len(raw),
+        )
+
+    @app.post("/api/files/extract-text")
+    def extract_uploaded_text_file():
+        return _uploaded_text_response(
+            request.files.get("file"),
+            log_label="通用上传文本提取",
+        )
+
+    @app.post("/api/tools/hot_review/extract-file")
+    def extract_hot_review_file():
+        return _uploaded_text_response(
+            request.files.get("file"),
+            log_label="爆款文审核",
         )
 
     @app.get("/api/tools")

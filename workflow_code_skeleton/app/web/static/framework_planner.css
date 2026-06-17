@@ -180,6 +180,43 @@ code { background: rgba(63, 95, 227, .08); padding: 1px 5px; border-radius: 6px;
 .fp-upload { min-height: 156px; border: 1px dashed var(--fp-border-strong); border-radius: 12px; background: linear-gradient(180deg, #fff, #fbfcff); display: grid; place-items: center; text-align: center; padding: 22px; }
 .fp-upload strong { display: block; margin-bottom: 7px; }
 .fp-upload p { margin: 4px 0 0; color: var(--fp-muted); font-size: 13px; }
+.fp-source-upload {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+  border: 1px dashed var(--fp-border-strong);
+  border-radius: 12px;
+  background: rgba(255, 246, 235, 0.72);
+  padding: 12px;
+  transition: border-color .16s ease, background .16s ease, transform .16s ease;
+}
+.fp-source-upload label {
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+}
+.fp-source-upload strong {
+  color: var(--fp-text);
+  font-size: 13px;
+}
+.fp-source-upload span,
+.fp-source-upload em {
+  color: var(--fp-muted);
+  font-size: 12px;
+  line-height: 1.55;
+  font-style: normal;
+}
+.fp-source-upload.dragging {
+  border-color: var(--fp-blue);
+  background: rgba(255, 233, 202, 0.9);
+  transform: translateY(-1px);
+}
+.fp-source-upload.disabled {
+  opacity: .62;
+}
+.fp-source-upload.disabled label {
+  cursor: not-allowed;
+}
 .fp-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 16px; }
 .fp-btn { display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--fp-border-strong); background: #fff; color: var(--fp-text); border-radius: 9px; padding: 9px 13px; min-height: 36px; }
 .fp-btn:hover:not(:disabled) { border-color: #b9c1d4; background: #fafbff; }

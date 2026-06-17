@@ -53,6 +53,7 @@
     runningProgressTimer: null,
     runningRetryMessage: "",
     runningRetryCountdown: 0,
+    lastFailedStage: "",
     error: null,
     importStatus: "",
     frameworkSource: "",
@@ -138,6 +139,35 @@
     }
   }
 
+  async function requestStageJsonWithRetry(stage, path, buildOptions, maxAttempts = 3) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await requestJson(path, typeof buildOptions === "function" ? buildOptions(attempt, lastError) : buildOptions);
+      } catch (error) {
+        lastError = error;
+        if (attempt >= maxAttempts) break;
+        state.error = `${stage} 阶段请求失败，正在第 ${attempt + 1}/${maxAttempts} 次重试：${formatRetryError(error)}`;
+        render();
+        await delay(2200);
+      }
+    }
+    throw lastError || new Error(`${stage} 阶段请求失败`);
+  }
+
+  function markStageFailure(stage, error, fallback) {
+    state.lastFailedStage = String(stage || "");
+    state.error = (error && error.message) || fallback || `${stage || "当前"} 阶段失败`;
+    saveWorkspace();
+    persistRunningStage("", state.lastFailedStage);
+  }
+
+  function clearStageFailure(stage) {
+    if (!stage || String(state.lastFailedStage || "") === String(stage || "")) {
+      state.lastFailedStage = "";
+    }
+  }
+
   function stripRaw(value) {
     if (Array.isArray(value)) return value.map(stripRaw);
     if (!value || typeof value !== "object") return value;
@@ -174,8 +204,28 @@
         frameworkSource: state.frameworkSource,
         preferenceSnapshot: state.preferenceSnapshot,
         preferenceSource: state.preferenceSource,
+        lastFailedStage: state.lastFailedStage,
       })));
     } catch (error) {}
+  }
+
+  async function persistRunningStage(stage, failedStage = undefined) {
+    if (!state.frameworkAssetId) return;
+    try {
+      const payload = {
+        framework_asset_id: state.frameworkAssetId,
+        running_stage: stage ? String(stage) : "",
+      };
+      if (failedStage !== undefined) {
+        payload.last_failed_stage = failedStage ? String(failedStage) : "";
+      }
+      await requestJson("/api/framework-to-script/running-stage", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      console.warn("persist framework-to-script running stage failed", error);
+    }
   }
 
   function attachKnowledgePayload(payload, stageNo) {
@@ -259,6 +309,7 @@
     state.runningStage = payload.runningStage;
     state.runningStartedAt = payload.startedAt;
     state.isRunning = Boolean(payload.runningStage);
+    persistRunningStage(stage);
 
     try {
       window.localStorage.setItem(RUNNING_STAGE_STORAGE_KEY, JSON.stringify(payload));
@@ -275,6 +326,7 @@
     state.runningStage = "";
     state.runningStartedAt = "";
     state.isRunning = false;
+    persistRunningStage("", state.lastFailedStage || "");
 
     try {
       window.localStorage.removeItem(RUNNING_STAGE_STORAGE_KEY);
@@ -543,6 +595,33 @@
         <span>${escapeHtml(text)}</span>
       </div>
     `;
+  }
+
+  function renderErrorPanel() {
+    if (!state.error) return `<section class="wts-error hidden" id="frameworkToScriptError"></section>`;
+    const failedStage = String(state.lastFailedStage || "").trim();
+    const canRetry = failedStage && currentAssetReady() && !state.runningStage && !state.isRunning;
+    return `
+      <section class="wts-error" id="frameworkToScriptError">
+        <div class="wts-error-text">${escapeHtml(state.error)}</div>
+        ${canRetry ? `
+          <div class="wts-error-actions">
+            <button type="button" class="wts-btn ghost" data-action="retry-failed-stage">重试 ${escapeHtml(failedStage)} 阶段</button>
+            <button type="button" class="wts-btn" data-action="continue-from-failure">从断点继续</button>
+          </div>
+        ` : ""}
+      </section>
+    `;
+  }
+
+  function retryStage(stage, options = {}) {
+    const key = String(stage || state.lastFailedStage || "").padStart(2, "0");
+    if (key === "08") return runStage08();
+    if (key === "09") return runStage09();
+    if (key === "10") return runStage10();
+    if (key === "11") return runStage11(options.reset ? { resetStage11: true } : {});
+    if (key === "12") return runStage12(options.reset ? { resetStage12: true } : {});
+    return generateFullScript();
   }
 
   function stageHasCompleted(stage) {
@@ -1215,24 +1294,26 @@
     if (hasObject((state.scriptStages.stage08 || {}).sceneDictionary) && !window.confirm("重新运行 08 会覆盖 08 输出，并清空后续 09-12 已生成结果。继续吗？")) return;
     saveRunningStage("08");
     state.error = null;
+    clearStageFailure("08");
     render();
     render();
     try {
-      const data = await requestJson("/api/framework-to-script/stage/08", {
+      const data = await requestStageJsonWithRetry("08", "/api/framework-to-script/stage/08", () => ({
         method: "POST",
         body: JSON.stringify(attachKnowledgePayload({
           ...frameworkRequestBase(),
         }, "08")),
-      });
+      }));
       state.scriptStages.stage08 = {
         sceneDictionary: data.sceneDictionary,
         scriptWorldRulesDigest: data.scriptWorldRulesDigest,
         updated_at: new Date().toISOString(),
       };
       clearDownstreamStages("stage08");
+      clearStageFailure("08");
       saveWorkspace();
     } catch (error) {
-      state.error = error.message || "08 提炼核心场景失败";
+      markStageFailure("08", error, "08 提炼核心场景失败");
     } finally {
       clearRunningStage("08");
       render();
@@ -1254,23 +1335,25 @@
     if (hasObject((state.scriptStages.stage09 || {}).appearanceMapping) && !window.confirm("重新运行 09 会覆盖 09 输出，并清空后续 10-12 已生成结果。继续吗？")) return;
     saveRunningStage("09");
     state.error = null;
+    clearStageFailure("09");
     render();
     try {
-      const data = await requestJson("/api/framework-to-script/stage/09", {
+      const data = await requestStageJsonWithRetry("09", "/api/framework-to-script/stage/09", () => ({
         method: "POST",
         body: JSON.stringify(attachKnowledgePayload({
           ...frameworkRequestBase(),
           sceneDictionary: stage08.sceneDictionary,
         }, "09")),
-      });
+      }));
       state.scriptStages.stage09 = {
         appearanceMapping: data.appearanceMapping,
         updated_at: new Date().toISOString(),
       };
       clearDownstreamStages("stage09");
+      clearStageFailure("09");
       saveWorkspace();
     } catch (error) {
-      state.error = error.message || "09 确定角色外观失败";
+      markStageFailure("09", error, "09 确定角色外观失败");
     } finally {
       clearRunningStage("09");
       render();
@@ -1302,6 +1385,7 @@
 
     saveRunningStage("10");
     state.error = null;
+    clearStageFailure("10");
     render();
 
     try {
@@ -1309,7 +1393,7 @@
       let validation = null;
       let lastIssues = [];
       for (let attempt = 1; attempt <= 2; attempt += 1) {
-        data = await requestJson("/api/framework-to-script/stage/10", {
+        data = await requestStageJsonWithRetry("10", "/api/framework-to-script/stage/10", () => ({
           method: "POST",
           body: JSON.stringify(attachKnowledgePayload({
             ...frameworkRequestBase(),
@@ -1318,7 +1402,7 @@
             appearanceMapping: stage09.appearanceMapping,
             retry_reason: lastIssues.join("；"),
           }, "10")),
-        });
+        }));
 
         const enrichedEpisodePlan =
           data.enrichedEpisodePlan ||
@@ -1387,10 +1471,11 @@
       state.completedStages = Array.from(new Set([...(state.completedStages || []).map((item) => String(item)), "10"]))
         .filter((item) => item !== "11" && item !== "12");
       clearDownstreamStages("stage10");
+      clearStageFailure("10");
 
       saveWorkspace();
     } catch (error) {
-      state.error = error.message || "10 优化分集计划失败";
+      markStageFailure("10", error, "10 优化分集计划失败");
     } finally {
       clearRunningStage("10");
       render();
@@ -1479,6 +1564,7 @@
     state.scriptStages.stage12 = {};
     saveRunningStage("11");
     state.error = null;
+    clearStageFailure("11");
     render();
     try {
       let firstRequest = true;
@@ -1521,8 +1607,9 @@
         throw new Error(`11 未完成全部批次，剩余第 ${finalMissing.join("、")} 集起。`);
       }
       saveWorkspace();
+      clearStageFailure("11");
     } catch (error) {
-      state.error = error.message || "11 开头冲突钩子失败";
+      markStageFailure("11", error, "11 开头冲突钩子失败");
     } finally {
       stopRunningProgress();
       clearRunningStage("11");
@@ -1548,6 +1635,7 @@
     }
     saveRunningStage("12");
     state.error = null;
+    clearStageFailure("12");
     render();
     try {
       let firstRequest = true;
@@ -1595,8 +1683,9 @@
         throw new Error(`12 未完成全部正文批次，剩余第 ${finalMissing.join("、")} 集起。`);
       }
       saveWorkspace();
+      clearStageFailure("12");
     } catch (error) {
-      state.error = error.message || "12 正文及对话失败";
+      markStageFailure("12", error, "12 正文及对话失败");
     } finally {
       stopRunningProgress();
       if (!options.autoFromStage11) {
@@ -2036,7 +2125,7 @@
             <a class="wts-btn ghost" href="${escapeHtml(workspaceUrl)}">返回主工作台</a>
           </div>
         </header>
-        ${state.error ? `<section class="wts-error" id="frameworkToScriptError">${escapeHtml(state.error)}</section>` : `<section class="wts-error hidden" id="frameworkToScriptError"></section>`}
+        ${renderErrorPanel()}
         ${renderAssetPanel()}
         ${renderImportedSummary()}
         ${renderStages()}
@@ -2086,6 +2175,14 @@
       saveWorkspace();
       state.error = null;
       render();
+    } else if (action === "retry-failed-stage") {
+      retryStage(state.lastFailedStage);
+    } else if (action === "continue-from-failure") {
+      if (["08", "09", "10", "11", "12"].includes(String(state.lastFailedStage || "").padStart(2, "0"))) {
+        retryStage(state.lastFailedStage);
+      } else {
+        generateFullScript();
+      }
     } else if (action === "collapse-tree-node") {
       const detail = target.closest("details.wts-tree-node");
       if (detail) detail.open = false;

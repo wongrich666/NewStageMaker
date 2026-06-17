@@ -123,6 +123,16 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   color: var(--wts-danger);
 }
 .wts-error.hidden { display: none; }
+.wts-error-text {
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.wts-error-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
 .wts-error-inline {
   color: var(--wts-danger);
   background: #fef2f2;

@@ -5062,12 +5062,20 @@ function renderToolForm(toolKey) {
     if (["old_script", "framework", "new_script", "character_reskin", "waibao"].includes(explicit)) return explicit;
     const assetKind = String(item.asset_kind || "").trim();
     const input = item.input_payload && typeof item.input_payload === "object" ? item.input_payload : {};
+    const artifacts = item.artifacts && typeof item.artifacts === "object" ? item.artifacts : {};
+    const frameworkToScriptState = artifacts.framework_to_script_state || item.framework_to_script_state;
+    const hasFrameworkScriptState = frameworkToScriptState && typeof frameworkToScriptState === "object"
+      && (
+        Object.keys(frameworkToScriptState.scriptStages || {}).length > 0
+        || Object.keys(frameworkToScriptState.stageOutputs || {}).length > 0
+        || Boolean(frameworkToScriptState.runningStage)
+      );
     const scriptMode = String(item.script_format_mode || input.script_format_mode || "").trim();
     const toolKey = String(item.tool_key || "").trim();
     if (assetKind === "tool_result" && toolKey === "character_reskin") return "character_reskin";
     if (scriptMode === "waibao") return "waibao";
+    if (assetKind === "framework_to_script" || scriptMode === "framework_to_script" || input.framework_to_script === true || hasFrameworkScriptState) return "new_script";
     if (assetKind === "framework_planner") return "framework";
-    if (assetKind === "framework_to_script" || scriptMode === "framework_to_script" || input.framework_to_script === true) return "new_script";
     return "old_script";
   }
 

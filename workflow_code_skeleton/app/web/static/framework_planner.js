@@ -385,6 +385,8 @@
     assetSearch: "",
     assetStatusFilter: "all",
     assetSort: "updated_desc",
+    sourceUploadStatus: "",
+    sourceUploading: false,
     newScriptForm: {
       title: "",
       season_count: 1,
@@ -538,6 +540,41 @@
       throw new Error(data.error || data.message || "请求失败，请稍后重试。");
     }
     return data;
+  }
+
+  async function uploadSourceMaterialFile(file) {
+    if (!file) return;
+    const formData = new FormData();
+    formData.append("file", file);
+    ui.sourceUploading = true;
+    ui.sourceUploadStatus = `正在解析 ${file.name || "文件"}...`;
+    render();
+    try {
+      const headers = {};
+      if (authToken) headers.Authorization = `Bearer ${authToken}`;
+      const response = await fetch("/api/files/extract-text", {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.success === false || data.ok === false) {
+        throw new Error(data.error || data.message || "文件解析失败，请稍后重试。");
+      }
+      state.basic_config.source_text = String(data.text || "");
+      if (!state.basic_config.source_title && data.filename) {
+        state.basic_config.source_title = String(data.filename).replace(/\.[^.]+$/, "");
+      }
+      ui.sourceUploadStatus = `已导入 ${data.filename || file.name || "文件"}，共 ${data.char_count || state.basic_config.source_text.length} 字，可继续手动修改。`;
+      markDirty();
+      savePromptPreferences("basic_config:source_text_upload");
+      saveState();
+    } catch (error) {
+      ui.sourceUploadStatus = error.message || "文件解析失败，请检查文件格式。";
+    } finally {
+      ui.sourceUploading = false;
+      render();
+    }
   }
 
   function delay(ms) {
@@ -2954,6 +2991,14 @@
         </div>
         <div class="fp-field" style="margin-top:14px">
           <label>原文材料</label>
+          <div class="fp-source-upload ${locked ? "disabled" : ""}" data-source-drop-zone>
+            <input id="sourceMaterialFileInput" type="file" accept=".txt,.md,.json,.docx,.pdf,text/plain,text/markdown,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" data-source-file-input ${locked ? "disabled" : ""} hidden />
+            <label for="sourceMaterialFileInput">
+              <strong>${ui.sourceUploading ? "正在解析文件..." : "拖拽文件到这里，或点击上传原文材料"}</strong>
+              <span>支持 TXT、MD、JSON、DOCX、PDF。导入后仍可在下方手动修改。</span>
+            </label>
+            ${ui.sourceUploadStatus ? `<em>${escapeHtml(ui.sourceUploadStatus)}</em>` : ""}
+          </div>
           <textarea data-config-key="source_text" placeholder="可直接粘贴原文、梗概、旧策划、分集等材料。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.source_text)}</textarea>
         </div>
         <div class="fp-grid two" style="margin-top:14px">
@@ -6776,6 +6821,12 @@ async function saveFrameworkAsset(options) {
 
   app.addEventListener("change", (event) => {
     const target = event.target;
+    if (target.matches("[data-source-file-input]")) {
+      const file = target.files && target.files[0];
+      uploadSourceMaterialFile(file);
+      target.value = "";
+      return;
+    }
     if (target.matches("[data-config-key]")) {
       const key = target.dataset.configKey;
       state.basic_config[key] = target.type === "number" ? Number(target.value) : target.value;
@@ -7151,6 +7202,28 @@ async function saveFrameworkAsset(options) {
       saveStorylineModal(actionElement.dataset.storylineId);
       return;
     }
+  });
+
+  app.addEventListener("dragover", (event) => {
+    const zone = event.target.closest("[data-source-drop-zone]");
+    if (!zone || zone.classList.contains("disabled")) return;
+    event.preventDefault();
+    zone.classList.add("dragging");
+  });
+
+  app.addEventListener("dragleave", (event) => {
+    const zone = event.target.closest("[data-source-drop-zone]");
+    if (!zone) return;
+    zone.classList.remove("dragging");
+  });
+
+  app.addEventListener("drop", (event) => {
+    const zone = event.target.closest("[data-source-drop-zone]");
+    if (!zone || zone.classList.contains("disabled")) return;
+    event.preventDefault();
+    zone.classList.remove("dragging");
+    const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+    uploadSourceMaterialFile(file);
   });
 
   document.addEventListener("click", (event) => {
