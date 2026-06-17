@@ -880,6 +880,9 @@ def _compact_default() -> dict:
             "payoff_chain": "",
             "global_retention_problem": "",
             "global_revision_priority": "",
+            "global_score_explanation": "",
+            "global_strength_summary": "",
+            "global_weakness_summary": "",
             "global_ecg_points": [],
             "global_satisfying_points": [],
             "global_key_issues": [],
@@ -894,6 +897,13 @@ def _compact_default() -> dict:
             "hook_continuity_problem": "",
             "character_arc_problem": "",
             "fix_suggestion": "",
+            "episode_score_trend": "",
+            "best_episode_no": 0,
+            "best_episode_reason": "",
+            "weakest_episode_no": 0,
+            "weakest_episode_reason": "",
+            "score_gap_analysis": "",
+            "global_dropoff_pattern": "",
         },
     }
 
@@ -1068,6 +1078,153 @@ def _extract_compact_episode_points(episode: dict) -> list:
     return _list(_dict(_dict(episode.get("ecg")).get("main_series")).get("points"))
 
 
+def _compact_id_list(value: Any) -> list[str]:
+    return [
+        _str(item)
+        for item in _compact_sequence(value, ("segment_ids", "affected_segment_ids", "evidence_segment_ids", "items"))
+        if _str(item)
+    ] if isinstance(value, dict) else [_str(item) for item in _list(value) if _str(item)]
+
+
+def _compact_number_list(value: Any) -> list[int]:
+    return [
+        _int(item, 0)
+        for item in _list(value)
+        if _int(item, 0)
+    ]
+
+
+def _normalize_compact_satisfying_points(items: Any, *, scope: str) -> list[dict]:
+    normalized = []
+    for index, item in enumerate(_compact_sequence(items, ("global_satisfying_points", "satisfying_points", "items")), start=1):
+        if not isinstance(item, dict):
+            continue
+        normalized.append({
+            "point_id": _str(item.get("point_id"), f"{scope}_satisfying_{index:03d}"),
+            "episode_no": _int(item.get("episode_no"), 0),
+            "segment_ids": _compact_id_list(item.get("segment_ids")),
+            "content": _str(item.get("content")),
+            "pressure_exists": _compact_bool(item.get("pressure_exists"), False),
+            "counterattack_exists": _compact_bool(item.get("counterattack_exists"), False),
+            "payoff_exists": _compact_bool(item.get("payoff_exists"), False),
+            "consequence_exists": _compact_bool(item.get("consequence_exists"), False),
+            "closed_loop": _compact_bool(item.get("closed_loop"), False),
+            "strength": _str(item.get("strength")),
+            "global_value": _str(item.get("global_value")),
+            "problem": _str(item.get("problem")),
+            "enhancement_suggestion": _str(item.get("enhancement_suggestion")),
+        })
+    return normalized
+
+
+def _normalize_compact_key_issues(items: Any, *, scope: str, default_episode_no: int = 0) -> list[dict]:
+    normalized = []
+    for index, item in enumerate(_compact_sequence(items, ("global_key_issues", "key_issues", "issues", "items")), start=1):
+        if not isinstance(item, dict):
+            continue
+        affected_episodes = _compact_number_list(item.get("affected_episode_numbers"))
+        if default_episode_no and not affected_episodes:
+            affected_episodes = [default_episode_no]
+        normalized.append({
+            "issue_id": _str(item.get("issue_id"), f"{scope}_issue_{index:03d}"),
+            "priority": _int(item.get("priority"), index),
+            "issue_type": _str(item.get("issue_type")),
+            "risk_level": _str(item.get("risk_level")),
+            "title": _str(item.get("title") or item.get("issue_title"), f"问题 {index}"),
+            "description": _str(item.get("description")),
+            "evidence": _str(item.get("evidence")),
+            "affected_episode_numbers": affected_episodes,
+            "affected_segment_ids": _compact_id_list(item.get("affected_segment_ids") or item.get("affected_segments")),
+            "commercial_impact": _str(item.get("commercial_impact")),
+            "fix_strategy": _str(item.get("fix_strategy") or item.get("fix_suggestion")),
+            "expected_improvement": _str(item.get("expected_improvement")),
+        })
+    return normalized
+
+
+def _normalize_compact_risk_scan(items: Any, *, scope: str, default_episode_no: int = 0) -> list[dict]:
+    normalized = []
+    for index, item in enumerate(_compact_sequence(items, ("global_risk_scan", "risk_scan", "risks", "items")), start=1):
+        if not isinstance(item, dict):
+            continue
+        affected_episodes = _compact_number_list(item.get("affected_episode_numbers"))
+        if default_episode_no and not affected_episodes:
+            affected_episodes = [default_episode_no]
+        normalized.append({
+            "risk_id": _str(item.get("risk_id"), f"{scope}_risk_{index:03d}"),
+            "risk_type": _str(item.get("risk_type")),
+            "risk_level": _str(item.get("risk_level")),
+            "evidence": _str(item.get("evidence")),
+            "affected_episode_numbers": affected_episodes,
+            "affected_segment_ids": _compact_id_list(item.get("affected_segment_ids") or item.get("affected_segments")),
+            "impact": _str(item.get("impact")),
+            "avoidance_suggestion": _str(item.get("avoidance_suggestion") or item.get("fix_suggestion")),
+        })
+    return normalized
+
+
+def _normalize_compact_rewrite_plan(items: Any, *, scope: str, default_episode_no: int = 0) -> list[dict]:
+    normalized = []
+    for index, item in enumerate(_compact_sequence(items, ("global_rewrite_plan", "rewrite_plan", "rewrite_tasks", "items")), start=1):
+        if not isinstance(item, dict):
+            continue
+        affected_episodes = _compact_number_list(item.get("affected_episode_numbers"))
+        if default_episode_no and not affected_episodes:
+            affected_episodes = [default_episode_no]
+        normalized.append({
+            "task_id": _str(item.get("task_id"), f"{scope}_rewrite_{index:03d}"),
+            "priority": _int(item.get("priority"), index),
+            "target": _str(item.get("target")),
+            "problem": _str(item.get("problem")),
+            "specific_action": _str(item.get("specific_action") or item.get("rewrite_action")),
+            "affected_episode_numbers": affected_episodes,
+            "affected_segment_ids": _compact_id_list(item.get("affected_segment_ids") or item.get("affected_segments")),
+            "expected_result": _str(item.get("expected_result")),
+        })
+    return normalized
+
+
+def _normalize_episode_scope(value: Any) -> dict:
+    scope = _dict(value)
+    return {
+        "segment_ids": _compact_id_list(scope.get("segment_ids")),
+        "scene_count": _int(scope.get("scene_count"), 0),
+        "segment_count": _int(scope.get("segment_count"), 0),
+        "is_complete_episode": _compact_bool(scope.get("is_complete_episode"), False),
+        "is_partial_episode": _compact_bool(scope.get("is_partial_episode"), False),
+        "integrity_evidence": _str(scope.get("integrity_evidence")),
+    }
+
+
+def _normalize_episode_structure(value: Any) -> dict:
+    structure = _dict(value)
+    return {
+        "episode_goal": _str(structure.get("episode_goal")),
+        "main_obstacle": _str(structure.get("main_obstacle")),
+        "forced_choice": _str(structure.get("forced_choice")),
+        "conflict_result": _str(structure.get("conflict_result")),
+        "situation_change": _str(structure.get("situation_change")),
+        "protagonist_agency": _str(structure.get("protagonist_agency")),
+        "retention_engine": _str(structure.get("retention_engine")),
+        "structure_problem": _str(structure.get("structure_problem")),
+        "evidence_segment_ids": _compact_id_list(structure.get("evidence_segment_ids")),
+    }
+
+
+def _normalize_ending_hook(value: Any) -> dict:
+    hook = _dict(value)
+    return {
+        **hook,
+        "exists": _compact_bool(hook.get("exists"), False),
+        "strength": _str(hook.get("strength")),
+        "content": _str(hook.get("content")),
+        "hook_type": _str(hook.get("hook_type")),
+        "problem": _str(hook.get("problem")),
+        "fix_suggestion": _str(hook.get("fix_suggestion")),
+        "evidence_segment_ids": _compact_id_list(hook.get("evidence_segment_ids")),
+    }
+
+
 def normalize_compact_audit_payload(data: dict) -> tuple[dict, list[str]]:
     """
     将模型输出标准化为 canonical script_audit_compact_v1。
@@ -1088,7 +1245,7 @@ def normalize_compact_audit_payload(data: dict) -> tuple[dict, list[str]]:
         "script_title": _str(meta.get("script_title") or data.get("script_title")),
         "text_type": _str(meta.get("text_type")),
         "total_episode_count": 0,
-        "total_segment_count": _int(meta.get("total_segment_count"), 0),
+        "total_segment_count": 0,
         "is_partial_review": _compact_bool(meta.get("is_partial_review"), False),
         "episode_detection": {
             "has_explicit_episode_titles": _compact_bool(detection.get("has_explicit_episode_titles"), False),
@@ -1138,11 +1295,14 @@ def normalize_compact_audit_payload(data: dict) -> tuple[dict, list[str]]:
         "payoff_chain": _str(global_source.get("payoff_chain") or structure.get("payoff_chain")),
         "global_retention_problem": _str(global_source.get("global_retention_problem") or structure.get("global_retention_problem")),
         "global_revision_priority": _str(global_source.get("global_revision_priority") or structure.get("global_revision_priority")),
+        "global_score_explanation": _str(global_source.get("global_score_explanation")),
+        "global_strength_summary": _str(global_source.get("global_strength_summary")),
+        "global_weakness_summary": _str(global_source.get("global_weakness_summary")),
         "global_ecg_points": global_points,
-        "global_satisfying_points": _list(global_source.get("global_satisfying_points")),
-        "global_key_issues": _list(global_source.get("global_key_issues")),
-        "global_risk_scan": _list(global_source.get("global_risk_scan")),
-        "global_rewrite_plan": _list(global_source.get("global_rewrite_plan")),
+        "global_satisfying_points": _normalize_compact_satisfying_points(global_source.get("global_satisfying_points"), scope="global"),
+        "global_key_issues": _normalize_compact_key_issues(global_source.get("global_key_issues"), scope="global"),
+        "global_risk_scan": _normalize_compact_risk_scan(global_source.get("global_risk_scan"), scope="global"),
+        "global_rewrite_plan": _normalize_compact_rewrite_plan(global_source.get("global_rewrite_plan"), scope="global"),
     }
 
     episode_source = data.get("episode_reviews")
@@ -1173,7 +1333,9 @@ def normalize_compact_audit_payload(data: dict) -> tuple[dict, list[str]]:
         episodes.append({
             "episode_no": episode_no,
             "episode_title": _str(episode.get("episode_title"), f"第{episode_no}集"),
+            "episode_scope": _normalize_episode_scope(episode.get("episode_scope")),
             "episode_score": episode_score,
+            "episode_score_explanation": _str(episode.get("episode_score_explanation")),
             "level": _str(episode.get("level") or episode_overall.get("level")),
             "core_judgement": _str(episode.get("core_judgement") or episode_overall.get("core_judgement")),
             "main_hook": _str(episode.get("main_hook") or episode_overall.get("main_hook")),
@@ -1183,6 +1345,7 @@ def normalize_compact_audit_payload(data: dict) -> tuple[dict, list[str]]:
             "best_retained_part": _str(episode.get("best_retained_part") or episode_overall.get("best_retained_part")),
             "next_episode_pull": _str(episode.get("next_episode_pull") or episode_overall.get("next_episode_pull")),
             "priority_fix": _str(episode.get("priority_fix") or episode_overall.get("priority_fix")),
+            "episode_structure": _normalize_episode_structure(episode.get("episode_structure")),
             "dimension_scores": episode_dimensions,
             "ecg_points": _normalize_compact_ecg_points(
                 _extract_compact_episode_points(episode),
@@ -1190,16 +1353,15 @@ def normalize_compact_audit_payload(data: dict) -> tuple[dict, list[str]]:
                 scope=f"episode_{episode_no}",
                 default_episode_no=episode_no,
             ),
-            "ending_hook": _dict(episode.get("ending_hook")),
-            "satisfying_points": _list(episode.get("satisfying_points")),
-            "key_issues": _list(episode.get("key_issues")),
-            "risk_scan": _list(episode.get("risk_scan")),
-            "rewrite_plan": _list(rewrite_plan),
+            "ending_hook": _normalize_ending_hook(episode.get("ending_hook")),
+            "satisfying_points": _normalize_compact_satisfying_points(episode.get("satisfying_points"), scope=f"episode_{episode_no}"),
+            "key_issues": _normalize_compact_key_issues(episode.get("key_issues"), scope=f"episode_{episode_no}", default_episode_no=episode_no),
+            "risk_scan": _normalize_compact_risk_scan(episode.get("risk_scan"), scope=f"episode_{episode_no}", default_episode_no=episode_no),
+            "rewrite_plan": _normalize_compact_rewrite_plan(rewrite_plan, scope=f"episode_{episode_no}", default_episode_no=episode_no),
         })
     audit["episode_reviews"] = sorted(episodes, key=lambda item: _int(item.get("episode_no"), 0))
     audit["meta"]["total_episode_count"] = len(audit["episode_reviews"])
-    if not audit["meta"]["total_segment_count"]:
-        audit["meta"]["total_segment_count"] = len(segments)
+    audit["meta"]["total_segment_count"] = len(segments)
 
     cross = _dict(data.get("cross_episode_analysis"))
     payoff = _dict(cross.get("payoff_distribution"))
@@ -1212,6 +1374,13 @@ def normalize_compact_audit_payload(data: dict) -> tuple[dict, list[str]]:
         "hook_continuity_problem": _str(cross.get("hook_continuity_problem") or hook.get("evidence") or hook.get("fix_suggestion")),
         "character_arc_problem": _str(cross.get("character_arc_problem") or character.get("problem") or character.get("fix_suggestion")),
         "fix_suggestion": _str(cross.get("fix_suggestion") or payoff.get("fix_suggestion") or hook.get("fix_suggestion") or character.get("fix_suggestion")),
+        "episode_score_trend": _str(cross.get("episode_score_trend")),
+        "best_episode_no": _int(cross.get("best_episode_no"), 0),
+        "best_episode_reason": _str(cross.get("best_episode_reason")),
+        "weakest_episode_no": _int(cross.get("weakest_episode_no"), 0),
+        "weakest_episode_reason": _str(cross.get("weakest_episode_reason")),
+        "score_gap_analysis": _str(cross.get("score_gap_analysis")),
+        "global_dropoff_pattern": _str(cross.get("global_dropoff_pattern")),
     }
 
     warnings.extend(validate_compact_audit_schema(audit))
@@ -1265,9 +1434,53 @@ def validate_compact_audit_schema(audit: dict) -> list[str]:
     if duplicate_segments:
         warnings.append(f"segments.segment_id 存在重复：{', '.join(sorted(duplicate_segments))}")
 
-    all_points = list(_list(_dict(audit.get("global_review")).get("global_ecg_points")))
+    def warn_missing_refs(label: str, ids: Any) -> None:
+        if not seen_segments:
+            return
+        for segment_id in _compact_id_list(ids):
+            if segment_id not in seen_segments:
+                warnings.append(f"{label} 引用了不存在的 segment_id：{segment_id}，已保留内容供前端展示。")
+
+    for index, dim in enumerate(_list(audit.get("dimension_scores")), start=1):
+        if isinstance(dim, dict):
+            warn_missing_refs(f"全局评分维度 {dim.get('dimension_key') or index}", dim.get("evidence_segment_ids"))
+
+    global_review = _dict(audit.get("global_review"))
+    for item in _list(global_review.get("global_satisfying_points")):
+        if isinstance(item, dict):
+            warn_missing_refs(f"全局爽点 {item.get('point_id') or item.get('content') or ''}", item.get("segment_ids"))
+    for item in _list(global_review.get("global_key_issues")):
+        if isinstance(item, dict):
+            warn_missing_refs(f"全局关键问题 {item.get('issue_id') or item.get('title') or ''}", item.get("affected_segment_ids"))
+    for item in _list(global_review.get("global_risk_scan")):
+        if isinstance(item, dict):
+            warn_missing_refs(f"全局风险 {item.get('risk_id') or item.get('risk_type') or ''}", item.get("affected_segment_ids"))
+    for item in _list(global_review.get("global_rewrite_plan")):
+        if isinstance(item, dict):
+            warn_missing_refs(f"全局修改计划 {item.get('task_id') or item.get('target') or ''}", item.get("affected_segment_ids"))
+
+    all_points = list(_list(global_review.get("global_ecg_points")))
     for episode in _list(audit.get("episode_reviews")):
         if isinstance(episode, dict):
+            episode_no = episode.get("episode_no") or "?"
+            warn_missing_refs(f"第{episode_no}集 episode_scope.segment_ids", _dict(episode.get("episode_scope")).get("segment_ids"))
+            warn_missing_refs(f"第{episode_no}集 episode_structure.evidence_segment_ids", _dict(episode.get("episode_structure")).get("evidence_segment_ids"))
+            warn_missing_refs(f"第{episode_no}集 ending_hook.evidence_segment_ids", _dict(episode.get("ending_hook")).get("evidence_segment_ids"))
+            for dim in _list(episode.get("dimension_scores")):
+                if isinstance(dim, dict):
+                    warn_missing_refs(f"第{episode_no}集评分维度 {dim.get('dimension_key') or ''}", dim.get("evidence_segment_ids"))
+            for item in _list(episode.get("satisfying_points")):
+                if isinstance(item, dict):
+                    warn_missing_refs(f"第{episode_no}集爽点 {item.get('point_id') or item.get('content') or ''}", item.get("segment_ids"))
+            for item in _list(episode.get("key_issues")):
+                if isinstance(item, dict):
+                    warn_missing_refs(f"第{episode_no}集关键问题 {item.get('issue_id') or item.get('title') or ''}", item.get("affected_segment_ids"))
+            for item in _list(episode.get("risk_scan")):
+                if isinstance(item, dict):
+                    warn_missing_refs(f"第{episode_no}集风险 {item.get('risk_id') or item.get('risk_type') or ''}", item.get("affected_segment_ids"))
+            for item in _list(episode.get("rewrite_plan")):
+                if isinstance(item, dict):
+                    warn_missing_refs(f"第{episode_no}集修改计划 {item.get('task_id') or item.get('target') or ''}", item.get("affected_segment_ids"))
             all_points.extend(_list(episode.get("ecg_points")))
     if seen_segments:
         for point in all_points:
@@ -1425,28 +1638,92 @@ def build_audit_visualization_payload(audit: dict) -> dict:
 
     episode_charts = []
     episode_score_map = []
+    dimension_cards = [
+        {
+            **item,
+            "scope": "global",
+            "scope_label": "全剧",
+            "level_color": LEVEL_COLOR_MAP.get(_str(item.get("level")), ""),
+        }
+        for item in _list(audit.get("dimension_scores"))
+        if isinstance(item, dict)
+    ]
+    issue_cards = [
+        {**item, "scope": "global", "scope_label": "全剧"}
+        for item in _list(global_review.get("global_key_issues"))
+        if isinstance(item, dict)
+    ]
+    rewrite_cards = [
+        {**item, "scope": "global", "scope_label": "全剧"}
+        for item in _list(global_review.get("global_rewrite_plan"))
+        if isinstance(item, dict)
+    ]
+    risk_cards = [
+        {
+            **item,
+            "scope": "global",
+            "scope_label": "全剧",
+            "risk_color": RISK_COLOR_MAP.get(_str(item.get("risk_level")), ""),
+        }
+        for item in _list(global_review.get("global_risk_scan"))
+        if isinstance(item, dict)
+    ]
     for episode in _list(audit.get("episode_reviews")):
         if not isinstance(episode, dict):
             continue
+        episode_no = _int(episode.get("episode_no"), 0)
+        episode_title = _str(episode.get("episode_title"))
         raw_episode_points = _list(episode.get("ecg_points"))
         if not raw_episode_points:
             raw_episode_points = [_fallback_episode_ecg_point(episode)]
         episode_points = _derived_ecg_points(raw_episode_points, segment_by_id)
         episode_charts.append({
-            "episode_no": _int(episode.get("episode_no"), 0),
-            "episode_title": _str(episode.get("episode_title")),
+            "episode_no": episode_no,
+            "episode_title": episode_title,
             "points": episode_points,
             "peak_points": _point_extremes(episode_points, reverse=True),
             "valley_points": _point_extremes(episode_points, reverse=False),
         })
         episode_score_map.append({
-            "episode_no": _int(episode.get("episode_no"), 0),
-            "episode_title": _str(episode.get("episode_title")),
+            "episode_no": episode_no,
+            "episode_title": episode_title,
             "episode_score": _num(episode.get("episode_score"), 0),
             "level": _str(episode.get("level")),
             "main_problem": _str(episode.get("largest_retention_loss")),
             "next_priority_fix": _str(episode.get("priority_fix")),
+            "best_retained_part": _str(episode.get("best_retained_part")),
         })
+        scope_label = f"第{episode_no}集"
+        dimension_cards.extend({
+            **item,
+            "scope": "episode",
+            "scope_label": scope_label,
+            "episode_no": episode_no,
+            "episode_title": episode_title,
+            "level_color": LEVEL_COLOR_MAP.get(_str(item.get("level")), ""),
+        } for item in _list(episode.get("dimension_scores")) if isinstance(item, dict))
+        issue_cards.extend({
+            **item,
+            "scope": "episode",
+            "scope_label": scope_label,
+            "episode_no": episode_no,
+            "episode_title": episode_title,
+        } for item in _list(episode.get("key_issues")) if isinstance(item, dict))
+        rewrite_cards.extend({
+            **item,
+            "scope": "episode",
+            "scope_label": scope_label,
+            "episode_no": episode_no,
+            "episode_title": episode_title,
+        } for item in _list(episode.get("rewrite_plan")) if isinstance(item, dict))
+        risk_cards.extend({
+            **item,
+            "scope": "episode",
+            "scope_label": scope_label,
+            "episode_no": episode_no,
+            "episode_title": episode_title,
+            "risk_color": RISK_COLOR_MAP.get(_str(item.get("risk_level")), ""),
+        } for item in _list(episode.get("risk_scan")) if isinstance(item, dict))
     global_points = _merge_global_episode_points(global_points, episode_charts)
 
     return {
@@ -1459,24 +1736,10 @@ def build_audit_visualization_payload(audit: dict) -> dict:
             "episodes": episode_charts,
         },
         "episode_score_map": episode_score_map,
-        "dimension_cards": [
-            {
-                **item,
-                "level_color": LEVEL_COLOR_MAP.get(_str(item.get("level")), ""),
-            }
-            for item in _list(audit.get("dimension_scores"))
-            if isinstance(item, dict)
-        ],
-        "issue_cards": _list(global_review.get("global_key_issues")),
-        "rewrite_cards": _list(global_review.get("global_rewrite_plan")),
-        "risk_cards": [
-            {
-                **item,
-                "risk_color": RISK_COLOR_MAP.get(_str(item.get("risk_level")), ""),
-            }
-            for item in _list(global_review.get("global_risk_scan"))
-            if isinstance(item, dict)
-        ],
+        "dimension_cards": dimension_cards,
+        "issue_cards": issue_cards,
+        "rewrite_cards": rewrite_cards,
+        "risk_cards": risk_cards,
     }
 
 

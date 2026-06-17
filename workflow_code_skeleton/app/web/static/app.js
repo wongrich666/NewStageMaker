@@ -3126,7 +3126,10 @@ startRuntimeDebugPolling();
       protagonist_arc: globalReview.protagonist_arc,
       payoff_chain: globalReview.payoff_chain,
       global_retention_problem: globalReview.global_retention_problem,
-      global_revision_priority: globalReview.global_revision_priority
+      global_revision_priority: globalReview.global_revision_priority,
+      global_score_explanation: globalReview.global_score_explanation,
+      global_strength_summary: globalReview.global_strength_summary,
+      global_weakness_summary: globalReview.global_weakness_summary
     };
     const globalEcg = globalReview?.ecg || audit?.ecg || audit?.ecg_chart || {};
     const points = auditArray(
@@ -3242,7 +3245,10 @@ startRuntimeDebugPolling();
       protagonist_arc: globalReview.protagonist_arc,
       payoff_chain: globalReview.payoff_chain,
       global_retention_problem: globalReview.global_retention_problem,
-      global_revision_priority: globalReview.global_revision_priority
+      global_revision_priority: globalReview.global_revision_priority,
+      global_score_explanation: globalReview.global_score_explanation,
+      global_strength_summary: globalReview.global_strength_summary,
+      global_weakness_summary: globalReview.global_weakness_summary
     };
     const lines = [
       `《${meta.script_title || "未命名剧本"}》爆款文审核报告`,
@@ -3263,6 +3269,9 @@ startRuntimeDebugPolling();
       `主角弧线：${structure.protagonist_arc || "-"}`,
       `留存问题：${structure.global_retention_problem || "-"}`,
       `修改优先级：${structure.global_revision_priority || "-"}`,
+      `全剧得分解释：${structure.global_score_explanation || "-"}`,
+      `全剧优势：${structure.global_strength_summary || "-"}`,
+      `全剧短板：${structure.global_weakness_summary || "-"}`,
       "",
       "三、评分维度",
       ...dimensions.map((item) => `- ${item.dimension_name || item.dimension_key || "评分维度"}：${item.score ?? "-"} / ${item.max_score ?? "-"}。${item.summary || item.priority_fix || ""}`),
@@ -3639,6 +3648,9 @@ startRuntimeDebugPolling();
         { label: "爽点兑现链", value: structure.payoff_chain },
         { label: "留存问题", value: structure.global_retention_problem },
         { label: "修改优先级", value: structure.global_revision_priority },
+        { label: "得分解释", value: structure.global_score_explanation },
+        { label: "全剧优势", value: structure.global_strength_summary },
+        { label: "全剧短板", value: structure.global_weakness_summary },
       ])}
       ${renderAuditList("评分维度", view.dimension_cards || [], { limit: 12 })}
       ${renderAuditList("爽点与保留项", globalReview.satisfying_points || [], { limit: 8 })}
@@ -3652,6 +3664,8 @@ startRuntimeDebugPolling();
       <div class="audit-episode-list">
         ${episodes.length ? episodes.map((episode) => {
           const overall = episode.episode_overall || episode;
+          const scope = episode.episode_scope || {};
+          const structure = episode.episode_structure || {};
           return `
             <article class="audit-list-card">
               <div>
@@ -3664,9 +3678,20 @@ startRuntimeDebugPolling();
                 { label: "主冲突", value: overall.main_conflict },
                 { label: "主爽点", value: overall.main_payoff },
                 { label: "最大流失点", value: overall.largest_retention_loss },
+                { label: "最佳保留", value: overall.best_retained_part },
+                { label: "得分解释", value: overall.episode_score_explanation },
                 { label: "集尾拉力", value: overall.next_episode_pull },
                 { label: "优先修改", value: overall.priority_fix },
                 { label: "集尾钩子", value: episode.ending_hook?.content || episode.ending_hook?.strength },
+                { label: "集目标", value: structure.episode_goal },
+                { label: "主要阻力", value: structure.main_obstacle },
+                { label: "被迫选择", value: structure.forced_choice },
+                { label: "冲突结果", value: structure.conflict_result },
+                { label: "局势变化", value: structure.situation_change },
+                { label: "主角能动性", value: structure.protagonist_agency },
+                { label: "留存引擎", value: structure.retention_engine },
+                { label: "结构问题", value: structure.structure_problem },
+                { label: "完整性证据", value: scope.integrity_evidence },
               ])}
               ${renderAuditList("关键问题", episode.key_issues || [], { limit: 4 })}
               ${renderAuditList("修改计划", episode.rewrite_plan || [], { limit: 4 })}
@@ -3687,6 +3712,11 @@ startRuntimeDebugPolling();
         { label: "钩子连续性", value: cross.hook_continuity_problem || cross.hook_continuity?.evidence || cross.hook_continuity?.fix_suggestion },
         { label: "人物弧光连续性", value: cross.character_arc_problem || cross.character_arc_continuity?.problem || cross.character_arc_continuity?.fix_suggestion },
         { label: "修改建议", value: cross.fix_suggestion },
+        { label: "单集分数趋势", value: cross.episode_score_trend },
+        { label: "最佳集", value: cross.best_episode_no ? `第${cross.best_episode_no}集：${cross.best_episode_reason || ""}` : "" },
+        { label: "最弱集", value: cross.weakest_episode_no ? `第${cross.weakest_episode_no}集：${cross.weakest_episode_reason || ""}` : "" },
+        { label: "分差分析", value: cross.score_gap_analysis },
+        { label: "全剧掉点模式", value: cross.global_dropoff_pattern },
       ])}
       ${renderAuditList("掉点风险", cross.episode_dropoff_risks || [], { limit: 10 })}
     `, "展开");

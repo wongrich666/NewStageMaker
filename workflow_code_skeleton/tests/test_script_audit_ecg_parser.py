@@ -349,3 +349,167 @@ def test_compact_episode_mapping_and_fallback_point_for_missing_ecg():
     global_points = result["visualization"]["ecg_chart"]["global"]["points"]
     assert {point["episode_no"] for point in global_points} == {1, 2}
     assert any(point.get("derived_from_episode_score") for point in global_points)
+
+
+def enhanced_compact_payload():
+    payload = compact_payload()
+    payload["segments"].append({
+        "segment_id": "s3",
+        "episode_no": 2,
+        "scene_no": 1,
+        "segment_index_global": 3,
+        "original_text_excerpt": "第二集出现新证据。",
+    })
+    payload["global_review"].update({
+        "global_score_explanation": "五大维度合计后，全剧商业可看性中上。",
+        "global_strength_summary": "开场和主线目标明确。",
+        "global_weakness_summary": "第二集钩子连续性偏弱。",
+        "global_satisfying_points": [{
+            "point_id": "sp1",
+            "episode_no": 1,
+            "segment_ids": ["s1"],
+            "content": "主角强反击",
+            "pressure_exists": True,
+            "counterattack_exists": True,
+            "payoff_exists": True,
+            "consequence_exists": True,
+            "closed_loop": True,
+            "strength": "强",
+            "global_value": "建立爽感承诺",
+            "problem": "",
+            "enhancement_suggestion": "保留",
+        }],
+        "global_key_issues": [{
+            "issue_id": "gi1",
+            "priority": 1,
+            "issue_type": "钩子",
+            "risk_level": "建议修改",
+            "title": "第二集拉力弱",
+            "description": "新危险不够具体",
+            "evidence": "第二集结尾信息不足",
+            "affected_episode_numbers": [2],
+            "affected_segment_ids": ["s3"],
+            "commercial_impact": "降低追更",
+            "fix_strategy": "加新证据",
+            "expected_improvement": "提升集尾拉力",
+        }],
+        "global_risk_scan": [{
+            "risk_id": "gr1",
+            "risk_type": "节奏",
+            "risk_level": "建议修改",
+            "evidence": "解释段偏多",
+            "affected_episode_numbers": [2],
+            "affected_segment_ids": ["s3"],
+            "impact": "掉点",
+            "avoidance_suggestion": "压缩解释",
+        }],
+        "global_rewrite_plan": [{
+            "task_id": "gt1",
+            "priority": 1,
+            "target": "集尾钩子",
+            "problem": "第二集缺拉力",
+            "specific_action": "补一个强选择",
+            "affected_episode_numbers": [2],
+            "affected_segment_ids": ["s3"],
+            "expected_result": "提高追更",
+        }],
+    })
+    payload["episode_reviews"] = [
+        {
+            "episode_no": 1,
+            "episode_title": "第一集",
+            "episode_scope": {
+                "segment_ids": ["s1", "s2"],
+                "scene_count": 2,
+                "segment_count": 2,
+                "is_complete_episode": True,
+                "is_partial_episode": False,
+                "integrity_evidence": "第一集完整",
+            },
+            "episode_score_explanation": "开场强但解释略多。",
+            "best_retained_part": "主角反击",
+            "episode_structure": {
+                "episode_goal": "证明自己",
+                "main_obstacle": "医生阻拦",
+                "forced_choice": "公开证据",
+                "conflict_result": "暂时获胜",
+                "situation_change": "关系反转",
+                "protagonist_agency": "强",
+                "retention_engine": "新证据",
+                "structure_problem": "解释偏多",
+                "evidence_segment_ids": ["s1"],
+            },
+            "dimension_scores": [
+                {"dimension_key": "opening_hook", "score": 12, "evidence_segment_ids": ["s1"]},
+            ],
+            "ending_hook": {"exists": True, "content": "新证据出现", "evidence_segment_ids": ["s2"]},
+            "key_issues": [{
+                "title": "解释偏多",
+                "affected_segment_ids": ["s2"],
+                "commercial_impact": "拖慢节奏",
+                "expected_improvement": "更快进入冲突",
+            }],
+            "rewrite_plan": [{"specific_action": "删减对白", "affected_segment_ids": ["s2"]}],
+            "ecg_points": [{"segment_id": "s1", "episode_no": 1, "ecg_value": 4, "label": "反击"}],
+        },
+        {
+            "episode_no": 2,
+            "episode_title": "第二集",
+            "episode_scope": {"segment_ids": ["s3"], "scene_count": 1, "segment_count": 1},
+            "episode_structure": {"episode_goal": "找出幕后人", "evidence_segment_ids": ["s3"]},
+            "dimension_scores": [
+                {"dimension_key": "opening_hook", "score": 8},
+                {"dimension_key": "conflict_pacing", "score": 12},
+                {"dimension_key": "satisfying_payoff", "score": 13},
+                {"dimension_key": "character_dialogue_filming", "score": 12},
+                {"dimension_key": "market_compliance", "score": 12},
+            ],
+            "ecg_points": [{"segment_id": "s3", "episode_no": 2, "ecg_value": -1, "label": "解释"}],
+        },
+    ]
+    payload["cross_episode_analysis"].update({
+        "episode_score_trend": "第一集高，第二集回落",
+        "best_episode_no": 1,
+        "best_episode_reason": "开场强",
+        "weakest_episode_no": 2,
+        "weakest_episode_reason": "集尾弱",
+        "score_gap_analysis": "两集差距来自钩子强度",
+        "global_dropoff_pattern": "第二集解释造成掉点",
+    })
+    return payload
+
+
+def test_compact_enhanced_payload_normalizes_deep_fields_and_visual_cards():
+    result = compact_result_from(json.dumps(enhanced_compact_payload(), ensure_ascii=False))
+    audit = result["audit"]
+    visualization = result["visualization"]
+    assert audit["meta"]["total_episode_count"] == 2
+    assert audit["meta"]["total_segment_count"] == 3
+    assert audit["global_review"]["global_score_explanation"].startswith("五大维度")
+    assert audit["global_review"]["global_satisfying_points"][0]["closed_loop"] is True
+    assert audit["episode_reviews"][0]["episode_scope"]["scene_count"] == 2
+    assert audit["episode_reviews"][0]["episode_structure"]["episode_goal"] == "证明自己"
+    assert audit["episode_reviews"][0]["ending_hook"]["evidence_segment_ids"] == ["s2"]
+    assert len(audit["episode_reviews"][0]["dimension_scores"]) == 5
+    assert audit["episode_reviews"][0]["episode_score"] == 12
+    assert audit["cross_episode_analysis"]["best_episode_no"] == 1
+    assert visualization["episode_score_map"][0]["best_retained_part"] == "主角反击"
+    assert any(card.get("scope") == "episode" for card in visualization["dimension_cards"])
+    assert any(card.get("scope") == "episode" for card in visualization["issue_cards"])
+    assert any(card.get("scope") == "episode" for card in visualization["rewrite_cards"])
+
+
+def test_compact_enhanced_wrapped_json_and_missing_segment_refs_warn():
+    payload = enhanced_compact_payload()
+    payload["global_review"]["global_ecg_points"].append({
+        "segment_id": "missing_seg",
+        "episode_no": 2,
+        "ecg_value": -4,
+        "label": "坏引用",
+    })
+    payload["episode_reviews"][0]["episode_scope"]["segment_ids"].append("missing_scope")
+    raw = {"data": "```json\n" + json.dumps(payload, ensure_ascii=False) + "\n```"}
+    result = compact_result_from(json.dumps(raw, ensure_ascii=False))
+    assert result["audit"]["schema_version"] == COMPACT_SCHEMA_VERSION
+    assert any("missing_seg" in warning for warning in result["warnings"])
+    assert any("missing_scope" in warning for warning in result["warnings"])
