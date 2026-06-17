@@ -3727,7 +3727,7 @@ startRuntimeDebugPolling();
       return;
     }
     const authToken = currentAuthToken();
-    const response = await fetch(apiUrl("/api/tools/hot_review/export/docx"), {
+    const response = await fetch("/api/tools/hot_review/export/docx", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
