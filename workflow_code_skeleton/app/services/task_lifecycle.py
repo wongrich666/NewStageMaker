@@ -392,9 +392,27 @@ class TaskLifecycleMixin:
         stage_state = payload.get("stage_state") if isinstance(payload.get("stage_state"), dict) else {}
         current_stage = str((asset_state or {}).get("current_stage") or "framework_planner").strip() or "framework_planner"
         confirmed_package = bool((stage_state.get("package") or {}).get("confirmed")) if isinstance(stage_state.get("package"), dict) else False
+        has_any_stage_data = any(
+            bool(payload.get(key))
+            for key in (
+                "source_brief",
+                "worldview_plan",
+                "character_plan",
+                "beat_checkpoint_timeline",
+                "character_storylines",
+                "adaptation_guide",
+                "framework_plan_package",
+            )
+        )
         status = str((asset_state or {}).get("status") or "").strip()
-        if status not in {"draft", "in_progress", "completed", "running", "failed", "terminated"}:
-            status = "completed" if framework_plan_package and confirmed_package else "in_progress"
+        if framework_plan_package and (confirmed_package or current_stage in {"package", "framework_planner_stage_07"}):
+            status = "completed"
+        elif status in {"failed", "terminated"}:
+            status = status
+        elif has_any_stage_data:
+            status = "in_progress"
+        elif status not in {"draft", "in_progress", "completed", "running", "failed", "terminated"}:
+            status = "draft"
         if status == "running":
             status = "in_progress"
 
@@ -481,7 +499,7 @@ class TaskLifecycleMixin:
             "task_id": task_id,
             "status": status,
             "title": title,
-            "message": "框架策划资产已保存。",
+            "message": "框架策划资产已完成。" if status == "completed" else "框架策划资产已保存。",
             "created_at": created_at,
             "updated_at": now,
             "finished_at": now if status == "completed" else None,
@@ -500,7 +518,7 @@ class TaskLifecycleMixin:
             "generated_episodes": 0,
             "total_episodes": total_episodes,
             "current_stage": current_stage,
-            "current_stage_label": "三幕十五节拍框架策划",
+            "current_stage_label": "已完成框架策划" if status == "completed" else "框架策划进行中",
             "current_node_id": None,
             "current_node_name": None,
             "current_batch": None,

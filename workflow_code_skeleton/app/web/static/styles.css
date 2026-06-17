@@ -5794,6 +5794,38 @@ body,
   color: var(--mono-text, #211b14);
 }
 
+.audit-parse-warning {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(196, 117, 54, 0.28);
+  border-radius: 8px;
+  color: #5b341d;
+  background: rgba(255, 241, 219, 0.92);
+}
+
+.audit-parse-warning strong {
+  font-size: 13px;
+}
+
+.audit-parse-warning span {
+  font-size: 12px;
+  color: rgba(91, 52, 29, 0.76);
+}
+
+.audit-raw-excerpt {
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #3b271a;
+  background: rgba(255, 249, 241, 0.92);
+  border: 1px solid rgba(147, 91, 48, 0.16);
+  border-radius: 8px;
+  padding: 10px;
+}
+
 .audit-hero,
 .audit-panel,
 .audit-summary-card,

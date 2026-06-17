@@ -2843,7 +2843,6 @@ startRuntimeDebugPolling();
       || els.characterReskinProjectList?.closest("details")
       || els.waibaoProjectList?.closest("details")
       || els.newScriptProjectList?.closest("details")
-      || els.activeProjectList?.closest("details")
       || null;
   }
 
@@ -2930,7 +2929,7 @@ startRuntimeDebugPolling();
   /* SCRIPT_AUDIT_ECG_UI_V1 */
 
   function isScriptAuditEcgResult(result) {
-    if (!result || result.parsed === false || !result.view) {
+    if (!result) {
       return false;
     }
 
@@ -2942,7 +2941,7 @@ startRuntimeDebugPolling();
 
     return Boolean(
       resultType === "script_audit_ecg"
-      || result.audit
+      || (result.audit && (result.view || looksLikeScriptAuditPayload(result.audit)))
     );
   }
 
@@ -3008,11 +3007,20 @@ startRuntimeDebugPolling();
     }
 
     const tryParse = (value) => {
-      try {
-        return JSON.parse(value);
-      } catch (_) {
-        return null;
+      const variants = [
+        value,
+        String(value || "").replace(/[“”]/g, '"').replace(/[‘’]/g, "'"),
+        String(value || "").replace(/,\s*([}\]])/g, "$1"),
+        String(value || "").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/,\s*([}\]])/g, "$1")
+      ];
+      for (const variant of variants) {
+        try {
+          return JSON.parse(variant);
+        } catch (_) {
+          // try the next repair variant
+        }
       }
+      return null;
     };
 
     let parsed = tryParse(text);
@@ -3203,6 +3211,7 @@ startRuntimeDebugPolling();
 
     let audit = result.audit || null;
     let view = result.view || null;
+    const resultType = String(result.result_type || result.resultType || "").trim();
 
     const candidates = [
       audit,
@@ -3233,9 +3242,6 @@ startRuntimeDebugPolling();
       }
     }
 
-    if (!audit && !view) return result;
-    if (!view && audit) view = scriptAuditViewFromAudit(audit);
-
     const rawText = result.text
       || result.answer_text
       || result.answerText
@@ -3243,16 +3249,90 @@ startRuntimeDebugPolling();
       || hotReviewFirstTextV4(result)
       || "";
 
+    if (!audit && resultType === "script_audit_ecg") {
+      audit = fallbackScriptAuditFromText(rawText, result.parse_warnings || result.parseWarnings || []);
+    }
+
+    if (!audit && !view) return result;
+    if (!view && audit) view = scriptAuditViewFromAudit(audit);
+
     return {
       ...result,
       text: String(rawText || "").trim(),
       answer_text: String(result.answer_text || result.answerText || rawText || "").trim(),
       result_type: "script_audit_ecg",
       resultType: "script_audit_ecg",
-      parsed: true,
+      parsed: result.parsed === false ? false : true,
       audit: audit || {},
       view,
       parse_warnings: result.parse_warnings || result.parseWarnings || []
+    };
+  }
+
+  function fallbackScriptAuditFromText(rawText, warnings = []) {
+    const text = String(rawText || "").trim();
+    const titleMatch = text.match(/《([^》]{1,80})》/) || text.match(/剧本(?:标题|名称)\s*[:：]\s*([^\n\r]{1,80})/);
+    const scriptTitle = titleMatch?.[1]?.trim() || "未命名剧本";
+    const excerpt = text.replace(/\s+/g, " ").slice(0, 1200);
+    return {
+      schema_version: "script_audit_ecg_v3_episode_global",
+      meta: {
+        script_title: scriptTitle,
+        text_type: "未知",
+        audit_scope: "解析容错",
+        total_episode_count: 0,
+        total_segment_count: 0
+      },
+      overall: {
+        total_score: 0,
+        level: "待重新解析",
+        modification_cost: "未知",
+        core_judgement: "模型输出暂时无法完整解析，已保留固定可视化面板。",
+        largest_hard_problem: "缺少合法结构化 JSON。",
+        final_judgement: "请重新运行审核，或检查模型是否严格返回指定 schema。"
+      },
+      dimension_scores: [],
+      global_review: {
+        global_structure_judgement: {
+          global_retention_problem: "当前缺少可解析心电节点。",
+          global_revision_priority: "优先修复模型输出格式。"
+        },
+        ecg: {
+          title: "全剧总心电图",
+          main_series: { points: [] },
+          negative_zones: [],
+          peak_points: [],
+          valley_points: []
+        },
+        episode_score_map: [],
+        global_satisfying_points: [],
+        global_key_issues: [{
+          title: "解析失败",
+          risk_level: "高",
+          description: "模型输出未能被解析为爆款文审核 v3 结构。",
+          evidence: excerpt,
+          fix_suggestion: "重新运行审核，要求模型只返回合法 JSON。"
+        }],
+        global_risk_scan: [],
+        global_rewrite_plan: [{
+          task_id: "parse_retry",
+          priority: 1,
+          target: "合规",
+          problem: "返回内容不是可解析 JSON。",
+          specific_action: "重新运行爆款文审核。",
+          expected_result: "恢复完整心电图和单集评价。"
+        }]
+      },
+      episode_reviews: [],
+      cross_episode_analysis: {
+        title: "跨集结构分析",
+        retention_curve_summary: "解析失败，暂无法生成。"
+      },
+      parse_fallback: {
+        enabled: true,
+        warnings,
+        raw_excerpt: excerpt
+      }
     };
   }
 
@@ -3532,8 +3612,15 @@ startRuntimeDebugPolling();
     const overall = audit.overall || {};
     const meta = audit.meta || view.meta || {};
     const raw = result.answer_text || result.text || "";
+    const warnings = auditArray(result.parse_warnings || result.parseWarnings);
     return `
       <div class="audit-result-shell">
+        ${result.parsed === false ? `
+          <section class="audit-parse-warning">
+            <strong>解析未完全成功，已进入容错展示模式。</strong>
+            <span>${escapeHtml(warnings[0] || "模型输出格式不稳定，当前仅展示可恢复的固定审核面板。")}</span>
+          </section>
+        ` : ""}
         <section class="audit-hero">
           <div>
             <div class="audit-kicker">爆款文审核 / ECG REPORT</div>
@@ -3555,6 +3642,10 @@ startRuntimeDebugPolling();
           ${renderAuditPopoverButton("关键问题", renderAuditList("关键问题", view.issue_cards || audit.key_issues, { limit: 20 }), auditArray(view.issue_cards || audit.key_issues).length)}
           ${renderAuditPopoverButton("风险扫描", renderAuditList("风险扫描", view.risk_cards || audit.risk_scan, { limit: 20 }), auditArray(view.risk_cards || audit.risk_scan).length)}
           ${renderAuditPopoverButton("修改计划", renderAuditList("修改计划", view.rewrite_tasks || audit.rewrite_plan, { limit: 20 }), auditArray(view.rewrite_tasks || audit.rewrite_plan).length)}
+          ${result.parsed === false ? renderAuditPopoverButton("原始输出摘要", `
+            <h4>原始输出摘要</h4>
+            <pre class="audit-raw-excerpt">${escapeHtml(raw.slice(0, 4000) || audit?.parse_fallback?.raw_excerpt || "暂无原始输出。")}</pre>
+          `, "查看") : ""}
         </section>
         <section class="audit-export-actions">
           <button class="btn btn-secondary" type="button" data-action="download-audit-txt">导出 TXT</button>
@@ -4775,10 +4866,10 @@ function renderToolForm(toolKey) {
 
   // 把后台项目压成简洁任务列表，方便在同一账号下快速切换工作台。
   function renderProjectList(projects) {
-    if (!els.activeProjectList || !els.completedProjectList) return;
+    if (!els.completedProjectList) return;
     if (!isAuthenticated()) {
       const message = emptyCard("登录后查看任务");
-      els.activeProjectList.innerHTML = message;
+      if (els.activeProjectList) els.activeProjectList.innerHTML = "";
       els.completedProjectList.innerHTML = message;
       if (els.newScriptProjectList) els.newScriptProjectList.innerHTML = message;
       if (els.waibaoProjectList) els.waibaoProjectList.innerHTML = message;
@@ -4792,7 +4883,6 @@ function renderToolForm(toolKey) {
     }
 
     const hotReviewProjects = hotReviewUniqueAssets([...(Array.isArray(projects) ? projects : []), ...(Array.isArray(state.assets) ? state.assets : [])]);
-    const oldScriptProjects = projects.filter((item) => assetCategory(item) === "old_script" && !isHotReviewAsset(item));
     const frameworkProjects = projects.filter((item) => assetCategory(item) === "framework" && !isHotReviewAsset(item));
     const newScriptProjects = projects.filter((item) => assetCategory(item) === "new_script" && !isHotReviewAsset(item));
     const waibaoProjects = projects.filter((item) => assetCategory(item) === "waibao" && !isHotReviewAsset(item));
@@ -4837,7 +4927,7 @@ function renderToolForm(toolKey) {
       }).join("");
     };
 
-    els.activeProjectList.innerHTML = renderCompactItems(oldScriptProjects, "当前没有老剧本平台资产。");
+    if (els.activeWorkspaceFolder) els.activeWorkspaceFolder.remove();
     els.completedProjectList.innerHTML = renderCompactItems(frameworkProjects, "当前还没有框架资产。");
     if (els.newScriptProjectList) {
       els.newScriptProjectList.innerHTML = renderCompactItems(newScriptProjects, "当前还没有新剧本平台资产。");
@@ -4854,7 +4944,7 @@ function renderToolForm(toolKey) {
     }
     setHotReviewProjectCount(hotReviewProjects.length);
     if (els.activeProjectCount) {
-      els.activeProjectCount.textContent = String(oldScriptProjects.length);
+      els.activeProjectCount.textContent = "0";
     }
     if (els.completedProjectCount) {
       els.completedProjectCount.textContent = String(frameworkProjects.length);
@@ -4863,7 +4953,6 @@ function renderToolForm(toolKey) {
 
   function workspaceFolders() {
     return [
-      els.activeWorkspaceFolder,
       els.completedWorkspaceFolder,
       document.getElementById("hotReviewProjectList")?.closest("details"),
       els.newScriptProjectList?.closest("details"),
@@ -5380,7 +5469,6 @@ function renderToolForm(toolKey) {
       return;
     }
     const categories = [
-      ["老剧本平台资产", assets.filter((item) => assetCategory(item) === "old_script" && !isHotReviewAsset(item))],
       ["爆款文审核资产", assets.filter((item) => isHotReviewAsset(item))],
       ["框架资产", assets.filter((item) => assetCategory(item) === "framework" && !isHotReviewAsset(item))],
       ["新剧本资产", assets.filter((item) => assetCategory(item) === "new_script" && !isHotReviewAsset(item))],

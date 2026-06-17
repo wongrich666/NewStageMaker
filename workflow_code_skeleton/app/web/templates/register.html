@@ -8,7 +8,7 @@
   <meta http-equiv="Expires" content="0">
   <title>注册 - 剧本生成工作台</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260603-sidebar-links">
-  <link rel="stylesheet" href="{{ url_for('static', filename='global_theme.css') }}?v=20260617-cat-theme-v1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='global_theme.css') }}?v=20260617-cat-theme-v2">
 </head>
 <body class="workspace-body mono-page auth-page">
   <main class="chat-workspace-shell prelogin-shell">
@@ -43,14 +43,6 @@
             <a class="sidebar-refresh-btn prelogin-inline-link" href="{{ url_for('register_page') }}">刷新</a>
           </div>
           <div class="sidebar-folders">
-            <details class="workspace-folder">
-              <summary>
-                <span>老剧本平台资产</span>
-              </summary>
-              <div class="workspace-compact-list">
-                <div class="workspace-empty">注册后查看老剧本平台资产。</div>
-              </div>
-            </details>
             <details class="workspace-folder">
               <summary>
                 <span>框架资产</span>
@@ -214,6 +206,6 @@
       </section>
     </section>
   </main>
-  <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v1"></script>
+  <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v2"></script>
 </body>
 </html>

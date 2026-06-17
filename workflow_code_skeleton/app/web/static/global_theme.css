@@ -18,6 +18,10 @@
   --cat-drift-x: 2.4vw;
   --cat-drift-y: 1.6vh;
   --cat-drift-scale: 1.035;
+  --cat-drift-x2: -1.8vw;
+  --cat-drift-y2: 1.2vh;
+  --cat-drift-scale2: 1.045;
+  --cat-focus-blur: 0.35px;
 
   --color-bg: var(--theme-bg);
   --color-panel: var(--theme-panel);
@@ -91,7 +95,7 @@ body,
 body::before {
   content: "";
   position: fixed;
-  inset: -7vmax;
+  inset: -12vmax;
   z-index: 0;
   pointer-events: none;
   background:
@@ -99,22 +103,31 @@ body::before {
     url("cat-wallpaper.png") center center / cover no-repeat;
   background-repeat: no-repeat, no-repeat;
   background-size: auto, cover;
-  transform: translate3d(calc(var(--cat-drift-x) * -0.45), calc(var(--cat-drift-y) * -0.35), 0) scale(var(--cat-drift-scale));
-  animation: catWallpaperFloat 34s ease-in-out infinite alternate;
+  transform: translate3d(calc(var(--cat-drift-x) * -0.32), calc(var(--cat-drift-y) * -0.24), 0) scale(var(--cat-drift-scale));
+  filter: saturate(0.98) blur(var(--cat-focus-blur));
+  animation: catWallpaperFloat 43s cubic-bezier(0.33, 0, 0.2, 1) infinite alternate;
   transform-origin: center;
-  will-change: transform;
+  will-change: transform, filter;
 }
 
 body::after {
   content: "";
   position: fixed;
-  inset: 0;
+  inset: -10vmax;
   z-index: 0;
   pointer-events: none;
   background:
+    linear-gradient(rgba(255, 248, 238, 0.62), rgba(255, 246, 234, 0.5)),
+    url("cat-wallpaper.png") 50% 50% / cover no-repeat,
     radial-gradient(circle at 18% 12%, rgba(255, 238, 213, 0.44), transparent 34%),
-    radial-gradient(circle at 82% 72%, rgba(255, 245, 229, 0.32), transparent 32%),
-    rgba(255, 248, 238, 0.2);
+    radial-gradient(circle at 82% 72%, rgba(255, 245, 229, 0.32), transparent 32%);
+  opacity: 0.34;
+  mix-blend-mode: soft-light;
+  transform: translate3d(var(--cat-drift-x2), var(--cat-drift-y2), 0) scale(var(--cat-drift-scale2));
+  filter: blur(calc(var(--cat-focus-blur) + 0.8px));
+  animation: catWallpaperParallax 57s cubic-bezier(0.22, 0.08, 0.18, 1) infinite alternate-reverse;
+  transform-origin: center;
+  will-change: transform, filter;
 }
 
 body > * {
@@ -128,13 +141,35 @@ body > * {
 
 @keyframes catWallpaperFloat {
   0% {
-    transform: translate3d(calc(var(--cat-drift-x) * -0.45), calc(var(--cat-drift-y) * -0.35), 0) scale(var(--cat-drift-scale));
+    transform: translate3d(calc(var(--cat-drift-x) * -0.32), calc(var(--cat-drift-y) * -0.24), 0) scale(var(--cat-drift-scale));
+    filter: saturate(0.98) blur(var(--cat-focus-blur));
   }
-  42% {
-    transform: translate3d(calc(var(--cat-drift-x) * 0.28), calc(var(--cat-drift-y) * -0.15), 0) scale(calc(var(--cat-drift-scale) + 0.012));
+  27% {
+    transform: translate3d(calc(var(--cat-drift-x) * 0.18), calc(var(--cat-drift-y) * -0.42), 0) scale(calc(var(--cat-drift-scale) + 0.009));
+    filter: saturate(1.01) blur(calc(var(--cat-focus-blur) + 0.18px));
+  }
+  61% {
+    transform: translate3d(calc(var(--cat-drift-x) * 0.52), calc(var(--cat-drift-y) * 0.16), 0) scale(calc(var(--cat-drift-scale) + 0.018));
+    filter: saturate(0.97) blur(calc(var(--cat-focus-blur) + 0.42px));
   }
   100% {
-    transform: translate3d(calc(var(--cat-drift-x) * 0.55), calc(var(--cat-drift-y) * 0.42), 0) scale(calc(var(--cat-drift-scale) + 0.018));
+    transform: translate3d(calc(var(--cat-drift-x) * -0.08), calc(var(--cat-drift-y) * 0.48), 0) scale(calc(var(--cat-drift-scale) + 0.012));
+    filter: saturate(1) blur(calc(var(--cat-focus-blur) + 0.08px));
+  }
+}
+
+@keyframes catWallpaperParallax {
+  0% {
+    transform: translate3d(calc(var(--cat-drift-x2) * 0.38), calc(var(--cat-drift-y2) * -0.2), 0) scale(var(--cat-drift-scale2));
+  }
+  39% {
+    transform: translate3d(calc(var(--cat-drift-x2) * -0.22), calc(var(--cat-drift-y2) * 0.44), 0) scale(calc(var(--cat-drift-scale2) + 0.016));
+  }
+  74% {
+    transform: translate3d(calc(var(--cat-drift-x2) * -0.5), calc(var(--cat-drift-y2) * -0.08), 0) scale(calc(var(--cat-drift-scale2) + 0.024));
+  }
+  100% {
+    transform: translate3d(calc(var(--cat-drift-x2) * 0.18), calc(var(--cat-drift-y2) * 0.36), 0) scale(calc(var(--cat-drift-scale2) + 0.008));
   }
 }
 
@@ -522,8 +557,13 @@ select:focus,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  body::before {
+  body::before,
+  body::after {
     animation: none;
+    filter: none;
+  }
+
+  body::before {
     transform: scale(1.04);
   }
 

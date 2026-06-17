@@ -4,7 +4,6 @@
 
   const authToken = config.authToken || new URLSearchParams(window.location.search).get("auth_token") || "";
   const lists = {
-    old_script: document.getElementById("activeProjectList"),
     framework: document.getElementById("completedProjectList"),
     new_script: document.getElementById("newScriptProjectList"),
     hot_review: null,
@@ -63,7 +62,7 @@
 
   function ensureHotReviewList() {
     if (lists.hot_review) return lists.hot_review;
-    const anchor = lists.framework?.closest("details") || lists.new_script?.closest("details") || lists.old_script?.closest("details");
+    const anchor = lists.framework?.closest("details") || lists.new_script?.closest("details");
     const parent = anchor?.parentElement;
     if (!parent) return null;
     const details = document.createElement("details");
@@ -90,14 +89,14 @@
   function assetCategory(item) {
     if (isHotReviewAsset(item)) return "hot_review";
     const explicit = String(item.asset_type || item.type || "").trim();
-    if (explicit === "legacy_script") return "old_script";
+    if (explicit === "legacy_script") return "";
     if (["old_script", "framework", "new_script"].includes(explicit)) return explicit;
     const input = item.input_payload && typeof item.input_payload === "object" ? item.input_payload : {};
     const assetKind = String(item.asset_kind || "").trim();
     const scriptMode = String(item.script_format_mode || input.script_format_mode || "").trim();
     if (assetKind === "framework_to_script" || scriptMode === "framework_to_script" || input.framework_to_script === true || hasFrameworkToScriptState(item)) return "new_script";
     if (assetKind === "framework_planner") return "framework";
-    return "old_script";
+    return "";
   }
 
   function isFrameworkToScriptAsset(item) {
@@ -168,7 +167,6 @@
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.success === false || data.ok === false) throw new Error(data.message || data.error || "资产列表加载失败");
     const projects = Array.isArray(data.projects) ? data.projects : [];
-    renderList(lists.old_script, projects.filter((item) => assetCategory(item) === "old_script"), "当前没有老剧本平台资产。");
     renderList(lists.framework, projects.filter((item) => assetCategory(item) === "framework"), "当前还没有框架资产。");
     renderList(ensureHotReviewList(), projects.filter((item) => assetCategory(item) === "hot_review"), "当前还没有爆款文审核资产。");
     renderList(lists.new_script, projects.filter((item) => assetCategory(item) === "new_script"), "当前还没有新剧本平台资产。");

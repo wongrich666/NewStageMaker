@@ -75,7 +75,23 @@ def _iter_balanced_json_candidates(text: str) -> list[str]:
 
 
 def _json_loads_maybe_nested(text: str) -> Any:
-    data = json.loads(_strip_code_fence(text))
+    cleaned = _strip_code_fence(text)
+    variants = [
+        cleaned,
+        cleaned.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'"),
+        re.sub(r",\s*([}\]])", r"\1", cleaned),
+        re.sub(r",\s*([}\]])", r"\1", cleaned.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")),
+    ]
+    last_error: Exception | None = None
+    data = None
+    for variant in variants:
+        try:
+            data = json.loads(variant)
+            break
+        except Exception as exc:
+            last_error = exc
+    if data is None:
+        raise last_error or ValueError("JSON parse failed")
     depth = 0
     while isinstance(data, str) and depth < 3:
         nested = _strip_code_fence(data)
@@ -94,6 +110,118 @@ def _json_loads_maybe_nested(text: str) -> Any:
             break
         depth += 1
     return data
+
+
+def _extract_title_from_text(text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    for pattern in (
+        r"""["']script_title["']\s*:\s*["']([^"']{1,120})["']""",
+        r"""剧本(?:标题|名称)\s*[:：]\s*([^\n\r]{1,80})""",
+        r"""作品(?:标题|名称)\s*[:：]\s*([^\n\r]{1,80})""",
+        r"""《([^》]{1,80})》""",
+    ):
+        match = re.search(pattern, value)
+        if match:
+            return match.group(1).strip().strip("：: -")
+    for line in value.replace("\r", "\n").split("\n"):
+        cleaned = line.strip().strip("#").strip()
+        if cleaned:
+            return cleaned[:80]
+    return ""
+
+
+def fallback_audit_from_text(raw_text: str, *, title: str = "", warnings: list[str] | None = None) -> dict:
+    text = str(raw_text or "").strip()
+    parse_warnings = [str(item) for item in (warnings or []) if str(item or "").strip()]
+    excerpt = " ".join(text.split())[:1200]
+    script_title = str(title or "").strip() or _extract_title_from_text(text) or "未命名剧本"
+    issue = {
+        "issue_id": "parse_fallback_001",
+        "priority": 1,
+        "issue_type": "解析容错",
+        "risk_level": "高",
+        "title": "模型输出未能完整解析",
+        "description": "系统已保留固定可视化面板和原始输出摘要，避免退回裸 JSON。建议重新运行审核，或检查模型是否严格返回指定 JSON schema。",
+        "evidence": excerpt,
+        "commercial_impact": "当前无法可靠计算心电曲线和单集评分。",
+        "fix_strategy": "请让模型只返回合法 JSON，或点击重新运行爆款文审核。",
+        "expected_improvement": "重新解析后可恢复完整心电图、全局评价和单集评价。",
+    }
+    return {
+        "schema_version": SCHEMA_VERSION_V3,
+        "meta": {
+            "script_title": script_title,
+            "text_type": "未知",
+            "audit_scope": "解析容错",
+            "total_episode_count": 0,
+            "total_segment_count": 0,
+            "is_partial_review": True,
+            "is_stage_score": False,
+            "evidence_policy": "模型输出解析失败时，仅展示原始输出摘要和解析提示。",
+        },
+        "overall": {
+            "total_score": 0,
+            "level": "待重新解析",
+            "modification_cost": "未知",
+            "core_judgement": "模型输出未能完整解析，已进入容错展示模式。",
+            "largest_hard_problem": "缺少合法结构化 JSON。",
+            "best_retained_part": "",
+            "final_judgement": "请重新运行审核或修正模型输出格式后再查看完整心电图。",
+            "top_improvement_metrics": [],
+        },
+        "dimension_scores": [],
+        "segments": [],
+        "global_review": {
+            "review_scope": "解析容错",
+            "global_structure_judgement": {
+                "global_retention_problem": "当前结果缺少可解析心电节点。",
+                "global_revision_priority": "优先修复模型输出格式。",
+            },
+            "ecg": {
+                "title": "全剧总心电图",
+                "x_axis_type": "global_offset",
+                "y_axis_range": [-5, 5],
+                "baseline": 0,
+                "main_series": {
+                    "series_key": "global_retention_ecg",
+                    "series_name": "全剧商业留存心电图",
+                    "description": "解析失败时暂不生成节点。",
+                    "points": [],
+                },
+                "secondary_series": [],
+                "negative_zones": [],
+                "peak_points": [],
+                "valley_points": [],
+            },
+            "episode_score_map": [],
+            "global_satisfying_points": [],
+            "global_key_issues": [issue],
+            "global_risk_scan": [],
+            "global_rewrite_plan": [{
+                "task_id": "parse_retry_001",
+                "priority": 1,
+                "target": "合规",
+                "problem": "返回内容不是可解析的 v3 JSON。",
+                "specific_action": "重新运行爆款文审核，要求模型只输出合法 JSON。",
+                "before_logic": "",
+                "after_logic": "可生成全剧心电图与单集评价。",
+                "affected_segments": [],
+                "expected_result": "恢复完整可视化审核结果。",
+            }],
+        },
+        "episode_reviews": [],
+        "cross_episode_analysis": {
+            "title": "跨集结构分析",
+            "retention_curve_summary": "解析失败，暂无法生成跨集结构分析。",
+        },
+        "parse_fallback": {
+            "enabled": True,
+            "warnings": parse_warnings,
+            "raw_excerpt": excerpt,
+        },
+    }
 
 
 def _extract_text_from_known_fields(raw: Any) -> list[str]:

@@ -2,12 +2,24 @@
   const root = document.documentElement;
 
   function setWallpaperDrift() {
-    const x = (1.4 + Math.random() * 2.2).toFixed(2);
-    const y = (1.0 + Math.random() * 1.8).toFixed(2);
-    const scale = (1.025 + Math.random() * 0.025).toFixed(3);
-    root.style.setProperty("--cat-drift-x", `${Math.random() > 0.5 ? "" : "-"}${x}vw`);
-    root.style.setProperty("--cat-drift-y", `${Math.random() > 0.5 ? "" : "-"}${y}vh`);
+    const angle = Math.random() * Math.PI * 2;
+    const angle2 = angle + Math.PI * (0.58 + Math.random() * 0.32);
+    const distance = 1.2 + Math.random() * 2.4;
+    const distance2 = 0.9 + Math.random() * 1.8;
+    const x = (Math.cos(angle) * distance).toFixed(2);
+    const y = (Math.sin(angle) * distance * 0.72).toFixed(2);
+    const x2 = (Math.cos(angle2) * distance2).toFixed(2);
+    const y2 = (Math.sin(angle2) * distance2 * 0.68).toFixed(2);
+    const scale = (1.04 + Math.random() * 0.03).toFixed(3);
+    const scale2 = (1.055 + Math.random() * 0.025).toFixed(3);
+    const blur = (0.18 + Math.random() * 0.55).toFixed(2);
+    root.style.setProperty("--cat-drift-x", `${x}vw`);
+    root.style.setProperty("--cat-drift-y", `${y}vh`);
     root.style.setProperty("--cat-drift-scale", scale);
+    root.style.setProperty("--cat-drift-x2", `${x2}vw`);
+    root.style.setProperty("--cat-drift-y2", `${y2}vh`);
+    root.style.setProperty("--cat-drift-scale2", scale2);
+    root.style.setProperty("--cat-focus-blur", `${blur}px`);
   }
 
   function rippleAt(x, y) {
@@ -29,7 +41,7 @@
   }
 
   setWallpaperDrift();
-  window.setInterval(setWallpaperDrift, 45000);
+  window.setInterval(setWallpaperDrift, 18000 + Math.floor(Math.random() * 9000));
 
   document.addEventListener("pointerdown", (event) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;

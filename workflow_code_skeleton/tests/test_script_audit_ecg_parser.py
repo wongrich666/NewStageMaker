@@ -6,6 +6,7 @@ from app.services.script_audit_ecg_parser import (
     SCHEMA_VERSION,
     SCHEMA_VERSION_V3,
     build_script_audit_view_model,
+    fallback_audit_from_text,
     normalize_script_audit_ecg,
     parse_model_json_loose,
 )
@@ -162,3 +163,16 @@ def test_parse_v3_from_nested_answer_text():
     raw = {"answerText": "```json\n" + json.dumps(sample_v3_payload(), ensure_ascii=False) + "\n```"}
     parsed, warnings = parse_model_json_loose(raw)
     assert parsed["schema_version"] == SCHEMA_VERSION_V3
+
+
+def test_fallback_audit_from_unparseable_text_still_builds_view():
+    audit, warnings = normalize_script_audit_ecg(
+        fallback_audit_from_text("《坏格式剧本》\n{ this is not valid json", warnings=["bad json"]),
+        raw_answer_text="{ this is not valid json",
+    )
+    view = build_script_audit_view_model(audit)
+    assert audit["schema_version"] == SCHEMA_VERSION_V3
+    assert audit["meta"]["script_title"] == "坏格式剧本"
+    assert audit["parse_fallback"]["enabled"] is True
+    assert view["summary_cards"]
+    assert view["global_review"]["key_issues"][0]["title"] == "模型输出未能完整解析"

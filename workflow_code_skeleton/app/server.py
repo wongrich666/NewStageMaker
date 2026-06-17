@@ -46,6 +46,7 @@ from .services.script_audit_ecg_parser import (
     SCHEMA_VERSION as SCRIPT_AUDIT_ECG_SCHEMA_VERSION,
     SCHEMA_VERSION_V3 as SCRIPT_AUDIT_ECG_SCHEMA_VERSION_V3,
     build_script_audit_view_model,
+    fallback_audit_from_text,
     normalize_script_audit_ecg,
     parse_model_json_loose,
 )
@@ -273,15 +274,22 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 parse_warnings
                 or ["未解析到可识别的剧本心电图 JSON"]
             )
-
+            fallback_audit, normalize_warnings = normalize_script_audit_ecg(
+                fallback_audit_from_text(raw_text, warnings=warnings),
+                raw_answer_text=raw_text,
+            )
+            fallback_view = build_script_audit_view_model(fallback_audit)
             for target in (
                 enriched_result,
                 enriched_flattened,
             ):
-                target["result_type"] = "text"
-                target["resultType"] = "text"
+                target["result_type"] = "script_audit_ecg"
+                target["resultType"] = "script_audit_ecg"
                 target["parsed"] = False
-                target["parse_warnings"] = warnings
+                target["audit"] = fallback_audit
+                target["view"] = fallback_view
+                target["parse_warnings"] = [*warnings, *normalize_warnings]
+                target["answer_text"] = raw_text
 
             return enriched_result, enriched_flattened
 

@@ -2603,8 +2603,9 @@
             ${[
               ["all", "全部状态"],
               ["draft", "草稿"],
+              ["in_progress", "策划中"],
               ["running", "处理中"],
-              ["completed", "完成"],
+              ["completed", "已完成"],
               ["failed", "失败"],
               ["terminated", "已停止"],
             ].map(([value, label]) => `<option value="${value}" ${ui.assetStatusFilter === value ? "selected" : ""}>${label}</option>`).join("")}
@@ -2855,18 +2856,19 @@
   function assetStatusLabel(status) {
     return {
       draft: "草稿",
+      in_progress: "策划中",
       pending: "等待中",
       running: "处理中",
       pausing: "暂停中",
       paused: "已暂停",
-      completed: "完成",
+      completed: "已完成",
       failed: "失败",
       terminated: "已停止",
     }[status] || "已生成";
   }
 
   function assetStatusClass(status) {
-    if (["running", "pending", "pausing"].includes(status)) return "blue";
+    if (["in_progress", "running", "pending", "pausing"].includes(status)) return "blue";
     if (status === "completed") return "ok";
     if (["failed", "terminated"].includes(status)) return "red";
     return "warn";
