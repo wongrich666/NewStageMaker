@@ -560,7 +560,7 @@ class StageCacheMixin:
             (
                 ("framework_scene_dictionary",),
                 "framework_scene_dictionary",
-                "框架转剧本：场景字典提炼",
+                "框架转剧本：提炼核心场景",
                 self._framework_to_script_summary_value(
                     "sceneDictionary",
                     variables.get("sceneDictionary")

@@ -51,7 +51,7 @@
 | `appearance_alias_review` | `服装版本映射审核.json` | `passed`, `rewrite_required`, `blocking_issues` |
 | `appearance_alias_rewrite` | `服装版本映射修订.json` | `appearanceMapping` |
 | `appearance_alias_unstructured` | `自然语言服装版本映射.json` | `c7VnQ4eX` |
-| `framework_scene_dictionary` | `08_场景字典提炼.json` | `sceneDictionary`, `scriptWorldRulesDigest` |
+| `framework_scene_dictionary` | `08_提炼核心场景.json` | `sceneDictionary`, `scriptWorldRulesDigest` |
 | `framework_appearanceMapping` | `09_人设服装alias映射.json` | `appearanceMapping` |
 | `framework_enriched_episode_plan` | `10_丰富分集计划.json` | `enrichedEpisodePlanResult`; 后端解析 `allEnrichedEpisodePlan`, `allEnrichedEpisodePlanText` |
 | `framework_causal_conflict_write` | `框架转剧本因果冲突推进计划编写.json` | `batchCausalConflictPlan` |
@@ -102,7 +102,7 @@
 
 | 环节 | 输入变量 | 输出变量 |
 | --- | --- | --- |
-| 08 场景字典提炼 | `frameworkPlanPackage`, `worldviewPlan`, `beatCheckpointTimeline`, `characterStorylines` | `sceneDictionary`, `scriptWorldRulesDigest` |
+| 08 提炼核心场景 | `frameworkPlanPackage`, `worldviewPlan`, `beatCheckpointTimeline`, `characterStorylines` | `sceneDictionary`, `scriptWorldRulesDigest` |
 | 09 人设服装 alias 映射 | `frameworkPlanPackage`, `characterPlan`, `sceneDictionary`, `beatCheckpointTimeline` | `appearanceMapping` |
 | 10 丰富分集计划 | `frameworkPlanPackage`, `beatCheckpointTimeline`, `characterStorylines`, `sceneDictionary`, `appearanceMapping` | `enrichedEpisodePlanResult` |
 | 10 后端解析 | `enrichedEpisodePlanResult` | `allEnrichedEpisodePlan`, `allEnrichedEpisodePlanText` |

@@ -988,7 +988,7 @@ startRuntimeDebugPolling();
       appearance_alias_review: "正在审核服装版本映射",
       appearance_alias_rewrite: "正在修订服装版本映射",
       appearance_alias_unstructured: "正在整理服装版本映射自然语言说明",
-      framework_scene_dictionary: "正在生成框架转剧本：场景字典提炼",
+      framework_scene_dictionary: "正在生成框架转剧本：提炼核心场景",
       framework_appearanceMapping: "正在生成框架转剧本：人设服装 alias 映射",
       framework_enriched_episode_plan: "正在生成框架转剧本：丰富分集计划",
       framework_causal_conflict: "正在生成框架转剧本因果冲突推进计划",
@@ -1080,7 +1080,7 @@ startRuntimeDebugPolling();
 
   function frameworkStageLabel(stageKey) {
     const mapping = {
-      framework_scene_dictionary: "框架转剧本：场景字典提炼",
+      framework_scene_dictionary: "框架转剧本：提炼核心场景",
       framework_appearancemapping: "框架转剧本：人设服装 alias 映射",
       framework_appearance_mapping: "框架转剧本：人设服装 alias 映射",
       framework_enriched_episode_plan: "框架转剧本：丰富分集计划",

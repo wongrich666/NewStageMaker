@@ -193,7 +193,7 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
             "framework_planner_source": True,
             "source_framework_project_id": 321,
         }
-        snapshot["current_stage_label"] = "框架转剧本：场景字典提炼"
+        snapshot["current_stage_label"] = "框架转剧本：提炼核心场景"
         snapshot["debug_state"]["variables"].update(
             {
                 "sceneDictionary": {
@@ -206,9 +206,9 @@ class TaskManagerPublicSnapshotTests(unittest.TestCase):
 
         public = self.manager._public_snapshot(snapshot)
 
-        self.assertEqual(public["current_stage_label"], "框架转剧本：场景字典提炼")
+        self.assertEqual(public["current_stage_label"], "框架转剧本：提炼核心场景")
         self.assertEqual(public["display_stage_key"], "framework_scene_dictionary")
-        self.assertEqual(public["display_stage_title"], "框架转剧本：场景字典提炼")
+        self.assertEqual(public["display_stage_title"], "框架转剧本：提炼核心场景")
         self.assertIn("2", public["display_stage_output"])
         self.assertIn("旧仓库", public["display_stage_output"])
 

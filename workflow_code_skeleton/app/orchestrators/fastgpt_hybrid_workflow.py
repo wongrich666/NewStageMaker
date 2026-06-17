@@ -1552,7 +1552,7 @@ _FRAMEWORK_STAGE_PROMPT_LABELS = {
     "guide": "06 改编指引偏好",
     "package": "07 框架校验偏好",
     "scene": "08 场景字典偏好",
-    "appearance": "09 角色外观映射偏好",
+    "appearance": "09 确定角色外观偏好",
     "episode": "10 分集细化偏好",
     "conflict": "11 开头冲突钩子偏好",
     "script_text": "12 正文写作偏好",

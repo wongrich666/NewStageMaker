@@ -1535,7 +1535,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         "guide": "06 改编指引偏好",
         "package": "07 框架校验偏好",
         "scene": "08 场景字典偏好",
-        "appearance": "09 角色外观映射偏好",
+        "appearance": "09 确定角色外观偏好",
         "episode": "10 分集细化偏好",
         "conflict": "11 开头冲突钩子偏好",
         "script_text": "12 正文写作偏好",
@@ -3040,7 +3040,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @app.post("/api/framework-to-script/stage/08")
     @_login_required
     def run_framework_to_script_stage08_api():
-        """单独运行 08 场景字典提炼。只跑 08，不继续 09/10。"""
+        """单独运行 08 提炼核心场景。只跑 08，不继续 09/10。"""
         import json as _json
 
         data = request.get_json(silent=True) or {}
@@ -3218,7 +3218,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 return _json_error(
                     str(exc),
                     status=500,
-                    fallback="08 场景字典提炼调用失败，请检查 FASTGPT_FRAMEWORK_SCENE_DICTIONARY_API_KEY 和工作流变量。",
+                    fallback="08 提炼核心场景调用失败，请检查 FASTGPT_FRAMEWORK_SCENE_DICTIONARY_API_KEY 和工作流变量。",
                 )
 
             scene_dictionary, rules_digest = _extract_scene_payload(raw_output)
@@ -3226,7 +3226,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 return _json_error(
                     "08 场景字典阶段输出缺少 sceneDictionary 或 scriptWorldRulesDigest。",
                     status=500,
-                    fallback="请检查 08_场景字典提炼.json 是否把 sceneDictionary 和 scriptWorldRulesDigest 写入变量或 answerText JSON。",
+                    fallback="请检查 08_提炼核心场景.json 是否把 sceneDictionary 和 scriptWorldRulesDigest 写入变量或 answerText JSON。",
                 )
             if asset_id:
                 _save_framework_to_script_stage(
@@ -3298,7 +3298,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
         if not isinstance(scene_dictionary, dict) or not scene_dictionary:
             return _json_error(
-                "缺少 sceneDictionary，请先运行并确认 08 场景字典提炼。",
+                "缺少 sceneDictionary，请先运行并确认 08 提炼核心场景。",
                 status=400,
             )
 
@@ -3714,7 +3714,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @app.post("/api/framework-to-script/stage/10")
     @_login_required
     def run_framework_to_script_stage10_api():
-        """单独运行 10 分集细化方案。只跑 10，不继续后续因果冲突。"""
+        """单独运行 10 优化分集计划。只跑 10，不继续后续因果冲突。"""
         import json as _json
 
         data = request.get_json(silent=True) or {}
@@ -3738,7 +3738,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         stage09 = _framework_script_stage_cache(framework_asset, "stage09")
         scene_dictionary = data.get("sceneDictionary") or data.get("scene_dictionary") or stage08.get("sceneDictionary") or {}
         if not isinstance(scene_dictionary, dict) or not scene_dictionary:
-            return _json_error("缺少 sceneDictionary，请先完成 08 场景字典提炼。", status=400)
+            return _json_error("缺少 sceneDictionary，请先完成 08 提炼核心场景。", status=400)
 
         rules_digest = (
             data.get("scriptWorldRulesDigest")
@@ -3747,7 +3747,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             or {}
         )
         if not isinstance(rules_digest, dict) or not rules_digest:
-            return _json_error("缺少 scriptWorldRulesDigest，请先完成 08 场景字典提炼。", status=400)
+            return _json_error("缺少 scriptWorldRulesDigest，请先完成 08 提炼核心场景。", status=400)
 
         appearance_mapping = (
             data.get("appearanceMapping")
@@ -3756,7 +3756,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             or {}
         )
         if not isinstance(appearance_mapping, dict) or not appearance_mapping:
-            return _json_error("缺少 appearanceMapping，请先完成 09 角色外观映射。", status=400)
+            return _json_error("缺少 appearanceMapping，请先完成 09 确定角色外观。", status=400)
 
         beat_checkpoint_timeline = (
             data.get("beat_checkpoint_timeline")
@@ -3919,13 +3919,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 return _json_error(
                     str(exc),
                     status=500,
-                    fallback="10 分集细化方案调用失败，请检查 FASTGPT_FRAMEWORK_ENRICHED_EPISODE_PLAN_API_KEY 和工作流变量。",
+                    fallback="10 优化分集计划调用失败，请检查 FASTGPT_FRAMEWORK_ENRICHED_EPISODE_PLAN_API_KEY 和工作流变量。",
                 )
 
             plan, plan_text = _extract_enriched_payload(raw_output)
             if not plan:
                 return _json_error(
-                    "10 分集细化方案输出缺少 allEnrichedEpisodePlan。",
+                    "10 优化分集计划输出缺少 allEnrichedEpisodePlan。",
                     status=500,
                     fallback="请检查 10 工作流是否把 allEnrichedEpisodePlan 写入变量或 answerText JSON。",
                 )
@@ -4004,7 +4004,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             or []
         )
         if not isinstance(plan, list) or not plan:
-            return _json_error("缺少 allEnrichedEpisodePlan，请先完成 10 分集细化方案。", status=400)
+            return _json_error("缺少 allEnrichedEpisodePlan，请先完成 10 优化分集计划。", status=400)
 
         stage08 = _framework_script_stage_cache(framework_asset, "stage08")
         stage09 = _framework_script_stage_cache(framework_asset, "stage09")
@@ -4012,11 +4012,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         rules_digest = data.get("scriptWorldRulesDigest") or stage08.get("scriptWorldRulesDigest") or {}
         appearance_mapping = data.get("appearanceMapping") or stage09.get("appearanceMapping") or {}
         if not isinstance(scene_dictionary, dict) or not scene_dictionary:
-            return _json_error("缺少 sceneDictionary，请先完成 08 场景字典提炼。", status=400)
+            return _json_error("缺少 sceneDictionary，请先完成 08 提炼核心场景。", status=400)
         if not isinstance(appearance_mapping, dict) or not appearance_mapping:
-            return _json_error("缺少 appearanceMapping，请先完成 09 角色外观映射。", status=400)
+            return _json_error("缺少 appearanceMapping，请先完成 09 确定角色外观。", status=400)
         if not isinstance(rules_digest, dict) or not rules_digest:
-            return _json_error("缺少 scriptWorldRulesDigest，请先完成 08 场景字典提炼。", status=400)
+            return _json_error("缺少 scriptWorldRulesDigest，请先完成 08 提炼核心场景。", status=400)
 
         existing_stage11 = _framework_script_stage_cache(framework_asset, "stage11")
         existing_batches = existing_stage11.get("batches") if isinstance(existing_stage11.get("batches"), dict) else {}

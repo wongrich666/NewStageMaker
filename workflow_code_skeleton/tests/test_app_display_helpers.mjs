@@ -291,7 +291,7 @@ test("framework-to-script snapshots expose explicit internal stage labels", () =
       source_framework_project_id: 321,
     },
     display_stage_key: "framework_scene_dictionary",
-    display_stage_title: "框架转剧本：场景字典提炼",
+    display_stage_title: "框架转剧本：提炼核心场景",
     display_stage_output: {
       sceneDictionary: {
         scene_count: 2,
@@ -302,15 +302,15 @@ test("framework-to-script snapshots expose explicit internal stage labels", () =
 
   assert.equal(isFrameworkToScriptSnapshot(snapshot), true);
   assert.equal(normalizeStageKey(snapshot.current_stage), "framework_to_script");
-  assert.equal(frameworkStageLabel(snapshot.current_stage), "框架转剧本：场景字典提炼");
+  assert.equal(frameworkStageLabel(snapshot.current_stage), "框架转剧本：提炼核心场景");
   assert.equal(displayProgressPercent(snapshot), 8);
 
   const thinking = thinkingStateFrom(snapshot);
-  assert.equal(thinking?.stageLabel, "框架转剧本：场景字典提炼");
+  assert.equal(thinking?.stageLabel, "框架转剧本：提炼核心场景");
   assert.match(thinking?.note || "", /来源：三幕十五节拍框架策划包/);
 
   const messages = visibleStageMessages(snapshot);
-  assert.equal(messages.at(-1)?.title, "框架转剧本：场景字典提炼");
+  assert.equal(messages.at(-1)?.title, "框架转剧本：提炼核心场景");
   assert.match(messages.at(-1)?.output || "", /sceneDictionary/);
 });
 
