@@ -110,11 +110,15 @@
       const detailMessage = detail.error_message || detail.message || "";
       const failedSubStage = detail.failed_sub_stage ? `（${detail.failed_sub_stage}）` : "";
       const debugPath = detail.debug_path ? `debug: ${detail.debug_path}` : "";
-      throw new Error(
+      const error = new Error(
         [data.message || data.error || "请求失败，请稍后重试。", failedSubStage, detailMessage, debugPath]
           .filter(Boolean)
           .join(" ")
       );
+      error.detail = detail;
+      error.failedSubStage = detail.failed_sub_stage || "";
+      error.reviewRound = detail.review_round || detail.review_attempt || detail.loop_round || "";
+      throw error;
     }
     return stripRaw(data);
   }
@@ -414,11 +418,11 @@
     const progress = state.runningProgress || {};
     if (String(progress.stage || "") !== String(stage || "")) return "";
     if (state.runningRetryMessage) return state.runningRetryMessage;
-    const phases = ["撰写", "审核", "修改", "保存记忆"];
-    const phase = progress.phase || phases[0];
     const range = progress.range || batchRangeForStart(progress.startEpisode);
-    const round = Math.max(1, Number(progress.round) || 1);
-    return `${range || "当前批次"}第${round}轮${phase}中...`;
+    const subStage = progress.backendSubStage ? backendSubStageLabel(stage, progress.backendSubStage) : "";
+    const round = progress.backendReviewRound ? `第${progress.backendReviewRound}轮` : "";
+    if (subStage) return `${range || "当前批次"}后端${round}${subStage}中...`;
+    return `${range || "当前批次"}请求中，等待后端返回实际处理阶段...`;
   }
 
   function stopRunningProgress() {
@@ -431,8 +435,7 @@
     state.runningRetryCountdown = 0;
   }
 
-  function startRunningProgress(stage, startEpisode) {
-    const phases = ["撰写", "审核", "修改", "保存记忆"];
+  function startRunningProgress(stage, startEpisode, metadata = {}) {
     if (state.runningProgressTimer) {
       window.clearInterval(state.runningProgressTimer);
     }
@@ -440,18 +443,13 @@
       stage: String(stage || ""),
       startEpisode: Number(startEpisode) || 0,
       range: batchRangeForStart(startEpisode),
-      tick: 0,
-      round: 1,
-      phase: phases[0],
+      backendSubStage: metadata.backendSubStage || "",
+      backendReviewRound: metadata.backendReviewRound || "",
+      requestAttempt: metadata.requestAttempt || 1,
     };
     state.runningProgressTimer = window.setInterval(() => {
       const progress = state.runningProgress;
       if (!progress || String(progress.stage || "") !== String(stage || "")) return;
-      if (state.runningRetryMessage) return;
-      const tick = Number(progress.tick || 0) + 1;
-      progress.tick = tick;
-      progress.phase = phases[tick % phases.length];
-      progress.round = Math.floor(tick / phases.length) + 1;
       render();
     }, 1800);
   }
@@ -464,6 +462,33 @@
     return String((error && error.message) || error || "请求失败").replace(/\s+/g, " ").trim();
   }
 
+  function backendSubStageLabel(stage, subStage) {
+    const key = String(subStage || "");
+    const common = {
+      memory: "保存记忆",
+    };
+    const stage11 = {
+      causal_conflict_write: "撰写开头冲突钩子",
+      causal_conflict_review: "审核开头冲突钩子",
+      causal_conflict_rewrite: "修改开头冲突钩子",
+      causal_conflict_memory: "保存记忆",
+    };
+    const stage12 = {
+      script_write: "撰写正文",
+      script_review: "审核正文",
+      script_rewrite: "修改正文",
+      script_memory: "保存记忆",
+    };
+    return (String(stage || "") === "12" ? stage12[key] : stage11[key]) || common[key] || key;
+  }
+
+  function backendStageTextFromError(stage, error) {
+    const subStage = error && error.failedSubStage;
+    if (!subStage) return "";
+    const round = error && error.reviewRound ? `第${error.reviewRound}轮` : "";
+    return `${round}${backendSubStageLabel(stage, subStage)}`;
+  }
+
   function delay(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, Number(ms) || 0)));
   }
@@ -471,17 +496,23 @@
   async function waitBeforeStageRetry(stage, startEpisode, attempt, error) {
     const range = batchRangeForStart(startEpisode) || "当前批次";
     const reason = formatRetryError(error);
+    const backendStageText = backendStageTextFromError(stage, error);
+    const backendPrefix = backendStageText ? `后端${backendStageText}异常` : "后端请求异常";
     const totalSeconds = Math.max(1, Math.ceil(RESILIENT_STAGE_RETRY_DELAY_MS / 1000));
     state.runningRetryCountdown = totalSeconds;
     for (let seconds = totalSeconds; seconds > 0; seconds -= 1) {
       state.runningRetryCountdown = seconds;
-      state.runningRetryMessage = `${range}第${attempt}次自动重试准备中，${seconds}秒后继续...（${reason}）`;
+      state.runningRetryMessage = `${range}${backendPrefix}，第${attempt}次自动重试准备中，${seconds}秒后继续...（${reason}）`;
       render();
       await delay(1000);
     }
     state.runningRetryCountdown = 0;
     state.runningRetryMessage = "";
-    startRunningProgress(stage, startEpisode);
+    startRunningProgress(stage, startEpisode, {
+      backendSubStage: error && error.failedSubStage,
+      backendReviewRound: error && error.reviewRound,
+      requestAttempt: attempt,
+    });
     render();
   }
 
@@ -489,7 +520,7 @@
     let attempt = 1;
     while (attempt <= RESILIENT_STAGE_MAX_RETRY_ATTEMPTS) {
       try {
-        startRunningProgress(stage, startEpisode);
+        startRunningProgress(stage, startEpisode, { requestAttempt: attempt });
         render();
         return await operation(attempt);
       } catch (error) {
@@ -1730,15 +1761,25 @@
     `;
   }
 
+  function firstContentValue(...values) {
+    return values.find((value) => hasContent(value));
+  }
+
   function renderFrameworkPackageStack(packageValue) {
     const source = packageValue && typeof packageValue === "object" && !Array.isArray(packageValue) ? packageValue : {};
-    const fields = [];
-    Object.keys(source)
-      .filter((key) => !RAW_KEYS.has(key) && hasContent(source[key]))
-      .forEach((key) => fields.push({ key, label: labelFor(key), value: source[key] }));
-    if (!fields.length && hasContent(packageValue)) {
-      fields.push({ key: "framework_plan_package", label: "最终策划包", value: packageValue });
-    }
+    const outputs = state.stageOutputs || {};
+    const fields = [
+      {
+        key: "beat_checkpoint_timeline",
+        label: "三幕十五节拍",
+        value: firstContentValue(source.beat_checkpoint_timeline, source.beatCheckpointTimeline, outputs.beat_checkpoint_timeline, outputs.beatCheckpointTimeline),
+      },
+      {
+        key: "worldview_plan",
+        label: "世界观方案",
+        value: firstContentValue(source.worldview_plan, source.worldviewPlan, source.worldview, outputs.worldview_plan, outputs.worldviewPlan, outputs.worldview),
+      },
+    ].filter((item) => hasContent(item.value));
     return `
       <div class="wts-package-stack">
         ${fields.map((item, index) => renderFrameworkPackageField(item.label, item.value, item.key, index)).join("") || `<div class="wts-empty-inline">暂无最终策划包内容</div>`}
