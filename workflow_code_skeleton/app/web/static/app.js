@@ -9,7 +9,8 @@
     selectedProjectId: `scriptmaker.web.${userKey}.selectedProjectId`,
     modelId: `scriptmaker.web.${userKey}.modelId`,
     sidebarCollapsed: `scriptmaker.web.${userKey}.sidebarCollapsed`,
-    userKnowledge: `scriptmaker.web.${userKey}.userKnowledge`
+    userKnowledge: `scriptmaker.web.${userKey}.userKnowledge`,
+    hotReviewSession: `scriptmaker.web.${userKey}.hotReviewSession`
   };
 
   const POLL_INTERVAL = 1500;
@@ -548,6 +549,53 @@
 
   function restoreSidebarCollapsed() {
     applySidebarCollapsed(draftStorage.getItem(STORAGE.sidebarCollapsed) === "1");
+  }
+
+  function hotReviewSessionAssetKey(result) {
+    return String(
+      result?.savedAsset?.project_id
+      || result?.saved_asset?.project_id
+      || result?.savedAsset?.id
+      || result?.project_id
+      || ""
+    ).trim();
+  }
+
+  function persistHotReviewSession(result = state.toolResults.hot_review) {
+    if (!result) return;
+    const normalized = normalizeScriptAuditEcgResult(result);
+    const assetKey = hotReviewSessionAssetKey(normalized);
+    const payload = {
+      tool: "hot_review",
+      assetKey,
+      draft: state.toolDrafts.hot_review || {},
+      result: normalized,
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      pageStorage.setItem(STORAGE.hotReviewSession, JSON.stringify(payload));
+    } catch (_) {
+      if (!assetKey) return;
+      try {
+        pageStorage.setItem(STORAGE.hotReviewSession, JSON.stringify({
+          tool: "hot_review",
+          assetKey,
+          draft: state.toolDrafts.hot_review || {},
+          updatedAt: payload.updatedAt,
+        }));
+      } catch (__) {}
+    }
+  }
+
+  function readHotReviewSession() {
+    try {
+      const raw = pageStorage.getItem(STORAGE.hotReviewSession);
+      if (!raw) return null;
+      const payload = JSON.parse(raw);
+      return payload && payload.tool === "hot_review" ? payload : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   function normalizeProjectText(value) {
@@ -3856,7 +3904,10 @@ startRuntimeDebugPolling();
     window.requestAnimationFrame(() => {
       els.toolPanel?.classList.add("panel-open");
     });
-    updateUrlParams((params) => params.set("section", "tools"));
+    updateUrlParams((params) => {
+      params.set("section", "tools");
+      params.set("tool", tool.key);
+    });
   }
 
   function closeToolPanel() {
@@ -4858,10 +4909,11 @@ function renderToolForm(toolKey) {
   }
 
   function pickPreferredProjectId(projects) {
-    if (!projects.length) return null;
-    const running = projects.find((item) => RUNNING_STATUSES.has(item.status));
-    const paused = projects.find((item) => item.status === "paused");
-    return Number((running || paused || projects[0]).project_id || 0) || null;
+    const selectable = (Array.isArray(projects) ? projects : []).filter((item) => !isHotReviewAsset(item));
+    if (!selectable.length) return null;
+    const running = selectable.find((item) => RUNNING_STATUSES.has(item.status));
+    const paused = selectable.find((item) => item.status === "paused");
+    return Number((running || paused || selectable[0]).project_id || 0) || null;
   }
 
   // 把后台项目压成简洁任务列表，方便在同一账号下快速切换工作台。
@@ -5822,6 +5874,9 @@ function renderToolForm(toolKey) {
       savedAsset: result.saved_asset || data.saved_asset || null
     };
     state.toolResults[state.activeTool] = normalizeScriptAuditEcgResult(state.toolResults[state.activeTool]);
+    if (state.activeTool === "hot_review") {
+      persistHotReviewSession(state.toolResults.hot_review);
+    }
     renderToolOutput(state.activeTool);
     if (assetSaved) {
       if (state.toolResults[state.activeTool]?.savedAsset) {
@@ -5944,15 +5999,21 @@ function renderToolForm(toolKey) {
     }
     if (section === "tools") {
       window.setTimeout(() => {
-        if (els.assistantToolsFolder) {
-          els.assistantToolsFolder.open = true;
-        }
-        const projectId = params.get("project_id");
-        if (projectId) {
-          openHotReviewAssetFromList(projectId);
-        } else {
+        (async () => {
+          if (els.assistantToolsFolder) {
+            els.assistantToolsFolder.open = true;
+          }
+          const toolKey = params.get("tool") || state.activeTool || "hot_review";
+          state.activeTool = toolConfig(toolKey)?.key || state.activeTool;
+          const projectId = params.get("project_id");
+          if ((toolKey === "hot_review" || projectId) && await restoreHotReviewPanelFromSession(projectId || "")) {
+            return;
+          }
           openToolPanel(state.activeTool);
-        }
+        })().catch((error) => {
+          showToast("爆款文审核恢复失败", friendlyErrorText(error, "请刷新资产列表后重试。"));
+          openToolPanel(state.activeTool);
+        });
       }, 80);
       return;
     }
@@ -6484,7 +6545,7 @@ function renderToolForm(toolKey) {
 
 
   async function openHotReviewAssetFromList(assetKey) {
-    if (!assetKey) return;
+    if (!assetKey) return false;
     let asset = findOwnedAsset(assetKey)
       || state.assets.find((item) => String(hotReviewAssetKeyV5(item) || item.project_id || item.id || "") === String(assetKey))
       || state.projects.find((item) => String(hotReviewAssetKeyV5(item) || item.project_id || item.id || "") === String(assetKey))
@@ -6506,7 +6567,7 @@ function renderToolForm(toolKey) {
 
     if (!asset) {
       showToast("资产未找到", "请刷新资产列表后重试。");
-      return;
+      return false;
     }
 
     const payload = asset.input_payload || asset.request_payload || asset.tool_request || asset.tool_request_payload || {};
@@ -6518,9 +6579,31 @@ function renderToolForm(toolKey) {
     };
 
     state.toolResults.hot_review = normalizeScriptAuditEcgResult(toolResultFromAsset(asset));
+    persistHotReviewSession(state.toolResults.hot_review);
     openToolPanel("hot_review");
     renderToolForm("hot_review");
     renderToolOutput("hot_review");
+    return true;
+  }
+
+  async function restoreHotReviewPanelFromSession(assetKey = "") {
+    const session = readHotReviewSession();
+    const targetKey = String(assetKey || session?.assetKey || "").trim();
+    if (targetKey && await openHotReviewAssetFromList(targetKey)) {
+      return true;
+    }
+    if (session?.result) {
+      state.toolDrafts.hot_review = {
+        ...ensureToolDraft("hot_review"),
+        ...(session.draft || {}),
+      };
+      state.toolResults.hot_review = normalizeScriptAuditEcgResult(session.result);
+      openToolPanel("hot_review");
+      renderToolForm("hot_review");
+      renderToolOutput("hot_review");
+      return true;
+    }
+    return false;
   }
 
 
