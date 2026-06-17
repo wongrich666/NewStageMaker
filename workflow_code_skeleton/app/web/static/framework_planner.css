@@ -655,7 +655,7 @@ code { background: rgba(63, 95, 227, .08); padding: 1px 5px; border-radius: 6px;
 .fp-knowledge-list { display: grid; gap: 9px; }
 .fp-knowledge-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 10px;
   border: 1px solid var(--fp-border);
@@ -663,6 +663,15 @@ code { background: rgba(63, 95, 227, .08); padding: 1px 5px; border-radius: 6px;
   border-radius: 12px;
   padding: 10px;
 }
+.fp-knowledge-checkline {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+}
+.fp-knowledge-checkline > span { min-width: 0; }
 .fp-knowledge-item input { margin-top: 3px; }
 .fp-knowledge-item strong { display: block; margin-bottom: 3px; }
 .fp-knowledge-item small,
@@ -1121,9 +1130,7 @@ button,
 body,
 .fp-app {
   color: var(--fp-text);
-  background:
-    linear-gradient(rgba(255, 250, 243, 0.22), rgba(255, 244, 231, 0.34)),
-    url("cat-wallpaper.png") center center / cover no-repeat fixed;
+  background: transparent !important;
 }
 
 .fp-app {
@@ -1131,13 +1138,7 @@ body,
 }
 
 .fp-app:before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background: url("cat-wallpaper.png") center center / cover no-repeat;
-  opacity: 0.32;
-  z-index: 0;
+  display: none !important;
 }
 
 .fp-shell {

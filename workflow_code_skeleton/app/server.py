@@ -592,7 +592,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "target_format",
             "season_count",
             "episodes_per_season",
-            "minutes_per_episode",
+            "episode_word_count",
             "adaptation_direction",
             "user_constraints",
             "user_requirements",
@@ -830,7 +830,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "source_title": source_title,
             "target_format": str(basic.get("target_format") or project.get("target_format") or "短剧"),
             "episodes_per_season": _safe_positive_int(basic.get("episodes_per_season") or project.get("total_episodes"), 0),
-            "minutes_per_episode": _safe_positive_int(basic.get("minutes_per_episode"), 0),
+            "episode_word_count": _safe_positive_int(basic.get("episode_word_count"), 0),
             "season_count": _safe_positive_int(basic.get("season_count"), 1),
             "created_at": project.get("created_at") or framework_state.get("created_at"),
             "updated_at": project.get("updated_at") or framework_state.get("updated_at"),
@@ -4638,8 +4638,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     }
                 )
                 debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
-                minutes = _positive_int((framework_asset or {}).get("minutes_per_episode"), 2)
-                episode_word_count = _positive_int(data.get("episode_word_count"), max(600, minutes * 450))
+                episode_word_count = _positive_int(
+                    data.get("episode_word_count") or (framework_asset or {}).get("episode_word_count"),
+                    600,
+                )
                 total_episodes = _positive_int(
                     data.get("total_episodes") or (framework_asset or {}).get("episodes_per_season"),
                     end_episode,
@@ -5445,13 +5447,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             or basic_config.get("episodes_per_season"),
             60,
         )
-        minutes_per_episode = _safe_int(
-            data.get("minutes_per_episode") or basic_config.get("minutes_per_episode"),
-            2,
-        )
         episode_word_count = _safe_int(
-            data.get("episode_word_count"),
-            max(600, minutes_per_episode * 450),
+            data.get("episode_word_count") or basic_config.get("episode_word_count"),
+            600,
         )
 
         expectation_parts = [
@@ -5471,7 +5469,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "season_count": _safe_int(data.get("season_count") or basic_config.get("season_count"), 1),
             "episodes_per_season": total_episodes,
             "total_episodes": total_episodes,
-            "minutes_per_episode": minutes_per_episode,
             "episode_word_count": episode_word_count,
             "user_expectation": expectation,
             "user_requirements": str(data.get("user_requirements") or basic_config.get("user_requirements") or ""),

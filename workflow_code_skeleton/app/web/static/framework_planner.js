@@ -170,7 +170,7 @@
     target_format: "目标剧本形式",
     season_count: "季数",
     episodes_per_season: "每季集数",
-    minutes_per_episode: "单集分钟数",
+    episode_word_count: "每集字数",
     adaptation_direction: "写作方向",
     core_logline: "故事核心",
     protagonist: "主角",
@@ -183,7 +183,7 @@
     display_text: "可读摘要",
   };
   const SOURCE_BRIEF_GROUPS = [
-    ["基础信息", ["title", "source_type", "genre", "tone", "target_format", "season_count", "episodes_per_season", "minutes_per_episode"]],
+    ["基础信息", ["title", "source_type", "genre", "tone", "target_format", "season_count", "episodes_per_season", "episode_word_count"]],
     ["写作方向", ["adaptation_direction", "core_logline"]],
     ["核心人物与冲突", ["protagonist", "main_opposition", "core_conflict"]],
     ["保留与禁区", ["must_keep_elements", "forbidden_deviations"]],
@@ -267,7 +267,7 @@
       target_format: "短剧",
       season_count: 1,
       episodes_per_season: 60,
-      minutes_per_episode: 2,
+      episode_word_count: 600,
       adaptation_direction: "请保持强钩子、强反转、强情绪推进，并优先服务后续正式剧本生成链路。",
       user_constraints: "",
       user_requirements: "",
@@ -846,7 +846,7 @@
       "target_format",
       "season_count",
       "episodes_per_season",
-      "minutes_per_episode",
+      "episode_word_count",
       "adaptation_direction",
       "user_constraints",
       "user_requirements",
@@ -1008,6 +1008,7 @@
     }
     mergeInto(next, saved);
     next.basic_config = Object.assign(clone(initialState.basic_config), saved.basic_config || {});
+    next.basic_config.episode_word_count = positiveNumber(next.basic_config.episode_word_count, 600);
     next.feedback = Object.assign(clone(initialState.feedback), saved.feedback || {});
     next.editors = Object.assign(
       clone(initialState.editors),
@@ -2275,7 +2276,7 @@
     target_format: "类型 / 形式",
     season_count: "季数",
     episodes_per_season: "每季集数",
-    minutes_per_episode: "每集分钟数",
+    episode_word_count: "每集字数",
     adaptation_direction: "写作方向",
     user_constraints: "限制条件",
     story_outline: "故事描述",
@@ -2757,27 +2758,28 @@
     const frameworkPromptCount = STAGE_SEQUENCE.filter((stageKey) => String(prompts[stageKey] || "").trim()).length;
     const stageStatus = frameworkPromptCount ? `已设置 ${frameworkPromptCount}/7 个框架阶段偏好` : "未设置阶段偏好";
     return `
-      <label class="fp-knowledge-item">
-        <input type="checkbox" data-knowledge-tag-id="${escapeHtml(id)}" ${selected ? "checked" : ""} />
-        <span>
-          <strong>${escapeHtml(tag.name || id)}</strong>
-          <small>${escapeHtml(tag.category || (tag.builtin ? "默认标签" : "自定义"))} · ${tag.builtin ? "默认标签，可编辑" : "自定义标签"} · ${escapeHtml(stageStatus)}</small>
-          ${tag.description ? `<em>${escapeHtml(truncateText(tag.description, 90))}</em>` : ""}
-          <details class="fp-knowledge-stage-details">
-            <summary>查看 01-07 阶段提示词</summary>
-            <div>
-              ${ALL_STAGE_PREFERENCE_KEYS.map((stageKey) => `
-                <p><strong>${escapeHtml(stagePromptLabel(stageKey))}</strong><span>${escapeHtml(truncateText(prompts[stageKey] || "", 120) || "暂无")}</span></p>
-              `).join("")}
-            </div>
-          </details>
-        </span>
+      <article class="fp-knowledge-item">
+        <label class="fp-knowledge-checkline">
+          <input type="checkbox" data-knowledge-tag-id="${escapeHtml(id)}" ${selected ? "checked" : ""} />
+          <span>
+            <strong>${escapeHtml(tag.name || id)}</strong>
+            <small>${escapeHtml(tag.category || (tag.builtin ? "默认标签" : "自定义"))} · ${tag.builtin ? "默认标签，可编辑" : "自定义标签"} · ${escapeHtml(stageStatus)}</small>
+            ${tag.description ? `<em>${escapeHtml(truncateText(tag.description, 90))}</em>` : ""}
+            <details class="fp-knowledge-stage-details">
+              <summary>查看 01-07 阶段提示词</summary>
+              <div>
+                ${ALL_STAGE_PREFERENCE_KEYS.map((stageKey) => `
+                  <p><strong>${escapeHtml(stagePromptLabel(stageKey))}</strong><span>${escapeHtml(truncateText(prompts[stageKey] || "", 120) || "暂无")}</span></p>
+                `).join("")}
+              </div>
+            </details>
+          </span>
+        </label>
         <span class="fp-knowledge-item-actions">
-          <button class="fp-btn small primary" type="button" data-action="edit-knowledge-stage-prompts" data-tag-id="${escapeHtml(id)}" title="点击编辑该标签下 01-07 阶段提示词">✍️</button>
-          <button class="fp-btn small" type="button" data-action="edit-knowledge-tag" data-tag-id="${escapeHtml(id)}">编辑</button>
+          <button class="fp-btn small primary" type="button" data-action="edit-knowledge-tag" data-tag-id="${escapeHtml(id)}" title="编辑该标签和 01-07 阶段提示词">✍️ 编辑</button>
           <button class="fp-btn small danger subtle" type="button" data-action="delete-knowledge-tag" data-tag-id="${escapeHtml(id)}">${tag.builtin ? "隐藏" : "删除"}</button>
         </span>
-      </label>
+      </article>
     `;
   }
 
@@ -2813,7 +2815,7 @@
             <h3>${editing ? `编辑标签偏好：${escapeHtml(form.name || "未命名标签")}` : "新建自定义标签"}</h3>
             <p class="fp-card-sub">通用偏好保留旧逻辑；阶段偏好只注入 01-07 框架策划阶段。</p>
           </div>
-          <button class="fp-btn small" data-action="cancel-knowledge-edit">取消</button>
+          <button class="fp-btn small" type="button" data-action="cancel-knowledge-edit">取消</button>
         </div>
         <div class="fp-grid three">
           <label class="fp-field"><span>名称</span><input data-knowledge-form-key="name" value="${escapeHtml(form.name)}" /></label>
@@ -2830,15 +2832,35 @@
           `).join("")}
         </div>
         <div class="fp-actions">
-          <button class="fp-btn primary" data-action="save-knowledge-tag">${editing ? "保存该标签阶段偏好" : "创建标签"}</button>
+          <button class="fp-btn primary" type="button" data-action="save-knowledge-tag">${editing ? "保存该标签阶段偏好" : "创建标签"}</button>
         </div>
       </div>
     `;
   }
 
+  function isFrameworkPlannerAsset(item) {
+    if (!item || typeof item !== "object") return false;
+    const input = item.input_payload && typeof item.input_payload === "object" ? item.input_payload : {};
+    const artifacts = item.artifacts && typeof item.artifacts === "object" ? item.artifacts : {};
+    const assetKind = String(item.asset_kind || input.asset_kind || "").trim();
+    const assetType = String(item.asset_type || input.asset_type || item.category || input.category || "").trim();
+    const workflowType = String(item.workflow_type || input.workflow_type || "").trim();
+    if (assetKind === "framework_planner") return true;
+    if (assetType === "framework" || assetType === "framework_planner") return true;
+    if (workflowType === "framework_planner") return true;
+    return Boolean(
+      item.framework_planner_state
+      || input.framework_planner_state
+      || artifacts.framework_planner_state
+      || item.framework_plan_package
+      || input.framework_plan_package
+      || artifacts.framework_plan_package
+    );
+  }
+
   function filteredAssets() {
     const query = ui.assetSearch.trim().toLowerCase();
-    let items = ui.assets.slice();
+    let items = ui.assets.filter(isFrameworkPlannerAsset);
     if (query) {
       items = items.filter((item) => `${item.title || ""} ${item.summary || ""}`.toLowerCase().includes(query));
     }
@@ -2987,8 +3009,8 @@
             <input type="number" min="15" data-config-key="episodes_per_season" value="${escapeHtml(state.basic_config.episodes_per_season)}" ${locked ? "disabled" : ""} />
           </div>
           <div class="fp-field">
-            <label>每集分钟数</label>
-            <input type="number" min="1" data-config-key="minutes_per_episode" value="${escapeHtml(state.basic_config.minutes_per_episode)}" ${locked ? "disabled" : ""} />
+            <label>每集字数</label>
+            <input type="number" min="100" step="50" data-config-key="episode_word_count" value="${escapeHtml(state.basic_config.episode_word_count || 600)}" ${locked ? "disabled" : ""} />
           </div>
         </div>
         <div class="fp-field" style="margin-top:14px">
@@ -3788,7 +3810,7 @@ function renderPackageBlocks() {
       project_title: basic.project_title || basic.source_title || "",
       title: basic.project_title || basic.source_title || "",
       episodes_per_season: basic.episodes_per_season,
-      minutes_per_episode: basic.minutes_per_episode,
+      episode_word_count: basic.episode_word_count,
       target_format: basic.target_format,
       adaptation_direction: basic.adaptation_direction,
       frameworkPlanPackage: clone(state.framework_plan_package || {}),
@@ -4861,7 +4883,7 @@ function renderPackageBlocks() {
     const seasonCount = positiveNumber(basic.season_count, 1);
     const episodesPerSeason = positiveNumber(basic.episodes_per_season, 60);
     const totalEpisodes = positiveNumber(basic.total_episodes, seasonCount * episodesPerSeason);
-    const minutesPerEpisode = positiveNumber(basic.minutes_per_episode, 2);
+    const episodeWordCount = positiveNumber(basic.episode_word_count, 600);
     const title = String(basic.project_title || basic.source_title || "未命名框架剧本").trim();
     const payload = {
       title,
@@ -4871,8 +4893,7 @@ function renderPackageBlocks() {
       season_count: seasonCount,
       episodes_per_season: episodesPerSeason,
       total_episodes: totalEpisodes,
-      minutes_per_episode: minutesPerEpisode,
-      episode_word_count: basic.episode_word_count ? positiveNumber(basic.episode_word_count, undefined) : undefined,
+      episode_word_count: episodeWordCount,
       source_framework_project_id: currentProjectId(),
       project_id: currentProjectId(),
       user_expectation: [
@@ -4993,7 +5014,7 @@ function renderPackageBlocks() {
         target_format: state.basic_config.target_format,
         season_count: state.basic_config.season_count,
         episodes_per_season: state.basic_config.episodes_per_season,
-        minutes_per_episode: state.basic_config.minutes_per_episode,
+        episode_word_count: state.basic_config.episode_word_count,
         adaptation_direction: state.basic_config.adaptation_direction,
         user_constraints: state.basic_config.user_constraints,
         user_requirements: payloadUserRequirements(),
@@ -6297,7 +6318,7 @@ async function saveFrameworkAsset(options) {
     if (ui.assetsOpen) render();
     try {
       const data = await requestJson("/api/assets");
-      ui.assets = Array.isArray(data.assets) ? data.assets : [];
+      ui.assets = (Array.isArray(data.assets) ? data.assets : []).filter(isFrameworkPlannerAsset);
     } catch (error) {
       showToast(error.message || "资产列表加载失败");
     } finally {
@@ -6934,6 +6955,10 @@ async function saveFrameworkAsset(options) {
     }
     const actionElement = event.target.closest("[data-action]");
     if (!actionElement) return;
+    if (actionElement.matches("button, a, .fp-modal-mask")) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     const action = actionElement.dataset.action;
     if (ui.assetImporting) return;
 

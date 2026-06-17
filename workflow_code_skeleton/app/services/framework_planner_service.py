@@ -707,7 +707,7 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "target_format",
             "season_count",
             "episodes_per_season",
-            "minutes_per_episode",
+            "episode_word_count",
             "adaptation_direction",
             "user_constraints",
             "user_requirements",
@@ -726,7 +726,7 @@ STAGE_DEFINITIONS: dict[str, FrameworkPlannerStageDefinition] = {
             "target_format": ("target_format",),
             "season_count": ("season_count",),
             "episodes_per_season": ("episodes_per_season",),
-            "minutes_per_episode": ("minutes_per_episode",),
+            "episode_word_count": ("episode_word_count",),
             "adaptation_direction": ("adaptation_direction",),
             "user_constraints": ("user_constraints",),
             "user_requirements": ("user_requirements",),
@@ -3479,7 +3479,7 @@ def _compact_stage_05_basic_config(value: Any) -> dict[str, Any]:
         "target_format",
         "season_count",
         "episodes_per_season",
-        "minutes_per_episode",
+        "episode_word_count",
         "adaptation_direction",
         "user_constraints",
         "user_requirements",
@@ -4055,7 +4055,7 @@ def _ensure_source_brief_core_fields(value: dict[str, Any]) -> dict[str, Any]:
     result.setdefault("target_format", result.get("format") or "短剧")
     result.setdefault("season_count", 1)
     result.setdefault("episodes_per_season", result.get("total_episodes") or 60)
-    result.setdefault("minutes_per_episode", 2)
+    result.setdefault("episode_word_count", 600)
     result.setdefault("core_premise", content or "核心故事信息待人工补充")
     result.setdefault("story_outline", result.get("outline") or result["core_premise"])
     result.setdefault("adaptation_direction", result.get("direction") or "保持强钩子、强反转、强情绪推进")
@@ -4814,7 +4814,7 @@ def _build_mock_stage_output(stage: str, payload: dict[str, Any]) -> tuple[dict[
             "season_plan": {
                 "season_count": int(payload.get("season_count") or 1),
                 "episodes_per_season": int(payload.get("episodes_per_season") or 60),
-                "minutes_per_episode": int(payload.get("minutes_per_episode") or 2),
+                "episode_word_count": int(payload.get("episode_word_count") or 600),
             },
             "core_premise": source_text[:180] or "当前为 mock 提取结果，请在接入真实原文后替换。",
             "main_conflict": "主角被旧秩序压制，被迫进入更高风险的规则体系中完成自我翻盘。",
@@ -5226,7 +5226,7 @@ def _overlay_source_brief_locked_fields(
         "target_format",
         "season_count",
         "episodes_per_season",
-        "minutes_per_episode",
+        "episode_word_count",
         "adaptation_direction",
     ):
         value = _payload_config_value(payload, key)

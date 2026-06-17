@@ -6495,7 +6495,10 @@ function renderToolForm(toolKey) {
       try {
         const detail = await requestJson(`/api/projects/${encodeURIComponent(projectId)}`);
         const detailAsset = detail.project || detail.asset || null;
-        if (detailAsset) asset = { ...(asset || {}), ...detailAsset };
+        if (detailAsset) {
+          asset = { ...(asset || {}), ...detailAsset };
+          mergeProjectListAsset(asset);
+        }
       } catch (_) {
         // 详情失败时保留列表快照。
       }

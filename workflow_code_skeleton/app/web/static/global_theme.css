@@ -84,12 +84,23 @@ html {
 
 body,
 .workspace-body,
-.home-body,
-.fp-app {
+.home-body {
   position: relative;
   isolation: isolate;
   color: var(--theme-text);
   background: var(--theme-bg) !important;
+}
+
+.fp-app {
+  position: relative;
+  isolation: isolate;
+  color: var(--theme-text);
+  background: transparent !important;
+}
+
+.fp-shell,
+.fp-main {
+  background: transparent !important;
 }
 
 body::before {
