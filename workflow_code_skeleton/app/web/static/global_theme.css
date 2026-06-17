@@ -15,13 +15,6 @@
   --theme-success: #5f9a72;
   --theme-danger: #b84f43;
   --theme-shadow: 0 18px 46px rgba(92, 56, 25, 0.11);
-  --cat-drift-x: 2.4vw;
-  --cat-drift-y: 1.6vh;
-  --cat-drift-scale: 1.035;
-  --cat-drift-x2: -1.8vw;
-  --cat-drift-y2: 1.2vh;
-  --cat-drift-scale2: 1.045;
-  --cat-focus-blur: 0.35px;
 
   --color-bg: var(--theme-bg);
   --color-panel: var(--theme-panel);
@@ -103,42 +96,76 @@ body,
   background: transparent !important;
 }
 
-body::before {
-  content: "";
+.cat-theme-background {
   position: fixed;
-  inset: -12vmax;
+  inset: 0;
   z-index: 0;
   pointer-events: none;
-  background:
-    linear-gradient(rgba(255, 250, 243, 0.18), rgba(255, 244, 231, 0.28)),
-    url("cat-wallpaper.png") center center / cover no-repeat;
-  background-repeat: no-repeat, no-repeat;
-  background-size: auto, cover;
-  transform: translate3d(calc(var(--cat-drift-x) * -0.32), calc(var(--cat-drift-y) * -0.24), 0) scale(var(--cat-drift-scale));
-  filter: saturate(0.98) blur(var(--cat-focus-blur));
-  animation: catWallpaperFloat 43s cubic-bezier(0.33, 0, 0.2, 1) infinite alternate;
-  transform-origin: center;
-  will-change: transform, filter;
+  overflow: hidden;
+  background: var(--theme-bg);
+  contain: layout paint style;
 }
 
-body::after {
-  content: "";
-  position: fixed;
-  inset: -10vmax;
-  z-index: 0;
+.cat-theme-layer,
+.cat-theme-blob,
+.cat-theme-particle,
+.cat-theme-line {
+  position: absolute;
+  left: 0;
+  top: 0;
   pointer-events: none;
-  background:
-    linear-gradient(rgba(255, 248, 238, 0.62), rgba(255, 246, 234, 0.5)),
-    url("cat-wallpaper.png") 50% 50% / cover no-repeat,
-    radial-gradient(circle at 18% 12%, rgba(255, 238, 213, 0.44), transparent 34%),
-    radial-gradient(circle at 82% 72%, rgba(255, 245, 229, 0.32), transparent 32%);
-  opacity: 0.34;
-  mix-blend-mode: soft-light;
-  transform: translate3d(var(--cat-drift-x2), var(--cat-drift-y2), 0) scale(var(--cat-drift-scale2));
-  filter: blur(calc(var(--cat-focus-blur) + 0.8px));
-  animation: catWallpaperParallax 57s cubic-bezier(0.22, 0.08, 0.18, 1) infinite alternate-reverse;
+  transform: translate3d(0, 0, 0);
   transform-origin: center;
-  will-change: transform, filter;
+  will-change: transform, opacity, filter;
+  backface-visibility: hidden;
+}
+
+.cat-theme-layer {
+  inset: -14vmax;
+}
+
+.cat-theme-photo {
+  background:
+    linear-gradient(rgba(255, 251, 245, 0.36), rgba(255, 244, 231, 0.44)),
+    url("cat-wallpaper.png") center center / cover no-repeat;
+  opacity: 0.72;
+  filter: saturate(0.96) blur(0.1px);
+}
+
+.cat-theme-haze {
+  background:
+    radial-gradient(circle at 18% 12%, rgba(255, 229, 198, 0.42), transparent 32%),
+    radial-gradient(circle at 74% 24%, rgba(255, 247, 218, 0.36), transparent 34%),
+    radial-gradient(circle at 48% 86%, rgba(255, 218, 196, 0.34), transparent 38%),
+    linear-gradient(135deg, rgba(255, 250, 240, 0.52), rgba(255, 237, 220, 0.36));
+  mix-blend-mode: soft-light;
+  opacity: 0.62;
+  filter: blur(18px);
+}
+
+.cat-theme-blob {
+  width: var(--cat-blob-size, 36vmax);
+  height: var(--cat-blob-size, 36vmax);
+  border-radius: 999px;
+  background: var(--cat-blob-bg, rgba(255, 220, 170, 0.32));
+  mix-blend-mode: soft-light;
+  filter: blur(var(--cat-blob-blur, 26px));
+}
+
+.cat-theme-particle {
+  width: var(--cat-particle-size, 5px);
+  height: var(--cat-particle-size, 5px);
+  border-radius: 999px;
+  background: rgba(173, 116, 74, 0.3);
+  box-shadow: 0 0 12px rgba(255, 232, 202, 0.52);
+}
+
+.cat-theme-line {
+  width: var(--cat-line-width, 64px);
+  height: 1px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(156, 106, 76, 0.22), transparent);
+  filter: blur(0.35px);
 }
 
 body > * {
@@ -146,43 +173,7 @@ body > * {
   z-index: 1;
 }
 
-.fp-app::before {
-  display: none !important;
-}
-
-@keyframes catWallpaperFloat {
-  0% {
-    transform: translate3d(calc(var(--cat-drift-x) * -0.32), calc(var(--cat-drift-y) * -0.24), 0) scale(var(--cat-drift-scale));
-    filter: saturate(0.98) blur(var(--cat-focus-blur));
-  }
-  27% {
-    transform: translate3d(calc(var(--cat-drift-x) * 0.18), calc(var(--cat-drift-y) * -0.42), 0) scale(calc(var(--cat-drift-scale) + 0.009));
-    filter: saturate(1.01) blur(calc(var(--cat-focus-blur) + 0.18px));
-  }
-  61% {
-    transform: translate3d(calc(var(--cat-drift-x) * 0.52), calc(var(--cat-drift-y) * 0.16), 0) scale(calc(var(--cat-drift-scale) + 0.018));
-    filter: saturate(0.97) blur(calc(var(--cat-focus-blur) + 0.42px));
-  }
-  100% {
-    transform: translate3d(calc(var(--cat-drift-x) * -0.08), calc(var(--cat-drift-y) * 0.48), 0) scale(calc(var(--cat-drift-scale) + 0.012));
-    filter: saturate(1) blur(calc(var(--cat-focus-blur) + 0.08px));
-  }
-}
-
-@keyframes catWallpaperParallax {
-  0% {
-    transform: translate3d(calc(var(--cat-drift-x2) * 0.38), calc(var(--cat-drift-y2) * -0.2), 0) scale(var(--cat-drift-scale2));
-  }
-  39% {
-    transform: translate3d(calc(var(--cat-drift-x2) * -0.22), calc(var(--cat-drift-y2) * 0.44), 0) scale(calc(var(--cat-drift-scale2) + 0.016));
-  }
-  74% {
-    transform: translate3d(calc(var(--cat-drift-x2) * -0.5), calc(var(--cat-drift-y2) * -0.08), 0) scale(calc(var(--cat-drift-scale2) + 0.024));
-  }
-  100% {
-    transform: translate3d(calc(var(--cat-drift-x2) * 0.18), calc(var(--cat-drift-y2) * 0.36), 0) scale(calc(var(--cat-drift-scale2) + 0.008));
-  }
-}
+.fp-app::before { display: none !important; }
 
 .workspace-sidebar,
 .workspace-body .workspace-sidebar,
@@ -568,24 +559,11 @@ select:focus,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  body::before,
-  body::after {
-    animation: none;
-    filter: none;
-  }
-
-  body::before {
-    transform: scale(1.04);
+  .cat-theme-background {
+    opacity: 0.92;
   }
 
   .cat-theme-ripple {
     display: none;
-  }
-}
-
-@media (max-width: 760px) {
-  body::before {
-    inset: -10vmax;
-    background-size: cover;
   }
 }
