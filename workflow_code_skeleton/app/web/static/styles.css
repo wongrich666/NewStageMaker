@@ -5890,6 +5890,14 @@ body,
   min-width: 820px;
 }
 
+.audit-episode-band {
+  fill: rgba(255, 246, 232, 0.22);
+}
+
+.audit-episode-band.is-alt {
+  fill: rgba(244, 214, 176, 0.16);
+}
+
 .audit-episode-marker {
   stroke: rgba(155, 113, 65, 0.24);
   stroke-width: 1;

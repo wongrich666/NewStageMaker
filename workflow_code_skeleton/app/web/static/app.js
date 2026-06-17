@@ -3479,42 +3479,104 @@ startRuntimeDebugPolling();
   }
 
   function renderAuditEcgChart(chart) {
-    const points = auditArray(chart?.points);
-    if (!points.length) {
+    const sourcePoints = auditArray(chart?.points);
+    if (!sourcePoints.length) {
       return `<section class="audit-panel"><h4>剧本心电图</h4><p class="audit-empty">暂无心电点位。</p></section>`;
     }
 
-    const width = Math.max(820, points.length * 38 + 120);
+    const points = sourcePoints.slice().sort((a, b) =>
+      (auditNumber(a.episode_no, 0) - auditNumber(b.episode_no, 0))
+      || (auditNumber(a.segment_index_global || a.segment_index, 0) - auditNumber(b.segment_index_global || b.segment_index, 0))
+      || (auditNumber(a.segment_index_in_episode, 0) - auditNumber(b.segment_index_in_episode, 0))
+      || (auditNumber(a.scene_no, 0) - auditNumber(b.scene_no, 0))
+      || (auditNumber(a.start_offset, 0) - auditNumber(b.start_offset, 0))
+      || (auditNumber(a.x, 0) - auditNumber(b.x, 0))
+    );
+    const markerEpisodes = auditArray(chart?.episode_markers)
+      .map((item) => auditNumber(item.episode_no, 0))
+      .filter(Boolean);
+    const pointEpisodes = points.map((point) => auditNumber(point.episode_no, 0)).filter(Boolean);
+    const orderedEpisodeNos = [...new Set([...markerEpisodes, ...pointEpisodes])].sort((a, b) => a - b);
+    const unknownPoints = points.filter((point) => !auditNumber(point.episode_no, 0));
+    const episodeGroups = orderedEpisodeNos.map((episodeNo) => ({
+      episodeNo,
+      label: `第${episodeNo}集`,
+      points: points.filter((point) => auditNumber(point.episode_no, 0) === episodeNo)
+    }));
+    if (unknownPoints.length) {
+      episodeGroups.push({
+        episodeNo: 0,
+        label: "未标集数",
+        points: unknownPoints
+      });
+    }
+
+    const sectionGap = 10;
+    const minSectionW = 48;
+    const pointGap = 36;
+    const sectionPad = 14;
+    const sectionWidths = episodeGroups.map((group) =>
+      Math.max(minSectionW, sectionPad * 2 + Math.max(0, group.points.length - 1) * pointGap)
+    );
+    const width = Math.max(920, sectionWidths.reduce((sum, value) => sum + value, 0) + Math.max(0, episodeGroups.length - 1) * sectionGap + 108);
     const height = 300;
     const padX = 54;
     const padY = 34;
-    const plotW = width - padX * 2;
     const plotH = height - padY * 2;
     const maxAbs = 5;
-    const xOf = (index) => padX + (points.length <= 1 ? plotW / 2 : index * (plotW / (points.length - 1)));
     const yOf = (value) => padY + ((maxAbs - Math.max(-maxAbs, Math.min(maxAbs, value))) / (maxAbs * 2)) * plotH;
     const zeroY = yOf(0);
+    const pointLayouts = [];
+    const episodeLayouts = [];
+    let cursorX = padX;
+    episodeGroups.forEach((group, groupIndex) => {
+      const sectionW = sectionWidths[groupIndex];
+      const startX = cursorX;
+      const centerX = startX + sectionW / 2;
+      const groupPoints = group.points;
+      episodeLayouts.push({
+        ...group,
+        startX,
+        centerX,
+        endX: startX + sectionW,
+        width: sectionW
+      });
+      groupPoints.forEach((point, pointIndex) => {
+        const x = groupPoints.length <= 1
+          ? centerX
+          : startX + sectionPad + pointIndex * ((sectionW - sectionPad * 2) / Math.max(1, groupPoints.length - 1));
+        pointLayouts.push({ point, index: points.indexOf(point), x });
+      });
+      cursorX += sectionW + sectionGap;
+    });
+    pointLayouts.sort((a, b) => a.x - b.x);
 
-    const segments = points.slice(1).map((point, index) => {
-      const prev = points[index];
+    const episodeBands = episodeLayouts.map((group, index) => `
+      <rect class="audit-episode-band ${index % 2 ? "is-alt" : ""}" x="${group.startX.toFixed(1)}" y="${padY}" width="${group.width.toFixed(1)}" height="${plotH}"></rect>
+    `).join("");
+
+    const segments = pointLayouts.slice(1).map((layout, index) => {
+      const point = layout.point;
+      const prevLayout = pointLayouts[index];
+      const prev = prevLayout.point;
       const v1 = auditNumber(prev.ecg_value);
       const v2 = auditNumber(point.ecg_value);
       const klass = (v1 + v2) / 2 >= 0 ? "audit-ecg-line-pos" : "audit-ecg-line-neg";
-      return `<line class="${klass}" x1="${xOf(index).toFixed(1)}" y1="${yOf(v1).toFixed(1)}" x2="${xOf(index + 1).toFixed(1)}" y2="${yOf(v2).toFixed(1)}"></line>`;
+      return `<line class="${klass}" x1="${prevLayout.x.toFixed(1)}" y1="${yOf(v1).toFixed(1)}" x2="${layout.x.toFixed(1)}" y2="${yOf(v2).toFixed(1)}"></line>`;
     }).join("");
 
-    const episodeNos = [...new Set(points.map((point) => auditNumber(point.episode_no, 0)).filter(Boolean))];
-    const episodeLines = episodeNos.map((episodeNo) => {
-      const firstIndex = points.findIndex((point) => auditNumber(point.episode_no, 0) === episodeNo);
-      if (firstIndex < 0) return "";
-      const x = xOf(firstIndex);
+    const episodeLines = episodeLayouts.map((group) => {
+      const x = group.startX;
+      const countLabel = group.points.length > 1 ? ` · ${group.points.length}点` : "";
       return `
         <line class="audit-episode-marker" x1="${x.toFixed(1)}" y1="${padY}" x2="${x.toFixed(1)}" y2="${height - padY}"></line>
-        <text class="audit-episode-label" x="${(x + 4).toFixed(1)}" y="${height - 8}">第${episodeNo}集</text>
+        <text class="audit-episode-label" x="${group.centerX.toFixed(1)}" y="${height - 8}" text-anchor="middle">${escapeHtml(group.label + countLabel)}</text>
       `;
     }).join("");
 
-    const circles = points.map((point, index) => {
+    const circles = pointLayouts.map((layout) => {
+      const point = layout.point;
+      const index = layout.index;
       const value = auditNumber(point.ecg_value);
       const klass = value >= 0 ? "audit-ecg-dot-pos" : "audit-ecg-dot-neg";
       const title = auditText(point.hover_title || point?.hover_card?.title || point.short_label || point.event_type || point.point_id, `第${index + 1}点`);
@@ -3522,7 +3584,7 @@ startRuntimeDebugPolling();
       const tooltip = `第${point.episode_no || "?"}集｜${auditScoreText(value)}｜${title}${reason ? "｜" + reason : ""}`;
       return `
         <g class="audit-ecg-node" data-action="show-audit-point" data-point-index="${index}" tabindex="0">
-          <circle class="audit-ecg-dot ${klass}" cx="${xOf(index).toFixed(1)}" cy="${yOf(value).toFixed(1)}" r="5.5"></circle>
+          <circle class="audit-ecg-dot ${klass}" cx="${layout.x.toFixed(1)}" cy="${yOf(value).toFixed(1)}" r="5.5"></circle>
           <title>${escapeHtml(tooltip)}</title>
         </g>
       `;
@@ -3539,6 +3601,7 @@ startRuntimeDebugPolling();
         </div>
         <div class="audit-ecg-wrap" data-audit-chart='${escapeHtml(JSON.stringify(points))}'>
           <svg class="audit-ecg-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="剧本心电图">
+            ${episodeBands}
             <line class="audit-ecg-axis" x1="${padX}" y1="${zeroY.toFixed(1)}" x2="${width - padX}" y2="${zeroY.toFixed(1)}"></line>
             <text class="audit-ecg-label" x="8" y="${yOf(5).toFixed(1)}">+5</text>
             <text class="audit-ecg-label" x="8" y="${zeroY.toFixed(1)}">0</text>
