@@ -205,9 +205,24 @@ class UserKnowledgeApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         tag = response.get_json()["tag"]
-        self.assertTrue(tag["builtin"])
+        self.assertFalse(tag["builtin"])
+        self.assertEqual(tag["source"], f"user_override:{builtin['id']}")
         self.assertEqual(tag["name"], "可编辑默认标签")
         self.assertEqual(tag["stage_prompts"]["worldview"], "只改世界观阶段")
+
+    def test_custom_tags_are_isolated_by_user(self) -> None:
+        other_headers = _auth_headers()
+        created = self.client.post(
+            "/api/user-knowledge/tags",
+            headers=self.headers,
+            json={"name": "我的私有标签", "stage_prompts": {"basic": "只属于我"}},
+        ).get_json()["tag"]
+
+        mine = self.client.get("/api/user-knowledge/tags", headers=self.headers).get_json()["tags"]
+        other = self.client.get("/api/user-knowledge/tags", headers=other_headers).get_json()["tags"]
+
+        self.assertTrue(any(tag["id"] == created["id"] for tag in mine))
+        self.assertFalse(any(tag["id"] == created["id"] for tag in other))
 
     def test_apply_tags_api_empty_selection(self) -> None:
         response = self.client.post(

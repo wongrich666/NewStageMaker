@@ -1166,17 +1166,20 @@
 
   function normalizeImportedFrameworkJson(source) {
     const data = source && typeof source === "object" ? source : {};
-    const stageOutputs = data.stageOutputs || data.stage_outputs || {};
+    const workspaceState = data.framework_to_script_state || data.frameworkToScriptState || data.workspace_state || {};
+    const scriptStages = data.scriptStages || data.script_stages || workspaceState.scriptStages || {};
+    const stageOutputs = data.stageOutputs || data.stage_outputs || workspaceState.stageOutputs || {};
+    const stage10Source = scriptStages.stage10 || data.stage10 || stageOutputs.stage10 || {};
     let frameworkPlanPackage =
       data.frameworkPlanPackage ||
       data.framework_plan_package ||
       stageOutputs.framework_plan_package ||
       data.framework_plan ||
       {};
-    if (!hasObject(frameworkPlanPackage) && !hasObject(stageOutputs)) {
-      throw new Error("导入失败：缺少 frameworkPlanPackage 或 stageOutputs，无法进入框架到剧本阶段。");
+    if (!hasObject(frameworkPlanPackage) && !hasObject(stageOutputs) && !hasObject(scriptStages)) {
+      throw new Error("导入失败：缺少 frameworkPlanPackage、stageOutputs 或 scriptStages，无法进入框架到剧本阶段。");
     }
-    if (!hasObject(frameworkPlanPackage) && hasObject(stageOutputs)) {
+    if (!hasObject(frameworkPlanPackage) && (hasObject(stageOutputs) || hasObject(scriptStages))) {
       frameworkPlanPackage = {
         source_brief: stageOutputs.source_brief || {},
         worldview_plan: stageOutputs.worldview_plan || {},
@@ -1188,21 +1191,18 @@
       };
     }
     const basic = data.basic_config || data.basicConfig || {};
-    const title = data.project_title || data.source_title || data.title || basic.project_title || basic.source_title || frameworkPlanPackage.project_title || "";
-    const episodes = Number(data.episodes_per_season || data.total_episodes || basic.episodes_per_season || basic.total_episodes || frameworkPlanPackage.episodes_per_season || 0);
-    if (!String(title || "").trim()) {
-      throw new Error("导入失败：无法确定项目标题。");
-    }
-    if (!episodes) {
-      throw new Error("导入失败：无法确定总集数。");
-    }
-    if (!hasObject(frameworkPlanPackage)) {
-      throw new Error("导入失败：无法确定框架核心内容。");
-    }
     const allEnrichedEpisodePlan = data.allEnrichedEpisodePlan
       || data.all_enriched_episode_plan
+      || stage10Source.allEnrichedEpisodePlan
+      || stage10Source.enrichedEpisodePlan
+      || stage10Source.batchEnrichedEpisodePlan
       || stageOutputs.allEnrichedEpisodePlan
       || stageOutputs.all_enriched_episode_plan
+      || stageOutputs.batchEnrichedEpisodePlan
+      || stageOutputs.batch_enriched_episode_plan
+      || (stageOutputs.framework_enriched_episode_plan || {}).allEnrichedEpisodePlan
+      || (stageOutputs.framework_enriched_episode_plan || {}).enrichedEpisodePlan
+      || (stageOutputs.framework_enriched_episode_plan || {}).batchEnrichedEpisodePlan
       || frameworkPlanPackage.allEnrichedEpisodePlan
       || frameworkPlanPackage.all_enriched_episode_plan
       || frameworkPlanPackage.enrichedEpisodePlan
@@ -1210,17 +1210,33 @@
       || [];
     const allEnrichedEpisodePlanText = data.allEnrichedEpisodePlanText
       || data.all_enriched_episode_plan_text
+      || stage10Source.allEnrichedEpisodePlanText
+      || stage10Source.enrichedEpisodePlanText
       || stageOutputs.allEnrichedEpisodePlanText
       || stageOutputs.all_enriched_episode_plan_text
+      || (stageOutputs.framework_enriched_episode_plan || {}).allEnrichedEpisodePlanText
+      || (stageOutputs.framework_enriched_episode_plan || {}).enrichedEpisodePlanText
       || frameworkPlanPackage.allEnrichedEpisodePlanText
       || frameworkPlanPackage.all_enriched_episode_plan_text
       || frameworkPlanPackage.enrichedEpisodePlanText
       || frameworkPlanPackage.enriched_episode_plan_text
       || "";
     const normalizedEpisodePlan = normalizeEpisodePlanItems(allEnrichedEpisodePlan);
-    if (normalizedEpisodePlan.length) {
+    const title = data.project_title || data.source_title || data.title || basic.project_title || basic.source_title || frameworkPlanPackage.project_title || "导入的框架 JSON";
+    const inferredFromPlan = inferTotalEpisodes(normalizedEpisodePlan, data);
+    const inferredFromText = episodeNumbersFromText(allEnrichedEpisodePlanText);
+    const episodes = Number(data.episodes_per_season || data.total_episodes || basic.episodes_per_season || basic.total_episodes || frameworkPlanPackage.episodes_per_season || inferredFromPlan || (inferredFromText.length ? Math.max(...inferredFromText) : 0));
+    if (!String(title || "").trim()) {
+      throw new Error("导入失败：无法确定项目标题。");
+    }
+    if (!hasObject(frameworkPlanPackage)) {
+      throw new Error("导入失败：无法确定框架核心内容。");
+    }
+    if (normalizedEpisodePlan.length && episodes) {
       const validation = validateStage10Completeness(normalizedEpisodePlan, allEnrichedEpisodePlanText, episodes);
-      if (!validation.ok) throw new Error(`导入失败：${validation.issues.join("；")}`);
+      if (!validation.ok) {
+        console.warn("[framework_to_script] imported stage10 validation warnings", validation.issues);
+      }
     }
     return {
       title,
@@ -1256,15 +1272,17 @@
         allEnrichedEpisodePlanText,
         batchEnrichedEpisodePlan: normalizedEpisodePlan,
       },
-      scriptStages: normalizedEpisodePlan.length ? {
+      scriptStages: Object.assign({}, scriptStages, normalizedEpisodePlan.length || allEnrichedEpisodePlanText ? {
         stage10: {
+          ...(scriptStages.stage10 || {}),
           allEnrichedEpisodePlan: normalizedEpisodePlan,
           enrichedEpisodePlan: normalizedEpisodePlan,
           batchEnrichedEpisodePlan: normalizedEpisodePlan,
           allEnrichedEpisodePlanText,
+          enrichedEpisodePlanText: allEnrichedEpisodePlanText,
           episodeValidation: { ok: true, issues: [] },
         },
-      } : {},
+      } : {}),
     };
   }
 
@@ -1903,12 +1921,12 @@
           <button type="button" class="wts-btn ghost" data-action="close-asset-panel">收起</button>
         </div>
         ${state.isLoadingAsset ? `<div class="wts-loading">正在读取框架资产...</div>` : ""}
-        <div class="wts-import-json">
+        <div class="wts-import-json" data-import-json-drop-zone>
           <label class="wts-btn">
             导入结构化框架 JSON
             <input type="file" accept="application/json,.json" data-import-framework-json hidden />
           </label>
-          <span>${escapeHtml(state.importStatus || "支持 07 页下载的结构化框架 JSON。")}</span>
+          <span>${escapeHtml(state.importStatus || "支持拖拽/点击上传 07 导出的结构化框架 JSON，也支持包含 08-12 scriptStages/stageOutputs 的工作区 JSON。")}</span>
         </div>
         <div class="wts-asset-list">
           ${state.assets.length ? state.assets.map(renderAssetItem).join("") : `<div class="wts-empty">暂无可导入框架资产。请先在框架生成页面完成 01-07 并保存。</div>`}
@@ -2216,6 +2234,28 @@
     const file = target.files && target.files[0];
     importStructuredFrameworkFile(file);
     target.value = "";
+  });
+
+  app.addEventListener("dragover", (event) => {
+    const zone = event.target && event.target.closest ? event.target.closest("[data-import-json-drop-zone]") : null;
+    if (!zone) return;
+    event.preventDefault();
+    zone.classList.add("drag-over");
+  });
+
+  app.addEventListener("dragleave", (event) => {
+    const zone = event.target && event.target.closest ? event.target.closest("[data-import-json-drop-zone]") : null;
+    if (!zone || zone.contains(event.relatedTarget)) return;
+    zone.classList.remove("drag-over");
+  });
+
+  app.addEventListener("drop", (event) => {
+    const zone = event.target && event.target.closest ? event.target.closest("[data-import-json-drop-zone]") : null;
+    if (!zone) return;
+    event.preventDefault();
+    zone.classList.remove("drag-over");
+    const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+    importStructuredFrameworkFile(file);
   });
 
   restoreRunningStage();

@@ -168,6 +168,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   margin-bottom: 12px;
   color: var(--wts-muted);
 }
+.wts-import-json.drag-over {
+  border-color: rgba(177, 125, 52, 0.72);
+  background: rgba(255, 248, 236, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(177, 125, 52, 0.18);
+}
 .wts-asset-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

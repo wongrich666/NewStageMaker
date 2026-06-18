@@ -1085,7 +1085,7 @@
 
   function applyPromptPreferencesToBasicConfig(targetState, fillExisting) {
     const fields = (targetState.prompt_preferences || {}).basic_prompt_fields || {};
-    ["adaptation_direction", "user_constraints", "user_requirements"].forEach((key) => {
+    ["adaptation_direction"].forEach((key) => {
       const value = String(fields[key] || "").trim();
       if (!value) return;
       if (fillExisting || !String(targetState.basic_config[key] || "").trim()) {
@@ -1304,6 +1304,33 @@
         }
       });
     }, 400);
+  }
+
+  function resetKnowledgeSelectionForNewProject() {
+    ui.knowledge.selectedIds = [];
+    ui.knowledge.tagPromptText = "";
+    ui.knowledge.editingId = "";
+    ui.knowledge.formOpen = false;
+    ui.knowledge.form = emptyKnowledgeTagForm();
+    state.prompt_preferences = normalizePromptPreferences(Object.assign({}, state.prompt_preferences || {}, {
+      script_preference: "",
+      stage_prompts: normalizeStagePrompts({}),
+      active_template_id: "custom",
+    }));
+    window.clearTimeout(preferenceSyncTimer);
+    requestJson("/api/user-knowledge/preferences", {
+      method: "PUT",
+      body: JSON.stringify({
+        user_preference_prompt: "",
+        selected_preference_tag_ids: [],
+        stage_prompts: normalizeStagePrompts({}),
+        reason: "new_project_clear",
+      }),
+    }).catch((error) => {
+      if (DEV_LOG_ENABLED && typeof console !== "undefined" && console.warn) {
+        console.warn("[framework_planner] clear knowledge preferences failed", error);
+      }
+    });
   }
 
   function simpleHash(value) {
@@ -1757,11 +1784,12 @@
     const lockedStages = STAGE_SEQUENCE.filter((stageKey) => Boolean((stageState[stageKey] || {}).locked));
     const runningStage = STAGE_SEQUENCE.find((stageKey) => (stageState[stageKey] || {}).status === "running");
     const hasFinalPackage = !isEmptyValue(targetState.framework_plan_package);
+    const hasGeneratedOutput = STAGE_SEQUENCE.some((stageKey) => hasStageDataFor(targetState, stageKey));
     const status = runningStage
       ? "running"
       : hasFinalPackage && Boolean((stageState.package || {}).confirmed)
         ? "completed"
-        : confirmedStages.length
+        : (confirmedStages.length || hasGeneratedOutput)
           ? "in_progress"
           : "draft";
     targetState.asset_state = Object.assign(clone(initialState.asset_state), targetState.asset_state || {}, {
@@ -3054,21 +3082,14 @@
           </div>
           <textarea data-config-key="source_text" placeholder="可直接粘贴原文、梗概、旧策划、分集等材料。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.source_text)}</textarea>
         </div>
-        <div class="fp-grid two" style="margin-top:14px">
-          <div class="fp-field">
-            <label>写作方向</label>
-            <textarea data-config-key="adaptation_direction" placeholder="例如：压缩支线，强化中点反转，偏短剧强情绪推进。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.adaptation_direction)}</textarea>
-          </div>
-          <div class="fp-field">
-            <label>用户提示词</label>
-            <textarea data-config-key="user_requirements" placeholder="补充平台风格、人物偏好、节奏要求等。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.user_requirements)}</textarea>
-          </div>
+        <div class="fp-field" style="margin-top:14px">
+          <label>写作方向</label>
+          <textarea data-config-key="adaptation_direction" placeholder="例如：压缩支线，强化中点反转，偏短剧强情绪推进。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.adaptation_direction)}</textarea>
         </div>
         <div class="fp-field" style="margin-top:14px">
           <label>限制条件</label>
           <textarea data-config-key="user_constraints" placeholder="例如：不能改世界观底层逻辑，不能删除某角色。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.user_constraints)}</textarea>
         </div>
-        ${renderScriptPreferencePanel(locked)}
         ${(!isEmptyValue(state.source_brief) || String(state.display_texts["01"] || "").trim()) ? `
           <div class="fp-stage-note fp-stage-output applied">
             <strong>01 阶段：原始故事信息提取</strong>
@@ -4994,12 +5015,7 @@ function renderPackageBlocks() {
   }
 
   function payloadUserRequirements() {
-    const parts = [];
-    const base = String(state.basic_config.user_requirements || "").trim();
-    const preference = String((state.prompt_preferences || {}).script_preference || "").trim();
-    if (base) parts.push(base);
-    if (preference && preference !== base) parts.push(`用户偏好提示：${preference}`);
-    return parts.join("\n\n");
+    return "";
   }
 
   function syncBasicConfigFromDom() {
@@ -5965,8 +5981,8 @@ function renderPackageBlocks() {
       state.display_texts = {};
       state.raw_stage_responses = {};
 
-      state.prompt_preferences = normalizePromptPreferences(loadPromptPreferences());
-      applyPromptPreferencesToBasicConfig(state, true);
+      state.prompt_preferences = normalizePromptPreferences({});
+      resetKnowledgeSelectionForNewProject();
 
       try {
         window.localStorage.removeItem(LEGACY_STORAGE_KEY);
@@ -5998,8 +6014,7 @@ function renderPackageBlocks() {
     state.feedback = clone(initialState.feedback);
     state.editors = clone(initialState.editors);
     state.stage_state = clone(initialState.stage_state);
-    ui.knowledge.selectedIds = [];
-    ui.knowledge.tagPromptText = "";
+    resetKnowledgeSelectionForNewProject();
     syncStageFlow(state);
     saveState();
     savePromptPreferences("clear_input");
@@ -6396,8 +6411,11 @@ async function saveFrameworkAsset(options) {
     state.basic_config.target_format = form.target_format || "短剧";
     state.basic_config.season_count = Number(form.season_count || 1);
     state.basic_config.episodes_per_season = Number(form.episodes_per_season || 60);
-    state.basic_config.user_requirements = form.style || "";
+    state.basic_config.adaptation_direction = form.style || state.basic_config.adaptation_direction || "";
+    state.basic_config.user_requirements = "";
     state.basic_config.source_text = form.description || "";
+    state.prompt_preferences = normalizePromptPreferences({});
+    resetKnowledgeSelectionForNewProject();
     state.project_id = asset.project_id || null;
     state.asset_state.asset_id = asset.project_id || null;
     state.asset_state.project_id = asset.project_id || null;

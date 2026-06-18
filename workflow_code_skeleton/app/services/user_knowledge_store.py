@@ -234,21 +234,32 @@ class UserKnowledgeStore:
         if not self.preferences_path.exists():
             self._write_json(self.preferences_path, {})
 
-    def list_tags(self, *, enabled_only: bool = True) -> list[dict[str, Any]]:
+    def list_tags(self, *, enabled_only: bool = True, user_id: int | str | None = None) -> list[dict[str, Any]]:
+        owner_id = str(user_id or "").strip()
         tags = [self._normalize_tag(item) for item in self._read_tags()]
+        if owner_id:
+            tags = [
+                item
+                for item in tags
+                if item.get("builtin") or str(item.get("owner_user_id") or "").strip() == owner_id
+            ]
+        else:
+            tags = [item for item in tags if item.get("builtin") or not str(item.get("owner_user_id") or "").strip()]
         if enabled_only:
             tags = [item for item in tags if item.get("enabled") is not False]
         group_order = {DEFAULT_STYLE_GROUP: 0, USER_CUSTOM_GROUP: 1, EXCELLENT_FILM_BEAT_GROUP: 2}
         return sorted(tags, key=lambda item: (group_order.get(str(item.get("group") or ""), 9), not bool(item.get("pinned")), item.get("created_at", "")))
 
-    def create_tag(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def create_tag(self, payload: dict[str, Any], *, user_id: int | str | None = None) -> dict[str, Any]:
         name = str(payload.get("name") or "").strip()
         if not name:
             raise ValueError("标签名称不能为空")
+        owner_id = str(user_id or "").strip()
         now = _now_iso()
         tag = self._normalize_tag(
             {
                 "id": f"custom-{uuid.uuid4().hex[:12]}",
+                "owner_user_id": owner_id,
                 "name": name,
                 "category": str(payload.get("category") or "自定义").strip() or "自定义",
                 "builtin": False,
@@ -272,11 +283,34 @@ class UserKnowledgeStore:
         self._write_json(self.tags_path, tags)
         return deepcopy(tag)
 
-    def update_tag(self, tag_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+    def update_tag(self, tag_id: str, changes: dict[str, Any], *, user_id: int | str | None = None) -> dict[str, Any]:
+        owner_id = str(user_id or "").strip()
         tags = self._read_tags()
         for index, tag in enumerate(tags):
             if str(tag.get("id") or "") != str(tag_id):
                 continue
+            if tag.get("builtin") and owner_id:
+                copy_payload = deepcopy(tag)
+                copy_payload.update(changes or {})
+                copy_payload["id"] = f"custom-{uuid.uuid4().hex[:12]}"
+                copy_payload["owner_user_id"] = owner_id
+                copy_payload["builtin"] = False
+                copy_payload["group"] = USER_CUSTOM_GROUP
+                copy_payload["group_label"] = GROUP_LABELS[USER_CUSTOM_GROUP]
+                copy_payload["source"] = f"user_override:{tag.get('id')}"
+                copy_payload["is_default"] = False
+                copy_payload["created_at"] = _now_iso()
+                copy_payload["updated_at"] = _now_iso()
+                copy_payload["enabled"] = True
+                copy_payload["pinned"] = False
+                tags.append(self._normalize_tag(copy_payload))
+                self._write_json(self.tags_path, tags)
+                return deepcopy(tags[-1])
+            tag_owner = str(tag.get("owner_user_id") or "").strip()
+            if owner_id and tag_owner and tag_owner != owner_id:
+                raise ValueError("不能编辑其他用户的智慧库标签")
+            if owner_id and not tag_owner:
+                raise ValueError("不能编辑未归属当前用户的历史标签，请新建自己的标签")
             for key in ("name", "category", "description", "prompt_text", "enabled", "pinned"):
                 if key not in changes:
                     continue
@@ -294,11 +328,19 @@ class UserKnowledgeStore:
             return deepcopy(tags[index])
         raise ValueError("标签不存在")
 
-    def delete_tag(self, tag_id: str) -> dict[str, Any]:
+    def delete_tag(self, tag_id: str, *, user_id: int | str | None = None) -> dict[str, Any]:
+        owner_id = str(user_id or "").strip()
         tags = self._read_tags()
         for index, tag in enumerate(tags):
             if str(tag.get("id") or "") != str(tag_id):
                 continue
+            if tag.get("builtin"):
+                raise ValueError("默认标签不能删除，请取消选择或新建个人标签")
+            tag_owner = str(tag.get("owner_user_id") or "").strip()
+            if owner_id and tag_owner and tag_owner != owner_id:
+                raise ValueError("不能删除其他用户的智慧库标签")
+            if owner_id and not tag_owner:
+                raise ValueError("不能删除未归属当前用户的历史标签")
             tag["enabled"] = False
             tag["updated_at"] = _now_iso()
             tags[index] = self._normalize_tag(tag)
@@ -325,7 +367,7 @@ class UserKnowledgeStore:
         self._write_json(self.preferences_path, data)
         return deepcopy(record)
 
-    def apply_tags(self, selected_tag_ids: Any, *, existing_user_preference: Any = "") -> dict[str, Any]:
+    def apply_tags(self, selected_tag_ids: Any, *, existing_user_preference: Any = "", user_id: int | str | None = None) -> dict[str, Any]:
         ids = _coerce_string_list(selected_tag_ids)
         existing = _coerce_prompt_text(existing_user_preference)
         empty_stage_prompts = {key: "" for key in STAGE_PROMPT_KEYS}
@@ -338,7 +380,7 @@ class UserKnowledgeStore:
                 "tag_prompt_text": "",
                 "stage_prompts": empty_stage_prompts,
             }
-        tags_by_id = {tag["id"]: tag for tag in self.list_tags(enabled_only=True)}
+        tags_by_id = {tag["id"]: tag for tag in self.list_tags(enabled_only=True, user_id=user_id)}
         selected_tags: list[dict[str, Any]] = []
         for tag_id in ids:
             tag = tags_by_id.get(tag_id)
@@ -450,6 +492,7 @@ class UserKnowledgeStore:
             "group": group,
             "group_label": group_label,
             "source": source,
+            "owner_user_id": str(tag.get("owner_user_id") or "").strip(),
             "type": str(tag.get("type") or "stage_preference_template").strip() or "stage_preference_template",
             "is_default": bool(tag.get("is_default")) if "is_default" in tag else bool(builtin),
             "is_user_editable": tag.get("is_user_editable") is not False,

@@ -1927,7 +1927,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 selected_ids = []
         if not selected_ids:
             return []
-        tags_by_id = {str(tag.get("id") or ""): tag for tag in user_knowledge_store.list_tags(enabled_only=True)}
+        tags_by_id = {str(tag.get("id") or ""): tag for tag in user_knowledge_store.list_tags(enabled_only=True, user_id=user_id)}
         result = []
         for tag_id in selected_ids:
             tag = tags_by_id.get(str(tag_id))
@@ -2762,7 +2762,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @_login_required
     def list_user_knowledge_tags_api():
         try:
-            return _json_ok(tags=user_knowledge_store.list_tags(enabled_only=True))
+            return _json_ok(tags=user_knowledge_store.list_tags(enabled_only=True, user_id=_require_user_id()))
         except Exception as exc:
             logger.exception("user knowledge tags list failed")
             return _json_error(str(exc), status=500, fallback="智慧库标签加载失败，请稍后重试。")
@@ -2772,7 +2772,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def create_user_knowledge_tag_api():
         data = request.get_json(silent=True) or {}
         try:
-            tag = user_knowledge_store.create_tag(data if isinstance(data, dict) else {})
+            tag = user_knowledge_store.create_tag(data if isinstance(data, dict) else {}, user_id=_require_user_id())
             return _json_ok(tag=tag)
         except ValueError as exc:
             return _json_error(str(exc), status=400)
@@ -2785,7 +2785,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def update_user_knowledge_tag_api(tag_id: str):
         data = request.get_json(silent=True) or {}
         try:
-            tag = user_knowledge_store.update_tag(tag_id, data if isinstance(data, dict) else {})
+            tag = user_knowledge_store.update_tag(tag_id, data if isinstance(data, dict) else {}, user_id=_require_user_id())
             return _json_ok(tag=tag)
         except ValueError as exc:
             return _json_error(str(exc), status=400)
@@ -2797,7 +2797,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @_login_required
     def delete_user_knowledge_tag_api(tag_id: str):
         try:
-            tag = user_knowledge_store.delete_tag(tag_id)
+            tag = user_knowledge_store.delete_tag(tag_id, user_id=_require_user_id())
             return _json_ok(tag=tag)
         except ValueError as exc:
             return _json_error(str(exc), status=400)
@@ -2835,6 +2835,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             result = user_knowledge_store.apply_tags(
                 data.get("selected_tag_ids") if "selected_tag_ids" in data else data.get("selected_preference_tag_ids"),
                 existing_user_preference=data.get("existing_user_preference") or data.get("user_preference_prompt") or "",
+                user_id=_require_user_id(),
             )
             return _json_ok(**result)
         except Exception as exc:
