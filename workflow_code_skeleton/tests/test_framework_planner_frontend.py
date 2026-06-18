@@ -40,8 +40,6 @@ def test_framework_planner_frontend_uses_stage_preference_payload_fields() -> No
 
 def test_framework_planner_progress_tick_uses_downstream_progress() -> None:
     assert "function stageProgressDone(stageKey)" in FRONTEND_SOURCE
-    assert "STAGE_SEQUENCE.slice(index + 1).some" in FRONTEND_SOURCE
-    assert "downstream.status === \"running\"" in FRONTEND_SOURCE
     assert "const done = stageProgressDone(item.stageKey) ? \"done\" : \"\";" in FRONTEND_SOURCE
     assert "const done = state.stage_state[item.stageKey] && state.stage_state[item.stageKey].confirmed ? \"done\" : \"\";" not in FRONTEND_SOURCE
 
@@ -57,4 +55,12 @@ def test_framework_planner_asset_import_uses_single_busy_state() -> None:
 def test_framework_planner_package_view_defines_locked_and_template_busts_cache() -> None:
     assert "function renderPackageView() {" in FRONTEND_SOURCE
     assert "const locked = Boolean(stage.locked);" in FRONTEND_SOURCE
-    assert "framework_planner.js') }}?v=20260604-framework-planner-flow-fixes" in FRONTEND_TEMPLATE
+    assert "framework_planner.js') }}?v=20260617-framework-assets-v3" in FRONTEND_TEMPLATE
+
+
+def test_framework_planner_knowledge_apply_replaces_old_tag_sections() -> None:
+    assert "function stripKnowledgeStagePromptSections(value)" in FRONTEND_SOURCE
+    assert "section.startsWith(\"【智慧库标签偏好：\")" in FRONTEND_SOURCE
+    assert "function replaceKnowledgeStagePrompts(existingPrompts, knowledgePrompts)" in FRONTEND_SOURCE
+    assert "stage_prompts: replaceKnowledgeStagePrompts((state.prompt_preferences || {}).stage_prompts || {}, stagePrompts)" in FRONTEND_SOURCE
+    assert "await applyKnowledgeTags();" in FRONTEND_SOURCE

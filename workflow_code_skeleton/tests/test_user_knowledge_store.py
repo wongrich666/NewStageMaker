@@ -13,9 +13,12 @@ from workflow_code_skeleton.app.services.user_knowledge_store import UserKnowled
 from workflow_code_skeleton.tests.test_support import workspace_tempdir
 
 
+TEST_PASSWORD = "UserKnowledge!2026_SafePass"
+
+
 def _auth_headers() -> dict[str, str]:
     username = f"uk_{uuid.uuid4().hex[:10]}"
-    user = auth_store.register_user(username, "password123")
+    user = auth_store.register_user(username, TEST_PASSWORD)
     token = auth_store.create_session_token(user.id)
     return {"Authorization": f"Bearer {token}"}
 

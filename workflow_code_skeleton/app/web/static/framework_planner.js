@@ -1372,6 +1372,31 @@
     return result;
   }
 
+  function stripKnowledgeStagePromptSections(value) {
+    const text = String(value || "").replace(/\r\n/g, "\n").trim();
+    if (!text) return "";
+    return text
+      .split(/\n{2,}/)
+      .map((section) => section.trim())
+      .filter((section) => section && !section.startsWith("【智慧库标签偏好："))
+      .join("\n\n")
+      .trim();
+  }
+
+  function replaceKnowledgeStagePrompts(existingPrompts, knowledgePrompts) {
+    const existing = normalizeStagePrompts(existingPrompts || {});
+    const knowledge = normalizeStagePrompts(knowledgePrompts || {});
+    const result = normalizeStagePrompts({});
+    ALL_STAGE_PREFERENCE_KEYS.forEach((stageKey) => {
+      const manualText = stripKnowledgeStagePromptSections(existing[stageKey]);
+      const knowledgeText = String(knowledge[stageKey] || "").trim();
+      result[stageKey] = manualText && knowledgeText
+        ? `${manualText}\n\n${knowledgeText}`
+        : (knowledgeText || manualText);
+    });
+    return result;
+  }
+
   function prerequisiteStageKey(stageKey) {
     const index = STAGE_SEQUENCE.indexOf(stageKey);
     return index > 0 ? STAGE_SEQUENCE[index - 1] : "";
@@ -2157,7 +2182,7 @@
     const selectedIds = (ui.knowledge.selectedIds || []).map((item) => String(item || "").trim()).filter(Boolean);
     const tagStagePrompts = mergeSelectedKnowledgeStagePrompts(tags);
     const manualStagePrompts = normalizeStagePrompts((state.prompt_preferences || {}).stage_prompts || {});
-    const stagePrompts = mergeStagePromptsNonEmpty(manualStagePrompts, tagStagePrompts);
+    const stagePrompts = replaceKnowledgeStagePrompts(manualStagePrompts, tagStagePrompts);
     const currentStagePrompts = normalizeStagePrompts({});
     currentStagePrompts[stageKey] = String(stagePrompts[stageKey] || "");
     return {
@@ -2185,7 +2210,7 @@
     const selectedIds = (ui.knowledge.selectedIds || []).map((item) => String(item || "").trim()).filter(Boolean);
     const tagStagePrompts = mergeSelectedKnowledgeStagePrompts(tags);
     const manualStagePrompts = normalizeStagePrompts((state.prompt_preferences || {}).stage_prompts || {});
-    const mergedStagePrompts = mergeStagePromptsNonEmpty(manualStagePrompts, tagStagePrompts);
+    const mergedStagePrompts = replaceKnowledgeStagePrompts(manualStagePrompts, tagStagePrompts);
     const stagePreferences = {};
     KNOWLEDGE_SNAPSHOT_STAGE_KEYS.forEach((stageKey) => {
       const stageNo = KNOWLEDGE_SNAPSHOT_STAGE_NUMBERS[stageKey] || stageKey;
@@ -6165,8 +6190,8 @@ async function saveFrameworkAsset(options) {
       syncSelectedKnowledgeTagsFromIds();
       state.prompt_preferences = normalizePromptPreferences(Object.assign({}, state.prompt_preferences || {}, {
         script_preference: preferences.user_preference_prompt || (state.prompt_preferences || {}).script_preference || "",
-        stage_prompts: hasRemoteStagePrompt
-          ? mergeStagePromptsNonEmpty((state.prompt_preferences || {}).stage_prompts || {}, remoteStagePrompts)
+        stage_prompts: hasRemoteStagePrompt || Array.isArray(preferences.selected_preference_tag_ids)
+          ? replaceKnowledgeStagePrompts((state.prompt_preferences || {}).stage_prompts || {}, remoteStagePrompts)
           : (state.prompt_preferences || {}).stage_prompts || {},
       }));
       saveState();
@@ -6202,7 +6227,7 @@ async function saveFrameworkAsset(options) {
       const stagePrompts = normalizeStagePrompts(data.stage_prompts || {});
       state.prompt_preferences = normalizePromptPreferences(Object.assign({}, state.prompt_preferences || {}, {
         script_preference: String(data.merged_preference_prompt || ""),
-        stage_prompts: mergeStagePromptsNonEmpty((state.prompt_preferences || {}).stage_prompts || {}, stagePrompts),
+        stage_prompts: replaceKnowledgeStagePrompts((state.prompt_preferences || {}).stage_prompts || {}, stagePrompts),
         active_template_id: "custom",
       }));
       ui.knowledge.selectedIds = Array.isArray(data.selected_tag_ids) ? data.selected_tag_ids.map(String) : selectedIds;
@@ -7036,6 +7061,7 @@ async function saveFrameworkAsset(options) {
     }
     if (action === "unselect-knowledge-tag") {
       setKnowledgeSelection(actionElement.dataset.tagId, false);
+      await applyKnowledgeTags();
       return;
     }
     if (action === "new-knowledge-tag") {
