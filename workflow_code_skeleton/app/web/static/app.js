@@ -730,13 +730,18 @@
     ].some((marker) => value.toLowerCase().includes(marker));
   }
 
-  function friendlyErrorText(error, fallback = "操作失败，请稍后重试。") {
+  function friendlyErrorText(error, fallback = "操作失败，请稍后重试。", context = {}) {
     const text = String(error?.message || "").trim();
+    const toolKey = String(context?.toolKey || "").trim();
     if (error?.name === "AbortError") {
-      return "请求等待时间过长，已停止等待。请稍后重试，或减少提交文本长度后再运行。";
+      return toolKey === "hot_review"
+        ? "爆款文审核等待时间过长，已停止等待。当前输入已保留，可以稍后重试，或减少提交文本长度后再运行。"
+        : "请求等待时间过长，已停止等待。请稍后重试，或减少提交文本长度后再运行。";
     }
     if (/timeout|timed\s*out|超时/i.test(text)) {
-      return "请求超时了。爆款文审核耗时较长，请稍后重试，或减少提交文本长度后再运行。";
+      return toolKey === "hot_review"
+        ? "爆款文审核请求超时了。它耗时较长，当前输入已保留，可以稍后重试，或减少提交文本长度后再运行。"
+        : "请求超时了。请稍后重试，或减少提交文本长度后再运行。";
     }
     if (/failed\s*to\s*fetch|networkerror|network\s*error|load\s*failed|断开|网络/i.test(text)) {
       return "网络连接中断，结果没有传回前端。请检查后端是否仍在运行，然后重新点击运行。";
@@ -757,13 +762,15 @@
     els.profileMessage.textContent = friendlyErrorText(error, fallback);
   }
 
-  function showToolError(error, fallback = "工具执行失败，请稍后重试。") {
+  function showToolError(error, fallback = "工具执行失败，请稍后重试。", context = {}) {
     if (!els.toolOutputBox) return;
-    els.toolOutputBox.innerHTML = renderToolErrorCard(error, fallback);
+    els.toolOutputBox.innerHTML = renderToolErrorCard(error, fallback, {
+      toolKey: context.toolKey || state.activeTool
+    });
   }
 
-  function renderToolErrorCard(error, fallback = "工具执行失败，请稍后重试。") {
-    const message = friendlyErrorText(error, fallback);
+  function renderToolErrorCard(error, fallback = "工具执行失败，请稍后重试。", context = {}) {
+    const message = friendlyErrorText(error, fallback, context);
     const raw = String(error?.message || "").trim();
     const showRaw = raw && raw !== message && !isTechnicalErrorText(raw);
     return `
@@ -2011,7 +2018,7 @@ startRuntimeDebugPolling();
     if (!tool?.configured) {
       return { valid: false, message: "当前工具还未配置 API Key。" };
     }
-    const payload = collectToolPayload();
+    const payload = collectToolPayload(tool.key);
     for (const field of tool.fields || []) {
       const rawValue = payload[field.name];
       const value = field.type === "number" ? Number(rawValue || 0) : String(rawValue || "").trim();
@@ -2186,8 +2193,10 @@ startRuntimeDebugPolling();
   function rememberCurrentToolDraft() {
     const tool = toolConfig(state.activeTool);
     const currentDraft = state.toolDrafts[tool.key] ? { ...state.toolDrafts[tool.key] } : {};
-    document.querySelectorAll("[data-tool-field]").forEach((field) => {
+    const allowedFields = new Set((tool.fields || []).map((field) => String(field.name || "")));
+    (els.toolForms || document).querySelectorAll("[data-tool-field]").forEach((field) => {
       const key = field.dataset.toolField;
+      if (!allowedFields.has(key)) return;
       currentDraft[key] = field.type === "number" ? String(field.value || "").trim() : String(field.value || "");
     });
     state.toolDrafts[tool.key] = currentDraft;
@@ -4734,20 +4743,23 @@ function renderToolForm(toolKey) {
   }
 
   
-  function collectToolPayload() {
+  function collectToolPayload(toolKey = state.activeTool) {
+    const tool = toolConfig(toolKey);
+    const allowedFields = new Set((tool?.fields || []).map((field) => String(field.name || "")));
     const payload = {};
 
-    document
+    (els.toolForms || document)
       .querySelectorAll("[data-tool-field]")
       .forEach((field) => {
         const key = field.dataset.toolField;
+        if (!allowedFields.has(key)) return;
 
         payload[key] = field.type === "number"
           ? Number(field.value || 0)
           : String(field.value || "").trim();
       });
 
-    if (state.activeTool === "hot_review") {
+    if (toolKey === "hot_review") {
       const textField =
         hotReviewUploadTextField();
 
@@ -6069,15 +6081,15 @@ function renderToolForm(toolKey) {
 
   async function runActiveTool() {
     if (!requireLogin()) return;
-    const payload = collectToolPayload();
-    if (state.activeTool === "new_framework") {
+    const activeToolKey = state.activeTool;
+    const payload = collectToolPayload(activeToolKey);
+    if (activeToolKey === "new_framework") {
       const projectTitle = projectTitleCandidate();
       if (projectTitle) {
         payload.project_title = projectTitle;
       }
     }
-    const activeToolKey = state.activeTool;
-    state.toolResults[state.activeTool] = null;
+    state.toolResults[activeToolKey] = null;
     renderToolOutput(activeToolKey, activeToolKey === "hot_review"
       ? "爆款文审核通常需要较长时间，请不要刷新。若超时或出错，这里会显示失败原因。模型可能会不稳定，如果显示内容和输入明显不符，请你重新运行。"
       : (activeToolKey === "character_reskin"
@@ -6145,8 +6157,8 @@ function renderToolForm(toolKey) {
       const fallback = activeToolKey === "hot_review"
         ? "爆款文审核运行失败，可能是请求超时、后端中断或网络抖动。当前输入已保留，请稍后重试。"
         : "辅助工具运行失败，请稍后重试。";
-      showToolError(error, fallback);
-      showToast("辅助工具运行失败", friendlyErrorText(error, fallback));
+      showToolError(error, fallback, { toolKey: activeToolKey });
+      showToast("辅助工具运行失败", friendlyErrorText(error, fallback, { toolKey: activeToolKey }));
     }
   }
 
