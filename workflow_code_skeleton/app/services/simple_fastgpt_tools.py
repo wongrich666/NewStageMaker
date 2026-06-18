@@ -118,10 +118,16 @@ class ToolExecutionError(RuntimeError):
 
 
 def _tool_timeout_seconds(definition: "SimpleToolDefinition") -> int:
-    default_timeout = 2700 if definition.key == "hot_review" else int(getattr(settings, "fastgpt_timeout", 300))
-    raw = os.getenv(f"{definition.env_prefix}_TIMEOUT") or os.getenv("FASTGPT_TIMEOUT") or str(default_timeout)
+    default_timeout = 4500 if definition.key == "hot_review" else int(getattr(settings, "fastgpt_timeout", 300))
+    if definition.key == "hot_review":
+        raw = os.getenv(f"{definition.env_prefix}_TIMEOUT") or str(default_timeout)
+    else:
+        raw = os.getenv(f"{definition.env_prefix}_TIMEOUT") or os.getenv("FASTGPT_TIMEOUT") or str(default_timeout)
     try:
-        return max(1, int(raw))
+        parsed = int(raw)
+        if definition.key == "hot_review":
+            return max(1500, parsed)
+        return max(1, parsed)
     except (TypeError, ValueError):
         return default_timeout
 

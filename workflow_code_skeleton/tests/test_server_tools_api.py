@@ -311,7 +311,7 @@ class ServerToolsApiTests(unittest.TestCase):
         call = mocked.call_args.kwargs
         self.assertEqual(call["input_payload"]["script_format_mode"], "waibao")
 
-    def test_home_page_renders_public_community_entries(self) -> None:
+    def test_home_page_links_to_community_for_prelogin_users(self) -> None:
         fake_assets = [
             {
                 "project_id": 7,
@@ -327,9 +327,9 @@ class ServerToolsApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         text = response.get_data(as_text=True)
-        self.assertIn('id="community"', text)
-        self.assertIn("公开短剧", text)
-        self.assertIn("/community/7", text)
+        self.assertIn("社区好剧", text)
+        self.assertIn("#community", text)
+        self.assertIn("未登录状态下会先进入登录页。", text)
 
 
 if __name__ == "__main__":

@@ -433,8 +433,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         "logs",
         "cache",
     }
-    framework_stage_runs: set[tuple[int, str, str]] = set()
+    framework_stage_runs: dict[tuple[int, str, str], float] = {}
     framework_stage_runs_lock = threading.Lock()
+    FRAMEWORK_STAGE_RUN_TTL_SECONDS = 4 * 60 * 60
 
     def _now_iso() -> str:
         return datetime.now(timezone.utc).astimezone().isoformat()
@@ -999,16 +1000,32 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         key = (int(user_id), str(asset_id or "").strip(), str(stage or "").strip())
         if not key[1] or not key[2]:
             return True
+        now = time.monotonic()
         with framework_stage_runs_lock:
-            if key in framework_stage_runs:
+            expired_keys = [
+                run_key
+                for run_key, started_at in framework_stage_runs.items()
+                if now - float(started_at or 0) > FRAMEWORK_STAGE_RUN_TTL_SECONDS
+            ]
+            for run_key in expired_keys:
+                framework_stage_runs.pop(run_key, None)
+            started_at = framework_stage_runs.get(key)
+            if started_at is not None:
+                logger.warning(
+                    "framework-to-script stage already running: user_id=%s asset_id=%s stage=%s age_seconds=%s",
+                    user_id,
+                    key[1],
+                    key[2],
+                    int(now - float(started_at or now)),
+                )
                 return False
-            framework_stage_runs.add(key)
+            framework_stage_runs[key] = now
         return True
 
     def _end_framework_stage(user_id: int, asset_id: str, stage: str) -> None:
         key = (int(user_id), str(asset_id or "").strip(), str(stage or "").strip())
         with framework_stage_runs_lock:
-            framework_stage_runs.discard(key)
+            framework_stage_runs.pop(key, None)
 
     def _save_framework_to_script_stage(
         *,
@@ -3896,7 +3913,16 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
         if not _try_begin_framework_stage(user_id, asset_id, "09"):
-            return _json_error("09 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
+            return _json_error(
+                "09 正在运行中，请稍后刷新页面，已完成输出会自动恢复。",
+                status=409,
+                detail={
+                    "stage": "09",
+                    "asset_id": asset_id,
+                    "user_id": user_id,
+                    "failure_reason": "stage_already_running",
+                },
+            )
         try:
             try:
                 from .services.fastgpt_client import fastgpt_client

@@ -179,7 +179,7 @@ class SimpleFastGPTToolsTests(unittest.TestCase):
             with patch.object(tools.requests, "post", side_effect=_fake_post):
                 tools.run_simple_tool("hot_review", {"review_text": "测试正文"})
 
-        self.assertEqual(captured["timeout"], 2700)
+        self.assertEqual(captured["timeout"], 4500)
 
     def test_hot_review_empty_input_does_not_call_fastgpt(self) -> None:
         with patch.dict(

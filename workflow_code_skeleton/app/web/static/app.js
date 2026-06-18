@@ -18,6 +18,9 @@
   const RUNNING_STATUSES = new Set(["pending", "running", "pausing"]);
   const RESUMABLE_STATUSES = new Set(["paused", "pausing", "failed", "terminated"]);
   const TERMINATABLE_STATUSES = new Set(["pending", "running", "pausing", "paused", "failed"]);
+  const HOT_REVIEW_RUN_TIMEOUT_MS = 75 * 60 * 1000;
+  const HOT_REVIEW_RESULT_POLL_INTERVAL_MS = 10000;
+  const HOT_REVIEW_RESULT_POLL_GRACE_MS = 10000;
   const CHARACTER_RESKIN_RUNNING_MESSAGES = [
     "正在运行：统计原剧本实际集数...",
     "正在运行：生成人设循环变量...",
@@ -4179,10 +4182,6 @@ startRuntimeDebugPolling();
   ]);
 
   const HOT_REVIEW_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
-  const HOT_REVIEW_RUN_TIMEOUT_MS = 45 * 60 * 1000;
-  const HOT_REVIEW_RESULT_POLL_INTERVAL_MS = 10000;
-  const HOT_REVIEW_RESULT_POLL_GRACE_MS = 10000;
-
   function hotReviewFileExtension(filename) {
     const parts = String(filename || "")
       .toLowerCase()

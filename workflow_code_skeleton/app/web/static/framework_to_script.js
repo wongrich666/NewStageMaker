@@ -118,6 +118,8 @@
           .join(" ")
       );
       error.detail = detail;
+      error.status = response.status;
+      error.payload = data;
       error.failedSubStage = detail.failed_sub_stage || "";
       error.reviewRound = detail.review_round || detail.review_attempt || detail.loop_round || "";
       throw error;
@@ -147,6 +149,7 @@
         return await requestJson(path, typeof buildOptions === "function" ? buildOptions(attempt, lastError) : buildOptions);
       } catch (error) {
         lastError = error;
+        if (Number(error?.status || 0) === 409) break;
         if (attempt >= maxAttempts) break;
         state.error = `${stage} 阶段请求失败，正在第 ${attempt + 1}/${maxAttempts} 次重试：${formatRetryError(error)}`;
         render();
