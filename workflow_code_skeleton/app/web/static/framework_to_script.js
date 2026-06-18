@@ -5,10 +5,12 @@
   const config = window.FRAMEWORK_TO_SCRIPT_CONFIG || {};
   const params = new URLSearchParams(window.location.search);
   const authToken = params.get("auth_token") || "";
-  const STORAGE_KEY = "frameworkToScriptWorkspace.v1";
+  const urlAssetId = params.get("framework_asset_id") || params.get("asset_id") || "";
+  const LEGACY_STORAGE_KEY = "frameworkToScriptWorkspace.v1";
+  const STORAGE_KEY = urlAssetId ? `${LEGACY_STORAGE_KEY}.${urlAssetId}` : LEGACY_STORAGE_KEY;
   const RAW_KEYS = new Set(["responseData", "choices", "reasoningText", "historyPreview", "newVariables", "updateVarResult", "raw_stage_responses", "raw_output", "raw", "answerText", "debug", "logs", "cache"]);
   const RESILIENT_STAGE_RETRY_DELAY_MS = 60 * 1000;
-  const RESILIENT_STAGE_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
+  const RESILIENT_STAGE_REQUEST_TIMEOUT_MS = 45 * 60 * 1000;
   const RESILIENT_STAGE_MAX_RETRY_ATTEMPTS = 30;
   const FIELD_LABELS = {
     framework_plan_package: "最终框架策划包",
@@ -59,7 +61,6 @@
     frameworkSource: "",
   }, loadWorkspace());
 
-  const urlAssetId = params.get("framework_asset_id") || params.get("asset_id") || "";
   const directFromPlanner = Boolean(urlAssetId && (params.has("source_framework_project_id") || params.has("project_id")));
   if (urlAssetId && (directFromPlanner || String(urlAssetId) !== String(state.frameworkAssetId || ""))) {
     window.localStorage.removeItem(STORAGE_KEY);
@@ -181,7 +182,8 @@
 
   function loadWorkspace() {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
+      const raw = window.localStorage.getItem(STORAGE_KEY)
+        || (STORAGE_KEY !== LEGACY_STORAGE_KEY ? window.localStorage.getItem(LEGACY_STORAGE_KEY) : "");
       const parsed = raw ? JSON.parse(raw) : {};
       return parsed && typeof parsed === "object" ? stripRaw(parsed) : {};
     } catch (error) {
@@ -296,8 +298,13 @@
     saveWorkspace();
   }
 
-    const RUNNING_STAGE_STORAGE_KEY = "frameworkToScriptRunningStage.v1";
-  const RUNNING_STAGE_TIMEOUT_MS = 1000 * 60 * 60;
+  const RUNNING_STAGE_STORAGE_PREFIX = "frameworkToScriptRunningStage.v1";
+  const RUNNING_STAGE_TIMEOUT_MS = 12 * 60 * 60 * 1000;
+
+  function runningStageStorageKey(assetId = state.frameworkAssetId) {
+    const scopedId = String(assetId || urlAssetId || "temporary").trim() || "temporary";
+    return `${RUNNING_STAGE_STORAGE_PREFIX}.${scopedId}`;
+  }
 
   function saveRunningStage(stage) {
     const payload = {
@@ -312,7 +319,7 @@
     persistRunningStage(stage);
 
     try {
-      window.localStorage.setItem(RUNNING_STAGE_STORAGE_KEY, JSON.stringify(payload));
+      window.localStorage.setItem(runningStageStorageKey(payload.frameworkAssetId), JSON.stringify(payload));
     } catch (error) {
       console.warn("save running stage failed", error);
     }
@@ -329,7 +336,7 @@
     persistRunningStage("", state.lastFailedStage || "");
 
     try {
-      window.localStorage.removeItem(RUNNING_STAGE_STORAGE_KEY);
+      window.localStorage.removeItem(runningStageStorageKey());
     } catch (error) {
       console.warn("clear running stage failed", error);
     }
@@ -364,18 +371,23 @@
 
   function restoreRunningStage() {
     try {
-      const raw = window.localStorage.getItem(RUNNING_STAGE_STORAGE_KEY);
+      const key = runningStageStorageKey();
+      const legacyKey = RUNNING_STAGE_STORAGE_PREFIX;
+      const raw = window.localStorage.getItem(key)
+        || (key !== legacyKey ? window.localStorage.getItem(legacyKey) : "");
       if (!raw) return;
 
       const payload = JSON.parse(raw);
       if (!payload || !payload.runningStage || !payload.startedAt) {
-        window.localStorage.removeItem(RUNNING_STAGE_STORAGE_KEY);
+        window.localStorage.removeItem(key);
+        window.localStorage.removeItem(legacyKey);
         return;
       }
 
       const startedAt = new Date(payload.startedAt).getTime();
       if (!Number.isFinite(startedAt) || Date.now() - startedAt > RUNNING_STAGE_TIMEOUT_MS) {
-        window.localStorage.removeItem(RUNNING_STAGE_STORAGE_KEY);
+        window.localStorage.removeItem(key);
+        window.localStorage.removeItem(legacyKey);
         return;
       }
 
@@ -387,7 +399,8 @@
         return;
       }
 
-      window.localStorage.removeItem(RUNNING_STAGE_STORAGE_KEY);
+      window.localStorage.removeItem(key);
+      window.localStorage.removeItem(legacyKey);
       state.runningStage = "";
       state.runningStartedAt = "";
       state.isRunning = false;
@@ -400,7 +413,8 @@
     } catch (error) {
       console.warn("restore running stage failed", error);
       try {
-        window.localStorage.removeItem(RUNNING_STAGE_STORAGE_KEY);
+        window.localStorage.removeItem(runningStageStorageKey());
+        window.localStorage.removeItem(RUNNING_STAGE_STORAGE_PREFIX);
       } catch (_) {}
     }
   }
@@ -1263,6 +1277,7 @@
       const asset = normalizeImportedFrameworkJson(parsed);
       try {
         window.localStorage.removeItem(STORAGE_KEY);
+        if (STORAGE_KEY !== LEGACY_STORAGE_KEY) window.localStorage.removeItem(LEGACY_STORAGE_KEY);
         window.localStorage.removeItem("frameworkToScriptSource");
       } catch (error) {}
       state.frameworkAssetId = "";

@@ -4179,7 +4179,7 @@ startRuntimeDebugPolling();
   ]);
 
   const HOT_REVIEW_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
-  const HOT_REVIEW_RUN_TIMEOUT_MS = 900000;
+  const HOT_REVIEW_RUN_TIMEOUT_MS = 45 * 60 * 1000;
 
   function hotReviewFileExtension(filename) {
     const parts = String(filename || "")
@@ -6091,7 +6091,7 @@ function renderToolForm(toolKey) {
     }
     state.toolResults[activeToolKey] = null;
     renderToolOutput(activeToolKey, activeToolKey === "hot_review"
-      ? "爆款文审核通常需要较长时间，请不要刷新。若超时或出错，这里会显示失败原因。模型可能会不稳定，如果显示内容和输入明显不符，请你重新运行。"
+      ? "爆款文审核通常需要较长时间。你可以切换页面继续操作，完成后会自动保存到爆款文审核资产；如果本页请求中断，这里会显示失败原因，也可以稍后从资产查看或重新运行。"
       : (activeToolKey === "character_reskin"
         ? characterReskinRunningMessage(0)
         : "生成时间很长，请不要刷新，马上就好~"));

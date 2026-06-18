@@ -6050,6 +6050,8 @@ function renderPackageBlocks() {
       try {
         window.localStorage.removeItem("frameworkToScriptSource");
         window.localStorage.removeItem("frameworkToScriptWorkspace.v1");
+        window.localStorage.removeItem(`frameworkToScriptWorkspace.v1.${sourceProjectId}`);
+        window.localStorage.removeItem(`frameworkToScriptRunningStage.v1.${sourceProjectId}`);
       } catch (error) {
         console.warn("清理框架转剧本本地上下文失败", error);
       }

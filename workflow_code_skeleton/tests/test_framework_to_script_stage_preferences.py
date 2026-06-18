@@ -41,7 +41,7 @@ from workflow_code_skeleton.app.services.workflow_preference_keys import inject_
 
 def _auth_headers() -> dict[str, str]:
     username = f"fts_{uuid.uuid4().hex[:8]}"
-    user = auth_store.register_user(username, "password123")
+    user = auth_store.register_user(username, "FrameworkToScript!2026")
     token = auth_store.create_session_token(user.id)
     return {"Authorization": f"Bearer {token}"}
 
@@ -341,6 +341,11 @@ def test_framework_to_script_ui_allows_stage_rerun_and_full_script_rewrite() -> 
     assert "生成下一批正文" not in script
     assert "framework_enriched_episode_plan" in script
     assert "completedStages" in script
+    assert "LEGACY_STORAGE_KEY = \"frameworkToScriptWorkspace.v1\"" in script
+    assert "`${LEGACY_STORAGE_KEY}.${urlAssetId}`" in script
+    assert "45 * 60 * 1000" in script
+    assert "12 * 60 * 60 * 1000" in script
+    assert "frameworkToScriptRunningStage.v1" in script
     assert "hideAction: true" not in script
     assert "wts-tree-preview" in script
     assert "wts-tree-collapse-label" in script

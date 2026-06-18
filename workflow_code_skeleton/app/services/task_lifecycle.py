@@ -107,7 +107,7 @@ class TaskLifecycleMixin:
         thread = threading.Thread(
             target=self._run_task,
             args=(record,),
-            daemon=True,
+            daemon=False,
             name=f"workflow-task-{task_id}",
         )
         record.thread = thread
@@ -770,7 +770,7 @@ class TaskLifecycleMixin:
         thread = threading.Thread(
             target=self._run_task,
             args=(record,),
-            daemon=True,
+            daemon=False,
             name=f"workflow-task-{task_id}",
         )
         record.thread = thread
@@ -1303,7 +1303,7 @@ class TaskLifecycleMixin:
         thread = threading.Thread(
             target=self._run_task,
             args=(record,),
-            daemon=True,
+            daemon=False,
             name=f"workflow-task-{new_task_id}",
         )
         record.thread = thread
@@ -1397,7 +1397,7 @@ class TaskLifecycleMixin:
         thread = threading.Thread(
             target=self._run_task,
             args=(record,),
-            daemon=True,
+            daemon=False,
             name=f"workflow-task-{new_task_id}",
         )
         record.thread = thread
