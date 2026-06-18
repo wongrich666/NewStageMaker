@@ -75,7 +75,7 @@ def test_character_reskin_runs_all_stages_and_concatenates_batches() -> None:
         if stage == "profile_review":
             return _FakeResponse({"u3ymVRAj": '{"passed":true,"rewrite_required":false}'})
         if stage == "profile_sort":
-            return _FakeResponse({"answerText": "新人设小传"})
+            return _FakeResponse({"vVtCqEXZ": "新人设小传"})
         if stage == "dialogue_write":
             return _FakeResponse({"answerText": '{"dialogue":"批次对话"}'})
         if stage == "dialogue_review":
@@ -118,6 +118,12 @@ def test_character_reskin_runs_all_stages_and_concatenates_batches() -> None:
         "ayxWwSpE": "原故事大纲",
         "fFM0mroW": {"name": "新主角"},
     }
+    first_profile_sort = next(call for call in calls if call["stage"] == "profile_sort")
+    assert first_profile_sort["variables"] == {
+        "fFM0mroW": {"name": "新主角"},
+        "ayxWwSpE": "原故事大纲",
+        "ti6oIFwf": "旧人物小传",
+    }
 
 
 def test_character_reskin_bridges_review_and_memory_variables() -> None:
@@ -137,7 +143,7 @@ def test_character_reskin_bridges_review_and_memory_variables() -> None:
         if stage == "profile_rewrite":
             return _FakeResponse({"wQrZxzeL": '{"profile":"fixed"}'})
         if stage == "profile_sort":
-            return _FakeResponse({"answerText": "新人设小传"})
+            return _FakeResponse({"vVtCqEXZ": "新人设小传"})
         if stage == "dialogue_write":
             return _FakeResponse({"answerText": '{"dialogue":"draft"}'})
         if stage == "dialogue_review":
@@ -236,7 +242,7 @@ def test_character_reskin_uses_actual_episode_count_and_rejects_incomplete_scrip
         if stage == "profile_review":
             return _FakeResponse({"answerText": '{"passed":true,"rewrite_required":false}'})
         if stage == "profile_sort":
-            return _FakeResponse({"answerText": "新人设小传"})
+            return _FakeResponse({"vVtCqEXZ": "新人设小传"})
         if stage == "dialogue_write":
             return _FakeResponse({"answerText": '{"dialogue":"1-3"}'})
         if stage == "dialogue_review":
@@ -288,7 +294,7 @@ def test_character_reskin_rewrites_at_most_five_times_and_uses_latest_version() 
             profile_rewrites = len([call for call in calls if call["stage"] == "profile_rewrite"])
             return _FakeResponse({"wQrZxzeL": f'{{"profile":"v{profile_rewrites}"}}'})
         if stage == "profile_sort":
-            return _FakeResponse({"answerText": "最后人设小传"})
+            return _FakeResponse({"vVtCqEXZ": "最后人设小传"})
         if stage == "dialogue_write":
             return _FakeResponse({"answerText": '{"dialogue":"ok"}'})
         if stage == "dialogue_review":

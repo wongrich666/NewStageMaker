@@ -51,7 +51,7 @@ EXPECTED_VARIABLE_KEYS_BY_STAGE: dict[str, list[str]] = {
     "profile_write": ["n5ZHYrj8", "ayxWwSpE", "yYYOuumm", "rxmvq2lS", *COMMON_TARGET_STYLE_KEYS],
     "profile_review": ["n5ZHYrj8", "ayxWwSpE", "fFM0mroW"],
     "profile_rewrite": ["n5ZHYrj8", "yYYOuumm", "ayxWwSpE", "va4Et1LA", "fFM0mroW", "zz4re7zP"],
-    "profile_sort": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW"],
+    "profile_sort": ["fFM0mroW", "ayxWwSpE", "ti6oIFwf"],
     "dialogue_write": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "sKq9Iyza"],
     "dialogue_review": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "mN7Fh38L"],
     "dialogue_rewrite": [
@@ -204,10 +204,7 @@ def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
     profile_sort = StageSpec("profile_sort", "FASTGPT_SORT_CHARACTER_PROFILE_KEY", ("vVtCqEXZ",))
     state["profile_text"] = _call_stage(
         profile_sort,
-        _with_common_variables(state, {
-            "fFM0mroW": state["profile_json"],
-            "yYYOuumm": state["source_characters"],
-        }),
+        _profile_sort_variables(state),
         debug,
     )
 
@@ -404,6 +401,7 @@ def _common_variables(state: dict[str, Any]) -> dict[str, Any]:
         "mubiao_fengge": state["target_style"],
         "rxmvq2lS": state["core_scenes"],
         "yYYOuumm": state["source_characters"],
+        "ti6oIFwf": state["source_characters"],
         "pxtQY7p2": state["source_script"],
     }
 
@@ -437,6 +435,14 @@ def _profile_rewrite_variables(state: dict[str, Any]) -> dict[str, Any]:
         "va4Et1LA": state["profile_review_json"],
         "fFM0mroW": state["profile_json"],
         "zz4re7zP": state["target_style"],
+    }
+
+
+def _profile_sort_variables(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "fFM0mroW": state["profile_json"],
+        "ayxWwSpE": state["source_outline"],
+        "ti6oIFwf": state["source_characters"],
     }
 
 
