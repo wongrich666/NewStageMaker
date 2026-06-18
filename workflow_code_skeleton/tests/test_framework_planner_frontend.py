@@ -82,3 +82,9 @@ def test_framework_planner_auto_run_commits_and_saves_each_stage() -> None:
     assert "syncFrameworkAssetState(state, `auto_confirm:${stageKey}`);" in FRONTEND_SOURCE
     assert "await saveFrameworkAsset({ silent: true, skipDirtyCheck: true });" in FRONTEND_SOURCE
     assert "function validateAutoFrameworkStart()" in FRONTEND_SOURCE
+
+
+def test_framework_planner_save_entry_is_not_duplicated_as_script_entry() -> None:
+    assert "保存框架并进入剧本正文阶段" not in FRONTEND_SOURCE
+    assert "进入剧本正文阶段" in FRONTEND_SOURCE
+    assert "await saveFrameworkAsset({ silent: true });" in FRONTEND_SOURCE

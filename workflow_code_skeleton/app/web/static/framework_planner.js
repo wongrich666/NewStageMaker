@@ -1496,7 +1496,7 @@
   function renderFrameworkScriptButton(sizeClass) {
     const className = sizeClass ? ` ${sizeClass}` : "";
     const disabled = canStartFrameworkScript() && !ui.assetImporting ? "" : "disabled";
-    const label = ui.loading.framework_script ? "正在保存并进入剧本正文阶段..." : "保存框架并进入剧本正文阶段";
+    const label = ui.loading.framework_script ? "正在保存并进入剧本正文阶段..." : "进入剧本正文阶段";
     return `<button class="fp-btn${className} primary" data-action="start-framework-script" ${disabled}>${label}</button>`;
   }
 
@@ -3332,7 +3332,7 @@
         <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="${escapeHtml(stageKey)}" ${ui.assetImporting || running || isAutoFrameworkRunning() || blockReason ? "disabled" : ""}>${hasOutput ? `重新生成 ${escapeHtml(title)}` : "生成本阶段"}</button>
         ${isStageEditable(stageKey) ? `<button class="fp-btn ${dirty ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="${escapeHtml(stageKey)}" ${dirty && !ui.assetImporting && !isAutoFrameworkRunning() ? "" : "disabled"}>应用修改</button>` : ""}
         <button class="fp-btn ${canNext ? "primary" : ""}" data-action="go-next-stage" data-view="${escapeHtml(nextView)}" ${canNext ? "" : "disabled"}>下一步</button>
-        ${stageKey === "package" ? `${renderSaveFrameworkButton("")}${renderFrameworkScriptButton("")}` : ""}
+        ${stageKey === "package" ? `${renderFrameworkScriptButton("")}` : ""}
       </div>
     `;
   }
@@ -3674,7 +3674,6 @@
         <div class="fp-actions fp-stage-bottom-actions">
           <button class="fp-btn" data-action="go-view" data-view="guide" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>上一步</button>
           <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="package" ${ui.assetImporting || isAutoFrameworkRunning() || isStageLoading("package") || blockReason ? "disabled" : ""}>${hasOutput ? "重新生成 07" : "生成本阶段"}</button>
-          ${renderSaveFrameworkButton("")}
           <button class="fp-btn primary" data-action="download-readable-framework" ${!hasOutput || ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>下载可读框架</button>
           <button class="fp-btn" data-action="download-structured-framework" ${!hasOutput || ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>下载结构化框架</button>
           ${renderFrameworkScriptButton("")}
