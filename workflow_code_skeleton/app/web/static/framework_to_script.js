@@ -301,6 +301,38 @@
     saveWorkspace();
   }
 
+  function detailsStateStorageKey(id) {
+    return [state.frameworkAssetId || "no-asset", id].join(":");
+  }
+
+  function isPersistentDetailsOpen(id, defaultOpen) {
+    if (!id) return Boolean(defaultOpen);
+    const map = (state.settings && state.settings.persistedDetailsOpen) || {};
+    const key = detailsStateStorageKey(id);
+    if (Object.prototype.hasOwnProperty.call(map, key)) return Boolean(map[key]);
+    return Boolean(defaultOpen);
+  }
+
+  function persistentDetailsAttrs(id, defaultOpen) {
+    const safeId = String(id || "").trim();
+    if (!safeId) return defaultOpen ? " open" : "";
+    return `data-persist-details-id="${escapeHtml(safeId)}"${isPersistentDetailsOpen(safeId, defaultOpen) ? " open" : ""}`;
+  }
+
+  function setPersistentDetailsOpen(id, isOpen) {
+    const safeId = String(id || "").trim();
+    if (!safeId) return;
+    if (!state.settings || typeof state.settings !== "object") {
+      state.settings = {};
+    }
+    const map = state.settings.persistedDetailsOpen && typeof state.settings.persistedDetailsOpen === "object"
+      ? state.settings.persistedDetailsOpen
+      : {};
+    map[detailsStateStorageKey(safeId)] = Boolean(isOpen);
+    state.settings.persistedDetailsOpen = map;
+    saveWorkspace();
+  }
+
   const RUNNING_STAGE_STORAGE_PREFIX = "frameworkToScriptRunningStage.v1";
   const RUNNING_STAGE_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 
@@ -1094,7 +1126,7 @@
       return `
         <details class="wts-output" ${outputDetailsAttrs(`stage12:${stage12.batchStartEpisode || "single"}:script`)}>
           <summary>第 ${escapeHtml(stage12.batchStartEpisode || "")}-${escapeHtml(stage12.batchEndEpisode || "")} 集正文</summary>
-          ${renderTree(stage12.batchScriptText || stage12.batch_script_text, "batchScriptText")}
+          ${renderTree(stage12.batchScriptText || stage12.batch_script_text, "batchScriptText", 0, `stage12:${stage12.batchStartEpisode || "single"}:script`)}
         </details>
       `;
     }
@@ -1103,7 +1135,7 @@
       return `
         <details class="wts-output" ${outputDetailsAttrs(`stage12:${key}:script`)}>
           <summary>第 ${escapeHtml(batch.batchStartEpisode || key)}-${escapeHtml(batch.batchEndEpisode || "")} 集正文</summary>
-          ${renderTree(batch.batchScriptText || batch.batch_script_text || "暂无", "batchScriptText")}
+          ${renderTree(batch.batchScriptText || batch.batch_script_text || "暂无", "batchScriptText", 0, `stage12:${key}:script`)}
         </details>
       `;
     }).join("");
@@ -1854,7 +1886,7 @@
   }
 
 
-  function renderTree(value, keyName = "root", depth = 0) {
+  function renderTree(value, keyName = "root", depth = 0, detailsPath = "") {
     let clean = null;
     try {
       clean = stripRaw(value);
@@ -1868,9 +1900,9 @@
     if (Array.isArray(clean)) {
       if (!clean.length) return `<div class="wts-empty-inline">暂无条目</div>`;
       return `<div class="wts-tree-list">${clean.map((item, index) => `
-        <details class="wts-tree-node" ${depth < 1 ? "open" : ""}>
+        <details class="wts-tree-node" ${persistentDetailsAttrs(`${detailsPath || keyName}:item:${index}`, depth < 1)}>
           <summary><span class="wts-tree-arrow"></span>${escapeHtml(labelFor(keyName))} ${index + 1}</summary>
-          <div>${safeRenderTree(item, keyName, depth + 1)}</div>
+          <div>${safeRenderTree(item, keyName, depth + 1, `${detailsPath || keyName}:item:${index}`)}</div>
         </details>
       `).join("")}</div>`;
     }
@@ -1880,24 +1912,24 @@
       return `<div class="wts-tree-list">${entries.map(([key, item]) => {
         const complex = item && typeof item === "object";
         return complex ? `
-          <details class="wts-tree-node" ${depth < 1 ? "open" : ""}>
+          <details class="wts-tree-node" ${persistentDetailsAttrs(`${detailsPath || keyName}:field:${key}`, depth < 1)}>
             <summary><span class="wts-tree-arrow"></span>${escapeHtml(labelFor(key))}</summary>
-            <div>${safeRenderTree(item, key, depth + 1)}</div>
+            <div>${safeRenderTree(item, key, depth + 1, `${detailsPath || keyName}:field:${key}`)}</div>
           </details>
         ` : `
           <div class="wts-tree-leaf">
             <b>${escapeHtml(labelFor(key))}</b>
-            ${renderTreeText(item)}
+            ${renderTreeText(item, `${detailsPath || keyName}:field:${key}:text`)}
           </div>
         `;
       }).join("")}</div>`;
     }
-    return `<div class="wts-tree-text">${renderTreeText(clean)}</div>`;
+    return `<div class="wts-tree-text">${renderTreeText(clean, `${detailsPath || keyName}:text`)}</div>`;
   }
 
-  function safeRenderTree(value, keyName = "root", depth = 0) {
+  function safeRenderTree(value, keyName = "root", depth = 0, detailsPath = "") {
     try {
-      return renderTree(value, keyName, depth);
+      return renderTree(value, keyName, depth, detailsPath);
     } catch (error) {
       console.warn("[framework_to_script] render tree failed", error);
       return `<div class="wts-error-inline">该内容暂时无法展开渲染，已保留原始摘要：${escapeHtml(truncate(readableValue(value), 360))}</div>`;
@@ -1907,29 +1939,29 @@
   function renderStage10Output(stage10) {
     const text = stage10Text(stage10);
     if (String(text || "").trim()) {
-      return safeRenderTree(text, "enrichedEpisodePlanText");
+      return safeRenderTree(text, "enrichedEpisodePlanText", 0, "stage10:enrichedEpisodePlanText");
     }
     const plan = normalizeEpisodePlanItems(stage10Plan(stage10));
     if (plan.length) {
       return `
         <div class="wts-tree-list">
           ${plan.map((item, index) => `
-            <details class="wts-tree-node" ${index < 3 ? "open" : ""}>
+            <details class="wts-tree-node" ${persistentDetailsAttrs(`stage10:episode:${item.episode || index + 1}`, index < 3)}>
               <summary><span class="wts-tree-arrow"></span>第 ${escapeHtml(item.episode || index + 1)} 集 ${escapeHtml(item.title || "")}</summary>
-              <div>${safeRenderTree(item, "episode", 1)}</div>
+              <div>${safeRenderTree(item, "episode", 1, `stage10:episode:${item.episode || index + 1}`)}</div>
             </details>
           `).join("")}
         </div>
       `;
     }
-    return safeRenderTree("已生成结构化优化分集计划，供 11/12 阶段继续使用；本次未返回分集细化文本。", "enrichedEpisodePlanText");
+    return safeRenderTree("已生成结构化优化分集计划，供 11/12 阶段继续使用；本次未返回分集细化文本。", "enrichedEpisodePlanText", 0, "stage10:empty");
   }
 
-  function renderTreeText(value) {
+  function renderTreeText(value, detailsPath = "") {
     const text = String(value ?? "");
     if (text.length <= 420) return `<span>${escapeHtml(text)}</span>`;
     return `
-      <details class="wts-tree-more">
+      <details class="wts-tree-more" ${persistentDetailsAttrs(`${detailsPath || "text"}:more`, false)}>
         <summary>
           <span class="wts-tree-preview">${escapeHtml(text.slice(0, 420))}...</span>
           <span class="wts-tree-expand-label">展开全文</span>
@@ -2323,8 +2355,13 @@
 
   app.addEventListener("toggle", (event) => {
     const target = event.target;
-    if (!target || !target.matches || !target.matches("details[data-output-details-id]")) return;
-    setOutputDetailsOpen(target.dataset.outputDetailsId, target.open);
+    if (!target || !target.matches) return;
+    if (target.matches("details[data-output-details-id]")) {
+      setOutputDetailsOpen(target.dataset.outputDetailsId, target.open);
+    }
+    if (target.matches("details[data-persist-details-id]")) {
+      setPersistentDetailsOpen(target.dataset.persistDetailsId, target.open);
+    }
   }, true);
 
   app.addEventListener("change", (event) => {

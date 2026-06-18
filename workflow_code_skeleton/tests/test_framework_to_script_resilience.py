@@ -68,6 +68,16 @@ def test_framework_asset_import_readiness_is_explained_to_frontend() -> None:
 
 def test_stage10_output_uses_safe_renderer() -> None:
     assert "function renderStage10Output(stage10)" in FRONTEND_SOURCE
-    assert "safeRenderTree(text, \"enrichedEpisodePlanText\")" in FRONTEND_SOURCE
+    assert "safeRenderTree(text, \"enrichedEpisodePlanText\", 0, \"stage10:enrichedEpisodePlanText\")" in FRONTEND_SOURCE
     assert "normalizeEpisodePlanItems(stage10Plan(stage10))" in FRONTEND_SOURCE
     assert "${renderStage10Output(stage10)}" in FRONTEND_SOURCE
+
+
+def test_framework_to_script_inner_details_keep_open_state_across_renders() -> None:
+    assert "function persistentDetailsAttrs" in FRONTEND_SOURCE
+    assert "function setPersistentDetailsOpen" in FRONTEND_SOURCE
+    assert "data-persist-details-id" in FRONTEND_SOURCE
+    assert "target.matches(\"details[data-persist-details-id]\")" in FRONTEND_SOURCE
+    assert "setPersistentDetailsOpen(target.dataset.persistDetailsId, target.open)" in FRONTEND_SOURCE
+    assert "persistedDetailsOpen" in FRONTEND_SOURCE
+    assert "`stage12:${key}:script`" in FRONTEND_SOURCE
