@@ -33,3 +33,11 @@ def test_tool_run_freezes_active_tool_before_collecting_payload() -> None:
     assert "const activeToolKey = state.activeTool;\n    const payload = collectToolPayload(activeToolKey);" in APP_SOURCE
     assert "state.toolResults[activeToolKey] = null;" in APP_SOURCE
     assert 'friendlyErrorText(error, fallback, { toolKey: activeToolKey })' in APP_SOURCE
+
+
+def test_hot_review_run_polls_saved_assets_and_keeps_synced_result() -> None:
+    assert "HOT_REVIEW_RESULT_POLL_INTERVAL_MS" in APP_SOURCE
+    assert "function startHotReviewResultPolling" in APP_SOURCE
+    assert "applyHotReviewAssetResult(asset, { toast: !notified })" in APP_SOURCE
+    assert "hotReviewResultPoller = startHotReviewResultPolling" in APP_SOURCE
+    assert 'activeToolKey === "hot_review" && isScriptAuditEcgResult(currentToolResult("hot_review"))' in APP_SOURCE

@@ -118,7 +118,7 @@ class ToolExecutionError(RuntimeError):
 
 
 def _tool_timeout_seconds(definition: "SimpleToolDefinition") -> int:
-    default_timeout = 900 if definition.key == "hot_review" else int(getattr(settings, "fastgpt_timeout", 300))
+    default_timeout = 2700 if definition.key == "hot_review" else int(getattr(settings, "fastgpt_timeout", 300))
     raw = os.getenv(f"{definition.env_prefix}_TIMEOUT") or os.getenv("FASTGPT_TIMEOUT") or str(default_timeout)
     try:
         return max(1, int(raw))

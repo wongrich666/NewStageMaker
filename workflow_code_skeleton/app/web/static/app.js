@@ -4180,6 +4180,8 @@ startRuntimeDebugPolling();
 
   const HOT_REVIEW_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
   const HOT_REVIEW_RUN_TIMEOUT_MS = 45 * 60 * 1000;
+  const HOT_REVIEW_RESULT_POLL_INTERVAL_MS = 10000;
+  const HOT_REVIEW_RESULT_POLL_GRACE_MS = 10000;
 
   function hotReviewFileExtension(filename) {
     const parts = String(filename || "")
@@ -5351,6 +5353,92 @@ function renderToolForm(toolKey) {
     renderProjectList(state.projects);
   }
 
+  function hotReviewAssetTimestampMs(asset) {
+    const raw = asset?.updated_at
+      || asset?.updatedAt
+      || asset?.created_at
+      || asset?.createdAt
+      || asset?.saved_at
+      || asset?.savedAt
+      || "";
+    const timestamp = Date.parse(String(raw || ""));
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }
+
+  function hotReviewKnownAssetKeys() {
+    return new Set(
+      (Array.isArray(state.assets) ? state.assets : [])
+        .filter((item) => isHotReviewAsset(item))
+        .map((item) => hotReviewAssetKey(item) || hotReviewAssetKeyV5(item) || hotReviewAssetTitle(item))
+        .filter(Boolean)
+        .map(String)
+    );
+  }
+
+  function pickFreshHotReviewAsset(assets, { startedAtMs = 0, knownKeys = new Set() } = {}) {
+    const cutoff = Math.max(0, Number(startedAtMs || 0) - HOT_REVIEW_RESULT_POLL_GRACE_MS);
+    return hotReviewUniqueAssetsV5(assets)
+      .filter((asset) => {
+        const key = String(hotReviewAssetKey(asset) || hotReviewAssetKeyV5(asset) || hotReviewAssetTitle(asset) || "");
+        const timestamp = hotReviewAssetTimestampMs(asset);
+        if (timestamp && timestamp < cutoff) return false;
+        if (!timestamp && key && knownKeys.has(key)) return false;
+        const result = toolResultFromAsset(asset);
+        return isScriptAuditEcgResult(result);
+      })
+      .sort((a, b) => hotReviewAssetTimestampMs(b) - hotReviewAssetTimestampMs(a))[0] || null;
+  }
+
+  function applyHotReviewAssetResult(asset, { toast = false } = {}) {
+    if (!asset) return false;
+    const result = toolResultFromAsset(asset);
+    if (!isScriptAuditEcgResult(result)) return false;
+    state.toolResults.hot_review = result;
+    persistHotReviewSession(result);
+    mergeProjectListAsset(asset);
+    stopToolProgressTicker();
+    renderToolOutput("hot_review");
+    if (toast) {
+      showToast("爆款文审核已完成", "已自动同步后端保存的可视化结果。");
+    }
+    return true;
+  }
+
+  function startHotReviewResultPolling({ startedAtMs = Date.now(), knownKeys = new Set() } = {}) {
+    let stopped = false;
+    let inFlight = false;
+    let notified = false;
+    const tick = async () => {
+      if (stopped || inFlight || !isAuthenticated()) return;
+      inFlight = true;
+      try {
+        const data = await requestJson(window.scriptMakerConfig.assetsUrl);
+        const assets = Array.isArray(data.assets) ? data.assets : [];
+        state.assets = assets;
+        state.assetsStatus = assets.length ? "success" : "empty";
+        renderAssets(state.assets);
+        const asset = pickFreshHotReviewAsset(assets, { startedAtMs, knownKeys });
+        if (asset && applyHotReviewAssetResult(asset, { toast: !notified })) {
+          notified = true;
+          stopped = true;
+          window.clearInterval(timer);
+        }
+      } catch (error) {
+        console.warn("[hot-review-poll]", error);
+      } finally {
+        inFlight = false;
+      }
+    };
+    const timer = window.setInterval(tick, HOT_REVIEW_RESULT_POLL_INTERVAL_MS);
+    window.setTimeout(tick, 3000);
+    return {
+      stop() {
+        stopped = true;
+        window.clearInterval(timer);
+      }
+    };
+  }
+
   function shouldContinuePolling() {
     return state.projects.some((item) => RUNNING_STATUSES.has(item.status));
   }
@@ -6083,6 +6171,9 @@ function renderToolForm(toolKey) {
     if (!requireLogin()) return;
     const activeToolKey = state.activeTool;
     const payload = collectToolPayload(activeToolKey);
+    const hotReviewStartedAt = Date.now();
+    const hotReviewKnownKeys = activeToolKey === "hot_review" ? hotReviewKnownAssetKeys() : new Set();
+    let hotReviewResultPoller = null;
     if (activeToolKey === "new_framework") {
       const projectTitle = projectTitleCandidate();
       if (projectTitle) {
@@ -6096,12 +6187,19 @@ function renderToolForm(toolKey) {
         ? characterReskinRunningMessage(0)
         : "生成时间很长，请不要刷新，马上就好~"));
     startToolProgressTicker(activeToolKey);
+    if (activeToolKey === "hot_review") {
+      hotReviewResultPoller = startHotReviewResultPolling({
+        startedAtMs: hotReviewStartedAt,
+        knownKeys: hotReviewKnownKeys
+      });
+    }
     try {
       const data = await requestJson(currentToolRunUrl(activeToolKey), {
         method: "POST",
         body: JSON.stringify(payload),
         timeoutMs: activeToolKey === "hot_review" ? HOT_REVIEW_RUN_TIMEOUT_MS : 0
       });
+      hotReviewResultPoller?.stop();
       stopToolProgressTicker();
       const result = data.result || data;
       const output = result.output ?? data.output ?? result.result ?? "";
@@ -6152,7 +6250,13 @@ function renderToolForm(toolKey) {
             : `${result.title || toolConfig(activeToolKey)?.label || "当前工具"} 已返回结果。`),
       );
     } catch (error) {
+      hotReviewResultPoller?.stop();
       stopToolProgressTicker();
+      if (activeToolKey === "hot_review" && isScriptAuditEcgResult(currentToolResult("hot_review"))) {
+        renderToolOutput("hot_review");
+        showToast("爆款文审核已完成", "请求链路已结束，当前页已展示自动同步到的结果。");
+        return;
+      }
       console.error("[tool-run]", error);
       const fallback = activeToolKey === "hot_review"
         ? "爆款文审核运行失败，可能是请求超时、后端中断或网络抖动。当前输入已保留，请稍后重试。"

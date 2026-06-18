@@ -161,6 +161,26 @@ class SimpleFastGPTToolsTests(unittest.TestCase):
                 self.assertEqual(result["text"], "审核意见")
                 self.assertTrue(result["filename"].startswith("爆款文审核意见_"))
 
+    def test_hot_review_uses_long_default_timeout(self) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_post(url, *, headers=None, json=None, timeout=None):
+            del url, headers, json
+            captured["timeout"] = timeout
+            return _FakeResponse(payload={"answerText": "审核意见"})
+
+        with patch.dict(
+            os.environ,
+            {
+                "FASTGPT_HOT_REVIEW_API_KEY": "tool-key",
+            },
+            clear=True,
+        ):
+            with patch.object(tools.requests, "post", side_effect=_fake_post):
+                tools.run_simple_tool("hot_review", {"review_text": "测试正文"})
+
+        self.assertEqual(captured["timeout"], 2700)
+
     def test_hot_review_empty_input_does_not_call_fastgpt(self) -> None:
         with patch.dict(
             os.environ,
