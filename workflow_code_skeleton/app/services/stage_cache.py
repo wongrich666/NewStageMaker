@@ -326,6 +326,7 @@ class StageCacheMixin:
         variables: dict[str, Any],
     ) -> str:
         """把运行时阶段名映射成回退阶段名，保证前后端对阶段理解一致。"""
+        variables = variables if isinstance(variables, dict) else {}
         batch_stage = _normalize_rollback_stage_key(variables.get(LOCAL_CURRENT_BATCH_STAGE))
         rewrite_stage = _normalize_rollback_stage_key(variables.get(LOCAL_REWRITE_FROM_STAGE))
         for candidate in (batch_stage, rewrite_stage):
