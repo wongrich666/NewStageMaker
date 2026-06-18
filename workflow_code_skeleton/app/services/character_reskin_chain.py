@@ -49,7 +49,7 @@ STAGE_LABELS: dict[str, str] = {
 EXPECTED_VARIABLE_KEYS_BY_STAGE: dict[str, list[str]] = {
     "actual_episode_count": ["juben_zhengwen"],
     "profile_write": ["n5ZHYrj8", "ayxWwSpE", "yYYOuumm", "rxmvq2lS", *COMMON_TARGET_STYLE_KEYS],
-    "profile_review": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW"],
+    "profile_review": ["n5ZHYrj8", "ayxWwSpE", "fFM0mroW"],
     "profile_rewrite": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "va4Et1LA"],
     "profile_sort": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW"],
     "dialogue_write": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "sKq9Iyza"],
@@ -180,7 +180,7 @@ def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
         debug,
     )
 
-    profile_review = StageSpec("profile_review", "FASTGPT_REVIEW_CHARACTER_PROFILE_KEY", json_output=True)
+    profile_review = StageSpec("profile_review", "FASTGPT_REVIEW_CHARACTER_PROFILE_KEY", ("u3ymVRAj",), json_output=True)
     profile_rewrite = StageSpec(
         "profile_rewrite",
         "FASTGPT_REWRITE_CHARACTER_PROFILE_KEY",
@@ -190,7 +190,7 @@ def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
     for rewrite_index in range(0, 6):
         state["profile_review_json"] = _call_stage(
             profile_review,
-            _with_common_variables(state, {"fFM0mroW": state["profile_json"]}),
+            _profile_review_variables(state),
             debug,
         )
         if not _review_needs_rewrite(state["profile_review_json"]) or rewrite_index >= 5:
@@ -422,6 +422,14 @@ def _profile_write_variables(state: dict[str, Any]) -> dict[str, Any]:
         "cUMhDqCG": state["target_style"],
         "target_style": state["target_style"],
         "mubiao_fengge": state["target_style"],
+    }
+
+
+def _profile_review_variables(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "n5ZHYrj8": state["title"],
+        "ayxWwSpE": state["source_outline"],
+        "fFM0mroW": state["profile_json"],
     }
 
 

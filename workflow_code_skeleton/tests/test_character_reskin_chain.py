@@ -73,7 +73,7 @@ def test_character_reskin_runs_all_stages_and_concatenates_batches() -> None:
         if stage == "actual_episode_count":
             return _FakeResponse({"answerText": "6"})
         if stage == "profile_review":
-            return _FakeResponse({"answerText": '{"passed":true,"rewrite_required":false}'})
+            return _FakeResponse({"u3ymVRAj": '{"passed":true,"rewrite_required":false}'})
         if stage == "profile_sort":
             return _FakeResponse({"answerText": "新人设小传"})
         if stage == "dialogue_write":
@@ -112,6 +112,12 @@ def test_character_reskin_runs_all_stages_and_concatenates_batches() -> None:
         "yYYOuumm": "旧人物小传",
     }.items():
         assert first_profile["variables"][key] == expected
+    first_profile_review = next(call for call in calls if call["stage"] == "profile_review")
+    assert first_profile_review["variables"] == {
+        "n5ZHYrj8": "镜中雪",
+        "ayxWwSpE": "原故事大纲",
+        "fFM0mroW": {"name": "新主角"},
+    }
 
 
 def test_character_reskin_bridges_review_and_memory_variables() -> None:
@@ -127,7 +133,7 @@ def test_character_reskin_bridges_review_and_memory_variables() -> None:
         if stage == "actual_episode_count":
             return _FakeResponse({"answerText": "6"})
         if stage == "profile_review":
-            return _FakeResponse({"answerText": '{"passed":false,"rewrite_required":true,"note":"profile review"}'})
+            return _FakeResponse({"u3ymVRAj": '{"passed":false,"rewrite_required":true,"note":"profile review"}'})
         if stage == "profile_rewrite":
             return _FakeResponse({"answerText": '{"profile":"fixed"}'})
         if stage == "profile_sort":
