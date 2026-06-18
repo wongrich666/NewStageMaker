@@ -1402,6 +1402,24 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         workspace_state["running_stage"] = running_stage
         workspace_state["lastFailedStage"] = last_failed_stage
         workspace_state["last_failed_stage"] = last_failed_stage
+        running_started_at = str(data.get("runningStartedAt") or data.get("running_started_at") or workspace_state.get("runningStartedAt") or "").strip()
+        running_progress = data.get("runningProgress") if isinstance(data.get("runningProgress"), dict) else data.get("running_progress")
+        if isinstance(running_progress, dict):
+            running_progress = _strip_raw_fastgpt_fields(copy.deepcopy(running_progress))
+        elif not isinstance(workspace_state.get("runningProgress"), dict):
+            running_progress = None
+        else:
+            running_progress = workspace_state.get("runningProgress")
+        running_retry_message = str(data.get("runningRetryMessage") or data.get("running_retry_message") or workspace_state.get("runningRetryMessage") or "").strip()
+        running_retry_countdown = data.get("runningRetryCountdown", data.get("running_retry_countdown", workspace_state.get("runningRetryCountdown", 0)))
+        workspace_state["runningStartedAt"] = running_started_at
+        workspace_state["running_started_at"] = running_started_at
+        workspace_state["runningProgress"] = running_progress
+        workspace_state["running_progress"] = running_progress
+        workspace_state["runningRetryMessage"] = running_retry_message
+        workspace_state["running_retry_message"] = running_retry_message
+        workspace_state["runningRetryCountdown"] = _positive_int(running_retry_countdown, 0)
+        workspace_state["running_retry_countdown"] = _positive_int(running_retry_countdown, 0)
         workspace_state["framework_asset_id"] = asset_id
         workspace_state["project_id"] = project_id
         workspace_state["updated_at"] = now

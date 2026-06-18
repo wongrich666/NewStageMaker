@@ -94,6 +94,10 @@ def test_framework_to_script_manual_progress_save_writes_asset_state() -> None:
     assert "stageOutputs: state.stageOutputs" in FRONTEND_SOURCE
     assert "completedStages: state.completedStages" in FRONTEND_SOURCE
     assert "runningStage: state.runningStage" in FRONTEND_SOURCE
+    assert "runningProgress: state.runningProgress" in FRONTEND_SOURCE
+    assert "runningRetryMessage: state.runningRetryMessage" in FRONTEND_SOURCE
+    assert "runningStartedAt" in SERVER_SOURCE
+    assert "runningProgress" in SERVER_SOURCE
 
 
 def test_framework_to_script_export_uses_project_context_and_clear_filename() -> None:

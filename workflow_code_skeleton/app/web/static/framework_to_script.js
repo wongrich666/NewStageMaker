@@ -248,6 +248,10 @@
         stages: state.stages,
         settings: state.settings,
         runningStage: state.runningStage,
+        runningStartedAt: state.runningStartedAt,
+        runningProgress: state.runningProgress,
+        runningRetryMessage: state.runningRetryMessage,
+        runningRetryCountdown: state.runningRetryCountdown,
         lastFailedStage: state.lastFailedStage,
       })),
     });
@@ -263,6 +267,10 @@
       state.completedStages = Array.isArray(savedState.completedStages) ? savedState.completedStages : state.completedStages;
       state.stages = savedState.stages || state.stages;
       state.settings = savedState.settings || state.settings;
+      state.runningStartedAt = savedState.runningStartedAt || savedState.running_started_at || state.runningStartedAt;
+      state.runningProgress = savedState.runningProgress || savedState.running_progress || state.runningProgress;
+      state.runningRetryMessage = savedState.runningRetryMessage || savedState.running_retry_message || state.runningRetryMessage;
+      state.runningRetryCountdown = Number(savedState.runningRetryCountdown || savedState.running_retry_countdown || state.runningRetryCountdown || 0);
     }
     saveWorkspace();
     return data;
@@ -1253,6 +1261,10 @@
       state.stages = workspaceState.stages || {};
       state.completedStages = Array.isArray(workspaceState.completedStages) ? workspaceState.completedStages : [];
       state.scriptStages = asset.scriptStages || workspaceState.scriptStages || {};
+      state.runningStartedAt = workspaceState.runningStartedAt || workspaceState.running_started_at || "";
+      state.runningProgress = workspaceState.runningProgress || workspaceState.running_progress || null;
+      state.runningRetryMessage = workspaceState.runningRetryMessage || workspaceState.running_retry_message || "";
+      state.runningRetryCountdown = Number(workspaceState.runningRetryCountdown || workspaceState.running_retry_countdown || 0);
       state.frameworkSource = state.frameworkSource === "刚刚完成的框架" ? "刚刚完成的框架" : "我的资产 / 框架资产";
       setPreferenceSnapshot(asset.preference_snapshot || {}, "framework_asset_snapshot");
       const stage10 = state.scriptStages.stage10 || {};
