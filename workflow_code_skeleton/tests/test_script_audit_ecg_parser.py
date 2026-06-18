@@ -241,7 +241,7 @@ def test_compact_parse_valid_raw_json():
     result = compact_result_from(json.dumps(compact_payload(), ensure_ascii=False))
     assert result["audit"]["schema_version"] == COMPACT_SCHEMA_VERSION
     assert result["audit"]["overall"]["total_score"] == 74
-    assert result["visualization"]["ecg_chart"]["global"]["points"][0]["hover_title"] == "强开场"
+    assert result["visualization"]["ecg_chart"]["global"]["points"][0]["hover_title"] == "集内高点"
     assert result["visualization"]["episode_score_map"][0]["episode_score"] == 74
 
 
@@ -249,8 +249,8 @@ def test_compact_parse_fenced_bom_and_surrounding_text():
     raw = "\ufeff下面是审核结果：```json\n" + json.dumps(compact_payload(), ensure_ascii=False) + "\n```谢谢"
     result = compact_result_from(raw)
     assert result["audit"]["meta"]["script_title"] == "紧凑测试"
-    assert result["visualization"]["ecg_chart"]["global"]["peak_points"][0]["point_id"] == "p1"
-    assert result["visualization"]["ecg_chart"]["global"]["valley_points"][0]["point_id"] == "p2"
+    assert result["visualization"]["ecg_chart"]["global"]["peak_points"][0]["hover_title"] == "集内高点"
+    assert result["visualization"]["ecg_chart"]["global"]["valley_points"][0]["hover_title"] == "集内高点"
 
 
 def test_compact_alias_payload_normalizes_to_canonical():
@@ -322,6 +322,23 @@ def test_compact_global_chart_includes_episode_points_for_each_episode():
     assert episodes == {1, 2}
     assert len(result["visualization"]["episode_score_map"]) == 2
     assert len(result["audit"]["episode_reviews"]) == 2
+
+
+def test_compact_global_chart_prefers_episode_ecg_points_over_global_points():
+    payload = compact_payload()
+    payload["global_review"]["global_ecg_points"] = [
+        {"point_id": "global_ep1", "segment_id": "s1", "episode_no": 1, "ecg_value": 5, "short_label": "全局关键点"}
+    ]
+    payload["episode_reviews"][0]["ecg_points"] = [
+        {"point_id": "episode_ep1", "segment_id": "s1", "episode_no": 1, "ecg_value": -1, "short_label": "单集真实点"}
+    ]
+
+    result = compact_result_from(json.dumps(payload, ensure_ascii=False))
+    global_points = result["visualization"]["ecg_chart"]["global"]["points"]
+    episode_one_points = [point for point in global_points if point["episode_no"] == 1]
+    assert len(episode_one_points) == 1
+    assert episode_one_points[0]["point_id"] == "episode_ep1"
+    assert episode_one_points[0]["ecg_value"] == -1
 
 
 def test_compact_global_chart_fills_missing_episodes_from_segments():

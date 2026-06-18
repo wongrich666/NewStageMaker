@@ -1629,14 +1629,10 @@ def _point_identity(point: dict) -> tuple:
     )
 
 
-def _merge_global_episode_points(global_points: list[dict], episode_charts: list[dict]) -> list[dict]:
-    merged = [dict(point) for point in global_points if isinstance(point, dict)]
+def _episode_chart_points(episode_charts: list[dict]) -> list[dict]:
+    merged: list[dict] = []
     seen = {_point_identity(point) for point in merged}
-    represented_episodes = {_int(point.get("episode_no"), 0) for point in merged if _int(point.get("episode_no"), 0)}
     for chart in episode_charts:
-        episode_no = _int(chart.get("episode_no"), 0)
-        if not episode_no or episode_no in represented_episodes:
-            continue
         for point in _list(chart.get("points")):
             if not isinstance(point, dict):
                 continue
@@ -1645,7 +1641,39 @@ def _merge_global_episode_points(global_points: list[dict], episode_charts: list
                 continue
             merged.append(dict(point))
             seen.add(identity)
-        represented_episodes.add(episode_no)
+    merged.sort(key=lambda point: (
+        _int(point.get("episode_no"), 0),
+        _int(point.get("segment_index_global"), 0),
+        _int(point.get("segment_index_in_episode"), 0),
+        _int(point.get("x"), 0),
+        _str(point.get("point_id")),
+    ))
+    for index, point in enumerate(merged, start=1):
+        point["x"] = index
+    return merged
+
+
+def _merge_episode_global_points(episode_points: list[dict], global_points: list[dict]) -> list[dict]:
+    merged = [dict(point) for point in episode_points if isinstance(point, dict)]
+    seen = {_point_identity(point) for point in merged}
+    represented_episodes = {
+        _int(point.get("episode_no"), 0)
+        for point in merged
+        if _int(point.get("episode_no"), 0)
+    }
+    for point in global_points:
+        if not isinstance(point, dict):
+            continue
+        episode_no = _int(point.get("episode_no"), 0)
+        if episode_no and episode_no in represented_episodes:
+            continue
+        identity = _point_identity(point)
+        if identity in seen:
+            continue
+        merged.append(dict(point))
+        seen.add(identity)
+        if episode_no:
+            represented_episodes.add(episode_no)
     merged.sort(key=lambda point: (
         _int(point.get("episode_no"), 0),
         _int(point.get("segment_index_global"), 0),
@@ -1853,7 +1881,8 @@ def build_audit_visualization_payload(audit: dict) -> dict:
             "episode_title": episode_title,
             "risk_color": RISK_COLOR_MAP.get(_str(item.get("risk_level")), ""),
         } for item in _list(episode.get("risk_scan")) if isinstance(item, dict))
-    global_points = _merge_global_episode_points(global_points, episode_charts)
+    episode_points = _episode_chart_points(episode_charts)
+    global_points = _merge_episode_global_points(episode_points, global_points)
     global_points = _ensure_global_points_for_episodes(
         global_points,
         audit=audit,

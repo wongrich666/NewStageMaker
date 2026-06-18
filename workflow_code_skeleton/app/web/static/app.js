@@ -6036,7 +6036,7 @@ function renderToolForm(toolKey) {
     const activeToolKey = state.activeTool;
     state.toolResults[state.activeTool] = null;
     renderToolOutput(activeToolKey, activeToolKey === "hot_review"
-      ? "爆款文审核通常需要较长时间，请不要刷新。若超时或出错，这里会显示失败原因。模型可能会出错，如果显示内容和输入明显不符，请你重新运行。"
+      ? "爆款文审核通常需要较长时间，请不要刷新。若超时或出错，这里会显示失败原因。模型可能会不稳定，如果显示内容和输入明显不符，请你重新运行。"
       : "生成时间很长，请不要刷新，马上就好~");
     try {
       const data = await requestJson(currentToolRunUrl(activeToolKey), {
