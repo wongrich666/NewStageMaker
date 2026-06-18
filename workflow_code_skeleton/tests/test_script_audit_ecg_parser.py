@@ -373,11 +373,11 @@ def test_compact_episode_mapping_and_fallback_point_for_missing_ecg():
             "largest_retention_loss": "节奏平",
             "priority_fix": "增加段尾钩子",
             "dimension_scores": [
-                {"dimension_key": "opening_hook", "score": 7},
-                {"dimension_key": "conflict_pacing", "score": 10},
-                {"dimension_key": "satisfying_payoff", "score": 11},
-                {"dimension_key": "character_dialogue_filming", "score": 10},
-                {"dimension_key": "market_compliance", "score": 12},
+                {"dimension_key": "opening_hook", "score": 12},
+                {"dimension_key": "conflict_pacing", "score": 20},
+                {"dimension_key": "satisfying_payoff", "score": 20},
+                {"dimension_key": "character_dialogue_filming", "score": 15},
+                {"dimension_key": "market_compliance", "score": 13},
             ],
         },
     }
@@ -385,7 +385,9 @@ def test_compact_episode_mapping_and_fallback_point_for_missing_ecg():
     assert [item["episode_no"] for item in result["audit"]["episode_reviews"]] == [1, 2]
     global_points = result["visualization"]["ecg_chart"]["global"]["points"]
     assert {point["episode_no"] for point in global_points} == {1, 2}
-    assert any(point.get("derived_from_episode_score") for point in global_points)
+    fallback = next(point for point in global_points if point["episode_no"] == 2)
+    assert fallback["derived_from_episode_score"] is True
+    assert fallback["ecg_value"] == 3
 
 
 def enhanced_compact_payload():
