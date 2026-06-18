@@ -30,20 +30,22 @@ DEDICATED_API_KEY_ENVS: tuple[str, ...] = (
 )
 
 URL_ENV = "FASTGPT_CHAT_COMPLETIONS_URL"
+COMMON_TARGET_STYLE_KEYS = ["target_style", "mubiao_fengge"]
 
 EXPECTED_VARIABLE_KEYS_BY_STAGE: dict[str, list[str]] = {
     "actual_episode_count": ["juben_zhengwen"],
-    "profile_write": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", "rxmvq2lS", "yYYOuumm", "pxtQY7p2"],
-    "profile_review": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW"],
-    "profile_rewrite": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "va4Et1LA"],
-    "profile_sort": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW"],
-    "dialogue_write": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "sKq9Iyza"],
-    "dialogue_review": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "mN7Fh38L"],
+    "profile_write": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2"],
+    "profile_review": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW"],
+    "profile_rewrite": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "va4Et1LA"],
+    "profile_sort": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW"],
+    "dialogue_write": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "sKq9Iyza"],
+    "dialogue_review": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "mN7Fh38L"],
     "dialogue_rewrite": [
         "n5ZHYrj8",
         "eBEWC07Q",
         "blkSS7dY",
         "ayxWwSpE",
+        *COMMON_TARGET_STYLE_KEYS,
         "rxmvq2lS",
         "yYYOuumm",
         "pxtQY7p2",
@@ -58,6 +60,7 @@ EXPECTED_VARIABLE_KEYS_BY_STAGE: dict[str, list[str]] = {
         "eBEWC07Q",
         "blkSS7dY",
         "ayxWwSpE",
+        *COMMON_TARGET_STYLE_KEYS,
         "rxmvq2lS",
         "yYYOuumm",
         "pxtQY7p2",
@@ -71,6 +74,7 @@ EXPECTED_VARIABLE_KEYS_BY_STAGE: dict[str, list[str]] = {
         "eBEWC07Q",
         "blkSS7dY",
         "ayxWwSpE",
+        *COMMON_TARGET_STYLE_KEYS,
         "rxmvq2lS",
         "yYYOuumm",
         "pxtQY7p2",
@@ -85,6 +89,7 @@ EXPECTED_VARIABLE_KEYS_BY_STAGE: dict[str, list[str]] = {
         "eBEWC07Q",
         "blkSS7dY",
         "ayxWwSpE",
+        *COMMON_TARGET_STYLE_KEYS,
         "rxmvq2lS",
         "yYYOuumm",
         "pxtQY7p2",
@@ -342,16 +347,14 @@ def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
 
 def _initial_state(payload: dict[str, Any]) -> dict[str, Any]:
     title = _first_text(payload, "title", "ju_ben_biao_ti", "script_title")
-    raw_source_outline = _first_text(payload, "source_outline", "yuan_juben_genggai", "outline", "story_outline")
-    source_outline = raw_source_outline
+    source_outline = _first_text(payload, "source_outline", "yuan_juben_genggai", "outline", "story_outline")
     target_style = _first_text(payload, "target_style", "mubiao_fengge", "style")
-    if target_style:
-        source_outline = f"【用户换人设要求】\n{target_style}\n\n【原故事大纲】\n{source_outline}"
     state = {
         "title": title,
         "episode_word_count": _first_positive_int(payload, 600, "episode_word_count", "meiji_zishu"),
         "total_episodes": _first_positive_int(payload, 50, "total_episodes", "zong_jishu"),
         "source_outline": source_outline,
+        "target_style": target_style,
         "core_scenes": _first_text(payload, "core_scenes", "hexin_changjing"),
         "source_characters": _first_text(payload, "source_characters", "renwu_xiaozhuan", "characters"),
         "source_script": _first_text(payload, "source_script", "juben_zhengwen", "script"),
@@ -369,7 +372,7 @@ def _initial_state(payload: dict[str, Any]) -> dict[str, Any]:
         "final_output_text": "",
     }
     missing = [key for key in ("title", "source_characters", "source_script") if not state[key]]
-    if not raw_source_outline:
+    if not source_outline:
         missing.append("source_outline")
     if missing:
         raise ToolExecutionError(
@@ -387,6 +390,8 @@ def _common_variables(state: dict[str, Any]) -> dict[str, Any]:
         "eBEWC07Q": state["episode_word_count"],
         "blkSS7dY": state["total_episodes"],
         "ayxWwSpE": state["source_outline"],
+        "target_style": state["target_style"],
+        "mubiao_fengge": state["target_style"],
         "rxmvq2lS": state["core_scenes"],
         "yYYOuumm": state["source_characters"],
         "pxtQY7p2": state["source_script"],
