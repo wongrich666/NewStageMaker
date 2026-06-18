@@ -1452,3 +1452,116 @@ body,
     box-shadow: none;
   }
 }
+
+/* FP_RESPONSIVE_SIDEBAR_LOCK_V1: keep stage flow as a collapsible sidebar */
+.fp-shell {
+  grid-template-columns: var(--fp-sidebar-width, 300px) minmax(0, 1fr) !important;
+  min-width: 0;
+}
+
+.fp-shell.fp-sidebar-collapsed {
+  --fp-sidebar-width: 64px;
+}
+
+.fp-side {
+  position: sticky !important;
+  top: 0;
+  height: 100vh !important;
+  min-width: 0;
+  overflow: hidden auto;
+}
+
+.fp-side-toggle {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  margin-bottom: 10px;
+  border: 1px solid var(--fp-border);
+  border-radius: 999px;
+  color: var(--fp-text);
+  background: rgba(255, 252, 247, 0.92);
+  box-shadow: 0 8px 20px rgba(92, 56, 25, 0.08);
+}
+
+.fp-shell.fp-sidebar-collapsed .fp-side {
+  padding: 14px 8px;
+}
+
+.fp-shell.fp-sidebar-collapsed .fp-logo {
+  justify-content: center;
+}
+
+.fp-shell.fp-sidebar-collapsed .fp-logo > div:last-child,
+.fp-shell.fp-sidebar-collapsed .fp-side-note,
+.fp-shell.fp-sidebar-collapsed .fp-side-actions,
+.fp-shell.fp-sidebar-collapsed .fp-asset-manager-side,
+.fp-shell.fp-sidebar-collapsed .fp-nav-item span:first-child {
+  display: none !important;
+}
+
+.fp-shell.fp-sidebar-collapsed .fp-nav-item {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.fp-shell.fp-sidebar-collapsed .fp-nav-pill {
+  min-width: 28px;
+  height: 28px;
+}
+
+@media (max-width: 1100px) {
+  .fp-shell {
+    --fp-sidebar-width: 248px;
+    grid-template-columns: var(--fp-sidebar-width) minmax(0, 1fr) !important;
+  }
+
+  .fp-side {
+    position: sticky !important;
+    height: 100vh !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .fp-shell {
+    --fp-sidebar-width: 64px;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .fp-main {
+    height: 100vh;
+    overflow: auto;
+    padding: 14px 14px 72px;
+  }
+
+  .fp-side {
+    padding: 14px 8px;
+  }
+
+  .fp-logo {
+    justify-content: center;
+  }
+
+  .fp-logo > div:last-child,
+  .fp-side-note,
+  .fp-side-actions,
+  .fp-asset-manager-side,
+  .fp-nav-item span:first-child {
+    display: none !important;
+  }
+
+  .fp-nav-item {
+    justify-content: center;
+    padding: 10px 0;
+  }
+
+  .fp-nav-pill {
+    min-width: 28px;
+    height: 28px;
+  }
+}

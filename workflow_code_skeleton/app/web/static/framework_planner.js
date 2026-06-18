@@ -418,6 +418,7 @@
       formOpen: false,
       form: emptyKnowledgeTagForm(),
     },
+    sidebarCollapsed: localStorage.getItem("frameworkPlanner.sidebarCollapsed") === "1",
   };
   let state = loadState();
   if (["storyline_details", "storyline_decisions"].includes(state.current_view)) {
@@ -2450,7 +2451,7 @@
     syncStageFlow(state);
     saveState();
     app.innerHTML = `
-      <div class="fp-shell">
+      <div class="fp-shell ${ui.sidebarCollapsed ? "fp-sidebar-collapsed" : ""}">
         ${renderSidebar()}
         <main class="fp-main">
           ${renderTopbar()}
@@ -2540,6 +2541,9 @@
     const modeClass = config.backendReady ? "blue" : "warn";
     return `
       <aside class="fp-side">
+        <button class="fp-side-toggle" type="button" data-action="toggle-sidebar" aria-label="${ui.sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}" title="${ui.sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}">
+          ${ui.sidebarCollapsed ? "›" : "‹"}
+        </button>
         <div class="fp-logo">
           <div class="fp-logo-mark">FP</div>
           <div>
@@ -6981,6 +6985,12 @@ async function saveFrameworkAsset(options) {
     }
     if (action === "go-view") {
       setCurrentView(actionElement.dataset.view);
+      return;
+    }
+    if (action === "toggle-sidebar") {
+      ui.sidebarCollapsed = !ui.sidebarCollapsed;
+      localStorage.setItem("frameworkPlanner.sidebarCollapsed", ui.sidebarCollapsed ? "1" : "0");
+      render();
       return;
     }
     if (action === "open-new-script") {

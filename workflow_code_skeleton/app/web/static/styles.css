@@ -6277,3 +6277,160 @@ body,
     width: 100%;
   }
 }
+
+/* SIDEBAR_RESPONSIVE_LOCK_V1: keep workspace/auth/home sidebar as a sidebar */
+.chat-workspace-shell,
+.prelogin-shell {
+  grid-template-columns: var(--workspace-sidebar-width, 236px) minmax(0, 1fr) !important;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.chat-workspace-shell.sidebar-collapsed {
+  --workspace-sidebar-width: 64px;
+}
+
+.workspace-sidebar.is-collapsed {
+  width: 64px;
+}
+
+@media (max-width: 1100px) {
+  .chat-workspace-shell,
+  .prelogin-shell {
+    --workspace-sidebar-width: 220px;
+    grid-template-columns: var(--workspace-sidebar-width) minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .workspace-body,
+  .home-body,
+  .auth-page {
+    height: 100vh !important;
+    overflow: hidden !important;
+  }
+
+  .chat-workspace-shell,
+  .prelogin-shell {
+    --workspace-sidebar-width: 64px;
+    height: 100vh !important;
+    overflow: hidden !important;
+  }
+
+  .workspace-sidebar,
+  .prelogin-sidebar,
+  .chat-main,
+  .prelogin-main-shell {
+    height: 100vh !important;
+    max-height: 100vh !important;
+  }
+
+  .workspace-sidebar,
+  .prelogin-sidebar {
+    position: sticky !important;
+    top: 0 !important;
+    overflow: hidden auto !important;
+  }
+
+  .workspace-sidebar:not(.is-collapsed),
+  .prelogin-sidebar:not(.is-collapsed) {
+    width: 64px;
+  }
+
+  .workspace-sidebar:not(.is-collapsed) .sidebar-brand-text,
+  .workspace-sidebar:not(.is-collapsed) .sidebar-group-label,
+  .workspace-sidebar:not(.is-collapsed) .sidebar-section-head,
+  .workspace-sidebar:not(.is-collapsed) .sidebar-folder-link,
+  .workspace-sidebar:not(.is-collapsed) .workspace-folder,
+  .workspace-sidebar:not(.is-collapsed) .sidebar-text-link,
+  .workspace-sidebar:not(.is-collapsed) .tool-shortcut,
+  .workspace-sidebar:not(.is-collapsed) .sidebar-footer-text,
+  .workspace-sidebar:not(.is-collapsed) .sidebar-logout-link,
+  .prelogin-sidebar:not(.is-collapsed) .sidebar-brand-text,
+  .prelogin-sidebar:not(.is-collapsed) .sidebar-group-label,
+  .prelogin-sidebar:not(.is-collapsed) .sidebar-section-head,
+  .prelogin-sidebar:not(.is-collapsed) .sidebar-folder-link,
+  .prelogin-sidebar:not(.is-collapsed) .workspace-folder,
+  .prelogin-sidebar:not(.is-collapsed) .sidebar-text-link,
+  .prelogin-sidebar:not(.is-collapsed) .tool-shortcut,
+  .prelogin-sidebar:not(.is-collapsed) .sidebar-footer-text,
+  .prelogin-sidebar:not(.is-collapsed) .sidebar-logout-link {
+    display: none !important;
+  }
+
+  .chat-main,
+  .prelogin-main-shell {
+    min-width: 0;
+    overflow: auto !important;
+    padding: 14px !important;
+  }
+}
+
+/* AUTH_FLOATING_CARD_V1: keep login/register forms as floating cards with scroll */
+.auth-page {
+  min-height: 100vh;
+}
+
+.auth-page .chat-main,
+.auth-page .prelogin-main-shell {
+  position: relative;
+  overflow: auto !important;
+}
+
+.auth-page .workspace-login-landing,
+.auth-page .prelogin-chat-view {
+  min-height: 100%;
+  padding: 24px !important;
+}
+
+.auth-page .workspace-landing__inner {
+  display: grid;
+  min-height: calc(100vh - 48px);
+  align-content: center;
+  justify-items: center;
+  gap: 14px;
+}
+
+.auth-page .workspace-landing__actions-login {
+  display: none !important;
+}
+
+.auth-page .workspace-landing__title,
+.auth-page .workspace-landing__subtitle,
+.auth-page .workspace-landing__eyebrow {
+  text-align: center;
+}
+
+.auth-page .workspace-login-card,
+.auth-page .prelogin-inline-auth {
+  width: min(440px, calc(100vw - var(--workspace-sidebar-width, 236px) - 48px));
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.auth-page .prelogin-auth-overlay {
+  position: absolute !important;
+  inset: 0 !important;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  max-height: 100%;
+  overflow: auto;
+  padding: 24px;
+  pointer-events: auto;
+}
+
+.auth-page .prelogin-inline-auth {
+  pointer-events: auto;
+}
+
+@media (max-width: 760px) {
+  .auth-page .workspace-login-card,
+  .auth-page .prelogin-inline-auth {
+    width: min(420px, calc(100vw - 96px));
+  }
+
+  .auth-page .workspace-landing__inner {
+    min-height: calc(100vh - 28px);
+  }
+}
