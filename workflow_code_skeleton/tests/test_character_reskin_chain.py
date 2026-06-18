@@ -135,7 +135,7 @@ def test_character_reskin_bridges_review_and_memory_variables() -> None:
         if stage == "profile_review":
             return _FakeResponse({"u3ymVRAj": '{"passed":false,"rewrite_required":true,"note":"profile review"}'})
         if stage == "profile_rewrite":
-            return _FakeResponse({"answerText": '{"profile":"fixed"}'})
+            return _FakeResponse({"wQrZxzeL": '{"profile":"fixed"}'})
         if stage == "profile_sort":
             return _FakeResponse({"answerText": "新人设小传"})
         if stage == "dialogue_write":
@@ -158,7 +158,14 @@ def test_character_reskin_bridges_review_and_memory_variables() -> None:
         result = tools.run_simple_tool("character_reskin", _payload(total_episodes=6))
 
     profile_rewrite = next(call for call in calls if call["stage"] == "profile_rewrite")
-    assert profile_rewrite["variables"]["va4Et1LA"]["note"] == "profile review"
+    assert profile_rewrite["variables"] == {
+        "n5ZHYrj8": "镜中雪",
+        "yYYOuumm": "旧人物小传",
+        "ayxWwSpE": "原故事大纲",
+        "va4Et1LA": {"passed": False, "rewrite_required": True, "note": "profile review"},
+        "fFM0mroW": {"profile": "draft"},
+        "zz4re7zP": "换成都市复仇人设",
+    }
     dialogue_rewrite = next(call for call in calls if call["stage"] == "dialogue_rewrite")
     assert dialogue_rewrite["variables"]["rZL0C6f9"]["note"] == "dialogue review"
     body_rewrite = next(call for call in calls if call["stage"] == "body_rewrite")
@@ -279,7 +286,7 @@ def test_character_reskin_rewrites_at_most_five_times_and_uses_latest_version() 
             return _FakeResponse({"answerText": '{"passed":false,"rewrite_required":true}'})
         if stage == "profile_rewrite":
             profile_rewrites = len([call for call in calls if call["stage"] == "profile_rewrite"])
-            return _FakeResponse({"answerText": f'{{"profile":"v{profile_rewrites}"}}'})
+            return _FakeResponse({"wQrZxzeL": f'{{"profile":"v{profile_rewrites}"}}'})
         if stage == "profile_sort":
             return _FakeResponse({"answerText": "最后人设小传"})
         if stage == "dialogue_write":

@@ -30,7 +30,7 @@ DEDICATED_API_KEY_ENVS: tuple[str, ...] = (
 )
 
 URL_ENV = "FASTGPT_CHAT_COMPLETIONS_URL"
-COMMON_TARGET_STYLE_KEYS = ["cUMhDqCG", "target_style", "mubiao_fengge"]
+COMMON_TARGET_STYLE_KEYS = ["cUMhDqCG", "zz4re7zP", "target_style", "mubiao_fengge"]
 STAGE_LABELS: dict[str, str] = {
     "actual_episode_count": "统计原剧本实际集数",
     "profile_write": "生成人设循环变量",
@@ -50,7 +50,7 @@ EXPECTED_VARIABLE_KEYS_BY_STAGE: dict[str, list[str]] = {
     "actual_episode_count": ["juben_zhengwen"],
     "profile_write": ["n5ZHYrj8", "ayxWwSpE", "yYYOuumm", "rxmvq2lS", *COMMON_TARGET_STYLE_KEYS],
     "profile_review": ["n5ZHYrj8", "ayxWwSpE", "fFM0mroW"],
-    "profile_rewrite": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "va4Et1LA"],
+    "profile_rewrite": ["n5ZHYrj8", "yYYOuumm", "ayxWwSpE", "va4Et1LA", "fFM0mroW", "zz4re7zP"],
     "profile_sort": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW"],
     "dialogue_write": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "sKq9Iyza"],
     "dialogue_review": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "mN7Fh38L"],
@@ -184,7 +184,7 @@ def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
     profile_rewrite = StageSpec(
         "profile_rewrite",
         "FASTGPT_REWRITE_CHARACTER_PROFILE_KEY",
-        ("fFM0mroW",),
+        ("wQrZxzeL",),
         json_output=True,
     )
     for rewrite_index in range(0, 6):
@@ -197,13 +197,7 @@ def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
             break
         state["profile_json"] = _call_stage(
             profile_rewrite,
-            _with_common_variables(
-                state,
-                {
-                "fFM0mroW": state["profile_json"],
-                "va4Et1LA": state["profile_review_json"],
-                },
-            ),
+            _profile_rewrite_variables(state),
             debug,
         )
 
@@ -362,7 +356,7 @@ def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
 def _initial_state(payload: dict[str, Any]) -> dict[str, Any]:
     title = _first_text(payload, "title", "ju_ben_biao_ti", "script_title")
     source_outline = _first_text(payload, "source_outline", "yuan_juben_genggai", "outline", "story_outline")
-    target_style = _first_text(payload, "cUMhDqCG", "target_style", "mubiao_fengge", "style")
+    target_style = _first_text(payload, "cUMhDqCG", "zz4re7zP", "target_style", "mubiao_fengge", "style")
     state = {
         "title": title,
         "episode_word_count": _first_positive_int(payload, 600, "episode_word_count", "meiji_zishu"),
@@ -405,6 +399,7 @@ def _common_variables(state: dict[str, Any]) -> dict[str, Any]:
         "blkSS7dY": state["total_episodes"],
         "ayxWwSpE": state["source_outline"],
         "cUMhDqCG": state["target_style"],
+        "zz4re7zP": state["target_style"],
         "target_style": state["target_style"],
         "mubiao_fengge": state["target_style"],
         "rxmvq2lS": state["core_scenes"],
@@ -420,6 +415,7 @@ def _profile_write_variables(state: dict[str, Any]) -> dict[str, Any]:
         "yYYOuumm": state["source_characters"],
         "rxmvq2lS": state["core_scenes"],
         "cUMhDqCG": state["target_style"],
+        "zz4re7zP": state["target_style"],
         "target_style": state["target_style"],
         "mubiao_fengge": state["target_style"],
     }
@@ -430,6 +426,17 @@ def _profile_review_variables(state: dict[str, Any]) -> dict[str, Any]:
         "n5ZHYrj8": state["title"],
         "ayxWwSpE": state["source_outline"],
         "fFM0mroW": state["profile_json"],
+    }
+
+
+def _profile_rewrite_variables(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "n5ZHYrj8": state["title"],
+        "yYYOuumm": state["source_characters"],
+        "ayxWwSpE": state["source_outline"],
+        "va4Et1LA": state["profile_review_json"],
+        "fFM0mroW": state["profile_json"],
+        "zz4re7zP": state["target_style"],
     }
 
 
