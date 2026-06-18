@@ -5,6 +5,7 @@
   let animationFrame = 0;
   let animatedItems = [];
   let reduceMotion = reduceMotionQuery.matches;
+  const pointer = { targetX: 0, targetY: 0, x: 0, y: 0 };
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -36,8 +37,8 @@
 
   function motionStrength() {
     if (reduceMotion) return 0.08;
-    if (window.innerWidth < 720 || coarsePointerQuery.matches) return 0.58;
-    return 1;
+    if (window.innerWidth < 720 || coarsePointerQuery.matches) return 0.72;
+    return 1.28;
   }
 
   function buildItem(element, options) {
@@ -63,6 +64,7 @@
       phase: options.phase,
       rotate: options.rotate || 0,
       rotateAmplitude: options.rotateAmplitude || 0,
+      pointerFactor: options.pointerFactor || 0,
     };
   }
 
@@ -84,20 +86,21 @@
       seedY: 28.44,
       baseX: 0,
       baseY: 0,
-      amplitudeX: 18 * strength,
-      amplitudeY: 12 * strength,
-      speedX: 0.018,
-      speedY: 0.014,
-      baseScale: 1.055,
-      scaleAmplitude: 0.012 * strength,
-      scaleSpeed: 0.12,
-      baseOpacity: 0.74,
-      opacityAmplitude: 0.025 * strength,
-      opacitySpeed: 0.09,
+      amplitudeX: 42 * strength,
+      amplitudeY: 28 * strength,
+      speedX: 0.032,
+      speedY: 0.027,
+      baseScale: 1.11,
+      scaleAmplitude: 0.022 * strength,
+      scaleSpeed: 0.16,
+      baseOpacity: 0.82,
+      opacityAmplitude: 0.035 * strength,
+      opacitySpeed: 0.11,
       blur: 0.12,
-      blurAmplitude: 0.32 * strength,
+      blurAmplitude: 0.5 * strength,
       layerDepth: 0.32,
       phase: 0.4,
+      pointerFactor: 5.5,
     }));
 
     items.push(buildItem(createElement("cat-theme-layer cat-theme-haze", background), {
@@ -105,29 +108,71 @@
       seedY: 19.24,
       baseX: 0,
       baseY: 0,
-      amplitudeX: 32 * strength,
-      amplitudeY: 20 * strength,
-      speedX: 0.012,
-      speedY: 0.016,
-      baseScale: 1.08,
-      scaleAmplitude: 0.018 * strength,
-      scaleSpeed: 0.08,
-      baseOpacity: 0.56,
-      opacityAmplitude: 0.06 * strength,
-      opacitySpeed: 0.07,
+      amplitudeX: 58 * strength,
+      amplitudeY: 38 * strength,
+      speedX: 0.022,
+      speedY: 0.027,
+      baseScale: 1.14,
+      scaleAmplitude: 0.028 * strength,
+      scaleSpeed: 0.11,
+      baseOpacity: 0.6,
+      opacityAmplitude: 0.08 * strength,
+      opacitySpeed: 0.09,
       blur: isMobile ? 12 : 18,
       blurAmplitude: isMobile ? 2 : 4,
       layerDepth: 0.18,
       phase: 2.2,
+      pointerFactor: 3.5,
     }));
 
-    const blobCount = isMobile ? 3 : 5;
+    const auroraCount = reduceMotion ? 1 : (isMobile ? 3 : 5);
+    const auroraColors = [
+      "linear-gradient(90deg, transparent 0%, rgba(255, 198, 143, 0.42) 42%, rgba(255, 244, 201, 0.26) 70%, transparent 100%)",
+      "linear-gradient(90deg, transparent 0%, rgba(255, 230, 176, 0.34) 34%, rgba(255, 178, 158, 0.24) 68%, transparent 100%)",
+      "linear-gradient(90deg, transparent 0%, rgba(247, 210, 255, 0.2) 28%, rgba(255, 216, 178, 0.34) 66%, transparent 100%)",
+      "linear-gradient(90deg, transparent 0%, rgba(255, 252, 216, 0.28) 38%, rgba(255, 190, 143, 0.22) 72%, transparent 100%)",
+      "linear-gradient(90deg, transparent 0%, rgba(255, 211, 166, 0.3) 32%, rgba(255, 248, 229, 0.24) 70%, transparent 100%)",
+    ];
+    for (let index = 0; index < auroraCount; index += 1) {
+      const element = createElement("cat-theme-aurora", background);
+      element.style.setProperty("--cat-aurora-width", `${isMobile ? 72 + index * 10 : 82 + index * 13}vmax`);
+      element.style.setProperty("--cat-aurora-height", `${isMobile ? 24 + index * 3 : 26 + index * 4}vmax`);
+      element.style.setProperty("--cat-aurora-bg", auroraColors[index % auroraColors.length]);
+      element.style.setProperty("--cat-aurora-blur", `${isMobile ? 22 + index * 2 : 30 + index * 3}px`);
+      items.push(buildItem(element, {
+        seedX: 130 + index * 41.7,
+        seedY: 180 + index * 53.9,
+        baseX: window.innerWidth * (-0.18 + index * 0.25),
+        baseY: window.innerHeight * (0.12 + (index * 0.16) % 0.72),
+        amplitudeX: (72 + index * 12) * strength,
+        amplitudeY: (42 + index * 8) * strength,
+        speedX: 0.03 + index * 0.004,
+        speedY: 0.024 + index * 0.004,
+        baseScale: 1.02 + index * 0.035,
+        scaleAmplitude: (0.03 + index * 0.004) * strength,
+        scaleSpeed: 0.08 + index * 0.012,
+        baseOpacity: 0.18 + index * 0.018,
+        opacityAmplitude: 0.065 * strength,
+        opacitySpeed: 0.1 + index * 0.012,
+        blur: isMobile ? 20 + index * 2 : 28 + index * 3,
+        blurAmplitude: isMobile ? 2 : 4,
+        layerDepth: 0.44 + index * 0.05,
+        pointerFactor: 7 + index * 1.2,
+        phase: index * 1.29,
+        rotate: -18 + index * 13,
+        rotateAmplitude: 4.5 * strength,
+      }));
+    }
+
+    const blobCount = isMobile ? 4 : 7;
     const blobColors = [
       "rgba(255, 219, 175, 0.33)",
       "rgba(255, 244, 202, 0.26)",
       "rgba(255, 205, 190, 0.24)",
       "rgba(244, 227, 255, 0.18)",
       "rgba(255, 236, 216, 0.28)",
+      "rgba(255, 224, 184, 0.2)",
+      "rgba(255, 248, 222, 0.22)",
     ];
     for (let index = 0; index < blobCount; index += 1) {
       const element = createElement("cat-theme-blob", background);
@@ -139,24 +184,25 @@
         seedY: 320 + index * 29.31,
         baseX: window.innerWidth * (0.08 + (index * 0.22) % 0.86),
         baseY: window.innerHeight * (0.12 + (index * 0.19) % 0.74),
-        amplitudeX: (28 + index * 6) * strength,
-        amplitudeY: (18 + index * 5) * strength,
-        speedX: 0.018 + index * 0.002,
-        speedY: 0.014 + index * 0.0025,
+        amplitudeX: (46 + index * 8) * strength,
+        amplitudeY: (30 + index * 6) * strength,
+        speedX: 0.027 + index * 0.003,
+        speedY: 0.022 + index * 0.003,
         baseScale: 0.9 + index * 0.045,
-        scaleAmplitude: (0.018 + index * 0.003) * strength,
-        scaleSpeed: 0.08 + index * 0.01,
-        baseOpacity: 0.2 + index * 0.025,
-        opacityAmplitude: 0.04 * strength,
-        opacitySpeed: 0.09 + index * 0.012,
+        scaleAmplitude: (0.028 + index * 0.004) * strength,
+        scaleSpeed: 0.1 + index * 0.012,
+        baseOpacity: 0.22 + index * 0.022,
+        opacityAmplitude: 0.055 * strength,
+        opacitySpeed: 0.11 + index * 0.014,
         blur: isMobile ? 16 + index * 2 : 24 + index * 3,
         blurAmplitude: isMobile ? 1.5 : 3,
         layerDepth: 0.48 + index * 0.07,
+        pointerFactor: 6 + index * 0.8,
         phase: index * 1.47,
       }));
     }
 
-    const particleCount = reduceMotion ? 0 : (isMobile ? 8 : 16);
+    const particleCount = reduceMotion ? 0 : (isMobile ? 14 : 28);
     for (let index = 0; index < particleCount; index += 1) {
       const element = createElement("cat-theme-particle", background);
       const size = 2.2 + (index % 5) * 0.7;
@@ -166,24 +212,25 @@
         seedY: 710 + index * 23.9,
         baseX: window.innerWidth * ((0.07 + index * 0.137) % 0.96),
         baseY: window.innerHeight * ((0.11 + index * 0.173) % 0.92),
-        amplitudeX: (18 + (index % 6) * 5) * strength,
-        amplitudeY: (14 + (index % 4) * 4) * strength,
-        speedX: 0.045 + (index % 4) * 0.008,
-        speedY: 0.038 + (index % 5) * 0.007,
+        amplitudeX: (28 + (index % 6) * 7) * strength,
+        amplitudeY: (22 + (index % 4) * 6) * strength,
+        speedX: 0.058 + (index % 4) * 0.009,
+        speedY: 0.048 + (index % 5) * 0.008,
         baseScale: 0.85 + (index % 4) * 0.12,
-        scaleAmplitude: 0.05 * strength,
-        scaleSpeed: 0.22 + (index % 5) * 0.02,
-        baseOpacity: 0.1 + (index % 5) * 0.018,
-        opacityAmplitude: 0.035 * strength,
-        opacitySpeed: 0.18 + (index % 4) * 0.025,
+        scaleAmplitude: 0.065 * strength,
+        scaleSpeed: 0.25 + (index % 5) * 0.023,
+        baseOpacity: 0.12 + (index % 5) * 0.018,
+        opacityAmplitude: 0.045 * strength,
+        opacitySpeed: 0.2 + (index % 4) * 0.026,
         blur: isMobile ? 0.25 : 0.45,
         blurAmplitude: 0.25,
         layerDepth: 0.85,
+        pointerFactor: 10 + (index % 5) * 0.8,
         phase: index * 0.83,
       }));
     }
 
-    const lineCount = reduceMotion ? 0 : (isMobile ? 3 : 7);
+    const lineCount = reduceMotion ? 0 : (isMobile ? 5 : 10);
     for (let index = 0; index < lineCount; index += 1) {
       const element = createElement("cat-theme-line", background);
       element.style.setProperty("--cat-line-width", `${isMobile ? 42 + index * 8 : 58 + index * 12}px`);
@@ -192,19 +239,20 @@
         seedY: 980 + index * 31.4,
         baseX: window.innerWidth * ((0.13 + index * 0.19) % 0.88),
         baseY: window.innerHeight * ((0.17 + index * 0.23) % 0.82),
-        amplitudeX: (20 + index * 3) * strength,
-        amplitudeY: (12 + index * 2) * strength,
-        speedX: 0.036 + index * 0.004,
-        speedY: 0.032 + index * 0.004,
+        amplitudeX: (30 + index * 4) * strength,
+        amplitudeY: (18 + index * 3) * strength,
+        speedX: 0.046 + index * 0.004,
+        speedY: 0.04 + index * 0.004,
         baseScale: 1,
-        scaleAmplitude: 0.045 * strength,
-        scaleSpeed: 0.14 + index * 0.018,
-        baseOpacity: 0.08 + index * 0.01,
-        opacityAmplitude: 0.025 * strength,
-        opacitySpeed: 0.13 + index * 0.014,
+        scaleAmplitude: 0.055 * strength,
+        scaleSpeed: 0.16 + index * 0.018,
+        baseOpacity: 0.09 + index * 0.01,
+        opacityAmplitude: 0.032 * strength,
+        opacitySpeed: 0.15 + index * 0.014,
         blur: 0.3,
         blurAmplitude: 0.15,
         layerDepth: 0.78,
+        pointerFactor: 9 + index * 0.7,
         phase: index * 1.11,
         rotate: -18 + index * 11,
         rotateAmplitude: 2.2 * strength,
@@ -217,10 +265,14 @@
   function render(timestamp) {
     const time = timestamp * 0.001;
     const strength = motionStrength();
+    pointer.x += (pointer.targetX - pointer.x) * 0.045;
+    pointer.y += (pointer.targetY - pointer.y) * 0.045;
 
     for (const item of animatedItems) {
-      const x = item.baseX + smoothNoise(item.seedX, time * item.speedX) * item.amplitudeX * strength * item.layerDepth;
-      const y = item.baseY + smoothNoise(item.seedY, time * item.speedY) * item.amplitudeY * strength * item.layerDepth;
+      const parallaxX = pointer.x * item.pointerFactor * item.layerDepth * strength;
+      const parallaxY = pointer.y * item.pointerFactor * item.layerDepth * strength;
+      const x = item.baseX + smoothNoise(item.seedX, time * item.speedX) * item.amplitudeX * strength * item.layerDepth + parallaxX;
+      const y = item.baseY + smoothNoise(item.seedY, time * item.speedY) * item.amplitudeY * strength * item.layerDepth + parallaxY;
       const scale = item.baseScale + Math.sin(time * item.scaleSpeed + item.phase) * item.scaleAmplitude * strength;
       const opacity = clamp(item.baseOpacity + Math.sin(time * item.opacitySpeed + item.phase) * item.opacityAmplitude * strength, 0, 1);
       const blur = Math.max(0, item.blur + Math.sin(time * item.opacitySpeed * 0.7 + item.phase) * item.blurAmplitude * strength);
@@ -284,6 +336,12 @@
   document.addEventListener("pointerdown", (event) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     rippleAt(event.clientX, event.clientY);
+  }, { passive: true });
+
+  document.addEventListener("pointermove", (event) => {
+    if (reduceMotion || coarsePointerQuery.matches) return;
+    pointer.targetX = ((event.clientX / Math.max(1, window.innerWidth)) - 0.5) * 2;
+    pointer.targetY = ((event.clientY / Math.max(1, window.innerHeight)) - 0.5) * 2;
   }, { passive: true });
 
   document.addEventListener("focusin", (event) => {

@@ -118,6 +118,7 @@ select {
 }
 
 .cat-theme-layer,
+.cat-theme-aurora,
 .cat-theme-blob,
 .cat-theme-particle,
 .cat-theme-line {
@@ -132,15 +133,15 @@ select {
 }
 
 .cat-theme-layer {
-  inset: -14vmax;
+  inset: -22vmax;
 }
 
 .cat-theme-photo {
   background:
-    linear-gradient(rgba(255, 251, 245, 0.36), rgba(255, 244, 231, 0.44)),
+    linear-gradient(rgba(255, 251, 245, 0.28), rgba(255, 244, 231, 0.34)),
     url("cat-wallpaper.png") center center / cover no-repeat;
-  opacity: 0.72;
-  filter: saturate(0.96) blur(0.1px);
+  opacity: 0.82;
+  filter: saturate(1.04) blur(0.1px);
 }
 
 .cat-theme-haze {
@@ -152,6 +153,15 @@ select {
   mix-blend-mode: soft-light;
   opacity: 0.62;
   filter: blur(18px);
+}
+
+.cat-theme-aurora {
+  width: var(--cat-aurora-width, 72vmax);
+  height: var(--cat-aurora-height, 28vmax);
+  border-radius: 999px;
+  background: var(--cat-aurora-bg, linear-gradient(90deg, transparent, rgba(255, 211, 166, 0.32), transparent));
+  mix-blend-mode: soft-light;
+  filter: blur(var(--cat-aurora-blur, 28px));
 }
 
 .cat-theme-blob {
