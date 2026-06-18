@@ -974,6 +974,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         asset_id: str,
         stage_key: str,
         output: dict,
+        status: str = "completed",
     ) -> None:
         try:
             project_id = int(str(asset_id or "").strip())
@@ -1050,24 +1051,29 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not isinstance(stages_state, dict):
             stages_state = {}
         stage_number = str(stage_key).replace("stage", "")
+        normalized_status = str(status or "completed").strip() or "completed"
         stages_state[stage_number] = {
-            "status": "completed",
+            "status": normalized_status,
             "stage_key": str(stage_key),
             "updated_at": now,
         }
-        for downstream_stage in cascade.get(str(stage_key), ()):
-            stages_state[str(downstream_stage).replace("stage", "")] = {
-                "status": "pending",
-                "stage_key": str(downstream_stage),
-                "updated_at": now,
-            }
+        if normalized_status == "completed":
+            for downstream_stage in cascade.get(str(stage_key), ()):
+                stages_state[str(downstream_stage).replace("stage", "")] = {
+                    "status": "pending",
+                    "stage_key": str(downstream_stage),
+                    "updated_at": now,
+                }
         completed_stages = workspace_state.get("completedStages")
         if not isinstance(completed_stages, list):
             completed_stages = []
         completed_set = {str(item) for item in completed_stages}
-        completed_set.add(stage_number)
-        for downstream_stage in cascade.get(str(stage_key), ()):
-            completed_set.discard(str(downstream_stage).replace("stage", ""))
+        if normalized_status == "completed":
+            completed_set.add(stage_number)
+            for downstream_stage in cascade.get(str(stage_key), ()):
+                completed_set.discard(str(downstream_stage).replace("stage", ""))
+        else:
+            completed_set.discard(stage_number)
         workspace_state["completedStages"] = sorted(completed_set, key=lambda item: int(item) if item.isdigit() else 999)
         workspace_state["scriptStages"] = script_stages
         workspace_state["stageOutputs"] = stage_outputs
@@ -1135,7 +1141,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def _login_required(view_func):
         @wraps(view_func)
         def wrapper(*args, **kwargs):
-            if not session.get("user_id"):
+            if not _current_user():
                 return _json_error("请先登录。", 401)
             return view_func(*args, **kwargs)
 
@@ -1554,6 +1560,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
     def _login_user(user) -> str:
         session.clear()
+        session["user_id"] = int(user.id)
         return auth_store.create_session_token(user.id)
 
     def _logout_user() -> None:
@@ -4178,6 +4185,51 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error("当前批次缺少 batchEnrichedEpisodePlan，请检查 10 输出集数。", status=400)
 
         asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
+        def _autosave_stage11_draft(
+            sub_stage: str,
+            *,
+            conflict_plan_value=None,
+            conflict_review_value=None,
+            conflict_memory_value=None,
+            status: str = "running",
+        ) -> None:
+            if not asset_id:
+                return
+            draft = {
+                "batchStartEpisode": start_episode,
+                "batchEndEpisode": end_episode,
+                "batchEnrichedEpisodePlan": batch_plan,
+                "subStage": sub_stage,
+                "sub_stage": sub_stage,
+                "status": status,
+                "updated_at": _now_iso(),
+            }
+            if isinstance(conflict_plan_value, dict) and conflict_plan_value:
+                draft["batchCausalConflictPlan"] = conflict_plan_value
+                draft["batch_causal_conflict_plan"] = conflict_plan_value
+            if isinstance(conflict_review_value, dict) and conflict_review_value:
+                draft["batchCausalConflictReview"] = conflict_review_value
+                draft["batch_causal_conflict_review"] = conflict_review_value
+            if conflict_memory_value is not None:
+                draft["conflictMemory"] = str(conflict_memory_value)
+                draft["conflict_memory"] = str(conflict_memory_value)
+            output = {
+                **(existing_stage11 if isinstance(existing_stage11, dict) else {}),
+                "batches": dict(existing_batches),
+                "currentBatchDraft": draft,
+                "inProgressBatch": draft,
+            }
+            if conflict_memory_value is not None:
+                output["conflictMemory"] = str(conflict_memory_value)
+                output["conflict_memory"] = str(conflict_memory_value)
+            _save_framework_to_script_stage(
+                user_id=user_id,
+                asset_id=asset_id,
+                stage_key="stage11",
+                output=output,
+                status=status,
+            )
+
         if not _try_begin_framework_stage(user_id, asset_id, "11"):
             return _json_error("11 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
         try:
@@ -4371,6 +4423,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             },
                         }
                     ), 500
+                _autosave_stage11_draft(
+                    "causal_conflict_write",
+                    conflict_plan_value=conflict_plan,
+                    conflict_memory_value=conflict_memory,
+                )
                 max_review_rounds = 5
                 conflict_review = {}
                 rewrite_round = 0
@@ -4422,6 +4479,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         "rewriteBrief": rewrite_brief,
                         "rewrite_brief": rewrite_brief,
                     }
+                    _autosave_stage11_draft(
+                        "causal_conflict_review",
+                        conflict_plan_value=conflict_plan,
+                        conflict_review_value=conflict_review,
+                        conflict_memory_value=conflict_memory,
+                    )
                     rewrite_triggered = _framework_review_needs_rewrite(conflict_review)
                     logger.info(
                         "framework-to-script stage11 review loop: stage=%s batchStartEpisode=%s review_round=%s "
@@ -4445,6 +4508,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     if review_passed is True and rewrite_required is False:
                         break
                     if review_round >= max_review_rounds:
+                        _autosave_stage11_draft(
+                            "causal_conflict_review_failed",
+                            conflict_plan_value=conflict_plan,
+                            conflict_review_value=conflict_review,
+                            conflict_memory_value=conflict_memory,
+                            status="failed",
+                        )
                         return jsonify(
                             {
                                 "success": False,
@@ -4503,6 +4573,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         "batch_causal_conflict_plan",
                     )
                     conflict_plan = rewrite_conflict_plan or conflict_plan
+                    _autosave_stage11_draft(
+                        "causal_conflict_rewrite",
+                        conflict_plan_value=conflict_plan,
+                        conflict_review_value=conflict_review,
+                        conflict_memory_value=conflict_memory,
+                    )
                     rewrite_episodes = conflict_plan.get("episodes") if isinstance(conflict_plan, dict) else []
                     logger.info(
                         "framework-to-script stage11 rewrite normalized: asset_id=%s normalized_keys=%s "
@@ -4543,6 +4619,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     )
                 else:
                     conflict_memory = str(memory_value)
+                _autosave_stage11_draft(
+                    "causal_conflict_memory",
+                    conflict_plan_value=conflict_plan,
+                    conflict_review_value=conflict_review,
+                    conflict_memory_value=conflict_memory,
+                )
                 logger.info(
                     "framework-to-script stage11 memory done: asset_id=%s memory_output_keys=%s normalized_keys=%s conflictMemory_length=%s",
                     asset_id,
@@ -4787,6 +4869,57 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "preference_snapshot": preference_snapshot,
                     "prompt_preferences": prompt_preferences,
                 }
+
+                def _autosave_stage12_draft(
+                    sub_stage: str,
+                    *,
+                    batch_script_value: str = "",
+                    script_review_value=None,
+                    script_memory_value=None,
+                    status: str = "running",
+                    debug_path_value: str = "",
+                ) -> None:
+                    if not asset_id:
+                        return
+                    draft = {
+                        "batchStartEpisode": start_episode,
+                        "batchEndEpisode": end_episode,
+                        "batchEnrichedEpisodePlan": batch_plan,
+                        "batchCausalConflictPlan": conflict_plan,
+                        "batch_causal_conflict_plan": conflict_plan,
+                        "subStage": sub_stage,
+                        "sub_stage": sub_stage,
+                        "status": status,
+                        "updated_at": _now_iso(),
+                    }
+                    if str(batch_script_value or "").strip():
+                        draft["batchScriptText"] = str(batch_script_value)
+                        draft["batch_script_text"] = str(batch_script_value)
+                    if isinstance(script_review_value, dict) and script_review_value:
+                        draft["batchScriptReview"] = script_review_value
+                        draft["batch_script_review"] = script_review_value
+                    if script_memory_value is not None:
+                        draft["scriptMemory"] = str(script_memory_value)
+                        draft["script_memory"] = str(script_memory_value)
+                    if debug_path_value:
+                        draft["stage12DebugPath"] = debug_path_value
+                    output = {
+                        **(existing_stage12 if isinstance(existing_stage12, dict) else {}),
+                        "batches": dict(existing_batches),
+                        "currentBatchDraft": draft,
+                        "inProgressBatch": draft,
+                    }
+                    if script_memory_value is not None:
+                        output["scriptMemory"] = str(script_memory_value)
+                        output["script_memory"] = str(script_memory_value)
+                    _save_framework_to_script_stage(
+                        user_id=user_id,
+                        asset_id=asset_id,
+                        stage_key="stage12",
+                        output=output,
+                        status=status,
+                    )
+
                 debug_record.update(
                     {
                         "status": "prepared",
@@ -4933,6 +5066,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             },
                         }
                     ), 500
+                _autosave_stage12_draft(
+                    "script_write",
+                    batch_script_value=batch_script,
+                    script_memory_value=script_memory,
+                    debug_path_value=debug_path,
+                )
                 max_review_rounds = 5
                 script_review = {}
                 rewrite_round = 0
@@ -5028,6 +5167,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         }
                     )
                     debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
+                    _autosave_stage12_draft(
+                        "script_review",
+                        batch_script_value=batch_script,
+                        script_review_value=script_review,
+                        script_memory_value=script_memory,
+                        debug_path_value=debug_path,
+                    )
                     logger.info(
                         "framework-to-script stage12 review loop: stage=%s batchStartEpisode=%s review_round=%s "
                         "rewrite_round=%s reviewPassed=%s rewriteRequired=%s blockingIssues_count=%s "
@@ -5061,6 +5207,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             }
                         )
                         debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
+                        _autosave_stage12_draft(
+                            "script_review_failed",
+                            batch_script_value=batch_script,
+                            script_review_value=script_review,
+                            script_memory_value=script_memory,
+                            status="failed",
+                            debug_path_value=debug_path,
+                        )
                         return jsonify(
                             {
                                 "success": False,
@@ -5182,8 +5336,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                                     "rewrite_output_keys": rewrite_keys,
                                     "debug_path": debug_path,
                                 },
-                        }
-                    ), 500
+                            }
+                        ), 500
+                    _autosave_stage12_draft(
+                        "script_rewrite",
+                        batch_script_value=batch_script,
+                        script_review_value=script_review,
+                        script_memory_value=script_memory,
+                        debug_path_value=debug_path,
+                    )
                 failed_sub_stage = "script_memory"
                 memory_vars = {
                     **base_vars,
@@ -5232,6 +5393,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     )
                 else:
                     script_memory = str(memory_value)
+                _autosave_stage12_draft(
+                    "script_memory",
+                    batch_script_value=batch_script,
+                    script_review_value=script_review,
+                    script_memory_value=script_memory,
+                    debug_path_value=debug_path,
+                )
                 memory_event.update(
                     {
                         "raw_response_summary": _stage12_debug_summary(memory_output, preview_limit=600),
