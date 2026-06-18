@@ -103,6 +103,7 @@ def test_character_reskin_runs_all_stages_and_concatenates_batches() -> None:
     assert first_profile["variables"]["cUMhDqCG"] == "换成都市复仇人设"
     assert first_profile["variables"]["target_style"] == "换成都市复仇人设"
     assert first_profile["variables"]["mubiao_fengge"] == "换成都市复仇人设"
+    assert first_profile["variables"]["mYdSy5nr"] == "换成都市复仇人设"
     assert "pxtQY7p2" not in first_profile["variables"]
     assert "eBEWC07Q" not in first_profile["variables"]
     assert "blkSS7dY" not in first_profile["variables"]
@@ -124,6 +125,9 @@ def test_character_reskin_runs_all_stages_and_concatenates_batches() -> None:
         "ayxWwSpE": "原故事大纲",
         "ti6oIFwf": "旧人物小传",
     }
+    first_dialogue_write = next(call for call in calls if call["stage"] == "dialogue_write")
+    assert first_dialogue_write["variables"]["ayxWwSpE"] == "原故事大纲"
+    assert first_dialogue_write["variables"]["mYdSy5nr"] == "换成都市复仇人设"
 
 
 def test_character_reskin_bridges_review_and_memory_variables() -> None:

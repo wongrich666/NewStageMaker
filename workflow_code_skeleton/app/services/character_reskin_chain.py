@@ -30,7 +30,7 @@ DEDICATED_API_KEY_ENVS: tuple[str, ...] = (
 )
 
 URL_ENV = "FASTGPT_CHAT_COMPLETIONS_URL"
-COMMON_TARGET_STYLE_KEYS = ["cUMhDqCG", "zz4re7zP", "target_style", "mubiao_fengge"]
+COMMON_TARGET_STYLE_KEYS = ["cUMhDqCG", "zz4re7zP", "mYdSy5nr", "target_style", "mubiao_fengge"]
 STAGE_LABELS: dict[str, str] = {
     "actual_episode_count": "统计原剧本实际集数",
     "profile_write": "生成人设循环变量",
@@ -353,7 +353,7 @@ def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
 def _initial_state(payload: dict[str, Any]) -> dict[str, Any]:
     title = _first_text(payload, "title", "ju_ben_biao_ti", "script_title")
     source_outline = _first_text(payload, "source_outline", "yuan_juben_genggai", "outline", "story_outline")
-    target_style = _first_text(payload, "cUMhDqCG", "zz4re7zP", "target_style", "mubiao_fengge", "style")
+    target_style = _first_text(payload, "cUMhDqCG", "zz4re7zP", "mYdSy5nr", "target_style", "mubiao_fengge", "style")
     state = {
         "title": title,
         "episode_word_count": _first_positive_int(payload, 600, "episode_word_count", "meiji_zishu"),
@@ -397,6 +397,7 @@ def _common_variables(state: dict[str, Any]) -> dict[str, Any]:
         "ayxWwSpE": state["source_outline"],
         "cUMhDqCG": state["target_style"],
         "zz4re7zP": state["target_style"],
+        "mYdSy5nr": state["target_style"],
         "target_style": state["target_style"],
         "mubiao_fengge": state["target_style"],
         "rxmvq2lS": state["core_scenes"],
@@ -414,6 +415,7 @@ def _profile_write_variables(state: dict[str, Any]) -> dict[str, Any]:
         "rxmvq2lS": state["core_scenes"],
         "cUMhDqCG": state["target_style"],
         "zz4re7zP": state["target_style"],
+        "mYdSy5nr": state["target_style"],
         "target_style": state["target_style"],
         "mubiao_fengge": state["target_style"],
     }
