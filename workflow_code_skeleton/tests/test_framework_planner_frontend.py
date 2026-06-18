@@ -87,4 +87,19 @@ def test_framework_planner_auto_run_commits_and_saves_each_stage() -> None:
 def test_framework_planner_save_entry_is_not_duplicated_as_script_entry() -> None:
     assert "保存框架并进入剧本正文阶段" not in FRONTEND_SOURCE
     assert "进入剧本正文阶段" in FRONTEND_SOURCE
-    assert "await saveFrameworkAsset({ silent: true });" in FRONTEND_SOURCE
+    assert "async function saveFrameworkAsset(options)" in FRONTEND_SOURCE
+
+
+def test_framework_planner_package_autosave_marks_completed() -> None:
+    assert 'if (stageKey === "package") {' in FRONTEND_SOURCE
+    assert 'markStageCommitted("package");' in FRONTEND_SOURCE
+    assert "function ensureFrameworkPackageSavedState()" in FRONTEND_SOURCE
+    assert 'state.asset_state.status = "completed";' in FRONTEND_SOURCE
+    assert 'state.asset_state.current_stage = "package";' in FRONTEND_SOURCE
+
+
+def test_framework_planner_script_entry_saves_and_checks_importability() -> None:
+    assert "savedAsset = await saveFrameworkAsset({ silent: true, skipDirtyCheck: true });" in FRONTEND_SOURCE
+    assert "assertSavedFrameworkAssetReady(savedAsset);" in FRONTEND_SOURCE
+    assert "function assertSavedFrameworkAssetReady(asset)" in FRONTEND_SOURCE
+    assert "asset && asset.can_import === false" in FRONTEND_SOURCE

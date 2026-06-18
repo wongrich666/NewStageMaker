@@ -5016,6 +5016,7 @@ function renderPackageBlocks() {
 
   function frameworkAssetSavePayload() {
     syncBasicConfigFromDom();
+    ensureFrameworkPackageSavedState();
     const knowledgeFields = knowledgePayloadFields("package");
     const assetState = clone(state.asset_state || {});
     const projectId = currentProjectId();
@@ -5055,6 +5056,14 @@ function renderPackageBlocks() {
       ),
     }));
     return cleanOutgoingPayload(payload, "framework_asset_save payload");
+  }
+
+  function ensureFrameworkPackageSavedState() {
+    if (isEmptyValue(state.framework_plan_package) || stageDraftDirty("package")) return;
+    markStageCommitted("package");
+    state.stage_state.package.locked = true;
+    state.current_view = state.current_view || "package";
+    syncFrameworkAssetState(state, "package_ready_to_save");
   }
 
   function payloadUserRequirements() {
@@ -5371,6 +5380,10 @@ function renderPackageBlocks() {
       state.stage_state[stageKey].confirmed = false;
       state.stage_state[stageKey].stageCommitted = true;
       state.stage_state[stageKey].stageDraftDirty = false;
+      if (stageKey === "package") {
+        markStageCommitted("package");
+        state.stage_state.package.locked = true;
+      }
       setStageEditMode(stageKey, false);
       delete ui.editSnapshots[stageKey];
       const next = STAGE_SEQUENCE[STAGE_SEQUENCE.indexOf(stageKey) + 1];
@@ -6170,13 +6183,13 @@ function renderPackageBlocks() {
     render();
 
     try {
-      if (!hasSavedFrameworkProjectId() || hasUnsavedChanges()) {
-        try {
-          await saveFrameworkAsset({ silent: true });
-        } catch (error) {
-          showToast(`当前框架保存失败，无法进入框架转剧本工作台：${(error && error.message) || "未知错误"}`);
-          return;
-        }
+      let savedAsset = {};
+      try {
+        savedAsset = await saveFrameworkAsset({ silent: true, skipDirtyCheck: true });
+        assertSavedFrameworkAssetReady(savedAsset);
+      } catch (error) {
+        showToast(`当前框架保存失败，无法进入框架转剧本工作台：${(error && error.message) || "未知错误"}`);
+        return;
       }
 
       if (!hasSavedFrameworkProjectId()) {
@@ -6217,68 +6230,88 @@ function renderPackageBlocks() {
     }
   }
 
+  function assertSavedFrameworkAssetReady(asset) {
+    if (isEmptyValue(state.framework_plan_package)) {
+      throw new Error("缺少 07 最终策划包，请先生成后再进入剧本阶段。");
+    }
+    if (asset && asset.can_import === false) {
+      throw new Error(asset.import_block_reason || asset.reason || "保存后的框架资产仍不可导入，请重新保存或查看 07 阶段输出。");
+    }
+  }
+
   function hasBasicStageOutputForAsset() {
     return !isEmptyValue(state.source_brief)
       || Boolean(String((state.display_texts || {})["01"] || "").trim());
   }
 
   async function saveFrameworkAsset(options) {
-  const safeOptions = options || {};
+    const safeOptions = options || {};
 
-  if (!(safeOptions && safeOptions.skipDirtyCheck) && anyStageDraftDirty()) {
-    showToast("当前阶段有未应用的修改。请先点击“应用修改”，否则下游仍会使用旧结果。");
-    throw new Error("存在未应用的阶段修改");
-  }
-
-  if (!hasSavedFrameworkProjectId() && !hasBasicStageOutputForAsset()) {
-    const message = "请先运行 01 阶段。01 阶段成功生成后，框架才会保存为资产。";
-    if (!safeOptions.silent) {
-      showToast(message);
+    if (!(safeOptions && safeOptions.skipDirtyCheck) && anyStageDraftDirty()) {
+      showToast("当前阶段有未应用的修改。请先点击“应用修改”，否则下游仍会使用旧结果。");
+      throw new Error("存在未应用的阶段修改");
     }
-    throw new Error(message);
-  }
 
-  ui.loading.framework_save = true;
-  render();
-
-  try {
-        const data = await planningApi.saveFrameworkAsset(frameworkAssetSavePayload());
-        const asset = data.asset || data.project || {};
-        const projectId = data.project_id || asset.project_id || asset.asset_id || asset.id || "";
-
-        if (projectId === undefined || projectId === null || String(projectId).trim() === "") {
-          throw new Error("project_id 缺失");
-        }
-
-        state.project_id = projectId;
-        state.asset_state = Object.assign({}, state.asset_state || {}, asset.asset_state || {}, {
-          asset_kind: "framework_planner",
-          asset_id: projectId,
-          project_id: projectId,
-          status: asset.status || (state.asset_state || {}).status || "in_progress",
-          updated_at: asset.updated_at || new Date().toISOString(),
-        });
-
-        syncStageFlow(state);
-        saveState();
-        clearDirty();
-
-        if (!safeOptions.silent) {
-          showToast("当前框架已保存");
-        }
-
-        await loadAssets();
-        return asset;
-      } catch (error) {
-        if (!safeOptions.silent) {
-          showToast((error && error.message) || "保存失败");
-        }
-        throw error;
-      } finally {
-        ui.loading.framework_save = false;
-        render();
+    if (!hasSavedFrameworkProjectId() && !hasBasicStageOutputForAsset()) {
+      const message = "请先运行 01 阶段。01 阶段成功生成后，框架才会保存为资产。";
+      if (!safeOptions.silent) {
+        showToast(message);
       }
-}
+      throw new Error(message);
+    }
+
+    ui.loading.framework_save = true;
+    render();
+
+    try {
+      const data = await planningApi.saveFrameworkAsset(frameworkAssetSavePayload());
+      const asset = data.asset || data.project || {};
+      const projectId = data.project_id || asset.project_id || asset.asset_id || asset.id || "";
+
+      if (projectId === undefined || projectId === null || String(projectId).trim() === "") {
+        throw new Error("project_id 缺失");
+      }
+
+      const completedPackage = !isEmptyValue(state.framework_plan_package);
+      state.project_id = projectId;
+      state.asset_state = Object.assign({}, state.asset_state || {}, asset.asset_state || {}, {
+        asset_kind: "framework_planner",
+        asset_id: projectId,
+        project_id: projectId,
+        current_stage: completedPackage ? "package" : ((asset.asset_state || {}).current_stage || (state.asset_state || {}).current_stage || state.current_view),
+        status: completedPackage ? "completed" : (asset.status || (state.asset_state || {}).status || "in_progress"),
+        updated_at: asset.updated_at || new Date().toISOString(),
+      });
+
+      syncStageFlow(state);
+      if (completedPackage) {
+        state.asset_state.status = "completed";
+        state.asset_state.current_stage = "package";
+      }
+      saveState();
+      clearDirty();
+
+      if (!safeOptions.silent) {
+        showToast("当前框架已保存");
+      }
+
+      await loadAssets();
+      return Object.assign({}, asset, {
+        project_id: projectId,
+        asset_id: projectId,
+        status: completedPackage ? "completed" : (asset.status || "in_progress"),
+        asset_state: clone(state.asset_state || {}),
+      });
+    } catch (error) {
+      if (!safeOptions.silent) {
+        showToast((error && error.message) || "保存失败");
+      }
+      throw error;
+    } finally {
+      ui.loading.framework_save = false;
+      render();
+    }
+  }
 
   async function loadKnowledgeTags() {
     const retryDelays = [400, 900];
