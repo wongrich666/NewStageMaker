@@ -41,3 +41,15 @@ def test_hot_review_run_polls_saved_assets_and_keeps_synced_result() -> None:
     assert "applyHotReviewAssetResult(asset, { toast: !notified })" in APP_SOURCE
     assert "hotReviewResultPoller = startHotReviewResultPolling" in APP_SOURCE
     assert 'activeToolKey === "hot_review" && isScriptAuditEcgResult(currentToolResult("hot_review"))' in APP_SOURCE
+
+
+def test_hot_review_result_can_be_saved_manually_to_assets() -> None:
+    assert "保存结果到资产" in APP_SOURCE
+    assert "function saveActiveHotReviewResult" in APP_SOURCE
+    assert '"/api/tools/hot_review/save"' in APP_SOURCE
+    assert "mergeProjectListAsset(nextResult.savedAsset || nextResult.saved_asset)" in APP_SOURCE
+    assert "raw_model_json" in APP_SOURCE
+
+
+def test_hot_review_export_filename_uses_script_title() -> None:
+    assert "return `${safeTitle}审核结果`;" in APP_SOURCE

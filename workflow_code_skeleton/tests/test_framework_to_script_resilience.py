@@ -81,3 +81,25 @@ def test_framework_to_script_inner_details_keep_open_state_across_renders() -> N
     assert "setPersistentDetailsOpen(target.dataset.persistDetailsId, target.open)" in FRONTEND_SOURCE
     assert "persistedDetailsOpen" in FRONTEND_SOURCE
     assert "`stage12:${key}:script`" in FRONTEND_SOURCE
+
+
+def test_framework_to_script_manual_progress_save_writes_asset_state() -> None:
+    assert "/api/framework-to-script/save-progress" in SERVER_SOURCE
+    assert "framework_to_script_state" in SERVER_SOURCE
+    assert "scriptStages" in SERVER_SOURCE
+    assert "stageDrafts" in SERVER_SOURCE
+    assert "保存当前剧本进度" in FRONTEND_SOURCE
+    assert "function saveWorkspaceToAsset" in FRONTEND_SOURCE
+    assert "scriptStages: state.scriptStages" in FRONTEND_SOURCE
+    assert "stageOutputs: state.stageOutputs" in FRONTEND_SOURCE
+    assert "completedStages: state.completedStages" in FRONTEND_SOURCE
+    assert "runningStage: state.runningStage" in FRONTEND_SOURCE
+
+
+def test_framework_to_script_export_uses_project_context_and_clear_filename() -> None:
+    assert "source_brief" in SERVER_SOURCE
+    assert "character_storylines" in SERVER_SOURCE
+    assert "_framework_to_script_export_filename" in SERVER_SOURCE
+    assert "完整剧本.{extension}" in SERVER_SOURCE
+    assert "function exportScriptFilename" in FRONTEND_SOURCE
+    assert "完整剧本.${extension}" in FRONTEND_SOURCE

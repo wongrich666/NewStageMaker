@@ -194,6 +194,55 @@ class ServerToolsApiTests(unittest.TestCase):
         self.assertIn("写入用户资产失败", payload["result"]["asset_save_error"])
         self.assertEqual(payload["text"], "15 节拍框架正文")
 
+    def test_hot_review_manual_save_creates_and_updates_asset(self) -> None:
+        raw_json = (
+            '{"schema_version":"script_audit_compact_v1",'
+            '"meta":{"script_title":"测试爆款文"},'
+            '"overall":{"total_score":80,"core_judgement":"可上线"},'
+            '"dimension_scores":[],"segments":[],"global_review":{},'
+            '"episode_reviews":[],"cross_episode_analysis":{}}'
+        )
+        response = self.client.post(
+            "/api/tools/hot_review/save",
+            headers=self.headers,
+            json={
+                "request_payload": {"text": "第一行正文"},
+                "result": {
+                    "title": "爆款文审核",
+                    "text": raw_json,
+                    "answer_text": raw_json,
+                    "result_type": "script_audit_ecg",
+                },
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["asset_saved"])
+        saved_asset = payload["saved_asset"]
+        self.assertEqual(saved_asset["asset_type"], "hot_review")
+        self.assertEqual((saved_asset.get("artifacts") or {}).get("raw_json"), raw_json)
+
+        update_response = self.client.post(
+            "/api/tools/hot_review/save",
+            headers=self.headers,
+            json={
+                "asset_id": saved_asset["project_id"],
+                "request_payload": {"text": "第二版正文"},
+                "result": {
+                    "title": "爆款文审核",
+                    "text": raw_json.replace("80", "81"),
+                    "answer_text": raw_json.replace("80", "81"),
+                    "result_type": "script_audit_ecg",
+                    "saved_asset": saved_asset,
+                },
+            },
+        )
+        self.assertEqual(update_response.status_code, 200)
+        update_payload = update_response.get_json()
+        self.assertEqual(update_payload["saved_asset"]["project_id"], saved_asset["project_id"])
+        self.assertEqual(update_payload["saved_asset"]["asset_type"], "hot_review")
+
     def test_run_tool_api_surfaces_specific_tool_error(self) -> None:
         error = ToolExecutionError(
             "爆款文审核缺少必填项：text",

@@ -233,6 +233,41 @@
     }
   }
 
+  async function saveWorkspaceToAsset() {
+    saveWorkspace();
+    if (!state.frameworkAssetId) {
+      throw new Error("当前剧本进度还没有关联框架资产，无法保存到资产。");
+    }
+    const data = await requestJson("/api/framework-to-script/save-progress", {
+      method: "POST",
+      body: JSON.stringify(stripRaw({
+        framework_asset_id: state.frameworkAssetId,
+        scriptStages: state.scriptStages,
+        stageOutputs: state.stageOutputs,
+        completedStages: state.completedStages,
+        stages: state.stages,
+        settings: state.settings,
+        runningStage: state.runningStage,
+        lastFailedStage: state.lastFailedStage,
+      })),
+    });
+    if (data.framework_asset) {
+      state.importedFrameworkAsset = data.framework_asset;
+      state.frameworkPlanPackage = data.framework_asset.framework_plan_package || state.frameworkPlanPackage;
+      state.frameworkAssetId = data.framework_asset.asset_id || state.frameworkAssetId;
+    }
+    const savedState = data.framework_to_script_state || {};
+    if (savedState && typeof savedState === "object") {
+      state.scriptStages = savedState.scriptStages || state.scriptStages;
+      state.stageOutputs = savedState.stageOutputs || state.stageOutputs;
+      state.completedStages = Array.isArray(savedState.completedStages) ? savedState.completedStages : state.completedStages;
+      state.stages = savedState.stages || state.stages;
+      state.settings = savedState.settings || state.settings;
+    }
+    saveWorkspace();
+    return data;
+  }
+
   function attachKnowledgePayload(payload, stageNo) {
     const next = Object.assign({}, payload || {});
     const snapshot = state.preferenceSnapshot && typeof state.preferenceSnapshot === "object" ? state.preferenceSnapshot : {};
@@ -903,6 +938,18 @@
     const text = String(value || "");
     const match = text.match(/(?:第\s*)?([0-9]+|[一二两三四五六七八九十]{1,4})\s*(?:集|话|episode)?/i);
     return match ? chineseNumberToInt(match[1]) : 0;
+  }
+
+  function exportScriptFilename(extension) {
+    const asset = state.importedFrameworkAsset || {};
+    const title = String(asset.title || asset.source_title || state.frameworkPlanPackage?.title || state.frameworkPlanPackage?.project_title || "完整剧本")
+      .replace(/[\\/:*?"<>|]+/g, "_")
+      .slice(0, 80) || "完整剧本";
+    const totalEpisodes = inferTotalEpisodes(stage10Plan((state.scriptStages || {}).stage10 || {}), asset)
+      || Number(asset.episodes_per_season || asset.total_episodes || 0)
+      || "";
+    const episodeText = totalEpisodes ? `${totalEpisodes}集` : "";
+    return `${title}${episodeText}完整剧本.${extension}`;
   }
 
   function normalizeEpisodePlanItems(plan) {
@@ -1825,8 +1872,7 @@
         throw new Error(data.message || "下载失败，请稍后重试。");
       }
       const blob = await response.blob();
-      const asset = state.importedFrameworkAsset || {};
-      const filename = `${String(asset.title || "framework_script").replace(/[\\/:*?"<>|]+/g, "_")}.txt`;
+      const filename = exportScriptFilename("txt");
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -1869,8 +1915,7 @@
         throw new Error(data.message || "DOCX 下载失败，请稍后重试。");
       }
       const blob = await response.blob();
-      const asset = state.importedFrameworkAsset || {};
-      const filename = `${String(asset.title || "framework_script").replace(/[\\/:*?"<>|]+/g, "_")}.docx`;
+      const filename = exportScriptFilename("docx");
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -2120,7 +2165,7 @@
             <span>${escapeHtml(preferenceStatusText())}</span>
             <span>当前阶段：08-12</span>
             <span>保存时间：${escapeHtml(formatDate(asset.updated_at || asset.created_at))}</span>
-            <button type="button" class="wts-btn ghost" data-action="save-workspace">保存当前版本</button>
+            <button type="button" class="wts-btn ghost" data-action="save-workspace">保存当前剧本进度</button>
           </div>
         </div>
         <div class="wts-framework-package-only">
@@ -2297,7 +2342,7 @@
     `;
   }
 
-  app.addEventListener("click", (event) => {
+  app.addEventListener("click", async (event) => {
     const target = event.target && event.target.closest ? event.target.closest("[data-action]") : null;
     if (!target) return;
     const action = target.dataset.action;
@@ -2336,9 +2381,20 @@
     } else if (action === "download-docx") {
       downloadDocx();
     } else if (action === "save-workspace") {
-      saveWorkspace();
-      state.error = null;
-      render();
+      target.disabled = true;
+      const previousText = target.textContent;
+      target.textContent = "保存中...";
+      try {
+        await saveWorkspaceToAsset();
+        state.error = null;
+        state.importStatus = "剧本进度已保存到当前框架资产。";
+      } catch (error) {
+        state.error = error?.message || "保存剧本进度失败，请稍后重试。";
+      } finally {
+        target.disabled = false;
+        target.textContent = previousText || "保存当前剧本进度";
+        render();
+      }
     } else if (action === "retry-failed-stage") {
       retryStage(state.lastFailedStage);
     } else if (action === "continue-from-failure") {

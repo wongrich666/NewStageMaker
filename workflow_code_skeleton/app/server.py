@@ -1357,6 +1357,75 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             )
         return _json_ok(running_stage=running_stage, project_id=project_id)
 
+    @app.post("/api/framework-to-script/save-progress")
+    @_login_required
+    def save_framework_to_script_progress():
+        data = request.get_json(silent=True) or {}
+        user_id = _require_user_id()
+        asset_id = str(data.get("framework_asset_id") or data.get("asset_id") or "").strip()
+        try:
+            project_id = int(asset_id)
+        except Exception:
+            project_id = 0
+        if project_id <= 0:
+            return _json_error("缺少有效 framework_asset_id，无法保存剧本进度。", status=400)
+
+        snapshot = task_manager.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+        if not snapshot or str(snapshot.get("asset_kind") or "").strip() != "framework_planner":
+            return _json_error("框架资产不存在或当前账号无权访问。", status=404)
+
+        now = _now_iso()
+        artifacts = snapshot.setdefault("artifacts", {})
+        if not isinstance(artifacts, dict):
+            artifacts = {}
+            snapshot["artifacts"] = artifacts
+        workspace_state = artifacts.get("framework_to_script_state")
+        if not isinstance(workspace_state, dict):
+            workspace_state = {"scriptStages": {}, "stageOutputs": {}}
+        else:
+            workspace_state = copy.deepcopy(workspace_state)
+
+        for key in ("scriptStages", "stageOutputs", "completedStages", "stages", "settings"):
+            value = data.get(key)
+            if isinstance(value, (dict, list)):
+                workspace_state[key] = _strip_raw_fastgpt_fields(copy.deepcopy(value))
+
+        incoming_drafts = data.get("stageDrafts") or data.get("stage_drafts")
+        if isinstance(incoming_drafts, dict):
+            workspace_state["stageDrafts"] = _strip_raw_fastgpt_fields(copy.deepcopy(incoming_drafts))
+        elif not isinstance(workspace_state.get("stageDrafts"), dict):
+            workspace_state["stageDrafts"] = {}
+
+        running_stage = str(data.get("runningStage") or data.get("running_stage") or workspace_state.get("runningStage") or "").strip()
+        last_failed_stage = str(data.get("lastFailedStage") or data.get("last_failed_stage") or workspace_state.get("lastFailedStage") or "").strip()
+        workspace_state["runningStage"] = running_stage
+        workspace_state["running_stage"] = running_stage
+        workspace_state["lastFailedStage"] = last_failed_stage
+        workspace_state["last_failed_stage"] = last_failed_stage
+        workspace_state["framework_asset_id"] = asset_id
+        workspace_state["project_id"] = project_id
+        workspace_state["updated_at"] = now
+        artifacts["framework_to_script_state"] = workspace_state
+        snapshot["updated_at"] = now
+
+        record = task_manager._projects.get(project_id)
+        if record:
+            with record.lock:
+                record.snapshot = snapshot
+            task_manager._persist_snapshot(record)
+        else:
+            task_manager._project_path(project_id).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+        return _json_ok(
+            message="剧本进度已保存到当前框架资产。",
+            project_id=project_id,
+            framework_asset=_framework_asset_payload(snapshot, include_detail=True),
+            framework_to_script_state=_strip_raw_fastgpt_fields(copy.deepcopy(workspace_state)),
+        )
+
     def _framework_script_stage_cache(framework_asset: dict | None, stage_key: str) -> dict:
         if not isinstance(framework_asset, dict):
             return {}
@@ -1659,23 +1728,34 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         stage12 = _get_dict_alias(script_stages, "stage12")
 
         stage07_package = _get_dict_alias(stage07, "frameworkPlanPackage", "framework_plan_package")
+        basic_config = _get_dict_alias(package, "basic_config")
+        source_brief = _first_present(package, "source_brief", "sourceBrief", default=None)
+        source_brief_dict = source_brief if isinstance(source_brief, dict) else {}
+        adaptation_guide = _first_present(package, "adaptation_guide", "adaptationGuide", default=None)
         story = (
             _first_present(package, "story_synopsis", "synopsis", "summary", default=None)
             or _first_present(stage07_package, "story_synopsis", "synopsis", "summary", default=None)
+            or _first_present(source_brief_dict, "story_synopsis", "synopsis", "summary", "source_summary", "source_text", default=None)
+            or _first_present(stage_outputs, "source_brief", "sourceBrief", default=None)
             or _first_present(stage06, "overallAdaptationGuide", "overall_adaptation_guide", default=None)
+            or adaptation_guide
             or _first_present(stage_outputs, "overallAdaptationGuide", "overall_adaptation_guide", "adaptation_guide", default=None)
+            or _first_present(basic_config, "source_text", "adaptation_direction", "user_requirements", default=None)
             or "暂无"
         )
         characters = (
             _first_present(package, "characterPlan", "character_plan", default=None)
             or _first_present(stage03, "characterPlan", "character_plan", default=None)
             or _first_present(stage_outputs, "characterPlan", "character_plan", default=None)
+            or _first_present(package, "character_storylines", "characterStorylines", default=None)
+            or _first_present(stage_outputs, "character_storylines", "characterStorylines", default=None)
             or "暂无"
         )
         scenes = (
             _first_present(stage08, "sceneDictionary", "scene_dictionary", default=None)
             or _first_present(package, "sceneDictionary", "scene_dictionary", "coreScenes", "core_scenes", default=None)
             or _first_present(stage_outputs, "sceneDictionary", "scene_dictionary", "coreScenes", "core_scenes", default=None)
+            or _first_present(source_brief_dict, "core_scenes", "coreScenes", "key_scenes", default=None)
             or "暂无"
         )
         script_text = _txt_readable(_framework_script_text_from_batches(stage12) or "暂无")
@@ -1690,6 +1770,26 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             ]
         ) + "\n"
         return _clean_framework_to_script_export_text(export_text)
+
+    def _framework_to_script_export_filename(asset: dict, extension: str) -> str:
+        package = asset.get("framework_plan_package") if isinstance(asset.get("framework_plan_package"), dict) else {}
+        title = _txt_scalar(
+            asset.get("title")
+            or asset.get("source_title")
+            or package.get("title")
+            or package.get("project_title")
+            or "完整剧本"
+        )
+        total_episodes = _positive_int(
+            asset.get("episodes_per_season")
+            or asset.get("total_episodes")
+            or package.get("episodes_per_season")
+            or package.get("total_episodes"),
+            0,
+        )
+        safe_title = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(title or "完整剧本"))
+        episode_text = f"{total_episodes}集" if total_episodes else ""
+        return f"{(safe_title[:48] or '完整剧本')}{episode_text}完整剧本.{extension}"
 
     def _framework_review_needs_rewrite(review: dict) -> bool:
         if not isinstance(review, dict):
@@ -2433,7 +2533,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         except Exception:
             return saved_asset
 
-        snapshot = task_manager.get_project_snapshot(project_id_int, user_id=user_id)
+        snapshot = task_manager.get_project_snapshot(project_id_int, user_id=user_id, public_view=False)
         if not isinstance(snapshot, dict):
             return saved_asset
 
@@ -2480,6 +2580,20 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         artifacts["tool_result"] = tool_result
         artifacts["result"] = tool_result
+        raw_candidates = [
+            merged.get("raw_json"),
+            merged.get("raw_model_json"),
+            merged.get("raw_text"),
+            merged.get("answer_text"),
+            merged.get("answerText"),
+            merged.get("text"),
+        ]
+        raw_model_json = next((str(item).strip() for item in raw_candidates if str(item or "").strip()), "")
+        if raw_model_json:
+            tool_result["raw_json"] = raw_model_json
+            tool_result["raw_model_json"] = raw_model_json
+            artifacts["raw_json"] = raw_model_json
+            artifacts["raw_model_json"] = raw_model_json
         if tool_result["answer_text"]:
             artifacts["final_output_text"] = tool_result["answer_text"]
         elif tool_result["text"]:
@@ -2521,6 +2635,100 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             )
 
         return snapshot
+
+    def _save_hot_review_asset_manual(
+        *,
+        user_id: int,
+        request_payload: dict,
+        result_payload: dict,
+        asset_id: str = "",
+    ) -> tuple[dict, dict, dict]:
+        if not isinstance(request_payload, dict):
+            request_payload = {}
+        if not isinstance(result_payload, dict):
+            raise ValueError("缺少可保存的爆款文审核结果。")
+
+        result, flattened = _maybe_enrich_script_audit_ecg_tool_result(
+            "hot_review",
+            copy.deepcopy(result_payload),
+            copy.deepcopy(result_payload),
+        )
+        raw_model_json = str(
+            result_payload.get("raw_json")
+            or result_payload.get("raw_model_json")
+            or result_payload.get("raw_text")
+            or result_payload.get("answer_text")
+            or result_payload.get("answerText")
+            or result_payload.get("text")
+            or ""
+        ).strip()
+        if not raw_model_json:
+            try:
+                raw_model_json = json.dumps(
+                    {
+                        key: copy.deepcopy(result_payload.get(key))
+                        for key in ("audit", "view", "visualization", "warnings", "parse_warnings")
+                        if result_payload.get(key) is not None
+                    },
+                    ensure_ascii=False,
+                    default=str,
+                ).strip()
+            except Exception:
+                raw_model_json = ""
+        for target in (result, flattened):
+            if not isinstance(target, dict):
+                continue
+            target["tool_key"] = "hot_review"
+            target["asset_kind"] = "tool_result"
+            target["asset_type"] = "hot_review"
+            target["category"] = "hot_review"
+            target["workflow_type"] = "hot_review"
+            target["result_type"] = "script_audit_ecg"
+            target["resultType"] = "script_audit_ecg"
+            if raw_model_json:
+                target["raw_json"] = raw_model_json
+                target["raw_model_json"] = raw_model_json
+            if not str(target.get("text") or "").strip():
+                target["text"] = raw_model_json or str(target.get("answer_text") or target.get("answerText") or "").strip()
+            if not str(target.get("answer_text") or "").strip():
+                target["answer_text"] = raw_model_json or str(target.get("text") or "").strip()
+
+        existing_asset = None
+        project_id = 0
+        try:
+            project_id = int(str(asset_id or "").strip())
+        except Exception:
+            project_id = 0
+        if project_id > 0:
+            existing_asset = task_manager.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+            if not existing_asset:
+                raise PermissionError("爆款文审核资产不存在或当前账号无权访问。")
+            existing_kind = str(existing_asset.get("asset_type") or existing_asset.get("category") or existing_asset.get("workflow_type") or "").strip()
+            existing_tool = str(existing_asset.get("tool_key") or "").strip()
+            if existing_kind != "hot_review" and existing_tool != "hot_review":
+                raise ValueError("只能更新爆款文审核资产，不能覆盖其他资产。")
+            saved_asset = {
+                "project_id": project_id,
+                "id": project_id,
+                "title": existing_asset.get("title") or "爆款文审核",
+                "tool_filename": existing_asset.get("tool_filename") or "",
+            }
+        else:
+            saved_asset = task_manager.save_auxiliary_asset(
+                user_id=user_id,
+                tool_key="hot_review",
+                request_payload=request_payload,
+                result=result,
+            )
+
+        saved_asset = _persist_script_audit_ecg_asset_metadata(
+            saved_asset,
+            result,
+            flattened,
+            request_payload,
+            user_id,
+        )
+        return saved_asset, result, flattened
 
 
 
@@ -2882,6 +3090,52 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def run_tool(tool_key: str):
         data = request.get_json(silent=True) or {}
         return _run_tool_request(tool_key, data)
+
+    @app.post("/api/tools/hot_review/save")
+    @_login_required
+    def save_hot_review_tool_result():
+        data = request.get_json(silent=True) or {}
+        user_id = _require_user_id()
+        result_payload = data.get("result") if isinstance(data.get("result"), dict) else data
+        request_payload = data.get("request_payload") if isinstance(data.get("request_payload"), dict) else {}
+        saved_asset_payload = data.get("saved_asset") if isinstance(data.get("saved_asset"), dict) else {}
+        asset_id = str(
+            data.get("asset_id")
+            or data.get("project_id")
+            or data.get("saved_asset_id")
+            or saved_asset_payload.get("project_id")
+            or saved_asset_payload.get("id")
+            or ""
+        ).strip()
+        try:
+            saved_asset, result, flattened = _save_hot_review_asset_manual(
+                user_id=user_id,
+                request_payload=request_payload,
+                result_payload=result_payload,
+                asset_id=asset_id,
+            )
+        except PermissionError as exc:
+            return _json_error(str(exc), status=403)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except Exception:
+            logger.exception("manual hot_review asset save failed user_id=%s asset_id=%s", user_id, asset_id)
+            return _json_error("保存爆款文审核资产失败，请稍后重试。", status=500)
+
+        flattened["asset_saved"] = True
+        flattened["saved_asset"] = saved_asset
+        result["asset_saved"] = True
+        result["saved_asset"] = saved_asset
+        response_payload = dict(flattened)
+        response_payload.update(
+            {
+                "ok": True,
+                "asset_saved": True,
+                "saved_asset": saved_asset,
+                "result": result,
+            }
+        )
+        return _json_ok(**response_payload)
 
     @app.post("/api/tools/hot_review/export/docx")
     @_login_required
@@ -5770,8 +6024,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not asset:
             return _json_error("框架资产不存在、无权访问，或尚未生成 07 最终策划包。", status=404)
         text = _framework_to_script_txt(asset)
-        filename_title = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(asset.get("title") or "framework_script_txt"))
-        filename = f"{filename_title[:48] or 'framework_script'}.txt"
+        filename = _framework_to_script_export_filename(asset, "txt")
         return Response(
             text,
             content_type="text/plain; charset=utf-8",
@@ -5796,8 +6049,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not asset:
             return _json_error("框架资产不存在、无权访问，或尚未生成 07 最终策划包。", status=404)
         text = _framework_to_script_txt(asset)
-        filename_title = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(asset.get("title") or "framework_script_docx"))
-        filename = f"{filename_title[:48] or 'framework_script'}.docx"
+        filename = _framework_to_script_export_filename(asset, "docx")
         try:
             from .utils.txt_to_docx import convert as convert_txt_to_docx
             with tempfile.TemporaryDirectory() as tmp_dir:

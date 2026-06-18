@@ -2788,11 +2788,15 @@ startRuntimeDebugPolling();
     const artifacts = item.artifacts || {};
     const result = hotReviewResultObjectV5(item);
     const candidates = [
+      result.raw_json,
+      result.raw_model_json,
       result.answer_text,
       result.answerText,
       result.text,
       result.content,
       result.output,
+      item.raw_json,
+      item.raw_model_json,
       item.answer_text,
       item.answerText,
       item.text,
@@ -2800,6 +2804,8 @@ startRuntimeDebugPolling();
       item.output,
       item.final_output_text,
       item.final_preview,
+      artifacts.raw_json,
+      artifacts.raw_model_json,
       artifacts.final_output_text,
       artifacts.answer_text,
       artifacts.answerText,
@@ -3883,6 +3889,7 @@ startRuntimeDebugPolling();
           `, "查看") : ""}
         </section>
         <section class="audit-export-actions">
+          <button class="btn btn-primary" type="button" data-action="save-audit-asset">保存结果到资产</button>
           <button class="btn btn-secondary" type="button" data-action="download-audit-txt">导出 TXT</button>
           <button class="btn btn-secondary" type="button" data-action="download-audit-docx">导出 DOCX</button>
           <button class="btn btn-secondary" type="button" data-action="download-audit-image">导出长图</button>
@@ -3977,9 +3984,10 @@ startRuntimeDebugPolling();
       result?.view?.meta?.script_title,
       result?.script_title,
       result?.savedAsset?.script_title,
-      "爆款文审核报告"
+      "爆款文"
     );
-    return title.replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80) || "爆款文审核报告";
+    const safeTitle = title.replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80) || "爆款文";
+    return `${safeTitle}审核结果`;
   }
 
   async function downloadAuditDocx() {
@@ -4029,6 +4037,58 @@ startRuntimeDebugPolling();
       script.onerror = () => reject(new Error("截图组件加载失败，请检查网络后重试。"));
       document.head.appendChild(script);
     });
+  }
+
+  async function saveActiveHotReviewResult(button = null) {
+    const current = normalizeScriptAuditEcgResult(currentToolResult("hot_review"));
+    if (!current || !isScriptAuditEcgResult(current)) {
+      throw new Error("暂无可保存的爆款文审核结果。");
+    }
+    const savedAsset = current.savedAsset || current.saved_asset || {};
+    const assetId = String(
+      current.project_id
+      || current.saved_asset_id
+      || savedAsset.project_id
+      || savedAsset.id
+      || ""
+    ).trim();
+    const previousText = button?.textContent || "";
+    if (button) {
+      button.disabled = true;
+      button.textContent = "保存中...";
+    }
+    try {
+      const data = await requestJson("/api/tools/hot_review/save", {
+        method: "POST",
+        body: JSON.stringify({
+          asset_id: assetId,
+          saved_asset: savedAsset,
+          request_payload: collectToolPayload("hot_review"),
+          result: current,
+        }),
+      });
+      const nextResult = normalizeScriptAuditEcgResult({
+        ...current,
+        ...data,
+        ...(data.result || {}),
+        assetSaved: true,
+        asset_saved: true,
+        savedAsset: data.saved_asset || data.result?.saved_asset || savedAsset,
+        saved_asset: data.saved_asset || data.result?.saved_asset || savedAsset,
+      });
+      state.toolResults.hot_review = nextResult;
+      persistHotReviewSession(nextResult);
+      if (nextResult.savedAsset || nextResult.saved_asset) {
+        mergeProjectListAsset(nextResult.savedAsset || nextResult.saved_asset);
+      }
+      renderToolOutput("hot_review");
+      showToast("保存成功", "爆款文审核结果已保存到资产。");
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = previousText || "保存结果到资产";
+      }
+    }
   }
 
   async function downloadAuditImage() {
@@ -6747,7 +6807,9 @@ function renderToolForm(toolKey) {
         return;
       }
       try {
-        if (action === "download-audit-txt") {
+        if (action === "save-audit-asset") {
+          await saveActiveHotReviewResult(actionButton);
+        } else if (action === "download-audit-txt") {
           const text = activeAuditReportText();
           if (!text) throw new Error("暂无可导出的报告正文。");
           downloadTextFile(text, `${activeAuditReportTitle()}.txt`);
@@ -6760,7 +6822,7 @@ function renderToolForm(toolKey) {
           showToast("长图已开始下载", `${activeAuditReportTitle()}_爆款文审核长图.png`);
         }
       } catch (error) {
-        showToast("导出失败", friendlyErrorText(error, "请稍后重试。"));
+        showToast(action === "save-audit-asset" ? "保存失败" : "导出失败", friendlyErrorText(error, "请稍后重试。"));
       }
     });
     document.addEventListener("click", (event) => {
