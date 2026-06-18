@@ -176,7 +176,10 @@ def test_character_reskin_bridges_review_and_memory_variables() -> None:
         "fFM0mroW": {"profile": "draft"},
         "zz4re7zP": "换成都市复仇人设",
     }
+    dialogue_review = next(call for call in calls if call["stage"] == "dialogue_review")
+    assert dialogue_review["variables"]["fFM0mroW"] == {"profile": "fixed"}
     dialogue_rewrite = next(call for call in calls if call["stage"] == "dialogue_rewrite")
+    assert dialogue_rewrite["variables"]["fFM0mroW"] == {"profile": "fixed"}
     assert dialogue_rewrite["variables"]["rZL0C6f9"]["note"] == "dialogue review"
     body_rewrite = next(call for call in calls if call["stage"] == "body_rewrite")
     assert body_rewrite["variables"]["gJT2URpY"]["note"] == "body review"
