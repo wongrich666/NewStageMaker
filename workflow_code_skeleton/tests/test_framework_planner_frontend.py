@@ -64,3 +64,21 @@ def test_framework_planner_knowledge_apply_replaces_old_tag_sections() -> None:
     assert "function replaceKnowledgeStagePrompts(existingPrompts, knowledgePrompts)" in FRONTEND_SOURCE
     assert "stage_prompts: replaceKnowledgeStagePrompts((state.prompt_preferences || {}).stage_prompts || {}, stagePrompts)" in FRONTEND_SOURCE
     assert "await applyKnowledgeTags();" in FRONTEND_SOURCE
+
+
+def test_framework_planner_has_one_click_framework_auto_run() -> None:
+    assert "一键出框架" in FRONTEND_SOURCE
+    assert "function renderAutoFrameworkButton" in FRONTEND_SOURCE
+    assert "async function autoRunFramework()" in FRONTEND_SOURCE
+    assert "for (const stageKey of STAGE_SEQUENCE)" in FRONTEND_SOURCE
+    assert "await runStage(stageKey, { revise: false, autoRunFramework: true });" in FRONTEND_SOURCE
+    assert "await commitAutoFrameworkStage(stageKey);" in FRONTEND_SOURCE
+    assert "ui.stageErrors[stageKey] = error && error.message" in FRONTEND_SOURCE
+
+
+def test_framework_planner_auto_run_commits_and_saves_each_stage() -> None:
+    assert "async function commitAutoFrameworkStage(stageKey)" in FRONTEND_SOURCE
+    assert "markStageCommitted(stageKey);" in FRONTEND_SOURCE
+    assert "syncFrameworkAssetState(state, `auto_confirm:${stageKey}`);" in FRONTEND_SOURCE
+    assert "await saveFrameworkAsset({ silent: true, skipDirtyCheck: true });" in FRONTEND_SOURCE
+    assert "function validateAutoFrameworkStart()" in FRONTEND_SOURCE

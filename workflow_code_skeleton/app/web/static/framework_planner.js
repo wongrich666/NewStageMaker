@@ -397,6 +397,11 @@
     },
     loadingStartedAt: {},
     loadingTicker: null,
+    autoFramework: {
+      running: false,
+      currentStage: "",
+      message: "",
+    },
     editMode: {
       worldview: false,
       character: false,
@@ -1476,10 +1481,15 @@
     return STAGE_SEQUENCE.find((stageKey) => isStageLoading(stageKey) || (state.stage_state[stageKey] || {}).status === "running") || "";
   }
 
+  function isAutoFrameworkRunning() {
+    return Boolean(ui.autoFramework && ui.autoFramework.running);
+  }
+
   function canStartFrameworkScript() {
     return !isEmptyValue(state.framework_plan_package)
       && !anyStageDraftDirty()
       && !runningStageKey()
+      && !isAutoFrameworkRunning()
       && !ui.loading.framework_script;
   }
 
@@ -1492,9 +1502,24 @@
 
   function renderSaveFrameworkButton(sizeClass) {
     const className = sizeClass ? ` ${sizeClass}` : "";
-    const disabled = runningStageKey() || ui.loading.framework_save || ui.loading.framework_script || ui.assetImporting ? "disabled" : "";
+    const disabled = runningStageKey() || isAutoFrameworkRunning() || ui.loading.framework_save || ui.loading.framework_script || ui.assetImporting ? "disabled" : "";
     const label = ui.loading.framework_save ? "正在保存..." : "保存框架";
     return `<button class="fp-btn${className}" data-action="save-framework-asset" ${disabled}>${label}</button>`;
+  }
+
+  function canAutoRunFramework() {
+    return !ui.assetImporting
+      && !isAutoFrameworkRunning()
+      && !runningStageKey()
+      && !ui.loading.framework_script
+      && !ui.loading.framework_save;
+  }
+
+  function renderAutoFrameworkButton(sizeClass) {
+    const className = sizeClass ? ` ${sizeClass}` : "";
+    const disabled = canAutoRunFramework() ? "" : "disabled";
+    const label = isAutoFrameworkRunning() ? "一键出框架中..." : "一键出框架";
+    return `<button class="fp-btn${className} primary" data-action="auto-run-framework" ${disabled} title="从当前缺失阶段开始自动生成 01-07，成功后直接进入下一阶段">${label}</button>`;
   }
 
   function processingElapsedLabel(stageKey) {
@@ -2611,8 +2636,8 @@
           <strong>本地保存：</strong>状态会自动保存
         </div>
         <div class="fp-side-actions">
-          <button class="fp-btn small primary" data-action="open-new-script" ${ui.assetImporting ? "disabled" : ""}>新建框架项目</button>
-          <button class="fp-btn small" data-action="toggle-assets" ${ui.assetImporting ? "disabled" : ""}>${ui.assetsOpen ? "收起框架资产" : "框架资产"}</button>
+          <button class="fp-btn small primary" data-action="open-new-script" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>新建框架项目</button>
+          <button class="fp-btn small" data-action="toggle-assets" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>${ui.assetsOpen ? "收起框架资产" : "框架资产"}</button>
         </div>
         ${ui.assetsOpen ? renderAssetManager("side") : ""}
         <nav class="fp-nav">${navItems}</nav>
@@ -2632,9 +2657,10 @@
           <p class="fp-top-sub">目标：产出可保存的框架资产。当前阶段：${escapeHtml(stageTitle)} · 框架资产 ID：${escapeHtml(assetId)}</p>
         </div>
         <div class="fp-top-actions">
+          ${renderAutoFrameworkButton("small")}
           ${renderSaveFrameworkButton("small")}
           <a class="fp-btn small ghost" data-guard-nav="workspace" href="${escapeHtml(config.workspaceUrl || "/workspace")}">返回主工作台</a>
-          <button class="fp-btn small danger" data-action="reset-state" ${canClearFrameworkInput() && !ui.assetImporting ? "" : "disabled"}>清空输入</button>
+          <button class="fp-btn small danger" data-action="reset-state" ${canClearFrameworkInput() && !ui.assetImporting && !isAutoFrameworkRunning() ? "" : "disabled"}>清空输入</button>
         </div>
       </div>
       ${ui.assetImporting ? renderProcessingBanner("导入资产中，请稍后") : ""}
@@ -2653,7 +2679,7 @@
             <h2 class="fp-card-title">我的框架资产</h2>
             <p class="fp-card-sub">从这里手动打开已保存的框架资产。新建框架不会自动恢复旧资产。</p>
           </div>
-          <button class="fp-btn small" data-action="refresh-assets" ${ui.assetsLoading || ui.assetImporting ? "disabled" : ""}>${ui.assetsLoading ? "刷新中..." : "刷新"}</button>
+          <button class="fp-btn small" data-action="refresh-assets" ${ui.assetsLoading || ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>${ui.assetsLoading ? "刷新中..." : "刷新"}</button>
         </div>
         <div class="fp-asset-toolbar">
           <input data-asset-search placeholder="搜索标题或摘要" value="${escapeHtml(ui.assetSearch)}" />
@@ -2700,11 +2726,11 @@
           <p>${escapeHtml(item.summary || "这个剧本还没有简短描述。")}</p>
         </div>
         <div class="fp-asset-actions">
-          <button class="fp-btn small primary" data-action="open-asset" data-project-id="${escapeHtml(projectId)}" ${ui.assetImporting ? "disabled" : ""}>打开查看</button>
-          <button class="fp-btn small" data-action="duplicate-asset" data-project-id="${escapeHtml(projectId)}" ${ui.assetImporting ? "disabled" : ""}>复制</button>
+          <button class="fp-btn small primary" data-action="open-asset" data-project-id="${escapeHtml(projectId)}" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>打开查看</button>
+          <button class="fp-btn small" data-action="duplicate-asset" data-project-id="${escapeHtml(projectId)}" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>复制</button>
           ${canStop ? `<button class="fp-btn small danger" data-action="stop-asset-task" data-task-id="${escapeHtml(taskId)}" ${ui.assetImporting ? "disabled" : ""}>停止</button>` : ""}
           ${canContinue ? `<button class="fp-btn small" data-action="continue-asset-task" data-task-id="${escapeHtml(taskId)}" ${ui.assetImporting ? "disabled" : ""}>继续</button>` : ""}
-          <button class="fp-btn small danger subtle" data-action="delete-asset" data-project-id="${escapeHtml(projectId)}" ${ui.assetImporting ? "disabled" : ""}>删除</button>
+          <button class="fp-btn small danger subtle" data-action="delete-asset" data-project-id="${escapeHtml(projectId)}" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>删除</button>
         </div>
       </article>
     `;
@@ -2954,6 +2980,24 @@
   }
 
   function renderRunningStageStatus() {
+    if (isAutoFrameworkRunning()) {
+      const current = (ui.autoFramework && ui.autoFramework.currentStage) || runningStageKey();
+      const stageNo = stageNoForKey(current);
+      const title = current ? stageDisplayTitle(current) : "准备阶段";
+      const message = (ui.autoFramework && ui.autoFramework.message) || "正在自动生成框架，请稍候...";
+      return `
+        <div class="fp-running-card" role="status" aria-live="polite">
+          <div class="fp-running-main">
+            <span class="fp-running-spinner" aria-hidden="true"></span>
+            <div>
+              <strong>一键出框架：${escapeHtml(stageNo ? `${stageNo} ${title}` : title)}</strong>
+              <p>${escapeHtml(message)}</p>
+            </div>
+          </div>
+          <span class="fp-running-badge">自动运行</span>
+        </div>
+      `;
+    }
     const stageKey = runningStageKey();
     if (!stageKey) return "";
     const stageNo = stageNoForKey(stageKey);
@@ -3280,13 +3324,13 @@
     const running = isStageLoading(stageKey);
     const dirty = stageDraftDirty(stageKey);
     const blockReason = stageRunBlockReason(stageKey);
-    const canNext = Boolean(!ui.assetImporting && nextView && hasOutput && !dirty && viewUnlocked(nextView));
+    const canNext = Boolean(!ui.assetImporting && !isAutoFrameworkRunning() && nextView && hasOutput && !dirty && viewUnlocked(nextView));
     const title = realStageDisplayTitle(stageKey);
     return `
       <div class="fp-actions fp-stage-bottom-actions">
-        <button class="fp-btn" data-action="go-view" data-view="${escapeHtml(previousView)}" ${previousView ? "" : "disabled"}>上一步</button>
-        <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="${escapeHtml(stageKey)}" ${ui.assetImporting || running || blockReason ? "disabled" : ""}>${hasOutput ? `重新生成 ${escapeHtml(title)}` : "生成本阶段"}</button>
-        ${isStageEditable(stageKey) ? `<button class="fp-btn ${dirty ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="${escapeHtml(stageKey)}" ${dirty && !ui.assetImporting ? "" : "disabled"}>应用修改</button>` : ""}
+        <button class="fp-btn" data-action="go-view" data-view="${escapeHtml(previousView)}" ${previousView && !isAutoFrameworkRunning() ? "" : "disabled"}>上一步</button>
+        <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="${escapeHtml(stageKey)}" ${ui.assetImporting || running || isAutoFrameworkRunning() || blockReason ? "disabled" : ""}>${hasOutput ? `重新生成 ${escapeHtml(title)}` : "生成本阶段"}</button>
+        ${isStageEditable(stageKey) ? `<button class="fp-btn ${dirty ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="${escapeHtml(stageKey)}" ${dirty && !ui.assetImporting && !isAutoFrameworkRunning() ? "" : "disabled"}>应用修改</button>` : ""}
         <button class="fp-btn ${canNext ? "primary" : ""}" data-action="go-next-stage" data-view="${escapeHtml(nextView)}" ${canNext ? "" : "disabled"}>下一步</button>
         ${stageKey === "package" ? `${renderSaveFrameworkButton("")}${renderFrameworkScriptButton("")}` : ""}
       </div>
@@ -3628,11 +3672,11 @@
         ${renderApplyStageChangesPanel("package")}
         ${renderStageHistoryPanel("package")}
         <div class="fp-actions fp-stage-bottom-actions">
-          <button class="fp-btn" data-action="go-view" data-view="guide" ${ui.assetImporting ? "disabled" : ""}>上一步</button>
-          <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="package" ${ui.assetImporting || isStageLoading("package") || blockReason ? "disabled" : ""}>${hasOutput ? "重新生成 07" : "生成本阶段"}</button>
+          <button class="fp-btn" data-action="go-view" data-view="guide" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>上一步</button>
+          <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="package" ${ui.assetImporting || isAutoFrameworkRunning() || isStageLoading("package") || blockReason ? "disabled" : ""}>${hasOutput ? "重新生成 07" : "生成本阶段"}</button>
           ${renderSaveFrameworkButton("")}
-          <button class="fp-btn primary" data-action="download-readable-framework" ${!hasOutput || ui.assetImporting ? "disabled" : ""}>下载可读框架</button>
-          <button class="fp-btn" data-action="download-structured-framework" ${!hasOutput || ui.assetImporting ? "disabled" : ""}>下载结构化框架</button>
+          <button class="fp-btn primary" data-action="download-readable-framework" ${!hasOutput || ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>下载可读框架</button>
+          <button class="fp-btn" data-action="download-structured-framework" ${!hasOutput || ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>下载结构化框架</button>
           ${renderFrameworkScriptButton("")}
         </div>
       </section>
@@ -5412,6 +5456,90 @@ function renderPackageBlocks() {
       render();
     } catch (error) {
       showToast(formatStageError(error, "01"));
+    }
+  }
+
+  function validateAutoFrameworkStart() {
+    syncBasicConfigFromDom();
+    if (ui.assetImporting) return "正在导入资产，请稍后再一键出框架。";
+    if (runningStageKey() || isAutoFrameworkRunning()) return "当前已有阶段正在运行。";
+    if (anyStageDraftDirty()) return "当前存在未应用修改，请先应用或取消修改后再一键出框架。";
+    if (!stagePreferenceReady("basic")) return "阶段偏好尚未加载完成，请稍后再试。";
+    if (!String(state.basic_config.project_title || state.basic_config.source_title || "").trim()) return "请先填写项目标题或作品标题。";
+    if (!String(state.basic_config.target_format || "").trim()) return "请先填写目标形式。";
+    return "";
+  }
+
+  async function commitAutoFrameworkStage(stageKey) {
+    if (!stageProgressDone(stageKey)) {
+      throw new Error(`${realStageDisplayTitle(stageKey)}没有得到完整输出，已停止一键出框架。`);
+    }
+    markStageCommitted(stageKey);
+    state.stage_state[stageKey].locked = true;
+    const next = STAGE_SEQUENCE[STAGE_SEQUENCE.indexOf(stageKey) + 1];
+    if (next) unlockStage(next);
+    state.current_view = firstViewForStage(next || stageKey);
+    syncStageFlow(state);
+    syncFrameworkAssetState(state, `auto_confirm:${stageKey}`);
+    saveState();
+    await saveFrameworkAsset({ silent: true, skipDirtyCheck: true });
+  }
+
+  async function autoRunFramework() {
+    const startError = validateAutoFrameworkStart();
+    if (startError) {
+      showToast(startError);
+      return;
+    }
+    ui.autoFramework = {
+      running: true,
+      currentStage: "",
+      message: "准备自动生成 01-07 框架策划...",
+    };
+    render();
+    try {
+      for (const stageKey of STAGE_SEQUENCE) {
+        ui.autoFramework.currentStage = stageKey;
+        ui.autoFramework.message = `正在处理 ${realStageDisplayTitle(stageKey)}，成功后会自动进入下一阶段。`;
+        state.current_view = firstViewForStage(stageKey);
+        render();
+        await waitForPaint();
+
+        if (stageProgressDone(stageKey)) {
+          await commitAutoFrameworkStage(stageKey);
+          continue;
+        }
+
+        const blockReason = stageRunBlockReason(stageKey);
+        if (blockReason) {
+          throw new Error(`${realStageDisplayTitle(stageKey)}暂不能生成：${blockReason}`);
+        }
+
+        await runStage(stageKey, { revise: false, autoRunFramework: true });
+        await commitAutoFrameworkStage(stageKey);
+      }
+      state.current_view = "package";
+      ui.autoFramework.message = "01-07 框架策划已自动生成完成。";
+      syncStageFlow(state);
+      saveState();
+      showToast("一键出框架已完成，07 最终策划包已生成并保存。");
+    } catch (error) {
+      const stageKey = (ui.autoFramework && ui.autoFramework.currentStage) || stageKeyForView(state.current_view);
+      if (stageKey && state.stage_state[stageKey]) {
+        state.stage_state[stageKey].status = "error";
+        ui.stageErrors[stageKey] = error && error.message ? error.message : "一键出框架失败";
+        state.current_view = firstViewForStage(stageKey);
+      }
+      showToast(error && error.message ? error.message : "一键出框架失败，请查看当前阶段错误。");
+    } finally {
+      ui.autoFramework = {
+        running: false,
+        currentStage: "",
+        message: "",
+      };
+      syncStageFlow(state);
+      saveState();
+      render();
     }
   }
 
@@ -7198,6 +7326,10 @@ async function saveFrameworkAsset(options) {
     }
     if (action === "save-framework-asset") {
       await saveFrameworkAsset();
+      return;
+    }
+    if (action === "auto-run-framework") {
+      await autoRunFramework();
       return;
     }
     if (action === "start-framework-script") {
