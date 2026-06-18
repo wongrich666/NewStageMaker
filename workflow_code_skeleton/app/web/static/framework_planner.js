@@ -6218,19 +6218,12 @@ function renderPackageBlocks() {
     }
   }
 
-  // FP_ASSET_AFTER_STAGE01_ONLY_V3
-function hasBasicStageOutputForAsset() {
-  return !isEmptyValue(state.source_brief)
-    || Boolean(String((state.display_texts || {})["01"] || "").trim());
-}
-  // FP_ASSET_AFTER_STAGE01_ONLY_V1
-    function hasBasicStageOutputForAsset() {
-      return !isEmptyValue(state.source_brief)
-        || Boolean(String((state.display_texts || {})["01"] || "").trim());
-    }
+  function hasBasicStageOutputForAsset() {
+    return !isEmptyValue(state.source_brief)
+      || Boolean(String((state.display_texts || {})["01"] || "").trim());
+  }
 
-    // FP_ASSET_AFTER_STAGE01_ONLY_V3
-async function saveFrameworkAsset(options) {
+  async function saveFrameworkAsset(options) {
   const safeOptions = options || {};
 
   if (!(safeOptions && safeOptions.skipDirtyCheck) && anyStageDraftDirty()) {
