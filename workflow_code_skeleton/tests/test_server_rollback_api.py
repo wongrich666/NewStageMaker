@@ -10,7 +10,7 @@ from workflow_code_skeleton.app.services.auth_store import auth_store
 
 def _auth_headers() -> dict[str, str]:
     username = f"rb{uuid.uuid4().hex[:8]}"
-    user = auth_store.register_user(username, "password123")
+    user = auth_store.register_user(username, "CodexTest9")
     token = auth_store.create_session_token(user.id)
     return {"Authorization": f"Bearer {token}"}
 

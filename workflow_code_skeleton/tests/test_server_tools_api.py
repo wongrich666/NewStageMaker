@@ -11,7 +11,7 @@ from workflow_code_skeleton.app.services.simple_fastgpt_tools import ToolExecuti
 
 def _auth_headers() -> dict[str, str]:
     username = f"tool_api_{uuid.uuid4().hex[:10]}"
-    user = auth_store.register_user(username, "password123")
+    user = auth_store.register_user(username, "CodexTest9")
     token = auth_store.create_session_token(user.id)
     return {"Authorization": f"Bearer {token}"}
 
@@ -233,7 +233,7 @@ class ServerToolsApiTests(unittest.TestCase):
 
     def test_logged_in_pages_redirect_directly_to_workspace(self) -> None:
         username = f"pg_{uuid.uuid4().hex[:8]}"
-        user = auth_store.register_user(username, "password123")
+        user = auth_store.register_user(username, "CodexTest9")
         token = auth_store.create_session_token(user.id)
 
         for path in ("/", "/login", "/register"):
@@ -244,11 +244,11 @@ class ServerToolsApiTests(unittest.TestCase):
 
     def test_login_and_register_submit_redirect_directly_to_workspace(self) -> None:
         username = f"lg_{uuid.uuid4().hex[:8]}"
-        auth_store.register_user(username, "password123")
+        auth_store.register_user(username, "CodexTest9")
 
         login_response = self.client.post(
             "/login",
-            data={"username": username, "password": "password123"},
+            data={"username": username, "password": "CodexTest9"},
             follow_redirects=False,
         )
         self.assertEqual(login_response.status_code, 302)
@@ -260,8 +260,8 @@ class ServerToolsApiTests(unittest.TestCase):
             "/register",
             data={
                 "username": register_username,
-                "password": "password123",
-                "confirm_password": "password123",
+                "password": "CodexTest9",
+                "confirm_password": "CodexTest9",
             },
             follow_redirects=False,
         )

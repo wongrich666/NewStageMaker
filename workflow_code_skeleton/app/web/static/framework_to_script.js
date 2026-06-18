@@ -654,14 +654,46 @@
   }
 
   function mergeStage11(data) {
+    const current = (state.scriptStages || {}).stage11 || {};
+    const currentBatches = current.batches && typeof current.batches === "object" && !Array.isArray(current.batches)
+      ? current.batches
+      : {};
+    const incomingBatches = data && data.batches && typeof data.batches === "object" && !Array.isArray(data.batches)
+      ? data.batches
+      : {};
+    const mergedBatches = Object.assign({}, currentBatches, incomingBatches);
+    const startEpisode = data.batchStartEpisode || data.batch_start_episode || data.startEpisode || data.start_episode;
+    const endEpisode = data.batchEndEpisode || data.batch_end_episode || data.endEpisode || data.end_episode;
+    const conflictPlan = data.batchCausalConflictPlan || data.batch_causal_conflict_plan;
+    const conflictReview = data.batchCausalConflictReview || data.batch_causal_conflict_review;
+    const conflictMemory = data.conflictMemory || data.conflict_memory;
+    const batchKey = startEpisode ? String(startEpisode) : "";
+
+    if (batchKey && hasContent(conflictPlan)) {
+      mergedBatches[batchKey] = Object.assign(
+        {},
+        currentBatches[batchKey] || {},
+        incomingBatches[batchKey] || {},
+        {
+          batchStartEpisode: startEpisode,
+          batchEndEpisode: endEpisode,
+          batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan || data.batch_enriched_episode_plan || (incomingBatches[batchKey] || {}).batchEnrichedEpisodePlan || (currentBatches[batchKey] || {}).batchEnrichedEpisodePlan,
+          batchCausalConflictPlan: conflictPlan,
+          batch_causal_conflict_plan: conflictPlan,
+          batchCausalConflictReview: conflictReview || (incomingBatches[batchKey] || {}).batchCausalConflictReview || (currentBatches[batchKey] || {}).batchCausalConflictReview,
+          conflictMemory: conflictMemory || (incomingBatches[batchKey] || {}).conflictMemory || (currentBatches[batchKey] || {}).conflictMemory
+        }
+      );
+    }
+
     state.scriptStages.stage11 = {
-      batchStartEpisode: data.batchStartEpisode,
-      batchEndEpisode: data.batchEndEpisode,
-      batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan,
-      batchCausalConflictPlan: data.batchCausalConflictPlan,
-      batchCausalConflictReview: data.batchCausalConflictReview,
-      conflictMemory: data.conflictMemory,
-      batches: data.batches || {},
+      batchStartEpisode: startEpisode || current.batchStartEpisode,
+      batchEndEpisode: endEpisode || current.batchEndEpisode,
+      batchEnrichedEpisodePlan: data.batchEnrichedEpisodePlan || data.batch_enriched_episode_plan || current.batchEnrichedEpisodePlan,
+      batchCausalConflictPlan: conflictPlan || current.batchCausalConflictPlan,
+      batchCausalConflictReview: conflictReview || current.batchCausalConflictReview,
+      conflictMemory: conflictMemory || current.conflictMemory,
+      batches: mergedBatches,
       updated_at: new Date().toISOString(),
     };
   }
@@ -1620,6 +1652,8 @@
               sceneDictionary: stage08.sceneDictionary,
               scriptWorldRulesDigest: stage08.scriptWorldRulesDigest,
               appearanceMapping: stage09.appearanceMapping,
+              batchStartEpisode: batchStart,
+              batch_start_episode: batchStart,
               reset_stage11: resetStage11 && firstRequest,
               conflictMemory: resetStage11 && firstRequest ? "" : (latestStage11.conflictMemory || ""),
             }, "11")),
@@ -1696,6 +1730,8 @@
               stage09: state.scriptStages.stage09 || {},
               stage11: latestStage11,
               stage12: latestStage12,
+              batchStartEpisode: batchStart,
+              batch_start_episode: batchStart,
               reset_stage12: resetStage12 && firstRequest,
             }, "12")),
           }, RESILIENT_STAGE_REQUEST_TIMEOUT_MS);

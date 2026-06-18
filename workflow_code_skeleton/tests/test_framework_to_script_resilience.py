@@ -24,13 +24,21 @@ def test_framework_to_script_login_guard_accepts_token_current_user() -> None:
 
 
 def test_framework_to_script_stage_drafts_are_saved_without_marking_completed() -> None:
-    assert "currentBatchDraft" in SERVER_SOURCE
-    assert "inProgressBatch" in SERVER_SOURCE
+    assert "stageDrafts" in SERVER_SOURCE
+    assert "_save_framework_to_script_stage_draft" in SERVER_SOURCE
     assert 'status: str = "running"' in SERVER_SOURCE
-    assert "status=status" in SERVER_SOURCE
+    assert "draft_only" in SERVER_SOURCE
+    assert "completed_set.discard(stage_number)" in SERVER_SOURCE
     assert "causal_conflict_write" in SERVER_SOURCE
     assert "script_write" in SERVER_SOURCE
     assert "script_memory" in SERVER_SOURCE
+
+
+def test_framework_to_script_batches_are_requested_explicitly() -> None:
+    assert "batchStartEpisode: batchStart" in FRONTEND_SOURCE
+    assert "batch_start_episode: batchStart" in FRONTEND_SOURCE
+    assert "batch_already_completed" in SERVER_SOURCE
+    assert "requested_batch_start" in SERVER_SOURCE
 
 
 def test_framework_asset_import_readiness_is_explained_to_frontend() -> None:

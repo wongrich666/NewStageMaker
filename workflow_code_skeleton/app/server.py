@@ -139,9 +139,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return fallback or "请求未能完成，请稍后重试。"
         return text
 
-    def _json_error(message: str, status: int = 400, *, fallback: str | None = None):
+    def _json_error(message: str, status: int = 400, *, fallback: str | None = None, detail: dict | None = None):
         public_message = _sanitize_error_message(message, status=status, fallback=fallback)
-        return jsonify({"success": False, "message": public_message}), status
+        payload = {"success": False, "message": public_message}
+        if isinstance(detail, dict) and detail:
+            payload["detail"] = _strip_raw_fastgpt_fields(copy.deepcopy(detail))
+        return jsonify(payload), status
 
 
     def _script_audit_ecg_extract_text(value, *, limit: int = 200000) -> str:
@@ -971,6 +974,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "stage_outputs": _strip_raw_fastgpt_fields({**copy.deepcopy(stage_outputs), **copy.deepcopy(workspace_stage_outputs)}),
                     "framework_to_script_state": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state)),
                     "scriptStages": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state.get("scriptStages") or {})),
+                    "stageDrafts": _strip_raw_fastgpt_fields(copy.deepcopy(workspace_state.get("stageDrafts") or {})),
                     "stage_prompts": _strip_raw_fastgpt_fields(copy.deepcopy(stage_prompts)),
                     "preference_snapshot": _strip_raw_fastgpt_fields(copy.deepcopy(preference_snapshot)),
                 }
@@ -1112,10 +1116,18 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 completed_set.discard(str(downstream_stage).replace("stage", ""))
         else:
             completed_set.discard(stage_number)
+        stage_drafts = workspace_state.get("stageDrafts")
+        if not isinstance(stage_drafts, dict):
+            stage_drafts = {}
+        if normalized_status == "completed":
+            stage_drafts.pop(str(stage_key), None)
+            for downstream_stage in cascade.get(str(stage_key), ()):
+                stage_drafts.pop(str(downstream_stage), None)
         workspace_state["completedStages"] = sorted(completed_set, key=lambda item: int(item) if item.isdigit() else 999)
         workspace_state["scriptStages"] = script_stages
         workspace_state["stageOutputs"] = stage_outputs
         workspace_state["stages"] = stages_state
+        workspace_state["stageDrafts"] = stage_drafts
         workspace_state["framework_asset_id"] = str(asset_id)
         workspace_state["project_id"] = project_id
         workspace_state["updated_at"] = now
@@ -1134,6 +1146,75 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 )
             except Exception:
                 logger.exception("framework-to-script stage snapshot persist failed project_id=%s", project_id)
+
+    def _save_framework_to_script_stage_draft(
+        *,
+        user_id: int,
+        asset_id: str,
+        stage_key: str,
+        draft: dict,
+        status: str = "running",
+    ) -> None:
+        try:
+            project_id = int(str(asset_id or "").strip())
+        except Exception:
+            return
+        if project_id <= 0 or not isinstance(draft, dict):
+            return
+        snapshot = task_manager.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+        if not snapshot or str(snapshot.get("asset_kind") or "").strip() != "framework_planner":
+            return
+        now = _now_iso()
+        clean_draft = _strip_raw_fastgpt_fields(copy.deepcopy(draft))
+        clean_draft["updated_at"] = now
+        clean_draft["status"] = str(status or clean_draft.get("status") or "running")
+        artifacts = snapshot.setdefault("artifacts", {})
+        if not isinstance(artifacts, dict):
+            artifacts = {}
+            snapshot["artifacts"] = artifacts
+        workspace_state = artifacts.get("framework_to_script_state")
+        if not isinstance(workspace_state, dict):
+            workspace_state = {"scriptStages": {}}
+        stage_drafts = workspace_state.get("stageDrafts")
+        if not isinstance(stage_drafts, dict):
+            stage_drafts = {}
+        stage_drafts[str(stage_key)] = clean_draft
+        stages_state = workspace_state.get("stages")
+        if not isinstance(stages_state, dict):
+            stages_state = {}
+        stage_number = str(stage_key).replace("stage", "")
+        stages_state[stage_number] = {
+            "status": clean_draft["status"],
+            "stage_key": str(stage_key),
+            "updated_at": now,
+            "draft_only": True,
+        }
+        completed_stages = workspace_state.get("completedStages")
+        if not isinstance(completed_stages, list):
+            completed_stages = []
+        completed_set = {str(item) for item in completed_stages}
+        completed_set.discard(stage_number)
+        workspace_state["completedStages"] = sorted(completed_set, key=lambda item: int(item) if item.isdigit() else 999)
+        workspace_state["stageDrafts"] = stage_drafts
+        workspace_state["stages"] = stages_state
+        workspace_state["framework_asset_id"] = str(asset_id)
+        workspace_state["project_id"] = project_id
+        workspace_state["updated_at"] = now
+        artifacts["framework_to_script_state"] = workspace_state
+        snapshot["updated_at"] = now
+        record = task_manager._projects.get(project_id)
+        if record:
+            with record.lock:
+                record.snapshot = snapshot
+            task_manager._persist_snapshot(record)
+        else:
+            try:
+                task_manager._project_path(project_id).write_text(
+                    json.dumps(snapshot, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            except Exception:
+                logger.exception("framework-to-script draft snapshot persist failed project_id=%s", project_id)
 
     def _inject_framework_asset(data: dict, user_id: int) -> tuple[dict, dict | None]:
         asset_id = str(data.get("framework_asset_id") or data.get("asset_id") or "").strip()
@@ -4148,6 +4229,34 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             or data.get("frameworkPlanPackage")
             or {}
         )
+        asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
+
+        def _stage11_400(message: str, reason: str, status: int = 400, **extra):
+            detail = {
+                "stage": "11",
+                "failure_reason": reason,
+                "asset_id": asset_id,
+                "user_id": user_id,
+                "requested_batch_start": data.get("batchStartEpisode") or data.get("batch_start_episode") or "",
+            }
+            try:
+                detail["plan_count"] = len(plan) if isinstance(plan, list) else 0
+            except Exception:
+                detail["plan_count"] = 0
+            try:
+                detail["existing_batch_keys"] = _sorted_numeric_batch_keys(existing_batches) if isinstance(existing_batches, dict) else []
+            except Exception:
+                detail["existing_batch_keys"] = []
+            try:
+                detail["has_stage08"] = bool(stage08)
+                detail["has_stage09"] = bool(stage09)
+                detail["has_stage10"] = bool(stage10)
+            except Exception:
+                pass
+            detail.update({key: value for key, value in extra.items() if value is not None})
+            logger.warning("framework-to-script stage11 rejected: %s", detail)
+            return _json_error(message, status=status, detail=detail)
+
         stage10 = _framework_script_stage_cache(framework_asset, "stage10")
         plan = (
             data.get("allEnrichedEpisodePlan")
@@ -4157,7 +4266,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             or []
         )
         if not isinstance(plan, list) or not plan:
-            return _json_error("缺少 allEnrichedEpisodePlan，请先完成 10 优化分集计划。", status=400)
+            return _stage11_400("缺少 allEnrichedEpisodePlan，请先完成 10 优化分集计划。", "missing_all_enriched_episode_plan")
 
         stage08 = _framework_script_stage_cache(framework_asset, "stage08")
         stage09 = _framework_script_stage_cache(framework_asset, "stage09")
@@ -4165,11 +4274,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         rules_digest = data.get("scriptWorldRulesDigest") or stage08.get("scriptWorldRulesDigest") or {}
         appearance_mapping = data.get("appearanceMapping") or stage09.get("appearanceMapping") or {}
         if not isinstance(scene_dictionary, dict) or not scene_dictionary:
-            return _json_error("缺少 sceneDictionary，请先完成 08 提炼核心场景。", status=400)
+            return _stage11_400("缺少 sceneDictionary，请先完成 08 提炼核心场景。", "missing_scene_dictionary")
         if not isinstance(appearance_mapping, dict) or not appearance_mapping:
-            return _json_error("缺少 appearanceMapping，请先完成 09 确定角色外观。", status=400)
+            return _stage11_400("缺少 appearanceMapping，请先完成 09 确定角色外观。", "missing_appearance_mapping")
         if not isinstance(rules_digest, dict) or not rules_digest:
-            return _json_error("缺少 scriptWorldRulesDigest，请先完成 08 提炼核心场景。", status=400)
+            return _stage11_400("缺少 scriptWorldRulesDigest，请先完成 08 提炼核心场景。", "missing_script_world_rules_digest")
 
         existing_stage11 = _framework_script_stage_cache(framework_asset, "stage11")
         existing_batches = existing_stage11.get("batches") if isinstance(existing_stage11.get("batches"), dict) else {}
@@ -4184,6 +4293,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     asset_id=reset_asset_id,
                     stage_key="stage12",
                     output={"batches": {}},
+                    status="pending",
                 )
         else:
             valid_existing_batches = {}
@@ -4217,15 +4327,45 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     continue
                 valid_existing_batches[str(existing_start)] = existing_batch
             existing_batches = valid_existing_batches
+        requested_start_value = data.get("batchStartEpisode") or data.get("batch_start_episode")
+        requested_batch_key = str(_positive_int(requested_start_value, 0)) if requested_start_value else ""
+        if requested_batch_key and requested_batch_key in existing_batches and not reset_stage11:
+            existing_output = existing_batches.get(requested_batch_key) if isinstance(existing_batches.get(requested_batch_key), dict) else {}
+            logger.info(
+                "framework-to-script stage11 explicit batch already completed: asset_id=%s batchStartEpisode=%s existing_batch_keys=%s",
+                asset_id,
+                requested_batch_key,
+                _sorted_numeric_batch_keys(existing_batches),
+            )
+            return _json_ok(
+                stage="11",
+                framework_asset_id=asset_id,
+                skipped=True,
+                skip_reason="batch_already_completed",
+                batches=existing_batches,
+                **existing_output,
+            )
         start_episode, end_episode, batch_plan = _framework_batch_from_plan(
             plan,
-            data.get("batchStartEpisode") or data.get("batch_start_episode"),
+            requested_start_value,
             completed_starts=existing_batches.keys(),
         )
         if not batch_plan:
-            return _json_error("当前批次缺少 batchEnrichedEpisodePlan，请检查 10 输出集数。", status=400)
+            return _stage11_400(
+                "当前批次缺少 batchEnrichedEpisodePlan，请检查 10 输出集数。",
+                "empty_batch_enriched_episode_plan",
+                expected_batch_starts=[
+                    str(start)
+                    for start in sorted(
+                        {
+                            ((_positive_int(item.get("episode") or item.get("episodeNumber") or item.get("episode_number"), index + 1) - 1) // 5) * 5 + 1
+                            for index, item in enumerate(plan)
+                            if isinstance(item, dict)
+                        }
+                    )
+                ],
+            )
 
-        asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
         def _autosave_stage11_draft(
             sub_stage: str,
             *,
@@ -4254,20 +4394,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             if conflict_memory_value is not None:
                 draft["conflictMemory"] = str(conflict_memory_value)
                 draft["conflict_memory"] = str(conflict_memory_value)
-            output = {
-                **(existing_stage11 if isinstance(existing_stage11, dict) else {}),
-                "batches": dict(existing_batches),
-                "currentBatchDraft": draft,
-                "inProgressBatch": draft,
-            }
-            if conflict_memory_value is not None:
-                output["conflictMemory"] = str(conflict_memory_value)
-                output["conflict_memory"] = str(conflict_memory_value)
-            _save_framework_to_script_stage(
+            _save_framework_to_script_stage_draft(
                 user_id=user_id,
                 asset_id=asset_id,
                 stage_key="stage11",
-                output=output,
+                draft=draft,
                 status=status,
             )
 
@@ -4794,6 +4925,22 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             _sorted_numeric_batch_keys(stage11_batches),
             _sorted_numeric_batch_keys(existing_batches),
         )
+        if requested_start and batch_key in existing_batches and not reset_stage12:
+            existing_output = existing_batches.get(batch_key) if isinstance(existing_batches.get(batch_key), dict) else {}
+            logger.info(
+                "framework-to-script stage12 explicit batch already completed: asset_id=%s batchStartEpisode=%s existing_batch_keys=%s",
+                str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip(),
+                batch_key,
+                _sorted_numeric_batch_keys(existing_batches),
+            )
+            return _json_ok(
+                stage="12",
+                framework_asset_id=str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip(),
+                skipped=True,
+                skip_reason="batch_already_completed",
+                batches=existing_batches,
+                **existing_output,
+            )
         if not isinstance(stage11_batch, dict):
             return _json_error("请先完成 11 当前批次因果冲突。", status=400)
 
@@ -4944,20 +5091,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         draft["script_memory"] = str(script_memory_value)
                     if debug_path_value:
                         draft["stage12DebugPath"] = debug_path_value
-                    output = {
-                        **(existing_stage12 if isinstance(existing_stage12, dict) else {}),
-                        "batches": dict(existing_batches),
-                        "currentBatchDraft": draft,
-                        "inProgressBatch": draft,
-                    }
-                    if script_memory_value is not None:
-                        output["scriptMemory"] = str(script_memory_value)
-                        output["script_memory"] = str(script_memory_value)
-                    _save_framework_to_script_stage(
+                    _save_framework_to_script_stage_draft(
                         user_id=user_id,
                         asset_id=asset_id,
                         stage_key="stage12",
-                        output=output,
+                        draft=draft,
                         status=status,
                     )
 
