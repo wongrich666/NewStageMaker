@@ -6184,7 +6184,7 @@ function renderToolForm(toolKey) {
       ? "爆款文审核通常需要较长时间。你可以切换页面继续操作，完成后会自动保存到爆款文审核资产；如果本页请求中断，这里会显示失败原因，也可以稍后从资产查看或重新运行。"
       : (activeToolKey === "character_reskin"
         ? characterReskinRunningMessage(0)
-        : "生成时间很长，请不要刷新，马上就好~"));
+        : "生成时间约十五分钟，请不要刷新，马上就好~"));
     startToolProgressTicker(activeToolKey);
     if (activeToolKey === "hot_review") {
       hotReviewResultPoller = startHotReviewResultPolling({
