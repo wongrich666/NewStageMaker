@@ -18,6 +18,20 @@
   const RUNNING_STATUSES = new Set(["pending", "running", "pausing"]);
   const RESUMABLE_STATUSES = new Set(["paused", "pausing", "failed", "terminated"]);
   const TERMINATABLE_STATUSES = new Set(["pending", "running", "pausing", "paused", "failed"]);
+  const CHARACTER_RESKIN_RUNNING_MESSAGES = [
+    "正在运行：统计原剧本实际集数...",
+    "正在运行：生成人设循环变量...",
+    "正在运行：审核人设循环变量...",
+    "正在运行：必要时修订人设循环变量...",
+    "正在运行：整理人设...",
+    "正在运行：按批次编写角色对话...",
+    "正在运行：审核角色对话...",
+    "正在运行：必要时修订角色对话...",
+    "正在运行：按批次编写剧本正文...",
+    "正在运行：审核剧本正文...",
+    "正在运行：必要时修订剧本正文...",
+    "正在运行：保存剧本记忆并拼接最终正文..."
+  ];
   const $ = (id) => document.getElementById(id);
   const currentAuthToken = () => new URL(window.location.href).searchParams.get("auth_token") || "";
 
@@ -155,6 +169,8 @@
     activeTool: "hot_review",
     toolDrafts: {},
     toolResults: {},
+    toolProgressTimer: null,
+    toolProgressIndex: 0,
     knowledgeTags: [],
     selectedKnowledgeTagIds: [],
     userKnowledgeTagPrompt: "",
@@ -3891,6 +3907,33 @@ startRuntimeDebugPolling();
     }
   }
 
+  function characterReskinRunningMessage(index = 0) {
+    const safeIndex = Math.max(0, Number(index) || 0) % CHARACTER_RESKIN_RUNNING_MESSAGES.length;
+    return [
+      CHARACTER_RESKIN_RUNNING_MESSAGES[safeIndex],
+      "只换人设会串联多轮人设、对白、正文审核与修订，等待时间可能较长。",
+      "当前页面没有卡住，请不要刷新；完成后会自动保存到只换人设资产。"
+    ].join("\n");
+  }
+
+  function stopToolProgressTicker() {
+    if (state.toolProgressTimer) {
+      window.clearInterval(state.toolProgressTimer);
+      state.toolProgressTimer = null;
+    }
+  }
+
+  function startToolProgressTicker(toolKey) {
+    stopToolProgressTicker();
+    state.toolProgressIndex = 0;
+    if (toolKey !== "character_reskin") return;
+    renderToolOutput(toolKey, characterReskinRunningMessage(state.toolProgressIndex));
+    state.toolProgressTimer = window.setInterval(() => {
+      state.toolProgressIndex += 1;
+      renderToolOutput(toolKey, characterReskinRunningMessage(state.toolProgressIndex));
+    }, 9000);
+  }
+
 
   function downloadTextFile(text, filename) {
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
@@ -6037,13 +6080,17 @@ function renderToolForm(toolKey) {
     state.toolResults[state.activeTool] = null;
     renderToolOutput(activeToolKey, activeToolKey === "hot_review"
       ? "爆款文审核通常需要较长时间，请不要刷新。若超时或出错，这里会显示失败原因。模型可能会不稳定，如果显示内容和输入明显不符，请你重新运行。"
-      : "生成时间很长，请不要刷新，马上就好~");
+      : (activeToolKey === "character_reskin"
+        ? characterReskinRunningMessage(0)
+        : "生成时间很长，请不要刷新，马上就好~"));
+    startToolProgressTicker(activeToolKey);
     try {
       const data = await requestJson(currentToolRunUrl(activeToolKey), {
         method: "POST",
         body: JSON.stringify(payload),
         timeoutMs: activeToolKey === "hot_review" ? HOT_REVIEW_RUN_TIMEOUT_MS : 0
       });
+      stopToolProgressTicker();
       const result = data.result || data;
       const output = result.output ?? data.output ?? result.result ?? "";
       const text = String(result.text || data.text || formatToolOutput(output) || "").trim();
@@ -6093,6 +6140,7 @@ function renderToolForm(toolKey) {
             : `${result.title || toolConfig(activeToolKey)?.label || "当前工具"} 已返回结果。`),
       );
     } catch (error) {
+      stopToolProgressTicker();
       console.error("[tool-run]", error);
       const fallback = activeToolKey === "hot_review"
         ? "爆款文审核运行失败，可能是请求超时、后端中断或网络抖动。当前输入已保留，请稍后重试。"

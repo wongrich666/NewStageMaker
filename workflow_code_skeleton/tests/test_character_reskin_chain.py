@@ -100,13 +100,16 @@ def test_character_reskin_runs_all_stages_and_concatenates_batches() -> None:
     assert [call["variables"]["d4sfifeZ"] for call in calls if call["stage"] == "body_write"] == [1, 6]
     first_profile = next(call for call in calls if call["stage"] == "profile_write")
     assert first_profile["variables"]["ayxWwSpE"] == "原故事大纲"
+    assert first_profile["variables"]["cUMhDqCG"] == "换成都市复仇人设"
     assert first_profile["variables"]["target_style"] == "换成都市复仇人设"
     assert first_profile["variables"]["mubiao_fengge"] == "换成都市复仇人设"
+    assert "pxtQY7p2" not in first_profile["variables"]
+    assert "eBEWC07Q" not in first_profile["variables"]
+    assert "blkSS7dY" not in first_profile["variables"]
     for key, expected in {
         "n5ZHYrj8": "镜中雪",
         "rxmvq2lS": "核心场景",
         "yYYOuumm": "旧人物小传",
-        "pxtQY7p2": "原剧本正文",
     }.items():
         assert first_profile["variables"][key] == expected
 

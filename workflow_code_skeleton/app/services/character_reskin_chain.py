@@ -30,11 +30,25 @@ DEDICATED_API_KEY_ENVS: tuple[str, ...] = (
 )
 
 URL_ENV = "FASTGPT_CHAT_COMPLETIONS_URL"
-COMMON_TARGET_STYLE_KEYS = ["target_style", "mubiao_fengge"]
+COMMON_TARGET_STYLE_KEYS = ["cUMhDqCG", "target_style", "mubiao_fengge"]
+STAGE_LABELS: dict[str, str] = {
+    "actual_episode_count": "统计原剧本实际集数",
+    "profile_write": "生成人设循环变量",
+    "profile_review": "审核人设循环变量",
+    "profile_rewrite": "修订人设循环变量",
+    "profile_sort": "整理人设",
+    "dialogue_write": "编写角色对话",
+    "dialogue_review": "审核角色对话",
+    "dialogue_rewrite": "修订角色对话",
+    "body_write": "编写剧本正文",
+    "body_review": "审核剧本正文",
+    "body_rewrite": "修订剧本正文",
+    "script_memory": "保存剧本记忆",
+}
 
 EXPECTED_VARIABLE_KEYS_BY_STAGE: dict[str, list[str]] = {
     "actual_episode_count": ["juben_zhengwen"],
-    "profile_write": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2"],
+    "profile_write": ["n5ZHYrj8", "ayxWwSpE", "yYYOuumm", "rxmvq2lS", *COMMON_TARGET_STYLE_KEYS],
     "profile_review": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW"],
     "profile_rewrite": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW", "va4Et1LA"],
     "profile_sort": ["n5ZHYrj8", "eBEWC07Q", "blkSS7dY", "ayxWwSpE", *COMMON_TARGET_STYLE_KEYS, "rxmvq2lS", "yYYOuumm", "pxtQY7p2", "fFM0mroW"],
@@ -162,7 +176,7 @@ def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
     )
     state["profile_json"] = _call_stage(
         profile_write,
-        _with_common_variables(state),
+        _profile_write_variables(state),
         debug,
     )
 
@@ -348,7 +362,7 @@ def run_character_reskin_chain(user_payload: dict[str, Any]) -> dict[str, Any]:
 def _initial_state(payload: dict[str, Any]) -> dict[str, Any]:
     title = _first_text(payload, "title", "ju_ben_biao_ti", "script_title")
     source_outline = _first_text(payload, "source_outline", "yuan_juben_genggai", "outline", "story_outline")
-    target_style = _first_text(payload, "target_style", "mubiao_fengge", "style")
+    target_style = _first_text(payload, "cUMhDqCG", "target_style", "mubiao_fengge", "style")
     state = {
         "title": title,
         "episode_word_count": _first_positive_int(payload, 600, "episode_word_count", "meiji_zishu"),
@@ -390,11 +404,24 @@ def _common_variables(state: dict[str, Any]) -> dict[str, Any]:
         "eBEWC07Q": state["episode_word_count"],
         "blkSS7dY": state["total_episodes"],
         "ayxWwSpE": state["source_outline"],
+        "cUMhDqCG": state["target_style"],
         "target_style": state["target_style"],
         "mubiao_fengge": state["target_style"],
         "rxmvq2lS": state["core_scenes"],
         "yYYOuumm": state["source_characters"],
         "pxtQY7p2": state["source_script"],
+    }
+
+
+def _profile_write_variables(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "n5ZHYrj8": state["title"],
+        "ayxWwSpE": state["source_outline"],
+        "yYYOuumm": state["source_characters"],
+        "rxmvq2lS": state["core_scenes"],
+        "cUMhDqCG": state["target_style"],
+        "target_style": state["target_style"],
+        "mubiao_fengge": state["target_style"],
     }
 
 
@@ -410,6 +437,7 @@ def _call_stage(spec: StageSpec, variables: dict[str, Any], debug: dict[str, Any
     variable_keys = list(variables.keys())
     stage_debug: dict[str, Any] = {
         "stage": spec.stage,
+        "stage_label": STAGE_LABELS.get(spec.stage, spec.stage),
         "api_env": spec.api_env,
         "request_variable_keys": variable_keys,
         "output_source": "",
