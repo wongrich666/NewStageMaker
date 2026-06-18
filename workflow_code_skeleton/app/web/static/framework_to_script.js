@@ -1816,7 +1816,13 @@
 
 
   function renderTree(value, keyName = "root", depth = 0) {
-    const clean = stripRaw(value);
+    let clean = null;
+    try {
+      clean = stripRaw(value);
+    } catch (error) {
+      console.warn("[framework_to_script] renderTree strip failed", error);
+      return `<div class="wts-tree-text">${renderTreeText(value)}</div>`;
+    }
     if (clean === null || clean === undefined || clean === "") {
       return `<div class="wts-empty-inline">暂无内容</div>`;
     }
@@ -1825,7 +1831,7 @@
       return `<div class="wts-tree-list">${clean.map((item, index) => `
         <details class="wts-tree-node" ${depth < 1 ? "open" : ""}>
           <summary><span class="wts-tree-arrow"></span>${escapeHtml(labelFor(keyName))} ${index + 1}</summary>
-          <div>${renderTree(item, keyName, depth + 1)}</div>
+          <div>${safeRenderTree(item, keyName, depth + 1)}</div>
         </details>
       `).join("")}</div>`;
     }
@@ -1837,7 +1843,7 @@
         return complex ? `
           <details class="wts-tree-node" ${depth < 1 ? "open" : ""}>
             <summary><span class="wts-tree-arrow"></span>${escapeHtml(labelFor(key))}</summary>
-            <div>${renderTree(item, key, depth + 1)}</div>
+            <div>${safeRenderTree(item, key, depth + 1)}</div>
           </details>
         ` : `
           <div class="wts-tree-leaf">
@@ -1848,6 +1854,36 @@
       }).join("")}</div>`;
     }
     return `<div class="wts-tree-text">${renderTreeText(clean)}</div>`;
+  }
+
+  function safeRenderTree(value, keyName = "root", depth = 0) {
+    try {
+      return renderTree(value, keyName, depth);
+    } catch (error) {
+      console.warn("[framework_to_script] render tree failed", error);
+      return `<div class="wts-error-inline">该内容暂时无法展开渲染，已保留原始摘要：${escapeHtml(truncate(readableValue(value), 360))}</div>`;
+    }
+  }
+
+  function renderStage10Output(stage10) {
+    const text = stage10Text(stage10);
+    if (String(text || "").trim()) {
+      return safeRenderTree(text, "enrichedEpisodePlanText");
+    }
+    const plan = normalizeEpisodePlanItems(stage10Plan(stage10));
+    if (plan.length) {
+      return `
+        <div class="wts-tree-list">
+          ${plan.map((item, index) => `
+            <details class="wts-tree-node" ${index < 3 ? "open" : ""}>
+              <summary><span class="wts-tree-arrow"></span>第 ${escapeHtml(item.episode || index + 1)} 集 ${escapeHtml(item.title || "")}</summary>
+              <div>${safeRenderTree(item, "episode", 1)}</div>
+            </details>
+          `).join("")}
+        </div>
+      `;
+    }
+    return safeRenderTree("已生成结构化优化分集计划，供 11/12 阶段继续使用；本次未返回分集细化文本。", "enrichedEpisodePlanText");
   }
 
   function renderTreeText(value) {
@@ -1941,9 +1977,13 @@
     const meta = [
       asset.target_format || "未填写类型",
       asset.episodes_per_season ? `${asset.episodes_per_season} 集` : "",
-      asset.minutes_per_episode ? `${asset.minutes_per_episode} 分钟/集` : "",
+      asset.episode_word_count ? `${asset.episode_word_count} 字/集` : "",
       `更新时间：${formatDate(asset.updated_at || asset.created_at)}`,
     ].filter(Boolean);
+    const importStatus = asset.import_readiness || (canImport ? "可导入：已找到最终策划包。" : asset.import_disabled_reason || "不可导入：缺少最终策划包。");
+    const packageSource = asset.framework_package_source === "synthesized_stage_outputs"
+      ? "阶段输出合成"
+      : (asset.framework_package_source === "framework_plan_package" ? "07 最终策划包" : "");
     return `
       <article class="wts-asset-item">
         <div>
@@ -1951,9 +1991,10 @@
           <div class="wts-meta">
             <span>原文：${escapeHtml(asset.source_title || "未填写")}</span>
             ${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
-            <span>${canImport ? "可导入" : "不可导入"}</span>
+            <span>${escapeHtml(canImport ? `可导入${packageSource ? `（${packageSource}）` : ""}` : "不可导入")}</span>
           </div>
-          <p>${escapeHtml(asset.summary || asset.import_disabled_reason || "暂无摘要")}</p>
+          <p>${escapeHtml(asset.summary || "暂无摘要")}</p>
+          <p class="${canImport ? "wts-hint" : "wts-error-inline"}">${escapeHtml(importStatus)}</p>
         </div>
         <button type="button" class="wts-btn" data-action="import-asset" data-asset-id="${escapeHtml(asset.asset_id)}" ${disabled}>导入</button>
       </article>
@@ -2103,12 +2144,7 @@
             has10 ? `
               <details class="wts-output" ${outputDetailsAttrs("stage10:enrichedEpisodePlanText")}>
                 <summary><span class="wts-output-arrow" aria-hidden="true"></span><span>分集细化文本</span></summary>
-                ${renderTree(
-                  stage10.enrichedEpisodePlanText ||
-                  stage10.allEnrichedEpisodePlanText ||
-                  "已生成结构化优化分集计划，供 11/12 阶段继续使用；本次未返回分集细化文本。",
-                  "enrichedEpisodePlanText"
-                )}
+                ${renderStage10Output(stage10)}
               </details>
               ${stage10Valid ? `<p class="wts-hint">第 10 阶段已完成，可继续运行 11。</p>` : `<p class="wts-error-inline">集数完整性校验失败：${escapeHtml((stage10Validation.issues || []).join("；"))}</p>`}
             ` : `<p class="wts-hint">将沿用当前导入的框架资产和已完成的 08/09 输出。</p>`,

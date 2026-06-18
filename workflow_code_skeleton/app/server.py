@@ -601,20 +601,46 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             or input_payload.get("framework_planner_state")
             or {}
         )
-        return state if isinstance(state, dict) else {}
+        state = copy.deepcopy(state) if isinstance(state, dict) else {}
+        for key in (
+            "basic_config",
+            "source_brief",
+            "worldview_plan",
+            "character_plan",
+            "beat_checkpoint_timeline",
+            "checkpoint_explanation",
+            "character_storylines",
+            "storyline_decisions",
+            "adaptation_guide",
+            "framework_plan_package",
+            "stage_outputs",
+            "stageOutputs",
+        ):
+            if key not in state and key in artifacts:
+                state[key] = copy.deepcopy(artifacts.get(key))
+            if key not in state and key in project:
+                state[key] = copy.deepcopy(project.get(key))
+            if key not in state and key in input_payload:
+                state[key] = copy.deepcopy(input_payload.get(key))
+        return state
 
     def _framework_stage_outputs(framework_state: dict) -> dict:
         package = framework_state.get("framework_plan_package") if isinstance(framework_state.get("framework_plan_package"), dict) else {}
+        direct_outputs = framework_state.get("stage_outputs") if isinstance(framework_state.get("stage_outputs"), dict) else {}
+        camel_outputs = framework_state.get("stageOutputs") if isinstance(framework_state.get("stageOutputs"), dict) else {}
         outputs = {
-            "source_brief": framework_state.get("source_brief") or package.get("source_brief") or {},
-            "worldview_plan": framework_state.get("worldview_plan") or package.get("worldview_plan") or {},
-            "character_plan": framework_state.get("character_plan") or package.get("character_plan") or {},
-            "beat_checkpoint_timeline": framework_state.get("beat_checkpoint_timeline") or package.get("beat_checkpoint_timeline") or [],
-            "checkpoint_explanation": framework_state.get("checkpoint_explanation") or package.get("checkpoint_explanation") or {},
-            "character_storylines": framework_state.get("character_storylines") or package.get("character_storylines") or [],
-            "storyline_decisions": framework_state.get("storyline_decisions") or package.get("storyline_decisions") or [],
-            "adaptation_guide": framework_state.get("adaptation_guide") or package.get("adaptation_guide") or {},
+            "source_brief": framework_state.get("source_brief") or package.get("source_brief") or direct_outputs.get("source_brief") or camel_outputs.get("source_brief") or {},
+            "worldview_plan": framework_state.get("worldview_plan") or package.get("worldview_plan") or direct_outputs.get("worldview_plan") or camel_outputs.get("worldview_plan") or {},
+            "character_plan": framework_state.get("character_plan") or package.get("character_plan") or direct_outputs.get("character_plan") or camel_outputs.get("character_plan") or {},
+            "beat_checkpoint_timeline": framework_state.get("beat_checkpoint_timeline") or package.get("beat_checkpoint_timeline") or direct_outputs.get("beat_checkpoint_timeline") or camel_outputs.get("beat_checkpoint_timeline") or [],
+            "checkpoint_explanation": framework_state.get("checkpoint_explanation") or package.get("checkpoint_explanation") or direct_outputs.get("checkpoint_explanation") or camel_outputs.get("checkpoint_explanation") or {},
+            "character_storylines": framework_state.get("character_storylines") or package.get("character_storylines") or direct_outputs.get("character_storylines") or camel_outputs.get("character_storylines") or [],
+            "storyline_decisions": framework_state.get("storyline_decisions") or package.get("storyline_decisions") or direct_outputs.get("storyline_decisions") or camel_outputs.get("storyline_decisions") or [],
+            "adaptation_guide": framework_state.get("adaptation_guide") or package.get("adaptation_guide") or direct_outputs.get("adaptation_guide") or camel_outputs.get("adaptation_guide") or {},
         }
+        for key, value in {**direct_outputs, **camel_outputs}.items():
+            if _framework_value_present(value):
+                outputs.setdefault(key, value)
         return _strip_raw_fastgpt_fields(outputs)
 
     def _framework_import_package(framework_state: dict, stage_outputs: dict | None = None) -> dict:
@@ -903,6 +929,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         summary = str(summary_source or "").replace("\r", "\n").strip()
         if len(summary) > 220:
             summary = summary[:220].rstrip() + "..."
+        package_ready = bool(package)
+        stage_output_keys = [key for key, value in (stage_outputs or {}).items() if _framework_value_present(value)]
+        import_disabled_reason = ""
+        import_readiness = "可导入：已找到 07 最终策划包。"
+        if not package_ready:
+            import_readiness = "不可导入：没有找到 07 最终策划包，也没有足够的阶段输出可合成框架包。"
+            if stage_output_keys:
+                import_readiness = "不可导入：找到部分阶段输出，但不足以恢复框架转剧本所需框架包。"
+            import_disabled_reason = import_readiness
         asset = {
             "asset_id": str(project.get("project_id") or framework_state.get("project_id") or ""),
             "project_id": project.get("project_id") or framework_state.get("project_id"),
@@ -915,8 +950,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "created_at": project.get("created_at") or framework_state.get("created_at"),
             "updated_at": project.get("updated_at") or framework_state.get("updated_at"),
             "summary": summary or "已保存的框架资产，可导入后继续 框架到剧本链路。",
-            "can_import": bool(package),
-            "import_disabled_reason": "" if package else "缺少可恢复的框架策划包或阶段输出。",
+            "can_import": package_ready,
+            "import_readiness": import_readiness,
+            "import_disabled_reason": import_disabled_reason,
+            "framework_package_source": "framework_plan_package" if package_ready and not package.get("import_package_synthesized") else ("synthesized_stage_outputs" if package_ready else ""),
+            "available_stage_output_keys": stage_output_keys,
             "stage_prompts": _strip_raw_fastgpt_fields(copy.deepcopy(stage_prompts)),
             "preference_snapshot": _strip_raw_fastgpt_fields(copy.deepcopy(preference_snapshot)),
         }
@@ -951,7 +989,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not project or str(project.get("asset_kind") or "").strip() != "framework_planner":
             return None
         asset = _framework_asset_payload(project, include_detail=True)
-        return asset if asset.get("can_import") else None
+        return asset
 
     def _try_begin_framework_stage(user_id: int, asset_id: str, stage: str) -> bool:
         key = (int(user_id), str(asset_id or "").strip(), str(stage or "").strip())
@@ -1103,7 +1141,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return data, None
         asset = _load_framework_asset_for_user(asset_id, user_id)
         if not asset:
-            raise ValueError("框架资产不存在、无权访问，或尚未生成 07 最终策划包。")
+            raise ValueError("框架资产不存在或当前账号无权访问。")
+        if not asset.get("can_import"):
+            reason = str(asset.get("import_disabled_reason") or "尚未生成可恢复的 07 最终策划包。").strip()
+            raise ValueError(reason)
         merged = dict(data)
         package = asset.get("framework_plan_package") if isinstance(asset.get("framework_plan_package"), dict) else {}
         stage_outputs = asset.get("stage_outputs") if isinstance(asset.get("stage_outputs"), dict) else {}
