@@ -41,6 +41,21 @@ def test_framework_to_script_batches_are_requested_explicitly() -> None:
     assert "requested_batch_start" in SERVER_SOURCE
 
 
+def test_framework_to_script_assets_are_recoverable_from_saved_stage_state() -> None:
+    assert "has_framework_to_script_state" in SERVER_SOURCE
+    assert "framework_to_script_progress" in SERVER_SOURCE
+    assert "has_script_state" in SERVER_SOURCE
+    assert "not asset.get(\"can_import\") and not has_script_state" in SERVER_SOURCE
+    assert "剧本阶段资产" in FRONTEND_SOURCE
+    assert "已有剧本阶段进度" in FRONTEND_SOURCE
+    assert "恢复进度" in FRONTEND_SOURCE
+
+
+def test_framework_to_script_same_asset_navigation_preserves_local_workspace() -> None:
+    assert 'if (urlAssetId && String(urlAssetId) !== String(state.frameworkAssetId || ""))' in FRONTEND_SOURCE
+    assert "directFromPlanner || state.runningStage || !currentAssetReady()" in FRONTEND_SOURCE
+
+
 def test_framework_asset_import_readiness_is_explained_to_frontend() -> None:
     assert "import_readiness" in SERVER_SOURCE
     assert "framework_package_source" in SERVER_SOURCE

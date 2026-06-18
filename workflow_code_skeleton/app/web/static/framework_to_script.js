@@ -62,7 +62,7 @@
   }, loadWorkspace());
 
   const directFromPlanner = Boolean(urlAssetId && (params.has("source_framework_project_id") || params.has("project_id")));
-  if (urlAssetId && (directFromPlanner || String(urlAssetId) !== String(state.frameworkAssetId || ""))) {
+  if (urlAssetId && String(urlAssetId) !== String(state.frameworkAssetId || "")) {
     window.localStorage.removeItem(STORAGE_KEY);
     state.frameworkAssetId = urlAssetId;
     state.frameworkSource = "刚刚完成的框架";
@@ -1986,12 +1986,14 @@
 
   function renderAssetPanel() {
     if (!state.assetPanelOpen) return "";
+    const scriptAssets = state.assets.filter((asset) => hasFrameworkToScriptProgress(asset));
+    const frameworkAssets = state.assets.filter((asset) => !hasFrameworkToScriptProgress(asset));
     return `
       <section class="wts-card wts-asset-panel" id="frameworkAssetPanel">
         <div class="wts-card-head">
           <div>
-            <h2>导入框架资产</h2>
-            <p>当前流程：从框架写剧本。请选择已保存框架资产，或导入结构化框架 JSON。</p>
+            <h2>剧本阶段资产</h2>
+            <p>优先从已保存的 08-12 进度恢复；没有进度时再选择框架资产重新开始。</p>
           </div>
           <button type="button" class="wts-btn ghost" data-action="close-asset-panel">收起</button>
         </div>
@@ -2004,14 +2006,34 @@
           <span>${escapeHtml(state.importStatus || "支持拖拽/点击上传 07 导出的结构化框架 JSON，也支持包含 08-12 scriptStages/stageOutputs 的工作区 JSON。")}</span>
         </div>
         <div class="wts-asset-list">
-          ${state.assets.length ? state.assets.map(renderAssetItem).join("") : `<div class="wts-empty">暂无可导入框架资产。请先在框架生成页面完成 01-07 并保存。</div>`}
+          <h3>已有剧本阶段进度</h3>
+          ${scriptAssets.length ? scriptAssets.map((asset) => renderAssetItem(asset, { restoreScript: true })).join("") : `<div class="wts-empty">当前没有已保存的 08-12 剧本阶段资产。</div>`}
+        </div>
+        <div class="wts-asset-list">
+          <h3>可用框架资产</h3>
+          ${frameworkAssets.length ? frameworkAssets.map((asset) => renderAssetItem(asset)).join("") : `<div class="wts-empty">暂无可导入框架资产。请先在框架生成页面完成 01-07 并保存。</div>`}
         </div>
       </section>
     `;
   }
 
-  function renderAssetItem(asset) {
-    const canImport = asset.can_import !== false;
+  function hasFrameworkToScriptProgress(asset) {
+    const progress = asset && typeof asset.framework_to_script_progress === "object" ? asset.framework_to_script_progress : {};
+    return Boolean(asset?.has_framework_to_script_state || progress.has_state || progress.latest_stage || Number(progress.stage_count || 0) > 0);
+  }
+
+  function frameworkToScriptProgressText(asset) {
+    const progress = asset && typeof asset.framework_to_script_progress === "object" ? asset.framework_to_script_progress : {};
+    const completed = Array.isArray(progress.completed_stages) ? progress.completed_stages : [];
+    const running = String(progress.running_stage || "").trim();
+    if (running) return `运行中：${running}`;
+    if (completed.length) return `已保存到：${completed.map((item) => String(item).padStart(2, "0")).join("、")}`;
+    return "已保存剧本阶段进度";
+  }
+
+  function renderAssetItem(asset, options = {}) {
+    const restoreScript = Boolean(options.restoreScript);
+    const canImport = restoreScript || asset.can_import !== false;
     const disabled = canImport ? "" : "disabled";
     const meta = [
       asset.target_format || "未填写类型",
@@ -2023,6 +2045,7 @@
     const packageSource = asset.framework_package_source === "synthesized_stage_outputs"
       ? "阶段输出合成"
       : (asset.framework_package_source === "framework_plan_package" ? "07 最终策划包" : "");
+    const progressText = hasFrameworkToScriptProgress(asset) ? frameworkToScriptProgressText(asset) : "";
     return `
       <article class="wts-asset-item">
         <div>
@@ -2033,9 +2056,10 @@
             <span>${escapeHtml(canImport ? `可导入${packageSource ? `（${packageSource}）` : ""}` : "不可导入")}</span>
           </div>
           <p>${escapeHtml(asset.summary || "暂无摘要")}</p>
-          <p class="${canImport ? "wts-hint" : "wts-error-inline"}">${escapeHtml(importStatus)}</p>
+          ${progressText ? `<p class="wts-hint">${escapeHtml(progressText)}</p>` : ""}
+          <p class="${canImport ? "wts-hint" : "wts-error-inline"}">${escapeHtml(restoreScript ? "点击恢复该资产已保存的 08-12 剧本阶段进度。" : importStatus)}</p>
         </div>
-        <button type="button" class="wts-btn" data-action="import-asset" data-asset-id="${escapeHtml(asset.asset_id)}" ${disabled}>导入</button>
+        <button type="button" class="wts-btn" data-action="import-asset" data-asset-id="${escapeHtml(asset.asset_id)}" ${disabled}>${restoreScript ? "恢复进度" : "导入"}</button>
       </article>
     `;
   }

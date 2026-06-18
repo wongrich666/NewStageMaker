@@ -895,6 +895,22 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         stage_outputs = _framework_stage_outputs(framework_state)
         package = _framework_import_package(framework_state, stage_outputs)
         artifacts = project.get("artifacts") if isinstance(project.get("artifacts"), dict) else {}
+        workspace_state = artifacts.get("framework_to_script_state") if isinstance(artifacts.get("framework_to_script_state"), dict) else {}
+        script_stages = workspace_state.get("scriptStages") if isinstance(workspace_state.get("scriptStages"), dict) else {}
+        workspace_stage_outputs = workspace_state.get("stageOutputs") if isinstance(workspace_state.get("stageOutputs"), dict) else {}
+        stage_drafts = workspace_state.get("stageDrafts") if isinstance(workspace_state.get("stageDrafts"), dict) else {}
+
+        def _script_stage_has_content(stage_key: str) -> bool:
+            value = script_stages.get(stage_key)
+            return isinstance(value, dict) and _framework_value_present(value)
+
+        completed_script_stage_numbers = [
+            key.replace("stage", "")
+            for key in ("stage08", "stage09", "stage10", "stage11", "stage12")
+            if _script_stage_has_content(key)
+        ]
+        has_framework_to_script_state = bool(script_stages or workspace_stage_outputs or workspace_state.get("runningStage") or stage_drafts)
+        latest_script_stage = completed_script_stage_numbers[-1] if completed_script_stage_numbers else ""
         input_payload = project.get("input_payload") if isinstance(project.get("input_payload"), dict) else {}
         metadata = project.get("metadata") if isinstance(project.get("metadata"), dict) else {}
         preference_snapshot = (
@@ -959,16 +975,18 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "import_disabled_reason": import_disabled_reason,
             "framework_package_source": "framework_plan_package" if package_ready and not package.get("import_package_synthesized") else ("synthesized_stage_outputs" if package_ready else ""),
             "available_stage_output_keys": stage_output_keys,
+            "has_framework_to_script_state": has_framework_to_script_state,
+            "framework_to_script_progress": {
+                "has_state": has_framework_to_script_state,
+                "latest_stage": latest_script_stage,
+                "completed_stages": completed_script_stage_numbers,
+                "running_stage": str(workspace_state.get("runningStage") or ""),
+                "stage_count": len(completed_script_stage_numbers),
+            },
             "stage_prompts": _strip_raw_fastgpt_fields(copy.deepcopy(stage_prompts)),
             "preference_snapshot": _strip_raw_fastgpt_fields(copy.deepcopy(preference_snapshot)),
         }
         if include_detail:
-            workspace_state = artifacts.get("framework_to_script_state") if isinstance(artifacts.get("framework_to_script_state"), dict) else {}
-            workspace_stage_outputs = (
-                workspace_state.get("stageOutputs")
-                if isinstance(workspace_state.get("stageOutputs"), dict)
-                else {}
-            )
             asset.update(
                 {
                     "framework_plan_package": _strip_raw_fastgpt_fields(copy.deepcopy(package)),
@@ -1240,7 +1258,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         asset = _load_framework_asset_for_user(asset_id, user_id)
         if not asset:
             raise ValueError("框架资产不存在或当前账号无权访问。")
-        if not asset.get("can_import"):
+        workspace_state = asset.get("framework_to_script_state") if isinstance(asset.get("framework_to_script_state"), dict) else {}
+        has_script_state = bool(
+            asset.get("has_framework_to_script_state")
+            or (isinstance(workspace_state.get("scriptStages"), dict) and workspace_state.get("scriptStages"))
+            or (isinstance(workspace_state.get("stageOutputs"), dict) and workspace_state.get("stageOutputs"))
+        )
+        if not asset.get("can_import") and not has_script_state:
             reason = str(asset.get("import_disabled_reason") or "尚未生成可恢复的 07 最终策划包。").strip()
             raise ValueError(reason)
         merged = dict(data)
