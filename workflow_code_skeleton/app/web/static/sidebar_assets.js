@@ -150,21 +150,31 @@
     return url.pathname + url.search;
   }
 
+  function projectId(item) {
+    return String(item && (item.project_id || item.asset_id || item.id) || "").trim();
+  }
+
   function renderList(container, items, emptyText) {
     if (!container) return;
     if (!items.length) {
       container.innerHTML = `<div class="workspace-empty">${escapeHtml(emptyText)}</div>`;
       return;
     }
-    container.innerHTML = items.map((item) => `
-      <a class="workspace-pick" href="${escapeHtml(projectUrl(item))}">
-        <span class="workspace-pick-main">
-          <span class="workspace-pick-title">${escapeHtml(projectTitle(item))}</span>
-          <span class="workspace-pick-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${item.current_stage_label || statusLabel(item.status)}`)}</span>
-        </span>
-        <span class="workspace-pick-state">${escapeHtml(statusLabel(item.status))}</span>
-      </a>
-    `).join("");
+    container.innerHTML = items.map((item) => {
+      const hotReview = isHotReviewAsset(item);
+      return `
+        <div class="workspace-pick-row${hotReview ? " hot-review-workspace-pick-row" : ""}">
+          <a class="workspace-pick" href="${escapeHtml(projectUrl(item))}">
+            <span class="workspace-pick-main">
+              <span class="workspace-pick-title">${escapeHtml(projectTitle(item))}</span>
+              <span class="workspace-pick-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${item.current_stage_label || statusLabel(item.status)}`)}</span>
+            </span>
+            <span class="workspace-pick-state">${escapeHtml(statusLabel(item.status))}</span>
+          </a>
+          ${hotReview ? `<button class="btn btn-danger workspace-pick-delete" type="button" data-action="delete-hot-review-asset" data-project-id="${escapeHtml(projectId(item))}">删除</button>` : ""}
+        </div>
+      `;
+    }).join("");
   }
 
   async function loadSidebarAssets() {
@@ -186,6 +196,34 @@
       event.preventDefault();
       loadSidebarAssets().catch(() => {});
     });
+  });
+
+  document.addEventListener("click", async (event) => {
+    const button = event.target?.closest?.('[data-action="delete-hot-review-asset"]');
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const id = String(button.dataset.projectId || "").trim();
+    if (!id) return;
+    if (!window.confirm("确认删除这个爆款文审核资产吗？此操作不可恢复。")) return;
+    button.disabled = true;
+    const previousText = button.textContent;
+    button.textContent = "删除中...";
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.success === false || data.ok === false) {
+        throw new Error(data.message || data.error || "删除失败");
+      }
+      await loadSidebarAssets();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = previousText;
+      window.alert(error && error.message ? error.message : "删除失败，请稍后重试。");
+    }
   });
 
   loadSidebarAssets().catch(() => {});

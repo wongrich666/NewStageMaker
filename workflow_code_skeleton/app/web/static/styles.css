@@ -3506,7 +3506,8 @@ a {
 }
 
 .mono-page,
-.workspace-body {
+.workspace-body,
+.auth-page-v2 {
   --mono-bg: #171717;
   --mono-surface: #202020;
   --mono-surface-soft: #262626;
@@ -5199,6 +5200,25 @@ body,
   line-height: 1.6;
 }
 
+/* 步骤编号徽标 */
+.workspace-landing__card-badge {
+  display: inline-block;
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--mono-accent, #f4bd2d);
+  border: 1px solid currentColor;
+  opacity: 0.85;
+}
+
+.workspace-landing__card.primary .workspace-landing__card-badge {
+  color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .workspace-landing__footnote {
   margin-top: 26px;
   color: #6b7282;
@@ -6433,4 +6453,337 @@ body,
   .auth-page .workspace-landing__inner {
     min-height: calc(100vh - 28px);
   }
+}
+
+/* ============================================================
+   Auth V2 — 登录 / 注册纯居中布局
+   替代旧的 prelogin-shell 侧边栏方案
+   ============================================================ */
+
+.auth-page-v2 {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--mono-bg, #171717);
+  color: var(--mono-text, #e0e0e0);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+/* ---- 顶栏品牌 ---- */
+
+.auth-topbar {
+  width: 100%;
+  max-width: 520px;
+  padding: 32px 28px 0;
+  display: flex;
+  justify-content: center;
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px 10px 10px;
+  border-radius: 16px;
+  text-decoration: none;
+  color: inherit;
+  background: transparent;
+  transition: background 0.22s ease, box-shadow 0.22s ease;
+}
+
+/* hover 时整行亮起，提示可点击 */
+.auth-brand:hover {
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.auth-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  font-size: 20px;
+  font-weight: 900;
+  color: #1a1a1a;
+  background: linear-gradient(135deg, #f5c64a, #e0a832);
+  box-shadow: 0 0 18px rgba(244, 189, 45, 0.28);
+  flex-shrink: 0;
+  transition: box-shadow 0.22s ease, transform 0.22s ease;
+}
+
+.auth-brand:hover .auth-brand-mark {
+  box-shadow: 0 0 28px rgba(244, 189, 45, 0.48);
+  transform: scale(1.05);
+}
+
+.auth-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.auth-brand-text strong {
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #ffffff;
+}
+
+.auth-brand-text em {
+  font-size: 14px;
+  font-style: normal;
+  font-weight: 700;
+  color: #f5c64a;
+  letter-spacing: 0.04em;
+  transition: color 0.22s ease, text-shadow 0.22s ease;
+}
+
+.auth-brand:hover .auth-brand-text em {
+  color: #fad464;
+  text-shadow: 0 0 12px rgba(245, 198, 74, 0.4);
+}
+
+/* ---- 中央区 ---- */
+
+.auth-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 420px;
+  padding: 32px 24px 48px;
+  gap: 28px;
+}
+
+/* ---- 欢迎文案 ---- */
+
+.auth-hero {
+  text-align: center;
+}
+
+.auth-eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--mono-accent, #f4bd2d);
+}
+
+.auth-title {
+  margin: 0 0 6px;
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  color: var(--mono-text, #e0e0e0);
+}
+
+.auth-desc {
+  margin: 0;
+  font-size: 14px;
+  color: var(--mono-muted, #9b9b9b);
+}
+
+/* ---- 表单卡片 ---- */
+
+.auth-card-v2 {
+  width: 100%;
+  padding: 28px;
+  border: 1px solid var(--mono-border, rgba(255,255,255,0.08));
+  border-radius: 20px;
+  background: var(--mono-surface, #202020);
+  box-shadow: var(--mono-shadow, 0 18px 44px rgba(0,0,0,0.18));
+  animation: auth-card-in 0.45s ease;
+}
+
+@keyframes auth-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---- 表单内部 ---- */
+
+.auth-form-v2 {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth-field span {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--mono-muted, #9b9b9b);
+  letter-spacing: 0.02em;
+}
+
+.auth-field input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--mono-border, rgba(255,255,255,0.08));
+  border-radius: 12px;
+  font-size: 15px;
+  color: var(--mono-text, #e0e0e0);
+  background: rgba(255, 255, 255, 0.04);
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.auth-field input::placeholder {
+  color: rgba(255, 255, 255, 0.22);
+}
+
+.auth-field input:focus {
+  border-color: var(--mono-accent, #f4bd2d);
+  box-shadow: 0 0 0 3px rgba(244, 189, 45, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ---- 提交按钮 ---- */
+
+.auth-submit-btn {
+  width: 100%;
+  margin-top: 4px;
+  padding: 13px 0;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #111111;
+  background: var(--mono-accent, #f4bd2d);
+  cursor: pointer;
+  transition: filter 0.2s ease, transform 0.15s ease;
+}
+
+.auth-submit-btn:hover {
+  filter: brightness(1.08);
+}
+
+.auth-submit-btn:active {
+  transform: scale(0.98);
+}
+
+/* ---- 底部切换链接 ---- */
+
+.auth-switch-v2 {
+  margin: 18px 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--mono-muted, #9b9b9b);
+}
+
+.auth-switch-v2 a {
+  color: var(--mono-accent, #f4bd2d);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.auth-switch-v2 a:hover {
+  text-decoration: underline;
+}
+
+/* ---- 错误提示 ---- */
+
+.auth-page-v2 .auth-error {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffd9cf;
+  background: rgba(227, 100, 49, 0.18);
+  border: 1px solid rgba(227, 100, 49, 0.22);
+}
+
+/* ---- 平台特色简介 ---- */
+
+.auth-features {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.auth-feature-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--mono-text, #e0e0e0);
+}
+
+.auth-feature-icon {
+  font-size: 20px;
+  margin-bottom: 2px;
+}
+
+.auth-feature-item small {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--mono-muted, #9b9b9b);
+}
+
+/* ---- 响应式 ---- */
+
+@media (max-width: 480px) {
+  .auth-center {
+    padding: 20px 16px 40px;
+    gap: 20px;
+  }
+
+  .auth-card-v2 {
+    padding: 22px 18px;
+  }
+
+  .auth-title {
+    font-size: 24px;
+  }
+
+  .auth-features {
+    gap: 16px;
+  }
+}
+
+/* ============================================================
+   Workspace V2 — 登录后主页微调
+   ============================================================ */
+
+/* 快速开始提示条 */
+.platform-flow-note em {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--mono-accent, #f4bd2d);
+}
+
+/* 闲置时弱化 Runtime 状态栏 */
+.runtime-meta-strip .runtime-pill strong:only-child {
+  opacity: 0.55;
+}
+
+/* 辅助工具快捷入口 */
+.tool-shortcut-list .tool-shortcut {
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.tool-shortcut-list .tool-shortcut:hover {
+  background: rgba(255, 255, 255, 0.04);
 }

@@ -62,6 +62,13 @@ class StageCacheMixin:
             raw_artifacts,
             tuple(allowed_keys),
         )
+        if is_hot_review_asset:
+            for key in ("audit", "view", "visualization", "parse_warnings", "warnings"):
+                if key in artifacts:
+                    continue
+                value = copy.deepcopy(snapshot.get(key))
+                if value not in (None, "", {}, []):
+                    artifacts[key] = value
         debug_variables = (
             (snapshot.get("debug_state") or {}).get("variables")
             if isinstance(snapshot.get("debug_state"), dict)
@@ -1509,6 +1516,97 @@ class StageCacheMixin:
             compacted["awaiting_user_confirmation"] = False
             compacted["cache_retained"] = False
             compacted["message"] = str(compacted.get("message") or "").strip() or "辅助工具结果已保存。"
+            return compacted
+        if str(snapshot.get("asset_kind") or "").strip() == "framework_planner":
+            artifacts = compacted.get("artifacts") if isinstance(compacted.get("artifacts"), dict) else {}
+            input_payload = compacted.get("input_payload") if isinstance(compacted.get("input_payload"), dict) else {}
+            debug_variables = (
+                (compacted.get("debug_state") or {}).get("variables")
+                if isinstance(compacted.get("debug_state"), dict)
+                else {}
+            )
+            if not isinstance(debug_variables, dict):
+                debug_variables = {}
+            framework_state = (
+                artifacts.get("framework_planner_state")
+                or input_payload.get("framework_planner_state")
+                or debug_variables.get("framework_planner_state")
+                or {}
+            )
+            framework_state = copy.deepcopy(framework_state) if isinstance(framework_state, dict) else {}
+            framework_plan_package = (
+                artifacts.get("framework_plan_package")
+                or input_payload.get("framework_plan_package")
+                or framework_state.get("framework_plan_package")
+                or {}
+            )
+            validation_report = (
+                artifacts.get("validation_report")
+                or input_payload.get("validation_report")
+                or framework_state.get("validation_report")
+                or {}
+            )
+            preference_snapshot = (
+                artifacts.get("preference_snapshot")
+                or input_payload.get("preference_snapshot")
+                or framework_state.get("preference_snapshot")
+                or {}
+            )
+            compacted["artifacts"] = _select_non_empty_fields(
+                {
+                    "story_outline": artifacts.get("story_outline") or input_payload.get("story_outline"),
+                    "framework_planner_state": framework_state,
+                    "framework_plan_package": framework_plan_package,
+                    "validation_report": validation_report,
+                    "preference_snapshot": preference_snapshot,
+                    "framework_to_script_state": artifacts.get("framework_to_script_state"),
+                },
+                (
+                    "story_outline",
+                    "framework_planner_state",
+                    "framework_plan_package",
+                    "validation_report",
+                    "preference_snapshot",
+                    "framework_to_script_state",
+                ),
+            )
+            compacted["input_payload"] = _select_non_empty_fields(
+                {
+                    **input_payload,
+                    "title": input_payload.get("title") or compacted.get("title"),
+                    "project_title": input_payload.get("project_title") or compacted.get("title"),
+                    "source_title": input_payload.get("source_title") or compacted.get("title"),
+                    "total_episodes": input_payload.get("total_episodes") or compacted.get("total_episodes"),
+                    "asset_kind": "framework_planner",
+                    "asset_type": "framework",
+                    "framework_planner_state": framework_state,
+                    "framework_plan_package": framework_plan_package,
+                    "preference_snapshot": preference_snapshot,
+                },
+                (
+                    "title",
+                    "project_title",
+                    "source_title",
+                    "target_format",
+                    "season_count",
+                    "episodes_per_season",
+                    "total_episodes",
+                    "story_outline",
+                    "asset_kind",
+                    "asset_type",
+                    "framework_planner_state",
+                    "framework_plan_package",
+                    "preference_snapshot",
+                ),
+            )
+            compacted.pop("debug_state", None)
+            compacted.pop("logs", None)
+            compacted.pop("error", None)
+            compacted.pop("prompt_fixes", None)
+            compacted["completion_confirmed"] = True
+            compacted["awaiting_user_confirmation"] = False
+            compacted["cache_retained"] = False
+            compacted["message"] = COMPLETION_CONFIRMED_MESSAGE
             return compacted
         compacted["artifacts"] = _select_non_empty_fields(
             compacted.get("artifacts") or {},

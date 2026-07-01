@@ -375,6 +375,7 @@
     lastStagePayloadPreview: {},
     stageHistory: {},
     stageHistoryLoading: {},
+    stageHistoryRequests: {},
     editSnapshots: {},
     stagePreferenceEditing: {},
     assetsOpen: false,
@@ -617,6 +618,16 @@
     const configState = state && state.basic_config ? state.basic_config : {};
     const rawName = String(configState.project_title || configState.source_title || "未命名项目").trim() || "未命名项目";
     return safeProjectCacheName(rawName);
+  }
+
+  function currentHistoryProjectRef() {
+    const projectId = currentProjectId();
+    const projectName = currentProjectCacheName();
+    return {
+      projectId: Number(projectId) > 0 ? String(projectId) : "",
+      projectName,
+      lookupKey: Number(projectId) > 0 ? String(projectId) : projectName,
+    };
   }
 
   function safeProjectCacheName(value) {
@@ -5222,19 +5233,31 @@ function renderPackageBlocks() {
   async function loadStageHistory(stageKey) {
     const stageNo = stageNoForKey(stageKey);
     if (!stageNo) return;
+    const historyRef = currentHistoryProjectRef();
+    const requestKey = `${stageKey}:${historyRef.lookupKey}:${historyRef.projectName}`;
+    if (ui.stageHistoryRequests[requestKey]) return ui.stageHistoryRequests[requestKey];
+    if (ui.stageHistoryLoading[stageKey] === requestKey) return;
     ui.stageHistoryLoading[stageKey] = true;
-    render();
-    try {
+    const requestPromise = (async () => {
       const params = new URLSearchParams({
-        project_id: currentProjectCacheName(),
+        project_id: historyRef.lookupKey,
+        project_name: historyRef.projectName,
         stage: stageNo,
       });
       const data = await requestJson(`/api/framework-planner/history?${params.toString()}`);
+      if (ui.stageHistoryLoading[stageKey] !== requestKey) return;
       ui.stageHistory[stageKey] = Array.isArray(data.entries) ? data.entries : [];
+    })();
+    ui.stageHistoryLoading[stageKey] = requestKey;
+    ui.stageHistoryRequests[requestKey] = requestPromise;
+    render();
+    try {
+      await requestPromise;
     } catch (error) {
       showToast(error.message || "历史版本刷新失败");
     } finally {
-      ui.stageHistoryLoading[stageKey] = false;
+      if (ui.stageHistoryLoading[stageKey] === requestKey) ui.stageHistoryLoading[stageKey] = false;
+      delete ui.stageHistoryRequests[requestKey];
       render();
     }
   }
@@ -5244,8 +5267,12 @@ function renderPackageBlocks() {
     const proceed = window.confirm(`将恢复到“${stageDisplayTitle(stageKey)}”在该时间点的版本，不影响已保存的其他历史版本。`);
     if (!proceed) return;
     try {
-      const projectId = encodeURIComponent(currentProjectCacheName());
-      const data = await requestJson(`/api/framework-planner/history/${projectId}/${encodeURIComponent(filename)}`);
+      const historyRef = currentHistoryProjectRef();
+      const projectRef = encodeURIComponent(historyRef.lookupKey);
+      const query = historyRef.projectName
+        ? `?project_name=${encodeURIComponent(historyRef.projectName)}`
+        : "";
+      const data = await requestJson(`/api/framework-planner/history/${projectRef}/${encodeURIComponent(filename)}${query}`);
       const record = data.record || {};
       const output = record.output || {};
       if (record.status !== "success") {
@@ -6734,6 +6761,32 @@ function renderPackageBlocks() {
     }
   }
 
+  function currentWorkspaceLooksPlaceholder() {
+    const projectId = Number(currentProjectId() || 0);
+    if (projectId > 0) return false;
+    const title = String((state.basic_config || {}).project_title || (state.basic_config || {}).source_title || "").trim();
+    const hasBusinessData = Boolean(
+      Object.keys(state.source_brief || {}).length
+      || Object.keys(state.worldview_plan || {}).length
+      || Object.keys(state.character_plan || {}).length
+      || (Array.isArray(state.beat_checkpoint_timeline) && state.beat_checkpoint_timeline.length)
+      || Object.keys(state.checkpoint_explanation || {}).length
+      || (Array.isArray(state.character_storylines) && state.character_storylines.length)
+      || (Array.isArray(state.storyline_decisions) && state.storyline_decisions.length)
+      || Object.keys(state.adaptation_guide || {}).length
+      || Object.keys(state.framework_plan_package || {}).length
+    );
+    if (hasBusinessData) return false;
+    return !title || title === "未命名项目";
+  }
+
+  function shouldAutoOpenLatestAsset() {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("project_id")) return false;
+    if (urlParams.get("new") === "1" || urlParams.get("reset") === "1" || urlParams.get("fresh") === "1") return false;
+    return currentWorkspaceLooksPlaceholder();
+  }
+
   async function controlAssetTask(taskId, action) {
     if (!taskId) return;
     const asset = ui.assets.find((item) => String(item.task_id || "") === String(taskId));
@@ -7500,7 +7553,24 @@ function renderPackageBlocks() {
     .catch(() => {
       if (ui.knowledge.open) loadKnowledgeTags().catch(() => {});
     });
-  loadAssets().catch(() => {});
+  // 先加载资产列表，再根据 URL 参数自动打开指定框架项目
+  loadAssets()
+    .then(() => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const autoProjectId = urlParams.get("project_id");
+      if (autoProjectId) {
+        const asset = (ui.assets || []).find((a) => String(a.project_id) === String(autoProjectId));
+        if (asset) openAsset(autoProjectId).catch(() => {});
+        return;
+      }
+      if (shouldAutoOpenLatestAsset()) {
+        const latestAsset = (ui.assets || []).find((item) => isFrameworkPlannerAsset(item));
+        if (latestAsset && latestAsset.project_id) {
+          openAsset(latestAsset.project_id).catch(() => {});
+        }
+      }
+    })
+    .catch(() => {});
   if (DEV_LOG_ENABLED) loadStageHistory(stageKeyForView(state.current_view || "basic")).catch(() => {});
 
 

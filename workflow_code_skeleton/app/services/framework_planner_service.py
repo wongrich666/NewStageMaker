@@ -572,12 +572,12 @@ def _history_project_candidate_dirs(project_id: Any, project_name: Any = "") -> 
     return candidates
 
 
-def list_framework_stage_history(project_id: Any, stage: str | None = None) -> dict[str, Any]:
+def list_framework_stage_history(project_id: Any, stage: str | None = None, project_name: Any = "") -> dict[str, Any]:
     slug = _history_stage_slug(stage) if stage else ""
     entries: list[dict[str, Any]] = []
     seen_files: set[str] = set()
 
-    for project_dir in _history_project_candidate_dirs(project_id):
+    for project_dir in _history_project_candidate_dirs(project_id, project_name):
         if not project_dir.exists():
             continue
 
@@ -611,18 +611,18 @@ def list_framework_stage_history(project_id: Any, stage: str | None = None) -> d
 
     return {
         "project_id": str(project_id or "").strip() or _project_history_id(project_id),
-        "project_name": str(project_id or "").strip() or _project_history_id(project_id),
+        "project_name": str(project_name or "").strip() or str(project_id or "").strip() or _project_history_id(project_id, project_name),
         "stage": slug,
         "entries": entries,
     }
 
 
-def load_framework_stage_history(project_id: Any, filename: str) -> dict[str, Any]:
+def load_framework_stage_history(project_id: Any, filename: str, project_name: Any = "") -> dict[str, Any]:
     safe_filename = Path(str(filename or "")).name
     if not safe_filename or safe_filename != str(filename or "").strip():
         raise FrameworkPlannerStageError("历史版本路径无效", stage="history", status_code=400)
 
-    for project_dir in _history_project_candidate_dirs(project_id):
+    for project_dir in _history_project_candidate_dirs(project_id, project_name):
         path = project_dir / safe_filename
         if not path.exists():
             continue

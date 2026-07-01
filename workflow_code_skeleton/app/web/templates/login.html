@@ -6,148 +6,95 @@
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>登录 - 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260610-minimal-home-v1">
+  <title>登录 — IDEA TO SCRIPT 剧本平台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260622-auth-v2">
   <link rel="stylesheet" href="{{ url_for('static', filename='global_theme.css') }}?v=20260617-cat-theme-v4">
 </head>
-<body class="workspace-body mono-page auth-page">
-  <main class="chat-workspace-shell prelogin-shell">
-    <aside id="workspaceCard" class="workspace-sidebar prelogin-sidebar">
-      <div class="sidebar-top">
-        <div class="sidebar-brand-row">
-          <button class="sidebar-toggle" type="button" aria-label="折叠侧边栏">
-            <span></span>
-            <span></span>
-            <span></span>
-          </button>
-          <a class="sidebar-brand" href="{{ url_for('index') }}">
-            <span class="sidebar-brand-mark">I</span>
-            <span class="sidebar-brand-text">
-              <strong>IDEA TO SCRIPT</strong>
-              <em>剧本平台</em>
-            </span>
-          </a>
-        </div>
+<body class="auth-page-v2">
+
+  <!-- 品牌顶栏 — 点击可回首页 -->
+  <header class="auth-topbar">
+    <a class="auth-brand" href="{{ url_for('index') }}" title="回到剧本平台首页">
+      <span class="auth-brand-mark">I</span>
+      <span class="auth-brand-text">
+        <strong>IDEA TO SCRIPT</strong>
+        <em>点击进入剧本平台 →</em>
+      </span>
+    </a>
+  </header>
+
+  <!-- 中央登录区 -->
+  <main class="auth-center">
+    <div class="auth-hero">
+      <p class="auth-eyebrow">IDEA TO SCRIPT</p>
+      <h1 class="auth-title">欢迎回来</h1>
+      <p class="auth-desc">登录后继续你的剧本创作</p>
+    </div>
+
+    <div class="auth-card-v2">
+      {% if error %}
+        <div class="auth-error">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" class="auth-form-v2" autocomplete="on" novalidate>
+        <label class="auth-field">
+          <span>用户名</span>
+          <input
+            name="username"
+            type="text"
+            value="{{ username or '' }}"
+            autocomplete="username"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            maxlength="80"
+            placeholder="输入你的用户名"
+            required
+          >
+        </label>
+
+        <label class="auth-field">
+          <span>密码</span>
+          <input
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            maxlength="256"
+            placeholder="输入密码"
+            required
+          >
+        </label>
+
+        <button class="auth-submit-btn" type="submit">
+          <span>登 录</span>
+        </button>
+      </form>
+
+      <p class="auth-switch-v2">
+        还没有账号？<a href="{{ url_for('register_page') }}">免费注册</a>
+      </p>
+    </div>
+
+    <!-- 平台特色简介 -->
+    <div class="auth-features">
+      <div class="auth-feature-item">
+        <span class="auth-feature-icon">📝</span>
+        <span>AI 辅助编剧</span>
+        <small>从大纲到正文全流程</small>
       </div>
-
-      <div class="sidebar-primary">
-        <a class="sidebar-create-btn" href="{{ url_for('login_page') }}">＋ 新建框架</a>
-        <a class="sidebar-create-btn" href="{{ url_for('login_page') }}">＋ 框架到剧本</a>
+      <div class="auth-feature-item">
+        <span class="auth-feature-icon">🎭</span>
+        <span>角色 & 世界观</span>
+        <small>系统化管理设定</small>
       </div>
-
-      <div class="sidebar-nav">
-        <section class="sidebar-group">
-          <div class="sidebar-group-label">我的资产</div>
-          <div class="sidebar-section-head sidebar-section-head-compact">
-            <span>资产会话</span>
-            <a class="sidebar-refresh-btn prelogin-inline-link" href="{{ url_for('login_page') }}">刷新</a>
-          </div>
-          <div class="sidebar-folders">
-            <details class="workspace-folder">
-              <summary>
-                <span>框架资产</span>
-              </summary>
-              <div class="workspace-compact-list">
-                <div class="workspace-empty">登录后查看 01-07 框架资产。</div>
-              </div>
-            </details>
-            <details class="workspace-folder">
-              <summary>
-                <span>新剧本资产</span>
-              </summary>
-              <div class="workspace-compact-list">
-                <div class="workspace-empty">登录后查看 08-12 新剧本资产。</div>
-              </div>
-            </details>
-          </div>
-        </section>
-
-        <section class="sidebar-group sidebar-tools-section">
-          <details class="workspace-folder tools-folder" open>
-            <summary>
-              <span class="sidebar-folder-link">辅助工具</span>
-            </summary>
-            <div class="tool-shortcut-list">
-              <a class="tool-shortcut" href="{{ url_for('login_page') }}">
-                <span>爆款文审核</span>
-                <small>登录后可运行</small>
-              </a>
-              <a class="tool-shortcut" href="{{ url_for('login_page') }}">
-                <span>增加爽感</span>
-                <small>登录后可运行</small>
-              </a>
-              <a class="tool-shortcut" href="{{ url_for('login_page') }}">
-                <span>只换人设</span>
-                <small>登录后可运行</small>
-              </a>
-            </div>
-          </details>
-        </section>
-
-        <section class="sidebar-group sidebar-tools-section">
-          <a class="sidebar-text-link sidebar-side-link" href="{{ url_for('login_page') }}">外包专属格式</a>
-        </section>
-
-        <div class="sidebar-group sidebar-tools-section">
-          <a class="sidebar-text-link sidebar-side-link" href="{{ url_for('index') }}#community">社区好剧</a>
-        </div>
+      <div class="auth-feature-item">
+        <span class="auth-feature-icon">📦</span>
+        <span>一键导出</span>
+        <small>支持 TXT / DOCX</small>
       </div>
-
-      <div class="sidebar-footer">
-        <div class="sidebar-footer-links">
-          <a class="sidebar-profile-btn" href="{{ url_for('login_page') }}">
-            <span class="sidebar-profile-avatar">登</span>
-            <span class="sidebar-footer-text">登录账号</span>
-          </a>
-          <a class="sidebar-logout-link" href="{{ url_for('register_page') }}">注册账号</a>
-        </div>
-      </div>
-    </aside>
-
-    <section class="chat-main prelogin-main-shell workspace-main-minimal">
-      <section class="workspace-landing workspace-login-landing">
-        <div class="workspace-landing__inner">
-          <div class="workspace-landing__eyebrow">IDEA TO SCRIPT</div>
-          <h1 class="workspace-landing__title">剧本平台</h1>
-          <p class="workspace-landing__subtitle">
-            登录后可新建框架、导入框架生成剧本，并在左侧管理资产与辅助工具。
-          </p>
-
-          <div class="workspace-landing__actions workspace-landing__actions-login">
-            <a class="workspace-landing__card primary" href="#login-form">
-              <span class="workspace-landing__card-title">新建框架</span>
-              <span class="workspace-landing__card-desc">登录后进入 01-07 框架策划</span>
-            </a>
-
-            <a class="workspace-landing__card" href="#login-form">
-              <span class="workspace-landing__card-title">框架到剧本</span>
-              <span class="workspace-landing__card-desc">登录后进入 08-12 剧本生成</span>
-            </a>
-          </div>
-
-          <section id="login-form" class="card auth-card workspace-login-card">
-            <p class="eyebrow">Welcome Back</p>
-            <h2>登录工作台</h2>
-            {% if error %}
-              <div class="auth-error">{{ error }}</div>
-            {% endif %}
-            <form method="post" class="auth-form" autocomplete="on">
-              <label class="field">
-                <span>用户名</span>
-                <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80" required>
-              </label>
-              <label class="field">
-                <span>密码</span>
-                <input name="password" type="password" autocomplete="current-password" maxlength="256" required>
-              </label>
-              <button class="btn btn-primary" type="submit">登录</button>
-            </form>
-            <p class="auth-switch">还没有账号？<a href="{{ url_for('register_page') }}">注册一个</a></p>
-          </section>
-        </div>
-      </section>
-    </section>
+    </div>
   </main>
+
   <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v4"></script>
 </body>
 </html>

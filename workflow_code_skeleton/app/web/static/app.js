@@ -3003,18 +3003,27 @@ startRuntimeDebugPolling();
       const score = hotReviewScoreV5(item);
       const scoreText = score !== "" && score !== null && score !== undefined ? ` · ${score}/100` : "";
       return `
-        <button
-          class="workspace-pick hot-review-workspace-pick"
-          type="button"
-          data-action="open-hot-review-asset"
-          data-project-id="${escapeHtml(key)}"
-          data-hot-review-asset-key="${escapeHtml(key)}"
-          title="${escapeHtml(hotReviewAssetTitleV5(item))}"
-        >
-          <span class="workspace-pick-title">${escapeHtml(hotReviewAssetTitleV5(item))}</span>
-          <span class="workspace-pick-meta">爆款文审核${escapeHtml(scoreText)}</span>
-          <span class="workspace-pick-state">${escapeHtml(updatedAt || statusLabel(item.status))}</span>
-        </button>
+        <div class="workspace-pick-row hot-review-workspace-pick-row">
+          <button
+            class="workspace-pick hot-review-workspace-pick"
+            type="button"
+            data-action="open-hot-review-asset"
+            data-project-id="${escapeHtml(key)}"
+            data-hot-review-asset-key="${escapeHtml(key)}"
+            title="${escapeHtml(hotReviewAssetTitleV5(item))}"
+          >
+            <span class="workspace-pick-title">${escapeHtml(hotReviewAssetTitleV5(item))}</span>
+            <span class="workspace-pick-meta">爆款文审核${escapeHtml(scoreText)}</span>
+            <span class="workspace-pick-state">${escapeHtml(updatedAt || statusLabel(item.status))}</span>
+          </button>
+          <button
+            class="btn btn-danger workspace-pick-delete"
+            type="button"
+            data-action="delete-hot-review-asset"
+            data-project-id="${escapeHtml(key)}"
+            title="删除爆款文审核资产"
+          >删除</button>
+        </div>
       `;
     }).join("");
   }
@@ -3175,6 +3184,31 @@ startRuntimeDebugPolling();
       || schema === "script_audit_compact_v1"
       || Boolean(payload.overall && (payload.dimension_scores || payload.global_dimensions || payload.ecg || payload.global_review || payload.episode_reviews || payload.episodes || payload.key_issues))
       || Boolean(payload.audit && (payload.view || payload.visualization));
+  }
+
+  function scriptAuditScoreValue(audit) {
+    const score = audit?.overall?.total_score ?? audit?.overall?.score ?? audit?.total_score ?? "";
+    const numeric = Number(score);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  function preferScriptAuditCandidate(currentAudit, candidateAudit) {
+    if (!candidateAudit || typeof candidateAudit !== "object") return currentAudit || null;
+    if (!currentAudit || typeof currentAudit !== "object") return candidateAudit;
+    const candidateScore = scriptAuditScoreValue(candidateAudit);
+    const currentScore = scriptAuditScoreValue(currentAudit);
+    const candidateHasContent = candidateScore !== null && candidateScore > 0;
+    const currentHasContent = currentScore !== null && currentScore > 0;
+    if (candidateHasContent && !currentHasContent) return candidateAudit;
+    const candidateIssueCount = auditArray(candidateAudit.key_issues).length
+      + auditArray(candidateAudit.rewrite_plan).length
+      + auditArray(candidateAudit.episode_reviews).length
+      + auditArray(candidateAudit.segments).length;
+    const currentIssueCount = auditArray(currentAudit.key_issues).length
+      + auditArray(currentAudit.rewrite_plan).length
+      + auditArray(currentAudit.episode_reviews).length
+      + auditArray(currentAudit.segments).length;
+    return candidateIssueCount > currentIssueCount ? candidateAudit : currentAudit;
   }
 
   function scriptAuditViewFromAudit(audit, visualization = null) {
@@ -3377,21 +3411,29 @@ startRuntimeDebugPolling();
 
     for (const candidate of candidates) {
       if (candidate?.audit && candidate?.view) {
-        audit = audit || candidate.audit;
-        view = view || candidate.view;
+        const preferredAudit = preferScriptAuditCandidate(audit, candidate.audit);
+        const replacedAudit = preferredAudit !== audit;
+        audit = preferredAudit;
+        view = replacedAudit ? candidate.view : (view || candidate.view);
         visualization = visualization || candidate.visualization || null;
-        break;
+        continue;
       }
       if (candidate?.audit && candidate?.visualization) {
-        audit = audit || candidate.audit;
-        visualization = visualization || candidate.visualization;
-        view = view || candidate.view || null;
-        break;
+        const preferredAudit = preferScriptAuditCandidate(audit, candidate.audit);
+        const replacedAudit = preferredAudit !== audit;
+        audit = preferredAudit;
+        visualization = replacedAudit ? candidate.visualization : (visualization || candidate.visualization);
+        view = replacedAudit ? (candidate.view || null) : (view || candidate.view || null);
+        continue;
       }
       if (looksLikeScriptAuditPayload(candidate)) {
-        audit = audit || (candidate.audit && (candidate.view || candidate.visualization) ? candidate.audit : candidate);
-        visualization = visualization || candidate.visualization || null;
-        break;
+        const candidateAudit = candidate.audit && (candidate.view || candidate.visualization) ? candidate.audit : candidate;
+        const preferredAudit = preferScriptAuditCandidate(audit, candidateAudit);
+        const replacedAudit = preferredAudit !== audit;
+        audit = preferredAudit;
+        visualization = replacedAudit ? (candidate.visualization || null) : (visualization || candidate.visualization || null);
+        view = replacedAudit ? (candidate.view || view || null) : view;
+        continue;
       }
     }
 
@@ -3854,12 +3896,22 @@ startRuntimeDebugPolling();
     const meta = audit.meta || view.meta || {};
     const raw = result.answer_text || result.text || "";
     const warnings = auditArray(result.parse_warnings || result.parseWarnings);
+    const score = scriptAuditScoreValue(audit);
+    const hasStructuredContent = Boolean(
+      (score && score > 0)
+      || overall.core_judgement
+      || overall.final_judgement
+      || auditArray(view.issue_cards || audit.key_issues).length
+      || auditArray(view.episode_cards || audit.episode_reviews).length
+      || auditArray(view.dimension_cards || audit.dimension_scores).some((item) => Number(item?.score || 0) > 0)
+    );
+    const showRecoveredText = !hasStructuredContent && String(raw || "").trim();
     return `
       <div class="audit-result-shell">
-        ${result.parsed === false ? `
+        ${result.parsed === false || showRecoveredText ? `
           <section class="audit-parse-warning">
-            <strong>解析未完全成功，已进入容错展示模式。</strong>
-            <span>${escapeHtml(warnings[0] || "模型输出格式不稳定，当前仅展示可恢复的固定审核面板。")}</span>
+            <strong>${showRecoveredText ? "已恢复保存文本，结构化图表不完整。" : "解析未完全成功，已进入容错展示模式。"}</strong>
+            <span>${escapeHtml(showRecoveredText ? "该资产保存了审核正文，但结构化 audit/view 字段不完整；下方展示原始审核内容。" : (warnings[0] || "模型输出格式不稳定，当前仅展示可恢复的固定审核面板。"))}</span>
           </section>
         ` : ""}
         <section class="audit-hero">
@@ -3883,11 +3935,17 @@ startRuntimeDebugPolling();
           ${renderAuditPopoverButton("关键问题", renderAuditList("关键问题", view.issue_cards || audit.key_issues, { limit: 20 }), auditArray(view.issue_cards || audit.key_issues).length)}
           ${renderAuditPopoverButton("风险扫描", renderAuditList("风险扫描", view.risk_cards || audit.risk_scan, { limit: 20 }), auditArray(view.risk_cards || audit.risk_scan).length)}
           ${renderAuditPopoverButton("修改计划", renderAuditList("修改计划", view.rewrite_tasks || audit.rewrite_plan, { limit: 20 }), auditArray(view.rewrite_tasks || audit.rewrite_plan).length)}
-          ${result.parsed === false ? renderAuditPopoverButton("原始输出摘要", `
+          ${result.parsed === false || showRecoveredText ? renderAuditPopoverButton("原始输出摘要", `
             <h4>原始输出摘要</h4>
             <pre class="audit-raw-excerpt">${escapeHtml(raw.slice(0, 4000) || audit?.parse_fallback?.raw_excerpt || "暂无原始输出。")}</pre>
           `, "查看") : ""}
         </section>
+        ${showRecoveredText ? `
+          <section class="audit-panel">
+            <div class="audit-section-head"><h4>已保存审核正文</h4></div>
+            <pre class="audit-raw-excerpt">${escapeHtml(raw.slice(0, 12000))}</pre>
+          </section>
+        ` : ""}
         <section class="audit-export-actions">
           <button class="btn btn-primary" type="button" data-action="save-audit-asset">保存结果到资产</button>
           <button class="btn btn-secondary" type="button" data-action="download-audit-txt">导出 TXT</button>
@@ -6628,6 +6686,14 @@ function renderToolForm(toolKey) {
       const projectId = button.dataset.projectId;
       try {
         if (button.dataset.action === "select-project") {
+          // 框架项目直接跳转到框架策划器，不在工作台打开
+          const existing = (state.projects || []).find((p) => String(p.project_id) === String(projectId));
+          if (existing && assetCategory(existing) === "framework") {
+            const token = currentAuthToken();
+            const fpUrl = `/framework-planner?auth_token=${encodeURIComponent(token)}&project_id=${encodeURIComponent(projectId)}`;
+            window.location.href = fpUrl;
+            return;
+          }
           await loadProjectDetail(projectId, { restoreInputs: true, scroll: false });
         } else if (button.dataset.action === "delete-asset") {
           await deleteAsset(projectId, button);
@@ -7040,6 +7106,14 @@ function renderToolForm(toolKey) {
 
 
   document.addEventListener("click", (event) => {
+    const deleteButton = event.target?.closest?.('[data-action="delete-hot-review-asset"]');
+    if (deleteButton) {
+      event.preventDefault();
+      deleteAsset(deleteButton.dataset.projectId || "", deleteButton).catch((error) => {
+        showToast("删除失败", friendlyErrorText(error, "请稍后重试。"));
+      });
+      return;
+    }
     const button = event.target?.closest?.('[data-action="open-hot-review-asset"]');
     if (!button) return;
     event.preventDefault();

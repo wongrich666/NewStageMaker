@@ -647,6 +647,34 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 outputs.setdefault(key, value)
         return _strip_raw_fastgpt_fields(outputs)
 
+    def _framework_project_history_name(project_id: object, requested_name: object = "") -> str:
+        requested = str(requested_name or "").strip()
+        if requested and requested not in {"未命名项目", "unsaved", "draft", "null", "undefined"}:
+            return requested
+        try:
+            numeric_project_id = int(str(project_id or "").strip())
+        except Exception:
+            numeric_project_id = 0
+        if numeric_project_id <= 0:
+            return requested
+        snapshot = task_manager.get_project_snapshot(numeric_project_id, user_id=_require_user_id(), public_view=False)
+        if not isinstance(snapshot, dict):
+            return requested
+        framework_state = _framework_state_from_project(snapshot)
+        basic = framework_state.get("basic_config") if isinstance(framework_state.get("basic_config"), dict) else {}
+        input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+        for value in (
+            framework_state.get("project_title"),
+            snapshot.get("title"),
+            basic.get("project_title"),
+            basic.get("source_title"),
+            input_payload.get("title"),
+        ):
+            text = str(value or "").strip()
+            if text and text != "未命名项目":
+                return text
+        return requested
+
     def _framework_import_package(framework_state: dict, stage_outputs: dict | None = None) -> dict:
         package = framework_state.get("framework_plan_package") if isinstance(framework_state.get("framework_plan_package"), dict) else {}
         if package:
@@ -3482,14 +3510,16 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def list_framework_planner_history_api():
         # print("[framework-planner-history] route hit", flush=True)
         project_id = request.args.get("project_id") or "unsaved"
+        project_name = _framework_project_history_name(project_id, request.args.get("project_name") or "")
         stage = request.args.get("stage") or ""
-        return jsonify(list_framework_stage_history(project_id, stage or None))
+        return jsonify(list_framework_stage_history(project_id, stage or None, project_name=project_name))
 
     @app.get("/api/framework-planner/history/<project_id>/<filename>")
     @_login_required
     def load_framework_planner_history_api(project_id: str, filename: str):
         try:
-            return jsonify(load_framework_stage_history(project_id, filename))
+            project_name = _framework_project_history_name(project_id, request.args.get("project_name") or "")
+            return jsonify(load_framework_stage_history(project_id, filename, project_name=project_name))
         except FrameworkPlannerStageError as exc:
             return _framework_planner_error(
                 exc.stage,
