@@ -383,6 +383,7 @@
     assets: [],
     assetsLoading: false,
     assetImporting: false,
+    assetImportProgress: null,
     assetSearch: "",
     assetStatusFilter: "all",
     assetSort: "updated_desc",
@@ -960,7 +961,6 @@
       storageRemove(LEGACY_STORAGE_KEY);
       const fresh = normalizeState(null);
       persistLoadedState(fresh);
-      normalizeUrlForResume();
       return fresh;
     }
 
@@ -1359,7 +1359,15 @@
   }
 
   function showToast(message) {
-    ui.toast = message;
+    const text = String(message || "");
+    if (ui.assetImporting && /failed\s*to\s*fetch|networkerror|network\s*error|load\s*failed/i.test(text)) {
+      return;
+    }
+    if (/failed\s*to\s*fetch/i.test(text)) {
+      ui.toast = "网络请求暂时中断，请稍后刷新重试。";
+    } else {
+      ui.toast = message;
+    }
     render();
     window.clearTimeout(showToast.timer);
     showToast.timer = window.setTimeout(() => {
@@ -2538,7 +2546,9 @@
   function render() {
     const focusedControl = captureFocusedControl();
     syncStageFlow(state);
-    saveState();
+    if (!ui.assetImporting) {
+      saveState();
+    }
     app.innerHTML = `
       <div class="fp-shell ${ui.sidebarCollapsed ? "fp-sidebar-collapsed" : ""}">
         ${renderSidebar()}
@@ -2547,6 +2557,7 @@
           ${renderCurrentView()}
         </main>
         ${renderFooter()}
+        ${renderAssetImportOverlay()}
         ${ui.toast ? `<div class="fp-toast">${escapeHtml(ui.toast)}</div>` : ""}
         ${ui.showNewScriptModal ? renderNewScriptModal() : ""}
         ${ui.modalStorylineId ? renderStorylineModal(ui.modalStorylineId) : ""}
@@ -2674,7 +2685,6 @@
           <button class="fp-btn small danger" data-action="reset-state" ${canClearFrameworkInput() && !ui.assetImporting && !isAutoFrameworkRunning() ? "" : "disabled"}>清空输入</button>
         </div>
       </div>
-      ${ui.assetImporting ? renderProcessingBanner("导入资产中，请稍后") : ""}
       ${state.current_view === "basic" ? renderKnowledgePanel() : ""}
       <div class="fp-card fp-steps">${renderStepRail()}</div>
       ${renderRunningStageStatus()}
@@ -2712,6 +2722,7 @@
           </select>
         </div>
         ${ui.assetsLoading ? renderProcessingBanner("正在刷新资产列表...") : ""}
+        ${renderAssetImportProgress()}
         <div class="fp-asset-list">
           ${assets.length ? assets.map(renderAssetItem).join("") : `<div class="fp-empty">暂无匹配资产。可以点击“新建框架项目”开始一个新的 01-07 框架策划。</div>`}
         </div>
@@ -3526,6 +3537,64 @@
       <div class="fp-processing-banner">
         <span class="fp-spinner" aria-hidden="true"></span>
         <span>${escapeHtml(message)}</span>
+      </div>
+    `;
+  }
+
+  function setAssetImportProgress(percent, message) {
+    ui.assetImportProgress = {
+      percent: Math.max(0, Math.min(100, Number(percent) || 0)),
+      message: message || "正在打开框架资产...",
+    };
+    render();
+  }
+
+  function clearAssetImportProgressLater() {
+    window.setTimeout(() => {
+      ui.assetImportProgress = null;
+      render();
+    }, 1400);
+  }
+
+  function renderAssetImportProgress() {
+    if (!ui.assetImportProgress) return "";
+    const percent = Math.max(0, Math.min(100, Number(ui.assetImportProgress.percent) || 0));
+    const message = ui.assetImportProgress.message || "正在打开框架资产...";
+    return `
+      <div class="fp-asset-import-progress" role="status" aria-live="polite">
+        <div class="fp-asset-import-progress-head">
+          <strong>正在打开框架资产</strong>
+          <span>${escapeHtml(String(Math.round(percent)))}%</span>
+        </div>
+        <div class="fp-asset-import-progress-track" aria-hidden="true">
+          <span style="width: ${escapeHtml(String(percent))}%"></span>
+        </div>
+        <p>${escapeHtml(message)}</p>
+      </div>
+    `;
+  }
+
+  function renderAssetImportOverlay() {
+    if (!ui.assetImportProgress) return "";
+    const percent = Math.max(0, Math.min(100, Number(ui.assetImportProgress.percent) || 0));
+    const message = ui.assetImportProgress.message || "正在缓存框架资产...";
+    const title = percent >= 100 ? "框架资产缓存完成" : "正在缓存框架资产";
+    return `
+      <div class="fp-asset-import-overlay" role="status" aria-live="polite" aria-busy="${percent >= 100 ? "false" : "true"}">
+        <div class="fp-asset-import-dialog">
+          <div class="fp-asset-import-dialog-head">
+            <span class="fp-asset-import-pulse" aria-hidden="true"></span>
+            <div>
+              <strong>${escapeHtml(title)}</strong>
+              <p>${escapeHtml(message)}</p>
+            </div>
+            <span class="fp-asset-import-percent">${escapeHtml(String(Math.round(percent)))}%</span>
+          </div>
+          <div class="fp-asset-import-progress-track" aria-hidden="true">
+            <span style="width: ${escapeHtml(String(percent))}%"></span>
+          </div>
+          <div class="fp-asset-import-dialog-note">资产内容较大时，写入本地缓存和重新渲染页面会短暂停顿，请等待完成提示。</div>
+        </div>
       </div>
     `;
   }
@@ -5230,7 +5299,7 @@ function renderPackageBlocks() {
     return next;
   }
 
-  async function loadStageHistory(stageKey) {
+  async function loadStageHistory(stageKey, options = {}) {
     const stageNo = stageNoForKey(stageKey);
     if (!stageNo) return;
     const historyRef = currentHistoryProjectRef();
@@ -5254,7 +5323,11 @@ function renderPackageBlocks() {
     try {
       await requestPromise;
     } catch (error) {
-      showToast(error.message || "历史版本刷新失败");
+      if (!options.silent) {
+        showToast(error.message || "历史版本刷新失败");
+      } else {
+        throw error;
+      }
     } finally {
       if (ui.stageHistoryLoading[stageKey] === requestKey) ui.stageHistoryLoading[stageKey] = false;
       delete ui.stageHistoryRequests[requestKey];
@@ -6646,7 +6719,7 @@ function renderPackageBlocks() {
     await createNewScript();
   }
 
-  function restoreFrameworkPlannerState(project) {
+  function restoreFrameworkPlannerState(project, options = {}) {
     const restored = project.framework_planner_state
       || ((project.input_payload || {}).framework_planner_state)
       || ((project.artifacts || {}).framework_planner_state)
@@ -6709,7 +6782,9 @@ function renderPackageBlocks() {
       : [];
     state.prompt_preferences = normalizePromptPreferences(state.prompt_preferences || {});
     syncStageFlow(state);
-    saveState();
+    if (!options.skipSave) {
+      saveState();
+    }
   }
 
   async function openAsset(projectId) {
@@ -6720,20 +6795,41 @@ function renderPackageBlocks() {
     })) return;
     ui.assetImporting = true;
     ui.toast = "";
-    render();
+    setAssetImportProgress(8, "正在读取资产快照...");
+    await waitForPaint();
     try {
       const data = await requestJson(`/api/projects/${projectId}`);
+      setAssetImportProgress(24, "资产快照已读取，正在解析框架数据...");
+      await waitForPaint();
       const project = data.project || {};
       if (String(project.asset_kind || "") === "framework_planner") {
-        restoreFrameworkPlannerState(project);
+        setAssetImportProgress(46, "正在恢复 01-07 阶段结果...");
+        await waitForPaint();
+        restoreFrameworkPlannerState(project, { skipSave: true });
+        setAssetImportProgress(68, "正在写入浏览器本地缓存，资产较大时会短暂停顿...");
+        await waitForPaint();
+        saveState();
         ui.stageHistory = {};
         ui.stageHistoryLoading = {};
-        await loadStageHistory(stageKeyForView(state.current_view || "basic"));
+        setAssetImportProgress(84, "正在加载当前阶段历史版本...");
+        await waitForPaint();
+        try {
+          await loadStageHistory(stageKeyForView(state.current_view || "basic"), { silent: true });
+        } catch (historyError) {
+          ui.stageHistory[stageKeyForView(state.current_view || "basic")] = [];
+          setAssetImportProgress(90, "资产已缓存，历史版本暂时未加载，可稍后手动刷新。");
+          await waitForPaint();
+        }
         clearDirty();
-        showToast("资产导入成功");
+        setAssetImportProgress(96, "正在渲染资产界面，即将完成...");
+        await waitForPaint();
+        ui.assetImporting = false;
+        setAssetImportProgress(100, "缓存完成，资产已打开。");
         return;
       }
       const input = project.input_payload || {};
+      setAssetImportProgress(45, "正在恢复基础项目信息...");
+      await waitForPaint();
       resetTransientUi();
       state = clone(initialState);
       state.basic_config.project_title = project.title || input.title || state.basic_config.project_title;
@@ -6749,14 +6845,31 @@ function renderPackageBlocks() {
       ui.stageHistory = {};
       ui.stageHistoryLoading = {};
       syncStageFlow(state);
+      setAssetImportProgress(68, "正在写入浏览器本地缓存...");
+      await waitForPaint();
       saveState();
       clearDirty();
-      await loadStageHistory("basic");
-      showToast("资产导入成功");
+      setAssetImportProgress(84, "正在加载基础阶段历史版本...");
+      await waitForPaint();
+      try {
+        await loadStageHistory("basic", { silent: true });
+      } catch (historyError) {
+        ui.stageHistory.basic = [];
+        setAssetImportProgress(90, "资产已缓存，历史版本暂时未加载，可稍后手动刷新。");
+        await waitForPaint();
+      }
+      setAssetImportProgress(96, "正在渲染资产界面，即将完成...");
+      await waitForPaint();
+      ui.assetImporting = false;
+      setAssetImportProgress(100, "缓存完成，资产已打开。");
     } catch (error) {
+      ui.assetImportProgress = null;
       showToast((error && error.message) || "资产导入失败");
     } finally {
       ui.assetImporting = false;
+      if (ui.assetImportProgress && ui.assetImportProgress.percent >= 100) {
+        clearAssetImportProgressLater();
+      }
       render();
     }
   }
@@ -7571,7 +7684,7 @@ function renderPackageBlocks() {
       }
     })
     .catch(() => {});
-  if (DEV_LOG_ENABLED) loadStageHistory(stageKeyForView(state.current_view || "basic")).catch(() => {});
+  if (DEV_LOG_ENABLED) loadStageHistory(stageKeyForView(state.current_view || "basic"), { silent: true }).catch(() => {});
 
 
 })();
