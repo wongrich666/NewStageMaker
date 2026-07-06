@@ -2373,6 +2373,30 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             current_auth_token=_current_auth_token(),
         )
 
+    @app.get("/assets/framework")
+    @_login_required
+    def framework_assets_page():
+        return render_template(
+            "asset_library.html",
+            current_user=_current_user(),
+            current_auth_token=_current_auth_token(),
+            asset_page_mode="framework",
+            asset_page_title="框架资产",
+            asset_page_subtitle="集中管理已完成的 01-07 框架策划资产，并继续进入框架到剧本。",
+        )
+
+    @app.get("/assets/hot-review")
+    @_login_required
+    def hot_review_assets_page():
+        return render_template(
+            "asset_library.html",
+            current_user=_current_user(),
+            current_auth_token=_current_auth_token(),
+            asset_page_mode="hot_review",
+            asset_page_title="爆款文审核资产",
+            asset_page_subtitle="查看已保存的爆款文审核结果、评分心电图和修改建议。",
+        )
+
     @app.get("/framework-planner")
     @_login_required
     def framework_planner_page():

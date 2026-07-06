@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>{{ asset_page_title }} - 剧本工坊</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='global_theme.css') }}?v=20260617-cat-theme-v4">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260706-asset-library-v1">
+</head>
+<body class="workspace-body asset-library-body">
+  <canvas id="particles-canvas" class="particles-canvas"></canvas>
+  <main class="chat-workspace-shell asset-library-shell">
+    <aside class="workspace-sidebar asset-library-sidebar">
+      <div class="sidebar-top">
+        <div class="sidebar-brand-row">
+          <a class="sidebar-brand" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">
+            <span class="sidebar-brand-mark">S</span>
+            <span class="sidebar-brand-text">
+              <strong>剧本工坊</strong>
+              <em>Script Studio</em>
+            </span>
+          </a>
+        </div>
+      </div>
+
+      <div class="sidebar-primary">
+        <a class="sidebar-create-btn" data-nav-icon="✦" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">新建框架</a>
+        <a class="sidebar-create-btn" data-nav-icon="▶" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">框架到剧本</a>
+      </div>
+
+      <div class="sidebar-nav">
+        <section class="sidebar-group">
+          <div class="sidebar-group-label">资产会话</div>
+          <a class="asset-nav-link{% if asset_page_mode == 'framework' %} active{% endif %}" href="{{ url_for('framework_assets_page', auth_token=current_auth_token) }}">
+            <span class="asset-nav-icon">▣</span>
+            <span>
+              <strong>框架资产</strong>
+              <small>01-07 策划包</small>
+            </span>
+          </a>
+          <a class="asset-nav-link{% if asset_page_mode == 'hot_review' %} active{% endif %}" href="{{ url_for('hot_review_assets_page', auth_token=current_auth_token) }}">
+            <span class="asset-nav-icon">◇</span>
+            <span>
+              <strong>爆款文审核资产</strong>
+              <small>评分 / 心电图 / 修改建议</small>
+            </span>
+          </a>
+        </section>
+
+        <section class="sidebar-group sidebar-tools-section">
+          <a class="sidebar-text-link sidebar-side-link" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}" data-nav-icon="⌂">返回工作台</a>
+        </section>
+      </div>
+
+      <div class="sidebar-footer">
+        {% if current_user %}
+          <div class="sidebar-footer-links">
+            <span class="sidebar-profile-avatar">{{ current_user.username[:1] }}</span>
+            <span class="sidebar-footer-text">{{ current_user.username }}</span>
+          </div>
+        {% endif %}
+      </div>
+    </aside>
+
+    <section class="asset-library-main">
+      <header class="asset-library-hero">
+        <div>
+          <span class="asset-library-kicker">
+            {% if asset_page_mode == 'framework' %}FRAMEWORK ASSETS{% else %}AUDIT ASSETS{% endif %}
+          </span>
+          <h1>{{ asset_page_title }}</h1>
+          <p>{{ asset_page_subtitle }}</p>
+        </div>
+        <div class="asset-library-hero-actions">
+          {% if asset_page_mode == 'framework' %}
+            <a class="asset-primary-action" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">
+              <span>✦</span>
+              新建框架
+            </a>
+          {% else %}
+            <a class="asset-primary-action" href="{{ url_for('workspace_page', auth_token=current_auth_token, section='tools', tool='hot_review') }}">
+              <span>◇</span>
+              运行审核
+            </a>
+          {% endif %}
+          <button id="assetRefreshBtn" class="asset-secondary-action" type="button">
+            <span>↻</span>
+            刷新
+          </button>
+        </div>
+      </header>
+
+      <section class="asset-library-toolbar" aria-label="资产筛选">
+        <label class="asset-search-field">
+          <span>搜索</span>
+          <input id="assetSearchInput" type="search" placeholder="输入标题、摘要或状态">
+        </label>
+        <div class="asset-stat-pill">
+          <span id="assetCountValue">0</span>
+          <small>条资产</small>
+        </div>
+      </section>
+
+      <section id="assetLibraryStatus" class="asset-library-status">正在读取资产...</section>
+      <section id="assetLibraryGrid" class="asset-library-grid" aria-live="polite"></section>
+    </section>
+  </main>
+
+  <script>
+    window.assetLibraryConfig = {
+      mode: {{ asset_page_mode|tojson }},
+      authToken: {{ current_auth_token|tojson }},
+      projectsUrl: "/api/projects",
+      workspaceUrl: {{ url_for('workspace_page', auth_token=current_auth_token)|tojson }},
+      frameworkPlannerUrl: {{ url_for('framework_planner_page', auth_token=current_auth_token)|tojson }},
+      frameworkToScriptUrl: "/framework-to-script"
+    };
+  </script>
+  <script src="{{ url_for('static', filename='asset_library.js') }}?v=20260706-asset-library-v2"></script>
+  <script src="{{ url_for('static', filename='particles.js') }}?v=20260702-particles-v1"></script>
+  <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v4"></script>
+</body>
+</html>

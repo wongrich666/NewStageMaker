@@ -58,14 +58,18 @@
           <div class="sidebar-folders">
             <details id="completedWorkspaceFolder" class="workspace-folder">
               <summary>
-                <span>框架资产</span>
+                <span class="asset-folder-title"><span class="asset-folder-icon">▣</span>框架资产</span>
+                <a class="asset-folder-open" href="{{ url_for('framework_assets_page', auth_token=current_auth_token) }}" aria-label="打开框架资产页" onclick="event.stopPropagation()">查看</a>
               </summary>
               <div id="completedProjectList" class="workspace-compact-list"></div>
             </details>
             <details class="workspace-folder hot-review-workspace-folder">
               <summary>
-                <span>爆款文审核资产</span>
-                <small class="workspace-pick-state" id="hotReviewProjectCount">0</small>
+                <span class="asset-folder-title"><span class="asset-folder-icon">◇</span>爆款文审核资产</span>
+                <span class="asset-folder-actions">
+                  <small class="workspace-pick-state" id="hotReviewProjectCount">0</small>
+                  <a class="asset-folder-open" href="{{ url_for('hot_review_assets_page', auth_token=current_auth_token) }}" aria-label="打开爆款文审核资产页" onclick="event.stopPropagation()">查看</a>
+                </span>
               </summary>
               <div id="hotReviewProjectList" class="workspace-compact-list"></div>
             </details>
