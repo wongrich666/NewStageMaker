@@ -7,10 +7,11 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>IDEA TO SCRIPT 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260617-hot-review-v8">
   <link rel="stylesheet" href="{{ url_for('static', filename='global_theme.css') }}?v=20260617-cat-theme-v4">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260702-cinematic-workspace-ui-v10">
 </head>
 <body class="workspace-body">
+  <canvas id="particles-canvas" class="particles-canvas"></canvas>
   <main class="chat-workspace-shell">
     <aside id="workspaceCard" class="workspace-sidebar">
       <div class="sidebar-top">
@@ -21,38 +22,54 @@
             <span></span>
           </button>
           <a class="sidebar-brand" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">
-            <span class="sidebar-brand-mark">I</span>
+            <span class="sidebar-brand-mark">S</span>
             <span class="sidebar-brand-text">
-              <strong>IDEA TO SCRIPT</strong>
-              <em>剧本平台</em>
+              <strong>剧本工坊</strong>
+              <em>Script Studio</em>
             </span>
           </a>
         </div>
       </div>
 
       <div class="sidebar-primary">
-        <a class="sidebar-create-btn" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">＋ 新建框架</a>
-        <a class="sidebar-create-btn" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">＋ 框架到剧本</a>
+        <a class="sidebar-create-btn" data-nav-icon="✦" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">新建框架</a>
+        <a class="sidebar-create-btn" data-nav-icon="▶" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">框架到剧本</a>
       </div>
+      <section class="sidebar-multi-open" aria-label="新开剧本窗口">
+        <div class="sidebar-multi-open-head">
+          <span>新开剧本窗口</span>
+          <small>并行生成</small>
+        </div>
+        <div class="sidebar-multi-open-actions" role="group" aria-label="选择新开窗口数量">
+          <button class="multi-open-count-btn" type="button" data-multi-open-count="1">1</button>
+          <button class="multi-open-count-btn" type="button" data-multi-open-count="2">2</button>
+          <button class="multi-open-count-btn" type="button" data-multi-open-count="3">3</button>
+          <button class="multi-open-count-btn" type="button" data-multi-open-count="4">4</button>
+        </div>
+      </section>
 
       <div class="sidebar-nav">
         <section class="sidebar-group">
           <div class="sidebar-group-label">我的资产</div>
           <div class="sidebar-section-head sidebar-section-head-compact">
             <span>资产会话</span>
-            <button id="refreshProjectsBtn" class="sidebar-refresh-btn" type="button">刷新</button>
+            <button id="refreshProjectsBtn" class="sidebar-refresh-btn" type="button" aria-label="刷新资产">刷新</button>
           </div>
           <div class="sidebar-folders">
             <details id="completedWorkspaceFolder" class="workspace-folder">
               <summary>
-                <span>框架资产</span>
+                <span class="asset-folder-title"><span class="asset-folder-icon">▣</span>框架资产</span>
+                <a class="asset-folder-open" href="{{ url_for('framework_assets_page', auth_token=current_auth_token) }}" aria-label="打开框架资产页" onclick="event.stopPropagation()">查看</a>
               </summary>
               <div id="completedProjectList" class="workspace-compact-list"></div>
             </details>
             <details class="workspace-folder hot-review-workspace-folder">
               <summary>
-                <span>爆款文审核资产</span>
-                <small class="workspace-pick-state" id="hotReviewProjectCount">0</small>
+                <span class="asset-folder-title"><span class="asset-folder-icon">◇</span>爆款文审核资产</span>
+                <span class="asset-folder-actions">
+                  <small class="workspace-pick-state" id="hotReviewProjectCount">0</small>
+                  <a class="asset-folder-open" href="{{ url_for('hot_review_assets_page', auth_token=current_auth_token) }}" aria-label="打开爆款文审核资产页" onclick="event.stopPropagation()">查看</a>
+                </span>
               </summary>
               <div id="hotReviewProjectList" class="workspace-compact-list"></div>
             </details>
@@ -87,7 +104,7 @@
         </section>
 
         <section class="sidebar-group sidebar-tools-section">
-          <button id="waibaoScriptBtn" class="sidebar-text-link sidebar-side-link" type="button">外包专属格式</button>
+          <button id="waibaoScriptBtn" class="sidebar-text-link sidebar-side-link" type="button" data-nav-icon="◇">外包专属格式</button>
         </section>
 
         <div class="sidebar-group sidebar-tools-section">
@@ -95,6 +112,7 @@
             id="openCommunityPanelLink"
             class="sidebar-text-link sidebar-side-link"
             href="{{ url_for('workspace_page', auth_token=current_auth_token, section='community') }}"
+          data-nav-icon="◎"
           >社区好剧</a>
         </div>
       </div>
@@ -123,8 +141,8 @@
     <section class="chat-main workspace-main-minimal">
             <section class="workspace-landing">
         <div class="workspace-landing__inner">
-          <div class="workspace-landing__eyebrow">IDEA TO SCRIPT</div>
-          <h1 class="workspace-landing__title">剧本平台</h1>
+          <div class="workspace-landing__eyebrow">SCRIPT STUDIO</div>
+          <h1 class="workspace-landing__title">剧本创作工作台</h1>
           <p class="workspace-landing__subtitle">
             可选流程：从头开始搭建框架，或者导入框架生成剧本
             剧本质量和提示词高度相关，如有需要可以在生成框架阶段的「智慧库」里选择基础提示词，或者存入自己的定制提示词哦~
@@ -256,6 +274,24 @@
         </div>
         <p id="formHint" class="composer-hint">当前流程：写剧本正文。先填写故事期待、角色数量和总集数；生成结果会保存在你的项目列表。</p>
         <p class="composer-mode-note">当前创作模式：<strong id="composerModeText">标准格式</strong></p>
+        <section id="multiOpenPanel" class="multi-open-panel" aria-label="剧本生成多开">
+          <div class="multi-open-copy">
+            <strong>多开生成</strong>
+            <span>需要同时制作多个剧本时，新窗口会保持空白新建态。</span>
+          </div>
+          <div class="multi-open-actions" role="group" aria-label="新开剧本窗口">
+            <label class="multi-open-select">
+              <span>窗口数</span>
+              <select id="multiOpenCountSelect">
+                <option value="1">1 个</option>
+                <option value="2">2 个</option>
+                <option value="3">3 个</option>
+                <option value="4">4 个</option>
+              </select>
+            </label>
+            <button id="newGenerationWindowBtn" class="btn btn-secondary multi-open-primary-btn" type="button">新开窗口</button>
+          </div>
+        </section>
 
         <div id="completionPanel" class="completion-panel compact-completion">
           <p id="cacheNoticeText" class="muted">系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。</p>
@@ -408,7 +444,8 @@
     };
   </script>
   <script src="{{ url_for('static', filename='field_labels_cn.js') }}?v=20260527-readable-labels"></script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260622-hot-review-delete"></script>
+  <script src="{{ url_for('static', filename='particles.js') }}?v=20260702-particles-v2"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260702-cinematic-workspace-ui-v10"></script>
   <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v4"></script>
 </body>
 </html>

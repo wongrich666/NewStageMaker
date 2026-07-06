@@ -70,6 +70,8 @@
     formHint: $("formHint"),
 
     startBtn: $("startBtn"),
+    newGenerationWindowBtn: $("newGenerationWindowBtn"),
+    multiOpenCountSelect: $("multiOpenCountSelect"),
     pauseBtn: $("pauseBtn"),
     resumeBtn: $("resumeBtn"),
     terminateBtn: $("terminateBtn"),
@@ -312,7 +314,7 @@
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   }
 
-  function buildWorkspaceUrl({ projectId = null, fresh = false, scriptFormatMode = "" } = {}) {
+  function buildWorkspaceUrl({ projectId = null, fresh = false, scriptFormatMode = "", windowSeed = "" } = {}) {
     const url = currentUrl();
     const basePath = window.scriptMakerConfig.workspaceUrl || url.pathname;
     url.pathname = basePath;
@@ -321,10 +323,15 @@
     url.searchParams.delete("section");
     url.searchParams.delete("panel");
     url.searchParams.delete("script_format_mode");
+    url.searchParams.delete("multi_open");
     if (projectId) {
       url.searchParams.set("project_id", String(projectId));
     } else if (fresh) {
       url.searchParams.set("mode", "new");
+      const normalizedSeed = String(windowSeed || "").trim();
+      if (normalizedSeed) {
+        url.searchParams.set("multi_open", normalizedSeed);
+      }
       const normalizedFormat = String(scriptFormatMode || "").trim().toLowerCase();
       if (normalizedFormat) {
         url.searchParams.set("script_format_mode", normalizedFormat);
@@ -346,8 +353,18 @@
     renderSnapshot(null);
   }
 
-  function openWorkspaceInNewPage({ projectId = null, fresh = false, scriptFormatMode = "" } = {}) {
-    window.open(buildWorkspaceUrl({ projectId, fresh, scriptFormatMode }), "_blank", "noopener");
+  function openWorkspaceInNewPage({ projectId = null, fresh = false, scriptFormatMode = "", windowSeed = "" } = {}) {
+    window.open(buildWorkspaceUrl({ projectId, fresh, scriptFormatMode, windowSeed }), "_blank", "noopener");
+  }
+
+  function openFreshGenerationWindows(count = 1) {
+    const normalizedCount = Math.max(1, Math.min(4, Number(count) || 1));
+    for (let index = 0; index < normalizedCount; index += 1) {
+      openWorkspaceInNewPage({
+        fresh: true,
+        windowSeed: `${Date.now()}-${index + 1}`
+      });
+    }
   }
 
   function statusLabel(status) {
@@ -747,7 +764,7 @@
         : "请求超时了。请稍后重试，或减少提交文本长度后再运行。";
     }
     if (/failed\s*to\s*fetch|networkerror|network\s*error|load\s*failed|断开|网络/i.test(text)) {
-      return "网络连接中断，结果没有传回前端。请检查后端是否仍在运行，然后重新点击运行。";
+      return "网络请求暂时中断，请稍后刷新或重新点击。";
     }
     if (!text || isTechnicalErrorText(text)) {
       return fallback;
@@ -5272,14 +5289,6 @@ function renderToolForm(toolKey) {
     return payload;
   }
 
-  function pickPreferredProjectId(projects) {
-    const selectable = (Array.isArray(projects) ? projects : []).filter((item) => !isHotReviewAsset(item));
-    if (!selectable.length) return null;
-    const running = selectable.find((item) => RUNNING_STATUSES.has(item.status));
-    const paused = selectable.find((item) => item.status === "paused");
-    return Number((running || paused || selectable[0]).project_id || 0) || null;
-  }
-
   // 把后台项目压成简洁任务列表，方便在同一账号下快速切换工作台。
   function renderProjectList(projects) {
     if (!els.completedProjectList) return;
@@ -5436,11 +5445,11 @@ function renderToolForm(toolKey) {
 
     const freshWorkspace = isFreshWorkspaceMode();
     let targetProjectId = restoreSelection
-      ? (state.projectId || readSelectedProjectId() || (freshWorkspace ? null : pickPreferredProjectId(state.projects)))
+      ? (state.projectId || readSelectedProjectId() || null)
       : state.projectId;
 
     if (targetProjectId && !state.projects.some((item) => Number(item.project_id) === Number(targetProjectId))) {
-      targetProjectId = pickPreferredProjectId(state.projects);
+      targetProjectId = null;
     }
 
     if (targetProjectId) {
@@ -6001,8 +6010,10 @@ function renderToolForm(toolKey) {
         <div class="asset-actions">
           <div class="asset-action-group">
             <span class="asset-action-label">资产操作</span>
-            ${isToolAsset(item) ? "" : `<button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>`}
-            ${isToolAsset(item) ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>`}
+            ${isToolAsset(item) ? "" : assetCategory(item) === "framework"
+              ? `<button class="btn btn-secondary" data-action="open-framework-asset" data-project-id="${escapeHtml(item.project_id)}">打开框架</button>`
+              : `<button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>`}
+            ${isToolAsset(item) || assetCategory(item) === "framework" ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>`}
             <button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>
             ${assetCategory(item) === "framework" ? `<a class="btn btn-secondary" href="/framework-to-script?framework_asset_id=${encodeURIComponent(item.project_id)}${currentAuthToken() ? `&auth_token=${encodeURIComponent(currentAuthToken())}` : ""}">进入框架到剧本</a>` : ""}
             <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : (isToolAsset(item) ? "公开结果" : "公开成品")}</button>
@@ -6054,6 +6065,11 @@ function renderToolForm(toolKey) {
         <button class="btn btn-ghost" data-action="delete-task" data-task-id="${escapeHtml(taskId)}" data-project-id="${escapeHtml(item.project_id)}">删除任务</button>
       </div>
     `;
+  }
+
+  function frameworkPlannerAssetUrl(projectId) {
+    const token = currentAuthToken();
+    return `/framework-planner?auth_token=${encodeURIComponent(token)}&project_id=${encodeURIComponent(projectId)}`;
   }
 
   function renderCommunity(assets) {
@@ -6580,6 +6596,18 @@ function renderToolForm(toolKey) {
       openWorkspaceInNewPage({ fresh: true });
     });
 
+    els.newGenerationWindowBtn?.addEventListener("click", () => {
+      if (!requireLogin()) return;
+      openFreshGenerationWindows(els.multiOpenCountSelect?.value || 1);
+    });
+
+    document.querySelectorAll("[data-multi-open-count]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (!requireLogin()) return;
+        openFreshGenerationWindows(button.dataset.multiOpenCount);
+      });
+    });
+
     els.waibaoScriptBtn?.addEventListener("click", () => {
       if (!requireLogin()) return;
       openWorkspaceInNewPage({ fresh: true, scriptFormatMode: "waibao" });
@@ -6689,9 +6717,7 @@ function renderToolForm(toolKey) {
           // 框架项目直接跳转到框架策划器，不在工作台打开
           const existing = (state.projects || []).find((p) => String(p.project_id) === String(projectId));
           if (existing && assetCategory(existing) === "framework") {
-            const token = currentAuthToken();
-            const fpUrl = `/framework-planner?auth_token=${encodeURIComponent(token)}&project_id=${encodeURIComponent(projectId)}`;
-            window.location.href = fpUrl;
+            window.location.href = frameworkPlannerAssetUrl(projectId);
             return;
           }
           await loadProjectDetail(projectId, { restoreInputs: true, scroll: false });
@@ -6717,7 +6743,16 @@ function renderToolForm(toolKey) {
         } else if (button.dataset.action === "load-more-assets") {
           state.assetsPage += 1;
           renderAssets(state.assets);
+        } else if (button.dataset.action === "open-framework-asset") {
+          window.location.href = frameworkPlannerAssetUrl(projectId);
+          return;
         } else if (button.dataset.action === "open-project") {
+          const existing = (state.assets || []).find((item) => String(item.project_id) === String(projectId))
+            || (state.projects || []).find((item) => String(item.project_id) === String(projectId));
+          if (existing && assetCategory(existing) === "framework") {
+            window.location.href = frameworkPlannerAssetUrl(projectId);
+            return;
+          }
           closeProfilePanel();
           await loadProjectDetail(projectId, { restoreInputs: true, scroll: false });
         } else if (button.dataset.action === "open-project-page") {
