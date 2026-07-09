@@ -6,29 +6,26 @@
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>登录 — IDEA TO SCRIPT 剧本平台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260622-auth-v2">
-  <link rel="stylesheet" href="{{ url_for('static', filename='global_theme.css') }}?v=20260617-cat-theme-v4">
+  <title>登录 - 剧本创作平台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260708-auth-planner-light-v6">
 </head>
 <body class="auth-page-v2">
 
-  <!-- 品牌顶栏 — 点击可回首页 -->
   <header class="auth-topbar">
     <a class="auth-brand" href="{{ url_for('index') }}" title="回到剧本平台首页">
-      <span class="auth-brand-mark">I</span>
+      <span class="auth-brand-mark">FP</span>
       <span class="auth-brand-text">
-        <strong>IDEA TO SCRIPT</strong>
-        <em>点击进入剧本平台 →</em>
+        <strong>剧本创作平台</strong>
+        <em>返回首页</em>
       </span>
     </a>
   </header>
 
-  <!-- 中央登录区 -->
   <main class="auth-center">
     <div class="auth-hero">
-      <p class="auth-eyebrow">IDEA TO SCRIPT</p>
+      <p class="auth-eyebrow">SCRIPT STUDIO</p>
       <h1 class="auth-title">欢迎回来</h1>
-      <p class="auth-desc">登录后继续你的剧本创作</p>
+      <p class="auth-desc">登录后继续管理框架资产、爆款文审核和剧本生成任务。</p>
     </div>
 
     <div class="auth-card-v2">
@@ -66,35 +63,30 @@
         </label>
 
         <button class="auth-submit-btn" type="submit">
-          <span>登 录</span>
+          <span>登录工作台</span>
         </button>
       </form>
 
       <p class="auth-switch-v2">
-        还没有账号？<a href="{{ url_for('register_page') }}">免费注册</a>
+        还没有账号？<a href="{{ url_for('register_page') }}">创建账号</a>
       </p>
     </div>
 
-    <!-- 平台特色简介 -->
     <div class="auth-features">
       <div class="auth-feature-item">
-        <span class="auth-feature-icon">📝</span>
-        <span>AI 辅助编剧</span>
-        <small>从大纲到正文全流程</small>
+        <span>框架资产</span>
+        <small>保存 01-07 策划结果</small>
       </div>
       <div class="auth-feature-item">
-        <span class="auth-feature-icon">🎭</span>
-        <span>角色 & 世界观</span>
-        <small>系统化管理设定</small>
+        <span>剧本生成</span>
+        <small>继续正文和导出</small>
       </div>
       <div class="auth-feature-item">
-        <span class="auth-feature-icon">📦</span>
-        <span>一键导出</span>
-        <small>支持 TXT / DOCX</small>
+        <span>辅助审核</span>
+        <small>运行爆款文评分</small>
       </div>
     </div>
   </main>
 
-  <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v4"></script>
 </body>
 </html>
