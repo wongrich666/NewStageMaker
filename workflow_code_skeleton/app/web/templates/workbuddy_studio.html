@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>AI剧本医生实验室 - 剧本创作平台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='workbuddy_studio.css') }}?v=20260709-script-doctor-v13" />
+</head>
+<body class="wb-page">
+  <header class="wb-topbar">
+    <a class="wb-brand" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">
+      <span class="wb-brand-mark">FP</span>
+      <span>
+        <strong>AI剧本医生实验室</strong>
+        <em>剧本二次优化</em>
+      </span>
+    </a>
+    <nav class="wb-top-actions">
+      <button id="wbRefreshStatusBtn" class="wb-ghost-link" type="button">检查API配置</button>
+      <a class="wb-ghost-link" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">返回工作台</a>
+    </nav>
+  </header>
+
+  <main class="wb-shell">
+    <section class="wb-hero" aria-labelledby="wbTitle">
+      <div class="wb-status-line">
+        <span class="wb-kicker">WORKBUDDY SCRIPT DOCTOR</span>
+        <span id="wbStatusPill" class="wb-status-pill is-loading">检测配置中</span>
+      </div>
+      <h1 id="wbTitle">AI剧本医生实验室</h1>
+      <p>上传已有剧本或粘贴完整正文，让专业智能体检查缺集、人物断线、爽点不足、逻辑漏洞和优先修复位置。</p>
+    </section>
+
+    <section class="wb-layout" aria-label="AI剧本医生工作区">
+      <aside class="wb-skill-panel">
+        <div class="wb-panel-title">
+          <p class="wb-section-label">SKILL</p>
+          <h2>选择审查器</h2>
+        </div>
+        <div class="wb-skill-list" role="radiogroup" aria-label="选择智能体 Skill">
+          <button class="wb-skill-card is-active" type="button" data-skill="overall_dispatcher">
+            <span class="wb-skill-index">01</span>
+            <strong>总质检调度器</strong>
+            <em>整体评分、缺集、优先修复顺序</em>
+          </button>
+          <button class="wb-skill-card" type="button" data-skill="character_continuity">
+            <span class="wb-skill-index">02</span>
+            <strong>人物连续性审查器</strong>
+            <em>人物动机、关系线、角色消失</em>
+          </button>
+          <button class="wb-skill-card" type="button" data-skill="hook_rhythm">
+            <span class="wb-skill-index">03</span>
+            <strong>爽点节奏审查员</strong>
+            <em>前三集、集尾钩子、反转密度</em>
+          </button>
+          <button class="wb-skill-card" type="button" data-skill="logic_holes">
+            <span class="wb-skill-index">04</span>
+            <strong>逻辑漏洞审查员</strong>
+            <em>设定冲突、因果断裂、伏笔回收</em>
+          </button>
+        </div>
+
+        <div class="wb-config-card">
+          <div class="wb-config-head">
+            <strong>API配置</strong>
+            <span id="wbConfigBadge">检测中</span>
+          </div>
+          <p id="wbConfigText">正在读取 CodeBuddy Agent SDK 配置。</p>
+          <p id="wbAccountText" class="wb-account-text">账号信息检测中。</p>
+          <p id="wbPointsText" class="wb-account-text">积分信息检测中。</p>
+          <ul id="wbMissingList" class="wb-missing-list"></ul>
+        </div>
+      </aside>
+
+      <section class="wb-input-panel">
+        <div class="wb-panel-head">
+          <div>
+            <p class="wb-section-label">INPUT</p>
+            <h2>上传剧本做二次质检</h2>
+          </div>
+          <span id="wbCurrentSkill">总质检调度器</span>
+        </div>
+
+        <form id="wbDoctorForm" class="wb-form">
+          <div class="wb-grid wb-grid-compact">
+            <label>
+              <span>剧本标题</span>
+              <input name="title" type="text" placeholder="例如：黑色契约、寂静谷" maxlength="100" />
+            </label>
+            <label>
+              <span>本次目标</span>
+              <select name="user_goal" id="wbGoalSelect">
+                <option value="先找出最影响成片质量的问题">先找出最影响成片质量的问题</option>
+                <option value="重点检查人物线是否断裂">重点检查人物线是否断裂</option>
+                <option value="重点检查爽点钩子和节奏">重点检查爽点钩子和节奏</option>
+                <option value="重点检查逻辑漏洞和前后矛盾">重点检查逻辑漏洞和前后矛盾</option>
+              </select>
+              <small id="wbGoalHint" class="wb-field-hint">总质检会先判断整部剧最大短板，并给出优先修复顺序。</small>
+            </label>
+          </div>
+
+          <section class="wb-model-picker" aria-label="选择调用模型">
+            <div class="wb-model-picker-head">
+              <span>选择调用模型</span>
+              <div class="wb-model-picker-meta">
+                <small id="wbModelHint">正在读取可用模型。</small>
+                <button id="wbToggleModelsBtn" class="wb-model-toggle" type="button" hidden>展开全部</button>
+              </div>
+            </div>
+            <input type="hidden" name="model" id="wbModelInput" value="">
+            <div id="wbModelOptions" class="wb-model-options"></div>
+          </section>
+
+          <label class="wb-upload-box">
+            <span>上传已有剧本</span>
+            <input id="wbScriptFile" type="file" accept=".txt,.docx,.pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf" />
+            <strong>拖拽或点击上传 TXT / Word / PDF</strong>
+            <small>支持 TXT、DOCX、PDF。扫描版 PDF 暂不支持 OCR，可复制正文到下方文本框。</small>
+          </label>
+
+          <label>
+            <span>完整剧本正文</span>
+            <textarea name="script_text" rows="16" placeholder="粘贴完整剧本。建议包含集数标题，例如：第1集、第2集……"></textarea>
+          </label>
+
+          <div class="wb-run-strip">
+            <div>
+              <strong id="wbScriptStats">尚未输入剧本</strong>
+              <span>建议上传完整剧本，AI 才能判断缺集、断线和结构问题。</span>
+            </div>
+            <div class="wb-form-actions">
+              <button class="wb-secondary-btn" type="button" id="wbClearFormBtn">清空</button>
+              <button class="wb-primary-btn" type="submit">开始剧本体检</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <aside class="wb-guide-panel">
+        <div class="wb-panel-title">
+          <p class="wb-section-label">OUTPUT</p>
+          <h2>报告结构</h2>
+        </div>
+        <div class="wb-guide-list">
+          <div><strong>总评分</strong><span>可用性、风险等级、优先修复范围</span></div>
+          <div><strong>分集问题地图</strong><span>绿/黄/红/灰标记每集状态</span></div>
+          <div><strong>问题原因</strong><span>指出为什么影响观看和商业转化</span></div>
+          <div><strong>修订建议</strong><span>给出局部改法，不直接推翻整部剧</span></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="wb-output-grid">
+      <section class="wb-result-card wb-report-card">
+        <div class="wb-card-head">
+          <h2>剧本体检报告</h2>
+          <div class="wb-card-actions">
+            <button id="wbCopyResultBtn" class="wb-mini-btn" type="button">复制</button>
+            <button id="wbDownloadResultBtn" class="wb-mini-btn" type="button">下载</button>
+          </div>
+        </div>
+        <div id="wbReportView" class="wb-report-view">
+          <div class="wb-report-empty">运行体检后，这里会展示总评分、风险等级、分集问题地图和优先修订建议。</div>
+        </div>
+        <details class="wb-raw-report">
+          <summary>查看原始返回</summary>
+          <pre id="wbResultBox">等待上传剧本并运行体检。</pre>
+        </details>
+      </section>
+
+      <section class="wb-result-card">
+        <div class="wb-card-head">
+          <h2>历史记录</h2>
+          <button id="wbClearHistoryBtn" class="wb-mini-btn" type="button">清空</button>
+        </div>
+        <div id="wbHistoryList" class="wb-history-list"></div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    window.workbuddyStudioConfig = {
+      authToken: {{ current_auth_token|tojson }},
+      workspaceUrl: {{ url_for('workspace_page', auth_token=current_auth_token)|tojson }}
+    };
+  </script>
+  <script src="{{ url_for('static', filename='workbuddy_studio.js') }}?v=20260709-script-doctor-v13"></script>
+</body>
+</html>

@@ -42,6 +42,19 @@ from .services.framework_planner_service import (
     write_framework_stage_exception_log,
 )
 from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
+from .services.workbuddy_doctor import (
+    build_doctor_prompt,
+    clear_workbuddy_history,
+    delete_workbuddy_history,
+    doctor_timeout_seconds,
+    format_doctor_exception,
+    list_workbuddy_history,
+    load_workbuddy_history,
+    run_codebuddy_doctor,
+    save_workbuddy_history,
+    validate_doctor_payload,
+    workbuddy_config_status,
+)
 from .services.script_audit_ecg_parser import (
     COMPACT_SCHEMA_VERSION as SCRIPT_AUDIT_COMPACT_SCHEMA_VERSION,
     SCHEMA_VERSION as SCRIPT_AUDIT_ECG_SCHEMA_VERSION,
@@ -2372,6 +2385,159 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             current_user=_current_user(),
             current_auth_token=_current_auth_token(),
         )
+
+    @app.get("/workbuddy-studio")
+    @_login_required
+    def workbuddy_studio_page():
+        return render_template(
+            "workbuddy_studio.html",
+            current_user=_current_user(),
+            current_auth_token=_current_auth_token(),
+        )
+
+    @app.get("/api/workbuddy/status")
+    @_login_required
+    def workbuddy_status():
+        include_metadata = str(request.args.get("metadata") or "1").lower() not in {"0", "false", "no"}
+        return jsonify(workbuddy_config_status(include_metadata=include_metadata))
+
+    @app.get("/api/workbuddy/doctor/history")
+    @_login_required
+    def workbuddy_doctor_history_list():
+        user = _current_user()
+        try:
+            limit = min(max(int(request.args.get("limit") or 50), 1), 100)
+        except (TypeError, ValueError):
+            limit = 50
+        return jsonify({"ok": True, "items": list_workbuddy_history(user.id, limit=limit)})
+
+    @app.delete("/api/workbuddy/doctor/history")
+    @_login_required
+    def workbuddy_doctor_history_clear():
+        user = _current_user()
+        deleted = clear_workbuddy_history(user.id)
+        return jsonify({"ok": True, "deleted": deleted, "items": []})
+
+    @app.get("/api/workbuddy/doctor/history/<entry_id>")
+    @_login_required
+    def workbuddy_doctor_history_get(entry_id: str):
+        user = _current_user()
+        entry = load_workbuddy_history(user.id, entry_id)
+        if not entry:
+            return jsonify({"ok": False, "error": "历史记录不存在或已删除。"}), 404
+        return jsonify({"ok": True, "entry": entry})
+
+    @app.delete("/api/workbuddy/doctor/history/<entry_id>")
+    @_login_required
+    def workbuddy_doctor_history_delete(entry_id: str):
+        user = _current_user()
+        deleted = delete_workbuddy_history(user.id, entry_id)
+        return jsonify({"ok": True, "deleted": deleted, "items": list_workbuddy_history(user.id)})
+
+    @app.post("/api/workbuddy/framework/generate")
+    @_login_required
+    def workbuddy_generate_framework():
+        return jsonify(
+            {
+                "ok": False,
+                "error": "该入口已调整为 AI剧本医生实验室。请使用 /api/workbuddy/doctor/run 做剧本二次质检。",
+            }
+        ), 410
+
+    @app.post("/api/workbuddy/review/run")
+    @_login_required
+    def workbuddy_run_review():
+        return jsonify(
+            {
+                "ok": False,
+                "error": "该入口已调整为 AI剧本医生实验室。请使用 /api/workbuddy/doctor/run 做剧本二次质检。",
+            }
+        ), 410
+
+    @app.post("/api/workbuddy/doctor/run")
+    @_login_required
+    def workbuddy_doctor_run():
+        data = request.get_json(silent=True) or {}
+        payload, error = validate_doctor_payload(data)
+        if error:
+            return jsonify({"ok": False, "error": error}), 400
+
+        status = workbuddy_config_status()
+        prompt = build_doctor_prompt(
+            payload["skill"],
+            payload["title"],
+            payload["script_text"],
+            payload["user_goal"],
+        )
+        if not status["configured"]:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "CodeBuddy Agent SDK 尚未配置完成，暂不能调用真实 WorkBuddy 智能体。",
+                    "missing": status["missing"],
+                    "accepted_payload": {
+                        "title": payload["title"],
+                        "skill": payload["skill"],
+                        "model": payload.get("model") or "",
+                        "script_length": len(payload["script_text"]),
+                        "user_goal": payload["user_goal"],
+                    },
+                    "prompt_preview": prompt[:1600],
+                }
+            ), 501
+
+        timeout_seconds = doctor_timeout_seconds(len(payload["script_text"]), payload["skill"])
+        try:
+            result = run_codebuddy_doctor(
+                prompt,
+                project_dir=Path.cwd(),
+                timeout_seconds=timeout_seconds,
+                model=payload.get("model") or None,
+            )
+        except Exception as exc:
+            formatted_error = format_doctor_exception(exc, timeout_seconds=timeout_seconds)
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": formatted_error["message"],
+                    "error_type": formatted_error["type"],
+                    "accepted_payload": {
+                        "title": payload["title"],
+                        "skill": payload["skill"],
+                        "model": payload.get("model") or "",
+                        "script_length": len(payload["script_text"]),
+                        "timeout_seconds": timeout_seconds,
+                    },
+                    "prompt_preview": prompt[:1200],
+                }
+            ), 502
+
+        response_payload = {
+            "ok": True,
+            "provider": "codebuddy-agent-sdk",
+            "title": payload["title"],
+            "skill": payload["skill"],
+            "script_length": len(payload["script_text"]),
+            "timeout_seconds": timeout_seconds,
+            "model": result.get("model"),
+            "session_id": result.get("session_id"),
+            "usage": result.get("usage"),
+            "report": result.get("content") or "",
+            "structured_output": result.get("structured_output"),
+        }
+        user = _current_user()
+        try:
+            response_payload["history_entry"] = save_workbuddy_history(
+                user.id,
+                username=user.username,
+                payload={**payload, "script_length": len(payload["script_text"])},
+                result=response_payload,
+            )
+        except Exception as exc:
+            logger.warning("WorkBuddy 历史保存失败: %s", exc)
+            response_payload["history_warning"] = "报告已生成，但历史记录保存失败。"
+
+        return jsonify(response_payload)
 
     @app.get("/assets/framework")
     @_login_required

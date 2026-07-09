@@ -4,6 +4,7 @@
   const LEGACY_STORAGE_KEY = "new_stage_maker_framework_planner_v2";
   const PREFERENCE_STORAGE_KEY = config.preferenceStorageKey || "frameworkPlannerPromptPreferences.v1";
   const KNOWLEDGE_PANEL_STORAGE_KEY = config.knowledgePanelStorageKey || "frameworkPlannerKnowledgePanelOpen.v1";
+  const STORAGE_FORMAT_VERSION = 1;
   const API_BASE = config.apiBase || "/api/framework-planner";
   const authToken = String(config.authToken || "").trim();
   const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "choices", "usage", "updateVarResult", "newVariables"];
@@ -389,6 +390,8 @@
     assetSort: "updated_desc",
     sourceUploadStatus: "",
     sourceUploading: false,
+    sourceInputOpen: false,
+    materialSource: "idea",
     newScriptForm: {
       title: "",
       season_count: 1,
@@ -555,6 +558,7 @@
     const formData = new FormData();
     formData.append("file", file);
     ui.sourceUploading = true;
+    ui.materialSource = "upload";
     ui.sourceUploadStatus = `正在解析 ${file.name || "文件"}...`;
     render();
     try {
@@ -629,6 +633,105 @@
       projectName,
       lookupKey: Number(projectId) > 0 ? String(projectId) : projectName,
     };
+  }
+
+  function currentAssetCacheSignature() {
+    const projectId = Number(currentProjectId() || 0);
+    const updatedAt = String((state && state.asset_state && state.asset_state.updated_at) || "").trim();
+    return projectId > 0 ? `${projectId}::${updatedAt}` : "";
+  }
+
+  function assetListItem(projectId) {
+    return (ui.assets || []).find((item) => String(item.project_id || item.asset_id || "") === String(projectId || "")) || null;
+  }
+
+  function assetCacheSignatureFromItem(item) {
+    if (!item || typeof item !== "object") return "";
+    const projectId = Number(item.project_id || item.asset_id || 0);
+    const updatedAt = String(item.updated_at || "").trim();
+    return projectId > 0 ? `${projectId}::${updatedAt}` : "";
+  }
+
+  function hasRestoredFrameworkState() {
+    return Boolean(
+      !isEmptyValue(state.source_brief)
+      || !isEmptyValue(state.worldview_plan)
+      || !isEmptyValue(state.character_plan)
+      || (Array.isArray(state.beat_checkpoint_timeline) && state.beat_checkpoint_timeline.length)
+      || !isEmptyValue(state.framework_plan_package)
+    );
+  }
+
+  function canUseCurrentAssetCache(projectId, item) {
+    if (Number(currentProjectId() || 0) !== Number(projectId || 0)) return false;
+    if (!hasRestoredFrameworkState()) return false;
+    const itemUpdatedAt = String((item && item.updated_at) || "").trim();
+    const localUpdatedAt = String((state && state.asset_state && state.asset_state.updated_at) || "").trim();
+    if (itemUpdatedAt && localUpdatedAt && itemUpdatedAt !== localUpdatedAt) {
+      if (hasCompleteFrameworkState()) {
+        syncAssetUpdatedAtInBackground(projectId, itemUpdatedAt);
+        return true;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  function hasCompleteFrameworkState() {
+    return Boolean(
+      !isEmptyValue(state.source_brief)
+      || !isEmptyValue(state.worldview_plan)
+      || !isEmptyValue(state.character_plan)
+      || (Array.isArray(state.beat_checkpoint_timeline) && state.beat_checkpoint_timeline.length > 0)
+      || !isEmptyValue(state.framework_plan_package)
+    );
+  }
+
+  function syncAssetUpdatedAtInBackground(projectId, serverUpdatedAt) {
+    setTimeout(() => {
+      try {
+        if (!state || !state.asset_state) return;
+        if (Number(state.project_id || 0) !== Number(projectId || 0)) return;
+        state.asset_state.updated_at = serverUpdatedAt;
+        saveState();
+      } catch (_) {
+        // 静默忽略后台同步错误
+      }
+    }, 200);
+  }
+
+  function normalizeUrlForAsset(projectId) {
+    try {
+      const numeric = Number(projectId || 0);
+      if (numeric <= 0) return;
+      const url = new URL(window.location.href);
+      url.searchParams.delete("new");
+      url.searchParams.delete("reset");
+      url.searchParams.delete("fresh");
+      url.searchParams.delete("force_new");
+      url.searchParams.delete("blank");
+      url.searchParams.set("resume", "1");
+      url.searchParams.set("project_id", String(numeric));
+      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    } catch (error) {
+      // ignore URL update errors
+    }
+  }
+
+  function normalizeUrlForFreshProject() {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("new");
+      url.searchParams.delete("reset");
+      url.searchParams.delete("fresh");
+      url.searchParams.delete("force_new");
+      url.searchParams.delete("project_id");
+      url.searchParams.delete("resume");
+      url.searchParams.set("blank", "1");
+      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    } catch (error) {
+      // ignore URL update errors
+    }
   }
 
   function safeProjectCacheName(value) {
@@ -914,33 +1017,12 @@
   // FP_REFRESH_RESUME_PATCH_V1
   function loadState() {
     const params = new URLSearchParams(window.location.search || "");
-    const explicitFresh = params.get("new") === "1" || params.get("reset") === "1" || params.get("fresh") === "1";
+    const explicitFresh = params.get("new") === "1"
+      || params.get("reset") === "1"
+      || params.get("fresh") === "1"
+      || params.get("force_new") === "1";
+    const explicitBlank = params.get("blank") === "1";
     const saved = readStorage(STORAGE_KEY) || readStorage(LEGACY_STORAGE_KEY);
-
-    const hasContent = (value) => {
-      if (value === null || value === undefined) return false;
-      if (typeof value === "string") return value.trim().length > 0;
-      if (Array.isArray(value)) return value.length > 0;
-      if (typeof value === "object") return Object.keys(value).length > 0;
-      return true;
-    };
-
-    const savedProjectId = saved && typeof saved === "object"
-      ? Number(saved.project_id || (saved.asset_state || {}).project_id || (saved.asset_state || {}).asset_id || 0)
-      : 0;
-
-    const savedHasWork = Boolean(saved && typeof saved === "object" && (
-      savedProjectId > 0
-      || hasContent(saved.source_brief)
-      || hasContent(saved.worldview_plan)
-      || hasContent(saved.character_plan)
-      || hasContent(saved.beat_checkpoint_timeline)
-      || hasContent(saved.checkpoint_explanation)
-      || hasContent(saved.character_storylines)
-      || hasContent(saved.storyline_decisions)
-      || hasContent(saved.adaptation_guide)
-      || hasContent(saved.framework_plan_package)
-    ));
 
     const normalizeUrlForResume = () => {
       try {
@@ -948,6 +1030,8 @@
         url.searchParams.delete("new");
         url.searchParams.delete("reset");
         url.searchParams.delete("fresh");
+        url.searchParams.delete("force_new");
+        url.searchParams.delete("blank");
         url.searchParams.set("resume", "1");
         window.history.replaceState(null, "", url.pathname + url.search + url.hash);
       } catch (error) {
@@ -955,12 +1039,37 @@
       }
     };
 
-    // FP_NEW_PROJECT_ALWAYS_FRESH_V1
+    // new=1 / reset=1 / fresh=1 始终创建空白项目。
+    // 资产数据已保存在服务端 {runtime_data}/projects/{id}.json，清浏览器缓存不会丢失。
+    // 打开已有资产后刷新的优化由 canUseCurrentAssetCache() 负责（URL 带 project_id 时生效）。
     if (explicitFresh) {
       storageRemove(STORAGE_KEY);
       storageRemove(LEGACY_STORAGE_KEY);
       const fresh = normalizeState(null);
       persistLoadedState(fresh);
+      normalizeUrlForFreshProject();
+      return fresh;
+    }
+
+    if (explicitBlank) {
+      const savedProjectId = saved && typeof saved === "object"
+        ? Number(saved.project_id || (saved.asset_state || {}).project_id || (saved.asset_state || {}).asset_id || 0)
+        : 0;
+      if (savedProjectId > 0) {
+        storageRemove(STORAGE_KEY);
+        storageRemove(LEGACY_STORAGE_KEY);
+        const fresh = normalizeState(null);
+        persistLoadedState(fresh);
+        normalizeUrlForFreshProject();
+        return fresh;
+      }
+      if (saved && typeof saved === "object") {
+        normalizeUrlForFreshProject();
+        return normalizeState(sanitizeLoadedState(saved));
+      }
+      const fresh = normalizeState(null);
+      persistLoadedState(fresh);
+      normalizeUrlForFreshProject();
       return fresh;
     }
 
@@ -986,6 +1095,9 @@
 
   function persistLoadedState(nextState) {
     try {
+      if (nextState && typeof nextState === "object") {
+        nextState._sfv = STORAGE_FORMAT_VERSION;
+      }
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
       window.localStorage.removeItem(LEGACY_STORAGE_KEY);
     } catch (error) {
@@ -1003,6 +1115,13 @@
 
   function sanitizeLoadedState(saved) {
     if (!saved || typeof saved !== "object") return saved;
+    // 已用当前格式版本保存过的数据跳过深度清理（_sfv 匹配时数据已经 stripRawResponseKeys 处理过），
+    // 仅清除不可序列化的运行时字段，大幅加速页面刷新后的状态恢复。
+    if (Number(saved._sfv || 0) === STORAGE_FORMAT_VERSION) {
+      const ready = Object.assign({}, saved);
+      ready.raw_stage_responses = {};
+      return ready;
+    }
     const sanitized = stripRawResponseKeys(saved);
     BUSINESS_FIELD_KEYS.forEach((field) => {
       if (saved[field] !== undefined) {
@@ -1128,8 +1247,29 @@
     });
   }
 
+  let _saveStateTimer = null;
   function saveState() {
+    // 300ms 防抖：连续多次调用合并为一次 localStorage 写入，减少 JSON 序列化开销
+    if (_saveStateTimer) clearTimeout(_saveStateTimer);
+    _saveStateTimer = setTimeout(() => {
+      _saveStateTimer = null;
+      try {
+        state._sfv = STORAGE_FORMAT_VERSION;
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (error) {
+        // ignore storage write errors
+      }
+    }, 300);
+  }
+
+  function flushSaveState() {
+    // 立即写入（用于页面关闭前等关键时刻）
+    if (_saveStateTimer) {
+      clearTimeout(_saveStateTimer);
+      _saveStateTimer = null;
+    }
     try {
+      state._sfv = STORAGE_FORMAT_VERSION;
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (error) {
       // ignore storage write errors
@@ -2637,8 +2777,9 @@
         </button>
       `;
     }).join("");
-    const modeLabel = config.backendReady ? "真实后端" : "Mock / 预留接口";
+    const modeLabel = config.backendReady ? "后端已连接" : "演示模式";
     const modeClass = config.backendReady ? "blue" : "warn";
+    const assetCount = filteredAssets().length;
     return `
       <aside class="fp-side">
         <button class="fp-side-toggle" type="button" data-action="toggle-sidebar" aria-label="${ui.sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}" title="${ui.sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}">
@@ -2647,22 +2788,27 @@
         <div class="fp-logo">
           <div class="fp-logo-mark">FP</div>
           <div>
-            剧本框架策划工作台
+            剧本创作
+            <small>框架策划助手</small>
           </div>
         </div>
-        <div class="fp-side-note">
-          <div class="fp-side-line"><span class="fp-tag ${modeClass}">${escapeHtml(modeLabel)}</span></div>
-          <div>每个阶段都需要调整输入、手动确认生成、审阅结果；若有修改请点击“应用修改”，下游阶段才会读取新版输入。</div>
+        <div class="fp-side-summary">
+          <span class="fp-tag ${modeClass}">${escapeHtml(modeLabel)}</span>
+          <strong>${escapeHtml(state.basic_config.project_title || state.basic_config.source_title || "未命名作品")}</strong>
+          <small>${escapeHtml(state.basic_config.target_format || "短剧")} · ${escapeHtml(state.basic_config.episodes_per_season || 60)} 集 · 当前 ${escapeHtml(realStageDisplayTitle(stageKeyForView(state.current_view || "basic")))}</small>
         </div>
-        <div class="fp-side-note">
-          <strong>本地保存：</strong>状态会自动保存
-        </div>
-        <div class="fp-side-actions">
-          <button class="fp-btn small primary" data-action="open-new-script" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>新建框架项目</button>
-          <button class="fp-btn small" data-action="toggle-assets" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>${ui.assetsOpen ? "收起框架资产" : "框架资产"}</button>
+        <div class="fp-side-actions fp-side-actions-clean">
+          <button class="fp-btn small primary" data-action="open-new-script" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>新建作品</button>
+          <button class="fp-btn small" data-action="toggle-assets" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>${ui.assetsOpen ? "收起资产" : `框架资产 ${assetCount ? `(${assetCount})` : ""}`}</button>
         </div>
         ${ui.assetsOpen ? renderAssetManager("side") : ""}
-        <nav class="fp-nav">${navItems}</nav>
+        <details class="fp-pro-stage-drawer">
+          <summary>
+            <span>专业阶段</span>
+            <small>查看和单独调整 01-07</small>
+          </summary>
+          <nav class="fp-nav">${navItems}</nav>
+        </details>
       </aside>
     `;
   }
@@ -2672,22 +2818,58 @@
     const stageTitle = realStageDisplayTitle(stageKeyForView(state.current_view || "basic"));
     const assetId = hasSavedFrameworkProjectId() ? projectId : "尚未保存";
     return `
+      <div class="fp-simple-top">
+        <div class="fp-simple-brand">
+          <span class="fp-simple-logo">FP</span>
+          <span>AI剧本创作助手</span>
+        </div>
+        <div class="fp-simple-progress">${renderStepRail()}</div>
+        <div class="fp-simple-actions">
+          <button class="fp-btn small" data-action="open-new-script" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>新建</button>
+          <button class="fp-btn small" data-action="toggle-assets" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>${ui.assetsOpen ? "收起作品" : "我的作品"}</button>
+          ${renderSaveFrameworkButton("small")}
+          <a class="fp-btn small ghost" data-guard-nav="workspace" href="${escapeHtml(config.workspaceUrl || "/workspace")}">返回</a>
+        </div>
+      </div>
+      ${ui.assetsOpen ? renderAssetManager("main") : ""}
       <div class="fp-top">
         <div>
-          <div class="fp-kicker">01-07 框架策划阶段</div>
-          <h1 class="fp-title">${escapeHtml(state.basic_config.project_title || "未命名框架策划")}</h1>
-          <p class="fp-top-sub">目标：产出可保存的框架资产。当前阶段：${escapeHtml(stageTitle)} · 框架资产 ID：${escapeHtml(assetId)}</p>
+          <div class="fp-kicker">AI 剧本创作向导</div>
+          <h1 class="fp-title">${escapeHtml(state.basic_config.project_title || "开始一个新剧本")}</h1>
+          <p class="fp-top-sub">先上传材料或写一句想法，AI 会自动完成原文提取、世界观、人设、节拍、人物线和最终策划包。当前：${escapeHtml(stageTitle)} · 资产 ID：${escapeHtml(assetId)}</p>
         </div>
         <div class="fp-top-actions">
           ${renderAutoFrameworkButton("small")}
-          ${renderSaveFrameworkButton("small")}
-          <a class="fp-btn small ghost" data-guard-nav="workspace" href="${escapeHtml(config.workspaceUrl || "/workspace")}">返回主工作台</a>
-          <button class="fp-btn small danger" data-action="reset-state" ${canClearFrameworkInput() && !ui.assetImporting && !isAutoFrameworkRunning() ? "" : "disabled"}>清空输入</button>
+          <button class="fp-btn small danger" data-action="reset-state" ${canClearFrameworkInput() && !ui.assetImporting && !isAutoFrameworkRunning() ? "" : "disabled"}>清空</button>
         </div>
       </div>
+      ${renderProfessionalStageNav()}
       ${state.current_view === "basic" ? renderKnowledgePanel() : ""}
-      <div class="fp-card fp-steps">${renderStepRail()}</div>
       ${renderRunningStageStatus()}
+    `;
+  }
+
+  function renderProfessionalStageNav() {
+    const navItems = VIEW_DEFS.map((item, index) => {
+      const unlocked = viewUnlocked(item.id);
+      const active = state.current_view === item.id ? "active" : "";
+      const done = stageProgressDone(item.stageKey) ? "done" : "";
+      const mark = done ? "✓" : String(index + 1);
+      return `
+        <button class="fp-pro-nav-item ${active} ${done}" data-action="go-view" data-view="${item.id}" ${unlocked ? "" : "disabled"}>
+          <span class="fp-pro-nav-dot">${mark}</span>
+          <span>${escapeHtml(item.label.replace(/^\d+\.\s*/, ""))}</span>
+        </button>
+      `;
+    }).join("");
+    return `
+      <details class="fp-card fp-pro-stage-main-drawer">
+        <summary>
+          <span>查看完整流程（可单独编辑）</span>
+          <small>展开后可逐阶段检查和单独修改 01-07</small>
+        </summary>
+        <div class="fp-pro-nav">${navItems}</div>
+      </details>
     `;
   }
 
@@ -2771,7 +2953,7 @@
       <section class="fp-card fp-knowledge-panel ${ui.knowledge.open ? "is-open" : ""}">
         <button class="fp-knowledge-toggle" type="button" data-action="toggle-knowledge-panel" aria-expanded="${ui.knowledge.open ? "true" : "false"}">
           <span>
-          <strong>智慧库 / 阶段偏好</strong>
+            <strong>智慧库 / 阶段偏好</strong>
             <small>${escapeHtml(selectedLabel)} · ${ui.knowledge.status ? escapeHtml(ui.knowledge.status) : "可为每个策划阶段注入不同偏好"}</small>
           </span>
           <span class="fp-tag blue">${ui.knowledge.open ? "收起" : "展开"}</span>
@@ -3010,7 +3192,7 @@
       return `
         <div class="fp-running-card" role="status" aria-live="polite">
           <div class="fp-running-main">
-            <span class="fp-running-spinner" aria-hidden="true"></span>
+            <span class="fp-running-orbit" aria-hidden="true"><i></i></span>
             <div>
               <strong>一键出框架：${escapeHtml(stageNo ? `${stageNo} ${title}` : title)}</strong>
               <p>${escapeHtml(message)}</p>
@@ -3027,7 +3209,7 @@
     return `
       <div class="fp-running-card" role="status" aria-live="polite">
         <div class="fp-running-main">
-          <span class="fp-running-spinner" aria-hidden="true"></span>
+          <span class="fp-running-orbit" aria-hidden="true"><i></i></span>
           <div>
             <strong>阶段 ${escapeHtml(stageNo)} 正在处理：${escapeHtml(title)}</strong>
             <p>已运行 ${escapeHtml(processingElapsedLabel(stageKey))}。</p>
@@ -3039,12 +3221,45 @@
   }
 
   function renderStepRail() {
-    return VIEW_DEFS.map((item, index) => {
-      const active = state.current_view === item.id ? "active" : "";
-      const done = stageProgressDone(item.stageKey) ? "done" : "";
-      const line = index < VIEW_DEFS.length - 1 ? `<span class="fp-step-line"></span>` : "";
-      const mark = done ? "✓" : String(index + 1);
-      return `<div class="fp-step ${active} ${done}"><span class="fp-step-dot">${mark}</span><span>${escapeHtml(item.label.replace(/^\d+\.\s*/, ""))}</span></div>${line}`;
+    const currentStage = stageKeyForView(state.current_view || "basic");
+    const groupedSteps = [
+      {
+        id: "start",
+        label: "开始创作",
+        active: currentStage === "basic",
+        done: stageProgressDone("basic"),
+      },
+      {
+        id: "planning",
+        label: "内容策划",
+        active: ["worldview", "character", "beat", "storylines", "guide"].includes(currentStage),
+        done: ["worldview", "character", "beat", "storylines", "guide"].every(stageProgressDone),
+      },
+      {
+        id: "package",
+        label: "框架确认",
+        active: currentStage === "package",
+        done: stageProgressDone("package"),
+      },
+      {
+        id: "script",
+        label: "正文生成",
+        active: false,
+        done: false,
+      },
+      {
+        id: "export",
+        label: "完成导出",
+        active: false,
+        done: false,
+      },
+    ];
+    return groupedSteps.map((item, index) => {
+      const active = item.active ? "active" : "";
+      const done = item.done ? "done" : "";
+      const line = index < groupedSteps.length - 1 ? `<span class="fp-step-line"></span>` : "";
+      const mark = item.done ? "✓" : String(index + 1);
+      return `<div class="fp-step ${active} ${done}"><span class="fp-step-dot">${mark}</span><span>${escapeHtml(item.label)}</span></div>${line}`;
     }).join("");
   }
 
@@ -3090,16 +3305,77 @@
   function renderBasicView() {
     const stage = state.stage_state.basic;
     const locked = stage.confirmed || hasStageOutput("basic");
+    const currentPreset = currentCreationPreset();
+    const hasSourceText = String(state.basic_config.source_text || "").trim().length > 0;
+    const sourceInputOpen = ui.sourceInputOpen || currentPreset !== "original" || hasSourceText || ui.sourceUploading || Boolean(ui.sourceUploadStatus);
+    const currentMaterial = currentMaterialSource(sourceInputOpen);
+    const episodeValue = [20, 40, 60].includes(Number(state.basic_config.episodes_per_season))
+      ? String(Number(state.basic_config.episodes_per_season))
+      : "custom";
     return `
-      <section class="fp-card fp-section">
-        <div class="fp-card-title-row">
+      <section class="fp-card fp-section fp-start-section">
+        <div class="fp-start-hero">
           <div>
-            <h2 class="fp-card-title">基础配置</h2>
+            <span class="fp-start-eyebrow">第 1 步 / 开始创作</span>
+            <h2 class="fp-start-title">把想法或原文交给 AI，先生成可修改的剧本框架</h2>
+            <p>小白只需要填清楚作品、集数、材料和想要的风格。专业拆解工作会放到后面的 01-07 阶段自动处理。</p>
           </div>
-          ${stageStatusTag("basic")}
+          <div class="fp-start-cta">
+            ${renderAutoFrameworkButton("")}
+            ${stageStatusTag("basic")}
+          </div>
         </div>
-        ${locked ? `<div class="fp-inline-warning">基础配置已应用。后续阶段会读取当前 01 输出。</div>` : ""}
-        <div class="fp-grid two">
+        ${locked ? `<div class="fp-inline-warning fp-applied-banner">基础配置已应用。后续阶段会读取当前 01 输出；如需大改，请清空输入或新建作品。</div>` : ""}
+        <div class="fp-start-layout">
+          <div class="fp-start-primary">
+            <div class="fp-card-title-row compact">
+              <div>
+                <h3 class="fp-card-title">核心选择</h3>
+                <p class="fp-card-sub">先选清楚 4 件事，剩下的结构拆解交给 AI。</p>
+              </div>
+            </div>
+            <div class="fp-guide-block">
+              <div class="fp-guide-question">
+                <label for="fpCreationPresetSelect">创作形式</label>
+                <select id="fpCreationPresetSelect" class="fp-guide-select" data-guide-select="creation-preset" ${locked ? "disabled" : ""}>
+                  <option value="original" ${currentPreset === "original" ? "selected" : ""}>原创</option>
+                  <option value="ip" ${currentPreset === "ip" ? "selected" : ""}>IP 改编</option>
+                  <option value="continue" ${currentPreset === "continue" ? "selected" : ""}>续写</option>
+                  <option value="rewrite" ${currentPreset === "rewrite" ? "selected" : ""}>剧本改编</option>
+                </select>
+              </div>
+              <div class="fp-guide-question">
+                <label for="fpEpisodeCountSelect">每季集数</label>
+                <select id="fpEpisodeCountSelect" class="fp-guide-select" data-guide-select="episode-count" ${locked ? "disabled" : ""}>
+                  <option value="20" ${episodeValue === "20" ? "selected" : ""}>20 集</option>
+                  <option value="40" ${episodeValue === "40" ? "selected" : ""}>40 集</option>
+                  <option value="60" ${episodeValue === "60" ? "selected" : ""}>60 集</option>
+                  <option value="custom" ${episodeValue === "custom" ? "selected" : ""}>自定义</option>
+                </select>
+              </div>
+              <div class="fp-guide-question">
+                <label for="fpMaterialSourceSelect">上传已有剧本</label>
+                <select id="fpMaterialSourceSelect" class="fp-guide-select" data-guide-select="material-source" ${locked ? "disabled" : ""}>
+                  <option value="idea" ${currentMaterial === "idea" ? "selected" : ""}>只写想法</option>
+                  <option value="upload" ${currentMaterial === "upload" ? "selected" : ""}>上传已有剧本</option>
+                  <option value="paste" ${currentMaterial === "paste" ? "selected" : ""}>粘贴文本</option>
+                </select>
+              </div>
+            </div>
+            <div class="fp-current-selection">
+              <strong>当前选择</strong>
+              <span>${escapeHtml(creationPresetLabel(currentPreset))} · ${escapeHtml(state.basic_config.episodes_per_season || 60)} 集 · ${escapeHtml(materialSourceLabel(currentMaterial))}</span>
+            </div>
+            <div class="fp-field fp-direction-field fp-main-idea-field">
+              <label>${currentPreset === "original" ? "你想写一个什么故事？" : "你想怎么改这个故事？"}</label>
+              <textarea data-config-key="adaptation_direction" placeholder="${currentPreset === "original" ? "在这里输入任何想法，我将为你定制创意，至少输入 15 字。" : "写清楚要保留什么、强化什么、避免什么。"}" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.adaptation_direction)}</textarea>
+            </div>
+            <details class="fp-basic-info-drawer" data-basic-info-drawer>
+              <summary>
+                <span>基础信息</span>
+                <small>标题、目标形式、每集字数</small>
+              </summary>
+            <div class="fp-grid two">
           <div class="fp-field">
             <label>项目标题</label>
             <input data-config-key="project_title" value="${escapeHtml(state.basic_config.project_title)}" ${locked ? "disabled" : ""} />
@@ -3111,8 +3387,8 @@
               <option value="改写" ${state.basic_config.mode === "改写" ? "selected" : ""}>改写</option>
             </select>
           </div>
-        </div>
-        <div class="fp-grid two" style="margin-top:14px">
+            </div>
+            <div class="fp-grid two" style="margin-top:14px">
           <div class="fp-field">
             <label>作品标题</label>
             <input data-config-key="source_title" placeholder="例如：机甲纪元，拳爆天星" value="${escapeHtml(state.basic_config.source_title)}" ${locked ? "disabled" : ""} />
@@ -3121,8 +3397,8 @@
             <label>目标形式</label>
             <input data-config-key="target_format" placeholder="例如：短剧、长剧、网文剧本" value="${escapeHtml(state.basic_config.target_format)}" ${locked ? "disabled" : ""} />
           </div>
-        </div>
-        <div class="fp-grid three" style="margin-top:14px">
+            </div>
+            <div class="fp-grid three fp-quick-numbers" style="margin-top:14px">
           <div class="fp-field">
             <label>季数</label>
             <input type="number" min="1" data-config-key="season_count" value="${escapeHtml(state.basic_config.season_count)}" ${locked ? "disabled" : ""} />
@@ -3135,26 +3411,47 @@
             <label>每集字数</label>
             <input type="number" min="100" step="50" data-config-key="episode_word_count" value="${escapeHtml(state.basic_config.episode_word_count || 600)}" ${locked ? "disabled" : ""} />
           </div>
-        </div>
-        <div class="fp-field" style="margin-top:14px">
+            </div>
+            </details>
+            ${sourceInputOpen ? `<div class="fp-field fp-material-field" style="margin-top:14px">
           <label>原文材料</label>
           <div class="fp-source-upload ${locked ? "disabled" : ""}" data-source-drop-zone>
             <input id="sourceMaterialFileInput" type="file" accept=".txt,.md,.json,.docx,.pdf,text/plain,text/markdown,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" data-source-file-input ${locked ? "disabled" : ""} hidden />
             <label for="sourceMaterialFileInput">
-              <strong>${ui.sourceUploading ? "正在解析文件..." : "拖拽文件到这里，或点击上传原文材料"}</strong>
-              <span>支持 TXT、MD、JSON、DOCX、PDF。导入后仍可在下方手动修改。</span>
+              <strong>${ui.sourceUploading ? "正在解析文件..." : "上传原文 / 大纲 / 旧策划"}</strong>
+              <span>支持 TXT、MD、JSON、DOCX、PDF。也可以直接在下方粘贴。</span>
             </label>
             ${ui.sourceUploadStatus ? `<em>${escapeHtml(ui.sourceUploadStatus)}</em>` : ""}
           </div>
           <textarea data-config-key="source_text" placeholder="可直接粘贴原文、梗概、旧策划、分集等材料。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.source_text)}</textarea>
-        </div>
-        <div class="fp-field" style="margin-top:14px">
-          <label>写作方向</label>
-          <textarea data-config-key="adaptation_direction" placeholder="例如：压缩支线，强化中点反转，偏短剧强情绪推进。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.adaptation_direction)}</textarea>
-        </div>
-        <div class="fp-field" style="margin-top:14px">
-          <label>限制条件</label>
-          <textarea data-config-key="user_constraints" placeholder="例如：不能改世界观底层逻辑，不能删除某角色。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.user_constraints)}</textarea>
+            </div>` : ""}
+          </div>
+          <details class="fp-start-secondary fp-advanced-creation-settings">
+            <summary>
+              <span>高级设置</span>
+              <small>限制条件、01 提取偏好</small>
+            </summary>
+            <div class="fp-helper-card">
+              <strong>AI 负责的重复工作</strong>
+              <span>提取原文、识别人设、拆三幕十五节拍、整理人物线、生成最终策划包。</span>
+            </div>
+            <div class="fp-helper-card">
+              <strong>你需要决定的创意</strong>
+              <span>想要的爽点、风格、必须保留的人物关系、不能改的设定和结局方向。</span>
+            </div>
+            <div class="fp-field">
+              <label>限制条件</label>
+              <textarea data-config-key="user_constraints" placeholder="例如：不能改世界观底层逻辑，不能删除某角色。" ${locked ? "disabled" : ""}>${escapeHtml(state.basic_config.user_constraints)}</textarea>
+            </div>
+            <div class="fp-field fp-preference-panel fp-basic-stage-preference">
+              <div class="fp-field-label-row">
+                <label>01 原文提取补充要求</label>
+                <button class="fp-btn small" type="button" data-action="apply-stage-preference" data-stage-key="basic" ${locked || !String((((state.prompt_preferences || {}).stage_prompts || {}).basic) || "").trim() ? "disabled" : ""}>应用偏好</button>
+              </div>
+              <textarea data-stage-preference-key="basic" placeholder="例如：优先识别已有主角、反派、关键配角；不要凭空新增人物；人物关系必须来自原文或明确大纲。" ${locked ? "disabled" : ""}>${escapeHtml((((state.prompt_preferences || {}).stage_prompts || {}).basic) || "")}</textarea>
+              <small>只影响 01 原始故事信息提取，不会污染后续阶段；填写后点击“应用偏好”再生成。</small>
+            </div>
+          </details>
         </div>
         ${(!isEmptyValue(state.source_brief) || String(state.display_texts["01"] || "").trim()) ? `
           <div class="fp-stage-note fp-stage-output applied">
@@ -3162,7 +3459,6 @@
             ${renderSourceBriefTree(state.source_brief, state.display_texts["01"] || "")}
           </div>
         ` : ""}
-        ${renderStagePreRunPanel("basic")}
         ${renderStageHistoryPanel("basic")}
         ${isStageLoading("basic") ? renderProcessingBanner("正在提取原文信息，请稍候。") : ""}
         ${renderStageBottomActions("basic")}
@@ -3348,10 +3644,14 @@
     const blockReason = stageRunBlockReason(stageKey);
     const canNext = Boolean(!ui.assetImporting && !isAutoFrameworkRunning() && nextView && hasOutput && !dirty && viewUnlocked(nextView));
     const title = realStageDisplayTitle(stageKey);
+    const generateLabel = hasOutput ? `重新生成 ${escapeHtml(title)}` : "生成本阶段";
+    const generateContent = running
+      ? `<span class="fp-btn-loading-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>正在生成</span>`
+      : generateLabel;
     return `
       <div class="fp-actions fp-stage-bottom-actions">
         <button class="fp-btn" data-action="go-view" data-view="${escapeHtml(previousView)}" ${previousView && !isAutoFrameworkRunning() ? "" : "disabled"}>上一步</button>
-        <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="${escapeHtml(stageKey)}" ${ui.assetImporting || running || isAutoFrameworkRunning() || blockReason ? "disabled" : ""}>${hasOutput ? `重新生成 ${escapeHtml(title)}` : "生成本阶段"}</button>
+        <button class="fp-btn fp-stage-generate-btn ${hasOutput ? "" : "primary"} ${running ? "is-loading" : ""}" data-action="run-stage-generate" data-stage-key="${escapeHtml(stageKey)}" ${ui.assetImporting || running || isAutoFrameworkRunning() || blockReason ? "disabled" : ""}>${generateContent}</button>
         ${isStageEditable(stageKey) ? `<button class="fp-btn ${dirty ? "primary" : ""}" data-action="apply-stage-changes" data-stage-key="${escapeHtml(stageKey)}" ${dirty && !ui.assetImporting && !isAutoFrameworkRunning() ? "" : "disabled"}>应用修改</button>` : ""}
         <button class="fp-btn ${canNext ? "primary" : ""}" data-action="go-next-stage" data-view="${escapeHtml(nextView)}" ${canNext ? "" : "disabled"}>下一步</button>
         ${stageKey === "package" ? `${renderFrameworkScriptButton("")}` : ""}
@@ -3535,7 +3835,7 @@
   function renderProcessingBanner(message) {
     return `
       <div class="fp-processing-banner">
-        <span class="fp-spinner" aria-hidden="true"></span>
+        <span class="fp-processing-pulse" aria-hidden="true"><i></i><i></i><i></i></span>
         <span>${escapeHtml(message)}</span>
       </div>
     `;
@@ -3753,7 +4053,7 @@
         ${renderStageHistoryPanel("package")}
         <div class="fp-actions fp-stage-bottom-actions">
           <button class="fp-btn" data-action="go-view" data-view="guide" ${ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>上一步</button>
-          <button class="fp-btn ${hasOutput ? "" : "primary"}" data-action="run-stage-generate" data-stage-key="package" ${ui.assetImporting || isAutoFrameworkRunning() || isStageLoading("package") || blockReason ? "disabled" : ""}>${hasOutput ? "重新生成 07" : "生成本阶段"}</button>
+          <button class="fp-btn fp-stage-generate-btn ${hasOutput ? "" : "primary"} ${isStageLoading("package") ? "is-loading" : ""}" data-action="run-stage-generate" data-stage-key="package" ${ui.assetImporting || isAutoFrameworkRunning() || isStageLoading("package") || blockReason ? "disabled" : ""}>${isStageLoading("package") ? `<span class="fp-btn-loading-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>正在生成</span>` : (hasOutput ? "重新生成 07" : "生成本阶段")}</button>
           <button class="fp-btn primary" data-action="download-readable-framework" ${!hasOutput || ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>下载可读框架</button>
           <button class="fp-btn" data-action="download-structured-framework" ${!hasOutput || ui.assetImporting || isAutoFrameworkRunning() ? "disabled" : ""}>下载结构化框架</button>
           ${renderFrameworkScriptButton("")}
@@ -4327,6 +4627,7 @@ function renderPackageBlocks() {
     if (isEmptyValue(data)) return `<div class="fp-empty">尚未生成人设方案。</div>`;
     const source = data && typeof data === "object" ? data : {};
     const characters = []
+      .concat(Array.isArray(source.characters) ? source.characters : [])
       .concat(Array.isArray(source.main_characters) ? source.main_characters : [])
       .concat(Array.isArray(source.supporting_characters) ? source.supporting_characters : []);
     ["protagonist", "antagonist"].forEach((key) => {
@@ -4358,12 +4659,344 @@ function renderPackageBlocks() {
       ["speech_style", "说话风格"],
       ["downstream_notes", "下游注意事项"],
     ];
-    return `<div class="fp-character-grid">${unique.map((item) => `
+    return `
+      ${renderCharacterRelationshipGraph(source, unique)}
+      <div class="fp-character-grid">${unique.map((item) => `
       <article class="fp-character-card">
         <h3>${escapeHtml(item.name || item.legal_name || item.title || "未命名人物")}</h3>
         ${fields.map(([key, label]) => renderReadableFieldCard(label, item[key])).join("")}
       </article>
-    `).join("")}</div>`;
+    `).join("")}</div>
+    `;
+  }
+
+  function graphFirstValue(...values) {
+    for (const value of values) {
+      if (isRenderableValue(value)) return value;
+    }
+    return "";
+  }
+
+  function characterName(item, fallback) {
+    return String(graphFirstValue(
+      item && item.name,
+      item && item.legal_name,
+      item && item.character_name,
+      item && item.title,
+      item && item.id,
+      fallback || "未命名人物"
+    ) || "").trim();
+  }
+
+  function characterRoleText(item) {
+    return String(graphFirstValue(
+      item && item.role,
+      item && item.identity,
+      item && item.identity_position,
+      item && item.story_function,
+      item && item.character_role,
+      ""
+    ) || "").trim();
+  }
+
+  function characterDetailText(item) {
+    const parts = [
+      graphFirstValue(item && item.external_goal, item && item.goal, item && item.objective, ""),
+      graphFirstValue(item && item.internal_need, item && item.desire, item && item.motivation, ""),
+      graphFirstValue(item && item.weakness, item && item.fear, ""),
+      graphFirstValue(item && item.growth_arc, item && item.arc, item && item.change_arc, ""),
+    ].filter(Boolean).map((value) => String(value).trim()).filter(Boolean);
+    return parts.slice(0, 4);
+  }
+
+  function normalizeGraphCharacters(items, maxCount = 24) {
+    const seen = new Set();
+    return (items || []).map((item, index) => {
+      const name = characterName(item, `人物${index + 1}`);
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) return null;
+      seen.add(key);
+      return {
+        id: String(graphFirstValue(item.id, item.character_id, name)).trim() || name,
+        name,
+        role: characterRoleText(item),
+        raw: item || {},
+      };
+    }).filter(Boolean).slice(0, maxCount);
+  }
+
+  function relationshipSourceItems(source) {
+    const value = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+    return []
+      .concat(Array.isArray(value.relationship_map) ? value.relationship_map : [])
+      .concat(Array.isArray(value.character_relationships) ? value.character_relationships : [])
+      .concat(Array.isArray(value.relationships) ? value.relationships : []);
+  }
+
+  function parseRelationshipEndpointsFromText(text) {
+    const line = String(text || "").trim();
+    if (!line) return [];
+    const head = line.split(/[：:]/)[0] || line;
+    const match = head.match(/^\s*(.+?)\s*(?:<->|->|—|–|-{1,2}|→|↔|～|~|\/)\s*(.+?)\s*$/);
+    if (!match) return [];
+    const cleanName = (value) => String(value || "")
+      .replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, "")
+      .replace(/^(关系|人物|角色)\s*/g, "")
+      .trim();
+    const from = cleanName(match[1]);
+    const to = cleanName(match[2]);
+    return from && to && from !== to ? [from, to] : [];
+  }
+
+  function graphCharactersWithRelationshipNodes(source, characters) {
+    const nodes = normalizeGraphCharacters(characters, 24);
+    const seen = new Set(nodes.map((item) => item.name.toLowerCase()));
+    const addNode = (name, relationText) => {
+      const clean = String(name || "").trim();
+      if (!clean) return;
+      const key = clean.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      nodes.push({
+        id: clean,
+        name: clean,
+        role: "关系表人物",
+        raw: {
+          name: clean,
+          role: "关系表人物",
+          story_function: relationText || "从人物关系表补充显示",
+        },
+      });
+    };
+    relationshipSourceItems(source).forEach((item) => {
+      let endpoints = [];
+      let relationText = "";
+      if (typeof item === "string") {
+        endpoints = parseRelationshipEndpointsFromText(item);
+        relationText = item;
+      } else if (item && typeof item === "object") {
+        endpoints = relationEndpointsFromObject(item);
+        relationText = relationTextFromObject(item);
+      }
+      endpoints.forEach((name) => addNode(name, relationText));
+    });
+    return nodes.slice(0, 24);
+  }
+
+  function graphCenterIndex(graphCharacters) {
+    const index = graphCharacters.findIndex((item) => {
+      const text = [
+        item && item.role,
+        item && item.raw && item.raw.role,
+        item && item.raw && item.raw.identity,
+        item && item.raw && item.raw.story_function,
+      ].join(" ");
+      return /主角|主人公|男主|女主|核心人物|protagonist/i.test(text);
+    });
+    return index >= 0 ? index : 0;
+  }
+
+  function relationTextFromObject(item) {
+    return String(graphFirstValue(
+      item && item.relation,
+      item && item.relationship,
+      item && item.label,
+      item && item.type,
+      item && item.hook,
+      item && item.summary,
+      item && item.description,
+      "人物关系"
+    ) || "").trim();
+  }
+
+  function relationEndpointsFromObject(item) {
+    const from = graphFirstValue(item && item.from, item && item.source, item && item.character_a, item && item.a, item && item.name, item && item.character, "");
+    const to = graphFirstValue(item && item.to, item && item.target, item && item.character_b, item && item.b, item && item.related_character, "");
+    return [String(from || "").trim(), String(to || "").trim()];
+  }
+
+  function parseRelationshipText(text, graphCharacters, defaultFrom) {
+    const line = String(text || "").trim();
+    if (!line) return [];
+    const explicitPair = parseRelationshipEndpointsFromText(line);
+    if (explicitPair.length === 2) {
+      return [{ from: explicitPair[0], to: explicitPair[1], label: line }];
+    }
+    const names = graphCharacters
+      .map((item) => item.name)
+      .filter((name) => name && line.includes(name));
+    const pairs = [];
+    if (defaultFrom && !names.includes(defaultFrom)) names.unshift(defaultFrom);
+    for (let i = 0; i < names.length; i += 1) {
+      for (let j = i + 1; j < names.length; j += 1) {
+        pairs.push({ from: names[i], to: names[j], label: line });
+      }
+    }
+    return pairs;
+  }
+
+  function collectCharacterRelationships(source, graphCharacters) {
+    const links = [];
+    const addLink = (from, to, label) => {
+      if (!from || !to || from === to) return;
+      if (!graphCharacters.some((item) => item.name === from) || !graphCharacters.some((item) => item.name === to)) return;
+      const key = [from, to].sort().join("__") + "__" + String(label || "").slice(0, 24);
+      if (links.some((item) => item.key === key)) return;
+      links.push({ key, from, to, label: String(label || "人物关系").trim() || "人物关系" });
+    };
+
+    const relationshipSources = relationshipSourceItems(source);
+
+    relationshipSources.forEach((item) => {
+      if (typeof item === "string") {
+        parseRelationshipText(item, graphCharacters).forEach((link) => addLink(link.from, link.to, link.label));
+        return;
+      }
+      if (item && typeof item === "object") {
+        const [from, to] = relationEndpointsFromObject(item);
+        addLink(from, to, relationTextFromObject(item));
+      }
+    });
+
+    graphCharacters.forEach((character) => {
+      const hooks = []
+        .concat(Array.isArray(character.raw.relationship_hooks) ? character.raw.relationship_hooks : [])
+        .concat(Array.isArray(character.raw.relationships) ? character.raw.relationships : [])
+        .concat(character.raw.relationship ? [character.raw.relationship] : []);
+      hooks.forEach((hook) => {
+        if (typeof hook === "string") {
+          parseRelationshipText(hook, graphCharacters, character.name).forEach((link) => addLink(link.from, link.to, link.label));
+          return;
+        }
+        if (hook && typeof hook === "object") {
+          const [from, to] = relationEndpointsFromObject(Object.assign({ from: character.name }, hook));
+          addLink(from || character.name, to, relationTextFromObject(hook));
+        }
+      });
+    });
+
+    if (!links.length && graphCharacters.length > 1) {
+      const center = graphCharacters[0].name;
+      graphCharacters.slice(1, 6).forEach((item) => addLink(center, item.name, "人物关系待确认"));
+    }
+    return links.slice(0, 36);
+  }
+
+  function shortRelationLabel(label) {
+    const raw = String(label || "人物关系")
+      .replace(/[。；;，,]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const relationWords = ["师生", "朋友", "敌人", "对手", "同伴", "合作", "守护", "利用", "亲人", "父子", "母子", "兄弟", "姐妹", "恋人", "夫妻", "上下级", "盟友", "背叛", "复仇", "救赎", "竞争", "监视", "追杀", "暗恋", "旧识", "导师", "徒弟", "主仆", "雇佣", "反派", "敌对", "支援", "保护"];
+    const hit = relationWords.find((word) => raw.includes(word));
+    if (hit) return hit.length <= 2 ? `${hit}关系` : hit;
+    const text = raw
+      .replace(/^.*?(是|为|作为|属于|承担|负责)/, "")
+      .replace(/(推动|影响|连接|牵引).*$/, "")
+      .trim();
+    if (!text) return "人物关系";
+    return truncateText(text, 5);
+  }
+
+  function graphLayoutPosition(index, count, canvasWidth, canvasHeight, centerIndex) {
+    const centerX = canvasWidth / 2;
+    const centerY = canvasHeight / 2;
+    if (index === centerIndex || count === 1) return { x: centerX, y: centerY };
+    const others = Array.from({ length: count }, (_, itemIndex) => itemIndex).filter((itemIndex) => itemIndex !== centerIndex);
+    const order = others.indexOf(index);
+    const slots = Math.max(4, others.length);
+    const angle = -Math.PI / 2 + (order / slots) * Math.PI * 2;
+    const radiusX = Math.max(260, Math.min(480, canvasWidth * 0.33));
+    const radiusY = Math.max(135, Math.min(210, canvasHeight * 0.34));
+    return {
+      x: centerX + Math.cos(angle) * radiusX,
+      y: centerY + Math.sin(angle) * radiusY,
+    };
+  }
+
+  function primaryGraphLinks(source, graphCharacters, centerName) {
+    const allLinks = collectCharacterRelationships(source || {}, graphCharacters);
+    const byPair = new Map();
+    allLinks.forEach((link) => {
+      const pairKey = [link.from, link.to].sort().join("__");
+      const current = byPair.get(pairKey);
+      const next = {
+        from: link.from,
+        to: link.to,
+        label: shortRelationLabel(link.label),
+      };
+      if (!current || String(next.label).length < String(current.label).length || current.label === "人物关系待确认") {
+        byPair.set(pairKey, next);
+      }
+    });
+    const connected = new Set();
+    Array.from(byPair.values()).forEach((link) => {
+      connected.add(link.from);
+      connected.add(link.to);
+    });
+    graphCharacters.forEach((item) => {
+      if (item.name === centerName || connected.has(item.name)) return;
+      byPair.set([centerName, item.name].sort().join("__"), { from: centerName, to: item.name, label: "关系待定" });
+    });
+    return Array.from(byPair.values()).slice(0, 36);
+  }
+
+  function renderCharacterRelationshipGraph(source, characters) {
+    const graphCharacters = graphCharactersWithRelationshipNodes(source || {}, characters);
+    if (!graphCharacters.length) return "";
+    const count = graphCharacters.length;
+    const centerIndex = graphCenterIndex(graphCharacters);
+    const centerName = graphCharacters[centerIndex].name;
+    const canvasWidth = Math.max(980, Math.ceil(count / 2) * 250);
+    const canvasHeight = count <= 5 ? 420 : Math.min(620, 420 + Math.ceil((count - 5) / 2) * 64);
+    const positions = graphCharacters.map((_, index) => graphLayoutPosition(index, count, canvasWidth, canvasHeight, centerIndex));
+    const positionByName = new Map(graphCharacters.map((item, index) => [item.name, positions[index]]));
+    const links = primaryGraphLinks(source || {}, graphCharacters, centerName);
+    const lineMarkup = links.map((link) => {
+      const from = positionByName.get(link.from);
+      const to = positionByName.get(link.to);
+      if (!from || !to) return "";
+      const midX = (from.x + to.x) / 2;
+      const midY = (from.y + to.y) / 2;
+      return `
+        <line class="fp-character-link-line" x1="${escapeHtml(String(from.x))}" y1="${escapeHtml(String(from.y))}" x2="${escapeHtml(String(to.x))}" y2="${escapeHtml(String(to.y))}" />
+        <foreignObject x="${escapeHtml(String(midX - 42))}" y="${escapeHtml(String(midY - 12))}" width="84" height="28">
+          <div class="fp-character-link-label">${escapeHtml(shortRelationLabel(link.label))}</div>
+        </foreignObject>
+      `;
+    }).join("");
+    const nodeMarkup = graphCharacters.map((item, index) => {
+      const pos = positions[index];
+      const details = characterDetailText(item.raw);
+      return `
+        <article class="fp-character-node ${index === centerIndex ? "primary" : ""}" style="left:${escapeHtml(String(pos.x))}px; top:${escapeHtml(String(pos.y))}px;" tabindex="0">
+          <strong>${escapeHtml(item.name)}</strong>
+          <span>${escapeHtml(item.role || "角色定位待确认")}</span>
+          <div class="fp-character-popover">
+            <b>${escapeHtml(item.name)}</b>
+            <small>${escapeHtml(item.role || "角色定位待确认")}</small>
+            ${details.length ? `<ul>${details.map((detail) => `<li>${escapeHtml(truncateText(detail, 42))}</li>`).join("")}</ul>` : `<p>暂无更多人物细节。</p>`}
+          </div>
+        </article>
+      `;
+    }).join("");
+    return `
+      <details class="fp-character-graph-card">
+        <summary class="fp-character-graph-head">
+          <div>
+            <strong>人物关系图</strong>
+            <span>点击展开横向关系图，鼠标悬停人物可查看摘要。</span>
+          </div>
+          <em>${escapeHtml(String(graphCharacters.length))} 人物 · ${escapeHtml(String(links.length))} 关系</em>
+        </summary>
+        <div class="fp-character-graph-scroll">
+          <div class="fp-character-graph" role="img" aria-label="人物关系图" style="width:${escapeHtml(String(canvasWidth))}px; height:${escapeHtml(String(canvasHeight))}px;">
+            <svg class="fp-character-link-layer" width="${escapeHtml(String(canvasWidth))}" height="${escapeHtml(String(canvasHeight))}" viewBox="0 0 ${escapeHtml(String(canvasWidth))} ${escapeHtml(String(canvasHeight))}" preserveAspectRatio="none" aria-hidden="true">${lineMarkup}</svg>
+            ${nodeMarkup}
+          </div>
+        </div>
+      </details>
+    `;
   }
 
   function renderReadableStageOutput(data, options) {
@@ -5470,6 +6103,8 @@ function renderPackageBlocks() {
           status: (autosavedAsset.asset_state || {}).status || autosavedAsset.status || (state.asset_state || {}).status || "in_progress",
           updated_at: autosavedAsset.updated_at || new Date().toISOString(),
         });
+        // 阶段首次自动保存后 URL 从 ?new=1 切换为具体 project_id，刷新可正确恢复
+        normalizeUrlForAsset(autosavedProjectId);
       }
       if (response.history) {
         ui.stageHistory[stageKey] = [response.history].concat(ui.stageHistory[stageKey] || []).slice(0, 50);
@@ -5490,11 +6125,10 @@ function renderPackageBlocks() {
       if (next) unlockStage(next);
       syncFrameworkAssetState(state, `generate:${stageKey}`);
       saveState();
-      try {
-        await saveFrameworkAsset({ silent: true, skipDirtyCheck: true });
-      } catch (saveError) {
-        showToast(`阶段已生成，但前端保存状态同步失败：${(saveError && saveError.message) || "未知错误"}`);
-      }
+      // 服务器已在阶段 API 内部自动保存（autosave），此处仅刷新资产列表以同步 UI，
+      // 不再重复发送全量保存请求，避免双写导致保存耗时翻倍。
+      clearDirty();
+      loadAssets().catch(() => {});
       recordHistory(options && options.revise ? "revise_stage" : "generate_stage", { stageKey, stageNo });
       return response;
     } catch (error) {
@@ -6233,6 +6867,7 @@ function renderPackageBlocks() {
       syncStageFlow(state);
       saveState();
       clearDirty();
+      normalizeUrlForFreshProject();
       loadStageHistory("basic", { silent: true }).catch(() => {});
       showToast("已新建空白框架，请在 01 阶段填写输入。");
       render();
@@ -6389,6 +7024,7 @@ function renderPackageBlocks() {
         state.asset_state.current_stage = "package";
       }
       saveState();
+      normalizeUrlForAsset(projectId);
       clearDirty();
 
       if (!safeOptions.silent) {
@@ -6693,6 +7329,10 @@ function renderPackageBlocks() {
     });
     await loadAssets();
     await loadStageHistory("basic");
+    // 更新 URL 指向新创建的项目，防止刷新后跳到旧资产
+    if (state.project_id) {
+      normalizeUrlForAsset(state.project_id);
+    }
     showToast("新框架项目已创建，已进入 01 阶段");
   }
 
@@ -6757,6 +7397,7 @@ function renderPackageBlocks() {
       asset_id: state.project_id,
       project_id: state.project_id,
       status: project.status || (state.asset_state || {}).status || "in_progress",
+      updated_at: project.updated_at || (state.asset_state || {}).updated_at || "",
     });
     if (!state.stage_state || typeof state.stage_state !== "object") {
       state.stage_state = clone(initialState.stage_state);
@@ -6793,6 +7434,18 @@ function renderPackageBlocks() {
       save: async () => openAsset(projectId),
       discard: async () => openAsset(projectId),
     })) return;
+    const cachedItem = assetListItem(projectId);
+    if (canUseCurrentAssetCache(projectId, cachedItem)) {
+      ui.assetsOpen = false;
+      ui.assetImportProgress = null;
+      state.current_view = state.current_view || "basic";
+      normalizeUrlForAsset(projectId);
+      clearDirty();
+      render();
+      loadStageHistory(stageKeyForView(state.current_view || "basic"), { silent: true }).catch(() => {});
+      showToast("已使用本地缓存打开资产");
+      return;
+    }
     ui.assetImporting = true;
     ui.toast = "";
     setAssetImportProgress(8, "正在读取资产快照...");
@@ -6811,19 +7464,15 @@ function renderPackageBlocks() {
         saveState();
         ui.stageHistory = {};
         ui.stageHistoryLoading = {};
-        setAssetImportProgress(84, "正在加载当前阶段历史版本...");
-        await waitForPaint();
-        try {
-          await loadStageHistory(stageKeyForView(state.current_view || "basic"), { silent: true });
-        } catch (historyError) {
+        setAssetImportProgress(84, "正在准备界面，历史版本将在后台加载...");
+        loadStageHistory(stageKeyForView(state.current_view || "basic"), { silent: true }).catch(() => {
           ui.stageHistory[stageKeyForView(state.current_view || "basic")] = [];
-          setAssetImportProgress(90, "资产已缓存，历史版本暂时未加载，可稍后手动刷新。");
-          await waitForPaint();
-        }
+        });
         clearDirty();
         setAssetImportProgress(96, "正在渲染资产界面，即将完成...");
         await waitForPaint();
         ui.assetImporting = false;
+        normalizeUrlForAsset(state.project_id || projectId);
         setAssetImportProgress(100, "缓存完成，资产已打开。");
         return;
       }
@@ -6849,18 +7498,14 @@ function renderPackageBlocks() {
       await waitForPaint();
       saveState();
       clearDirty();
-      setAssetImportProgress(84, "正在加载基础阶段历史版本...");
-      await waitForPaint();
-      try {
-        await loadStageHistory("basic", { silent: true });
-      } catch (historyError) {
+      setAssetImportProgress(84, "正在准备界面，历史版本将在后台加载...");
+      loadStageHistory("basic", { silent: true }).catch(() => {
         ui.stageHistory.basic = [];
-        setAssetImportProgress(90, "资产已缓存，历史版本暂时未加载，可稍后手动刷新。");
-        await waitForPaint();
-      }
+      });
       setAssetImportProgress(96, "正在渲染资产界面，即将完成...");
       await waitForPaint();
       ui.assetImporting = false;
+      normalizeUrlForAsset(state.project_id || projectId);
       setAssetImportProgress(100, "缓存完成，资产已打开。");
     } catch (error) {
       ui.assetImportProgress = null;
@@ -6896,8 +7541,12 @@ function renderPackageBlocks() {
   function shouldAutoOpenLatestAsset() {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("project_id")) return false;
-    if (urlParams.get("new") === "1" || urlParams.get("reset") === "1" || urlParams.get("fresh") === "1") return false;
-    return currentWorkspaceLooksPlaceholder();
+    if (urlParams.get("new") === "1"
+      || urlParams.get("reset") === "1"
+      || urlParams.get("fresh") === "1"
+      || urlParams.get("force_new") === "1"
+      || urlParams.get("blank") === "1") return false;
+    return false;
   }
 
   async function controlAssetTask(taskId, action) {
@@ -7114,6 +7763,172 @@ function renderPackageBlocks() {
     });
   }
 
+  function updateBasicConfigFromGuide(values, reason) {
+    Object.entries(values || {}).forEach(([key, value]) => {
+      state.basic_config[key] = value;
+    });
+    markDirty();
+    savePromptPreferences(reason || "guided_start");
+    saveState();
+    render();
+  }
+
+  function openSourceInput(focusKey) {
+    ui.sourceInputOpen = true;
+    ui.materialSource = "paste";
+    render();
+    if (focusKey) focusConfigField(focusKey);
+  }
+
+  function useIdeaOnly() {
+    ui.sourceInputOpen = false;
+    ui.materialSource = "idea";
+    render();
+    focusConfigField("adaptation_direction");
+  }
+
+  function openBasicInfoAndFocus(key) {
+    const drawer = app.querySelector("[data-basic-info-drawer]");
+    if (drawer) drawer.open = true;
+    focusConfigField(key);
+  }
+
+  function triggerSourceUploadPicker() {
+    ui.sourceInputOpen = true;
+    ui.materialSource = "upload";
+    render();
+    window.setTimeout(() => {
+      const input = app.querySelector("[data-source-file-input]");
+      if (input && !input.disabled) input.click();
+    }, 0);
+  }
+
+  function currentCreationPreset() {
+    const mode = String(state.basic_config.mode || "").trim();
+    const direction = String(state.basic_config.adaptation_direction || "");
+    if (direction.includes("创作类型：IP改编")) return "ip";
+    if (direction.includes("创作类型：续写")) return "continue";
+    if (direction.includes("创作类型：剧本改编")) return "rewrite";
+    if (mode === "改写" && direction.includes("IP")) return "ip";
+    return "original";
+  }
+
+  function creationPresetLabel(preset) {
+    return {
+      original: "原创",
+      ip: "IP 改编",
+      continue: "续写",
+      rewrite: "剧本改编",
+    }[preset] || "原创";
+  }
+
+  function materialSourceLabel(source) {
+    return {
+      idea: "只写想法",
+      upload: "上传已有剧本",
+      paste: "粘贴文本",
+    }[source] || "只写想法";
+  }
+
+  function currentMaterialSource(sourceInputOpen) {
+    if (!sourceInputOpen) return "idea";
+    if (ui.sourceUploading || ui.sourceUploadStatus) return "upload";
+    if (ui.materialSource === "upload" || ui.materialSource === "paste") return ui.materialSource;
+    if (String(state.basic_config.source_text || "").trim()) return "paste";
+    return currentCreationPreset() === "original" ? "idea" : "upload";
+  }
+
+  function removeCreationPresetMarkers(text) {
+    return String(text || "")
+      .split("；")
+      .map((item) => item.trim())
+      .filter((item) => item && !item.startsWith("创作类型："))
+      .join("；");
+  }
+
+  function withCreationPresetMarker(preset, instruction) {
+    const base = removeCreationPresetMarkers(state.basic_config.adaptation_direction);
+    const marker = `创作类型：${creationPresetLabel(preset)}。${instruction}`;
+    return base ? `${marker}；${base}` : marker;
+  }
+
+  function focusConfigField(key) {
+    window.setTimeout(() => {
+      const safeKey = window.CSS && typeof window.CSS.escape === "function"
+        ? window.CSS.escape(key)
+        : String(key || "").replace(/"/g, '\\"');
+      const field = app.querySelector(`[data-config-key="${safeKey}"]`);
+      if (!field || field.disabled) return;
+      field.focus();
+      if (typeof field.setSelectionRange === "function") {
+        const length = String(field.value || "").length;
+        field.setSelectionRange(length, length);
+      }
+    }, 0);
+  }
+
+  function applyQuickStartPreset(preset) {
+    if (preset === "original") {
+      ui.sourceInputOpen = false;
+      ui.materialSource = "idea";
+      updateBasicConfigFromGuide(
+        {
+          mode: "创作",
+          target_format: state.basic_config.target_format || "短剧",
+          adaptation_direction: withCreationPresetMarker("original", "从零创作一个完整短剧框架，重点明确主角目标、核心冲突、爽点节奏和每集钩子。"),
+        },
+        "guided_preset:original"
+      );
+      return;
+    }
+    if (preset === "ip") {
+      ui.sourceInputOpen = true;
+      ui.materialSource = "upload";
+      updateBasicConfigFromGuide(
+        {
+          mode: "改写",
+          target_format: "短剧",
+          adaptation_direction: withCreationPresetMarker("ip", "按 IP 改编处理：保留原作核心人物、核心冲突和关键设定，强化短剧强钩子与强反转。"),
+        },
+        "guided_preset:ip"
+      );
+      return;
+    }
+    if (preset === "continue") {
+      ui.sourceInputOpen = true;
+      ui.materialSource = "upload";
+      updateBasicConfigFromGuide(
+        {
+          mode: "改写",
+          target_format: state.basic_config.target_format || "短剧",
+          adaptation_direction: withCreationPresetMarker("continue", "按续写处理：延续原有人物关系和世界规则，在后续剧情中强化新冲突、新目标和新反转。"),
+        },
+        "guided_preset:continue"
+      );
+      return;
+    }
+    if (preset === "rewrite") {
+      ui.sourceInputOpen = true;
+      ui.materialSource = "upload";
+      updateBasicConfigFromGuide(
+        {
+          mode: "改写",
+          target_format: "短剧",
+          adaptation_direction: withCreationPresetMarker("rewrite", "按剧本改编处理：保留核心剧情和人物关系，重排节奏、卡点、冲突升级和每集钩子。"),
+        },
+        "guided_preset:rewrite"
+      );
+    }
+  }
+
+  function mergeDirectionText(addition) {
+    const current = String(state.basic_config.adaptation_direction || "").trim();
+    const text = String(addition || "").trim();
+    if (!text) return current;
+    if (current.includes(text)) return current;
+    return current ? `${current}；${text}` : text;
+  }
+
   app.addEventListener("input", (event) => {
     const target = event.target;
     if (target.matches("[data-config-key]")) {
@@ -7221,6 +8036,36 @@ function renderPackageBlocks() {
       uploadSourceMaterialFile(file);
       target.value = "";
       return;
+    }
+    if (target.matches("[data-guide-select]")) {
+      const guideType = target.dataset.guideSelect;
+      const value = target.value;
+      if (guideType === "creation-preset") {
+        applyQuickStartPreset(value);
+        return;
+      }
+      if (guideType === "episode-count") {
+        if (value === "custom") {
+          openBasicInfoAndFocus("episodes_per_season");
+          return;
+        }
+        updateBasicConfigFromGuide({ episodes_per_season: Number(value) }, `guided_episodes:${value}`);
+        return;
+      }
+      if (guideType === "material-source") {
+        if (value === "idea") {
+          useIdeaOnly();
+          return;
+        }
+        if (value === "upload") {
+          triggerSourceUploadPicker();
+          return;
+        }
+        if (value === "paste") {
+          openSourceInput("source_text");
+          return;
+        }
+      }
     }
     if (target.matches("[data-config-key]")) {
       const key = target.dataset.configKey;
@@ -7334,6 +8179,42 @@ function renderPackageBlocks() {
     const action = actionElement.dataset.action;
     if (ui.assetImporting) return;
 
+    if (action === "quick-start-preset") {
+      applyQuickStartPreset(actionElement.dataset.preset);
+      return;
+    }
+    if (action === "quick-episode-count") {
+      const episodes = Number(actionElement.dataset.episodes || 0);
+      if (episodes > 0) {
+        updateBasicConfigFromGuide({ episodes_per_season: episodes }, `guided_episodes:${episodes}`);
+      }
+      return;
+    }
+    if (action === "custom-episode-count") {
+      openBasicInfoAndFocus("episodes_per_season");
+      return;
+    }
+    if (action === "focus-field") {
+      focusConfigField(actionElement.dataset.field);
+      return;
+    }
+    if (action === "open-source-input") {
+      openSourceInput(actionElement.dataset.focus || "source_text");
+      return;
+    }
+    if (action === "idea-only") {
+      useIdeaOnly();
+      return;
+    }
+    if (action === "trigger-source-upload") {
+      ui.sourceInputOpen = true;
+      render();
+      window.setTimeout(() => {
+        const input = app.querySelector("[data-source-file-input]");
+        if (input && !input.disabled) input.click();
+      }, 0);
+      return;
+    }
     if (action === "save-unsaved-prompt") {
       await runUnsavedPrompt("save");
       return;
@@ -7655,6 +8536,7 @@ function renderPackageBlocks() {
   };
 
   window.addEventListener("beforeunload", (event) => {
+    flushSaveState();
     if (ui.suppressBeforeUnload || !hasUnsavedChanges()) return;
     event.preventDefault();
     event.returnValue = UNSAVED_MESSAGE;
@@ -7673,13 +8555,15 @@ function renderPackageBlocks() {
       const autoProjectId = urlParams.get("project_id");
       if (autoProjectId) {
         const asset = (ui.assets || []).find((a) => String(a.project_id) === String(autoProjectId));
-        if (asset) openAsset(autoProjectId).catch(() => {});
+        if (asset && !canUseCurrentAssetCache(autoProjectId, asset)) openAsset(autoProjectId).catch(() => {});
         return;
       }
       if (shouldAutoOpenLatestAsset()) {
         const latestAsset = (ui.assets || []).find((item) => isFrameworkPlannerAsset(item));
         if (latestAsset && latestAsset.project_id) {
-          openAsset(latestAsset.project_id).catch(() => {});
+          if (!canUseCurrentAssetCache(latestAsset.project_id, latestAsset)) {
+            openAsset(latestAsset.project_id).catch(() => {});
+          }
         }
       }
     })
