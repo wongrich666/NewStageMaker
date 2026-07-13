@@ -127,11 +127,11 @@
 
     const auroraCount = reduceMotion ? 1 : (isMobile ? 3 : 5);
     const auroraColors = [
-      "linear-gradient(90deg, transparent 0%, rgba(255, 198, 143, 0.42) 42%, rgba(255, 244, 201, 0.26) 70%, transparent 100%)",
-      "linear-gradient(90deg, transparent 0%, rgba(255, 230, 176, 0.34) 34%, rgba(255, 178, 158, 0.24) 68%, transparent 100%)",
-      "linear-gradient(90deg, transparent 0%, rgba(247, 210, 255, 0.2) 28%, rgba(255, 216, 178, 0.34) 66%, transparent 100%)",
-      "linear-gradient(90deg, transparent 0%, rgba(255, 252, 216, 0.28) 38%, rgba(255, 190, 143, 0.22) 72%, transparent 100%)",
-      "linear-gradient(90deg, transparent 0%, rgba(255, 211, 166, 0.3) 32%, rgba(255, 248, 229, 0.24) 70%, transparent 100%)",
+      "linear-gradient(90deg, transparent 0%, rgba(147, 197, 253, 0.42) 42%, rgba(219, 234, 254, 0.26) 70%, transparent 100%)",
+      "linear-gradient(90deg, transparent 0%, rgba(254, 240, 138, 0.34) 34%, rgba(253, 224, 71, 0.24) 68%, transparent 100%)",
+      "linear-gradient(90deg, transparent 0%, rgba(167, 243, 208, 0.28) 28%, rgba(147, 197, 253, 0.34) 66%, transparent 100%)",
+      "linear-gradient(90deg, transparent 0%, rgba(191, 219, 254, 0.28) 38%, rgba(254, 240, 138, 0.22) 72%, transparent 100%)",
+      "linear-gradient(90deg, transparent 0%, rgba(147, 197, 253, 0.3) 32%, rgba(209, 250, 229, 0.24) 70%, transparent 100%)",
     ];
     for (let index = 0; index < auroraCount; index += 1) {
       const element = createElement("cat-theme-aurora", background);
@@ -166,13 +166,13 @@
 
     const blobCount = isMobile ? 4 : 7;
     const blobColors = [
-      "rgba(255, 219, 175, 0.33)",
-      "rgba(255, 244, 202, 0.26)",
-      "rgba(255, 205, 190, 0.24)",
-      "rgba(244, 227, 255, 0.18)",
-      "rgba(255, 236, 216, 0.28)",
-      "rgba(255, 224, 184, 0.2)",
-      "rgba(255, 248, 222, 0.22)",
+      "rgba(147, 197, 253, 0.33)",
+      "rgba(254, 240, 138, 0.26)",
+      "rgba(167, 243, 208, 0.24)",
+      "rgba(191, 219, 254, 0.18)",
+      "rgba(219, 234, 254, 0.28)",
+      "rgba(147, 197, 253, 0.2)",
+      "rgba(209, 250, 229, 0.22)",
     ];
     for (let index = 0; index < blobCount; index += 1) {
       const element = createElement("cat-theme-blob", background);

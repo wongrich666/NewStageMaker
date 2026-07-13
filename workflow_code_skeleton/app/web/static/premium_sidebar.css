@@ -1,0 +1,748 @@
+/* ============================================================
+   premium_sidebar.css — Premium sidebar button & layout styles
+   Loaded after styles.css; targets .premium-sidebar with higher
+   specificity to override existing .workspace-body rules.
+   ============================================================ */
+
+/* ---- Primary action buttons (新建框架 / 框架到剧本 / AI剧本医生) ---- */
+.workspace-body aside.premium-sidebar .sidebar-create-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  color: #ffffff !important;
+  font-weight: 950;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  background: linear-gradient(135deg, #3b82f6, #10b981) !important;
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+  transition: transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 220ms ease, filter 220ms ease;
+}
+
+.workspace-body aside.premium-sidebar .sidebar-create-btn::before {
+  content: attr(data-nav-icon);
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 12px;
+  font-weight: 950;
+  backdrop-filter: blur(4px);
+}
+
+.workspace-body aside.premium-sidebar .sidebar-create-btn:hover {
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: 0 18px 40px rgba(59, 130, 246, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  filter: brightness(1.06);
+}
+
+.workspace-body aside.premium-sidebar .sidebar-create-btn:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 6px 14px rgba(59, 130, 246, 0.18);
+}
+
+/* ---- Multi-open section (新开剧本窗口) ---- */
+.workspace-body aside.premium-sidebar .sidebar-multi-open {
+  margin: 4px 0 14px !important;
+  padding: 14px !important;
+  border: 1px solid rgba(15, 23, 42, 0.10) !important;
+  border-radius: 16px !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.06) !important;
+  backdrop-filter: blur(12px);
+  transition: box-shadow 220ms ease;
+}
+
+.workspace-body aside.premium-sidebar .sidebar-multi-open:hover {
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.10) !important;
+}
+
+.workspace-body aside.premium-sidebar .sidebar-multi-open-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.workspace-body aside.premium-sidebar .sidebar-multi-open-head span {
+  color: var(--app-text) !important;
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.workspace-body aside.premium-sidebar .sidebar-multi-open-head small {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.10), rgba(16, 185, 129, 0.10));
+  color: var(--app-blue-dark) !important;
+  font-size: 11px;
+  font-weight: 900;
+  border: 1px solid rgba(59, 130, 246, 0.18);
+}
+
+.workspace-body aside.premium-sidebar .sidebar-multi-open-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.workspace-body aside.premium-sidebar .multi-open-count-btn {
+  position: relative;
+  height: 44px !important;
+  min-height: 44px !important;
+  border: 1px solid rgba(15, 23, 42, 0.10) !important;
+  border-radius: 12px !important;
+  color: var(--app-text) !important;
+  font-size: 16px !important;
+  font-weight: 950 !important;
+  background: rgba(255, 255, 255, 0.86) !important;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04) !important;
+  cursor: pointer;
+  overflow: hidden;
+  transition: all 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.workspace-body aside.premium-sidebar .multi-open-count-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--app-blue), var(--app-green));
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+
+.workspace-body aside.premium-sidebar .multi-open-count-btn:hover {
+  color: #ffffff !important;
+  border-color: transparent !important;
+  box-shadow: 0 12px 28px rgba(59, 130, 246, 0.22) !important;
+  transform: translateY(-2px);
+}
+
+.workspace-body aside.premium-sidebar .multi-open-count-btn:hover::after {
+  opacity: 1;
+}
+
+.workspace-body aside.premium-sidebar .multi-open-count-btn:active {
+  transform: translateY(0) scale(0.96);
+}
+
+/* ---- Asset folders ---- */
+.workspace-body aside.premium-sidebar .workspace-folder {
+  border: 1px solid rgba(15, 23, 42, 0.10) !important;
+  border-radius: 16px !important;
+  background: rgba(255, 255, 255, 0.62) !important;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04) !important;
+  transition: all 220ms ease;
+  overflow: hidden;
+}
+
+.workspace-body aside.premium-sidebar .workspace-folder[open] {
+  border-color: rgba(59, 130, 246, 0.22) !important;
+  background: rgba(255, 255, 255, 0.88) !important;
+  box-shadow: 0 10px 30px rgba(59, 130, 246, 0.08) !important;
+}
+
+.workspace-body aside.premium-sidebar .workspace-folder summary {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  padding: 13px 14px !important;
+  color: var(--app-text) !important;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background 180ms ease;
+}
+
+.workspace-body aside.premium-sidebar .workspace-folder summary::-webkit-details-marker {
+  display: none;
+}
+
+.workspace-body aside.premium-sidebar .workspace-folder summary:hover {
+  background: rgba(59, 130, 246, 0.04);
+}
+
+.workspace-body aside.premium-sidebar .asset-folder-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 900;
+}
+
+.workspace-body aside.premium-sidebar .asset-folder-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 950;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(16, 185, 129, 0.12));
+  color: var(--app-blue-dark);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.08);
+  flex: 0 0 auto;
+}
+
+.workspace-body aside.premium-sidebar .asset-folder-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+/* "查看" pill button */
+.workspace-body aside.premium-sidebar .asset-folder-open {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 12px !important;
+  border: 1px solid rgba(15, 23, 42, 0.10) !important;
+  border-radius: 999px !important;
+  color: var(--app-muted) !important;
+  font-size: 12px !important;
+  font-weight: 900 !important;
+  text-decoration: none !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  transition: all 180ms ease;
+}
+
+.workspace-body aside.premium-sidebar .asset-folder-open:hover {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, var(--app-blue), var(--app-blue-dark)) !important;
+  border-color: transparent !important;
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.20);
+  transform: translateY(-1px);
+}
+
+/* ---- Section labels & headers ---- */
+.workspace-body aside.premium-sidebar .sidebar-group-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 4px;
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.workspace-body aside.premium-sidebar .sidebar-group-label::before {
+  content: "";
+  width: 4px;
+  height: 16px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--app-blue), var(--app-green));
+}
+
+.workspace-body aside.premium-sidebar .sidebar-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.workspace-body aside.premium-sidebar .sidebar-section-head span {
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.workspace-body aside.premium-sidebar .sidebar-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 10px !important;
+  border: 1px solid rgba(15, 23, 42, 0.10) !important;
+  border-radius: 8px !important;
+  color: var(--app-muted) !important;
+  background: rgba(255, 255, 255, 0.62) !important;
+  font-size: 12px !important;
+  font-weight: 900 !important;
+  cursor: pointer;
+  transition: all 180ms ease;
+}
+
+.workspace-body aside.premium-sidebar .sidebar-refresh-btn:hover {
+  color: var(--app-blue-dark) !important;
+  background: rgba(59, 130, 246, 0.08) !important;
+  border-color: rgba(59, 130, 246, 0.22) !important;
+  transform: translateY(-1px);
+}
+
+.workspace-body aside.premium-sidebar .sidebar-refresh-btn.is-spinning {
+  animation: ps-spin 800ms linear infinite;
+}
+
+/* ---- Side links (外包专属格式 / 社区好剧) ---- */
+.workspace-body aside.premium-sidebar .sidebar-text-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: 14px;
+  color: var(--app-text) !important;
+  font-size: 13px;
+  font-weight: 900;
+  text-decoration: none !important;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+  cursor: pointer;
+  overflow: hidden;
+  transition: all 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.workspace-body aside.premium-sidebar .sidebar-text-link::before {
+  content: attr(data-nav-icon);
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(16, 185, 129, 0.12));
+  color: var(--app-blue-dark);
+  font-size: 12px;
+  font-weight: 950;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.08);
+}
+
+.workspace-body aside.premium-sidebar .sidebar-text-link:hover {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(59, 130, 246, 0.22);
+  box-shadow: 0 12px 32px rgba(59, 130, 246, 0.10);
+  transform: translateY(-2px);
+}
+
+.workspace-body aside.premium-sidebar .sidebar-text-link:active {
+  transform: translateY(0) scale(0.98);
+}
+
+/* ---- Tool shortcuts inside 辅助工具 ---- */
+.workspace-body aside.premium-sidebar .tool-shortcut {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 40px;
+  padding: 10px 12px 10px 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  color: var(--app-text);
+  font-size: 13px;
+  font-weight: 900;
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.52);
+  cursor: pointer;
+  transition: all 180ms ease;
+  overflow: hidden;
+}
+
+.workspace-body aside.premium-sidebar .tool-shortcut::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--app-blue), var(--app-green));
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.workspace-body aside.premium-sidebar .tool-shortcut:hover {
+  background: rgba(255, 255, 255, 0.86);
+  border-color: rgba(59, 130, 246, 0.18);
+  box-shadow: 0 8px 22px rgba(59, 130, 246, 0.08);
+  transform: translateX(4px);
+}
+
+.workspace-body aside.premium-sidebar .tool-shortcut:hover::before {
+  opacity: 1;
+}
+
+.workspace-body aside.premium-sidebar .tool-shortcut.active {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(59, 130, 246, 0.22);
+  box-shadow: 0 6px 18px rgba(59, 130, 246, 0.08);
+}
+
+.workspace-body aside.premium-sidebar .tool-shortcut small {
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* ---- Sidebar footer ---- */
+.workspace-body aside.premium-sidebar .sidebar-profile-btn {
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.62);
+  transition: all 180ms ease;
+}
+
+.workspace-body aside.premium-sidebar .sidebar-profile-btn:hover {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(59, 130, 246, 0.22);
+  box-shadow: 0 8px 22px rgba(59, 130, 246, 0.08);
+  transform: translateY(-1px);
+}
+
+/* ---- Layout spacing ---- */
+.workspace-body aside.premium-sidebar .sidebar-nav {
+  gap: 20px;
+}
+
+.workspace-body aside.premium-sidebar .sidebar-group {
+  gap: 10px;
+}
+
+.workspace-body aside.premium-sidebar .sidebar-folders {
+  gap: 10px;
+}
+
+/* ---- Animations ---- */
+@keyframes ps-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes ps-ripple {
+  to {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+
+/* A late global rule turns folders into horizontal flex rows. Keep summary and list stacked. */
+.workspace-body aside.premium-sidebar .workspace-folder {
+  display: block !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  align-items: stretch !important;
+  gap: 0 !important;
+}
+
+.workspace-body aside.premium-sidebar .workspace-folder > summary {
+  width: auto;
+}
+/* ---- Asset cards: roomy two-level layout for narrow sidebars ---- */
+.workspace-body aside.premium-sidebar .workspace-compact-list {
+  gap: 8px !important;
+  padding: 6px 8px 12px !important;
+}
+
+.workspace-body aside.premium-sidebar .workspace-folder[open] > .workspace-compact-list {
+  animation: ps-asset-list-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: top center;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-row {
+  --asset-progress: 0%;
+  position: relative;
+  display: block !important;
+  min-width: 0;
+  isolation: isolate;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick {
+  position: relative;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: start !important;
+  gap: 8px 10px !important;
+  width: 100%;
+  min-height: 72px !important;
+  padding: 11px 12px 12px !important;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.09) !important;
+  border-radius: 13px !important;
+  color: var(--app-text) !important;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.76) !important;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.035) !important;
+  cursor: pointer;
+  transition:
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 180ms ease,
+    box-shadow 220ms ease,
+    background 180ms ease !important;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  border-radius: 13px 0 0 13px;
+  background: linear-gradient(180deg, var(--app-blue), var(--app-green));
+  opacity: 0;
+  transform: scaleY(0.45);
+  transition: opacity 180ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick:hover,
+.workspace-body aside.premium-sidebar .workspace-pick:focus-visible {
+  border-color: rgba(59, 130, 246, 0.24) !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.10) !important;
+  transform: translateY(-2px) !important;
+  outline: none;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick:hover::after,
+.workspace-body aside.premium-sidebar .workspace-pick:focus-visible::after,
+.workspace-body aside.premium-sidebar .workspace-pick.active::after {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick:active {
+  transform: translateY(0) scale(0.99) !important;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick.active {
+  border-color: rgba(59, 130, 246, 0.32) !important;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.09), rgba(16, 185, 129, 0.055)) !important;
+  box-shadow: 0 8px 22px rgba(59, 130, 246, 0.11) !important;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-main {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 3px !important;
+  min-width: 0;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-title {
+  min-width: 0;
+  max-width: none !important;
+  overflow: hidden;
+  color: var(--app-text) !important;
+  font-size: 13px !important;
+  font-weight: 900 !important;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--app-muted) !important;
+  font-size: 11px !important;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-state {
+  align-self: start;
+  min-width: 0;
+  max-width: 72px;
+  height: 22px;
+  padding: 0 8px !important;
+  overflow: hidden;
+  border: 1px solid rgba(59, 130, 246, 0.10);
+  color: var(--app-blue-dark) !important;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: rgba(59, 130, 246, 0.08) !important;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick.completed .workspace-pick-state {
+  color: #047857 !important;
+  border-color: rgba(16, 185, 129, 0.16);
+  background: rgba(16, 185, 129, 0.10) !important;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick.failed .workspace-pick-state {
+  color: #b91c1c !important;
+  border-color: rgba(239, 68, 68, 0.16);
+  background: rgba(239, 68, 68, 0.09) !important;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-progress {
+  position: relative;
+  grid-column: 1 / -1;
+  display: block;
+  height: 4px;
+  margin-right: 38px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.07);
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-progress-bar {
+  display: block;
+  width: var(--asset-progress);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--app-blue), var(--app-green));
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.22);
+  transition: width 480ms cubic-bezier(0.22, 1, 0.36, 1), filter 180ms ease;
+}
+
+.workspace-body aside.premium-sidebar .hot-review-workspace-pick .workspace-pick-progress-bar {
+  background: linear-gradient(90deg, #8b5cf6, #ec4899);
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-progress.is-empty .workspace-pick-progress-bar {
+  width: 18%;
+  opacity: 0.28;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-row:hover .workspace-pick-progress-bar,
+.workspace-body aside.premium-sidebar .workspace-pick-row:focus-within .workspace-pick-progress-bar {
+  filter: saturate(1.15) brightness(1.04);
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-delete {
+  position: absolute;
+  right: 9px;
+  bottom: 8px;
+  z-index: 2;
+  display: grid !important;
+  place-items: center;
+  width: 30px !important;
+  min-width: 30px !important;
+  height: 26px !important;
+  min-height: 26px !important;
+  padding: 0 !important;
+  overflow: hidden;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  color: var(--app-muted) !important;
+  font-size: 0 !important;
+  line-height: 1;
+  background: rgba(15, 23, 42, 0.045) !important;
+  opacity: 0.58;
+  transform: translateX(2px);
+  cursor: pointer;
+  transition:
+    opacity 160ms ease,
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease !important;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-delete::before {
+  content: "删";
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-row:hover .workspace-pick-delete,
+.workspace-body aside.premium-sidebar .workspace-pick-delete:focus-visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-delete:hover,
+.workspace-body aside.premium-sidebar .workspace-pick-delete:focus-visible {
+  color: #dc2626 !important;
+  border-color: rgba(239, 68, 68, 0.18) !important;
+  background: rgba(239, 68, 68, 0.10) !important;
+  box-shadow: 0 5px 14px rgba(239, 68, 68, 0.12) !important;
+  outline: none;
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-delete:active {
+  transform: scale(0.92);
+}
+
+.workspace-body aside.premium-sidebar .workspace-pick-delete:disabled::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(100, 116, 139, 0.28);
+  border-top-color: var(--app-blue);
+  border-radius: 50%;
+  animation: ps-spin 700ms linear infinite;
+}
+
+.workspace-body aside.premium-sidebar .workspace-empty {
+  min-height: 52px;
+  padding: 13px 12px !important;
+  border: 1px dashed rgba(15, 23, 42, 0.12) !important;
+  border-radius: 12px !important;
+  color: var(--app-muted) !important;
+  font-size: 11px;
+  line-height: 1.55;
+  background: rgba(255, 255, 255, 0.45) !important;
+}
+
+.workspace-body aside.premium-sidebar .workspace-folder summary:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.30);
+  outline-offset: -2px;
+}
+
+@media (hover: none) {
+  .workspace-body aside.premium-sidebar .workspace-pick-delete {
+    opacity: 0.9;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-body aside.premium-sidebar .workspace-folder[open] > .workspace-compact-list,
+  .workspace-body aside.premium-sidebar .workspace-pick,
+  .workspace-body aside.premium-sidebar .workspace-pick::after,
+  .workspace-body aside.premium-sidebar .workspace-pick-progress-bar,
+  .workspace-body aside.premium-sidebar .workspace-pick-delete {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes ps-asset-list-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scaleY(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}

@@ -3018,9 +3018,11 @@ startRuntimeDebugPolling();
       const key = hotReviewAssetKeyV5(item) || hotReviewAssetTitleV5(item);
       const updatedAt = String(item.updated_at || item.created_at || item.createdAt || "").trim();
       const score = hotReviewScoreV5(item);
-      const scoreText = score !== "" && score !== null && score !== undefined ? ` · ${score}/100` : "";
+      const hasScore = score !== "" && score !== null && score !== undefined;
+      const scorePercent = hasScore ? Math.max(0, Math.min(100, Number(score) || 0)) : 0;
+      const scoreText = hasScore ? `${score}/100` : statusLabel(item.status);
       return `
-        <div class="workspace-pick-row hot-review-workspace-pick-row">
+        <div class="workspace-pick-row hot-review-workspace-pick-row" style="--asset-progress: ${scorePercent}%;">
           <button
             class="workspace-pick hot-review-workspace-pick"
             type="button"
@@ -3029,9 +3031,14 @@ startRuntimeDebugPolling();
             data-hot-review-asset-key="${escapeHtml(key)}"
             title="${escapeHtml(hotReviewAssetTitleV5(item))}"
           >
-            <span class="workspace-pick-title">${escapeHtml(hotReviewAssetTitleV5(item))}</span>
-            <span class="workspace-pick-meta">爆款文审核${escapeHtml(scoreText)}</span>
-            <span class="workspace-pick-state">${escapeHtml(updatedAt || statusLabel(item.status))}</span>
+            <span class="workspace-pick-main">
+              <span class="workspace-pick-title">${escapeHtml(hotReviewAssetTitleV5(item))}</span>
+              <span class="workspace-pick-meta">${escapeHtml(updatedAt || "爆款文审核资产")}</span>
+            </span>
+            <span class="workspace-pick-state">${escapeHtml(scoreText)}</span>
+            <span class="workspace-pick-progress${hasScore ? "" : " is-empty"}" role="progressbar" aria-label="审核评分" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${scorePercent}">
+              <span class="workspace-pick-progress-bar"></span>
+            </span>
           </button>
           <button
             class="btn btn-danger workspace-pick-delete"
@@ -5324,8 +5331,10 @@ function renderToolForm(toolKey) {
           : item.status === "completed"
             ? " completed"
             : "";
+        const progress = Math.max(0, Math.min(100, Number(item.progress_percent || 0)));
+        const stageLabel = item.current_stage_label || statusLabel(item.status);
         return `
-          <div class="workspace-pick-row">
+          <div class="workspace-pick-row" style="--asset-progress: ${progress}%;">
             <button
               class="workspace-pick${activeClass}${statusClass}"
               type="button"
@@ -5335,9 +5344,12 @@ function renderToolForm(toolKey) {
             >
               <span class="workspace-pick-main">
                 <span class="workspace-pick-title">${escapeHtml(projectDisplayTitle(item))}</span>
-                <span class="workspace-pick-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${item.current_stage_label || statusLabel(item.status)}`)}</span>
+                <span class="workspace-pick-meta">${escapeHtml(`${progress}% · ${stageLabel}`)}</span>
               </span>
               <span class="workspace-pick-state">${escapeHtml(statusLabel(item.status))}</span>
+              <span class="workspace-pick-progress" role="progressbar" aria-label="项目进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}">
+                <span class="workspace-pick-progress-bar"></span>
+              </span>
             </button>
             <button
               class="btn btn-danger workspace-pick-delete"

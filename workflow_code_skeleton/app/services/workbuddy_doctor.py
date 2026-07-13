@@ -56,7 +56,7 @@ DOCTOR_SKILLS: tuple[DoctorSkill, ...] = (
 )
 
 SKILL_PROMPT_DIR = Path(__file__).resolve().parents[1] / "skills" / "script_doctor"
-_METADATA_CACHE: dict[str, Any] = {"expires_at": 0.0, "data": None}
+_METADATA_CACHE: dict[str, dict[str, Any]] = {}
 _HISTORY_LIMIT = 100
 
 
@@ -259,10 +259,38 @@ def skill_exists(key: str) -> bool:
     return any(skill.key == key for skill in DOCTOR_SKILLS)
 
 
-def workbuddy_config_status(*, include_metadata: bool = True) -> dict[str, Any]:
-    api_key = (os.environ.get("CODEBUDDY_API_KEY") or "").strip()
-    internet_env = (os.environ.get("CODEBUDDY_INTERNET_ENVIRONMENT") or "").strip()
+def _resolve_codebuddy_config(
+    *,
+    api_key: str | None = None,
+    internet_env: str | None = None,
+    model: str | None = None,
+) -> dict[str, str]:
+    env_api_key = (os.environ.get("CODEBUDDY_API_KEY") or "").strip()
+    env_internet_env = (os.environ.get("CODEBUDDY_INTERNET_ENVIRONMENT") or "").strip()
     env_model = (os.environ.get("CODEBUDDY_MODEL") or "").strip()
+    resolved_api_key = (api_key if api_key is not None else env_api_key).strip()
+    resolved_internet_env = (internet_env if internet_env is not None else env_internet_env).strip()
+    resolved_model = (model if model is not None else env_model).strip()
+    return {
+        "api_key": resolved_api_key,
+        "internet_env": resolved_internet_env,
+        "model": resolved_model,
+        "env_model": env_model,
+        "api_key_source": "request" if resolved_api_key and api_key is not None else ("environment" if env_api_key else "missing"),
+    }
+
+
+def workbuddy_config_status(
+    *,
+    include_metadata: bool = True,
+    api_key: str | None = None,
+    internet_env: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    resolved = _resolve_codebuddy_config(api_key=api_key, internet_env=internet_env, model=model)
+    api_key = resolved["api_key"]
+    internet_env = resolved["internet_env"]
+    env_model = resolved["env_model"]
     sdk_available = importlib.util.find_spec("codebuddy_agent_sdk") is not None
 
     missing: list[str] = []
@@ -277,17 +305,18 @@ def workbuddy_config_status(*, include_metadata: bool = True) -> dict[str, Any]:
     metadata_error = ""
     if include_metadata and not missing:
         try:
-            metadata = get_codebuddy_metadata()
+            metadata = get_codebuddy_metadata(api_key=api_key, internet_env=internet_env)
         except Exception as exc:
             metadata_error = str(exc)
 
-    current_model = env_model or str(metadata.get("current_model") or "")
+    current_model = resolved["model"] or str(metadata.get("current_model") or "")
     return {
         "ok": True,
         "provider": "codebuddy-agent-sdk",
         "configured": not missing,
         "sdk_available": sdk_available,
         "api_key_present": bool(api_key),
+        "api_key_source": resolved["api_key_source"],
         "internet_environment": internet_env,
         "internet_environment_ok": internet_env.lower() == "internal",
         "model": current_model,
@@ -414,8 +443,19 @@ def run_codebuddy_doctor(
     project_dir: str | Path,
     timeout_seconds: int = 180,
     model: str | None = None,
+    api_key: str | None = None,
+    internet_env: str | None = None,
 ) -> dict[str, Any]:
-    return asyncio.run(_run_codebuddy_doctor_async(prompt, project_dir=project_dir, timeout_seconds=timeout_seconds, model=model))
+    return asyncio.run(
+        _run_codebuddy_doctor_async(
+            prompt,
+            project_dir=project_dir,
+            timeout_seconds=timeout_seconds,
+            model=model,
+            api_key=api_key,
+            internet_env=internet_env,
+        )
+    )
 
 
 async def _run_codebuddy_doctor_async(
@@ -424,6 +464,8 @@ async def _run_codebuddy_doctor_async(
     project_dir: str | Path,
     timeout_seconds: int,
     model: str | None,
+    api_key: str | None,
+    internet_env: str | None,
 ) -> dict[str, Any]:
     from codebuddy_agent_sdk import (  # type: ignore
         AssistantMessage,
@@ -434,9 +476,10 @@ async def _run_codebuddy_doctor_async(
         query,
     )
 
-    selected_model = (model or os.environ.get("CODEBUDDY_MODEL") or "").strip() or None
-    api_key = (os.environ.get("CODEBUDDY_API_KEY") or "").strip()
-    internet_env = (os.environ.get("CODEBUDDY_INTERNET_ENVIRONMENT") or "internal").strip()
+    resolved = _resolve_codebuddy_config(api_key=api_key, internet_env=internet_env, model=model)
+    selected_model = resolved["model"] or None
+    resolved_api_key = resolved["api_key"]
+    resolved_internet_env = resolved["internet_env"] or "internal"
 
     options = CodeBuddyAgentOptions(
         cwd=project_dir,
@@ -446,8 +489,8 @@ async def _run_codebuddy_doctor_async(
         permission_mode="default",
         request_timeout_ms=timeout_seconds * 1000,
         env={
-            "CODEBUDDY_API_KEY": api_key,
-            "CODEBUDDY_INTERNET_ENVIRONMENT": internet_env,
+            "CODEBUDDY_API_KEY": resolved_api_key,
+            "CODEBUDDY_INTERNET_ENVIRONMENT": resolved_internet_env,
         },
     )
 
@@ -490,28 +533,40 @@ async def _run_codebuddy_doctor_async(
     }
 
 
-def get_codebuddy_metadata(*, force: bool = False) -> dict[str, Any]:
+def _metadata_cache_key(api_key: str, internet_env: str) -> str:
+    return f"{internet_env.lower()}:{api_key[-12:] if api_key else 'missing'}"
+
+
+def get_codebuddy_metadata(
+    *,
+    force: bool = False,
+    api_key: str | None = None,
+    internet_env: str | None = None,
+) -> dict[str, Any]:
+    resolved = _resolve_codebuddy_config(api_key=api_key, internet_env=internet_env)
+    cache_key = _metadata_cache_key(resolved["api_key"], resolved["internet_env"])
     now = time.time()
-    if not force and _METADATA_CACHE.get("data") and float(_METADATA_CACHE.get("expires_at") or 0) > now:
-        return dict(_METADATA_CACHE["data"])
-    data = asyncio.run(_get_codebuddy_metadata_async())
-    _METADATA_CACHE["data"] = data
-    _METADATA_CACHE["expires_at"] = now + 300
+    cached = _METADATA_CACHE.get(cache_key) or {}
+    if not force and cached.get("data") and float(cached.get("expires_at") or 0) > now:
+        return dict(cached["data"])
+    data = asyncio.run(_get_codebuddy_metadata_async(api_key=resolved["api_key"], internet_env=resolved["internet_env"]))
+    _METADATA_CACHE[cache_key] = {"data": data, "expires_at": now + 300}
     return dict(data)
 
 
-async def _get_codebuddy_metadata_async() -> dict[str, Any]:
+async def _get_codebuddy_metadata_async(*, api_key: str | None = None, internet_env: str | None = None) -> dict[str, Any]:
     from codebuddy_agent_sdk import CodeBuddyAgentOptions  # type: ignore
     from codebuddy_agent_sdk._internal import Query  # type: ignore
     from codebuddy_agent_sdk.transport import SubprocessTransport  # type: ignore
 
-    api_key = (os.environ.get("CODEBUDDY_API_KEY") or "").strip()
-    internet_env = (os.environ.get("CODEBUDDY_INTERNET_ENVIRONMENT") or "internal").strip()
+    resolved = _resolve_codebuddy_config(api_key=api_key, internet_env=internet_env)
+    resolved_api_key = resolved["api_key"]
+    resolved_internet_env = resolved["internet_env"] or "internal"
     options = CodeBuddyAgentOptions(
         tools=[],
         env={
-            "CODEBUDDY_API_KEY": api_key,
-            "CODEBUDDY_INTERNET_ENVIRONMENT": internet_env,
+            "CODEBUDDY_API_KEY": resolved_api_key,
+            "CODEBUDDY_INTERNET_ENVIRONMENT": resolved_internet_env,
         },
         request_timeout_ms=30000,
     )

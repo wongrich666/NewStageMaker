@@ -6,9 +6,9 @@
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>{{ asset_page_title }} - 剧本工坊</title>
+  <title>{{ asset_page_title }} - 剧本创作平台</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='global_theme.css') }}?v=20260617-cat-theme-v4">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260706-asset-library-v1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260710-nav-assets-rebuild-v3">
 </head>
 <body class="workspace-body asset-library-body">
   <canvas id="particles-canvas" class="particles-canvas"></canvas>
@@ -17,9 +17,9 @@
       <div class="sidebar-top">
         <div class="sidebar-brand-row">
           <a class="sidebar-brand" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">
-            <span class="sidebar-brand-mark">S</span>
+            <span class="sidebar-brand-mark">FP</span>
             <span class="sidebar-brand-text">
-              <strong>剧本工坊</strong>
+              <strong>剧本创作平台</strong>
               <em>Script Studio</em>
             </span>
           </a>
@@ -119,7 +119,7 @@
       frameworkToScriptUrl: "/framework-to-script"
     };
   </script>
-  <script src="{{ url_for('static', filename='asset_library.js') }}?v=20260706-asset-library-v2"></script>
+  <script src="{{ url_for('static', filename='asset_library.js') }}?v=20260710-asset-library-v3"></script>
   <script src="{{ url_for('static', filename='particles.js') }}?v=20260702-particles-v1"></script>
   <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v4"></script>
 </body>

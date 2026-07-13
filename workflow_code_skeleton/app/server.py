@@ -11,6 +11,7 @@ from functools import wraps
 import os
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import Any
 from urllib.parse import quote
 
 from flask import (
@@ -2395,11 +2396,43 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             current_auth_token=_current_auth_token(),
         )
 
+    def _request_codebuddy_api_key(data: dict[str, Any] | None = None) -> str | None:
+        value = (
+            request.headers.get("X-CodeBuddy-Api-Key")
+            or request.headers.get("X-Codebuddy-Api-Key")
+            or (data or {}).get("codebuddy_api_key")
+            or ""
+        )
+        value = str(value).strip()
+        return value or None
+
+    def _request_codebuddy_internet_env(data: dict[str, Any] | None = None) -> str | None:
+        value = (
+            request.headers.get("X-CodeBuddy-Internet-Environment")
+            or request.headers.get("X-Codebuddy-Internet-Environment")
+            or (data or {}).get("codebuddy_internet_environment")
+            or ""
+        )
+        value = str(value).strip()
+        return value or None
+
+    def _request_codebuddy_model(data: dict[str, Any] | None = None) -> str | None:
+        value = request.headers.get("X-CodeBuddy-Model") or (data or {}).get("codebuddy_model") or ""
+        value = str(value).strip()
+        return value or None
+
     @app.get("/api/workbuddy/status")
     @_login_required
     def workbuddy_status():
         include_metadata = str(request.args.get("metadata") or "1").lower() not in {"0", "false", "no"}
-        return jsonify(workbuddy_config_status(include_metadata=include_metadata))
+        return jsonify(
+            workbuddy_config_status(
+                include_metadata=include_metadata,
+                api_key=_request_codebuddy_api_key(),
+                internet_env=_request_codebuddy_internet_env(),
+                model=_request_codebuddy_model(),
+            )
+        )
 
     @app.get("/api/workbuddy/doctor/history")
     @_login_required
@@ -2462,7 +2495,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if error:
             return jsonify({"ok": False, "error": error}), 400
 
-        status = workbuddy_config_status()
+        codebuddy_api_key = _request_codebuddy_api_key(data)
+        codebuddy_internet_env = _request_codebuddy_internet_env(data)
+        codebuddy_model = payload.get("model") or _request_codebuddy_model(data)
+        status = workbuddy_config_status(
+            api_key=codebuddy_api_key,
+            internet_env=codebuddy_internet_env,
+            model=codebuddy_model,
+        )
         prompt = build_doctor_prompt(
             payload["skill"],
             payload["title"],
@@ -2492,7 +2532,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 prompt,
                 project_dir=Path.cwd(),
                 timeout_seconds=timeout_seconds,
-                model=payload.get("model") or None,
+                model=codebuddy_model or None,
+                api_key=codebuddy_api_key,
+                internet_env=codebuddy_internet_env,
             )
         except Exception as exc:
             formatted_error = format_doctor_exception(exc, timeout_seconds=timeout_seconds)
