@@ -1,79 +1,149 @@
+/* ============================================================
+   global_theme.css — Unified "Sunlit Studio" Design System v1
+   Single source of truth for all color tokens, cat-theme
+   animated background, and base element reset.
+   ============================================================ */
+
+/* ---- Unified Design Tokens ---- */
 :root {
   color-scheme: light;
-  --theme-bg: #fff7ee;
-  --theme-panel: rgba(255, 252, 247, 0.9);
-  --theme-panel-strong: rgba(255, 252, 247, 0.96);
-  --theme-soft: rgba(255, 246, 235, 0.82);
-  --theme-soft-strong: #fff0dc;
-  --theme-border: rgba(147, 91, 48, 0.16);
-  --theme-border-strong: rgba(139, 91, 57, 0.26);
-  --theme-text: #241811;
-  --theme-muted: #715b4d;
-  --theme-faint: #a98f7f;
-  --theme-accent: #b87942;
-  --theme-accent-dark: #8f562d;
-  --theme-accent-soft: #ffd9aa;
-  --theme-success: #5f9a72;
-  --theme-danger: #b84f43;
-  --theme-shadow: 0 18px 46px rgba(92, 56, 25, 0.11);
 
-  --color-bg: var(--theme-bg);
-  --color-panel: var(--theme-panel);
-  --color-primary: var(--theme-accent);
-  --color-primary-strong: var(--theme-accent-dark);
-  --color-primary-soft: var(--theme-soft-strong);
-  --color-border: var(--theme-border);
-  --color-text: var(--theme-text);
-  --color-muted: var(--theme-muted);
+  /* Core palette */
+  --app-blue: #3b82f6;
+  --app-blue-dark: #2563eb;
+  --app-blue-soft: #dbeafe;
+  --app-yellow: #f59e0b;
+  --app-yellow-soft: #fef3c7;
+  --app-green: #10b981;
+  --app-green-soft: #d1fae5;
+  --app-green-dark: #065f46;
+  --app-red: #ef4444;
+  --app-red-soft: #fef2f2;
+  --app-red-dark: #991b1b;
+  --app-orange: #f97316;
 
-  --fp-bg: var(--theme-bg);
-  --fp-panel: var(--theme-panel);
-  --fp-soft: var(--theme-soft);
-  --fp-soft-2: var(--theme-soft-strong);
-  --fp-border: var(--theme-border);
-  --fp-border-strong: var(--theme-border-strong);
-  --fp-text: var(--theme-text);
-  --fp-muted: var(--theme-muted);
-  --fp-faint: var(--theme-faint);
-  --fp-blue: var(--theme-accent);
-  --fp-blue-dark: var(--theme-accent-dark);
-  --fp-blue-soft: var(--theme-soft-strong);
-  --fp-green: var(--theme-success);
-  --fp-red: var(--theme-danger);
-  --fp-orange: #d78332;
-  --fp-primary: var(--theme-accent);
-  --fp-primary-soft: var(--theme-soft-strong);
-  --fp-shadow: var(--theme-shadow);
+  /* Surfaces */
+  --app-bg: #f0f9ff;
+  --app-bg-warm: #fefce8;
+  --app-surface: rgba(255, 255, 255, 0.88);
+  --app-surface-solid: #ffffff;
+  --app-soft: rgba(241, 245, 249, 0.82);
 
-  --wts-bg: var(--theme-bg);
-  --wts-panel: var(--theme-panel);
-  --wts-soft: var(--theme-soft);
-  --wts-border: var(--theme-border);
-  --wts-strong: var(--theme-accent);
-  --wts-text: var(--theme-text);
-  --wts-muted: var(--theme-muted);
-  --wts-ok: #326548;
-  --wts-danger: var(--theme-danger);
-  --wts-shadow: var(--theme-shadow);
+  /* Text */
+  --app-text: #0f172a;
+  --app-muted: #64748b;
+  --app-faint: #94a3b8;
 
-  --bg: var(--theme-bg);
-  --surface: var(--theme-panel);
-  --surface-solid: #fffdf9;
-  --line: var(--theme-border);
-  --text: var(--theme-text);
-  --muted: var(--theme-muted);
-  --shadow: var(--theme-shadow);
-  --mono-bg: var(--theme-bg);
-  --mono-panel: var(--theme-panel);
-  --mono-soft: var(--theme-soft);
-  --mono-text: var(--theme-text);
-  --mono-muted: var(--theme-muted);
-  --mono-line: var(--theme-border);
-  --mono-accent: var(--theme-accent);
+  /* Borders */
+  --app-border: rgba(15, 23, 42, 0.08);
+  --app-border-strong: rgba(15, 23, 42, 0.14);
+
+  /* Radius */
+  --app-radius: 10px;
+  --app-radius-sm: 8px;
+  --app-radius-lg: 14px;
+  --app-radius-full: 999px;
+
+  /* Shadows */
+  --app-shadow-sm: 0 10px 24px rgba(15, 23, 42, 0.06);
+  --app-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+  --app-shadow-lg: 0 24px 70px rgba(15, 23, 42, 0.12);
+
+  /* Focus */
+  --app-focus-ring: 0 0 0 3px rgba(59, 130, 246, 0.25);
+
+  /* Gradients */
+  --app-gradient-primary: linear-gradient(135deg, #3b82f6, #2563eb);
+  --app-gradient-accent: linear-gradient(135deg, #3b82f6, #10b981);
+  --app-gradient-brand: linear-gradient(135deg, #3b82f6, #10b981);
+
+  /* Transition */
+  --app-transition: 180ms ease;
+
+  /* ============================================================
+     Backward-compatible aliases — map old var names to new tokens.
+     Page-specific CSS files can still reference their old names
+     while we migrate them incrementally.
+     ============================================================ */
+
+  /* --theme-* aliases (used by global_theme.css legacy consumers) */
+  --theme-bg: var(--app-bg);
+  --theme-panel: var(--app-surface);
+  --theme-panel-strong: var(--app-surface-solid);
+  --theme-soft: var(--app-soft);
+  --theme-soft-strong: #e2e8f0;
+  --theme-border: var(--app-border);
+  --theme-border-strong: var(--app-border-strong);
+  --theme-text: var(--app-text);
+  --theme-muted: var(--app-muted);
+  --theme-faint: var(--app-faint);
+  --theme-accent: var(--app-blue);
+  --theme-accent-dark: var(--app-blue-dark);
+  --theme-accent-soft: var(--app-blue-soft);
+  --theme-success: var(--app-green);
+  --theme-danger: var(--app-red);
+  --theme-shadow: var(--app-shadow);
+
+  /* --fp-* aliases (framework_planner.css) */
+  --fp-bg: var(--app-bg);
+  --fp-panel: var(--app-surface);
+  --fp-soft: var(--app-soft);
+  --fp-soft-2: #e2e8f0;
+  --fp-border: var(--app-border);
+  --fp-border-strong: var(--app-border-strong);
+  --fp-text: var(--app-text);
+  --fp-muted: var(--app-muted);
+  --fp-faint: var(--app-faint);
+  --fp-blue: var(--app-blue);
+  --fp-blue-dark: var(--app-blue-dark);
+  --fp-blue-soft: var(--app-blue-soft);
+  --fp-green: var(--app-green);
+  --fp-red: var(--app-red);
+  --fp-orange: var(--app-orange);
+  --fp-primary: var(--app-blue);
+  --fp-primary-soft: var(--app-blue-soft);
+  --fp-shadow: var(--app-shadow);
+  --fp-radius: var(--app-radius);
+  --fp-radius-sm: var(--app-radius-sm);
+  --fp-radius-lg: var(--app-radius-lg);
+
+  /* --wts-* aliases (framework_to_script.css) */
+  --wts-bg: var(--app-bg);
+  --wts-panel: var(--app-surface);
+  --wts-soft: var(--app-soft);
+  --wts-border: var(--app-border);
+  --wts-border-strong: var(--app-border-strong);
+  --wts-strong: var(--app-blue);
+  --wts-strong-2: var(--app-green);
+  --wts-text: var(--app-text);
+  --wts-muted: var(--app-muted);
+  --wts-faint: var(--app-faint);
+  --wts-ok: var(--app-green-dark);
+  --wts-danger: var(--app-red);
+  --wts-orange: var(--app-orange);
+  --wts-radius: var(--app-radius);
+  --wts-shadow: var(--app-shadow);
+
+  /* Generic aliases */
+  --bg: var(--app-bg);
+  --surface: var(--app-surface);
+  --surface-solid: var(--app-surface-solid);
+  --line: var(--app-border);
+  --text: var(--app-text);
+  --muted: var(--app-muted);
+  --shadow: var(--app-shadow);
+  --mono-bg: var(--app-bg);
+  --mono-panel: var(--app-surface);
+  --mono-soft: var(--app-soft);
+  --mono-text: var(--app-text);
+  --mono-muted: var(--app-muted);
+  --mono-line: var(--app-border);
+  --mono-accent: var(--app-blue);
 }
 
+/* ---- Base Reset ---- */
 html {
-  background: var(--theme-bg);
+  background: var(--app-bg);
   color-scheme: light;
 }
 
@@ -82,8 +152,8 @@ body,
 .home-body {
   position: relative;
   isolation: isolate;
-  color: var(--theme-text);
-  background: var(--theme-bg) !important;
+  color: var(--app-text);
+  background: var(--app-bg);
   color-scheme: light;
 }
 
@@ -95,17 +165,15 @@ select {
   color-scheme: light;
 }
 
-.fp-app {
+/* Ensure content sits above the animated background */
+body > * {
   position: relative;
-  isolation: isolate;
-  color: var(--theme-text);
-  background: transparent !important;
+  z-index: 1;
 }
 
-.fp-shell,
-.fp-main {
-  background: transparent !important;
-}
+/* ============================================================
+   Cat Theme Animated Background — Blue / Yellow / Green tones
+   ============================================================ */
 
 .cat-theme-background {
   position: fixed;
@@ -113,7 +181,7 @@ select {
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
-  background: var(--theme-bg);
+  background: var(--app-bg);
   contain: layout paint style;
 }
 
@@ -136,466 +204,66 @@ select {
   inset: -22vmax;
 }
 
+/* Photo layer — cool blue tint */
 .cat-theme-photo {
   background:
-    linear-gradient(rgba(255, 251, 245, 0.28), rgba(255, 244, 231, 0.34)),
+    linear-gradient(rgba(240, 249, 255, 0.28), rgba(224, 242, 254, 0.34)),
     url("cat-wallpaper.png") center center / cover no-repeat;
   opacity: 0.82;
   filter: saturate(1.04) blur(0.1px);
 }
 
+/* Haze — blue + yellow + green radials */
 .cat-theme-haze {
   background:
-    radial-gradient(circle at 18% 12%, rgba(255, 229, 198, 0.42), transparent 32%),
-    radial-gradient(circle at 74% 24%, rgba(255, 247, 218, 0.36), transparent 34%),
-    radial-gradient(circle at 48% 86%, rgba(255, 218, 196, 0.34), transparent 38%),
-    linear-gradient(135deg, rgba(255, 250, 240, 0.52), rgba(255, 237, 220, 0.36));
+    radial-gradient(circle at 18% 12%, rgba(191, 219, 254, 0.42), transparent 32%),
+    radial-gradient(circle at 74% 24%, rgba(254, 252, 232, 0.36), transparent 34%),
+    radial-gradient(circle at 48% 86%, rgba(209, 250, 229, 0.34), transparent 38%),
+    linear-gradient(135deg, rgba(240, 249, 255, 0.52), rgba(224, 242, 254, 0.36));
   mix-blend-mode: soft-light;
   opacity: 0.62;
   filter: blur(18px);
 }
 
+/* Aurora bands — cool blue default, overridden by JS */
 .cat-theme-aurora {
   width: var(--cat-aurora-width, 72vmax);
   height: var(--cat-aurora-height, 28vmax);
   border-radius: 999px;
-  background: var(--cat-aurora-bg, linear-gradient(90deg, transparent, rgba(255, 211, 166, 0.32), transparent));
+  background: var(--cat-aurora-bg, linear-gradient(90deg, transparent, rgba(147, 197, 253, 0.32), transparent));
   mix-blend-mode: soft-light;
   filter: blur(var(--cat-aurora-blur, 28px));
 }
 
+/* Blobs — cool blue default */
 .cat-theme-blob {
   width: var(--cat-blob-size, 36vmax);
   height: var(--cat-blob-size, 36vmax);
   border-radius: 999px;
-  background: var(--cat-blob-bg, rgba(255, 220, 170, 0.32));
+  background: var(--cat-blob-bg, rgba(147, 197, 253, 0.32));
   mix-blend-mode: soft-light;
   filter: blur(var(--cat-blob-blur, 26px));
 }
 
+/* Particles — blue */
 .cat-theme-particle {
   width: var(--cat-particle-size, 5px);
   height: var(--cat-particle-size, 5px);
   border-radius: 999px;
-  background: rgba(173, 116, 74, 0.3);
-  box-shadow: 0 0 12px rgba(255, 232, 202, 0.52);
+  background: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 0 12px rgba(219, 234, 254, 0.52);
 }
 
+/* Lines — blue tint */
 .cat-theme-line {
   width: var(--cat-line-width, 64px);
   height: 1px;
   border-radius: 999px;
-  background: linear-gradient(90deg, transparent, rgba(156, 106, 76, 0.22), transparent);
+  background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.22), transparent);
   filter: blur(0.35px);
 }
 
-body > * {
-  position: relative;
-  z-index: 1;
-}
-
-.fp-app::before { display: none !important; }
-
-.workspace-sidebar,
-.workspace-body .workspace-sidebar,
-.fp-side {
-  color: var(--theme-text) !important;
-  background: rgba(255, 248, 238, 0.9) !important;
-  border-color: var(--theme-border) !important;
-  box-shadow: 10px 0 36px rgba(92, 56, 25, 0.08) !important;
-  backdrop-filter: blur(14px);
-}
-
-.chat-main,
-.fp-main {
-  background: transparent !important;
-}
-
-.home-topbar,
-.topbar,
-.workspace-runtime,
-.workspace-body .workspace-runtime,
-.tool-panel,
-.workspace-body .tool-panel,
-.community-panel,
-.workspace-body .community-panel,
-.composer-card,
-.workspace-body .composer-card,
-.chat-composer-shell,
-.workspace-body .chat-composer-shell,
-.workspace-folder,
-.workspace-body .workspace-folder,
-.workspace-pick,
-.workspace-body .workspace-pick,
-.workspace-empty,
-.workspace-body .workspace-empty,
-.tool-shortcut,
-.workspace-body .tool-shortcut,
-.sidebar-create-btn,
-.workspace-body .sidebar-create-btn,
-.sidebar-profile-btn,
-.workspace-body .sidebar-profile-btn,
-.sidebar-toggle,
-.workspace-body .sidebar-toggle,
-.card,
-.home-entry-card,
-.workspace-landing,
-.workspace-landing__card,
-.asset-tile,
-.workspace-body .asset-tile,
-.asset-editor,
-.workspace-body .asset-editor,
-.profile-drawer,
-.workspace-body .profile-drawer,
-.toast-card,
-.workspace-body .toast-card,
-.fp-top,
-.fp-steps,
-.fp-section,
-.fp-card,
-.fp-panel-card,
-.fp-stage-note,
-.fp-asset-card,
-.fp-modal-card,
-.fp-knowledge-panel,
-.fp-package-card,
-.fp-source-group,
-.fp-business-panel,
-.fp-readable-item,
-.fp-character-card,
-.fp-asset-item,
-.fp-running-card,
-.fp-history-panel,
-.fp-commit-panel,
-.fp-preflight-panel,
-.wts-header,
-.wts-card,
-.wts-asset-item,
-.wts-step,
-.wts-package-field,
-.wts-tree-node,
-.wts-asset-current,
-.wts-tree-leaf {
-  color: var(--theme-text) !important;
-  background: var(--theme-panel) !important;
-  border-color: var(--theme-border) !important;
-  box-shadow: var(--theme-shadow);
-  backdrop-filter: blur(12px);
-}
-
-.workspace-landing,
-.workspace-landing__inner,
-.chat-view,
-.workspace-body .chat-view {
-  background: transparent !important;
-}
-
-.workspace-landing__card,
-.home-entry-card {
-  min-height: 108px;
-}
-
-.sidebar-brand-mark,
-.workspace-body .sidebar-brand-mark,
-.sidebar-profile-avatar,
-.workspace-body .sidebar-profile-avatar,
-.fp-logo-mark,
-.chat-avatar {
-  color: #7b4723 !important;
-  background: #ffe5c2 !important;
-  border: 1px solid rgba(147, 91, 48, 0.18) !important;
-}
-
-.sidebar-brand,
-.sidebar-brand-text strong,
-.sidebar-brand-text,
-.sidebar-group-label,
-.sidebar-section-head,
-.sidebar-folder-link,
-.sidebar-text-link,
-.sidebar-footer-text,
-.sidebar-logout-link,
-.workspace-folder summary,
-.workspace-body .workspace-folder summary,
-.runtime-app-label,
-.runtime-brandline strong,
-.runtime-pill strong,
-.workspace-landing__title,
-.workspace-landing__card-title,
-.home-hero-copy h1,
-.brand-mark strong,
-.fp-title,
-.fp-card-title,
-.wts-header h1,
-.wts-card h2,
-.auth-card,
-.auth-card h2,
-.auth-card p,
-.auth-form label,
-.auth-form span,
-.auth-switch,
-.profile-drawer,
-.profile-drawer h2,
-.profile-drawer h3,
-.mini-card,
-.mini-card h3,
-.workspace-landing__card-desc,
-.workspace-pick-title,
-.tool-panel h3,
-.tool-panel h4 {
-  color: var(--theme-text) !important;
-}
-
-.sidebar-brand-text em,
-.workspace-pick-meta,
-.workspace-pick-state,
-.tool-shortcut small,
-.runtime-note,
-.runtime-foot,
-.runtime-kicker,
-.runtime-pill .runtime-kicker,
-.chat-bubble-meta,
-.chat-empty-state p,
-.composer-hint,
-.composer-mode-note,
-.workspace-landing__subtitle,
-.workspace-landing__footnote,
-.home-nav a,
-.home-entry-card small,
-.fp-muted,
-.fp-hint,
-.fp-card-sub,
-.fp-top-sub,
-.fp-kicker,
-.wts-hint,
-.wts-card p,
-.wts-meta,
-.wts-version,
-.wts-label {
-  color: var(--theme-muted) !important;
-}
-
-.btn-primary,
-.workspace-body .btn-primary,
-.mono-page .btn-primary,
-.sidebar-create-btn,
-.workspace-body .sidebar-create-btn,
-.composer-send-btn,
-.workspace-body .composer-send-btn,
-.fp-btn.primary,
-.wts-btn,
-.wts-step-actions button {
-  color: #4b2a15 !important;
-  background: var(--theme-accent-soft) !important;
-  border-color: #efbd82 !important;
-}
-
-.btn-primary:hover:not(:disabled),
-.workspace-body .btn-primary:hover:not(:disabled),
-.mono-page .btn-primary:hover:not(:disabled),
-.sidebar-create-btn:hover,
-.workspace-body .sidebar-create-btn:hover,
-.composer-send-btn:hover:not(:disabled),
-.workspace-body .composer-send-btn:hover:not(:disabled),
-.fp-btn.primary:hover:not(:disabled),
-.wts-btn:hover:not(:disabled),
-.wts-step-actions button:hover:not(:disabled) {
-  background: #ffc987 !important;
-  border-color: #dda364 !important;
-}
-
-.btn-secondary,
-.btn-ghost,
-.workspace-body .btn-secondary,
-.workspace-body .btn-ghost,
-.sidebar-refresh-btn,
-.workspace-body .sidebar-refresh-btn,
-.workspace-pick-delete,
-.workspace-body .workspace-pick-delete,
-.composer-action-link,
-.workspace-body .composer-action-link,
-.fp-btn,
-.wts-btn.ghost,
-.wts-step-actions button.secondary,
-.wts-step-actions button:disabled {
-  color: #4a2d1b !important;
-  background: rgba(255, 246, 235, 0.96) !important;
-  border-color: rgba(184, 121, 66, 0.26) !important;
-}
-
-.btn-secondary:hover:not(:disabled),
-.btn-ghost:hover:not(:disabled),
-.workspace-body .btn-secondary:hover:not(:disabled),
-.workspace-body .btn-ghost:hover:not(:disabled),
-.sidebar-refresh-btn:hover,
-.workspace-body .sidebar-refresh-btn:hover,
-.composer-action-link:hover:not(:disabled),
-.workspace-body .composer-action-link:hover:not(:disabled),
-.fp-btn:hover:not(:disabled),
-.wts-btn.ghost:hover:not(:disabled) {
-  color: #3b2112 !important;
-  background: #ffe9ca !important;
-  border-color: rgba(184, 121, 66, 0.38) !important;
-}
-
-.btn-danger,
-.workspace-body .btn-danger,
-.fp-btn.danger,
-.fp-btn.danger.subtle {
-  color: #8e3b31 !important;
-  background: #fff0ec !important;
-  border-color: #f0b8ad !important;
-}
-
-.btn-success,
-.workspace-body .btn-success {
-  color: #326548 !important;
-  background: #edf7ed !important;
-  border-color: #badfbd !important;
-}
-
-input,
-textarea,
-select,
-.field input,
-.field textarea,
-.field select,
-.workspace-body .field input,
-.workspace-body .field textarea,
-.workspace-body .field select,
-.tool-field input,
-.tool-field textarea,
-.workspace-body .tool-field input,
-.workspace-body .tool-field textarea,
-.composer-field input,
-.composer-field textarea,
-.workspace-body .composer-field input,
-.workspace-body .composer-field textarea,
-.compact-select,
-.workspace-body .compact-select,
-.fp-field input,
-.fp-field textarea,
-.fp-field select,
-.fp-business-field input,
-.fp-business-field textarea,
-.fp-business-field select,
-.fp-preference-panel textarea,
-.fp-preference-head select,
-.wts-card input,
-.wts-card textarea,
-.wts-card select {
-  color: var(--theme-text) !important;
-  background: rgba(255, 253, 249, 0.96) !important;
-  border-color: var(--theme-border-strong) !important;
-  -webkit-text-fill-color: var(--theme-text);
-  caret-color: var(--theme-accent-dark);
-}
-
-input::placeholder,
-textarea::placeholder,
-.workspace-body input::placeholder,
-.workspace-body textarea::placeholder,
-.fp-field input::placeholder,
-.fp-field textarea::placeholder,
-.wts-card input::placeholder,
-.wts-card textarea::placeholder {
-  color: #8e7667 !important;
-  opacity: 1;
-  -webkit-text-fill-color: #8e7667;
-}
-
-input:-webkit-autofill,
-textarea:-webkit-autofill,
-select:-webkit-autofill {
-  -webkit-text-fill-color: var(--theme-text) !important;
-  box-shadow: 0 0 0 1000px #fffdf9 inset !important;
-  caret-color: var(--theme-accent-dark);
-}
-
-input:focus,
-textarea:focus,
-select:focus,
-.field input:focus,
-.field textarea:focus,
-.field select:focus,
-.tool-field input:focus,
-.tool-field textarea:focus,
-.composer-field input:focus,
-.composer-field textarea:focus,
-.compact-select:focus,
-.fp-field input:focus,
-.fp-field textarea:focus,
-.fp-field select:focus,
-.wts-card input:focus,
-.wts-card textarea:focus,
-.wts-card select:focus {
-  border-color: rgba(184, 121, 66, 0.58) !important;
-  box-shadow: 0 0 0 3px rgba(255, 201, 135, 0.34) !important;
-  outline: none;
-}
-
-.runtime-pill,
-.workspace-body .runtime-pill,
-.status-pill,
-.workspace-body .status-pill,
-.completion-panel,
-.workspace-body .completion-panel,
-.advanced-inputs,
-.workspace-body .advanced-inputs,
-.output-box,
-.workspace-body .output-box,
-.chat-bubble,
-.workspace-body .chat-bubble,
-.chat-message.system .chat-bubble,
-.chat-message.assistant .chat-bubble,
-.chat-empty-state,
-.platform-flow-note,
-.fp-empty,
-.fp-output-overview,
-.fp-guide-card,
-.fp-story-card,
-.fp-beat-card,
-.fp-source-group > summary,
-.fp-business-panel summary,
-.fp-tree-node summary,
-.fp-tree-leaf,
-.fp-upload,
-.wts-empty,
-.wts-empty-state,
-.wts-loading,
-.wts-import-json {
-  color: var(--theme-text) !important;
-  background: var(--theme-soft) !important;
-  border-color: var(--theme-border) !important;
-}
-
-.chat-message.user .chat-bubble,
-.workspace-body .chat-message.user .chat-bubble,
-.workspace-pick.active,
-.workspace-body .workspace-pick.active,
-.fp-nav-item.active,
-.wts-step.done {
-  color: #5c3319 !important;
-  background: rgba(255, 226, 190, 0.82) !important;
-  border-color: rgba(184, 121, 66, 0.28) !important;
-}
-
-.progress-fill,
-.workspace-body .progress-fill,
-.runtime-progress-top .progress-fill,
-.fp-step.active .fp-step-dot,
-.fp-step.done .fp-step-dot,
-.wts-step-number {
-  background: linear-gradient(90deg, #ffd9aa, #c88444) !important;
-}
-
-.fp-json,
-.fp-json-inline,
-.fp-business-debug pre {
-  color: #f8efe7 !important;
-  background: #4a3428 !important;
-}
-
+/* ---- Ripple Effect — blue tones ---- */
 .cat-theme-ripple {
   position: fixed;
   left: 0;
@@ -605,8 +273,8 @@ select:focus,
   pointer-events: none;
   z-index: 2147483647;
   border-radius: 999px;
-  border: 1px solid rgba(184, 121, 66, 0.22);
-  background: radial-gradient(circle, rgba(255, 235, 207, 0.35) 0%, rgba(255, 235, 207, 0.2) 38%, rgba(255, 235, 207, 0) 72%);
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  background: radial-gradient(circle, rgba(219, 234, 254, 0.35) 0%, rgba(219, 234, 254, 0.2) 38%, rgba(219, 234, 254, 0) 72%);
   transform: translate(-50%, -50%) scale(0.2);
   animation: catRipple 680ms ease-out forwards;
 }
@@ -618,6 +286,7 @@ select:focus,
   }
 }
 
+/* ---- Reduced Motion ---- */
 @media (prefers-reduced-motion: reduce) {
   .cat-theme-background {
     opacity: 0.92;
@@ -625,28 +294,5 @@ select:focus,
 
   .cat-theme-ripple {
     display: none;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root,
-  html,
-  body {
-    color-scheme: light;
-  }
-
-  body,
-  .workspace-body,
-  .home-body,
-  .fp-app {
-    color: var(--theme-text) !important;
-    background: var(--theme-bg) !important;
-  }
-
-  input,
-  textarea,
-  select,
-  button {
-    color-scheme: light;
   }
 }

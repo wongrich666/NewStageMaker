@@ -1,23 +1,4 @@
-:root {
-  --color-bg: #f5f7fb;
-  --color-panel: #ffffff;
-  --color-primary: #3f5fe3;
-  --color-primary-soft: #edf1ff;
-  --color-border: #d8deea;
-  --color-text: #172033;
-  --color-muted: #667085;
-  --wts-bg: var(--color-bg);
-  --wts-panel: var(--color-panel);
-  --wts-soft: #f8fafc;
-  --wts-border: var(--color-border);
-  --wts-strong: var(--color-primary);
-  --wts-text: var(--color-text);
-  --wts-muted: var(--color-muted);
-  --wts-ok: #16803c;
-  --wts-danger: #991b1b;
-  --wts-radius: 16px;
-  --wts-shadow: 0 14px 36px rgba(15, 23, 42, 0.07);
-}
+/* Base :root variables now provided by global_theme.css unified tokens */
 
 * { box-sizing: border-box; }
 body {
@@ -445,250 +426,40 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .wts-version { justify-content: flex-start; }
   .wts-summary-grid { grid-template-columns: 1fr; }
 }
-/* UI_UNIFIED_THEME_V1: align framework-to-script page with main workspace */
-
-:root {
-  --color-bg: #f3f5f9;
-  --color-panel: #ffffff;
-  --color-primary: #253247;
-  --color-primary-soft: #eef2ff;
-  --color-border: rgba(24, 34, 53, 0.08);
-  --color-text: #161c28;
-  --color-muted: #6b7282;
-  --color-shadow: 0 18px 48px rgba(15, 23, 42, 0.07);
-  --color-radius: 22px;
-
-  --wts-bg: var(--color-bg);
-  --wts-panel: var(--color-panel);
-  --wts-soft: #f8fafc;
-  --wts-border: var(--color-border);
-  --wts-strong: var(--color-primary);
-  --wts-text: var(--color-text);
-  --wts-muted: var(--color-muted);
-  --wts-radius: var(--color-radius);
-  --wts-shadow: var(--color-shadow);
-}
-
-body {
-  color: var(--wts-text);
-  background: linear-gradient(180deg, #f7f8fb 0%, #eef2f7 100%);
-  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
-}
-
-.wts-shell {
-  width: min(1320px, calc(100% - 32px));
-  padding: 24px 0 56px;
-}
-
-.wts-header,
-.wts-card {
-  border: 1px solid var(--wts-border);
-  border-radius: var(--wts-radius);
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: var(--wts-shadow);
-}
-
-.wts-card {
-  padding: 22px;
-}
-
-.wts-header {
-  padding: 24px;
-}
-
-.wts-header h1 {
-  font-size: 26px;
-  letter-spacing: -0.03em;
-}
-
-.wts-card h2,
-.wts-step h3,
-.wts-asset-item h3 {
-  color: var(--wts-text);
-  letter-spacing: -0.02em;
-}
-
-.wts-btn,
-.wts-step-actions button {
-  border-radius: 999px;
-  border-color: transparent;
-  background: var(--wts-strong);
-  color: #ffffff;
-  font-weight: 800;
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
-}
-
-.wts-btn.ghost,
-.wts-step-actions button.secondary,
-.wts-step-actions button:disabled {
-  border-color: var(--wts-border);
-  background: rgba(255, 255, 255, 0.94);
-  color: var(--wts-text);
-  box-shadow: none;
-}
-
-.wts-step,
-.wts-asset-item,
-.wts-tree-leaf,
-.wts-import-json,
-.wts-empty,
-.wts-empty-state,
-.wts-loading {
-  border-color: var(--wts-border);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.92);
-}
-
-.wts-step.done {
-  border-color: rgba(22, 128, 60, 0.18);
-  background: rgba(248, 253, 250, 0.92);
-}
-
-.wts-tree-list {
-  gap: 8px;
-}
-
-.wts-tree-leaf {
-  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
-  padding: 10px 12px;
-}
-
-.wts-tree-leaf b {
-  color: #334155;
-}
-
-.wts-tree-leaf span,
-.wts-tree-text {
-  color: #374151;
-  line-height: 1.75;
-}
-/* UI_STAGE_SCRIPT_VISIBLE_POLISH_V2 */
-
-body {
-  background: linear-gradient(180deg, #f7f8fb 0%, #eef2f7 100%);
-}
-
-.wts-shell {
-  width: min(1440px, calc(100% - 48px));
-  padding: 28px 0 72px;
-}
-
-.wts-header {
-  padding: 24px 28px;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.07);
-}
-
-.wts-header h1 {
-  font-size: 30px;
-  letter-spacing: -0.04em;
-}
-
-.wts-card {
-  padding: 24px;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.06);
-}
-
-.wts-btn,
-.wts-step-actions button {
-  border-radius: 999px;
-  background: #253247;
-  border-color: transparent;
-}
-
-.wts-btn.ghost,
-.wts-step-actions button.secondary,
-.wts-step-actions button:disabled {
-  background: rgba(255, 255, 255, 0.94);
-  border-color: rgba(24, 34, 53, 0.1);
-  color: #161c28;
-}
-
-.wts-asset-item,
-.wts-step,
-.wts-output,
-.wts-tree-node,
-.wts-tree-leaf,
-.wts-import-json {
-  border-color: rgba(24, 34, 53, 0.08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.94);
-}
-
-.wts-asset-item {
-  padding: 18px;
-}
-
-.wts-step {
-  padding: 18px;
-}
-
-.wts-step > b {
-  background: #253247;
-  border-radius: 14px;
-}
-
-.wts-output summary,
-.wts-tree-node summary {
-  padding: 13px 15px;
-}
-
-.wts-output > div,
-.wts-tree-node > div {
-  padding: 14px 15px;
-}
-
-.wts-tree-leaf {
-  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
-}
-
-@keyframes wtsPulse {
-  0%, 100% { opacity: .35; transform: scale(.85); }
-  50% { opacity: 1; transform: scale(1); }
-}
-
 /* ============================================================
-   Cinematic Framework-To-Script UI v1
+   Unified Framework-To-Script UI — bright theme
    ============================================================ */
 
 :root {
-  --wts-bg: #030708;
-  --wts-panel: rgba(9, 22, 23, 0.84);
-  --wts-soft: rgba(255, 255, 255, 0.06);
-  --wts-border: rgba(112, 255, 235, 0.16);
-  --wts-border-strong: rgba(57, 255, 232, 0.42);
-  --wts-strong: #20f7e7;
-  --wts-strong-2: #77ffb6;
-  --wts-text: #f1fffd;
-  --wts-muted: #9cb4b2;
-  --wts-faint: #647c7a;
-  --wts-ok: #77ffb6;
-  --wts-danger: #ff4f64;
-  --wts-orange: #ff8a1d;
-  --wts-radius: 8px;
-  --wts-shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
+  --wts-bg: var(--app-bg);
+  --wts-panel: var(--app-surface);
+  --wts-soft: var(--app-soft);
+  --wts-border: var(--app-border);
+  --wts-border-strong: var(--app-border-strong);
+  --wts-strong: var(--app-blue);
+  --wts-strong-2: var(--app-green);
+  --wts-text: var(--app-text);
+  --wts-muted: var(--app-muted);
+  --wts-faint: var(--app-faint);
+  --wts-ok: var(--app-green-dark);
+  --wts-danger: var(--app-red);
+  --wts-orange: var(--app-orange);
+  --wts-radius: var(--app-radius);
+  --wts-shadow: var(--app-shadow);
 }
 
 body {
   color: var(--wts-text) !important;
   background:
-    radial-gradient(circle at 50% 0%, rgba(23, 255, 230, 0.13), transparent 36%),
-    radial-gradient(circle at 78% 16%, rgba(255, 99, 54, 0.15), transparent 30%),
-    linear-gradient(135deg, #020405 0%, #07100f 48%, #020304 100%) !important;
-}
-
-.cat-theme-background,
-.cat-theme-blob {
-  display: none !important;
+    radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.13), transparent 36%),
+    radial-gradient(circle at 78% 16%, rgba(245, 158, 11, 0.15), transparent 30%),
+    linear-gradient(135deg, #f0f9ff 0%, var(--app-bg) 48%, #f0fdf4 100%) !important;
 }
 
 #framework-to-script-app {
   min-height: 100vh;
   background:
-    linear-gradient(90deg, rgba(32, 247, 231, 0.06), transparent 27%),
+    linear-gradient(90deg, rgba(59, 130, 246, 0.06), transparent 27%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 18%),
     transparent !important;
 }
@@ -705,8 +476,8 @@ body {
   padding: 24px 28px !important;
   color: var(--wts-text) !important;
   background:
-    radial-gradient(circle at 12% 0%, rgba(32, 247, 231, 0.2), transparent 38%),
-    linear-gradient(135deg, rgba(9, 22, 23, 0.9), rgba(6, 10, 12, 0.88)) !important;
+    radial-gradient(circle at 12% 0%, rgba(59, 130, 246, 0.2), transparent 38%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.88)) !important;
   border: 1px solid var(--wts-border) !important;
   border-radius: 8px !important;
   box-shadow: var(--wts-shadow) !important;
@@ -719,8 +490,8 @@ body {
   min-height: 28px;
   padding: 0 12px;
   color: var(--wts-strong) !important;
-  background: rgba(32, 247, 231, 0.08);
-  border: 1px solid rgba(32, 247, 231, 0.18);
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.18);
   border-radius: 999px;
   letter-spacing: 0 !important;
 }
@@ -731,7 +502,7 @@ body {
   font-size: clamp(34px, 4.8vw, 62px) !important;
   line-height: 1.02 !important;
   letter-spacing: 0 !important;
-  text-shadow: 0 0 26px rgba(32, 247, 231, 0.24);
+  text-shadow: 0 0 26px rgba(59, 130, 246, 0.24);
 }
 
 .wts-header h1::first-letter {
@@ -792,7 +563,7 @@ body {
 .wts-empty-state,
 .wts-loading,
 .wts-asset-current {
-  background-image: linear-gradient(135deg, rgba(32, 247, 231, 0.055), rgba(255, 255, 255, 0.025)) !important;
+  background-image: linear-gradient(135deg, rgba(59, 130, 246, 0.055), rgba(255, 255, 255, 0.025)) !important;
 }
 
 .wts-card {
@@ -812,11 +583,11 @@ body {
 .wts-btn,
 .wts-step-actions button {
   min-height: 36px;
-  color: #001817 !important;
+  color: #ffffff !important;
   background: linear-gradient(135deg, var(--wts-strong), var(--wts-strong-2)) !important;
-  border: 1px solid rgba(119, 255, 182, 0.7) !important;
+  border: 1px solid rgba(16, 185, 129, 0.7) !important;
   border-radius: 8px !important;
-  box-shadow: 0 14px 34px rgba(32, 247, 231, 0.2) !important;
+  box-shadow: 0 14px 34px rgba(59, 130, 246, 0.2) !important;
   font-weight: 900 !important;
 }
 
@@ -838,13 +609,13 @@ body {
 .wts-btn.ghost:hover:not(:disabled),
 .wts-step-actions button.secondary:hover:not(:disabled) {
   color: var(--wts-strong) !important;
-  background: rgba(32, 247, 231, 0.1) !important;
-  border-color: rgba(32, 247, 231, 0.34) !important;
+  background: rgba(59, 130, 246, 0.1) !important;
+  border-color: rgba(59, 130, 246, 0.34) !important;
 }
 
 .wts-error,
 .wts-error-inline {
-  color: #ffb4bd !important;
+  color: var(--app-red-soft) !important;
   background: rgba(255, 79, 100, 0.16) !important;
   border: 1px solid rgba(255, 79, 100, 0.36) !important;
   border-radius: 8px !important;
@@ -855,33 +626,33 @@ body {
 .wts-loading,
 .wts-import-json {
   border-style: dashed !important;
-  border-color: rgba(32, 247, 231, 0.32) !important;
+  border-color: rgba(59, 130, 246, 0.32) !important;
 }
 
 .wts-import-json.drag-over {
   color: var(--wts-text) !important;
-  background: rgba(32, 247, 231, 0.12) !important;
-  border-color: rgba(32, 247, 231, 0.6) !important;
-  box-shadow: inset 0 0 0 1px rgba(32, 247, 231, 0.22) !important;
+  background: rgba(59, 130, 246, 0.12) !important;
+  border-color: rgba(59, 130, 246, 0.6) !important;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.22) !important;
 }
 
 .wts-meta span,
 .wts-version span {
-  color: #c8d8d6 !important;
+  color: var(--app-muted) !important;
   background: rgba(255, 255, 255, 0.07) !important;
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
   border-radius: 999px;
 }
 
 .wts-step.done {
-  border-color: rgba(119, 255, 182, 0.24) !important;
-  background: rgba(119, 255, 182, 0.08) !important;
+  border-color: rgba(16, 185, 129, 0.24) !important;
+  background: rgba(16, 185, 129, 0.08) !important;
 }
 
 .wts-step > b,
 .wts-step-number,
 .wts-stage-index {
-  color: #001817 !important;
+  color: #ffffff !important;
   background: linear-gradient(135deg, var(--wts-strong), var(--wts-strong-2)) !important;
   border-radius: 8px !important;
 }
@@ -901,7 +672,7 @@ body {
 .wts-package-field-body > div,
 .wts-package-field-panel > div {
   color: var(--wts-muted) !important;
-  background: rgba(0, 0, 0, 0.18) !important;
+  background: rgba(15, 23, 42, 0.06) !important;
 }
 
 .wts-tree-leaf {
@@ -917,14 +688,14 @@ body {
 .wts-json,
 pre,
 code {
-  color: #dffffb !important;
+  color: var(--app-text) !important;
 }
 
 pre,
 code,
 .wts-json,
 .wts-output pre {
-  background: rgba(0, 0, 0, 0.34) !important;
+  background: rgba(15, 23, 42, 0.10) !important;
   border-color: rgba(255, 255, 255, 0.1) !important;
 }
 
@@ -935,7 +706,7 @@ select,
 .wts-field textarea,
 .wts-field select {
   color: var(--wts-text) !important;
-  background: rgba(0, 0, 0, 0.24) !important;
+  background: rgba(255, 255, 255, 0.88) !important;
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
   border-radius: 8px !important;
   caret-color: var(--wts-strong);
@@ -948,7 +719,7 @@ select:focus,
 .wts-field textarea:focus,
 .wts-field select:focus {
   border-color: var(--wts-strong) !important;
-  box-shadow: 0 0 0 3px rgba(32, 247, 231, 0.16) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16) !important;
   outline: none !important;
 }
 
@@ -990,15 +761,15 @@ textarea::placeholder {
 .wts-shell input,
 .wts-shell textarea,
 .wts-shell select {
-  color: #eafffb !important;
-  -webkit-text-fill-color: #eafffb !important;
-  background: rgba(3, 12, 13, 0.74) !important;
-  border-color: rgba(126, 255, 238, 0.2) !important;
+  color: var(--app-text) !important;
+  -webkit-text-fill-color: var(--app-text) !important;
+  background: rgba(255, 255, 255, 0.88) !important;
+  border-color: rgba(59, 130, 246, 0.2) !important;
 }
 
 .wts-shell input::placeholder,
 .wts-shell textarea::placeholder {
-  color: #87a5a1 !important;
+  color: var(--app-muted) !important;
   opacity: 1 !important;
 }
 
@@ -1017,10 +788,10 @@ textarea::placeholder {
 .wts-tree-more div,
 .wts-asset-current,
 .wts-summary-card {
-  color: #eafffb !important;
-  background: rgba(9, 22, 23, 0.92) !important;
-  background-image: linear-gradient(135deg, rgba(32, 247, 231, 0.07), rgba(255, 255, 255, 0.025)) !important;
-  border-color: rgba(112, 255, 235, 0.2) !important;
+  color: var(--app-text) !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  background-image: linear-gradient(135deg, rgba(59, 130, 246, 0.07), rgba(255, 255, 255, 0.025)) !important;
+  border-color: rgba(59, 130, 246, 0.2) !important;
   box-shadow: none !important;
 }
 
@@ -1032,14 +803,14 @@ textarea::placeholder {
 .wts-tree-more *,
 .wts-asset-current *,
 .wts-summary-card * {
-  color: #d9fffb !important;
+  color: var(--app-text) !important;
 }
 
 .wts-package-field summary strong,
 .wts-tree-node summary strong,
 .wts-tree-leaf b,
 .wts-output summary strong {
-  color: #f4fffd !important;
+  color: var(--app-text) !important;
 }
 
 .wts-package-field summary small,
@@ -1048,7 +819,7 @@ textarea::placeholder {
 .wts-tree-text,
 .wts-tree-more div,
 .wts-output > div {
-  color: #a9c9c5 !important;
+  color: var(--app-muted) !important;
 }
 
 .wts-step,
@@ -1059,17 +830,17 @@ textarea::placeholder {
 .wts-step p,
 .wts-step small,
 .wts-step .wts-hint {
-  color: #d9fffb !important;
+  color: var(--app-text) !important;
 }
 
 .wts-step h3,
 .wts-step-head h3,
 .wts-step strong {
-  color: #f4fffd !important;
+  color: var(--app-text) !important;
 }
 
 .wts-step > b,
 .wts-step-number,
 .wts-stage-index {
-  color: #001817 !important;
+  color: #ffffff !important;
 }

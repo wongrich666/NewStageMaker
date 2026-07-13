@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>AI剧本医生实验室 - 剧本创作平台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='workbuddy_studio.css') }}?v=20260709-script-doctor-v13" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='workbuddy_studio.css') }}?v=20260710-script-doctor-v14" />
 </head>
 <body class="wb-page">
   <header class="wb-topbar">
@@ -19,7 +19,8 @@
       </span>
     </a>
     <nav class="wb-top-actions">
-      <button id="wbRefreshStatusBtn" class="wb-ghost-link" type="button">检查API配置</button>
+      <button id="wbOpenApiConfigBtn" class="wb-ghost-link wb-api-config-trigger" type="button">API配置</button>
+      <button id="wbRefreshStatusBtn" class="wb-ghost-link" type="button">重新检测</button>
       <a class="wb-ghost-link" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">返回工作台</a>
     </nav>
   </header>
@@ -181,12 +182,37 @@
     </section>
   </main>
 
+  <div id="wbApiConfigDialog" class="wb-api-dialog" hidden>
+    <div class="wb-api-dialog-backdrop" data-api-dialog-close></div>
+    <section class="wb-api-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="wbApiConfigTitle">
+      <button id="wbApiConfigCloseBtn" class="wb-dialog-close" type="button" aria-label="关闭">×</button>
+      <p class="wb-section-label">CODEBUDDY CONFIG</p>
+      <h2 id="wbApiConfigTitle">API 配置</h2>
+      <p class="wb-dialog-intro">这里填写的 Key 只保存在当前浏览器，用于本页状态检测和剧本医生调用。不会写入项目代码。</p>
+      <label class="wb-api-field">
+        <span>CodeBuddy API Key</span>
+        <input id="wbApiKeyInput" type="password" placeholder="ck_xxx..." autocomplete="off" spellcheck="false" />
+      </label>
+      <label class="wb-api-field">
+        <span>网络环境</span>
+        <select id="wbApiEnvInput">
+          <option value="internal">internal 中国区</option>
+        </select>
+      </label>
+      <p id="wbApiConfigHint" class="wb-api-hint">粘贴 API Key 后点击“保存并检测”。后续可在这里更换会员账号 Key。</p>
+      <div class="wb-api-actions">
+        <button id="wbApiConfigClearBtn" class="wb-secondary-btn" type="button">清除本地配置</button>
+        <button id="wbApiConfigSaveBtn" class="wb-primary-btn" type="button">保存并检测</button>
+      </div>
+    </section>
+  </div>
+
   <script>
     window.workbuddyStudioConfig = {
       authToken: {{ current_auth_token|tojson }},
       workspaceUrl: {{ url_for('workspace_page', auth_token=current_auth_token)|tojson }}
     };
   </script>
-  <script src="{{ url_for('static', filename='workbuddy_studio.js') }}?v=20260709-script-doctor-v13"></script>
+  <script src="{{ url_for('static', filename='workbuddy_studio.js') }}?v=20260710-script-doctor-v14"></script>
 </body>
 </html>

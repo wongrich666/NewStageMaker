@@ -70,7 +70,7 @@
     details.className = "workspace-folder hot-review-workspace-folder";
     details.innerHTML = `
       <summary><span>爆款文审核资产</span></summary>
-      <div id="hotReviewProjectList" class="workspace-compact-list"></div>
+      <div id="hotReviewProjectList" class="sidebar-asset-list"></div>
     `;
     if (anchor) anchor.insertAdjacentElement("afterend", details);
     else parent.appendChild(details);
@@ -154,6 +154,19 @@
     return String(item && (item.project_id || item.asset_id || item.id) || "").trim();
   }
 
+  function statusCssClass(status) {
+    const map = {
+      pending: "is-pending",
+      running: "is-running",
+      pausing: "is-pausing",
+      paused: "is-paused",
+      failed: "is-failed",
+      completed: "is-completed",
+      terminated: "is-terminated",
+    };
+    return map[String(status || "")] || "is-saved";
+  }
+
   function renderList(container, items, emptyText) {
     if (!container) return;
     if (!items.length) {
@@ -162,16 +175,16 @@
     }
     container.innerHTML = items.map((item) => {
       const hotReview = isHotReviewAsset(item);
+      const status = String(item.status || "");
+      const cssClass = statusCssClass(status);
       return `
-        <div class="workspace-pick-row${hotReview ? " hot-review-workspace-pick-row" : ""}">
-          <a class="workspace-pick" href="${escapeHtml(projectUrl(item))}">
-            <span class="workspace-pick-main">
-              <span class="workspace-pick-title">${escapeHtml(projectTitle(item))}</span>
-              <span class="workspace-pick-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${item.current_stage_label || statusLabel(item.status)}`)}</span>
-            </span>
-            <span class="workspace-pick-state">${escapeHtml(statusLabel(item.status))}</span>
+        <div class="sidebar-asset-block${hotReview ? " hot-review-asset-block" : ""} ${cssClass}">
+          <a class="sidebar-asset-link" href="${escapeHtml(projectUrl(item))}">
+            <span class="sidebar-asset-title">${escapeHtml(projectTitle(item))}</span>
+            <span class="sidebar-asset-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${item.current_stage_label || statusLabel(item.status)}`)}</span>
+            <span class="sidebar-asset-status">${escapeHtml(statusLabel(item.status))}</span>
           </a>
-          ${hotReview ? `<button class="btn btn-danger workspace-pick-delete" type="button" data-action="delete-hot-review-asset" data-project-id="${escapeHtml(projectId(item))}">删除</button>` : ""}
+          <button class="sidebar-asset-delete" type="button" data-action="delete-sidebar-asset" data-project-id="${escapeHtml(projectId(item))}" title="删除资产">删除</button>
         </div>
       `;
     }).join("");
@@ -199,13 +212,13 @@
   });
 
   document.addEventListener("click", async (event) => {
-    const button = event.target?.closest?.('[data-action="delete-hot-review-asset"]');
+    const button = event.target?.closest?.('[data-action="delete-sidebar-asset"]');
     if (!button) return;
     event.preventDefault();
     event.stopPropagation();
     const id = String(button.dataset.projectId || "").trim();
     if (!id) return;
-    if (!window.confirm("确认删除这个爆款文审核资产吗？此操作不可恢复。")) return;
+    if (!window.confirm("确认删除这个资产吗？此操作不可恢复。")) return;
     button.disabled = true;
     const previousText = button.textContent;
     button.textContent = "删除中...";

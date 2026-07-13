@@ -3569,13 +3569,14 @@
     if (!hasStageOutput(stageKey) || !isStageEditable(stageKey)) return "";
     const editing = isStageEditMode(stageKey);
     const dirty = stageDraftDirty(stageKey);
+    const applied = Boolean((state.stage_state && state.stage_state[stageKey] || {}).confirmed);
     if (disabled) return "";
     return `
       <div class="fp-actions fp-edit-actions">
         ${editing ? `
           <span class="fp-inline-hint">当前阶段有未应用修改，请先应用修改。</span>
           <button class="fp-btn small" data-action="cancel-stage-edit" data-stage-key="${escapeHtml(stageKey)}">取消修改</button>
-        ` : `<button class="fp-btn small" data-action="enter-stage-edit" data-stage-key="${escapeHtml(stageKey)}" ${dirty ? "disabled" : ""}>修改</button>`}
+        ` : `<button class="fp-btn small" data-action="enter-stage-edit" data-stage-key="${escapeHtml(stageKey)}" ${dirty ? "disabled" : ""}>${applied ? "再次修改" : "修改"}</button>`}
       </div>
     `;
   }
@@ -3664,7 +3665,7 @@
     const data = state[options.dataKey];
     const blocked = stageBlockedByUpstream(stage);
     const confirmed = stage.confirmed;
-    const editable = !blocked && !confirmed && isStageEditMode(options.stageKey);
+    const editable = !blocked && isStageEditMode(options.stageKey);
     return `
       <section class="fp-card fp-section">
         <div class="fp-card-title-row">
@@ -3674,11 +3675,11 @@
           </div>
           ${stageStatusTag(options.stageKey)}
         </div>
-        ${confirmed ? `<div class="fp-inline-warning">${escapeHtml(options.title)}已确认并锁定。下游内容已基于当前版本生成，如需改动请显式回退。</div>` : ""}
+        ${confirmed ? `<div class="fp-inline-warning">${escapeHtml(options.title)}已应用。下游内容已基于当前版本生成，如需调整可点击“再次修改”，应用后下游会读取新版本。</div>` : ""}
         ${isStageLoading(options.stageKey) ? renderProcessingBanner(`正在生成${options.title}，请稍候...`) : ""}
         ${renderStagePreRunPanel(options.stageKey)}
         ${blocked && isEmptyValue(data) ? `<div class="fp-empty">请先应用上游阶段。</div>` : renderDataBlock(data, { dataKey: options.dataKey, stageKey: options.stageKey, editable })}
-        ${renderStageEditControls(options.stageKey, blocked || confirmed)}
+        ${renderStageEditControls(options.stageKey, blocked)}
         ${renderApplyStageChangesPanel(options.stageKey)}
         ${renderStageHistoryPanel(options.stageKey)}
         ${renderStageError(options.stageKey)}
@@ -3706,8 +3707,8 @@
         </div>
         ${confirmed ? `<div class="fp-inline-warning">04 阶段已确认并锁定，05 人物故事线会严格基于这 15 个节拍继续拆解。</div>` : ""}
         ${isStageLoading("beat") ? renderProcessingBanner("正在生成三幕十五节拍时间轴，请稍候...") : ""}
-        ${blocked && !hasTimeline ? `<div class="fp-empty">请先确认人设方案。</div>` : renderBeatTimeline(state.beat_checkpoint_timeline, { editable: !blocked && !confirmed && isStageEditMode("beat") })}
-        ${renderStageEditControls("beat", blocked || confirmed)}
+        ${blocked && !hasTimeline ? `<div class="fp-empty">请先确认人设方案。</div>` : renderBeatTimeline(state.beat_checkpoint_timeline, { editable: !blocked && isStageEditMode("beat") })}
+        ${renderStageEditControls("beat", blocked)}
         ${renderStagePreRunPanel("beat")}
         ${renderApplyStageChangesPanel("beat")}
         ${renderStageHistoryPanel("beat")}
@@ -3914,8 +3915,8 @@
           ${stageStatusTag("beat")}
         </div>
         ${isStageLoading("beat") ? renderProcessingBanner("正在生成卡点说明，请稍候...") : ""}
-        ${blocked && !hasExplanation ? `<div class="fp-empty">请先确认人设方案。</div>` : renderCheckpointExplanation(state.checkpoint_explanation, { editable: !blocked && !confirmed && isStageEditMode("beat") })}
-        ${renderStageEditControls("beat", blocked || confirmed)}
+        ${blocked && !hasExplanation ? `<div class="fp-empty">请先确认人设方案。</div>` : renderCheckpointExplanation(state.checkpoint_explanation, { editable: !blocked && isStageEditMode("beat") })}
+        ${renderStageEditControls("beat", blocked)}
         ${renderStagePreRunPanel("beat")}
         ${renderApplyStageChangesPanel("beat")}
         ${renderStageHistoryPanel("beat")}
@@ -3941,7 +3942,7 @@
         ${confirmed ? `<div class="fp-inline-warning">人物故事线已确认并锁定。06 阶段的整体改编指引会以当前故事线取舍为准。</div>` : ""}
         ${isStageLoading("storylines") ? renderProcessingBanner("正在生成人物故事线，请稍候...") : ""}
         ${blocked && !hasStorylines ? `<div class="fp-empty">请先确认 04 阶段。</div>` : renderStorylineDecisionGrid()}
-        ${renderStageEditControls("storylines", blocked || confirmed)}
+        ${renderStageEditControls("storylines", blocked)}
         ${renderStagePreRunPanel("storylines")}
         ${renderApplyStageChangesPanel("storylines")}
         ${renderStageHistoryPanel("storylines")}
@@ -4016,10 +4017,10 @@
           </div>
           ${stageStatusTag("guide")}
         </div>
-        ${confirmed ? `<div class="fp-inline-warning">整体改编指引已确认并锁定。现在可以生成最终策划包。</div>` : ""}
+        ${confirmed ? `<div class="fp-inline-warning">整体改编指引已应用。现在可以生成最终策划包；如需调整可点击“再次修改”。</div>` : ""}
         ${isStageLoading("guide") ? renderProcessingBanner("正在生成整体改编指引，请稍候...") : ""}
-        ${blocked && !hasGuide ? `<div class="fp-empty">请先确认 05 阶段。</div>` : renderGuideCards(state.adaptation_guide, { editable: !blocked && !confirmed && isStageEditMode("guide") })}
-        ${renderStageEditControls("guide", blocked || confirmed)}
+        ${blocked && !hasGuide ? `<div class="fp-empty">请先确认 05 阶段。</div>` : renderGuideCards(state.adaptation_guide, { editable: !blocked && isStageEditMode("guide") })}
+        ${renderStageEditControls("guide", blocked)}
         ${renderStagePreRunPanel("guide")}
         ${renderApplyStageChangesPanel("guide")}
         ${renderStageHistoryPanel("guide")}
@@ -4904,13 +4905,24 @@ function renderPackageBlocks() {
     if (index === centerIndex || count === 1) return { x: centerX, y: centerY };
     const others = Array.from({ length: count }, (_, itemIndex) => itemIndex).filter((itemIndex) => itemIndex !== centerIndex);
     const order = others.indexOf(index);
-    const slots = Math.max(4, others.length);
-    const angle = -Math.PI / 2 + (order / slots) * Math.PI * 2;
-    const radiusX = Math.max(260, Math.min(480, canvasWidth * 0.33));
-    const radiusY = Math.max(135, Math.min(210, canvasHeight * 0.34));
+    const side = order % 2 === 0 ? -1 : 1;
+    const sideIndex = Math.floor(order / 2);
+    const sideTotal = Math.ceil(others.length / 2);
+    const rowsPerColumn = count > 14 ? 5 : count > 8 ? 4 : 3;
+    const column = Math.floor(sideIndex / rowsPerColumn);
+    const row = sideIndex % rowsPerColumn;
+    const rowsInColumn = Math.min(rowsPerColumn, Math.max(1, sideTotal - column * rowsPerColumn));
+    const horizontalGap = count > 14 ? 220 : 250;
+    const verticalGap = count > 14 ? 82 : 112;
+    const nodeHalfWidth = count > 14 ? 78 : 98;
+    const nodeHalfHeight = 54;
+    const edgePadding = 38;
+    const x = centerX + side * (310 + column * horizontalGap);
+    const y = centerY + (row - (rowsInColumn - 1) / 2) * verticalGap;
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
     return {
-      x: centerX + Math.cos(angle) * radiusX,
-      y: centerY + Math.sin(angle) * radiusY,
+      x: clamp(x, edgePadding + nodeHalfWidth, canvasWidth - edgePadding - nodeHalfWidth),
+      y: clamp(y, edgePadding + nodeHalfHeight, canvasHeight - edgePadding - nodeHalfHeight),
     };
   }
 
@@ -4947,8 +4959,9 @@ function renderPackageBlocks() {
     const count = graphCharacters.length;
     const centerIndex = graphCenterIndex(graphCharacters);
     const centerName = graphCharacters[centerIndex].name;
-    const canvasWidth = Math.max(980, Math.ceil(count / 2) * 250);
-    const canvasHeight = count <= 5 ? 420 : Math.min(620, 420 + Math.ceil((count - 5) / 2) * 64);
+    const sideColumns = Math.ceil(Math.ceil(Math.max(0, count - 1) / 2) / (count > 14 ? 5 : count > 8 ? 4 : 3));
+    const canvasWidth = Math.max(980, 720 + sideColumns * 500);
+    const canvasHeight = count <= 7 ? 420 : Math.min(620, 420 + Math.ceil((count - 7) / 2) * 42);
     const positions = graphCharacters.map((_, index) => graphLayoutPosition(index, count, canvasWidth, canvasHeight, centerIndex));
     const positionByName = new Map(graphCharacters.map((item, index) => [item.name, positions[index]]));
     const links = primaryGraphLinks(source || {}, graphCharacters, centerName);
@@ -6330,7 +6343,10 @@ function renderPackageBlocks() {
 
   function enterStageEdit(stageKey) {
     if (!isStageEditable(stageKey) || !hasStageData(stageKey)) return;
-    ui.editSnapshots[stageKey] = stageDataSnapshot(stageKey);
+    ui.editSnapshots[stageKey] = {
+      data: stageDataSnapshot(stageKey),
+      stageState: clone(stageState(stageKey)),
+    };
     setStageEditMode(stageKey, true);
     markStageDraftDirty(stageKey);
     syncStageFlow(state);
@@ -6341,14 +6357,20 @@ function renderPackageBlocks() {
 
   function cancelStageEdit(stageKey) {
     if (!isStageEditable(stageKey)) return;
-    restoreStageDataSnapshot(stageKey, ui.editSnapshots[stageKey]);
+    const snapshot = ui.editSnapshots[stageKey];
+    restoreStageDataSnapshot(stageKey, snapshot && snapshot.data ? snapshot.data : snapshot);
     delete ui.editSnapshots[stageKey];
     setStageEditMode(stageKey, false);
     const stage = stageState(stageKey);
-    stage.stageDraftDirty = false;
-    stage.stageCommitted = hasStageData(stageKey);
-    stage.confirmed = false;
-    stage.status = stage.stageCommitted ? "generated" : stage.status;
+    const previousStageState = snapshot && snapshot.stageState && typeof snapshot.stageState === "object" ? snapshot.stageState : null;
+    if (previousStageState) {
+      Object.assign(stage, clone(previousStageState));
+    } else {
+      stage.stageDraftDirty = false;
+      stage.stageCommitted = hasStageData(stageKey);
+      stage.confirmed = false;
+      stage.status = stage.stageCommitted ? "generated" : stage.status;
+    }
     syncStageFlow(state);
     saveState();
     render();

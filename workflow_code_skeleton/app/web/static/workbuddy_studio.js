@@ -55,9 +55,45 @@
   let cachedDefaultModel = "";
   let currentHistoryItems = [];
   let runningTimer = null;
+  const apiConfigStorageKey = "workbuddy.scriptDoctor.apiConfig.v1";
 
   function authHeaders() {
     return config.authToken ? { Authorization: `Bearer ${config.authToken}` } : {};
+  }
+
+  function readApiConfig() {
+    try {
+      const raw = window.localStorage.getItem(apiConfigStorageKey);
+      if (!raw) return { apiKey: "", internetEnvironment: "internal" };
+      const parsed = JSON.parse(raw);
+      return {
+        apiKey: String(parsed.apiKey || "").trim(),
+        internetEnvironment: String(parsed.internetEnvironment || "internal").trim() || "internal",
+      };
+    } catch (error) {
+      return { apiKey: "", internetEnvironment: "internal" };
+    }
+  }
+
+  function saveApiConfig(value) {
+    window.localStorage.setItem(apiConfigStorageKey, JSON.stringify({
+      apiKey: String(value.apiKey || "").trim(),
+      internetEnvironment: String(value.internetEnvironment || "internal").trim() || "internal",
+      updatedAt: new Date().toISOString(),
+    }));
+  }
+
+  function clearApiConfig() {
+    window.localStorage.removeItem(apiConfigStorageKey);
+  }
+
+  function codebuddyHeaders() {
+    const apiConfig = readApiConfig();
+    const headers = authHeaders();
+    if (apiConfig.apiKey) headers["X-CodeBuddy-Api-Key"] = apiConfig.apiKey;
+    if (apiConfig.internetEnvironment) headers["X-CodeBuddy-Internet-Environment"] = apiConfig.internetEnvironment;
+    if (activeModel && activeModel !== "auto") headers["X-CodeBuddy-Model"] = activeModel;
+    return headers;
   }
 
   function escapeHtml(value) {
@@ -567,11 +603,14 @@
     return report && report.score != null ? String(report.score) : "";
   }
 
-  async function fetchJsonWithTimeout(url, timeoutMs) {
+  async function fetchJsonWithTimeout(url, timeoutMs, options = {}) {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(url, { headers: authHeaders(), signal: controller.signal });
+      const response = await fetch(url, {
+        headers: options.codebuddy ? codebuddyHeaders() : authHeaders(),
+        signal: controller.signal,
+      });
       const data = await response.json();
       if (!response.ok || data.ok === false) {
         throw new Error(data.error || data.message || `请求失败：HTTP ${response.status}`);
@@ -602,13 +641,13 @@
     statusPill.className = "wb-status-pill is-loading";
 
     try {
-      const fastData = await fetchJsonWithTimeout("/api/workbuddy/status?metadata=0", 6000);
+      const fastData = await fetchJsonWithTimeout("/api/workbuddy/status?metadata=0", 6000, { codebuddy: true });
       applyStatusData(fastData, { hydrated: false });
       if (fastData.configured) {
-        fetchJsonWithTimeout("/api/workbuddy/status?metadata=1", 12000)
+        fetchJsonWithTimeout("/api/workbuddy/status?metadata=1", 12000, { codebuddy: true })
           .then((data) => applyStatusData(data, { hydrated: true }))
           .catch((error) => {
-            configText.textContent = "API 已配置；模型列表读取较慢，点击“检查API配置”可重试。";
+            configText.textContent = "API 已配置；模型列表读取较慢，点击“重新检测”可重试。";
             pointsText.textContent = `积分余额：模型元数据暂未读取（${error.name === "AbortError" ? "请求超时" : error.message || "请求失败"}）`;
             renderModels(cachedModels, activeModel || fastData.model || "");
           });
@@ -819,7 +858,7 @@
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...authHeaders(),
+        ...codebuddyHeaders(),
       },
       body: JSON.stringify(payload),
     });
@@ -930,6 +969,67 @@
     });
   }
 
+  function setupApiConfigDialog() {
+    const dialog = $("#wbApiConfigDialog");
+    const openButton = $("#wbOpenApiConfigBtn");
+    const closeButton = $("#wbApiConfigCloseBtn");
+    const saveButton = $("#wbApiConfigSaveBtn");
+    const clearButton = $("#wbApiConfigClearBtn");
+    const apiKeyInput = $("#wbApiKeyInput");
+    const envInput = $("#wbApiEnvInput");
+    const hint = $("#wbApiConfigHint");
+
+    function syncInputs() {
+      const apiConfig = readApiConfig();
+      apiKeyInput.value = apiConfig.apiKey || "";
+      envInput.value = apiConfig.internetEnvironment || "internal";
+      hint.textContent = apiConfig.apiKey
+        ? "当前浏览器已保存 API Key。可以直接检测，也可以粘贴新的 Key 覆盖。"
+        : "粘贴 API Key 后点击“保存并检测”。后续可在这里更换会员账号 Key。";
+    }
+
+    function openDialog() {
+      syncInputs();
+      dialog.hidden = false;
+      document.body.classList.add("wb-dialog-open");
+      window.setTimeout(() => apiKeyInput.focus(), 0);
+    }
+
+    function closeDialog() {
+      dialog.hidden = true;
+      document.body.classList.remove("wb-dialog-open");
+    }
+
+    openButton.addEventListener("click", openDialog);
+    closeButton.addEventListener("click", closeDialog);
+    $$("[data-api-dialog-close]", dialog).forEach((item) => item.addEventListener("click", closeDialog));
+    dialog.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeDialog();
+    });
+    saveButton.addEventListener("click", async () => {
+      const apiKey = apiKeyInput.value.trim();
+      if (!apiKey) {
+        hint.textContent = "请先填写 CodeBuddy API Key。";
+        apiKeyInput.focus();
+        return;
+      }
+      saveApiConfig({
+        apiKey,
+        internetEnvironment: envInput.value || "internal",
+      });
+      hint.textContent = "已保存到当前浏览器，正在检测连接。";
+      await loadStatus();
+      closeDialog();
+    });
+    clearButton.addEventListener("click", async () => {
+      clearApiConfig();
+      apiKeyInput.value = "";
+      envInput.value = "internal";
+      hint.textContent = "已清除当前浏览器保存的 API Key。";
+      await loadStatus();
+    });
+  }
+
   function setupActions() {
     $("#wbRefreshStatusBtn").addEventListener("click", loadStatus);
     $("#wbToggleModelsBtn").addEventListener("click", () => {
@@ -1008,6 +1108,7 @@
     setupSkills();
     setupFileImport();
     setupForm();
+    setupApiConfigDialog();
     setupActions();
     loadHistory();
     updateStats();
