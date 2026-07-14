@@ -1133,6 +1133,13 @@ code { background: rgba(59, 130, 246, .08); padding: 1px 5px; border-radius: 6px
   transform: translateY(-34%) rotate(225deg);
 }
 
+/* 02-07 阶段保持适合阅读的正文宽度，避免大屏下表单和结果横向铺得过散。 */
+.fp-main > .fp-card.fp-section:not(.fp-start-section) {
+  width: min(920px, calc(100vw - 84px)) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
 .fp-pro-nav {
   display: flex;
   flex-wrap: wrap;
@@ -1933,7 +1940,8 @@ code { background: rgba(59, 130, 246, .08); padding: 1px 5px; border-radius: 6px
 
   .fp-card.fp-knowledge-panel,
   .fp-pro-stage-main-drawer,
-  .fp-card.fp-section.fp-start-section {
+  .fp-card.fp-section.fp-start-section,
+  .fp-main > .fp-card.fp-section:not(.fp-start-section) {
     width: min(100%, calc(100vw - 28px)) !important;
   }
 

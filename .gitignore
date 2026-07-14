@@ -26,3 +26,4 @@ fix_*.py
 *.bak
 *.bak_*
 *_verify.png
+.codex-runtime/

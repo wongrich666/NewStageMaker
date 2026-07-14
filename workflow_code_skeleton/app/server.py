@@ -18,6 +18,7 @@ from flask import (
     Flask,
     Response,
     jsonify,
+    g,
     redirect,
     render_template,
     request,
@@ -28,6 +29,7 @@ from flask import (
 
 from .models.inputs import derive_script_title_content
 from .services.auth_store import auth_store
+from .services.admin_store import admin_store
 from .services.fastgpt_client import FastGPTTransientError
 from .services.framework_planner_service import (
     FRAMEWORK_PLANNER_STORAGE_KEY,
@@ -1871,20 +1873,33 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         return str(
             request.args.get("auth_token")
             or request.form.get("auth_token")
+            or session.get("auth_token")
             or ""
         ).strip()
 
     def _current_user():
         token = _request_auth_token()
-        return auth_store.get_user_by_token(token)
+        if token:
+            user = auth_store.get_user_by_token(token)
+            if user:
+                return user
+        user_id = session.get("user_id")
+        if user_id is None:
+            return None
+        try:
+            return auth_store.get_user(int(user_id))
+        except (TypeError, ValueError):
+            return None
 
     def _current_auth_token() -> str:
         return _request_auth_token()
 
     def _login_user(user) -> str:
         session.clear()
+        auth_token = auth_store.create_session_token(user.id)
         session["user_id"] = int(user.id)
-        return auth_store.create_session_token(user.id)
+        session["auth_token"] = auth_token
+        return auth_token
 
     def _logout_user() -> None:
         session.clear()
@@ -1905,6 +1920,132 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not user:
             raise ValueError("请先登录")
         return int(user.id)
+
+    def _request_ip_address() -> str:
+        forwarded = str(request.headers.get("X-Forwarded-For") or "").strip()
+        if forwarded:
+            return forwarded.split(",", 1)[0].strip()[:80]
+        return str(request.remote_addr or "").strip()[:80]
+
+    def _admin_required(view):
+        @wraps(view)
+        def wrapper(*args, **kwargs):
+            user = _current_user()
+            if not user:
+                if request.path.startswith("/api/"):
+                    return _json_error("请先登录", status=401)
+                return redirect(url_for("login_page", next="admin"))
+            if not admin_store.is_admin(user.id, user.username):
+                if request.path.startswith("/api/"):
+                    return _json_error("没有管理员权限", status=403)
+                return render_template("admin_forbidden.html", current_user=user), 403
+            return view(*args, **kwargs)
+
+        return wrapper
+
+    @app.context_processor
+    def _inject_admin_template_context():
+        user = _current_user()
+        return {
+            "current_user_is_admin": bool(user and admin_store.is_admin(user.id, user.username)),
+        }
+
+    def _workflow_request_identity(path: str) -> tuple[str, str] | None:
+        value = str(path or "")
+        if value.startswith("/api/tools/") and value.endswith("/run"):
+            key = value.removeprefix("/api/tools/").removesuffix("/run").strip("/")
+            labels = {
+                "hot_review": "爆款文审核",
+                "reskin": "换皮",
+                "punchup": "增加爽感",
+                "character_reskin": "只换人设",
+                "sitcom": "情景剧生成",
+            }
+            return f"tool:{key}", labels.get(key, key)
+        if value == "/api/workflows/start":
+            return "script_generation", "剧本生成"
+        if value.startswith("/api/framework-planner/stage/"):
+            stage = value.rsplit("/", 1)[-1]
+            return f"framework_stage_{stage}", f"框架流程 {stage}"
+        if value.startswith("/api/framework-to-script/stage/"):
+            stage = value.rsplit("/", 1)[-1]
+            return f"script_stage_{stage}", f"剧本流程 {stage}"
+        if value == "/api/framework-planner/generate-script":
+            return "framework_generate_script", "框架生成剧本"
+        if value == "/api/tools/new-framework":
+            return "tool:new_framework", "新框架生成"
+        if value == "/api/workbuddy/doctor/run":
+            return "workbuddy_doctor", "AI剧本医生"
+        return None
+
+    @app.before_request
+    def _begin_admin_audit_capture():
+        if request.method not in {"POST", "PATCH", "PUT", "DELETE"}:
+            return None
+        if request.path in {"/login", "/register", "/logout"}:
+            return None
+        user = _current_user()
+        g.admin_audit_started = time.perf_counter()
+        g.admin_audit_user_id = int(user.id) if user else None
+        g.admin_audit_username = str(user.username) if user else ""
+        workflow = _workflow_request_identity(request.path)
+        if workflow:
+            workflow_key, workflow_label = workflow
+            try:
+                g.admin_workflow_run_id = admin_store.start_workflow_run(
+                    user_id=g.admin_audit_user_id,
+                    username=g.admin_audit_username,
+                    workflow_key=workflow_key,
+                    workflow_label=workflow_label,
+                    http_method=request.method,
+                    path=request.path,
+                    ip_address=_request_ip_address(),
+                    request_bytes=int(request.content_length or 0),
+                )
+            except Exception:
+                logger.exception("admin workflow run start capture failed path=%s", request.path)
+        return None
+
+    @app.after_request
+    def _finish_admin_audit_capture(response):
+        started = getattr(g, "admin_audit_started", None)
+        if started is None:
+            return response
+        duration_ms = max(0, int((time.perf_counter() - started) * 1000))
+        status = "success" if response.status_code < 400 else "failed"
+        try:
+            admin_store.record_event(
+                user_id=getattr(g, "admin_audit_user_id", None),
+                username=getattr(g, "admin_audit_username", ""),
+                category="request",
+                action=f"{request.method} {request.path}",
+                status=status,
+                target_type="endpoint",
+                target_id=request.path,
+                http_method=request.method,
+                path=request.path,
+                ip_address=_request_ip_address(),
+                user_agent=str(request.user_agent or ""),
+                duration_ms=duration_ms,
+                metadata={"http_status": response.status_code},
+            )
+        except Exception:
+            logger.exception("admin audit capture failed path=%s", request.path)
+        run_id = getattr(g, "admin_workflow_run_id", "")
+        if run_id:
+            run_status = "accepted" if request.path == "/api/workflows/start" and response.status_code < 400 else status
+            try:
+                admin_store.finish_workflow_run(
+                    run_id,
+                    status=run_status,
+                    duration_ms=duration_ms,
+                    http_status=response.status_code,
+                    response_bytes=int(response.calculate_content_length() or 0),
+                    error_code="" if response.status_code < 400 else f"HTTP_{response.status_code}",
+                )
+            except Exception:
+                logger.exception("admin workflow run finish capture failed run_id=%s", run_id)
+        return response
 
     def _resolve_spec_path(data: dict) -> str:
         custom = str(data.get("workflow_spec_path") or "").strip()
@@ -2645,9 +2786,32 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         password = str(request.form.get("password") or "")
         user = auth_store.authenticate(username, password)
         if not user:
+            admin_store.record_event(
+                user_id=None,
+                username=username,
+                category="auth",
+                action="login",
+                status="failed",
+                http_method=request.method,
+                path=request.path,
+                ip_address=_request_ip_address(),
+                user_agent=str(request.user_agent or ""),
+            )
             return render_template("login.html", error="用户名或密码错误", username=username), 400
         auth_token = _login_user(user)
-        return redirect(url_for("workspace_page", auth_token=auth_token))
+        admin_store.record_event(
+            user_id=user.id,
+            username=user.username,
+            category="auth",
+            action="login",
+            status="success",
+            http_method=request.method,
+            path=request.path,
+            ip_address=_request_ip_address(),
+            user_agent=str(request.user_agent or ""),
+        )
+        destination = "admin_dashboard_page" if admin_store.is_admin(user.id, user.username) and request.args.get("next") == "admin" else "workspace_page"
+        return redirect(url_for(destination, auth_token=auth_token))
 
     @app.get("/register")
     def register_page():
@@ -2675,10 +2839,34 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 username=username,
             ), 400
         auth_token = _login_user(user)
+        admin_store.record_event(
+            user_id=user.id,
+            username=user.username,
+            category="auth",
+            action="register",
+            status="success",
+            http_method=request.method,
+            path=request.path,
+            ip_address=_request_ip_address(),
+            user_agent=str(request.user_agent or ""),
+        )
         return redirect(url_for("workspace_page", auth_token=auth_token))
 
     @app.get("/logout")
     def logout():
+        user = _current_user()
+        if user:
+            admin_store.record_event(
+                user_id=user.id,
+                username=user.username,
+                category="auth",
+                action="logout",
+                status="success",
+                http_method=request.method,
+                path=request.path,
+                ip_address=_request_ip_address(),
+                user_agent=str(request.user_agent or ""),
+            )
         _logout_user()
         return redirect(url_for("login_page"))
 
@@ -2687,6 +2875,72 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def current_user_api():
         user = _current_user()
         return _json_ok(user={"id": user.id, "username": user.username})
+
+    @app.get("/admin")
+    @_admin_required
+    def admin_dashboard_page():
+        user = _current_user()
+        return render_template(
+            "admin_dashboard.html",
+            current_user=user,
+            current_auth_token=_current_auth_token(),
+        )
+
+    @app.get("/api/admin/overview")
+    @_admin_required
+    def admin_overview_api():
+        return _json_ok(overview=admin_store.overview())
+
+    @app.get("/api/admin/users")
+    @_admin_required
+    def admin_users_api():
+        try:
+            page = int(request.args.get("page") or 1)
+            page_size = int(request.args.get("page_size") or 25)
+        except (TypeError, ValueError):
+            return _json_error("分页参数无效", status=400)
+        return _json_ok(
+            **admin_store.list_users(
+                search=str(request.args.get("search") or "").strip(),
+                page=page,
+                page_size=page_size,
+            )
+        )
+
+    @app.get("/api/admin/audit-events")
+    @_admin_required
+    def admin_audit_events_api():
+        try:
+            page = int(request.args.get("page") or 1)
+            page_size = int(request.args.get("page_size") or 30)
+        except (TypeError, ValueError):
+            return _json_error("分页参数无效", status=400)
+        return _json_ok(
+            **admin_store.list_events(
+                search=str(request.args.get("search") or "").strip(),
+                category=str(request.args.get("category") or "").strip(),
+                status=str(request.args.get("status") or "").strip(),
+                page=page,
+                page_size=page_size,
+            )
+        )
+
+    @app.get("/api/admin/workflow-runs")
+    @_admin_required
+    def admin_workflow_runs_api():
+        try:
+            page = int(request.args.get("page") or 1)
+            page_size = int(request.args.get("page_size") or 30)
+        except (TypeError, ValueError):
+            return _json_error("分页参数无效", status=400)
+        return _json_ok(
+            **admin_store.list_workflow_runs(
+                search=str(request.args.get("search") or "").strip(),
+                status=str(request.args.get("status") or "").strip(),
+                page=page,
+                page_size=page_size,
+            )
+        )
 
     @app.patch("/api/me/username")
     @_login_required

@@ -89,6 +89,8 @@
     completedWorkspaceFolder: $("completedWorkspaceFolder"),
     activeProjectList: $("activeProjectList"),
     completedProjectList: $("completedProjectList"),
+    assetSubnav: $("assetSubnav"),
+    assetDetailPanel: $("assetDetailPanel"),
     newScriptProjectList: $("newScriptProjectList"),
     waibaoProjectList: $("waibaoProjectList"),
     characterReskinProjectList: $("characterReskinProjectList"),
@@ -231,6 +233,25 @@
         { name: "source_script", label: "原剧本正文", type: "textarea", placeholder: "原剧本正文。", required: true },
         { name: "total_episodes", label: "总集数", type: "number", placeholder: "总集数。", required: true },
         { name: "episode_word_count", label: "每集正文字数", type: "number", placeholder: "每集字数。", required: true }
+      ],
+      configured: false,
+      source: "fallback"
+    },
+    sitcom_generator: {
+      key: "sitcom_generator",
+      label: "情景剧生成",
+      help: "固定人物与关系，每集生成一个独立闭环故事，结果自动保存到新剧本资产。",
+      fields: [
+        { name: "project_title", label: "情景剧名称", type: "input", placeholder: "例如：合租屋奇遇记。", required: true },
+        { name: "sitcom_requirement", label: "创作要求", type: "textarea", placeholder: "题材、受众、笑点或冲突方向。", required: true },
+        { name: "total_episodes", label: "总集数", type: "number", placeholder: "例如：20。", required: true, defaultValue: 20 },
+        { name: "episode_word_count", label: "每集字数", type: "number", placeholder: "例如：1200。", required: true, defaultValue: 1200 },
+        { name: "batch_start_episode", label: "本次起始集", type: "number", placeholder: "首次填 1。", required: true, defaultValue: 1 },
+        { name: "batch_end_episode", label: "本次结束集", type: "number", placeholder: "建议每批 3-5 集。", required: true, defaultValue: 3 },
+        { name: "fixed_characters", label: "固定人物设定", type: "textarea", placeholder: "姓名、身份、性格、关系和不可改变项。", required: true },
+        { name: "main_scenes", label: "主要场景", type: "textarea", placeholder: "常驻场景及可变化的临时场景。", required: true },
+        { name: "style_requirements", label: "风格要求", type: "textarea", placeholder: "轻喜剧、强反转、单集闭环。", required: false, defaultValue: "轻喜剧、节奏明快、单集闭环、人物性格稳定" },
+        { name: "continuity_level", label: "连续性强度", type: "input", placeholder: "弱 / 中 / 强。", required: false, defaultValue: "弱" }
       ],
       configured: false,
       source: "fallback"
@@ -578,9 +599,18 @@
   // 记住侧边栏折叠状态，让用户切页面回来后仍保持同一工作台布局。
   function applySidebarCollapsed(collapsed) {
     if (!els.workspaceSidebar) return;
-    els.workspaceSidebar.classList.toggle("is-collapsed", Boolean(collapsed));
-    els.workspaceShell?.classList.toggle("sidebar-collapsed", Boolean(collapsed));
-    draftStorage.setItem(STORAGE.sidebarCollapsed, collapsed ? "1" : "0");
+    const isCollapsed = Boolean(collapsed);
+    els.workspaceSidebar.classList.toggle("is-collapsed", isCollapsed);
+    els.workspaceShell?.classList.toggle("sidebar-collapsed", isCollapsed);
+    els.sidebarToggleBtn?.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+    els.sidebarToggleBtn?.setAttribute("aria-label", isCollapsed ? "展开导航栏" : "收起导航栏");
+    if (els.sidebarToggleBtn) els.sidebarToggleBtn.title = isCollapsed ? "展开导航栏" : "收起导航栏";
+    if (isCollapsed) {
+      els.workspaceSidebar.querySelectorAll("details[open]").forEach((folder) => {
+        folder.open = false;
+      });
+    }
+    draftStorage.setItem(STORAGE.sidebarCollapsed, isCollapsed ? "1" : "0");
   }
 
   function restoreSidebarCollapsed() {
@@ -4218,20 +4248,39 @@ startRuntimeDebugPolling();
   function renderToolList() {
     if (!els.toolList) return;
     const definitions = Object.values(toolDefinitions()).filter((tool) => tool.key !== "new_framework");
-    els.toolList.innerHTML = definitions.map((tool) => `
-      <button
-        class="tool-shortcut${tool.key === state.activeTool ? " active" : ""}"
-        type="button"
-        data-tool-key="${escapeHtml(tool.key)}"
-      >
-        <span>${escapeHtml(tool.label)}</span>
-        <small>${escapeHtml(
-          !isAuthenticated()
-            ? "登录后可运行"
-            : (tool.configured ? "可直接运行" : "待配置 API Key")
-        )}</small>
-      </button>
-    `).join("");
+    const toolNavigationMeta = {
+      hot_review: { icon: "审", hint: "检查节奏、逻辑与爽点" },
+      punchup: { icon: "爽", hint: "增强冲突、节奏与表达" },
+      character_reskin: { icon: "人", hint: "保留剧情，只替换人物设定" },
+      sitcom_generator: { icon: "剧", hint: "固定人物，每集一个独立故事" }
+    };
+    els.toolList.innerHTML = definitions.map((tool) => {
+      const meta = toolNavigationMeta[tool.key] || {
+        icon: "工",
+        hint: String(tool.help || "打开并运行该辅助功能").replace(/。.*$/, "")
+      };
+      const availability = !isAuthenticated()
+        ? "需登录"
+        : (tool.configured ? "可运行" : "待配置");
+      return `
+        <button
+          class="tool-shortcut${tool.key === state.activeTool ? " active" : ""}"
+          type="button"
+          data-tool-key="${escapeHtml(tool.key)}"
+          aria-pressed="${tool.key === state.activeTool ? "true" : "false"}"
+        >
+          <span class="tool-shortcut-icon" aria-hidden="true">${escapeHtml(meta.icon)}</span>
+          <span class="tool-shortcut-copy">
+            <strong>${escapeHtml(tool.label)}</strong>
+            <small>${escapeHtml(meta.hint)}</small>
+          </span>
+          <span class="tool-shortcut-tail">
+            <small class="tool-shortcut-availability">${escapeHtml(availability)}</small>
+            <b aria-hidden="true">›</b>
+          </span>
+        </button>
+      `;
+    }).join("");
   }
 
   function openCommunityPanel() {
@@ -7053,11 +7102,38 @@ function renderToolForm(toolKey) {
     });
   }
 
+  function bindAssetSubnav() {
+    if (!els.assetSubnav || !els.assetDetailPanel) return;
+    const buttons = [...els.assetSubnav.querySelectorAll("[data-asset-panel]")];
+    const views = [...els.assetDetailPanel.querySelectorAll(".asset-detail-view")];
+
+    const activate = (button) => {
+      const panelId = button?.dataset?.assetPanel;
+      const target = panelId ? document.getElementById(panelId) : null;
+      if (!target) return;
+      const alreadyActive = button.getAttribute("aria-selected") === "true" && !els.assetDetailPanel.hidden;
+
+      buttons.forEach((item) => {
+        const active = item === button && !alreadyActive;
+        item.classList.toggle("is-active", active);
+        item.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      views.forEach((view) => {
+        view.hidden = alreadyActive || view !== target;
+        view.classList.toggle("is-active", !alreadyActive && view === target);
+      });
+      els.assetDetailPanel.hidden = alreadyActive;
+      if (!alreadyActive) target.scrollTop = 0;
+    };
+
+    buttons.forEach((button) => button.addEventListener("click", () => activate(button)));
+  }
   async function init() {
     restoreDraft();
     restoreKnowledgeDraft();
     syncExpectationInputHeight();
     restoreSidebarCollapsed();
+    bindAssetSubnav();
     state.toolDefinitions = { ...DEFAULT_TOOL_DEFINITIONS };
     renderToolList();
     renderToolForm(state.activeTool);

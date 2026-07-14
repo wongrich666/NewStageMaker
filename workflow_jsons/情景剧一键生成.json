@@ -1,0 +1,1584 @@
+{
+  "nodes": [
+    {
+      "nodeId": "userGuide",
+      "name": "common:core.module.template.system_config",
+      "intro": "common:core.module.template.system_config_info",
+      "avatar": "core/workflow/template/systemConfig",
+      "flowNodeType": "userGuide",
+      "position": {
+        "x": -2200,
+        "y": -2500
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "welcomeText",
+          "label": "core.app.Welcome Text",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": ""
+        },
+        {
+          "key": "variables",
+          "label": "core.app.Chat Variable",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": []
+        },
+        {
+          "key": "questionGuide",
+          "label": "core.app.Question Guide",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false
+          }
+        },
+        {
+          "key": "tts",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "type": "web"
+          }
+        },
+        {
+          "key": "whisper",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false,
+            "autoSend": false,
+            "autoTTSResponse": false
+          }
+        },
+        {
+          "key": "scheduleTrigger",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": null
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "sitcomStart",
+      "name": "common:core.module.template.work_start",
+      "intro": "",
+      "avatar": "core/workflow/template/workflowStart",
+      "flowNodeType": "workflowStart",
+      "position": {
+        "x": -1650,
+        "y": -2000
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "userChatInput",
+          "key": "userChatInput",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.input.label.user question",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "sitcomPlan",
+      "name": "01 情景剧圣经与整季选题",
+      "intro": "生成或继承固定人物圣经，并规划全季独立选题。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": -1050,
+        "y": -2000
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-v4-flash",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 0.35,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 128000,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatAudio",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVideo",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatExtractFiles",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoningEffort",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "json_object",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schema_version\",\"sitcom_bible\",\"season_topic_matrix\",\"planning_notes\"],\"properties\":{\"schema_version\":{\"type\":\"string\"},\"sitcom_bible\":{\"type\":\"object\"},\"season_topic_matrix\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"planning_notes\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“情景剧一键生成工作流”的总策划节点。你要生成一套固定人物、固定基础世界观、每集故事独立闭环的情景单元剧策划包。\n\n【项目名称】{{$VARIABLE_NODE_ID.projectTitle$}}\n【创作需求】{{$VARIABLE_NODE_ID.sitcomRequirement$}}\n【总集数】{{$VARIABLE_NODE_ID.totalEpisodes$}}\n【每集目标字数】{{$VARIABLE_NODE_ID.episodeWordCount$}}\n【固定人物（可为空或 JSON/文本）】{{$VARIABLE_NODE_ID.fixedCharacters$}}\n【主要场景（可为空或 JSON/文本）】{{$VARIABLE_NODE_ID.mainScenes$}}\n【整体风格】{{$VARIABLE_NODE_ID.styleRequirements$}}\n【连续程度】{{$VARIABLE_NODE_ID.continuityLevel$}}\n【已有情景剧圣经；非空时必须继承】{{$VARIABLE_NODE_ID.existingSitcomBible$}}\n【已有整季选题；非空时必须继承】{{$VARIABLE_NODE_ID.existingSeasonTopicMatrix$}}\n【已使用故事指纹】{{$VARIABLE_NODE_ID.usedEpisodeFingerprints$}}\n【当前人物关系状态】{{$VARIABLE_NODE_ID.relationshipState$}}\n【用户补充偏好】{{$VARIABLE_NODE_ID.userPreferences$}}\n\n任务：\n1. 如果已有情景剧圣经非空，严格继承，只补缺失字段；否则创建完整 sitcom_bible。\n2. 如果已有整季选题非空，严格继承已有集数；否则为 totalEpisodes 的每一集生成选题。\n3. 人物姓名、身份、核心性格、说话方式、基础关系必须恒定。\n4. 每一集必须是独立故事：无需观看上一集也能理解，当集核心冲突当集解决。\n5. 可以保留弱关系变化和长期梗，但不得让本集依赖上一集未解决事件。\n6. 全季不得重复相同的“事件起因+核心冲突+主要场景+关键道具+反转类型+结尾类型”组合。\n7. 每个选题必须有唯一 novelty_signature；主动规避 usedEpisodeFingerprints。\n8. 场景采用“固定主场景+轮换场景”，人物组合、事件类型、道具和反转要轮换。\n\nsitcom_bible 至少包含：title、genre、tone、world_rules、fixed_characters、relationship_baseline、permanent_locations、rotating_locations、running_gags、episode_reset_rules、forbidden_changes。\nseason_topic_matrix 必须覆盖第1集到总集数，每项至少包含：episode、title、logline、main_characters、main_locations、story_engine、trigger_event、main_conflict、key_prop、twist_type、ending_type、emotional_theme、novelty_signature。\n只输出符合 JSON Schema 的 JSON 对象，不输出 Markdown。",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "生成情景剧圣经和整季独立选题，严格避免重复。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "sitcomDraft",
+      "name": "02 当前批次大纲与完整剧本",
+      "intro": "按照整季选题生成指定批次的完整情景剧。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": -450,
+        "y": -2000
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-v4-flash",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 0.55,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 256000,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatAudio",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVideo",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatExtractFiles",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoningEffort",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "json_object",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"batch\",\"episode_outlines\",\"episode_scripts\",\"batch_memory\"],\"properties\":{\"batch\":{\"type\":\"object\"},\"episode_outlines\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"episode_scripts\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"batch_memory\":{\"type\":\"object\"}}}",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是专业情景短剧编剧。根据总策划结果，生成当前批次的详细大纲和完整剧本。\n\n【总策划 JSON】\n{{$sitcomPlan.answerText$}}\n\n【当前批次起始集】{{$VARIABLE_NODE_ID.batchStartEpisode$}}\n【当前批次结束集】{{$VARIABLE_NODE_ID.batchEndEpisode$}}\n【每集目标字数】{{$VARIABLE_NODE_ID.episodeWordCount$}}\n【用户补充偏好】{{$VARIABLE_NODE_ID.userPreferences$}}\n【已使用故事指纹】{{$VARIABLE_NODE_ID.usedEpisodeFingerprints$}}\n【人物关系状态】{{$VARIABLE_NODE_ID.relationshipState$}}\n\n硬性规则：\n1. 只生成 batchStartEpisode 到 batchEndEpisode，禁止漏集、跳集、增加范围外集数。\n2. 每集单独观看也能看懂，有独立开场、事件起因、冲突升级、反转、解决和结尾回扣。\n3. 当集主要冲突必须当集解决，不能用“下集继续”代替结局。\n4. 人物身份、核心性格、语言习惯和基础关系严格服从 sitcom_bible。\n5. 相邻集不得重复故事发动机、主要场景组合、关键道具、反转和解决方式。\n6. 不直接续写上一集事件；允许长期梗和轻微关系变化。\n7. 剧本采用中文短剧格式：集标题；场次号；日/夜；内/外；地点；出场人物；动作；对白。\n8. 对白生活化、可表演，避免解释性长台词。每集至少有一次升级、一次有效反转、一个可记忆包袱或情绪点。\n9. 尽量达到 episodeWordCount，不得用摘要冒充正文。\n\nepisode_outlines 每项至少包含：episode、title、opening_hook、characters、scenes、trigger_event、conflict_escalations、midpoint_change、final_twist、episode_resolution、relationship_delta、reset_state。\nepisode_scripts 每项至少包含：episode、title、script_text、characters_used、locations_used、props_used、novelty_signature、relationship_delta、episode_closed。\nbatch_memory 保存本批次新使用的故事指纹、人物关系轻微变化和长期梗使用次数。\n只输出 JSON。",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "生成指定批次完整情景剧，禁止漏集和用提纲代替正文。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "sitcomAudit",
+      "name": "03 人物恒定与单集闭环审核",
+      "intro": "逐集检查独立性、闭环、人物一致性与重复。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 150,
+        "y": -2000
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-v4-flash",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 0.2,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 128000,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatAudio",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVideo",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatExtractFiles",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoningEffort",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "json_object",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"approved\",\"overall_summary\",\"episode_reviews\",\"revision_brief\"],\"properties\":{\"approved\":{\"type\":\"boolean\"},\"overall_summary\":{\"type\":\"string\"},\"episode_reviews\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"revision_brief\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}}}}",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是情景单元剧质量审核员。审核以下策划圣经和当前批次剧本。\n\n【总策划】{{$sitcomPlan.answerText$}}\n【当前批次剧本】{{$sitcomDraft.answerText$}}\n\n逐集检查：\n1. 是否无需上一集信息也能理解；\n2. 核心冲突是否当集闭环；\n3. 人物身份、性格、语言习惯是否漂移；\n4. 是否与其他集重复事件、冲突、场景组合、道具、反转或结尾；\n5. 剧本是否完整，不是提纲或缩略稿；\n6. 场次、动作和对白是否可拍；\n7. 是否达到用户要求的风格和大致字数；\n8. 是否出现主要人物无理由永久离开、关系突变或世界规则改变。\n\napproved 只有在全部集数不存在阻断问题时为 true。\nepisode_reviews 每项包含 episode、status(pass/warning/fail)、character_consistency、independence、closure、novelty、format_quality、problems、revision_instructions。\nrevision_brief 只列必须修改的集数及定向修改要求。不要直接重写剧本。只输出 JSON。",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "严格审核当前批次情景剧，并给出结构化修订清单。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "sitcomFinal",
+      "name": "04 定向修订与最终拼接",
+      "intro": "仅修订问题集，输出最终剧本、记忆和下一批信息。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": 750,
+        "y": -2000
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-v4-flash",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 0.35,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 256000,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatAudio",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVideo",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatExtractFiles",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoningEffort",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "json_object",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schema_version\",\"ok\",\"project_title\",\"generation_mode\",\"batch\",\"sitcom_bible\",\"season_topic_matrix\",\"episode_outlines\",\"episode_scripts\",\"quality_report\",\"updated_memory\",\"next_batch\",\"final_script_text\"],\"properties\":{\"schema_version\":{\"type\":\"string\"},\"ok\":{\"type\":\"boolean\"},\"project_title\":{\"type\":\"string\"},\"generation_mode\":{\"type\":\"string\"},\"batch\":{\"type\":\"object\"},\"sitcom_bible\":{\"type\":\"object\"},\"season_topic_matrix\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"episode_outlines\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"episode_scripts\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"quality_report\":{\"type\":\"object\"},\"updated_memory\":{\"type\":\"object\"},\"next_batch\":{\"type\":\"object\"},\"final_script_text\":{\"type\":\"string\"}}}",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“情景剧一键生成工作流”的总编审。根据策划、初稿和审核报告，定向修复问题并输出唯一最终结果。\n\n【项目名称】{{$VARIABLE_NODE_ID.projectTitle$}}\n【总集数】{{$VARIABLE_NODE_ID.totalEpisodes$}}\n【当前批次起始集】{{$VARIABLE_NODE_ID.batchStartEpisode$}}\n【当前批次结束集】{{$VARIABLE_NODE_ID.batchEndEpisode$}}\n【每集目标字数】{{$VARIABLE_NODE_ID.episodeWordCount$}}\n\n【总策划】\n{{$sitcomPlan.answerText$}}\n\n【初稿】\n{{$sitcomDraft.answerText$}}\n\n【审核报告】\n{{$sitcomAudit.answerText$}}\n\n执行规则：\n1. 审核通过的集数保持原文，不得无理由重写。\n2. 只针对 fail 或阻断问题进行定向修订；warning 可在不破坏原稿的情况下微调。\n3. 修订后再次自行检查人物恒定、单集独立、当集闭环、内容去重和格式完整。\n4. episode_scripts 必须完整保留当前批次所有集数，每集 script_text 必须是完整正文。\n5. final_script_text 按集数顺序拼接当前批次完整剧本，集与集之间用两个换行分隔。\n6. updated_memory 合并：本批次故事指纹、关系轻微变化、长期梗使用情况；不得保存“下一集必须续写本集事件”的记忆。\n7. next_batch.required 在 batchEndEpisode 小于 totalEpisodes 时为 true，并给出下一批 start_episode/end_episode；否则为 false。\n8. generation_mode 固定为 sitcom，schema_version 固定为 sitcom_generation_v1。\n9. ok 表示最终结果是否可交付；即使审核有 warning，只要无阻断问题可为 true。\n只输出完整 JSON，不输出 Markdown、解释或代码围栏。",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "根据审核定向修订并输出唯一最终 JSON。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "sitcomAnswer",
+      "name": "输出情景剧最终结果",
+      "intro": "输出可供平台保存和继续下一批生成的完整 JSON。",
+      "avatar": "core/workflow/template/reply",
+      "flowNodeType": "answerNode",
+      "position": {
+        "x": 1400,
+        "y": -2000
+      },
+      "inputs": [
+        {
+          "key": "text",
+          "label": "common:core.module.input.label.Response content",
+          "valueType": "any",
+          "required": true,
+          "isRichText": false,
+          "placeholder": "common:core.module.input.description.Response content",
+          "maxLength": 100000,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": [
+            "sitcomFinal",
+            "answerText"
+          ],
+          "debugLabel": "",
+          "description": "common:core.module.input.description.Response content",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "sitcomStart",
+      "target": "sitcomPlan",
+      "sourceHandle": "sitcomStart-source-right",
+      "targetHandle": "sitcomPlan-target-left"
+    },
+    {
+      "source": "sitcomPlan",
+      "target": "sitcomDraft",
+      "sourceHandle": "sitcomPlan-source-right",
+      "targetHandle": "sitcomDraft-target-left"
+    },
+    {
+      "source": "sitcomDraft",
+      "target": "sitcomAudit",
+      "sourceHandle": "sitcomDraft-source-right",
+      "targetHandle": "sitcomAudit-target-left"
+    },
+    {
+      "source": "sitcomAudit",
+      "target": "sitcomFinal",
+      "sourceHandle": "sitcomAudit-source-right",
+      "targetHandle": "sitcomFinal-target-left"
+    },
+    {
+      "source": "sitcomFinal",
+      "target": "sitcomAnswer",
+      "sourceHandle": "sitcomFinal-source-right",
+      "targetHandle": "sitcomAnswer-target-left"
+    }
+  ],
+  "chatConfig": {
+    "variables": [
+      {
+        "key": "projectTitle",
+        "label": "项目名称",
+        "valueType": "string",
+        "required": true,
+        "defaultValue": "未命名情景剧",
+        "type": "input",
+        "description": "情景剧项目名称。",
+        "maxLength": 200
+      },
+      {
+        "key": "sitcomRequirement",
+        "label": "情景剧创作需求",
+        "valueType": "string",
+        "required": true,
+        "defaultValue": "",
+        "type": "input",
+        "description": "题材、背景、核心想法和内容要求。",
+        "maxLength": 20000
+      },
+      {
+        "key": "totalEpisodes",
+        "label": "总集数",
+        "valueType": "number",
+        "required": true,
+        "defaultValue": 5,
+        "type": "input",
+        "description": "整部情景剧总集数。"
+      },
+      {
+        "key": "episodeWordCount",
+        "label": "每集目标字数",
+        "valueType": "number",
+        "required": true,
+        "defaultValue": 1500,
+        "type": "input",
+        "description": "单集完整剧本目标字数。"
+      },
+      {
+        "key": "batchStartEpisode",
+        "label": "当前批次起始集",
+        "valueType": "number",
+        "required": true,
+        "defaultValue": 1,
+        "type": "input",
+        "description": "首次通常填1。"
+      },
+      {
+        "key": "batchEndEpisode",
+        "label": "当前批次结束集",
+        "valueType": "number",
+        "required": true,
+        "defaultValue": 5,
+        "type": "input",
+        "description": "建议每批3至5集。"
+      },
+      {
+        "key": "fixedCharacters",
+        "label": "固定人物",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "input",
+        "description": "可输入人物 JSON 或自然语言；为空时自动生成。",
+        "maxLength": 30000
+      },
+      {
+        "key": "mainScenes",
+        "label": "主要场景",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "input",
+        "description": "固定主场景和可轮换场景；为空时自动生成。",
+        "maxLength": 12000
+      },
+      {
+        "key": "styleRequirements",
+        "label": "整体风格",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "轻喜剧、生活化、可拍摄",
+        "type": "input",
+        "description": "喜剧类型、节奏、对白和尺度。",
+        "maxLength": 10000
+      },
+      {
+        "key": "continuityLevel",
+        "label": "跨集连续程度",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "弱连续",
+        "type": "input",
+        "description": "完全独立/弱连续/单元故事加弱主线。",
+        "maxLength": 100
+      },
+      {
+        "key": "existingSitcomBible",
+        "label": "已有情景剧圣经",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "input",
+        "description": "继续生成时传入首次结果中的 sitcom_bible。",
+        "maxLength": 50000
+      },
+      {
+        "key": "existingSeasonTopicMatrix",
+        "label": "已有整季选题",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "input",
+        "description": "继续生成时传入首次结果中的 season_topic_matrix。",
+        "maxLength": 100000
+      },
+      {
+        "key": "usedEpisodeFingerprints",
+        "label": "已使用故事指纹",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "input",
+        "description": "继续生成时传入 updated_memory.used_episode_fingerprints。",
+        "maxLength": 50000
+      },
+      {
+        "key": "relationshipState",
+        "label": "人物关系状态",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "input",
+        "description": "继续生成时传入 updated_memory.relationship_state。",
+        "maxLength": 30000
+      },
+      {
+        "key": "userPreferences",
+        "label": "用户补充偏好",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "type": "input",
+        "description": "补充题材、禁区、文风、拍摄和平台要求。",
+        "maxLength": 20000
+      }
+    ],
+    "scheduledTriggerConfig": {
+      "cronString": "",
+      "timezone": "Asia/Shanghai",
+      "defaultPrompt": ""
+    },
+    "_id": "e6a22150cd9da52095a96931"
+  }
+}

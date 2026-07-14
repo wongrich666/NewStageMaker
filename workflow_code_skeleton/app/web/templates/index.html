@@ -9,7 +9,7 @@
   <title>IDEA TO SCRIPT 剧本生成工作台</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='global_theme.css') }}?v=20260617-cat-theme-v4">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260710-nav-assets-rebuild-v3">
-  <link rel="stylesheet" href="{{ url_for('static', filename='premium_sidebar.css') }}?v=20260710-premium-sidebar-v2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='premium_sidebar.css') }}?v=20260713-sidebar-assets-v4">
 </head>
 <body class="workspace-body">
   <canvas id="particles-canvas" class="particles-canvas"></canvas>
@@ -17,7 +17,7 @@
     <aside id="workspaceCard" class="workspace-sidebar premium-sidebar">
       <div class="sidebar-top">
         <div class="sidebar-brand-row">
-          <button id="sidebarToggleBtn" class="sidebar-toggle" type="button" aria-label="折叠侧边栏">
+          <button id="sidebarToggleBtn" class="sidebar-toggle" type="button" aria-label="收起导航栏" aria-expanded="true" title="收起导航栏">
             <span></span>
             <span></span>
             <span></span>
@@ -51,70 +51,69 @@
       </section>
 
       <div class="sidebar-nav">
-        <section class="sidebar-group">
-          <div class="sidebar-group-label">我的资产</div>
-          <div class="sidebar-section-head sidebar-section-head-compact">
-            <span>资产会话</span>
-            <button id="refreshProjectsBtn" class="sidebar-refresh-btn" type="button" aria-label="刷新资产">刷新</button>
+        <details id="assetNavFolder" class="sidebar-nav-cluster asset-nav-cluster" open>
+          <summary class="sidebar-nav-cluster-summary">
+            <span class="sidebar-nav-cluster-icon" aria-hidden="true">资</span>
+            <span class="sidebar-nav-cluster-copy">
+              <strong>资产</strong>
+              <small>框架、审核与新剧本</small>
+            </span>
+            <span class="sidebar-nav-cluster-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="sidebar-nav-cluster-body">
+            <div class="sidebar-section-head sidebar-section-head-compact">
+              <span>资产分类</span>
+              <button id="refreshProjectsBtn" class="sidebar-refresh-btn" type="button" aria-label="刷新资产">刷新</button>
+            </div>
+            <div id="assetSubnav" class="asset-subnav-list" role="tablist" aria-label="资产分类">
+              <button class="asset-subnav-button" type="button" role="tab" aria-selected="false" aria-controls="frameworkAssetPanel" data-asset-panel="frameworkAssetPanel">
+                <span class="asset-folder-icon">框</span><span>框架资产</span><small class="workspace-pick-state" id="completedProjectCount">0</small><span class="asset-subnav-arrow" aria-hidden="true">›</span>
+              </button>
+              <button class="asset-subnav-button" type="button" role="tab" aria-selected="false" aria-controls="hotReviewAssetPanel" data-asset-panel="hotReviewAssetPanel">
+                <span class="asset-folder-icon">审</span><span>爆款文审核资产</span><small class="workspace-pick-state" id="hotReviewProjectCount">0</small><span class="asset-subnav-arrow" aria-hidden="true">›</span>
+              </button>
+              <button class="asset-subnav-button" type="button" role="tab" aria-selected="false" aria-controls="newScriptAssetPanel" data-asset-panel="newScriptAssetPanel">
+                <span class="asset-folder-icon">剧</span><span>新剧本资产</span><span class="asset-subnav-arrow" aria-hidden="true">›</span>
+              </button>
+            </div>
+            <section id="assetDetailPanel" class="asset-detail-panel" aria-live="polite" hidden>
+              <div id="frameworkAssetPanel" class="asset-detail-view" role="tabpanel" hidden>
+                <div class="asset-detail-head"><strong>框架资产</strong><a href="{{ url_for('framework_assets_page', auth_token=current_auth_token) }}">查看全部</a></div>
+                <div id="completedProjectList" class="workspace-compact-list"></div>
+              </div>
+              <div id="hotReviewAssetPanel" class="asset-detail-view" role="tabpanel" hidden>
+                <div class="asset-detail-head"><strong>爆款文审核资产</strong><a href="{{ url_for('hot_review_assets_page', auth_token=current_auth_token) }}">查看全部</a></div>
+                <div id="hotReviewProjectList" class="workspace-compact-list"></div>
+              </div>
+              <div id="newScriptAssetPanel" class="asset-detail-view" role="tabpanel" hidden>
+                <div class="asset-detail-head"><strong>新剧本资产</strong><span>最近生成</span></div>
+                <div id="newScriptProjectList" class="workspace-compact-list"></div>
+              </div>
+            </section>
           </div>
-          <div class="sidebar-folders">
-            <details id="completedWorkspaceFolder" class="workspace-folder">
-              <summary>
-                <span class="asset-folder-title"><span class="asset-folder-icon">▣</span>框架资产</span>
-                <a class="asset-folder-open" href="{{ url_for('framework_assets_page', auth_token=current_auth_token) }}" aria-label="打开框架资产页" onclick="event.stopPropagation()">查看</a>
-              </summary>
-              <div id="completedProjectList" class="workspace-compact-list"></div>
-            </details>
-            <details class="workspace-folder hot-review-workspace-folder">
-              <summary>
-                <span class="asset-folder-title"><span class="asset-folder-icon">◇</span>爆款文审核资产</span>
-                <span class="asset-folder-actions">
-                  <small class="workspace-pick-state" id="hotReviewProjectCount">0</small>
-                  <a class="asset-folder-open" href="{{ url_for('hot_review_assets_page', auth_token=current_auth_token) }}" aria-label="打开爆款文审核资产页" onclick="event.stopPropagation()">查看</a>
-                </span>
-              </summary>
-              <div id="hotReviewProjectList" class="workspace-compact-list"></div>
-            </details>
-            <details class="workspace-folder">
-              <summary>
-                <span class="asset-folder-title"><span class="asset-folder-icon">新</span>新剧本资产</span>
-              </summary>
-              <div id="newScriptProjectList" class="workspace-compact-list"></div>
-            </details>
-            <details class="workspace-folder">
-              <summary>
-                <span class="asset-folder-title"><span class="asset-folder-icon">外</span>外包格式专属</span>
-              </summary>
-              <div id="waibaoProjectList" class="workspace-compact-list"></div>
-            </details>
-            <details class="workspace-folder">
-              <summary>
-                <span class="asset-folder-title"><span class="asset-folder-icon">人</span>只换人设</span>
-              </summary>
-              <div id="characterReskinProjectList" class="workspace-compact-list"></div>
-            </details>
-          </div>
-        </section>
+        </details>
 
-        <section id="tools" class="sidebar-group sidebar-tools-section">
-          <details id="assistantToolsFolder" class="workspace-folder tools-folder">
-            <summary>
-              <span class="asset-folder-title"><span class="asset-folder-icon">工</span>辅助工具</span>
-            </summary>
+        <details id="assistantToolsFolder" class="sidebar-nav-cluster tools-nav-cluster">
+          <summary class="sidebar-nav-cluster-summary">
+            <span class="sidebar-nav-cluster-icon" aria-hidden="true">工</span>
+            <span class="sidebar-nav-cluster-copy">
+              <strong>辅助工具</strong>
+              <small>审核、增爽与人设替换</small>
+            </span>
+            <span class="sidebar-nav-cluster-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="sidebar-nav-cluster-body tools-nav-body">
             <div id="toolList" class="tool-shortcut-list"></div>
-          </details>
-        </section>
+          </div>
+        </details>
 
-        <section class="sidebar-group sidebar-tools-section">
-          <button id="waibaoScriptBtn" class="sidebar-text-link sidebar-side-link" type="button" data-nav-icon="◇">外包专属格式</button>
-        </section>
-
-        <div class="sidebar-group sidebar-tools-section">
+        <div class="sidebar-minor-links" aria-label="更多功能">
+          <button id="waibaoScriptBtn" class="sidebar-text-link sidebar-side-link" type="button" data-nav-icon="外">外包专属格式</button>
           <a
             id="openCommunityPanelLink"
             class="sidebar-text-link sidebar-side-link"
             href="{{ url_for('workspace_page', auth_token=current_auth_token, section='community') }}"
-          data-nav-icon="◎"
+            data-nav-icon="社"
           >社区好剧</a>
         </div>
       </div>
@@ -126,6 +125,9 @@
               <span class="sidebar-profile-avatar">{{ current_user.username[:1] }}</span>
               <span class="sidebar-footer-text">个人中心</span>
             </button>
+            {% if current_user_is_admin %}
+              <a class="sidebar-logout-link" href="{{ url_for('admin_dashboard_page', auth_token=current_auth_token) }}">管理后台</a>
+            {% endif %}
             <a class="sidebar-logout-link" href="{{ url_for('logout', auth_token=current_auth_token) }}">退出登录</a>
           </div>
         {% else %}
@@ -452,7 +454,7 @@
   </script>
   <script src="{{ url_for('static', filename='field_labels_cn.js') }}?v=20260527-readable-labels"></script>
   <script src="{{ url_for('static', filename='particles.js') }}?v=20260702-particles-v2"></script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260710-sidebar-asset-cards-v1"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260713-framework-count-v2"></script>
   <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v4"></script>
   <script>
     (function() {
