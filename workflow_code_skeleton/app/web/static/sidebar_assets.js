@@ -83,6 +83,11 @@
     if (countEl) countEl.textContent = String(Math.max(0, Number(count) || 0));
   }
 
+  function setFrameworkCount(count) {
+    const countEl = document.getElementById("completedProjectCount");
+    if (countEl) countEl.textContent = String(Math.max(0, Number(count) || 0));
+  }
+
   function hasFrameworkToScriptState(item) {
     const artifacts = item && typeof item.artifacts === "object" ? item.artifacts : {};
     const state = artifacts.framework_to_script_state || item.framework_to_script_state;
@@ -198,7 +203,9 @@
     if (!response.ok || data.success === false || data.ok === false) throw new Error(data.message || data.error || "资产列表加载失败");
     const projects = Array.isArray(data.projects) ? data.projects : [];
     const hotReviews = projects.filter((item) => assetCategory(item) === "hot_review");
-    renderList(lists.framework, projects.filter((item) => assetCategory(item) === "framework"), "当前还没有框架资产。");
+    const frameworks = projects.filter((item) => assetCategory(item) === "framework");
+    renderList(lists.framework, frameworks, "当前还没有框架资产。");
+    setFrameworkCount(frameworks.length);
     renderList(ensureHotReviewList(), hotReviews, "当前还没有爆款文审核资产。");
     setHotReviewCount(hotReviews.length);
     renderList(lists.new_script, projects.filter((item) => assetCategory(item) === "new_script"), "当前还没有新剧本平台资产。");

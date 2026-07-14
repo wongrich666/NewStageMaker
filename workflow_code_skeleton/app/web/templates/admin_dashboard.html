@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="auth-token" content="{{ current_auth_token }}">
+  <title>运营管理台 · 剧本平台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_dashboard.css') }}">
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="admin-brand">
+        <span class="admin-brand-mark">S</span>
+        <div><strong>Script Admin</strong><small>开发版 · 5002</small></div>
+      </div>
+      <nav class="admin-nav" aria-label="管理功能">
+        <button class="admin-nav-item is-active" type="button" data-panel="overview"><span>总</span>数据总览</button>
+        <button class="admin-nav-item" type="button" data-panel="users"><span>用</span>用户管理</button>
+        <button class="admin-nav-item" type="button" data-panel="runs"><span>流</span>工作流运行</button>
+        <button class="admin-nav-item" type="button" data-panel="audit"><span>审</span>操作审计</button>
+      </nav>
+      <div class="admin-sidebar-footer">
+        <div class="admin-user-card">
+          <span>{{ current_user.username[:1] }}</span>
+          <div><strong>{{ current_user.username }}</strong><small>超级管理员</small></div>
+        </div>
+        <a href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">返回创作平台</a>
+      </div>
+    </aside>
+
+    <main class="admin-main">
+      <header class="admin-topbar">
+        <div>
+          <p class="admin-eyebrow">OPERATIONS CONTROL</p>
+          <h1 id="panelTitle">平台数据总览</h1>
+          <p id="panelSubtitle">掌握用户、调用和工作流运行情况</p>
+        </div>
+        <div class="admin-top-actions">
+          <span class="admin-live"><i></i>5002 正在运行</span>
+          <button id="refreshAdminData" class="admin-refresh" type="button">刷新数据</button>
+        </div>
+      </header>
+
+      <section id="adminNotice" class="admin-notice" hidden></section>
+
+      <section class="admin-panel is-active" data-panel-view="overview">
+        <div id="metricGrid" class="metric-grid" aria-live="polite"></div>
+        <div class="admin-grid-two">
+          <article class="admin-card">
+            <div class="admin-card-head"><div><small>WORKFLOW</small><h2>今日功能使用</h2></div></div>
+            <div id="topWorkflowList" class="workflow-ranking"></div>
+          </article>
+          <article class="admin-card">
+            <div class="admin-card-head"><div><small>SECURITY</small><h2>审计状态</h2></div></div>
+            <div class="security-summary">
+              <div><span class="security-icon">✓</span><p><strong>敏感信息不入库</strong><small>不记录密码、API密钥、Token和完整剧本</small></p></div>
+              <div><span class="security-icon">时</span><p><strong>关键操作自动记录</strong><small>包含用户、时间、IP、入口和执行结果</small></p></div>
+              <div><span class="security-icon">流</span><p><strong>工作流单独追踪</strong><small>记录运行编号、耗时、状态和HTTP结果</small></p></div>
+            </div>
+          </article>
+        </div>
+        <article class="admin-card">
+          <div class="admin-card-head"><div><small>RECENT ACTIVITY</small><h2>最近操作</h2></div><button class="text-button" data-open-panel="audit">查看全部</button></div>
+          <div id="overviewAuditTable" class="table-wrap"></div>
+        </article>
+      </section>
+
+      <section class="admin-panel" data-panel-view="users">
+        <article class="admin-card">
+          <div class="admin-card-head responsive-head">
+            <div><small>USERS</small><h2>用户列表</h2><p>查看注册时间、最近活跃、会话和工作流使用次数</p></div>
+            <form class="admin-filter" data-filter-form="users">
+              <input name="search" type="search" placeholder="搜索用户名或用户ID">
+              <button type="submit">查询</button>
+            </form>
+          </div>
+          <div id="usersTable" class="table-wrap"></div>
+          <div class="pagination" data-pagination="users"></div>
+        </article>
+      </section>
+
+      <section class="admin-panel" data-panel-view="runs">
+        <article class="admin-card">
+          <div class="admin-card-head responsive-head">
+            <div><small>WORKFLOW RUNS</small><h2>工作流运行记录</h2><p>定位哪个用户在什么时间运行了哪个功能</p></div>
+            <form class="admin-filter" data-filter-form="runs">
+              <input name="search" type="search" placeholder="用户、功能或运行ID">
+              <select name="status"><option value="">全部状态</option><option value="success">成功</option><option value="accepted">已受理</option><option value="failed">失败</option><option value="running">运行中</option></select>
+              <button type="submit">查询</button>
+            </form>
+          </div>
+          <div id="runsTable" class="table-wrap"></div>
+          <div class="pagination" data-pagination="runs"></div>
+        </article>
+      </section>
+
+      <section class="admin-panel" data-panel-view="audit">
+        <article class="admin-card">
+          <div class="admin-card-head responsive-head">
+            <div><small>AUDIT LOG</small><h2>用户操作审计</h2><p>只记录行为元数据，不保存用户提交的剧本正文</p></div>
+            <form class="admin-filter" data-filter-form="audit">
+              <input name="search" type="search" placeholder="用户、接口或IP">
+              <select name="category"><option value="">全部类型</option><option value="auth">登录注册</option><option value="request">功能操作</option></select>
+              <select name="status"><option value="">全部状态</option><option value="success">成功</option><option value="failed">失败</option></select>
+              <button type="submit">查询</button>
+            </form>
+          </div>
+          <div id="auditTable" class="table-wrap"></div>
+          <div class="pagination" data-pagination="audit"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+  <script src="{{ url_for('static', filename='admin_dashboard.js') }}" defer></script>
+</body>
+</html>

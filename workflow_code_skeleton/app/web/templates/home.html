@@ -46,6 +46,7 @@
             <details class="workspace-folder">
               <summary>
                 <span>框架资产</span>
+                <small class="workspace-pick-state" id="completedProjectCount">0</small>
               </summary>
               <div id="completedProjectList" class="sidebar-asset-list">
                 <div class="workspace-empty">登录后查看 01-07 框架资产。</div>
@@ -112,6 +113,9 @@
               <span class="sidebar-profile-avatar">{{ current_user.username[:1] }}</span>
               <span class="sidebar-footer-text">进入工作台</span>
             </a>
+            {% if current_user_is_admin %}
+              <a class="sidebar-logout-link" href="{{ url_for('admin_dashboard_page', auth_token=current_auth_token) }}">管理后台</a>
+            {% endif %}
             <a class="sidebar-logout-link" href="{{ url_for('logout', auth_token=current_auth_token) }}">退出登录</a>
           {% else %}
             <a class="sidebar-profile-btn" href="{{ url_for('login_page') }}">
@@ -163,7 +167,7 @@
       frameworkToScriptUrl: "/framework-to-script"
     };
   </script>
-  <script src="{{ url_for('static', filename='sidebar_assets.js') }}?v=20260710-sidebar-block-v2"></script>
+  <script src="{{ url_for('static', filename='sidebar_assets.js') }}?v=20260713-framework-count-v2"></script>
   {% endif %}
   <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v4"></script>
 </body>

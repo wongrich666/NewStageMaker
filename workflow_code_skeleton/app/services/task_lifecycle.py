@@ -220,7 +220,11 @@ class TaskLifecycleMixin:
             "visibility": "private",
             "model_option": None,
             "asset_kind": AUXILIARY_TOOL_ASSET_KIND,
-            "asset_type": "character_reskin" if str(tool_key or "").strip() == "character_reskin" else "old_script",
+            "asset_type": (
+                "character_reskin" if str(tool_key or "").strip() == "character_reskin"
+                else "new_script" if str(tool_key or "").strip() == "sitcom_generator"
+                else "old_script"
+            ),
             "tool_key": str(tool_key or "").strip(),
             "tool_label": tool_label,
             "tool_request_payload": copy.deepcopy(request_payload or {}),
