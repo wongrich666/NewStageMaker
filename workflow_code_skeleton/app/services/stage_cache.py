@@ -57,6 +57,8 @@ class StageCacheMixin:
                     "final_output_text",
                 )
             )
+        if is_tool_asset and str(snapshot.get("tool_key") or "").strip() == "sitcom_generator":
+            allowed_keys.append("tool_output")
         raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
         artifacts = _select_non_empty_fields(
             raw_artifacts,
@@ -1476,6 +1478,7 @@ class StageCacheMixin:
                     "final_output_text",
                     "tool_filename",
                     "tool_output_type",
+                    "tool_output",
                     "character_profile",
                     "character_profile_json",
                     "script_batches",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -824,6 +825,11 @@ def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, An
 
         if extracted is not None:
             output, output_source = extracted
+            if definition.key == "sitcom_generator" and isinstance(output, str):
+                recovered_output = _recover_sitcom_jsonish_output(output)
+                if recovered_output:
+                    output = recovered_output
+                    output_source = f"{output_source}.recovered_sitcom_fields"
             debug = {
                 **env_debug,
                 "workflow_json_file": resolved.json_path.name if resolved.json_path else None,
@@ -843,7 +849,7 @@ def run_simple_tool(tool_key: str, user_payload: dict[str, Any]) -> dict[str, An
                 "retry_attempts": attempts_debug,
                 "api_key_source": api_info["source"],
             }
-            rendered_text = _render_tool_text(output)
+            rendered_text = _render_tool_user_text(definition, output)
             filename_payload = dict(payload_debug)
             project_title = str(payload.get("project_title") or "").strip()
             if project_title:
@@ -1616,6 +1622,106 @@ def _render_tool_text(value: Any) -> str:
         except Exception:
             return str(value).strip()
     return str(value or "").strip()
+
+
+def _render_tool_user_text(definition: SimpleToolDefinition, value: Any) -> str:
+    if definition.key == "sitcom_generator" and isinstance(value, dict):
+        final_script_text = value.get("final_script_text")
+        if isinstance(final_script_text, str) and final_script_text.strip():
+            return final_script_text.strip()
+    return _render_tool_text(value)
+
+
+def _extract_balanced_json_value(text: str, field_name: str) -> Any | None:
+    match = re.search(rf'"{re.escape(field_name)}"\s*:\s*', text)
+    if not match:
+        return None
+    start = match.end()
+    while start < len(text) and text[start].isspace():
+        start += 1
+    if start >= len(text) or text[start] not in "[{":
+        return None
+    opening = text[start]
+    closing = "}" if opening == "{" else "]"
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start:index + 1])
+                except Exception:
+                    return None
+    return None
+
+
+def _extract_json_string_field(text: str, field_name: str) -> str:
+    match = re.search(
+        rf'"{re.escape(field_name)}"\s*:\s*"((?:\\.|[^"\\])*)"',
+        text,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return ""
+    try:
+        return str(json.loads(f'"{match.group(1)}"')).strip()
+    except Exception:
+        return match.group(1).replace(r"\n", "\n").replace(r'\"', '"').strip()
+
+
+def _recover_sitcom_jsonish_output(value: str) -> dict[str, Any] | None:
+    text = strip_code_fence(str(value or "")).strip()
+    if not text or "sitcom_bible" not in text and "episode_scripts" not in text:
+        return None
+    recovered: dict[str, Any] = {
+        "schema_version": _extract_json_string_field(text, "schema_version") or "sitcom_generation_v1",
+        "generation_mode": _extract_json_string_field(text, "generation_mode") or "sitcom",
+        "project_title": _extract_json_string_field(text, "project_title"),
+    }
+    for field_name in (
+        "batch",
+        "sitcom_bible",
+        "season_topic_matrix",
+        "episode_outlines",
+        "episode_scripts",
+        "quality_report",
+        "updated_memory",
+        "next_batch",
+    ):
+        extracted = _extract_balanced_json_value(text, field_name)
+        if extracted not in (None, "", [], {}):
+            recovered[field_name] = extracted
+    final_script_text = _extract_json_string_field(text, "final_script_text")
+    if final_script_text:
+        recovered["final_script_text"] = final_script_text
+    episode_scripts = recovered.get("episode_scripts")
+    if not final_script_text and isinstance(episode_scripts, list):
+        scripts = [
+            str(item.get("script_text") or "").strip()
+            for item in episode_scripts
+            if isinstance(item, dict) and str(item.get("script_text") or "").strip()
+        ]
+        if scripts:
+            recovered["final_script_text"] = "\n\n".join(scripts)
+    if not recovered.get("final_script_text") and not recovered.get("episode_scripts"):
+        return None
+    recovered["ok"] = True
+    return recovered
 
 
 def _build_tool_filename(

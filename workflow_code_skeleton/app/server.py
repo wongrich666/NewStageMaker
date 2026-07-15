@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import copy
+import re
 import threading
 import tempfile
 import time
@@ -46,17 +47,28 @@ from .services.framework_planner_service import (
 )
 from .services.simple_fastgpt_tools import ToolExecutionError, list_simple_tools, run_simple_tool
 from .services.workbuddy_doctor import (
+    build_doctor_optimization_prompt,
     build_doctor_prompt,
     clear_workbuddy_history,
     delete_workbuddy_history,
     doctor_timeout_seconds,
+    extract_doctor_report,
     format_doctor_exception,
     list_workbuddy_history,
+    load_workbuddy_optimized_document,
+    load_workbuddy_source,
     load_workbuddy_history,
+    parse_doctor_optimization_result,
     run_codebuddy_doctor,
+    save_workbuddy_optimized_document,
+    save_workbuddy_source,
     save_workbuddy_history,
     validate_doctor_payload,
     workbuddy_config_status,
+)
+from .services.workbuddy_docx_optimizer import (
+    apply_docx_replacements,
+    indexed_docx_text,
 )
 from .services.script_audit_ecg_parser import (
     COMPACT_SCHEMA_VERSION as SCRIPT_AUDIT_COMPACT_SCHEMA_VERSION,
@@ -1700,6 +1712,54 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             end_episode = max(batch_episode_numbers)
         return start_episode, end_episode, batch
 
+    def _stage12_script_episode_numbers(script_text: object) -> set[int]:
+        """Return episode headings that are actually present in a generated batch."""
+        text = str(script_text or "")
+        return {
+            int(match.group(1))
+            for match in re.finditer(r"(?m)^\s*第\s*(\d+)\s*集(?:\s*[:：]|\s|$)", text)
+        }
+
+    def _stage12_missing_script_episodes(
+        script_text: object,
+        start_episode: int,
+        end_episode: int,
+    ) -> list[int]:
+        expected = set(range(int(start_episode), int(end_episode) + 1))
+        return sorted(expected - _stage12_script_episode_numbers(script_text))
+
+    def _stage12_episode_plan_slice(plan: object, episode_no: int) -> list[dict]:
+        if not isinstance(plan, list):
+            return []
+        selected: list[dict] = []
+        for index, item in enumerate(plan, start=1):
+            if not isinstance(item, dict):
+                continue
+            item_episode = _positive_int(
+                item.get("episode")
+                or item.get("episodeNumber")
+                or item.get("episode_number")
+                or item.get("ep"),
+                index,
+            )
+            if item_episode == episode_no:
+                selected.append(item)
+        return selected
+
+    def _stage12_conflict_plan_slice(plan: object, episode_no: int) -> dict:
+        if not isinstance(plan, dict):
+            return {}
+        result = copy.deepcopy(plan)
+        episodes = result.get("episodes")
+        if isinstance(episodes, list):
+            result["episodes"] = [
+                item
+                for index, item in enumerate(episodes, start=1)
+                if isinstance(item, dict)
+                and _positive_int(item.get("episode"), index) == episode_no
+            ]
+        return result
+
     def _sorted_numeric_batch_keys(batches: dict) -> list[str]:
         if not isinstance(batches, dict):
             return []
@@ -2636,6 +2696,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if error:
             return jsonify({"ok": False, "error": error}), 400
 
+        user = _current_user()
+        if payload.get("source_document_id"):
+            source = load_workbuddy_source(user.id, payload["source_document_id"])
+            if not source:
+                return jsonify({"ok": False, "error": "原始 Word 文件已失效，请重新上传 DOCX 后再运行体检。"}), 400
+            payload["source_filename"] = str(source.get("original_filename") or "原始剧本.docx")
+
         codebuddy_api_key = _request_codebuddy_api_key(data)
         codebuddy_internet_env = _request_codebuddy_internet_env(data)
         codebuddy_model = payload.get("model") or _request_codebuddy_model(data)
@@ -2708,7 +2775,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "report": result.get("content") or "",
             "structured_output": result.get("structured_output"),
         }
-        user = _current_user()
         try:
             response_payload["history_entry"] = save_workbuddy_history(
                 user.id,
@@ -2721,6 +2787,118 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             response_payload["history_warning"] = "报告已生成，但历史记录保存失败。"
 
         return jsonify(response_payload)
+
+    @app.post("/api/workbuddy/doctor/history/<entry_id>/optimize")
+    @_login_required
+    def workbuddy_doctor_optimize(entry_id: str):
+        user = _current_user()
+        entry = load_workbuddy_history(user.id, entry_id)
+        if not entry or not entry.get("ok"):
+            return jsonify({"ok": False, "error": "审查记录不存在或尚未成功完成。"}), 404
+
+        source_document_id = str(entry.get("source_document_id") or "")
+        source = load_workbuddy_source(user.id, source_document_id)
+        if not source:
+            return jsonify({"ok": False, "error": "这条记录没有可回写的原始 Word，请重新上传 DOCX 并运行审查。"}), 400
+
+        report = extract_doctor_report(entry.get("result") or {})
+        if not report:
+            return jsonify({"ok": False, "error": "审查报告无法解析，请重新运行审查后再优化。"}), 400
+
+        data = request.get_json(silent=True) or {}
+        codebuddy_api_key = _request_codebuddy_api_key(data)
+        codebuddy_internet_env = _request_codebuddy_internet_env(data)
+        codebuddy_model = str(data.get("model") or entry.get("model") or _request_codebuddy_model(data) or "").strip()
+        status = workbuddy_config_status(
+            api_key=codebuddy_api_key,
+            internet_env=codebuddy_internet_env,
+            model=codebuddy_model,
+        )
+        if not status["configured"]:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "CodeBuddy Agent SDK 尚未配置完成，暂不能执行一键优化。",
+                    "missing": status["missing"],
+                }
+            ), 501
+
+        try:
+            indexed_paragraphs = indexed_docx_text(source["path"])
+        except Exception:
+            logger.exception("WorkBuddy 原始 Word 读取失败: source=%s", source_document_id)
+            return jsonify({"ok": False, "error": "原始 Word 文件损坏或无法读取，请重新上传。"}), 400
+
+        prompt = build_doctor_optimization_prompt(
+            skill_name=str(entry.get("skill_name") or entry.get("skill") or "剧本医生"),
+            title=str(entry.get("title") or "未命名剧本"),
+            report=report,
+            indexed_paragraphs=indexed_paragraphs,
+            user_goal=str(entry.get("user_goal") or ""),
+        )
+        timeout_seconds = min(600, max(420, doctor_timeout_seconds(len(indexed_paragraphs), str(entry.get("skill") or ""))))
+        try:
+            result = run_codebuddy_doctor(
+                prompt,
+                project_dir=Path.cwd(),
+                timeout_seconds=timeout_seconds,
+                model=codebuddy_model or None,
+                api_key=codebuddy_api_key,
+                internet_env=codebuddy_internet_env,
+            )
+            optimization = parse_doctor_optimization_result(result)
+            optimized_raw, applied, skipped = apply_docx_replacements(
+                source["path"],
+                optimization["operations"],
+            )
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 422
+        except Exception as exc:
+            logger.exception("WorkBuddy 一键优化失败: history=%s", entry_id)
+            formatted_error = format_doctor_exception(exc, timeout_seconds=timeout_seconds)
+            return jsonify({"ok": False, "error": formatted_error["message"]}), 502
+
+        if not applied:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "AI 返回了修改建议，但没有一项通过原文匹配校验，Word 未被改动。请重新审查后再试。",
+                    "skipped": skipped[:10],
+                }
+            ), 422
+
+        output = save_workbuddy_optimized_document(
+            user.id,
+            history_entry_id=entry_id,
+            original_filename=str(source.get("original_filename") or "原始剧本.docx"),
+            raw=optimized_raw,
+            applied_count=len(applied),
+            summary=optimization["summary"],
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "summary": optimization["summary"],
+                "applied_count": len(applied),
+                "skipped_count": len(skipped),
+                "download_name": output["download_name"],
+                "download_url": url_for("workbuddy_doctor_download_optimized", output_id=output["output_id"]),
+            }
+        )
+
+    @app.get("/api/workbuddy/doctor/optimized/<output_id>/download")
+    @_login_required
+    def workbuddy_doctor_download_optimized(output_id: str):
+        user = _current_user()
+        output = load_workbuddy_optimized_document(user.id, output_id)
+        if not output:
+            return jsonify({"ok": False, "error": "优化后的 Word 不存在或已失效。"}), 404
+        return send_file(
+            output["path"],
+            as_attachment=True,
+            download_name=str(output.get("download_name") or "AI优化版剧本.docx"),
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
     @app.get("/assets/framework")
     @_login_required
@@ -3458,6 +3636,44 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         return _uploaded_text_response(
             request.files.get("file"),
             log_label="通用上传文本提取",
+        )
+
+    @app.post("/api/workbuddy/doctor/source")
+    @_login_required
+    def upload_workbuddy_doctor_source():
+        user = _current_user()
+        uploaded = request.files.get("file")
+        if uploaded is None:
+            return _json_error("没有收到上传文件。", status=400)
+        original_filename = str(uploaded.filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+        if Path(original_filename).suffix.lower() != ".docx":
+            return _json_error("一键优化只支持 Word DOCX 原文件。", status=400)
+        raw = uploaded.read(HOT_REVIEW_UPLOAD_MAX_BYTES + 1)
+        if not raw:
+            return _json_error("上传文件为空。", status=400)
+        if len(raw) > HOT_REVIEW_UPLOAD_MAX_BYTES:
+            return _json_error("文件超过 20 MB，无法上传。", status=413)
+        try:
+            text = _extract_hot_review_docx_text(raw)
+            if not text:
+                raise ValueError("没有从 Word 中提取到可用文字。")
+            if len(text) > HOT_REVIEW_UPLOAD_MAX_CHARS:
+                raise ValueError(f"Word 共有 {len(text)} 个字符，超过 {HOT_REVIEW_UPLOAD_MAX_CHARS} 字符限制。")
+            source = save_workbuddy_source(user.id, filename=original_filename, raw=raw)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except Exception:
+            logger.exception("AI 剧本医生 Word 上传失败: filename=%s", original_filename)
+            return _json_error("Word 文件解析或暂存失败，请检查文件是否损坏。", status=400)
+        return _json_ok(
+            filename=source["original_filename"],
+            extension=".docx",
+            mime_type=str(uploaded.mimetype or ""),
+            text=text,
+            char_count=len(text),
+            byte_count=len(raw),
+            source_document_id=source["source_document_id"],
+            can_optimize=True,
         )
 
     @app.post("/api/tools/hot_review/extract-file")
@@ -6083,6 +6299,114 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             },
                         }
                     ), 500
+
+                missing_script_episodes = _stage12_missing_script_episodes(
+                    batch_script,
+                    start_episode,
+                    end_episode,
+                )
+                write_event["generated_episode_numbers"] = sorted(
+                    _stage12_script_episode_numbers(batch_script)
+                )
+                write_event["missing_episode_numbers"] = missing_script_episodes
+                if missing_script_episodes and start_episode < end_episode:
+                    # The batch workflow occasionally returns only the first episode despite
+                    # receiving a complete five-episode plan. Regenerate the batch as explicit
+                    # one-episode calls before asking the reviewer to judge it.
+                    logger.warning(
+                        "framework-to-script stage12 write omitted episodes; switching to one-episode recovery "
+                        "asset_id=%s start_episode=%s end_episode=%s missing=%s",
+                        asset_id,
+                        start_episode,
+                        end_episode,
+                        missing_script_episodes,
+                    )
+                    recovery_event = {
+                        "sub_stage": "script_write_recovery",
+                        "reason": "initial_batch_missing_episode_headings",
+                        "missing_episode_numbers_before": missing_script_episodes,
+                        "episodes": [],
+                        "fastgpt_request_started_at": _now_iso(),
+                    }
+                    debug_record["events"].append(recovery_event)
+                    debug_record.update(
+                        {
+                            "status": "requesting_fastgpt",
+                            "failed_sub_stage": "script_write_recovery",
+                            "missing_episode_numbers": missing_script_episodes,
+                            "updated_at": _now_iso(),
+                        }
+                    )
+                    debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
+                    recovered_scripts: list[str] = []
+                    for episode_no in range(start_episode, end_episode + 1):
+                        episode_plan = _stage12_episode_plan_slice(batch_plan, episode_no)
+                        episode_conflict_plan = _stage12_conflict_plan_slice(conflict_plan, episode_no)
+                        if not episode_plan or not episode_conflict_plan.get("episodes"):
+                            raise RuntimeError(
+                                f"12 阶段无法补齐第 {episode_no} 集：缺少该集的分集计划或因果冲突计划。"
+                            )
+                        episode_vars = {
+                            **base_vars,
+                            "totalEpisodes": episode_no,
+                            "total_episodes": episode_no,
+                            "scriptStartEpisode": episode_no,
+                            "script_start_episode": episode_no,
+                            "batchEnrichedEpisodePlan": episode_plan,
+                            "batch_enriched_episode_plan": episode_plan,
+                            "batchCausalConflictPlan": episode_conflict_plan,
+                            "batch_causal_conflict_plan": episode_conflict_plan,
+                        }
+                        episode_started = time.monotonic()
+                        episode_output = fastgpt_client.run_stage(
+                            STAGE_FRAMEWORK_SCRIPT_WRITE,
+                            episode_vars,
+                        )
+                        episode_script = str(
+                            _first_present(
+                                episode_output,
+                                "batchScriptText",
+                                "batch_script_text",
+                                default="",
+                            )
+                            or ""
+                        ).strip()
+                        episode_event = {
+                            "episode": episode_no,
+                            "duration_ms": int((time.monotonic() - episode_started) * 1000),
+                            "batchScriptText_length": len(episode_script),
+                            "generated_episode_numbers": sorted(
+                                _stage12_script_episode_numbers(episode_script)
+                            ),
+                        }
+                        recovery_event["episodes"].append(episode_event)
+                        if episode_no not in _stage12_script_episode_numbers(episode_script):
+                            raise RuntimeError(
+                                f"12 阶段第 {episode_no} 集补齐失败：工作流未返回该集正文标题。"
+                            )
+                        recovered_scripts.append(episode_script)
+                    batch_script = "\n\n".join(recovered_scripts)
+                    missing_script_episodes = _stage12_missing_script_episodes(
+                        batch_script,
+                        start_episode,
+                        end_episode,
+                    )
+                    recovery_event.update(
+                        {
+                            "fastgpt_request_ended_at": _now_iso(),
+                            "batchScriptText_length_after": len(batch_script),
+                            "missing_episode_numbers_after": missing_script_episodes,
+                        }
+                    )
+                    debug_record.update(
+                        {
+                            "status": "script_write_recovery_done",
+                            "failed_sub_stage": "",
+                            "missing_episode_numbers": missing_script_episodes,
+                            "updated_at": _now_iso(),
+                        }
+                    )
+                    debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                 _autosave_stage12_draft(
                     "script_write",
                     batch_script_value=batch_script,
@@ -7008,3 +7332,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     )
 
     return app
+    extract_doctor_report,
+    load_workbuddy_optimized_document,
+    load_workbuddy_source,
+    parse_doctor_optimization_result,
+    save_workbuddy_optimized_document,
+    save_workbuddy_source,

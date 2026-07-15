@@ -43,8 +43,8 @@ DOCTOR_SKILLS: tuple[DoctorSkill, ...] = (
         key="hook_rhythm",
         name="爽点节奏审查员",
         short_name="爽点节奏",
-        description="检查前三集吸引力、每集钩子、反转密度、压迫感和爽点兑现。",
-        focus=("前三集", "集尾钩子", "反转密度", "爽点兑现"),
+        description="检查开篇阅读钩子、段落与集尾钩子、反转密度、语言质感和爽点兑现。",
+        focus=("开篇钩子", "信息缺口", "集尾钩子", "文采节奏", "爽点兑现"),
     ),
     DoctorSkill(
         key="logic_holes",
@@ -53,11 +53,26 @@ DOCTOR_SKILLS: tuple[DoctorSkill, ...] = (
         description="检查设定冲突、因果断裂、伏笔未回收、信息差错误和道具突兀。",
         focus=("设定冲突", "因果链", "伏笔回收", "信息差"),
     ),
+    DoctorSkill(
+        key="character_humanity",
+        name="人物人情味优化师",
+        short_name="人物人情味",
+        description="检查人物是否拥有真实内心、情绪层次、生活细节、人物化文风和有潜台词的反应，并给出局部优化样例。",
+        focus=("真实心理", "情绪层次", "生活细节", "人物化文风", "潜台词与身体反应"),
+    ),
+    DoctorSkill(
+        key="character_resonance",
+        name="人物画像共鸣评估师",
+        short_name="画像共鸣",
+        description="评估人物登场钩子、画像辨识度、共情入口、欲望与代价，判断目标读者是否愿意理解并追随角色。",
+        focus=("人物登场钩子", "共情入口", "人物吸引力", "欲望与代价", "读者代入"),
+    ),
 )
 
 SKILL_PROMPT_DIR = Path(__file__).resolve().parents[1] / "skills" / "script_doctor"
 _METADATA_CACHE: dict[str, dict[str, Any]] = {}
 _HISTORY_LIMIT = 100
+_SOURCE_LIMIT = 100
 
 
 def list_doctor_skills() -> list[dict[str, Any]]:
@@ -91,6 +106,115 @@ def _history_dir(user_id: Any) -> Path:
     return path
 
 
+def _source_dir(user_id: Any) -> Path:
+    path = get_runtime_data_dir() / "workbuddy_sources" / _safe_history_key(user_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _optimized_dir(user_id: Any) -> Path:
+    path = get_runtime_data_dir() / "workbuddy_optimized" / _safe_history_key(user_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _safe_docx_name(value: Any, *, fallback: str = "优化后剧本.docx") -> str:
+    name = str(value or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    stem = Path(name).stem if name else Path(fallback).stem
+    safe_stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", stem).strip(" ._")[:100]
+    return f"{safe_stem or Path(fallback).stem}.docx"
+
+
+def save_workbuddy_source(user_id: Any, *, filename: str, raw: bytes) -> dict[str, Any]:
+    if not raw:
+        raise ValueError("上传的 Word 文件为空。")
+    source_id = uuid.uuid4().hex
+    original_filename = _safe_docx_name(filename, fallback="原始剧本.docx")
+    directory = _source_dir(user_id)
+    docx_path = directory / f"{source_id}.docx"
+    metadata_path = directory / f"{source_id}.json"
+    docx_path.write_bytes(raw)
+    metadata = {
+        "source_document_id": source_id,
+        "original_filename": original_filename,
+        "byte_count": len(raw),
+        "created_at": _now_iso(),
+    }
+    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    _trim_workbuddy_sources(user_id)
+    return metadata
+
+
+def load_workbuddy_source(user_id: Any, source_document_id: str) -> dict[str, Any] | None:
+    safe_id = "".join(ch for ch in str(source_document_id or "") if ch.isalnum())
+    if not safe_id:
+        return None
+    directory = _source_dir(user_id)
+    metadata_path = directory / f"{safe_id}.json"
+    docx_path = directory / f"{safe_id}.docx"
+    if not metadata_path.is_file() or not docx_path.is_file():
+        return None
+    metadata = _read_history_file(metadata_path)
+    if not metadata:
+        return None
+    return {**metadata, "path": docx_path}
+
+
+def _trim_workbuddy_sources(user_id: Any) -> None:
+    directory = _source_dir(user_id)
+    files = sorted(directory.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+    for metadata_path in files[_SOURCE_LIMIT:]:
+        source_id = metadata_path.stem
+        for path in (metadata_path, directory / f"{source_id}.docx"):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+
+def save_workbuddy_optimized_document(
+    user_id: Any,
+    *,
+    history_entry_id: str,
+    original_filename: str,
+    raw: bytes,
+    applied_count: int,
+    summary: str = "",
+) -> dict[str, Any]:
+    output_id = uuid.uuid4().hex
+    base_name = Path(_safe_docx_name(original_filename)).stem
+    download_name = _safe_docx_name(f"{base_name}_AI优化版.docx")
+    directory = _optimized_dir(user_id)
+    docx_path = directory / f"{output_id}.docx"
+    metadata_path = directory / f"{output_id}.json"
+    docx_path.write_bytes(raw)
+    metadata = {
+        "output_id": output_id,
+        "history_entry_id": _safe_history_key(history_entry_id),
+        "download_name": download_name,
+        "applied_count": int(applied_count or 0),
+        "summary": str(summary or ""),
+        "created_at": _now_iso(),
+    }
+    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    return metadata
+
+
+def load_workbuddy_optimized_document(user_id: Any, output_id: str) -> dict[str, Any] | None:
+    safe_id = "".join(ch for ch in str(output_id or "") if ch.isalnum())
+    if not safe_id:
+        return None
+    directory = _optimized_dir(user_id)
+    metadata_path = directory / f"{safe_id}.json"
+    docx_path = directory / f"{safe_id}.docx"
+    if not metadata_path.is_file() or not docx_path.is_file():
+        return None
+    metadata = _read_history_file(metadata_path)
+    if not metadata:
+        return None
+    return {**metadata, "path": docx_path}
+
+
 def _read_history_file(path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -115,6 +239,8 @@ def _history_summary(entry: dict[str, Any]) -> dict[str, Any]:
         "message": entry.get("message") or result.get("error") or "",
         "created_at": entry.get("created_at") or "",
         "created_at_label": entry.get("created_at_label") or "",
+        "can_optimize": bool(entry.get("ok") and entry.get("source_document_id")),
+        "source_filename": entry.get("source_filename") or "",
     }
 
 
@@ -122,9 +248,9 @@ def _extract_report_value(result: dict[str, Any]) -> Any:
     if not isinstance(result, dict):
         return None
     value = result.get("structured_output")
-    if value:
+    if isinstance(value, dict):
         return value
-    raw = result.get("report") or result.get("content")
+    raw = value if isinstance(value, str) else (result.get("report") or result.get("content"))
     if isinstance(raw, str):
         text = raw.strip()
         if text:
@@ -221,7 +347,7 @@ def save_workbuddy_history(
     created_at = _now_iso()
     meta = _extract_report_meta(result)
     entry = {
-        "schema_version": 1,
+        "schema_version": 2,
         "id": entry_id,
         "user_id": str(user_id or ""),
         "username": username or "",
@@ -234,6 +360,8 @@ def save_workbuddy_history(
         "ok": bool(result.get("ok", True)),
         "script_length": int(payload.get("script_length") or len(str(payload.get("script_text") or ""))),
         "user_goal": str(payload.get("user_goal") or ""),
+        "source_document_id": str(payload.get("source_document_id") or ""),
+        "source_filename": _safe_docx_name(payload.get("source_filename"), fallback="原始剧本.docx") if payload.get("source_document_id") else "",
         "message": result.get("error") or result.get("message") or "",
         "score": str(meta.get("score") or ""),
         "risk_level": str(meta.get("risk_level") or ""),
@@ -401,6 +529,7 @@ def validate_doctor_payload(data: dict[str, Any]) -> tuple[dict[str, Any], str |
     script_text = str(data.get("script_text") or "").strip()
     user_goal = str(data.get("user_goal") or "").strip()
     model = str(data.get("model") or "").strip()
+    source_document_id = "".join(ch for ch in str(data.get("source_document_id") or "") if ch.isalnum())
 
     if not skill_exists(skill_key):
         return {}, "未知智能体 Skill，请重新选择。"
@@ -413,13 +542,84 @@ def validate_doctor_payload(data: dict[str, Any]) -> tuple[dict[str, Any], str |
         "script_text": script_text,
         "user_goal": user_goal,
         "model": model,
+        "source_document_id": source_document_id,
     }, None
+
+
+def extract_doctor_report(result: dict[str, Any]) -> dict[str, Any] | None:
+    report = _extract_report_value(result)
+    return report if isinstance(report, dict) else None
+
+
+def build_doctor_optimization_prompt(
+    *,
+    skill_name: str,
+    title: str,
+    report: dict[str, Any],
+    indexed_paragraphs: str,
+    user_goal: str = "",
+) -> str:
+    report_json = json.dumps(report, ensure_ascii=False, separators=(",", ":"))
+    return f"""你是“AI剧本医生实验室”的剧本精修执行器。
+本次审查器：{skill_name or "剧本医生"}
+剧本标题：{title or "未命名剧本"}
+用户目标：{user_goal or "按照审查报告修复高优先级问题"}
+
+你的任务是依据审查报告，对下方带编号的 Word 原文段落做最小、准确、可回写的局部优化。
+
+【绝对约束】
+1. 只修改审查报告有证据支持的问题，优先处理 high 风险和 priority_fixes。
+2. 不得改变核心剧情、人物姓名、人物关系、世界观规则、集数顺序和已经成立的因果。
+3. 不得凭空增加身世、疾病、死亡、恋爱、反转或新角色；不得删除整集或重排段落。
+4. 每项修改只能对应一个现有 paragraph_id。original_text 必须逐字复制该编号后的完整原文，不得省略或改写。
+5. replacement_text 写完整替换段落，可以包含换行，但不能只写修改说明。
+6. 最多返回 30 项真正重要的修改。没有把握定位时不要修改，宁缺毋滥。
+7. 保留原叙事人称、人物口吻、剧本格式和上下文事实，避免把所有人物改成同一种文风。
+8. 禁止输出 Markdown、代码围栏或解释前缀，只输出一个 JSON 对象。
+
+【输出 JSON】
+{{
+  "summary": "本次优化重点和边界",
+  "operations": [
+    {{
+      "paragraph_id": "P0001",
+      "original_text": "逐字复制的完整原段落",
+      "replacement_text": "优化后的完整段落",
+      "reason": "对应的审查问题及修改目的"
+    }}
+  ]
+}}
+
+【审查报告】
+{report_json}
+
+【Word 原文段落】
+{indexed_paragraphs}
+"""
+
+
+def parse_doctor_optimization_result(result: dict[str, Any]) -> dict[str, Any]:
+    payload = _extract_report_value(result)
+    if not isinstance(payload, dict):
+        raise ValueError("AI 未返回可解析的优化 JSON。")
+    operations = payload.get("operations")
+    if not isinstance(operations, list) or not operations:
+        raise ValueError("AI 没有返回可执行的段落修改。")
+    return {
+        "summary": str(payload.get("summary") or ""),
+        "operations": [item for item in operations if isinstance(item, dict)][:40],
+    }
 
 
 def doctor_timeout_seconds(script_length: int, skill_key: str) -> int:
     length = max(0, int(script_length or 0))
     # Character/logic audits are more expensive because they track cross-episode dependencies.
-    skill_extra = 90 if skill_key in {"character_continuity", "logic_holes"} else 45
+    skill_extra = 90 if skill_key in {
+        "character_continuity",
+        "logic_holes",
+        "character_humanity",
+        "character_resonance",
+    } else 45
     length_extra = min(300, max(0, (length - 12000) // 8000 * 60))
     return min(540, 240 + skill_extra + length_extra)
 

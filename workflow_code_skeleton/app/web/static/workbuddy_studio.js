@@ -5,6 +5,8 @@
     character_continuity: "人物连续性审查器",
     hook_rhythm: "爽点节奏审查员",
     logic_holes: "逻辑漏洞审查员",
+    character_humanity: "人物人情味优化师",
+    character_resonance: "人物画像共鸣评估师",
   };
   const skillGoalOptions = {
     overall_dispatcher: {
@@ -26,12 +28,12 @@
       ],
     },
     hook_rhythm: {
-      hint: "爽点节奏会重点检查前三集吸引力、集尾钩子、反转密度和爽点兑现。",
+      hint: "爽点节奏会检查开篇为什么让人继续读、段落与集尾钩子、信息缺口、语言节奏和爽点兑现。",
       options: [
-        "重点检查爽点钩子和节奏",
-        "检查前三集是否足够吸引用户继续看",
+        "重点优化开篇阅读钩子和文字质感",
+        "检查前300字和前三集是否让人继续读",
         "找出集尾钩子弱、反转不足的集数",
-        "检查压迫、反击、爽点兑现是否拖沓",
+        "检查段落钩子、语言节奏和爽点兑现",
       ],
     },
     logic_holes: {
@@ -41,6 +43,24 @@
         "找出设定冲突、规则变化和信息差错误",
         "检查关键事件的因果链是否成立",
         "检查伏笔、道具、秘密是否有回收",
+      ],
+    },
+    character_humanity: {
+      hint: "人物人情味会检查角色有没有真实的内心波动、生活质感、矛盾反应和不直说的潜台词。",
+      options: [
+        "让主要人物更真实、更有人情味",
+        "丰富关键场景的内心活动和身体反应",
+        "减少口号式心理描写和工具人对白",
+        "为情感转折补足细节、潜台词和记忆触发",
+      ],
+    },
+    character_resonance: {
+      hint: "画像共鸣会判断目标读者能否理解人物、在意人物，并愿意跟随人物继续看下去。",
+      options: [
+        "评估主角画像是否足够吸引人",
+        "找出读者最容易共鸣和最容易出戏的位置",
+        "增强人物的欲望、软肋、矛盾和选择代价",
+        "让反派和配角也有辨识度与可理解动机",
       ],
     },
   };
@@ -55,6 +75,8 @@
   let cachedDefaultModel = "";
   let currentHistoryItems = [];
   let runningTimer = null;
+  let uploadedWordSource = { id: "", filename: "", scriptSnapshot: "" };
+  let currentOptimizationContext = null;
   const apiConfigStorageKey = "workbuddy.scriptDoctor.apiConfig.v1";
 
   function authHeaders() {
@@ -116,6 +138,7 @@
   }
 
   function setRunningResult(payload) {
+    currentOptimizationContext = null;
     $("#wbResultBox").textContent = "AI 剧本医生正在分析剧本，请稍候。";
     renderRunningView(payload);
   }
@@ -166,8 +189,10 @@
     const map = {
       overall_dispatcher: ["拆分分集", "判断缺集", "评分风险", "排序修复"],
       character_continuity: ["提取人物", "检查动机", "追踪关系", "定位断线"],
-      hook_rhythm: ["分析开局", "扫描钩子", "检查爽点", "标记弱集"],
+      hook_rhythm: ["审查开篇", "定位缺口", "检查文采", "扫描集尾"],
       logic_holes: ["提取规则", "检查因果", "核对信息差", "定位漏洞"],
+      character_humanity: ["读取内心", "核对情绪", "检查文风", "生成样例"],
+      character_resonance: ["提取画像", "匹配受众", "评估共鸣", "增强吸引"],
     };
     return map[skillKey] || shared;
   }
@@ -245,6 +270,17 @@
     const score = normalized.score ?? "未评分";
     const risk = normalized.risk || "unknown";
     const issueCount = normalized.issues.length || globalIssues.length || 0;
+    const optimizationPanel = currentOptimizationContext && currentOptimizationContext.canOptimize
+      ? `<section class="wb-optimize-panel">
+          <div>
+            <p class="wb-section-label">ONE-CLICK OPTIMIZE</p>
+            <h3>按本次报告优化原 Word</h3>
+            <p>只回写通过原文匹配校验的段落，不覆盖原文件。完成后自动下载新的 DOCX。</p>
+            <small id="wbOptimizeStatus">已绑定：${escapeHtml(currentOptimizationContext.filename || "原始剧本.docx")}</small>
+          </div>
+          <button class="wb-primary-btn wb-optimize-btn" type="button" data-report-action="optimize">一键优化并下载</button>
+        </section>`
+      : "";
 
     root.innerHTML = `
       <section class="wb-report-summary">
@@ -265,6 +301,7 @@
           <strong>${escapeHtml(issueCount || "0")}</strong>
         </div>
       </section>
+      ${optimizationPanel}
       <section class="wb-report-block">
         <h3>一句话诊断</h3>
         <p>${escapeHtml(diagnosis)}</p>
@@ -421,6 +458,14 @@
       ...firstArray(report.causality_issues),
       ...firstArray(report.information_gap_issues),
       ...firstArray(report.rule_consistency),
+      ...firstArray(report.emotionally_flat_scenes),
+      ...firstArray(report.inner_world_issues),
+      ...firstArray(report.resonance_breaks),
+      ...firstArray(report.character_appeal_issues),
+      ...firstArray(report.opening_hook_rewrites),
+      ...firstArray(report.hook_opportunities),
+      ...firstArray(report.prose_craft_issues),
+      ...firstArray(report.character_entry_hooks),
     ];
     if (!candidates.length && Array.isArray(episodeItems)) {
       candidates.push(...episodeItems.filter((item) => {
@@ -572,6 +617,18 @@
       return;
     }
     loadHistory();
+  }
+
+  function setOptimizationContext(entry, fallbackFilename = "") {
+    if (!entry || !entry.id || !entry.can_optimize) {
+      currentOptimizationContext = null;
+      return;
+    }
+    currentOptimizationContext = {
+      historyEntryId: String(entry.id),
+      canOptimize: true,
+      filename: String(entry.source_filename || fallbackFilename || uploadedWordSource.filename || "原始剧本.docx"),
+    };
   }
 
   function renderHistory() {
@@ -888,10 +945,12 @@
         return;
       }
       setResult({ ok: true, message: `正在解析文件：${file.name}` });
+      currentOptimizationContext = null;
       const formData = new FormData();
       formData.append("file", file);
       try {
-        const response = await fetch("/api/files/extract-text", {
+        const isWord = /\.docx$/i.test(file.name);
+        const response = await fetch(isWord ? "/api/workbuddy/doctor/source" : "/api/files/extract-text", {
           method: "POST",
           headers: authHeaders(),
           body: formData,
@@ -901,6 +960,13 @@
           throw new Error(data.message || data.error || `文件解析失败：HTTP ${response.status}`);
         }
         textarea.value = data.text || "";
+        uploadedWordSource = isWord && data.source_document_id
+          ? {
+              id: String(data.source_document_id),
+              filename: String(data.filename || file.name),
+              scriptSnapshot: textarea.value,
+            }
+          : { id: "", filename: "", scriptSnapshot: "" };
         if (!titleInput.value.trim()) titleInput.value = (data.filename || file.name).replace(/\.[^.]+$/, "");
         updateStats();
         setResult({
@@ -908,6 +974,7 @@
           message: "文件解析完成，正文已填入输入框。",
           filename: data.filename || file.name,
           char_count: data.char_count || textarea.value.length,
+          one_click_optimization: uploadedWordSource.id ? "审查完成后可一键优化并下载 Word" : "当前文件仅支持文本审查",
         });
       } catch (error) {
         setResult({ ok: false, error: error.message || String(error) });
@@ -932,6 +999,9 @@
         script_text: formData.script_text || "",
         skill: activeSkill,
         model: formData.model || modelValueForSubmit(activeModel) || "",
+        source_document_id: uploadedWordSource.id && textarea.value === uploadedWordSource.scriptSnapshot
+          ? uploadedWordSource.id
+          : "",
       };
       const original = button.textContent;
       button.disabled = true;
@@ -940,6 +1010,7 @@
       setRunningResult(payload);
       try {
         const data = await postJson("/api/workbuddy/doctor/run", payload);
+        setOptimizationContext(data && data.history_entry, uploadedWordSource.filename);
         if (data && data.ok && data.report) {
           setResult({
             report: data.report,
@@ -964,6 +1035,8 @@
 
     $("#wbClearFormBtn").addEventListener("click", () => {
       form.reset();
+      uploadedWordSource = { id: "", filename: "", scriptSnapshot: "" };
+      currentOptimizationContext = null;
       updateStats();
       setResult("等待上传剧本并运行体检。");
     });
@@ -1041,6 +1114,7 @@
       try {
         await deleteJson("/api/workbuddy/doctor/history");
         currentHistoryItems = [];
+        currentOptimizationContext = null;
         renderHistory();
       } catch (error) {
         setResult({ ok: false, error: error.message || String(error) });
@@ -1058,11 +1132,19 @@
           const data = await deleteJson(`/api/workbuddy/doctor/history/${encodeURIComponent(entryId)}`);
           currentHistoryItems = Array.isArray(data.items) ? data.items : currentHistoryItems.filter((item) => item.id !== entryId);
           renderHistory();
+          if (currentOptimizationContext && currentOptimizationContext.historyEntryId === entryId) {
+            currentOptimizationContext = null;
+          }
           return;
         }
         const data = await fetchJsonWithTimeout(`/api/workbuddy/doctor/history/${encodeURIComponent(entryId)}`, 8000);
         const entry = data.entry || {};
         const result = entry.result || {};
+        setOptimizationContext({
+          id: entry.id,
+          can_optimize: Boolean(entry.ok && entry.source_document_id),
+          source_filename: entry.source_filename || "原始剧本.docx",
+        });
         setResult(result.report || result.structured_output ? {
           report: result.report,
           structured_output: result.structured_output,
@@ -1090,6 +1172,50 @@
     $("#wbDownloadResultBtn").addEventListener("click", () => {
       downloadText(`AI剧本医生报告-${new Date().toISOString().slice(0, 10)}.txt`, $("#wbResultBox").textContent || "");
     });
+    $("#wbReportView").addEventListener("click", async (event) => {
+      const button = event.target.closest('[data-report-action="optimize"]');
+      if (!button || !currentOptimizationContext) return;
+      const status = $("#wbOptimizeStatus");
+      const original = button.textContent;
+      button.disabled = true;
+      button.textContent = "AI 正在逐段优化";
+      if (status) status.textContent = "正在依据审查报告生成修改，并核对 Word 原段落。长剧本可能需要数分钟。";
+      try {
+        const data = await postJson(
+          `/api/workbuddy/doctor/history/${encodeURIComponent(currentOptimizationContext.historyEntryId)}/optimize`,
+          { model: modelValueForSubmit(activeModel) || "" }
+        );
+        if (!data || data.ok === false || !data.download_url) {
+          throw new Error((data && (data.error || data.message)) || "一键优化失败。");
+        }
+        if (status) {
+          status.textContent = `已安全回写 ${data.applied_count || 0} 个段落${data.skipped_count ? `，跳过 ${data.skipped_count} 个未通过校验的修改` : ""}，正在下载。`;
+        }
+        await downloadAuthenticated(data.download_url, data.download_name || "AI优化版剧本.docx");
+      } catch (error) {
+        if (status) status.textContent = error.message || String(error);
+      } finally {
+        button.disabled = false;
+        button.textContent = original;
+      }
+    });
+  }
+
+  async function downloadAuthenticated(url, filename) {
+    const response = await fetch(url, { headers: authHeaders() });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || data.message || `下载失败：HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
   }
 
   function downloadText(filename, content) {
