@@ -8,7 +8,7 @@
   <meta http-equiv="Expires" content="0">
   <title>IDEA TO SCRIPT 剧本生成工作台</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='global_theme.css') }}?v=20260617-cat-theme-v4">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260710-nav-assets-rebuild-v3">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260714-tool-history-v3">
   <link rel="stylesheet" href="{{ url_for('static', filename='premium_sidebar.css') }}?v=20260713-sidebar-assets-v4">
 </head>
 <body class="workspace-body">
@@ -225,6 +225,13 @@
           <button id="runToolBtn" class="btn btn-primary" type="button">运行辅助工具</button>
           <button id="downloadToolBtn" class="btn btn-secondary hidden" type="button">下载 TXT</button>
         </div>
+        <section id="toolHistory" class="tool-history" aria-label="辅助工具历史记录">
+          <div class="tool-history-head">
+            <h4>历史记录</h4>
+            <span id="toolHistoryCount">0 条</span>
+          </div>
+          <div id="toolHistoryList" class="tool-history-list"></div>
+        </section>
         <pre id="toolOutputBox" class="output-box tool-panel-output">这里会显示辅助工具结果。</pre>
       </section>
 
@@ -454,7 +461,7 @@
   </script>
   <script src="{{ url_for('static', filename='field_labels_cn.js') }}?v=20260527-readable-labels"></script>
   <script src="{{ url_for('static', filename='particles.js') }}?v=20260702-particles-v2"></script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260713-framework-count-v2"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260714-tool-history-v3"></script>
   <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v4"></script>
   <script>
     (function() {

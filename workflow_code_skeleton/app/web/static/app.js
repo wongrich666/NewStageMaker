@@ -130,6 +130,9 @@
     toolForms: $("toolForms"),
     runToolBtn: $("runToolBtn"),
     downloadToolBtn: $("downloadToolBtn"),
+    toolHistory: $("toolHistory"),
+    toolHistoryCount: $("toolHistoryCount"),
+    toolHistoryList: $("toolHistoryList"),
     toolOutputBox: $("toolOutputBox"),
 
     statusText: $("statusText"),
@@ -4017,6 +4020,8 @@ startRuntimeDebugPolling();
     if (els.toolOutputBox) {
       if (isScriptAuditEcgResult(result)) {
         els.toolOutputBox.innerHTML = renderScriptAuditEcgResult(result);
+      } else if (toolKey === "sitcom_generator" && sitcomResultPayload(result)) {
+        els.toolOutputBox.innerHTML = renderSitcomResult(result);
       } else {
         els.toolOutputBox.textContent = result?.text
           || result?.answer_text
@@ -4036,6 +4041,329 @@ startRuntimeDebugPolling();
           : "下载 TXT";
       }
     }
+  }
+
+  function parseJsonObject(value) {
+    if (value && typeof value === "object") return value;
+    if (typeof value !== "string") return null;
+    const text = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    if (!text || !/^[\[{]/.test(text)) return null;
+    try {
+      const parsed = JSON.parse(text);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function sitcomJsonStringField(text, fieldName) {
+    const escapedName = String(fieldName).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = String(text || "").match(new RegExp(`"${escapedName}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, "s"));
+    if (!match) return "";
+    try {
+      return JSON.parse(`"${match[1]}"`);
+    } catch (_) {
+      return match[1].replace(/\\n/g, "\n").replace(/\\"/g, '"').trim();
+    }
+  }
+
+  function sitcomBalancedField(text, fieldName) {
+    const source = String(text || "");
+    const fieldIndex = source.indexOf(`"${fieldName}"`);
+    if (fieldIndex < 0) return null;
+    const colonIndex = source.indexOf(":", fieldIndex + fieldName.length + 2);
+    if (colonIndex < 0) return null;
+    let start = colonIndex + 1;
+    while (/\s/.test(source[start] || "")) start += 1;
+    const opening = source[start];
+    if (opening !== "[" && opening !== "{") return null;
+    const closing = opening === "[" ? "]" : "}";
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < source.length; index += 1) {
+      const char = source[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') inString = true;
+      else if (char === opening) depth += 1;
+      else if (char === closing) {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            return JSON.parse(source.slice(start, index + 1));
+          } catch (_) {
+            return null;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  function recoverSitcomJsonishText(value) {
+    if (typeof value !== "string") return null;
+    const text = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    if (!text || (!text.includes('"sitcom_bible"') && !text.includes('"episode_scripts"'))) return null;
+    const recovered = {
+      schema_version: sitcomJsonStringField(text, "schema_version") || "sitcom_generation_v1",
+      generation_mode: sitcomJsonStringField(text, "generation_mode") || "sitcom",
+      project_title: sitcomJsonStringField(text, "project_title"),
+    };
+    ["batch", "sitcom_bible", "season_topic_matrix", "episode_outlines", "episode_scripts", "quality_report", "updated_memory", "next_batch"]
+      .forEach((fieldName) => {
+        const fieldValue = sitcomBalancedField(text, fieldName);
+        if (fieldValue !== null) recovered[fieldName] = fieldValue;
+      });
+    recovered.final_script_text = sitcomJsonStringField(text, "final_script_text");
+    if (!recovered.final_script_text && Array.isArray(recovered.episode_scripts)) {
+      recovered.final_script_text = recovered.episode_scripts
+        .map((item) => sitcomEpisodeScript(item))
+        .filter(Boolean)
+        .join("\n\n");
+    }
+    if (!recovered.final_script_text && !Array.isArray(recovered.episode_scripts)) return null;
+    recovered.ok = true;
+    return recovered;
+  }
+
+  function sitcomResultPayload(result) {
+    const candidates = [result?.output, result?.result, result?.text, result?.answer_text];
+    for (const candidate of candidates) {
+      const parsed = parseJsonObject(candidate) || recoverSitcomJsonishText(candidate);
+      if (!parsed) continue;
+      const payload = parsed.data && typeof parsed.data === "object" ? parsed.data : parsed;
+      if (
+        payload.generation_mode === "sitcom"
+        || payload.schema_version === "sitcom_generation_v1"
+        || Array.isArray(payload.episode_scripts)
+        || payload.sitcom_bible
+      ) return payload;
+    }
+    return null;
+  }
+
+  function sitcomPlainText(value) {
+    if (value === null || value === undefined) return "";
+    return String(value)
+      .replace(/\\r\\n/g, "\n")
+      .replace(/\\n/g, "\n")
+      .replace(/\r\n/g, "\n")
+      .trim();
+  }
+
+  function sitcomEpisodeNumber(item, index) {
+    return item?.episode_number ?? item?.episode ?? item?.episode_no ?? item?.number ?? index + 1;
+  }
+
+  function sitcomEpisodeTitle(item, index) {
+    return sitcomPlainText(item?.title || item?.episode_title || item?.name) || `第 ${sitcomEpisodeNumber(item, index)} 集`;
+  }
+
+  function sitcomEpisodeScript(item) {
+    return sitcomPlainText(
+      item?.script_text
+      || item?.final_script
+      || item?.script
+      || item?.content
+      || item?.text
+      || ""
+    );
+  }
+
+  function sitcomReadableText(value) {
+    if (window.fieldLabelsCn && typeof window.fieldLabelsCn.readableText === "function") {
+      return window.fieldLabelsCn.readableText(value);
+    }
+    return formatDisplayValue(value);
+  }
+
+  function renderSitcomInfoSection(title, value, { open = false } = {}) {
+    if (value === null || value === undefined || value === "" || (Array.isArray(value) && !value.length)) return "";
+    return `
+      <details class="sitcom-info-section" ${open ? "open" : ""}>
+        <summary>${escapeHtml(title)}</summary>
+        <pre>${escapeHtml(sitcomReadableText(value))}</pre>
+      </details>
+    `;
+  }
+
+  function renderSitcomResult(result) {
+    const payload = sitcomResultPayload(result);
+    if (!payload) return "";
+    const episodes = Array.isArray(payload.episode_scripts) ? payload.episode_scripts : [];
+    const batch = payload.batch && typeof payload.batch === "object" ? payload.batch : {};
+    const firstEpisode = episodes.length ? sitcomEpisodeNumber(episodes[0], 0) : "";
+    const startEpisode = batch.start_episode ?? batch.start ?? firstEpisode;
+    const endEpisode = batch.end_episode ?? batch.end ?? (episodes.length ? sitcomEpisodeNumber(episodes[episodes.length - 1], episodes.length - 1) : "");
+    const rangeText = startEpisode && endEpisode ? `第 ${startEpisode}-${endEpisode} 集` : `${episodes.length} 集`;
+    const quality = payload.quality_report && typeof payload.quality_report === "object" ? payload.quality_report : {};
+    const qualityPassed = quality.passed ?? quality.ok ?? payload.ok;
+
+    const episodeHtml = episodes.map((item, index) => {
+      const episode = item && typeof item === "object" ? item : { script_text: item };
+      const number = sitcomEpisodeNumber(episode, index);
+      const title = sitcomEpisodeTitle(episode, index);
+      const script = sitcomEpisodeScript(episode);
+      const supporting = Object.fromEntries(Object.entries(episode).filter(([key, value]) => (
+        !["episode_number", "episode", "episode_no", "number", "title", "episode_title", "name", "script_text", "final_script", "script", "content", "text"].includes(key)
+        && value !== null && value !== undefined && value !== ""
+      )));
+      return `
+        <details class="sitcom-episode" ${index === 0 ? "open" : ""}>
+          <summary>
+            <span class="sitcom-episode-number">${escapeHtml(number)}</span>
+            <span class="sitcom-episode-title">${escapeHtml(title)}</span>
+            <span class="sitcom-episode-toggle">展开正文</span>
+          </summary>
+          <div class="sitcom-episode-body">
+            ${script ? `<pre class="sitcom-script-text">${escapeHtml(script)}</pre>` : '<p class="sitcom-empty">本集未返回剧本正文。</p>'}
+            ${Object.keys(supporting).length ? `
+              <details class="sitcom-episode-notes">
+                <summary>查看本集提纲与制作信息</summary>
+                <pre>${escapeHtml(sitcomReadableText(supporting))}</pre>
+              </details>
+            ` : ""}
+          </div>
+        </details>
+      `;
+    }).join("");
+
+    return `
+      <div class="sitcom-result-shell">
+        <header class="sitcom-result-head">
+          <div>
+            <span class="sitcom-kicker">情景剧生成完成</span>
+            <h3>${escapeHtml(payload.project_title || result?.title || "未命名情景剧")}</h3>
+          </div>
+          <div class="sitcom-result-meta">
+            <span>${escapeHtml(rangeText)}</span>
+            <span>${episodes.length} 个完整剧本</span>
+            <span class="${qualityPassed === false ? "is-warning" : "is-ready"}">${qualityPassed === false ? "需要复核" : "可以交付"}</span>
+          </div>
+        </header>
+        <section class="sitcom-episodes-section">
+          <div class="sitcom-section-heading">
+            <h4>本批分集剧本</h4>
+            <p>点击集标题展开或收起正文</p>
+          </div>
+          <div class="sitcom-episode-list">
+            ${episodeHtml || '<p class="sitcom-empty">工作流没有返回 episode_scripts，请检查最终节点输出。</p>'}
+          </div>
+        </section>
+        <section class="sitcom-supporting-section">
+          <div class="sitcom-section-heading"><h4>策划与续写资料</h4></div>
+          ${renderSitcomInfoSection("情景剧设定总表", payload.sitcom_bible, { open: true })}
+          ${renderSitcomInfoSection("整季选题表", payload.season_topic_matrix)}
+          ${renderSitcomInfoSection("分集大纲", payload.episode_outlines)}
+          ${renderSitcomInfoSection("质量检查", payload.quality_report)}
+          ${renderSitcomInfoSection("续写记忆", payload.updated_memory)}
+          ${renderSitcomInfoSection("下一批建议", payload.next_batch)}
+        </section>
+      </div>
+    `;
+  }
+
+  function isSitcomAsset(asset) {
+    return String(asset?.tool_key || "").trim() === "sitcom_generator";
+  }
+
+  function sitcomAssetTimestamp(asset) {
+    const timestamp = Date.parse(String(asset?.updated_at || asset?.created_at || ""));
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }
+
+  function sitcomResultFromAsset(asset) {
+    if (!asset || !isSitcomAsset(asset)) return null;
+    const artifacts = asset.artifacts && typeof asset.artifacts === "object" ? asset.artifacts : {};
+    const output = parseJsonObject(artifacts.tool_output)
+      || parseJsonObject(asset.tool_output)
+      || parseJsonObject(artifacts.final_output_text)
+      || null;
+    const text = sitcomPlainText(
+      artifacts.final_output_text
+      || artifacts.final_script
+      || asset.final_output_text
+      || ""
+    );
+    if (!output && !text) return null;
+    const requestPayload = asset.tool_request_payload && typeof asset.tool_request_payload === "object"
+      ? asset.tool_request_payload
+      : {};
+    const displayOutput = output || {
+      schema_version: "sitcom_generation_v1",
+      generation_mode: "sitcom",
+      project_title: requestPayload.project_title || String(asset.title || "").replace(/^情景剧生成[｜|]?/, ""),
+      batch: {
+        start_episode: requestPayload.batch_start_episode || 1,
+        end_episode: requestPayload.batch_end_episode || requestPayload.total_episodes || 1,
+      },
+      episode_scripts: [{
+        episode_number: requestPayload.batch_start_episode || 1,
+        title: "历史完整结果",
+        script_text: text,
+      }],
+      final_script_text: text,
+      ok: true,
+    };
+    return {
+      title: asset.title || "情景剧生成",
+      text,
+      answer_text: text,
+      output: displayOutput,
+      outputType: "json",
+      filename: artifacts.tool_filename || asset.tool_filename || "情景剧.txt",
+      assetSaved: true,
+      savedAsset: asset,
+      restoredFromAsset: true,
+    };
+  }
+
+  function applySitcomAssetResult(asset) {
+    const result = sitcomResultFromAsset(asset);
+    if (!result) return false;
+    const payload = asset.tool_request_payload && typeof asset.tool_request_payload === "object"
+      ? asset.tool_request_payload
+      : {};
+    state.toolDrafts.sitcom_generator = {
+      ...ensureToolDraft("sitcom_generator"),
+      ...payload,
+    };
+    state.toolResults.sitcom_generator = result;
+    return true;
+  }
+
+  function restoreLatestSitcomResult() {
+    if (state.toolResults.sitcom_generator) return true;
+    const latest = [
+      ...(Array.isArray(state.assets) ? state.assets : []),
+      ...(Array.isArray(state.projects) ? state.projects : []),
+    ]
+      .filter((asset) => isSitcomAsset(asset))
+      .sort((a, b) => sitcomAssetTimestamp(b) - sitcomAssetTimestamp(a))[0];
+    return applySitcomAssetResult(latest);
+  }
+
+  async function openSitcomAsset(projectId) {
+    let asset = [...(state.assets || []), ...(state.projects || [])]
+      .find((item) => String(item.project_id) === String(projectId));
+    try {
+      const data = await requestJson(`/api/projects/${encodeURIComponent(projectId)}`);
+      asset = data.project || asset;
+    } catch (_) {
+      // 详情失败时，列表快照仍可恢复旧记录的正文。
+    }
+    if (!applySitcomAssetResult(asset)) {
+      throw new Error("该情景剧记录没有可恢复的正文。");
+    }
+    openToolPanel("sitcom_generator");
+    renderToolForm("sitcom_generator");
+    renderToolOutput("sitcom_generator");
+    showToast("已打开情景剧记录", asset?.title || "历史结果已恢复。");
   }
 
   function characterReskinRunningMessage(index = 0) {
@@ -4283,6 +4611,114 @@ startRuntimeDebugPolling();
     }).join("");
   }
 
+  function toolHistoryAssets(toolKey = state.activeTool) {
+    const records = new Map();
+    [...(state.projects || []), ...(state.assets || [])].forEach((item) => {
+      if (String(item?.tool_key || "").trim() !== String(toolKey || "").trim()) return;
+      const key = String(item.project_id || item.id || item.task_id || "").trim();
+      if (!key) return;
+      records.set(key, { ...(records.get(key) || {}), ...item });
+    });
+    return [...records.values()].sort((a, b) => (
+      Date.parse(String(b.updated_at || b.created_at || ""))
+      - Date.parse(String(a.updated_at || a.created_at || ""))
+    ));
+  }
+
+  function toolHistoryTimeLabel(item) {
+    const timestamp = Date.parse(String(item?.updated_at || item?.created_at || ""));
+    if (!Number.isFinite(timestamp)) return "时间未知";
+    return new Date(timestamp).toLocaleString("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  }
+
+  function renderToolHistory(toolKey = state.activeTool) {
+    if (!els.toolHistory || !els.toolHistoryList) return;
+    const records = isAuthenticated() ? toolHistoryAssets(toolKey) : [];
+    els.toolHistory.classList.toggle("hidden", !isAuthenticated());
+    if (els.toolHistoryCount) els.toolHistoryCount.textContent = `${records.length} 条`;
+    if (!records.length) {
+      els.toolHistoryList.innerHTML = '<p class="tool-history-empty">当前工具还没有生成记录。</p>';
+      return;
+    }
+    els.toolHistoryList.innerHTML = records.slice(0, 12).map((item, index) => `
+      <button
+        class="tool-history-row"
+        type="button"
+        data-action="open-tool-history"
+        data-tool-key="${escapeHtml(toolKey)}"
+        data-project-id="${escapeHtml(item.project_id || item.id)}"
+      >
+        <span class="tool-history-index">${index + 1}</span>
+        <span class="tool-history-copy">
+          <strong>${escapeHtml(item.title || toolConfig(toolKey)?.label || "辅助工具结果")}</strong>
+          <small>${escapeHtml(toolHistoryTimeLabel(item))}</small>
+        </span>
+        <span class="tool-history-open">查看</span>
+      </button>
+    `).join("");
+  }
+
+  function genericToolResultFromAsset(asset, toolKey) {
+    if (!asset) return null;
+    const artifacts = asset.artifacts && typeof asset.artifacts === "object" ? asset.artifacts : {};
+    const output = artifacts.tool_output || asset.tool_output || null;
+    const text = String(
+      artifacts.final_output_text
+      || artifacts.final_script
+      || asset.final_output_text
+      || asset.text
+      || ""
+    ).trim();
+    if (!output && !text) return null;
+    return {
+      title: asset.title || toolConfig(toolKey)?.label || "辅助工具结果",
+      text: text || formatToolOutput(output),
+      answer_text: text || formatToolOutput(output),
+      output: output || text,
+      outputType: output ? "json" : "text",
+      filename: artifacts.tool_filename || asset.tool_filename || `${toolConfig(toolKey)?.label || "辅助工具结果"}.txt`,
+      assetSaved: true,
+      savedAsset: asset,
+      restoredFromAsset: true,
+    };
+  }
+
+  async function openToolHistoryRecord(toolKey, projectId) {
+    if (toolKey === "hot_review") {
+      await openHotReviewAssetFromList(projectId);
+      return;
+    }
+    if (toolKey === "sitcom_generator") {
+      await openSitcomAsset(projectId);
+      return;
+    }
+    let asset = [...(state.assets || []), ...(state.projects || [])]
+      .find((item) => String(item.project_id || item.id) === String(projectId));
+    try {
+      const data = await requestJson(`/api/projects/${encodeURIComponent(projectId)}`);
+      asset = data.project || asset;
+    } catch (_) {
+      // 列表快照包含正文时仍可打开。
+    }
+    const result = genericToolResultFromAsset(asset, toolKey);
+    if (!result) throw new Error("该历史记录没有可展示的结果。");
+    const requestPayload = asset?.tool_request_payload && typeof asset.tool_request_payload === "object"
+      ? asset.tool_request_payload
+      : {};
+    state.toolDrafts[toolKey] = { ...ensureToolDraft(toolKey), ...requestPayload };
+    state.toolResults[toolKey] = result;
+    openToolPanel(toolKey);
+    renderToolForm(toolKey);
+    renderToolOutput(toolKey);
+    showToast("已打开历史记录", asset?.title || "辅助工具结果已恢复。");
+  }
+
   function openCommunityPanel() {
     if (!els.communityPanel) return;
     closeToolPanel();
@@ -4312,6 +4748,9 @@ startRuntimeDebugPolling();
   function openToolPanel(toolKey) {
     const tool = toolConfig(toolKey);
     state.activeTool = tool.key;
+    if (tool.key === "sitcom_generator" && !state.toolResults.sitcom_generator) {
+      restoreLatestSitcomResult();
+    }
     closeCommunityPanel();
     if (els.assistantToolsFolder) {
       els.assistantToolsFolder.open = true;
@@ -4931,6 +5370,7 @@ function renderToolForm(toolKey) {
           ? "这里会显示辅助工具结果。"
           : "当前工具还未配置 API Key，配置后即可运行。")
     );
+    renderToolHistory(tool.key);
     syncButtons();
   }
 
@@ -5387,7 +5827,7 @@ function renderToolForm(toolKey) {
             <button
               class="workspace-pick${activeClass}${statusClass}"
               type="button"
-              data-action="select-project"
+              data-action="${isSitcomAsset(item) ? "open-sitcom-asset" : "select-project"}"
               data-project-id="${escapeHtml(item.project_id)}"
               title="${escapeHtml(projectTooltip(item))}"
             >
@@ -5997,6 +6437,10 @@ function renderToolForm(toolKey) {
       state.assets = data.assets || [];
       state.assetsStatus = state.assets.length ? "success" : "empty";
       renderAssets(state.assets);
+      renderToolHistory(state.activeTool);
+      if (state.activeTool === "sitcom_generator" && !state.toolResults.sitcom_generator) {
+        if (restoreLatestSitcomResult()) renderToolOutput("sitcom_generator");
+      }
     } catch (error) {
       state.assetsStatus = "error";
       state.assetsError = friendlyErrorText(error, "资产列表加载失败，请稍后重试。");
@@ -6075,7 +6519,9 @@ function renderToolForm(toolKey) {
               ? `<button class="btn btn-secondary" data-action="open-framework-asset" data-project-id="${escapeHtml(item.project_id)}">打开框架</button>`
               : `<button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>`}
             ${isToolAsset(item) || assetCategory(item) === "framework" ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>`}
-            <button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>
+            ${isSitcomAsset(item)
+              ? `<button class="btn btn-edit" data-action="open-sitcom-asset" data-project-id="${escapeHtml(item.project_id)}">打开情景剧</button>`
+              : `<button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>`}
             ${assetCategory(item) === "framework" ? `<a class="btn btn-secondary" href="/framework-to-script?framework_asset_id=${encodeURIComponent(item.project_id)}${currentAuthToken() ? `&auth_token=${encodeURIComponent(currentAuthToken())}` : ""}">进入框架到剧本</a>` : ""}
             <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : (isToolAsset(item) ? "公开结果" : "公开成品")}</button>
             <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除资产</button>
@@ -6782,6 +7228,8 @@ function renderToolForm(toolKey) {
             return;
           }
           await loadProjectDetail(projectId, { restoreInputs: true, scroll: false });
+        } else if (button.dataset.action === "open-sitcom-asset") {
+          await openSitcomAsset(projectId);
         } else if (button.dataset.action === "delete-asset") {
           await deleteAsset(projectId, button);
         }
@@ -6818,6 +7266,8 @@ function renderToolForm(toolKey) {
           await loadProjectDetail(projectId, { restoreInputs: true, scroll: false });
         } else if (button.dataset.action === "open-project-page") {
           openWorkspaceInNewPage({ projectId });
+        } else if (button.dataset.action === "open-sitcom-asset") {
+          await openSitcomAsset(projectId);
         } else if (button.dataset.action === "edit-asset") {
           await openAssetEditor(projectId);
         } else if (button.dataset.action === "toggle-privacy") {
@@ -6885,6 +7335,19 @@ function renderToolForm(toolKey) {
       const button = event.target.closest("[data-tool-key]");
       if (!button) return;
       openToolPanel(button.dataset.toolKey || state.activeTool);
+    });
+
+    els.toolHistoryList?.addEventListener("click", async (event) => {
+      const button = event.target.closest('[data-action="open-tool-history"]');
+      if (!button) return;
+      try {
+        await openToolHistoryRecord(
+          button.dataset.toolKey || state.activeTool,
+          button.dataset.projectId || "",
+        );
+      } catch (error) {
+        showToast("历史记录打开失败", friendlyErrorText(error, "请稍后重试。"));
+      }
     });
 
     els.chatTranscript?.addEventListener("click", (event) => {

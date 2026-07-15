@@ -241,6 +241,11 @@ class TaskLifecycleMixin:
                 "final_output_text": final_text,
                 "tool_filename": clean_user_visible_text(result.get("filename")).strip(),
                 "tool_output_type": str(result.get("output_type") or "").strip(),
+                "tool_output": (
+                    copy.deepcopy(result.get("output"))
+                    if isinstance(result.get("output"), (dict, list))
+                    else None
+                ),
             },
             "logs": [],
             "progress_percent": 100,

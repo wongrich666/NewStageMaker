@@ -868,6 +868,33 @@ a {
   font-size: 22px;
 }
 
+.wb-optimize-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px;
+  border: 1px solid rgba(13, 129, 116, 0.28);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.10), rgba(62, 207, 142, 0.14));
+}
+
+.wb-optimize-panel h3,
+.wb-optimize-panel p {
+  margin: 4px 0;
+}
+
+.wb-optimize-panel small {
+  display: block;
+  margin-top: 8px;
+  color: var(--wb-muted);
+  font-weight: 800;
+}
+
+.wb-optimize-btn {
+  flex: 0 0 auto;
+}
+
 .wb-score-card strong {
   color: #0d8174;
   font-size: 30px;
@@ -1466,6 +1493,15 @@ a {
 }
 
 @media (max-width: 640px) {
+  .wb-optimize-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .wb-optimize-btn {
+    width: 100%;
+  }
+
   .wb-topbar,
   .wb-shell {
     width: min(100% - 28px, 1480px);
