@@ -730,7 +730,7 @@
     const missingList = $("#wbMissingList");
 
     if (data.configured) {
-      statusPill.textContent = options.hydrated ? "CodeBuddy 已就绪" : "API 已配置";
+      statusPill.textContent = options.hydrated ? "DeepSeek 已就绪" : "API 已配置";
       statusPill.className = "wb-status-pill is-ready";
       configBadge.textContent = options.hydrated ? "已配置" : "已连接";
       configBadge.className = "is-ready";
@@ -743,7 +743,7 @@
       const models = Array.isArray(data.models) && data.models.length ? data.models : cachedModels;
       renderModels(models, data.model || activeModel || "");
     } else {
-      statusPill.textContent = "CodeBuddy 未配置";
+      statusPill.textContent = "DeepSeek 未配置";
       statusPill.className = "wb-status-pill is-missing";
       configBadge.textContent = "缺配置";
       configBadge.className = "is-missing";
@@ -768,7 +768,7 @@
     if (data.metadata_error) {
       return `积分余额：暂未读取（${data.metadata_error}）`;
     }
-    return "积分余额：当前 CodeBuddy SDK 未返回余额字段，后续接官方余额接口即可显示。";
+    return "用量由平台统一的 DeepSeek V4 Pro API 账户结算。";
   }
 
   function renderModels(models, currentModel) {
@@ -827,7 +827,7 @@
       {
         id: "auto",
         name: "Auto 自动选择",
-        description: "不指定固定模型，由 CodeBuddy 根据账号和任务自动选择。",
+        description: "使用平台统一配置的 DeepSeek V4 Pro 模型。",
       },
       ...models.filter((item) => item.id !== "auto"),
     ];
@@ -1082,7 +1082,7 @@
     saveButton.addEventListener("click", async () => {
       const apiKey = apiKeyInput.value.trim();
       if (!apiKey) {
-        hint.textContent = "请先填写 CodeBuddy API Key。";
+        hint.textContent = "DeepSeek API Key 已由平台统一配置，无需在浏览器填写。";
         apiKeyInput.focus();
         return;
       }

@@ -7571,6 +7571,24 @@ function renderPackageBlocks() {
     return false;
   }
 
+  function focusRequestedAgentStage() {
+    const stageNo = String(new URLSearchParams(window.location.search).get("stage") || "").padStart(2, "0");
+    const stageMap = {
+      "01": "basic",
+      "02": "worldview",
+      "03": "character",
+      "04": "beat",
+      "05": "storylines",
+      "06": "guide",
+      "07": "package",
+    };
+    const stageKey = stageMap[stageNo];
+    if (!stageKey) return;
+    state.current_view = firstViewForStage(stageKey);
+    render();
+    loadStageHistory(stageKey, { silent: true }).catch(() => {});
+  }
+
   async function controlAssetTask(taskId, action) {
     if (!taskId) return;
     const asset = ui.assets.find((item) => String(item.task_id || "") === String(taskId));
@@ -8577,7 +8595,10 @@ function renderPackageBlocks() {
       const autoProjectId = urlParams.get("project_id");
       if (autoProjectId) {
         const asset = (ui.assets || []).find((a) => String(a.project_id) === String(autoProjectId));
-        if (asset && !canUseCurrentAssetCache(autoProjectId, asset)) openAsset(autoProjectId).catch(() => {});
+        const restore = asset && !canUseCurrentAssetCache(autoProjectId, asset)
+          ? openAsset(autoProjectId)
+          : Promise.resolve();
+        restore.then(focusRequestedAgentStage).catch(() => {});
         return;
       }
       if (shouldAutoOpenLatestAsset()) {

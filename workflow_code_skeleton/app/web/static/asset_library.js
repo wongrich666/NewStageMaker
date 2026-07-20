@@ -81,6 +81,7 @@
   function assetCategory(item) {
     if (isHotReviewAsset(item)) return "hot_review";
     const explicit = String(item.asset_type || item.type || "").trim();
+    if (["old_script", "legacy_script"].includes(explicit)) return "framework";
     if (["framework", "new_script", "character_reskin", "waibao"].includes(explicit)) return explicit;
     const input = asObject(item.input_payload);
     const assetKind = String(item.asset_kind || "").trim();
@@ -90,6 +91,10 @@
     }
     if (assetKind === "framework_planner") return "framework";
     return "";
+  }
+
+  function isFrameworkPlannerAsset(item) {
+    return String((item && item.asset_kind) || "").trim() === "framework_planner";
   }
 
   function statusLabel(status) {
@@ -157,6 +162,14 @@
     return url.pathname + url.search;
   }
 
+  function workspaceOpenUrl(item) {
+    const id = projectId(item);
+    const url = new URL(config.workspaceUrl || "/workspace", window.location.origin);
+    if (authToken) url.searchParams.set("auth_token", authToken);
+    if (id) url.searchParams.set("project_id", id);
+    return url.pathname + url.search;
+  }
+
   function hotReviewOpenUrl(item) {
     const id = projectId(item);
     const url = new URL(config.workspaceUrl || "/workspace", window.location.origin);
@@ -219,13 +232,15 @@
     const title = assetTitle(item);
     const summary = assetSummary(item);
     const score = hot ? extractHotScore(item) : null;
+    const frameworkPlanner = isFrameworkPlannerAsset(item);
+    const stage = String(item.current_stage_label || item.current_stage || "待开始").trim();
     return `
       <article class="asset-library-card ${hot ? "hot-review-card" : "framework-card"}">
         <div class="asset-card-icon">${hot ? "◇" : "▣"}</div>
         ${hot ? renderScoreBadge(score) : ""}
         <div class="asset-card-body">
           <div class="asset-card-topline">
-            <span>${hot ? "爆款文审核" : "框架策划"}</span>
+            <span>${hot ? "爆款文审核" : (frameworkPlanner ? "框架策划" : "历史任务")}</span>
             <small>${escapeHtml(status)}</small>
           </div>
           <h2>${escapeHtml(title)}</h2>
@@ -233,13 +248,16 @@
           <div class="asset-card-meta">
             ${score ? `<span>评分 ${escapeHtml(score.label)}</span>` : ""}
             <span>ID ${escapeHtml(id || "-")}</span>
+            ${hot ? "" : `<span>${escapeHtml(stage)}</span>`}
             <span>${escapeHtml(updated || "暂无更新时间")}</span>
           </div>
           <div class="asset-card-actions">
             ${hot
               ? `<a class="asset-card-btn primary" href="${escapeHtml(hotReviewOpenUrl(item))}"><span>↗</span>打开审核</a>`
-              : `<a class="asset-card-btn primary" href="${escapeHtml(frameworkOpenUrl(item))}"><span>↗</span>打开框架</a>
-                 <a class="asset-card-btn" href="${escapeHtml(frameworkToScriptUrl(item))}"><span>▶</span>生成剧本</a>`
+              : frameworkPlanner
+                ? `<a class="asset-card-btn primary" href="${escapeHtml(frameworkOpenUrl(item))}"><span>↗</span>打开框架</a>
+                   <a class="asset-card-btn" href="${escapeHtml(frameworkToScriptUrl(item))}"><span>▶</span>生成剧本</a>`
+                : `<a class="asset-card-btn primary" href="${escapeHtml(workspaceOpenUrl(item))}"><span>↗</span>打开任务</a>`
             }
             ${hot ? `<button class="asset-card-btn danger" type="button" data-action="delete-asset" data-project-id="${escapeHtml(id)}"><span>×</span>删除</button>` : ""}
           </div>

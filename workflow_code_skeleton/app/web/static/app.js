@@ -6515,14 +6515,14 @@ function renderToolForm(toolKey) {
         <div class="asset-actions">
           <div class="asset-action-group">
             <span class="asset-action-label">资产操作</span>
-            ${isToolAsset(item) ? "" : assetCategory(item) === "framework"
+            ${isToolAsset(item) ? "" : isFrameworkPlannerAsset(item)
               ? `<button class="btn btn-secondary" data-action="open-framework-asset" data-project-id="${escapeHtml(item.project_id)}">打开框架</button>`
               : `<button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>`}
-            ${isToolAsset(item) || assetCategory(item) === "framework" ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>`}
+            ${isToolAsset(item) || isFrameworkPlannerAsset(item) ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>`}
             ${isSitcomAsset(item)
               ? `<button class="btn btn-edit" data-action="open-sitcom-asset" data-project-id="${escapeHtml(item.project_id)}">打开情景剧</button>`
               : `<button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>`}
-            ${assetCategory(item) === "framework" ? `<a class="btn btn-secondary" href="/framework-to-script?framework_asset_id=${encodeURIComponent(item.project_id)}${currentAuthToken() ? `&auth_token=${encodeURIComponent(currentAuthToken())}` : ""}">进入框架到剧本</a>` : ""}
+            ${isFrameworkPlannerAsset(item) ? `<a class="btn btn-secondary" href="/framework-to-script?framework_asset_id=${encodeURIComponent(item.project_id)}${currentAuthToken() ? `&auth_token=${encodeURIComponent(currentAuthToken())}` : ""}">进入框架到剧本</a>` : ""}
             <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : (isToolAsset(item) ? "公开结果" : "公开成品")}</button>
             <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除资产</button>
           </div>
@@ -6536,8 +6536,8 @@ function renderToolForm(toolKey) {
 
   function assetCategory(item) {
     const explicit = String(item.asset_type || item.type || "").trim();
-    if (explicit === "legacy_script") return "old_script";
-    if (["old_script", "framework", "new_script", "character_reskin", "waibao"].includes(explicit)) return explicit;
+    if (["old_script", "legacy_script"].includes(explicit)) return "framework";
+    if (["framework", "new_script", "character_reskin", "waibao"].includes(explicit)) return explicit;
     const assetKind = String(item.asset_kind || "").trim();
     const input = item.input_payload && typeof item.input_payload === "object" ? item.input_payload : {};
     const artifacts = item.artifacts && typeof item.artifacts === "object" ? item.artifacts : {};
@@ -6555,6 +6555,10 @@ function renderToolForm(toolKey) {
     if (assetKind === "framework_to_script" || scriptMode === "framework_to_script" || input.framework_to_script === true || hasFrameworkScriptState) return "new_script";
     if (assetKind === "framework_planner") return "framework";
     return "old_script";
+  }
+
+  function isFrameworkPlannerAsset(item) {
+    return String((item && item.asset_kind) || "").trim() === "framework_planner";
   }
 
   function renderAssetTaskActions(item) {
@@ -7223,7 +7227,7 @@ function renderToolForm(toolKey) {
         if (button.dataset.action === "select-project") {
           // 框架项目直接跳转到框架策划器，不在工作台打开
           const existing = (state.projects || []).find((p) => String(p.project_id) === String(projectId));
-          if (existing && assetCategory(existing) === "framework") {
+          if (existing && isFrameworkPlannerAsset(existing)) {
             window.location.href = frameworkPlannerAssetUrl(projectId);
             return;
           }
@@ -7258,7 +7262,7 @@ function renderToolForm(toolKey) {
         } else if (button.dataset.action === "open-project") {
           const existing = (state.assets || []).find((item) => String(item.project_id) === String(projectId))
             || (state.projects || []).find((item) => String(item.project_id) === String(projectId));
-          if (existing && assetCategory(existing) === "framework") {
+          if (existing && isFrameworkPlannerAsset(existing)) {
             window.location.href = frameworkPlannerAssetUrl(projectId);
             return;
           }

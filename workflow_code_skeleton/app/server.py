@@ -7,6 +7,7 @@ import threading
 import tempfile
 import time
 import traceback
+import uuid
 from io import BytesIO
 from functools import wraps
 import os
@@ -31,6 +32,8 @@ from flask import (
 from .models.inputs import derive_script_title_content
 from .services.auth_store import auth_store
 from .services.admin_store import admin_store
+from .services.agent_conversation_store import agent_conversation_store
+from .services.platform_agent import platform_conversation_agent
 from .services.fastgpt_client import FastGPTTransientError
 from .services.framework_planner_service import (
     FRAMEWORK_PLANNER_STORAGE_KEY,
@@ -2597,6 +2600,96 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             current_auth_token=_current_auth_token(),
         )
 
+    @app.get("/agent-studio")
+    @_login_required
+    def agent_studio_page():
+        return render_template(
+            "agent_studio.html",
+            current_user=_current_user(),
+            current_auth_token=_current_auth_token(),
+        )
+
+    @app.get("/api/agent/status")
+    @_login_required
+    def agent_status_api():
+        return _json_ok(agent=platform_conversation_agent.status())
+
+    @app.route("/api/agent/conversations", methods=["GET", "POST"])
+    @_login_required
+    def agent_conversations_api():
+        user = _current_user()
+        if request.method == "GET":
+            return _json_ok(conversations=agent_conversation_store.list(user.id))
+        data = request.get_json(silent=True) or {}
+        conversation = agent_conversation_store.create(
+            user.id,
+            title=str(data.get("title") or "新的创作对话"),
+        )
+        welcome = agent_conversation_store.add_message(
+            user.id,
+            conversation["id"],
+            role="assistant",
+            content=(
+                "告诉我你想创作什么剧本。我会从对话里提取题材、集数、角色和风格，"
+                "只追问缺少的必要信息，确认后直接调度现有剧本平台。"
+            ),
+            metadata={"kind": "welcome", "model": "deepseek-v4-pro"},
+        )
+        return _json_ok(conversation=conversation, messages=[welcome])
+
+    @app.route("/api/agent/conversations/<conversation_id>", methods=["GET", "DELETE"])
+    @_login_required
+    def agent_conversation_api(conversation_id: str):
+        user = _current_user()
+        conversation = agent_conversation_store.get(user.id, conversation_id)
+        if not conversation:
+            return _json_error("对话不存在或无权访问。", status=404)
+        if request.method == "DELETE":
+            agent_conversation_store.delete(user.id, conversation_id)
+            return _json_ok(conversation_id=conversation_id)
+        return _json_ok(
+            conversation=conversation,
+            messages=agent_conversation_store.messages(user.id, conversation_id),
+            context=platform_conversation_agent._conversation_context(conversation, user.id),
+        )
+
+    @app.post("/api/agent/conversations/<conversation_id>/messages")
+    @_login_required
+    def agent_conversation_message_api(conversation_id: str):
+        user = _current_user()
+        data = request.get_json(silent=True) or {}
+        content = str(data.get("content") or "").strip()
+        selected_skill = str(data.get("selected_skill") or "").strip()
+        selected_knowledge_tag_ids = data.get("selected_knowledge_tag_ids")
+        if not isinstance(selected_knowledge_tag_ids, list):
+            selected_knowledge_tag_ids = []
+        attachment_id = str(data.get("attachment_id") or "").strip()
+        request_id = str(data.get("request_id") or uuid.uuid4().hex).strip()
+        if not content:
+            return _json_error("请输入要交给智能体的内容。", status=400)
+        if len(content) > 12000:
+            return _json_error("单条消息不能超过12000字。", status=400)
+        if not platform_conversation_agent.status().get("configured"):
+            return _json_error("DeepSeek V4 Pro智能体尚未配置完成。", status=501)
+        try:
+            result = platform_conversation_agent.handle_message(
+                user_id=user.id,
+                username=user.username,
+                conversation_id=conversation_id,
+                content=content,
+                request_id=request_id,
+                selected_skill=selected_skill,
+                selected_knowledge_tag_ids=selected_knowledge_tag_ids,
+                attachment_id=attachment_id,
+                internal_api_base_url=f"http://127.0.0.1:{int(request.environ.get('SERVER_PORT') or 5002)}",
+                internal_auth_token=_current_auth_token() or auth_store.create_session_token(user.id),
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        if not result.get("success"):
+            return jsonify(result), 502
+        return jsonify(result)
+
     def _request_codebuddy_api_key(data: dict[str, Any] | None = None) -> str | None:
         value = (
             request.headers.get("X-CodeBuddy-Api-Key")
@@ -2721,7 +2814,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return jsonify(
                 {
                     "ok": False,
-                    "error": "CodeBuddy Agent SDK 尚未配置完成，暂不能调用真实 WorkBuddy 智能体。",
+                    "error": "DeepSeek V4 Pro尚未配置完成，暂不能调用AI剧本医生。",
                     "missing": status["missing"],
                     "accepted_payload": {
                         "title": payload["title"],
@@ -2764,7 +2857,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         response_payload = {
             "ok": True,
-            "provider": "codebuddy-agent-sdk",
+            "provider": status.get("provider") or "deepseek",
             "title": payload["title"],
             "skill": payload["skill"],
             "script_length": len(payload["script_text"]),
@@ -2818,7 +2911,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return jsonify(
                 {
                     "ok": False,
-                    "error": "CodeBuddy Agent SDK 尚未配置完成，暂不能执行一键优化。",
+                    "error": "DeepSeek V4 Pro尚未配置完成，暂不能执行一键优化。",
                     "missing": status["missing"],
                 }
             ), 501
@@ -3674,6 +3767,78 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             byte_count=len(raw),
             source_document_id=source["source_document_id"],
             can_optimize=True,
+        )
+
+    @app.post("/api/agent/conversations/<conversation_id>/attachments")
+    @_login_required
+    def upload_agent_conversation_attachment(conversation_id: str):
+        user = _current_user()
+        if not agent_conversation_store.get(user.id, conversation_id):
+            return _json_error("对话不存在或无权访问。", status=404)
+        uploaded = request.files.get("file")
+        if uploaded is None:
+            return _json_error("没有收到上传文件。", status=400)
+        original_filename = str(uploaded.filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+        extension = Path(original_filename).suffix.lower()
+        if extension not in HOT_REVIEW_UPLOAD_EXTENSIONS:
+            return _json_error("暂不支持该文件格式，请上传 TXT、MD、JSON、DOCX 或 PDF。", status=400)
+        raw = uploaded.read(HOT_REVIEW_UPLOAD_MAX_BYTES + 1)
+        if not raw:
+            return _json_error("上传文件为空。", status=400)
+        if len(raw) > HOT_REVIEW_UPLOAD_MAX_BYTES:
+            return _json_error("文件超过 20 MB，无法上传。", status=413)
+        try:
+            text = str(_extract_hot_review_uploaded_text(raw, extension) or "").strip()
+            if not text:
+                if extension == ".pdf":
+                    raise ValueError("没有从 PDF 中提取到文字；扫描版 PDF 暂不支持 OCR。")
+                raise ValueError("没有从文件中提取到可用文字。")
+            if len(text) > HOT_REVIEW_UPLOAD_MAX_CHARS:
+                raise ValueError(f"文件提取后共有 {len(text)} 个字符，超过 {HOT_REVIEW_UPLOAD_MAX_CHARS} 字符限制。")
+
+            converted_to_docx = extension != ".docx"
+            if converted_to_docx:
+                from docx import Document
+
+                document = Document()
+                for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+                    document.add_paragraph(line)
+                output = BytesIO()
+                document.save(output)
+                source_raw = output.getvalue()
+                source_filename = f"{Path(original_filename).stem or '剧本'}_工作副本.docx"
+            else:
+                source_raw = raw
+                source_filename = original_filename
+            source = save_workbuddy_source(user.id, filename=source_filename, raw=source_raw)
+            attachment = agent_conversation_store.save_attachment(
+                user.id,
+                conversation_id,
+                filename=original_filename,
+                extension=extension,
+                script_text=text,
+                source_document_id=str(source.get("source_document_id") or ""),
+                metadata={
+                    "char_count": len(text),
+                    "byte_count": len(raw),
+                    "converted_to_docx": converted_to_docx,
+                    "source_filename": str(source.get("original_filename") or source_filename),
+                },
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except Exception:
+            logger.exception("Agent 剧本附件解析失败: filename=%s", original_filename)
+            return _json_error("文件解析失败，请检查文件是否损坏。", status=400)
+        return _json_ok(
+            attachment={
+                "id": attachment.get("id"),
+                "filename": attachment.get("filename"),
+                "extension": attachment.get("extension"),
+                "char_count": len(text),
+                "converted_to_docx": converted_to_docx,
+                "can_optimize": True,
+            }
         )
 
     @app.post("/api/tools/hot_review/extract-file")

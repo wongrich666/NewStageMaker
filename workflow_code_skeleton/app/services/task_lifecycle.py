@@ -357,6 +357,49 @@ class TaskLifecycleMixin:
         self._remember_latest_project(int(user_id), project_id)
         return self._public_snapshot(snapshot)
 
+    def update_framework_script_pipeline_status(
+        self,
+        project_id: int,
+        *,
+        user_id: int,
+        status: str,
+        current_stage: str,
+        current_stage_label: str,
+        message: str,
+        progress_percent: int,
+    ) -> dict[str, Any]:
+        snapshot = self.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+        if not snapshot or not self._snapshot_belongs_to_user(snapshot, user_id):
+            raise ValueError("项目不存在或无权操作")
+        if str(snapshot.get("asset_kind") or "").strip() != "framework_planner":
+            raise ValueError("该项目不是人工模式框架资产")
+        now = now_iso()
+        snapshot.update(
+            {
+                "status": str(status or "in_progress"),
+                "current_stage": str(current_stage or ""),
+                "current_stage_label": str(current_stage_label or ""),
+                "message": str(message or ""),
+                "progress_percent": max(0, min(100, int(progress_percent or 0))),
+                "updated_at": now,
+                "finished_at": now if status in {"completed", "failed", "terminated"} else None,
+                "completion_confirmed": False,
+                "awaiting_user_confirmation": False,
+            }
+        )
+        record = self._projects.get(project_id)
+        if record:
+            with record.lock:
+                record.snapshot = snapshot
+            self._persist_snapshot(record)
+        else:
+            self._project_path(project_id).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        self._remember_latest_project(int(user_id), project_id)
+        return self._public_snapshot(snapshot)
+
     def save_framework_planner_asset(
         self,
         *,
@@ -424,6 +467,27 @@ class TaskLifecycleMixin:
             status = "draft"
         if status == "running":
             status = "in_progress"
+
+        framework_stage_labels = {
+            "basic": "01 原文信息提取",
+            "worldview": "02 世界观方案",
+            "character": "03 人物设定",
+            "beat": "04 三幕十五节拍",
+            "storylines": "05 人物故事线",
+            "guide": "06 整体改编指引",
+            "package": "07 框架策划包校验",
+        }
+        framework_stage_progress = {
+            "basic": 10,
+            "worldview": 24,
+            "character": 38,
+            "beat": 52,
+            "storylines": 68,
+            "guide": 84,
+            "package": 100,
+        }
+        current_stage_label = framework_stage_labels.get(current_stage, "框架策划进行中")
+        current_stage_progress = framework_stage_progress.get(current_stage, 0)
 
         total_episodes = _safe_int(
             payload.get("total_episodes")
@@ -508,7 +572,7 @@ class TaskLifecycleMixin:
             "task_id": task_id,
             "status": status,
             "title": title,
-            "message": "框架策划资产已完成。" if status == "completed" else "框架策划资产已保存。",
+            "message": "框架策划资产已完成。" if status == "completed" else f"正在执行 {current_stage_label}",
             "created_at": created_at,
             "updated_at": now,
             "finished_at": now if status == "completed" else None,
@@ -523,11 +587,11 @@ class TaskLifecycleMixin:
                 "preference_snapshot": copy.deepcopy(framework_state["preference_snapshot"]),
             },
             "logs": [],
-            "progress_percent": 100 if status == "completed" else 0,
+            "progress_percent": 100 if status == "completed" else current_stage_progress,
             "generated_episodes": 0,
             "total_episodes": total_episodes,
             "current_stage": current_stage,
-            "current_stage_label": "已完成框架策划" if status == "completed" else "框架策划进行中",
+            "current_stage_label": "已完成框架策划" if status == "completed" else current_stage_label,
             "current_node_id": None,
             "current_node_name": None,
             "current_batch": None,

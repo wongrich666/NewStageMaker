@@ -33,6 +33,7 @@
       </div>
 
       <div class="sidebar-primary">
+        <a class="sidebar-create-btn" data-nav-icon="◉" href="{{ url_for('agent_studio_page', auth_token=current_auth_token) }}">AI Agent 创作</a>
         <a class="sidebar-create-btn" data-nav-icon="✦" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">新建框架</a>
         <a class="sidebar-create-btn" data-nav-icon="▶" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">框架到剧本</a>
         <a class="sidebar-create-btn" data-nav-icon="AI" href="{{ url_for('workbuddy_studio_page', auth_token=current_auth_token) }}">AI剧本医生</a>
@@ -148,12 +149,18 @@
           <div class="workspace-landing__eyebrow">SCRIPT STUDIO</div>
           <h1 class="workspace-landing__title">剧本创作工作台</h1>
           <p class="workspace-landing__subtitle">
-            可选流程：从头开始搭建框架，或者导入框架生成剧本
+            可以直接和 AI Agent 对话完成创作，也可以进入原有工作流手动控制每个阶段。
             剧本质量和提示词高度相关，如有需要可以在生成框架阶段的「智慧库」里选择基础提示词，或者存入自己的定制提示词哦~
           </p>
 
           <div class="workspace-landing__actions">
-            <a class="workspace-landing__card primary" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">
+            <a class="workspace-landing__card primary agent-entry" href="{{ url_for('agent_studio_page', auth_token=current_auth_token) }}">
+              <span class="workspace-landing__card-badge">DEEPSEEK V4 PRO</span>
+              <span class="workspace-landing__card-title">对话创作 Agent</span>
+              <span class="workspace-landing__card-desc">说出需求，由智能体补齐信息并调度剧本平台执行</span>
+            </a>
+
+            <a class="workspace-landing__card" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">
               <span class="workspace-landing__card-title">新建框架</span>
               <span class="workspace-landing__card-desc">进入 01-07 框架策划流程</span>
             </a>
@@ -461,7 +468,7 @@
   </script>
   <script src="{{ url_for('static', filename='field_labels_cn.js') }}?v=20260527-readable-labels"></script>
   <script src="{{ url_for('static', filename='particles.js') }}?v=20260702-particles-v2"></script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260714-tool-history-v3"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260717-legacy-in-framework-v1"></script>
   <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v4"></script>
   <script>
     (function() {
