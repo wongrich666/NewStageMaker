@@ -4,6 +4,8 @@
 
   const config = window.FRAMEWORK_TO_SCRIPT_CONFIG || {};
   const params = new URLSearchParams(window.location.search);
+  const requestedAgentStage = String(params.get("stage") || "").padStart(2, "0");
+  let requestedAgentStageFocused = false;
   const authToken = params.get("auth_token") || "";
   const urlAssetId = params.get("framework_asset_id") || params.get("asset_id") || "";
   const LEGACY_STORAGE_KEY = "frameworkToScriptWorkspace.v1";
@@ -2192,7 +2194,7 @@
     const secondary = Boolean(options.secondary);
     const hideAction = Boolean(options.hideAction);
     return `
-      <article class="wts-step ${status === "已完成" ? "done" : disabled ? "locked" : ""}">
+      <article id="wts-stage-${escapeHtml(id)}" class="wts-step ${status === "已完成" ? "done" : disabled ? "locked" : ""}">
         <b>${escapeHtml(id)}</b>
         <div>
           <div class="wts-step-head">
@@ -2352,6 +2354,12 @@
         ${renderStages()}
       </main>
     `;
+    if (!requestedAgentStageFocused && ["08", "09", "10", "11", "12"].includes(requestedAgentStage)) {
+      requestedAgentStageFocused = true;
+      window.requestAnimationFrame(() => {
+        document.getElementById(`wts-stage-${requestedAgentStage}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    }
   }
 
   app.addEventListener("click", async (event) => {

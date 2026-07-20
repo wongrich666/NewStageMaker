@@ -21,6 +21,26 @@ from ..utils.readable_labels import readable_text
 class RuntimeExportStoreMixin:
     def _best_final_script_text(self, snapshot: dict[str, Any]) -> str:
         artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        framework_script_state = artifacts.get("framework_to_script_state") if isinstance(artifacts.get("framework_to_script_state"), dict) else {}
+        script_stages = framework_script_state.get("scriptStages") if isinstance(framework_script_state.get("scriptStages"), dict) else {}
+        stage12 = script_stages.get("stage12") if isinstance(script_stages.get("stage12"), dict) else {}
+        stage12_batches = stage12.get("batches") if isinstance(stage12.get("batches"), dict) else {}
+        if stage12_batches:
+            def _batch_sort_key(item: tuple[Any, Any]) -> tuple[int, str]:
+                key = str(item[0] or "")
+                return (_safe_int(key, 10**9), key)
+
+            batch_scripts = [
+                str((batch or {}).get("batchScriptText") or (batch or {}).get("batch_script_text") or "").strip()
+                for _, batch in sorted(stage12_batches.items(), key=_batch_sort_key)
+                if isinstance(batch, dict)
+            ]
+            framework_script = "\n\n".join(text for text in batch_scripts if text).strip()
+            if framework_script:
+                return clean_multiline_user_visible_text(framework_script)
+        direct_framework_script = str(stage12.get("batchScriptText") or stage12.get("batch_script_text") or "").strip()
+        if direct_framework_script:
+            return clean_multiline_user_visible_text(direct_framework_script)
         if str(snapshot.get("asset_kind") or "").strip() == AUXILIARY_TOOL_ASSET_KIND:
             return clean_multiline_user_visible_text(
                 artifacts.get("final_output_text")

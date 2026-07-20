@@ -100,8 +100,8 @@
   function assetCategory(item) {
     if (isHotReviewAsset(item)) return "hot_review";
     const explicit = String(item.asset_type || item.type || "").trim();
-    if (explicit === "legacy_script") return "";
-    if (["old_script", "framework", "new_script", "character_reskin", "waibao"].includes(explicit)) return explicit;
+    if (["old_script", "legacy_script"].includes(explicit)) return "framework";
+    if (["framework", "new_script", "character_reskin", "waibao"].includes(explicit)) return explicit;
     const input = item.input_payload && typeof item.input_payload === "object" ? item.input_payload : {};
     const assetKind = String(item.asset_kind || "").trim();
     const scriptMode = String(item.script_format_mode || input.script_format_mode || "").trim();

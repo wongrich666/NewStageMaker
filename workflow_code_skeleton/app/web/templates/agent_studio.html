@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <title>WorkBuddy Agent｜剧本平台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='agent_studio.css') }}?v=20260717-agent-task-panel-v11">
+</head>
+<body class="agent-body">
+  <main class="agent-shell">
+    <aside class="agent-sidebar">
+      <a class="agent-brand" href="{{ url_for('index', auth_token=current_auth_token) }}">
+        <span class="agent-brand-mark">IS</span>
+        <span><strong>IDEA TO SCRIPT</strong><small>AGENT WORKSPACE</small></span>
+      </a>
+
+      <button id="newConversationBtn" class="agent-new-btn" type="button">
+        <span>＋</span> 新建创作对话
+      </button>
+
+      <div class="agent-side-label"><span>创作会话</span><b id="conversationCount">0</b></div>
+      <div id="conversationList" class="agent-conversation-list">
+        <div class="agent-side-empty">正在读取会话…</div>
+      </div>
+
+      <div class="agent-sidebar-spacer"></div>
+      <button id="knowledgePickerBtn" class="agent-knowledge-button" type="button" aria-haspopup="dialog" aria-expanded="false">
+        <span class="agent-knowledge-button-mark">智</span>
+        <span><strong>智慧库</strong><small id="knowledgeSelectionLabel">选择创作风格</small></span>
+        <b aria-hidden="true">›</b>
+      </button>
+
+      <div class="agent-profile">
+        <span class="agent-avatar">{{ current_user.username[:1] }}</span>
+        <span><strong>{{ current_user.username }}</strong><small>创作空间</small></span>
+      </div>
+    </aside>
+
+    <section class="agent-main">
+      <header class="agent-topbar">
+        <div>
+          <span class="agent-kicker">PERSONAL SCRIPT AGENT</span>
+          <h1 id="conversationTitle">新的创作对话</h1>
+        </div>
+        <div class="agent-top-actions">
+          <button id="taskPanelToggle" class="agent-task-toggle" type="button" aria-controls="agentContextPanel" aria-expanded="false">任务</button>
+          <a href="{{ url_for('workspace_page', auth_token=current_auth_token) }}" class="agent-ghost-link">切换人工模式</a>
+        </div>
+      </header>
+
+      <section id="chatViewport" class="agent-chat-viewport">
+        <div id="agentHero" class="agent-hero">
+          <div class="agent-hero-chip">SCRIPT CREATION WORKSPACE</div>
+          <h2>一句话，把整套剧本流程交给我</h2>
+          <p>我会理解你的创作目标，自动补齐缺失字段，再调用原有剧本平台完成生成、控制、质检与导出。</p>
+          <div class="agent-quick-grid">
+            <button type="button" data-prompt="帮我生成一部60集都市情感复仇女频短剧，每集600字，5个主要角色，开篇要有强钩子。">从一句话生成剧本</button>
+            <button type="button" data-prompt="查看我最近的剧本项目，并告诉我各自进行到哪里。">查看最近项目</button>
+            <button type="button" data-prompt="检查当前项目状态，如果失败请告诉我可以怎么继续。">恢复中断任务</button>
+            <button type="button" data-prompt="对当前已完成剧本运行人物人情味审查，重点检查真实心理和潜台词。">运行剧本医生</button>
+          </div>
+        </div>
+        <div id="messageList" class="agent-message-list"></div>
+        <div id="agentThinking" class="agent-thinking" hidden>
+          <span></span><span></span><span></span><em>正在理解并调度平台…</em>
+        </div>
+      </section>
+
+      <footer class="agent-composer-wrap">
+        <form id="agentComposer" class="agent-composer">
+          <div id="fileAttachment" class="agent-file-attachment" hidden>
+            <span id="fileAttachmentType">FILE</span>
+            <strong id="fileAttachmentName"></strong>
+            <small id="fileAttachmentMeta"></small>
+            <button id="removeFileBtn" type="button" aria-label="移除文件" title="移除文件">×</button>
+          </div>
+          <div id="skillAttachment" class="agent-skill-attachment" hidden>
+            <span>SKILL</span>
+            <strong id="skillAttachmentName"></strong>
+            <button id="removeSkillBtn" type="button" aria-label="移除 Skill" title="移除 Skill">×</button>
+          </div>
+          <textarea id="agentInput" rows="1" maxlength="12000" placeholder="描述你想生成的剧本，或说：继续、暂停、重试第10阶段、运行人物共鸣审查…"></textarea>
+          <div class="agent-composer-foot">
+            <div class="agent-composer-tools">
+              <button id="filePickerBtn" class="agent-tool-button" type="button">＋ 文件</button>
+              <input id="agentFileInput" type="file" accept=".txt,.md,.json,.docx,.pdf" hidden>
+              <button id="skillPickerBtn" class="agent-tool-button" type="button" aria-haspopup="listbox" aria-expanded="false">＋ Skill</button>
+              <span>Enter 发送 · Shift + Enter 换行</span>
+            </div>
+            <button id="agentSendBtn" type="submit" aria-label="发送消息">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 20 4l-6 16-2.6-6.4L4 12Zm7.4 1.6L20 4"/></svg>
+            </button>
+          </div>
+        </form>
+        <div id="skillPicker" class="agent-skill-picker" role="listbox" aria-label="选择剧本医生 Skill" hidden></div>
+        <p>智能体只调用平台白名单工具；覆盖、终止和大范围修改会先征求确认。</p>
+      </footer>
+    </section>
+
+    <aside id="agentContextPanel" class="agent-context-panel">
+      <button id="taskPanelClose" class="agent-task-close" type="button" aria-label="关闭任务栏">×</button>
+      <section id="agentTaskRail" class="agent-task-rail" aria-live="polite" hidden>
+        <div class="agent-task-head">
+          <span class="agent-context-label">任务执行轨道</span>
+          <strong id="contextProgress">0%</strong>
+        </div>
+        <h3 id="contextProjectTitle">尚未选择项目</h3>
+        <div id="contextProjectMeta" class="agent-context-meta">通过对话创建或选择项目</div>
+        <div class="agent-progress-track"><i id="contextProgressBar" style="width:0%"></i></div>
+        <div id="contextStage" class="agent-current-stage">等待指令</div>
+        <ol id="taskStageList" class="agent-stage-list"></ol>
+        <a id="contextOpenProject" class="agent-context-action" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">打开当前资产</a>
+      </section>
+
+      <section id="agentTaskIdle" class="agent-task-idle">
+        <span class="agent-context-label">任务开始后显示在这里</span>
+        <p>01–12 阶段会持续更新，完成后可逐项打开人工页面。</p>
+      </section>
+
+      <section id="agentWaitingActions" class="agent-waiting-actions" hidden>
+        <span class="agent-context-label">等待时继续创作</span>
+        <button type="button" data-agent-prompt="查看当前任务进度，并概括已经完成的创作内容。">查看当前产出</button>
+        <button type="button" data-agent-fill="我们先讨论一下这个剧本的人物关系：">讨论人物关系</button>
+        <button type="button" data-agent-fill="记录到下一轮修改清单：">整理修改清单</button>
+      </section>
+    </aside>
+  </main>
+
+  <section id="knowledgePicker" class="agent-knowledge-picker" role="dialog" aria-modal="false" aria-labelledby="knowledgePickerTitle" hidden>
+    <header>
+      <span class="agent-knowledge-picker-mark">智</span>
+      <span><strong id="knowledgePickerTitle">智慧库</strong><small>为 Agent 选择题材、结构与文字风格</small></span>
+      <button id="knowledgePickerClose" type="button" aria-label="关闭智慧库" title="关闭">×</button>
+    </header>
+    <label class="agent-knowledge-search">
+      <span aria-hidden="true">⌕</span>
+      <input id="knowledgeSearchInput" type="search" placeholder="搜索风格、题材或自定义标签" autocomplete="off">
+    </label>
+    <div id="knowledgePickerStatus" class="agent-knowledge-status">正在读取智慧库…</div>
+    <div id="knowledgeTagGroups" class="agent-knowledge-groups"></div>
+    <footer>
+      <button id="knowledgeClearBtn" type="button">清空选择</button>
+      <span id="knowledgeSelectedCount">已选择 0 项</span>
+      <button id="knowledgeApplyBtn" class="is-primary" type="button">应用到 Agent</button>
+    </footer>
+  </section>
+
+  <script>
+    window.agentStudioConfig = {
+      authToken: {{ current_auth_token|tojson }},
+      username: {{ current_user.username|tojson }},
+      conversationsUrl: "/api/agent/conversations",
+      statusUrl: "/api/agent/status",
+      workspaceUrl: "/workspace"
+    };
+  </script>
+  <script src="{{ url_for('static', filename='agent_studio.js') }}?v=20260717-agent-task-panel-v11"></script>
+</body>
+</html>

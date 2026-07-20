@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .deepseek_agent import deepseek_agent_client, deepseek_agent_status
 from .runtime_paths import get_runtime_data_dir
 
 
@@ -415,6 +416,36 @@ def workbuddy_config_status(
     internet_env: str | None = None,
     model: str | None = None,
 ) -> dict[str, Any]:
+    provider = str(os.getenv("WORKBUDDY_PROVIDER") or "deepseek").strip().lower()
+    if provider == "deepseek":
+        status = deepseek_agent_status()
+        selected_model = str(model or status.get("model") or "deepseek-v4-pro").strip()
+        return {
+            "ok": True,
+            "provider": "deepseek",
+            "configured": bool(status.get("configured")),
+            "sdk_available": True,
+            "api_key_present": bool(status.get("api_key_present")),
+            "api_key_source": "environment" if status.get("api_key_present") else "missing",
+            "internet_environment": "cloud",
+            "internet_environment_ok": True,
+            "model": selected_model,
+            "env_model": str(status.get("model") or ""),
+            "models": [
+                {
+                    "id": str(status.get("model") or "deepseek-v4-pro"),
+                    "name": "DeepSeek V4 Pro",
+                    "description": "平台统一DeepSeek智能体模型",
+                }
+            ],
+            "account": {},
+            "points": None,
+            "points_supported": False,
+            "metadata_error": "",
+            "missing": list(status.get("missing") or []),
+            "skills": list_doctor_skills(),
+        }
+
     resolved = _resolve_codebuddy_config(api_key=api_key, internet_env=internet_env, model=model)
     api_key = resolved["api_key"]
     internet_env = resolved["internet_env"]
@@ -628,12 +659,12 @@ def format_doctor_exception(exc: BaseException, *, timeout_seconds: int) -> dict
     if isinstance(exc, TimeoutError) or exc.__class__.__name__ in {"TimeoutError", "CancelledError"}:
         return {
             "type": exc.__class__.__name__,
-            "message": f"CodeBuddy 智能体调用超时（已等待 {timeout_seconds} 秒）。长剧本人物连续性审查耗时较长，请重试；如果仍超时，建议先选择 GLM-5.2 或拆成前半/后半审查。",
+            "message": f"DeepSeek智能体调用超时（已等待 {timeout_seconds} 秒）。长剧本审查耗时较长，请重试或拆成前半/后半审查。",
         }
     text = str(exc).strip()
     return {
         "type": exc.__class__.__name__,
-        "message": f"CodeBuddy 智能体调用失败：{text or exc.__class__.__name__}",
+        "message": f"DeepSeek智能体调用失败：{text or exc.__class__.__name__}",
     }
 
 
@@ -646,6 +677,18 @@ def run_codebuddy_doctor(
     api_key: str | None = None,
     internet_env: str | None = None,
 ) -> dict[str, Any]:
+    provider = str(os.getenv("WORKBUDDY_PROVIDER") or "deepseek").strip().lower()
+    if provider == "deepseek":
+        resolved_model = str(model or "").strip()
+        if resolved_model.lower() == "auto":
+            resolved_model = ""
+        return deepseek_agent_client.complete_json(
+            prompt,
+            system_prompt="你是AI剧本医生。必须严格遵守用户提示并且只输出一个合法JSON对象。",
+            model=resolved_model or None,
+            max_tokens=32768,
+            timeout_seconds=timeout_seconds,
+        )
     return asyncio.run(
         _run_codebuddy_doctor_async(
             prompt,

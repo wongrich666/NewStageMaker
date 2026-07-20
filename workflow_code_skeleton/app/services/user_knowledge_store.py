@@ -89,6 +89,25 @@ EXCELLENT_FILM_BEAT_NAMES = (
     "醉酒俏佳人",
 )
 
+EXCELLENT_FILM_PROMPTS_PATH = Path(__file__).resolve().parents[1] / "data" / "excellent_film_beat_prompts.json"
+
+
+def _load_excellent_film_prompt_definitions() -> dict[str, dict[str, Any]]:
+    try:
+        payload = json.loads(EXCELLENT_FILM_PROMPTS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, list):
+        return {}
+    return {
+        str(item.get("name") or "").strip(): item
+        for item in payload
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    }
+
+
+EXCELLENT_FILM_PROMPT_DEFINITIONS = _load_excellent_film_prompt_definitions()
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat()
@@ -201,8 +220,9 @@ class UserKnowledgeStore:
             changed = True
         for index, name in enumerate(EXCELLENT_FILM_BEAT_NAMES, start=1):
             tag_id = f"excellent_film_beat_{index:03d}"
+            definition = EXCELLENT_FILM_PROMPT_DEFINITIONS.get(name) or {}
             if tag_id in by_id:
-                changed = self._ensure_excellent_film_beat_fields(by_id[tag_id], name) or changed
+                changed = self._ensure_excellent_film_beat_fields(by_id[tag_id], name, definition) or changed
                 continue
             now = _now_iso()
             tag = self._normalize_tag(
@@ -217,9 +237,9 @@ class UserKnowledgeStore:
                     "type": "stage_preference_template",
                     "is_default": True,
                     "is_user_editable": True,
-                    "description": "优秀电影节拍表空标签。用户可手动填写 01-12 阶段提示词。",
-                    "prompt_text": "",
-                    "stage_prompts": {key: "" for key in STAGE_PROMPT_KEYS},
+                    "description": str(definition.get("description") or "优秀电影节拍参考。"),
+                    "prompt_text": str(definition.get("prompt_text") or ""),
+                    "stage_prompts": definition.get("stage_prompts") or {key: "" for key in STAGE_PROMPT_KEYS},
                     "created_at": now,
                     "updated_at": now,
                     "enabled": True,
@@ -419,8 +439,13 @@ class UserKnowledgeStore:
         return data if isinstance(data, dict) else {}
 
     @staticmethod
-    def _ensure_excellent_film_beat_fields(tag: dict[str, Any], default_name: str) -> bool:
+    def _ensure_excellent_film_beat_fields(
+        tag: dict[str, Any],
+        default_name: str,
+        definition: dict[str, Any] | None = None,
+    ) -> bool:
         changed = False
+        definition = definition if isinstance(definition, dict) else {}
         defaults = {
             "category": GROUP_LABELS[EXCELLENT_FILM_BEAT_GROUP],
             "builtin": True,
@@ -436,17 +461,22 @@ class UserKnowledgeStore:
         if not str(tag.get("name") or "").strip():
             tag["name"] = default_name
             changed = True
-        if not str(tag.get("description") or "").strip():
-            tag["description"] = "优秀电影节拍表空标签。用户可手动填写 01-12 阶段提示词。"
+        description = str(tag.get("description") or "").strip()
+        if not description or "空标签" in description:
+            tag["description"] = str(definition.get("description") or "优秀电影节拍参考。")
+            changed = True
+        if not str(tag.get("prompt_text") or "").strip() and str(definition.get("prompt_text") or "").strip():
+            tag["prompt_text"] = str(definition.get("prompt_text") or "").strip()
             changed = True
         for key, value in defaults.items():
             if key not in tag or tag.get(key) in (None, ""):
                 tag[key] = value
                 changed = True
         prompts = tag.get("stage_prompts") if isinstance(tag.get("stage_prompts"), dict) else {}
+        definition_prompts = definition.get("stage_prompts") if isinstance(definition.get("stage_prompts"), dict) else {}
         for stage_key in STAGE_PROMPT_KEYS:
-            if stage_key not in prompts:
-                prompts[stage_key] = ""
+            if not str(prompts.get(stage_key) or "").strip():
+                prompts[stage_key] = str(definition_prompts.get(stage_key) or "").strip()
                 changed = True
         tag["stage_prompts"] = prompts
         return changed
