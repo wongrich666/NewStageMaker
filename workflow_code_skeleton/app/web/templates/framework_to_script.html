@@ -3,20 +3,27 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>框架转剧本工作台</title>
+  <title>{{ page_title|default('框架转剧本工作台') }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='global_theme.css') }}?v=20260617-cat-theme-v4" />
   <link rel="stylesheet" href="{{ url_for('static', filename='framework_to_script.css') }}?v=20260702-cinematic-wts-ui-v4" />
+  {% if workflow_line == 'new-workflow-test' %}
+  <style>.workflow-line-banner{padding:9px 16px;background:#0f766e;color:#fff;text-align:center;font-size:14px;font-weight:700}</style>
+  {% endif %}
 </head>
 <body>
+  {% if workflow_line == 'new-workflow-test' %}
+  <div class="workflow-line-banner">新工作流测试线路 · 08-12 独立 API</div>
+  {% endif %}
   <div id="framework-to-script-app"></div>
   <script>
     window.FRAMEWORK_TO_SCRIPT_CONFIG = {
       workspaceUrl: "{{ url_for('workspace') if false else '/workspace' }}",
-      frameworkPlannerUrl: "{{ url_for('framework_planner') if false else '/framework-planner' }}"
+      frameworkPlannerUrl: {{ framework_planner_url|default('/framework-planner')|tojson }},
+      workflowLine: {{ workflow_line|default('production')|tojson }}
     };
   </script>
   <script src="{{ url_for('static', filename='field_labels_cn.js') }}?v=20260527-readable-labels"></script>
-  <script src="{{ url_for('static', filename='framework_to_script.js') }}?v=20260717-agent-stage-links-v1"></script>
+  <script src="{{ url_for('static', filename='framework_to_script.js') }}?v=20260723-running-sync-v6"></script>
   <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v4"></script>
 </body>
 </html>

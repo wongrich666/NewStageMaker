@@ -20,23 +20,19 @@
     knowledgeFilmPage: 1,
     taskPanelOpen: null,
     taskPanelProjectId: "",
+    selectedTaskIdentity: "",
     selectedAttachment: null,
     uploadingAttachment: false,
   };
 
-  const PIPELINE_STAGES = [
-    ["01", "原文信息提取"],
-    ["02", "世界观方案"],
-    ["03", "人物设定"],
-    ["04", "三幕十五节拍"],
-    ["05", "人物故事线"],
-    ["06", "整体改编指引"],
-    ["07", "框架策划包校验"],
-    ["08", "提炼核心场景"],
-    ["09", "确定角色外观"],
-    ["10", "优化分集计划"],
-    ["11", "规划因果冲突"],
-    ["12", "生成剧本正文"],
+  const SCRIPT_TEAM_STAGES = [
+    ["01", "总编剧"],
+    ["02", "故事架构师"],
+    ["03", "人物情感编剧"],
+    ["04", "分集连续性编剧"],
+    ["05", "正文对白编剧"],
+    ["06", "状态记录器"],
+    ["07", "终审与钩子编辑"],
   ];
 
   function authHeaders() {
@@ -60,25 +56,57 @@
   }
 
   function userFacingText(value) {
-    return String(value || "")
-      .replaceAll("01-12 人工模式流程已完成", "剧本创作流程完成")
-      .replaceAll("人工模式 01-12 流程已完成", "剧本创作流程完成")
-      .replaceAll("01-12 已完成", "剧本创作流程完成");
+    return String(value || "");
+  }
+
+  function formatInlineContent(value) {
+    return escapeHtml(value)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+  }
+
+  function markdownTable(lines) {
+    const rows = lines.map((line) => line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim()));
+    if (rows.length < 2 || rows[0].length < 2) return "";
+    const separatorIndex = rows[1].every((cell) => /^:?-{3,}:?$/.test(cell)) ? 1 : -1;
+    const header = rows[0];
+    const body = rows.slice(separatorIndex === 1 ? 2 : 1);
+    return `
+      <div class="agent-copy-table-wrap">
+        <table class="agent-copy-table">
+          <thead><tr>${header.map((cell) => `<th>${formatInlineContent(cell)}</th>`).join("")}</tr></thead>
+          ${body.length ? `<tbody>${body.map((row) => `<tr>${header.map((_, index) => `<td>${formatInlineContent(row[index] || "")}</td>`).join("")}</tr>`).join("")}</tbody>` : ""}
+        </table>
+      </div>`;
   }
 
   function formatMessageContent(value) {
-    const safe = escapeHtml(value)
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>");
-    return safe.split(/\r?\n/).map((line) => {
+    const lines = String(value || "").split(/\r?\n/);
+    const formatted = [];
+    for (let index = 0; index < lines.length; index += 1) {
+      const rawLine = lines[index];
+      if (/^\s*\|.*\|\s*$/.test(rawLine)) {
+        const tableLines = [];
+        while (index < lines.length && /^\s*\|.*\|\s*$/.test(lines[index])) {
+          tableLines.push(lines[index]);
+          index += 1;
+        }
+        index -= 1;
+        const table = markdownTable(tableLines);
+        if (table) {
+          formatted.push(table);
+          continue;
+        }
+      }
+      const line = formatInlineContent(rawLine);
       const heading = line.match(/^(#{1,3})\s+(.+)$/);
-      if (heading) return `<div class="agent-copy-heading level-${heading[1].length}">${heading[2]}</div>`;
-      if (/^\s*---+\s*$/.test(line)) return '<div class="agent-copy-divider"></div>';
-      if (/^\s*&gt;\s?/.test(line)) return `<div class="agent-copy-quote">${line.replace(/^\s*&gt;\s?/, "")}</div>`;
-      if (/^\s*[-*]\s+/.test(line)) return `<div class="agent-copy-list-item">${line.replace(/^\s*[-*]\s+/, "")}</div>`;
-      if (/^\s*\|.*\|\s*$/.test(line)) return `<div class="agent-copy-table-row">${line.replace(/^\s*\|\s?|\s*\|\s*$/g, "")}</div>`;
-      return `<div class="agent-copy-line">${line || "&nbsp;"}</div>`;
-    }).join("");
+      if (heading) formatted.push(`<div class="agent-copy-heading level-${heading[1].length}">${heading[2]}</div>`);
+      else if (/^\s*---+\s*$/.test(line)) formatted.push('<div class="agent-copy-divider"></div>');
+      else if (/^\s*&gt;\s?/.test(line)) formatted.push(`<div class="agent-copy-quote">${line.replace(/^\s*&gt;\s?/, "")}</div>`);
+      else if (/^\s*[-*]\s+/.test(line)) formatted.push(`<div class="agent-copy-list-item">${line.replace(/^\s*[-*]\s+/, "")}</div>`);
+      else formatted.push(`<div class="agent-copy-line">${line || "&nbsp;"}</div>`);
+    }
+    return formatted.join("");
   }
 
   async function fetchJson(url, options = {}) {
@@ -125,7 +153,9 @@
     if (phase === "completed") return { label: "已完成", className: "is-done" };
     if (phase === "failed") return { label: "需处理", className: "is-error" };
     if (phase && !["terminated", "cancelled"].includes(phase)) return { label: stage && stage !== "00" ? `${stage} 阶段` : "创作中", className: "is-running" };
-    if (item && item.project_id) return { label: "已关联", className: "is-linked" };
+    if (conversationState.script_team_job_id || (item && String(item.task_id || "").startsWith("npc-"))) {
+      return { label: "已关联", className: "is-linked" };
+    }
     return { label: "对话", className: "" };
   }
 
@@ -152,25 +182,60 @@
     }).join("");
   }
 
-  function eventCard(event) {
+  function eventCard(event, { answered = false } = {}) {
     const result = event && event.result && typeof event.result === "object" ? event.result : {};
     const ui = result.ui && typeof result.ui === "object" ? result.ui : {};
+    if (ui.kind === "choice") {
+      const options = Array.isArray(result.options) ? result.options : [];
+      const step = Math.max(1, Number(result.step || 1));
+      const total = Math.max(step, Number(result.total || step));
+      return `
+        <section class="agent-choice-card ${answered ? "is-answered" : ""}">
+          <header>
+            <div><span>补齐关键信息</span><h4>${escapeHtml(result.question || "请选择一个选项")}</h4></div>
+            <b>${step}/${total}</b>
+          </header>
+          <div class="agent-choice-options">
+            ${options.map((option, index) => `
+              <button type="button" data-agent-choice="${escapeHtml(option.prompt || option.label || "")}" ${answered ? "disabled" : ""}>
+                <span>${index + 1}</span>
+                <strong>${escapeHtml(option.label || `选项 ${index + 1}`)}</strong>
+                ${option.description ? `<small>${escapeHtml(option.description)}</small>` : ""}
+                <b aria-hidden="true">›</b>
+              </button>`).join("")}
+          </div>
+          <footer>
+            ${answered
+              ? '<span class="agent-choice-done">已回答，选择结果已进入对话</span>'
+              : `<button type="button" data-agent-fill="${escapeHtml(result.custom_prefix || "我的选择：")}">自己输入</button>
+                 <button type="button" data-agent-choice="这个选项由你根据故事目标决定，采用平台推荐的默认值。">由 Agent 决定</button>`}
+          </footer>
+        </section>`;
+    }
     if (ui.kind === "confirmation") {
       const summary = result.summary || {};
+      const costEstimate = summary.cost_estimate || {};
       const knowledgeNames = Array.isArray(summary.selected_preference_tags)
         ? summary.selected_preference_tags.map((item) => item && (item.name || item.id)).filter(Boolean)
         : [];
       return `
         <section class="agent-event-card is-confirmation">
           <h4>生成方案已准备</h4>
-          <p>确认后将调用现有剧本平台创建后台任务，生成过程中可以继续对话查询或暂停。</p>
+          <p>${summary.execution_scope === "framework_only"
+            ? "确认后由专业剧本团队执行前四个策划节点，不生成剧本正文。"
+            : "确认后由专业剧本团队执行全部七个节点，过程中可以继续查询或暂停。"}</p>
           <div class="agent-event-tags">
             <span>${escapeHtml(summary.title || "未命名剧本")}</span>
             <span>${escapeHtml(summary.total_episodes || 0)} 集</span>
             <span>${escapeHtml(summary.character_count || 0)} 个主要角色</span>
             <span>每集 ${escapeHtml(summary.episode_word_count || 600)} 字</span>
+            ${summary.source_filename ? `<span>源文件：${escapeHtml(summary.source_filename)}</span>` : ""}
+            <span>${summary.execution_scope === "framework_only" ? "剧本团队前四个策划节点" : "剧本团队七节点完整生成"}</span>
+            ${costEstimate.paid_call_range ? `<span>预计付费调用 ${escapeHtml(costEstimate.paid_call_range)}</span>` : ""}
+            ${costEstimate.estimated_output_chars ? `<span>预计正文 ${Number(costEstimate.estimated_output_chars).toLocaleString()} 字</span>` : ""}
             ${knowledgeNames.length ? `<span>智慧库：${escapeHtml(knowledgeNames.join("、"))}</span>` : ""}
           </div>
+          ${costEstimate.notice ? `<p class="agent-cost-notice">${escapeHtml(costEstimate.notice)}</p>` : ""}
           <div class="agent-event-actions">
             <button class="is-primary" type="button" data-agent-prompt="确认开始执行这个剧本生成任务">确认开始</button>
             <button type="button" data-agent-prompt="取消本次待执行的生成任务">取消</button>
@@ -190,7 +255,7 @@
             <span>${progress}%</span>
             ${project.total_episodes ? `<span>${escapeHtml(project.generated_episodes || 0)}/${escapeHtml(project.total_episodes)} 集</span>` : ""}
           </div>
-          <div class="agent-event-actions"><a href="${escapeHtml(withAuth(`/workspace?project_id=${project.project_id || ""}`))}">进入原工作台</a></div>
+          <div class="agent-event-actions"><a href="${escapeHtml(withAuth(project.workspace_url || "/new-workflow-test"))}">打开专业剧本团队</a></div>
         </section>`;
     }
     if (ui.kind === "download" && result.download_url) {
@@ -204,8 +269,8 @@
     if (ui.kind === "navigation" && result.url) {
       return `
         <section class="agent-event-card">
-          <h4>原平台功能已保留</h4>
-          <p>可以进入对应精细工作台继续人工调整。</p>
+          <h4>功能入口</h4>
+          <p>可以进入对应模块继续操作。</p>
           <div class="agent-event-actions"><a href="${escapeHtml(withAuth(result.url))}">打开工作台</a></div>
         </section>`;
     }
@@ -239,10 +304,11 @@
     const wasNearBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 120;
     const visible = state.messages.filter((item) => item.role === "user" || item.role === "assistant");
     $("#agentHero").hidden = visible.length > 1;
-    list.innerHTML = visible.map((item) => {
+    list.innerHTML = visible.map((item, messageIndex) => {
       const isUser = item.role === "user";
       const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : {};
       const events = Array.isArray(metadata.events) ? metadata.events : [];
+      const hasTable = /^\s*\|.*\|\s*$/m.test(String(item.content || ""));
       const skillChip = metadata.selected_skill_name
         ? `<div class="agent-message-skill"><span>SKILL</span>${escapeHtml(metadata.selected_skill_name)}</div>`
         : "";
@@ -254,12 +320,14 @@
         ? `<div class="agent-message-knowledge"><span>智慧库</span>${escapeHtml(knowledgeNames.join("、"))}</div>`
         : "";
       return `
-        <article class="agent-message ${isUser ? "is-user" : "is-assistant"}">
+        <article class="agent-message ${isUser ? "is-user" : "is-assistant"} ${hasTable ? "has-table" : ""}">
           <div class="agent-message-avatar">${isUser ? escapeHtml((config.username || "我").slice(0, 1)) : "AI"}</div>
           <div class="agent-message-body">
             ${fileChip}${skillChip}${knowledgeChip}
             <div class="agent-message-copy">${formatMessageContent(userFacingText(item.content || ""))}</div>
-            ${events.length ? `<div class="agent-event-stack">${events.map(eventCard).join("")}</div>` : ""}
+            ${events.length ? `<div class="agent-event-stack">${events.map((event) => eventCard(event, {
+              answered: !isUser && visible.slice(messageIndex + 1).some((later) => later.role === "user"),
+            })).join("")}</div>` : ""}
             <div class="agent-message-meta">${escapeHtml(formatTime(item.created_at))}</div>
           </div>
         </article>`;
@@ -272,20 +340,15 @@
 
   function pipelineStageIndex(project) {
     const explicit = Number(project && project.pipeline_stage);
-    const current = String(project && project.current_stage || "");
-    if (explicit >= 1 && explicit <= 12) return explicit;
-    const frameworkMap = { basic: 1, worldview: 2, character: 3, beat: 4, storylines: 5, guide: 6, package: 7 };
-    if (frameworkMap[current]) return frameworkMap[current];
-    if (current.includes("scene_dictionary")) return 8;
-    if (current.includes("appearanceMapping")) return 9;
-    if (current.includes("enriched_episode_plan")) return 10;
-    if (current.includes("causal_conflict")) return 11;
-    if (current.includes("framework_script") || ["final", "finalize", "finished"].includes(current)) return 12;
-    return 0;
+    return explicit >= 1 && explicit <= 7 ? explicit : 1;
   }
 
   function isPipelineProject(project) {
-    return Boolean(project && project.generation_chain === "agent_framework_01_12");
+    return Boolean(project && project.generation_chain === "script_team_v2");
+  }
+
+  function isScriptTeamProject(project) {
+    return Boolean(project && project.generation_chain === "script_team_v2");
   }
 
   function isPipelineActive(project) {
@@ -294,28 +357,90 @@
     return !["completed", "failed", "terminated"].includes(phase);
   }
 
-  function stageWorkspaceUrl(stageNumber, projectId) {
-    const stage = String(stageNumber).padStart(2, "0");
-    if (Number(stage) <= 7) {
-      return withAuth(`/framework-planner?project_id=${encodeURIComponent(projectId)}&stage=${stage}`);
-    }
-    return withAuth(`/framework-to-script?framework_asset_id=${encodeURIComponent(projectId)}&project_id=${encodeURIComponent(projectId)}&stage=${stage}`);
+  function pipelineProgress(project) {
+    return Math.max(0, Math.min(100, Number(project && project.progress_percent || 0)));
   }
 
-  function pipelineProgress(project) {
-    const stage = pipelineStageIndex(project);
-    if (!stage) return Math.max(0, Math.min(100, Number(project && project.progress_percent || 0)));
-    if (stage <= 7) return Math.round((stage / 12) * 100);
-    const nativeProgress = Math.max(0, Math.min(100, Number(project.progress_percent || 0)));
-    const stageBase = Math.round(((stage - 1) / 12) * 100);
-    const stageEnd = Math.round((stage / 12) * 100);
-    return Math.min(stageEnd, Math.max(stageBase, Math.round(stageBase + ((stageEnd - stageBase) * nativeProgress / 100))));
+  function currentBackgroundOperation() {
+    const context = state.context && typeof state.context === "object" ? state.context : {};
+    if (context.active_operation) return context.active_operation;
+    const project = context.current_project || null;
+    const projectStatus = String(project && project.status || "").toLowerCase();
+    const activeProject = project && (["pending", "running", "in_progress", "pausing", "paused", "retrying"].includes(projectStatus) || isPipelineActive(project));
+    return activeProject ? null : (context.last_operation || null);
+  }
+
+  function operationIsActive(operation) {
+    return Boolean(operation && operation.status === "running");
+  }
+
+  function operationElapsed(operation) {
+    const startedAt = new Date(operation && operation.started_at || "");
+    if (Number.isNaN(startedAt.getTime())) return "正在运行";
+    const seconds = Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000));
+    if (seconds < 60) return `已运行 ${seconds} 秒`;
+    return `已运行 ${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+  }
+
+  function taskHistoryRecords() {
+    const context = state.context && typeof state.context === "object" ? state.context : {};
+    return Array.isArray(context.task_history) ? context.task_history.filter((item) => item && item.identity) : [];
+  }
+
+  function renderTaskHistory(records, selectedIdentity) {
+    const container = $("#agentTaskHistory");
+    const list = $("#agentTaskHistoryList");
+    const count = $("#agentTaskHistoryCount");
+    if (!container || !list || !count) return;
+    container.hidden = records.length < 2;
+    count.textContent = String(records.length);
+    list.innerHTML = records.slice().reverse().map((record) => {
+      const project = record.kind === "script_team" && record.project ? record.project : null;
+      const operation = record.kind === "operation" && record.operation ? record.operation : null;
+      const title = project
+        ? (project.title || "剧本团队任务")
+        : (operation && (operation.filename || operation.skill_name)) || "剧本任务";
+      const status = String((project && (project.pipeline_phase || project.status)) || (operation && operation.status) || "").toLowerCase();
+      const active = operationIsActive(operation) || (project && (isPipelineActive(project) || ["pending", "running", "in_progress", "retrying"].includes(String(project.status || "").toLowerCase())));
+      const statusLabel = active ? "执行中" : ["failed", "error"].includes(status) ? "失败" : ["paused", "pausing"].includes(status) ? "已暂停" : "已完成";
+      const typeLabel = project
+        ? "专业剧本团队"
+        : operation && operation.type === "word_optimization" ? "Word 优化" : "剧本医生";
+      return `
+        <button type="button" class="${record.identity === selectedIdentity ? "is-active" : ""}" data-task-history-id="${escapeHtml(record.identity)}" title="查看 ${escapeHtml(title)} 的任务轨道">
+          <i class="${active ? "is-running" : statusLabel === "失败" ? "is-failed" : "is-done"}"></i>
+          <span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(typeLabel)} · ${escapeHtml(statusLabel)}</small></span>
+        </button>`;
+    }).join("");
   }
 
   function renderLiveExecution() {
     const container = $("#agentLiveExecution");
     if (!container) return;
     const project = state.context && state.context.current_project ? state.context.current_project : null;
+    const operation = currentBackgroundOperation();
+    const activeOperation = operationIsActive(operation) ? operation : null;
+    if (activeOperation && ["script_doctor", "word_optimization"].includes(activeOperation.type)) {
+      const optimizingWord = activeOperation.type === "word_optimization";
+      const stageOrder = optimizingWord
+        ? ["preparing", "ai_optimize", "saving", "completed"]
+        : ["preparing", "ai_review", "saving", "completed"];
+      const activeIndex = Math.max(0, stageOrder.indexOf(String(activeOperation.stage || "preparing")));
+      const labels = optimizingWord
+        ? ["读取原文", "AI优化", "生成Word", "完成"]
+        : ["读取Word", "AI审查", "保存报告", "完成"];
+      container.hidden = false;
+      container.innerHTML = `
+        <div class="agent-live-icon" aria-hidden="true"><i></i></div>
+        <div class="agent-live-main">
+          <strong>${escapeHtml(activeOperation.message || "AI剧本医生正在审查")}</strong>
+          <p>${escapeHtml(activeOperation.filename || "上传剧本")} · ${escapeHtml(optimizingWord ? "一键优化 Word" : (activeOperation.skill_name || "剧本医生"))} · 刷新页面不会中止</p>
+          <div class="agent-live-track"><i style="width:${Math.max(12, Number(activeOperation.progress_percent || 20))}%"></i></div>
+          <div class="agent-live-stages is-doctor">${labels.map((label, index) => `<span class="${index < activeIndex ? "is-done" : index === activeIndex ? "is-active" : ""}">${escapeHtml(label)}</span>`).join("")}</div>
+        </div>
+        <b>${escapeHtml(operationElapsed(activeOperation))}</b>`;
+      return;
+    }
     const status = String(project && project.status || "").toLowerCase();
     const active = project && ["pending", "running", "in_progress", "pausing", "paused", "retrying"].includes(status);
     if (!active && !state.sending) {
@@ -329,9 +454,12 @@
       ? (project.pipeline_message || project.message || project.current_stage_label || "正在执行剧本生成流程")
       : "正在理解需求并准备执行";
     const subtitle = project
-      ? `${project.title || "剧本项目"} · 01-07 框架策划 → 08-12 框架转剧本`
+      ? `${project.title || "剧本项目"} · ${project.execution_scope === "framework_only"
+        ? "专业剧本团队 · 策划四节点"
+        : "专业剧本团队 · 七节点"}`
       : "正在连接剧本创作平台";
-    const chips = Array.from({ length: 12 }, (_, index) => {
+    const stageCount = 7;
+    const chips = Array.from({ length: stageCount }, (_, index) => {
       const number = index + 1;
       const className = number < stage ? "is-done" : number === stage ? "is-active" : "";
       return `<span class="${className}">${String(number).padStart(2, "0")}</span>`;
@@ -349,25 +477,56 @@
     `;
   }
 
-  function renderTaskRail(project) {
+  function renderTaskRail(project, operation = null) {
     const rail = $("#agentTaskRail");
     const idle = $("#agentTaskIdle");
     const waitingActions = $("#agentWaitingActions");
     if (!rail || !idle || !waitingActions) return;
-    const visible = isPipelineProject(project);
+    const doctorOperation = operation && ["script_doctor", "word_optimization"].includes(operation.type) ? operation : null;
+    rail.classList.toggle("is-doctor-task", Boolean(doctorOperation));
+    const visible = Boolean(doctorOperation) || isPipelineProject(project);
     rail.hidden = !visible;
     idle.hidden = visible;
     waitingActions.hidden = !visible;
     if (!visible) return;
 
+    if (doctorOperation) {
+      const running = operationIsActive(doctorOperation);
+      const completed = doctorOperation.status === "completed";
+      const failed = doctorOperation.status === "failed";
+      const optimizingWord = doctorOperation.type === "word_optimization";
+      const stageIndex = running
+        ? (["ai_review", "ai_optimize"].includes(doctorOperation.stage) ? 3 : doctorOperation.stage === "saving" ? 4 : 1)
+        : 4;
+      const stages = optimizingWord
+        ? ["读取原始 Word", "加载剧本医生报告", "剧本 Agent 生成修改方案", "校验修改并生成 Word"]
+        : ["读取 Word 剧本", `加载 ${doctorOperation.skill_name || "剧本医生 Skill"}`, "剧本 Agent 深度审查", "保存审查报告"];
+      $("#taskStageList").innerHTML = stages.map((name, index) => {
+        const number = index + 1;
+        const done = completed || number < stageIndex;
+        const active = running && number === stageIndex;
+        const className = done ? "is-done" : active ? "is-active" : failed && number === stageIndex ? "is-active is-failed" : "";
+        const stateText = done ? "已完成" : active ? "执行中" : failed && number === stageIndex ? "失败" : "等待";
+        return `<li class="agent-stage-item ${className}"><div class="agent-stage-static"><span class="agent-stage-number">${String(number).padStart(2, "0")}</span><span class="agent-stage-name">${escapeHtml(name)}</span><span class="agent-stage-state">${stateText}</span></div></li>`;
+      }).join("");
+      $("#contextOpenProject").href = optimizingWord && completed && doctorOperation.download_url
+        ? withAuth(doctorOperation.download_url)
+        : withAuth("/workbuddy-studio");
+      $("#contextOpenProject").textContent = optimizingWord
+        ? (completed ? "查看并下载优化版 Word" : "打开剧本医生工作台")
+        : (completed ? "打开剧本医生报告" : "打开剧本医生工作台");
+      waitingActions.hidden = true;
+      return;
+    }
+
     const stage = pipelineStageIndex(project);
     const phase = String(project.pipeline_phase || "").toLowerCase();
-    const completed = phase === "completed" || (stage === 12 && String(project.status || "").toLowerCase() === "completed");
+    const completed = phase === "completed" || String(project.status || "").toLowerCase() === "completed";
     const failed = phase === "failed" || String(project.status || "").toLowerCase() === "failed";
-    const projectId = project.project_id || project.framework_project_id || "";
-    $("#taskStageList").innerHTML = PIPELINE_STAGES.map(([number, name]) => {
+    const jobId = project.job_id || project.task_id || "";
+    $("#taskStageList").innerHTML = SCRIPT_TEAM_STAGES.map(([number, name]) => {
       const numeric = Number(number);
-      const done = completed ? numeric <= 12 : numeric < stage;
+      const done = completed ? numeric <= 7 : numeric < stage;
       const active = !completed && numeric === stage;
       const stateText = done ? "已完成" : active ? (failed ? "失败" : "执行中") : "等待";
       const className = done ? "is-done" : active ? (failed ? "is-active is-failed" : "is-active") : "";
@@ -375,21 +534,24 @@
         <span class="agent-stage-number">${number}</span>
         <span class="agent-stage-name">${escapeHtml(name)}</span>
         <span class="agent-stage-state">${stateText}</span>`;
-      const canOpen = Boolean(projectId && (done || active || completed));
-      return `<li class="agent-stage-item ${className}">${canOpen
-        ? `<a class="agent-stage-link" href="${escapeHtml(stageWorkspaceUrl(number, projectId))}" title="在人工模式打开 ${number} ${escapeHtml(name)}">${inner}</a>`
-        : `<div class="agent-stage-static">${inner}</div>`}</li>`;
+      return `<li class="agent-stage-item ${className}"><a class="agent-stage-link" href="${escapeHtml(withAuth("/new-workflow-test"))}" title="打开专业剧本团队任务 ${escapeHtml(jobId)}">${inner}</a></li>`;
     }).join("");
+    $("#contextOpenProject").href = withAuth(project.workspace_url || "/new-workflow-test");
+    $("#contextOpenProject").textContent = completed ? "查看并下载最终剧本" : "打开专业剧本团队";
   }
 
-  function syncTaskPanelVisibility(project) {
+  function syncTaskPanelVisibility(project, operation = null) {
     const shell = $(".agent-shell");
     const toggle = $("#taskPanelToggle");
     if (!shell || !toggle) return;
-    const projectId = String(project && (project.project_id || project.framework_project_id) || "");
-    const active = isPipelineActive(project);
-    if (active && projectId && state.taskPanelProjectId !== projectId) {
-      state.taskPanelProjectId = projectId;
+    const projectId = String(project && (project.job_id || project.task_id) || "");
+    const active = isPipelineActive(project) || operationIsActive(operation);
+    const taskIdentity = operationIsActive(operation) ? String(operation.request_id || "doctor") : projectId;
+    if (active && taskIdentity && state.taskPanelProjectId !== taskIdentity) {
+      state.taskPanelProjectId = taskIdentity;
+      state.selectedTaskIdentity = operationIsActive(operation)
+        ? `operation:${taskIdentity}`
+        : `script_team:${taskIdentity}`;
       state.taskPanelOpen = true;
     }
     const open = state.taskPanelOpen === null ? active : state.taskPanelOpen;
@@ -399,30 +561,53 @@
   }
 
   function renderContext() {
-    const project = state.context && state.context.current_project ? state.context.current_project : null;
-    syncTaskPanelVisibility(project);
+    const currentProject = state.context && state.context.current_project ? state.context.current_project : null;
+    const currentOperation = currentBackgroundOperation();
+    syncTaskPanelVisibility(currentProject, currentOperation);
+    const records = taskHistoryRecords();
+    if (!records.some((record) => record.identity === state.selectedTaskIdentity)) {
+      const preferredIdentity = operationIsActive(currentOperation)
+        ? `operation:${currentOperation.request_id || ""}`
+        : currentProject
+          ? `script_team:${currentProject.job_id || currentProject.task_id || ""}`
+          : records.length ? records[records.length - 1].identity : "";
+      state.selectedTaskIdentity = preferredIdentity;
+    }
+    const selectedRecord = records.find((record) => record.identity === state.selectedTaskIdentity) || null;
+    const project = selectedRecord && selectedRecord.kind === "script_team" ? selectedRecord.project : (!selectedRecord ? currentProject : null);
+    const operation = selectedRecord && selectedRecord.kind === "operation" ? selectedRecord.operation : (!selectedRecord ? currentOperation : null);
+    renderTaskHistory(records, state.selectedTaskIdentity);
+    if (operation && ["script_doctor", "word_optimization"].includes(operation.type)) {
+      const progress = Math.max(0, Math.min(100, Number(operation.progress_percent || 0)));
+      $("#contextProjectTitle").textContent = operation.filename || "上传剧本";
+      $("#contextProjectMeta").textContent = `${operation.type === "word_optimization" ? "一键优化 Word" : (operation.skill_name || "剧本医生")} · ${Number(operation.char_count || 0).toLocaleString("zh-CN")} 字`;
+      $("#contextStage").textContent = operation.message || (operation.status === "completed" ? "审查完成" : "正在审查");
+      $("#contextProgress").textContent = operation.status === "running" ? operationElapsed(operation) : operation.status === "completed" ? "完成" : "失败";
+      $("#contextProgressBar").style.width = `${progress}%`;
+      renderTaskRail(project, operation);
+      renderLiveExecution();
+      return;
+    }
     if (!project) {
       $("#contextProjectTitle").textContent = "尚未选择项目";
       $("#contextProjectMeta").textContent = "通过对话创建或选择项目";
       $("#contextStage").textContent = "等待指令";
       $("#contextProgress").textContent = "0%";
       $("#contextProgressBar").style.width = "0%";
-      renderTaskRail(null);
+      renderTaskRail(null, null);
+      renderLiveExecution();
       return;
     }
-    const progress = project.generation_chain === "agent_framework_01_12"
-      ? pipelineProgress(project)
-      : Math.max(0, Math.min(100, Number(project.progress_percent || 0)));
+    const progress = pipelineProgress(project);
     $("#contextProjectTitle").textContent = project.title || "未命名项目";
-    $("#contextProjectMeta").textContent = project.message || `项目 #${project.project_id}`;
+    $("#contextProjectMeta").textContent = project.message || `任务 ${project.job_id || project.task_id || ""}`;
     $("#contextStage").textContent = userFacingText(project.pipeline_message || project.current_stage_label || project.current_stage || project.status || "等待");
     $("#contextProgress").textContent = `${progress}%`;
     $("#contextProgressBar").style.width = `${progress}%`;
-    const currentStage = Math.max(1, pipelineStageIndex(project));
-    $("#contextOpenProject").href = isPipelineProject(project)
-      ? stageWorkspaceUrl(currentStage, project.project_id || "")
-      : withAuth(`/workspace?project_id=${project.project_id || ""}`);
-    renderTaskRail(project);
+    $("#contextOpenProject").href = withAuth(project.workspace_url || "/new-workflow-test");
+    $("#contextOpenProject").textContent = "打开专业剧本团队";
+    renderTaskRail(project, null);
+    renderLiveExecution();
   }
 
   function setSending(value) {
@@ -430,6 +615,7 @@
     $("#agentSendBtn").disabled = state.sending;
     $("#agentInput").disabled = state.sending;
     $("#agentThinking").hidden = !state.sending;
+    renderLiveExecution();
   }
 
   function selectedSkillRecord() {
@@ -441,8 +627,7 @@
     character_continuity: { tone: "mint", icon: "人物" },
     hook_rhythm: { tone: "sunset", icon: "节奏" },
     logic_holes: { tone: "indigo", icon: "逻辑" },
-    character_humanity: { tone: "coral", icon: "人情" },
-    character_resonance: { tone: "violet", icon: "共鸣" },
+    character_humanity: { tone: "coral", icon: "共鸣" },
   };
 
   function skillVisual(skill) {
@@ -463,13 +648,6 @@
     const selected = new Set(state.selectedKnowledgeTagIds.map(String));
     return state.knowledgeTags.filter((tag) => selected.has(String(tag.id || "")));
   }
-
-  const KNOWLEDGE_STAGE_FIELDS = [
-    ["basic", "01 原文提取"], ["worldview", "02 世界观"], ["character", "03 人物设定"],
-    ["beat", "04 三幕十五节拍"], ["storylines", "05 人物故事线"], ["guide", "06 改编指引"],
-    ["package", "07 框架校验"], ["scene", "08 场景字典"], ["appearance", "09 角色外观"],
-    ["episode", "10 分集细化"], ["conflict", "11 因果冲突"], ["script_text", "12 正文写作"],
-  ];
 
   function knowledgeTagById(tagId) {
     return state.knowledgeTags.find((tag) => String(tag.id || "") === String(tagId || "")) || null;
@@ -503,7 +681,7 @@
         <div class="agent-knowledge-options">${defaults.map((tag) => knowledgeOption(tag)).join("") || `<p class="agent-knowledge-empty">暂无匹配标签</p>`}</div>
       </section>
       <button class="agent-knowledge-folder" type="button" data-knowledge-action="open-films">
-        <span class="agent-knowledge-folder-mark">影</span><span><strong>优秀电影节拍</strong><small>选择电影后查看详情与 01–12 阶段提示词</small></span><b>${films.length} ›</b>
+        <span class="agent-knowledge-folder-mark">影</span><span><strong>优秀电影节拍</strong><small>选择电影作为团队创作参考</small></span><b>${films.length} ›</b>
       </button>
       <section class="agent-knowledge-group">
         <div class="agent-knowledge-group-head"><h3>用户自定义<span>${custom.length}</span></h3><button type="button" data-knowledge-action="new">＋ 新建</button></div>
@@ -518,7 +696,7 @@
     return `
       <section class="agent-knowledge-film-list">
         <div class="agent-knowledge-view-head"><button type="button" data-knowledge-action="back">‹ 返回</button><span>点击电影查看详情</span></div>
-        ${visible.map((tag) => `<button type="button" class="agent-knowledge-film" data-knowledge-action="film-detail" data-tag-id="${escapeHtml(tag.id)}"><span>${escapeHtml(tag.name)}</span><small>${Object.values(tag.stage_prompts || {}).filter((value) => String(value || "").trim()).length}/12 阶段已设置</small><b>›</b></button>`).join("") || `<p class="agent-knowledge-empty is-search">没有找到电影</p>`}
+        ${visible.map((tag) => `<button type="button" class="agent-knowledge-film" data-knowledge-action="film-detail" data-tag-id="${escapeHtml(tag.id)}"><span>${escapeHtml(tag.name)}</span><small>查看创作参考</small><b>›</b></button>`).join("") || `<p class="agent-knowledge-empty is-search">没有找到电影</p>`}
         ${visible.length < films.length ? `<button class="agent-knowledge-more" type="button" data-knowledge-action="more-films">继续加载（${films.length - visible.length}）</button>` : ""}
       </section>`;
   }
@@ -532,13 +710,11 @@
         <div class="agent-knowledge-detail-title"><span class="agent-knowledge-folder-mark">影</span><span><h3>${escapeHtml(tag.name)}</h3><p>${escapeHtml(tag.description || "优秀电影节拍参考模板")}</p></span></div>
         <label class="agent-knowledge-detail-select"><input type="checkbox" data-knowledge-tag-id="${escapeHtml(tag.id)}" ${checked ? "checked" : ""}><span>${checked ? "已选择用于 Agent 创作" : "选择用于 Agent 创作"}</span></label>
         <div class="agent-knowledge-general"><strong>通用创作偏好</strong><p>${escapeHtml(tag.prompt_text || "暂无通用偏好，可编辑为个人版本。")}</p></div>
-        <div class="agent-knowledge-stage-detail">${KNOWLEDGE_STAGE_FIELDS.map(([key, label]) => `<article><strong>${label}</strong><p>${escapeHtml(String((tag.stage_prompts || {})[key] || "暂无阶段提示词"))}</p></article>`).join("")}</div>
       </section>`;
   }
 
   function renderKnowledgeForm(tag) {
     const editing = Boolean(tag);
-    const prompts = tag && tag.stage_prompts || {};
     return `
       <section class="agent-knowledge-form" data-editing-id="${escapeHtml(tag && tag.id || "")}">
         <div class="agent-knowledge-view-head"><button type="button" data-knowledge-action="back">‹ 返回</button><span>${editing ? "保存后生成个人副本" : "创建后自动选中"}</span></div>
@@ -549,8 +725,6 @@
         </div>
         <label><span>描述</span><input data-knowledge-form="description" value="${escapeHtml(tag && tag.description || "")}"></label>
         <label><span>通用创作偏好</span><textarea data-knowledge-form="prompt_text">${escapeHtml(tag && tag.prompt_text || "")}</textarea></label>
-        <h4>01–12 分阶段提示词</h4>
-        <div class="agent-knowledge-form-stages">${KNOWLEDGE_STAGE_FIELDS.map(([key, label]) => `<label><span>${label}</span><textarea data-knowledge-stage="${key}">${escapeHtml(String(prompts[key] || ""))}</textarea></label>`).join("")}</div>
         <button class="agent-knowledge-form-save" type="button" data-knowledge-action="save-form">${editing ? "保存为我的标签" : "创建标签"}</button>
       </section>`;
   }
@@ -585,16 +759,14 @@
     const form = $("#knowledgeTagGroups .agent-knowledge-form");
     if (!form) return;
     const editingId = String(form.dataset.editingId || "");
+    const editingTag = knowledgeTagById(editingId);
     const payload = {
       name: String(form.querySelector('[data-knowledge-form="name"]')?.value || "").trim(),
       category: String(form.querySelector('[data-knowledge-form="category"]')?.value || "自定义").trim(),
       description: String(form.querySelector('[data-knowledge-form="description"]')?.value || "").trim(),
       prompt_text: String(form.querySelector('[data-knowledge-form="prompt_text"]')?.value || "").trim(),
-      stage_prompts: {},
+      stage_prompts: { ...((editingTag && editingTag.stage_prompts) || {}) },
     };
-    form.querySelectorAll("[data-knowledge-stage]").forEach((field) => {
-      payload.stage_prompts[field.dataset.knowledgeStage] = field.value;
-    });
     if (!payload.name) {
       $("#knowledgePickerStatus").textContent = "请填写标签名称。";
       return;
@@ -663,7 +835,7 @@
         body: JSON.stringify({
           selected_preference_tag_ids: applied.selected_preference_tag_ids || state.selectedKnowledgeTagIds,
           user_preference_prompt: state.knowledgePreferences.user_preference_prompt || "",
-          stage_prompts: applied.stage_prompts || {},
+          stage_prompts: state.knowledgePreferences.stage_prompts || {},
         }),
       });
       state.knowledgePreferences = saved.preferences || state.knowledgePreferences;
@@ -716,8 +888,11 @@
     $("#fileAttachmentName").textContent = attachment ? attachment.filename : "";
     $("#fileAttachmentType").textContent = attachment ? String(attachment.extension || "FILE").replace(".", "").toUpperCase() : "FILE";
     $("#fileAttachmentMeta").textContent = attachment
-      ? `${Number(attachment.char_count || 0).toLocaleString("zh-CN")} 字${attachment.converted_to_docx ? " · 将输出 Word" : ""}`
+      ? `${Number(attachment.char_count || 0).toLocaleString("zh-CN")} 字 · 已保存，尚未分析`
       : "";
+    $("#agentInput").placeholder = attachment
+      ? "文件已上传。请明确用途：分析框架、生成完整剧本、续写，或运行剧本医生…"
+      : "描述你想生成的剧本，或说：继续、暂停、重试第10阶段、运行人物共鸣审查…";
   }
 
   async function uploadAttachment(file) {
@@ -735,7 +910,6 @@
         { method: "POST", body: form },
       );
       state.selectedAttachment = data.attachment || null;
-      if (!state.selectedSkill) state.selectedSkill = "overall_dispatcher";
       renderFileAttachment();
       renderSkillAttachment();
       renderSkillPicker();
@@ -774,8 +948,18 @@
     try {
       const data = await fetchJson(`/api/workbuddy/doctor/history/${encodeURIComponent(historyId)}/optimize`, {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          background: true,
+          conversation_id: state.currentConversationId,
+        }),
       });
+      if (data.accepted) {
+        button.textContent = data.already_running ? "优化任务运行中" : "后台优化已开始";
+        state.context = data.context || state.context;
+        renderContext();
+        schedulePoll();
+        return;
+      }
       await downloadAuthenticated(data.download_url, data.download_name || "AI优化版剧本.docx");
       button.textContent = "优化版已下载";
     } catch (error) {
@@ -832,6 +1016,8 @@
     state.currentConversationId = conversation.id;
     state.messages = Array.isArray(data.messages) ? data.messages : [];
     state.context = {};
+    state.selectedTaskIdentity = "";
+    state.taskPanelProjectId = "";
     $("#conversationTitle").textContent = conversation.title || "新的创作对话";
     renderConversations();
     renderMessages();
@@ -841,8 +1027,13 @@
 
   async function openConversation(conversationId, { silent = false } = {}) {
     if (!conversationId) return;
+    const changedConversation = state.currentConversationId !== conversationId;
     const data = await fetchJson(`${config.conversationsUrl}/${encodeURIComponent(conversationId)}`);
     state.currentConversationId = conversationId;
+    if (changedConversation) {
+      state.selectedTaskIdentity = "";
+      state.taskPanelProjectId = "";
+    }
     state.messages = Array.isArray(data.messages) ? data.messages : [];
     state.context = data.context || {};
     const conversation = data.conversation || {};
@@ -923,11 +1114,19 @@
       renderConversations();
       renderMessages();
       renderContext();
-      if (attachedSkill && state.selectedSkill === attachedSkill.key) selectSkill("");
-      if (attachedDocument && state.selectedAttachment && state.selectedAttachment.id === attachedDocument.id) {
-        state.selectedAttachment = null;
-        renderFileAttachment();
-      }
+      const assistantEvents = data.assistant_message && data.assistant_message.metadata
+        && Array.isArray(data.assistant_message.metadata.events)
+        ? data.assistant_message.metadata.events
+        : [];
+      const isClarificationTurn = assistantEvents.some((event) => {
+        const result = event && event.result && typeof event.result === "object" ? event.result : {};
+        const ui = result.ui && typeof result.ui === "object" ? result.ui : {};
+        return ui.kind === "choice";
+      });
+      if (attachedSkill && state.selectedSkill === attachedSkill.key && !isClarificationTurn) selectSkill("");
+      // Keep the uploaded document selected during clarification turns. The user
+      // can remove it explicitly after choosing framework analysis, generation,
+      // continuation or doctor review.
       schedulePoll();
     } catch (error) {
       state.messages.push({
@@ -947,11 +1146,13 @@
   function schedulePoll() {
     if (state.pollTimer) window.clearInterval(state.pollTimer);
     const project = state.context && state.context.current_project;
+    const operation = currentBackgroundOperation();
+    const operationActive = operationIsActive(operation);
     const taskStatusActive = project && ["pending", "running", "in_progress", "pausing", "paused", "retrying"].includes(String(project.status || "").toLowerCase());
-    if (!project || (!taskStatusActive && !isPipelineActive(project))) return;
+    if (!operationActive && (!project || (!taskStatusActive && !isPipelineActive(project)))) return;
     state.pollTimer = window.setInterval(() => {
       if (!state.sending && state.currentConversationId) openConversation(state.currentConversationId, { silent: true }).catch(() => {});
-    }, 5000);
+    }, 3000);
   }
 
   $("#agentComposer").addEventListener("submit", (event) => {
@@ -1066,6 +1267,12 @@
     $("#agentContextPanel").classList.remove("is-open");
     syncTaskPanelVisibility(state.context && state.context.current_project ? state.context.current_project : null);
   });
+  $("#agentTaskHistoryList").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-task-history-id]");
+    if (!button) return;
+    state.selectedTaskIdentity = button.dataset.taskHistoryId || "";
+    renderContext();
+  });
   $("#newConversationBtn").addEventListener("click", () => createConversation().catch((error) => alert(error.message)));
   $("#conversationList").addEventListener("click", (event) => {
     const deleteButton = event.target.closest("[data-delete-conversation]");
@@ -1108,6 +1315,14 @@
       input.value = fillButton.dataset.agentFill || "";
       autoSizeInput();
       input.focus();
+      return;
+    }
+    const choiceButton = event.target.closest("[data-agent-choice]");
+    if (choiceButton && !choiceButton.disabled) {
+      const choiceCard = choiceButton.closest(".agent-choice-card");
+      if (choiceCard) $$('button', choiceCard).forEach((button) => { button.disabled = true; });
+      const prompt = choiceButton.dataset.agentChoice || "";
+      if (prompt) sendMessage(prompt);
       return;
     }
     const promptButton = event.target.closest("[data-prompt], [data-agent-prompt]");

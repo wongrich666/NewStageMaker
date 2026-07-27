@@ -6,11 +6,17 @@
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>剧本框架策划工作台</title>
+  <title>{{ page_title|default('剧本框架策划工作台') }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='global_theme.css') }}?v=20260617-cat-theme-v4" />
   <link rel="stylesheet" href="{{ url_for('static', filename='framework_planner.css') }}?v=20260717-asset-cache-steady-v35" />
+  {% if workflow_line == 'new-workflow-test' %}
+  <style>.workflow-line-banner{padding:9px 16px;background:#0f766e;color:#fff;text-align:center;font-size:14px;font-weight:700}</style>
+  {% endif %}
 </head>
 <body>
+  {% if workflow_line == 'new-workflow-test' %}
+  <div class="workflow-line-banner">新工作流测试线路 · 01-12 独立 API</div>
+  {% endif %}
   <div id="frameworkPlannerApp" class="fp-app"></div>
   <script>
     window.frameworkPlannerConfig = {
@@ -18,11 +24,13 @@
       workspaceUrl: {{ url_for('workspace_page', auth_token=current_auth_token)|tojson }},
       backendReady: {{ framework_backend_ready|tojson }},
       storageKey: {{ framework_planner_storage_key|tojson }},
-      apiBase: "/api/framework-planner"
+      apiBase: "/api/framework-planner",
+      workflowLine: {{ workflow_line|default('production')|tojson }},
+      frameworkToScriptUrl: {{ framework_to_script_url|default('/framework-to-script')|tojson }}
     };
   </script>
   <script src="{{ url_for('static', filename='field_labels_cn.js') }}?v=20260527-readable-labels"></script>
-  <script src="{{ url_for('static', filename='framework_planner.js') }}?v=20260717-agent-stage-links-v1"></script>
+  <script src="{{ url_for('static', filename='framework_planner.js') }}?v=20260722-unsaved-guard-v5"></script>
   <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v4"></script>
 </body>
 </html>

@@ -4,16 +4,19 @@
 
   const config = window.FRAMEWORK_TO_SCRIPT_CONFIG || {};
   const params = new URLSearchParams(window.location.search);
+  const WORKFLOW_LINE = String(config.workflowLine || "production");
   const requestedAgentStage = String(params.get("stage") || "").padStart(2, "0");
   let requestedAgentStageFocused = false;
   const authToken = params.get("auth_token") || "";
   const urlAssetId = params.get("framework_asset_id") || params.get("asset_id") || "";
-  const LEGACY_STORAGE_KEY = "frameworkToScriptWorkspace.v1";
+  const LEGACY_STORAGE_KEY = WORKFLOW_LINE === "production"
+    ? "frameworkToScriptWorkspace.v1"
+    : `frameworkToScriptWorkspace.v1.${WORKFLOW_LINE}`;
   const STORAGE_KEY = urlAssetId ? `${LEGACY_STORAGE_KEY}.${urlAssetId}` : LEGACY_STORAGE_KEY;
   const RAW_KEYS = new Set(["responseData", "choices", "reasoningText", "historyPreview", "newVariables", "updateVarResult", "raw_stage_responses", "raw_output", "raw", "answerText", "debug", "logs", "cache"]);
   const RESILIENT_STAGE_RETRY_DELAY_MS = 60 * 1000;
   const RESILIENT_STAGE_REQUEST_TIMEOUT_MS = 45 * 60 * 1000;
-  const RESILIENT_STAGE_MAX_RETRY_ATTEMPTS = 30;
+  const RESILIENT_STAGE_MAX_RETRY_ATTEMPTS = 2;
   const FIELD_LABELS = {
     framework_plan_package: "最终框架策划包",
     source_brief: "原文信息",
@@ -96,6 +99,7 @@
   function headers() {
     const value = { "Content-Type": "application/json" };
     if (authToken) value.Authorization = `Bearer ${authToken}`;
+    if (WORKFLOW_LINE !== "production") value["X-Workflow-Line"] = WORKFLOW_LINE;
     return value;
   }
 
@@ -174,6 +178,33 @@
     }
   }
 
+  function markStageCompleted(stage) {
+    const key = String(stage || "").padStart(2, "0");
+    if (!key) return;
+    state.completedStages = Array.from(new Set([
+      ...(state.completedStages || []).map((item) => String(item).padStart(2, "0")),
+      key,
+    ]));
+    if (!state.stages || typeof state.stages !== "object") state.stages = {};
+    state.stages[key] = {
+      ...(state.stages[key] || {}),
+      status: "completed",
+      stage_key: `stage${key}`,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  function clearStageCompletion(...stages) {
+    const keys = new Set(stages.map((stage) => String(stage || "").padStart(2, "0")));
+    state.completedStages = (state.completedStages || [])
+      .map((item) => String(item).padStart(2, "0"))
+      .filter((item) => !keys.has(item));
+    if (!state.stages || typeof state.stages !== "object") return;
+    keys.forEach((key) => {
+      delete state.stages[key];
+    });
+  }
+
   function stripRaw(value) {
     if (Array.isArray(value)) return value.map(stripRaw);
     if (!value || typeof value !== "object") return value;
@@ -216,23 +247,29 @@
     } catch (error) {}
   }
 
-  async function persistRunningStage(stage, failedStage = undefined) {
-    if (!state.frameworkAssetId) return;
-    try {
+  let runningStagePersistQueue = Promise.resolve();
+
+  function persistRunningStage(stage, failedStage = undefined) {
+    if (!state.frameworkAssetId) return Promise.resolve();
+    const assetId = state.frameworkAssetId;
+    runningStagePersistQueue = runningStagePersistQueue.catch(() => undefined).then(async () => {
       const payload = {
-        framework_asset_id: state.frameworkAssetId,
+        framework_asset_id: assetId,
         running_stage: stage ? String(stage) : "",
       };
       if (failedStage !== undefined) {
         payload.last_failed_stage = failedStage ? String(failedStage) : "";
       }
-      await requestJson("/api/framework-to-script/running-stage", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-    } catch (error) {
-      console.warn("persist framework-to-script running stage failed", error);
-    }
+      try {
+        await requestJson("/api/framework-to-script/running-stage", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      } catch (error) {
+        console.warn("persist framework-to-script running stage failed", error);
+      }
+    });
+    return runningStagePersistQueue;
   }
 
   async function saveWorkspaceToAsset() {
@@ -264,8 +301,8 @@
     }
     const savedState = data.framework_to_script_state || {};
     if (savedState && typeof savedState === "object") {
-      state.scriptStages = savedState.scriptStages || state.scriptStages;
       state.stageOutputs = savedState.stageOutputs || state.stageOutputs;
+      state.scriptStages = normalizeScriptStagesFromOutputs(savedState.scriptStages || state.scriptStages, state.stageOutputs);
       state.completedStages = Array.isArray(savedState.completedStages) ? savedState.completedStages : state.completedStages;
       state.stages = savedState.stages || state.stages;
       state.settings = savedState.settings || state.settings;
@@ -484,12 +521,7 @@
       state.runningStage = "";
       state.runningStartedAt = "";
       state.isRunning = false;
-      if (["11", "12"].includes(String(payload.runningStage))) {
-        state.error = `检测到上次 ${payload.runningStage} 阶段可能中断，正在自动从已完成批次断点续跑。`;
-        scheduleInterruptedStageResume(payload.runningStage);
-      } else {
-        state.error = `已清除上次遗留的 ${payload.runningStage} 阶段运行锁，可重新点击运行。`;
-      }
+      state.error = `已清除上次遗留的 ${payload.runningStage} 阶段运行锁，可重新点击运行。`;
     } catch (error) {
       console.warn("restore running stage failed", error);
       try {
@@ -514,14 +546,15 @@
       .sort((a, b) => Number(a) - Number(b));
   }
 
-  function expectedBatchStartsFromPlan(plan) {
+  function expectedBatchStartsFromPlan(plan, maxEpisodes = 0) {
     const starts = new Set();
+    const episodeLimit = Number(maxEpisodes) > 0 ? Number(maxEpisodes) : 0;
     (Array.isArray(plan) ? plan : []).forEach((item, index) => {
       const episode = Number(
         (item && (item.episode || item.episodeNumber || item.episode_number || item.ep))
         || index + 1
       );
-      if (Number.isFinite(episode) && episode > 0) {
+      if (Number.isFinite(episode) && episode > 0 && (!episodeLimit || episode <= episodeLimit)) {
         starts.add(String(Math.floor((episode - 1) / 5) * 5 + 1));
       }
     });
@@ -530,20 +563,30 @@
 
   function expectedStage11Starts() {
     const stage10 = (state.scriptStages || {}).stage10 || {};
-    return expectedBatchStartsFromPlan(stage10Plan(stage10));
+    const plan = stage10Plan(stage10);
+    const total = inferTotalEpisodes(plan, state.importedFrameworkAsset);
+    return expectedBatchStartsFromPlan(plan, total);
+  }
+
+  function batchesForExpectedStarts(value, expected = expectedStage11Starts()) {
+    const batches = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    if (!expected.length) return Object.assign({}, batches);
+    const allowed = new Set(expected.map((key) => String(key)));
+    return Object.fromEntries(Object.entries(batches).filter(([key]) => allowed.has(String(key))));
   }
 
   function stage11Completion() {
     const expected = expectedStage11Starts();
-    const done = numericKeys(((state.scriptStages || {}).stage11 || {}).batches);
-    return { expected, done, complete: Boolean(expected.length && done.length >= expected.length) };
+    const done = numericKeys(batchesForExpectedStarts(((state.scriptStages || {}).stage11 || {}).batches, expected));
+    return { expected, done, complete: Boolean(expected.length && !missingBatchStarts(expected, done).length) };
   }
 
   function stage12Completion() {
-    const stage11 = ((state.scriptStages || {}).stage11 || {});
-    const expected = numericKeys(stage11.batches);
-    const done = numericKeys(((state.scriptStages || {}).stage12 || {}).batches);
-    return { expected, done, complete: Boolean(expected.length && done.length >= expected.length) };
+    const expected = expectedStage11Starts();
+    const stage11Done = numericKeys(batchesForExpectedStarts(((state.scriptStages || {}).stage11 || {}).batches, expected));
+    const done = numericKeys(batchesForExpectedStarts(((state.scriptStages || {}).stage12 || {}).batches, expected));
+    const readyExpected = expected.filter((key) => stage11Done.includes(String(key)));
+    return { expected, done, complete: Boolean(expected.length && readyExpected.length === expected.length && !missingBatchStarts(expected, done).length) };
   }
 
   function missingBatchStarts(expected, done) {
@@ -556,11 +599,13 @@
     if (!start) return "";
     const plan = stage10Plan((state.scriptStages || {}).stage10 || {});
     const total = inferTotalEpisodes(plan, state.importedFrameworkAsset);
+    if (total && start > total) return "";
     const end = total ? Math.min(total, start + 4) : start + 4;
     return `${start}-${end}集`;
   }
 
   function runningProgressText(stage) {
+    if (String(state.runningStage || "") !== String(stage || "")) return "";
     const progress = state.runningProgress || {};
     if (String(progress.stage || "") !== String(stage || "")) return "";
     if (state.runningRetryMessage) return state.runningRetryMessage;
@@ -662,6 +707,56 @@
     render();
   }
 
+  function stageBatchHasOutput(stage, startEpisode) {
+    const stageData = (state.scriptStages || {})[`stage${String(stage || "").padStart(2, "0")}`] || {};
+    const batches = batchesForExpectedStarts(stageData.batches || {});
+    const batch = batches[String(startEpisode)] || {};
+    if (String(stage) === "11") {
+      return hasContent(batch.batchCausalConflictPlan || batch.batch_causal_conflict_plan);
+    }
+    return hasContent(batch.batchScriptText || batch.batch_script_text);
+  }
+
+  async function syncStageProgressFromAsset(stage, startEpisode) {
+    if (!state.frameworkAssetId) return false;
+    const data = await requestJson(`/api/framework-assets/${encodeURIComponent(state.frameworkAssetId)}`);
+    const asset = data.asset || {};
+    const workspaceState = asset.framework_to_script_state || {};
+    const remoteStages = normalizeScriptStagesFromOutputs(
+      asset.scriptStages || workspaceState.scriptStages || {},
+      { ...(asset.stage_outputs || {}), ...(workspaceState.stageOutputs || {}) }
+    );
+    const stageKey = `stage${String(stage || "").padStart(2, "0")}`;
+    const remoteStage = remoteStages[stageKey] || {};
+    if (String(stage) === "11" && hasContent(remoteStage)) mergeStage11(remoteStage);
+    if (String(stage) === "12" && hasContent(remoteStage)) mergeStage12(remoteStage);
+    saveWorkspace();
+    return stageBatchHasOutput(stage, startEpisode);
+  }
+
+  async function waitForExistingStageRun(stage, startEpisode) {
+    const range = batchRangeForStart(startEpisode) || "当前批次";
+    const deadline = Date.now() + Math.min(RESILIENT_STAGE_REQUEST_TIMEOUT_MS, 12 * 60 * 1000);
+    while (Date.now() < deadline) {
+      state.runningRetryMessage = `${range}已有请求正在后端处理，正在等待并同步结果...`;
+      render();
+      try {
+        const params = new URLSearchParams({ framework_asset_id: String(state.frameworkAssetId || "") });
+        const status = await requestJson(`/api/framework-to-script/running-stage?${params.toString()}`);
+        if (!status.backend_running || String(status.running_stage || "") !== String(stage || "")) {
+          const recovered = await syncStageProgressFromAsset(stage, startEpisode);
+          state.runningRetryMessage = "";
+          render();
+          return recovered;
+        }
+      } catch (_) {
+        // A transient status read must not start another model request.
+      }
+      await delay(4000);
+    }
+    throw new Error(`${range}后端请求仍在运行，等待超过12分钟。请稍后刷新，已完成结果会自动恢复。`);
+  }
+
   async function runResilientStageBatch(stage, startEpisode, operation) {
     let attempt = 1;
     while (attempt <= RESILIENT_STAGE_MAX_RETRY_ATTEMPTS) {
@@ -670,6 +765,21 @@
         render();
         return await operation(attempt);
       } catch (error) {
+        if (Number(error && error.status || 0) === 409) {
+          const recovered = await waitForExistingStageRun(stage, startEpisode);
+          if (recovered) return;
+          attempt += 1;
+          continue;
+        }
+        const status = Number(error && error.status || 0);
+        const retryableStatus = [408, 425, 429, 502, 503, 504].includes(status);
+        const retryableNetworkError = !status && (
+          (error && error.name === "AbortError")
+          || /network|fetch|网络|长时间无响应|连接/i.test(String(error && error.message || ""))
+        );
+        if (!retryableStatus && !retryableNetworkError) {
+          throw error;
+        }
         if (attempt >= RESILIENT_STAGE_MAX_RETRY_ATTEMPTS) {
           throw new Error(`${resilientStageLabel(stage)}自动重试 ${attempt} 次后仍未完成：${formatRetryError(error)}。已保留已完成批次，可重新点击继续。`);
         }
@@ -741,7 +851,8 @@
     const incomingBatches = data && data.batches && typeof data.batches === "object" && !Array.isArray(data.batches)
       ? data.batches
       : {};
-    const mergedBatches = Object.assign({}, currentBatches, incomingBatches);
+    const expectedStarts = expectedStage11Starts();
+    const mergedBatches = batchesForExpectedStarts(Object.assign({}, currentBatches, incomingBatches), expectedStarts);
     const startEpisode = data.batchStartEpisode || data.batch_start_episode || data.startEpisode || data.start_episode;
     const endEpisode = data.batchEndEpisode || data.batch_end_episode || data.endEpisode || data.end_episode;
     const conflictPlan = data.batchCausalConflictPlan || data.batch_causal_conflict_plan;
@@ -766,6 +877,8 @@
       );
     }
 
+    const prunedBatches = batchesForExpectedStarts(mergedBatches, expectedStarts);
+
     state.scriptStages.stage11 = {
       batchStartEpisode: startEpisode || current.batchStartEpisode,
       batchEndEpisode: endEpisode || current.batchEndEpisode,
@@ -773,7 +886,7 @@
       batchCausalConflictPlan: conflictPlan || current.batchCausalConflictPlan,
       batchCausalConflictReview: conflictReview || current.batchCausalConflictReview,
       conflictMemory: conflictMemory || current.conflictMemory,
-      batches: mergedBatches,
+      batches: prunedBatches,
       updated_at: new Date().toISOString(),
     };
   }
@@ -788,7 +901,8 @@
       ? data.batches
       : {};
 
-    const mergedBatches = Object.assign({}, currentBatches, incomingBatches);
+    const expectedStarts = expectedStage11Starts();
+    const mergedBatches = batchesForExpectedStarts(Object.assign({}, currentBatches, incomingBatches), expectedStarts);
 
     const startEpisode = data.batchStartEpisode || data.batch_start_episode || data.startEpisode || data.start_episode;
     const endEpisode = data.batchEndEpisode || data.batch_end_episode || data.endEpisode || data.end_episode;
@@ -813,6 +927,8 @@
       );
     }
 
+    const prunedBatches = batchesForExpectedStarts(mergedBatches, expectedStarts);
+
     state.scriptStages.stage12 = {
       batchStartEpisode: startEpisode || current.batchStartEpisode,
       batchEndEpisode: endEpisode || current.batchEndEpisode,
@@ -821,7 +937,7 @@
       batchScriptText: batchScriptText || current.batchScriptText,
       batchScriptReview: batchScriptReview || current.batchScriptReview,
       scriptMemory: data.scriptMemory || data.script_memory || current.scriptMemory,
-      batches: mergedBatches,
+      batches: prunedBatches,
       updated_at: new Date().toISOString(),
     };
   }
@@ -927,6 +1043,107 @@
       || (outputs.framework_enriched_episode_plan || {}).allEnrichedEpisodePlanText
       || (outputs.framework_enriched_episode_plan || {}).enrichedEpisodePlanText
       || "";
+  }
+
+  function restoreStage11FromOutputs(stageOutputs = {}) {
+    const plan = stageOutputs.framework_causal_conflict_plan || stageOutputs.stage11 || {};
+    const batchPlan = plan.batchCausalConflictPlan
+      || plan.batch_causal_conflict_plan
+      || stageOutputs.batchCausalConflictPlan
+      || stageOutputs.batch_causal_conflict_plan
+      || {};
+    const batches = hasObject(plan.batches)
+      ? plan.batches
+      : (hasObject(batchPlan) && (batchPlan.batchStartEpisode || batchPlan.batch_start_episode)
+        ? { [String(batchPlan.batchStartEpisode || batchPlan.batch_start_episode)]: {
+          batchStartEpisode: batchPlan.batchStartEpisode || batchPlan.batch_start_episode,
+          batchEndEpisode: batchPlan.batchEndEpisode || batchPlan.batch_end_episode || "",
+          batchCausalConflictPlan: batchPlan,
+        } }
+        : {});
+    if (!hasObject(plan) && !hasObject(batchPlan) && !hasObject(batches)) return {};
+    const conflictMemory = plan.conflictMemory
+      || plan.conflict_memory
+      || stageOutputs.conflictMemory
+      || stageOutputs.conflict_memory
+      || "";
+    return {
+      ...plan,
+      framework_causal_conflict_plan: plan,
+      batchCausalConflictPlan: batchPlan,
+      batch_causal_conflict_plan: plan.batch_causal_conflict_plan || batchPlan,
+      batchCausalConflictReview: plan.batchCausalConflictReview || plan.batch_causal_conflict_review || {},
+      batch_causal_conflict_review: plan.batch_causal_conflict_review || plan.batchCausalConflictReview || {},
+      batches,
+      conflictMemory,
+      conflict_memory: plan.conflict_memory || conflictMemory,
+      updated_at: plan.updated_at || new Date().toISOString(),
+    };
+  }
+
+  function restoreStage12FromOutputs(stageOutputs = {}, stage11 = {}) {
+    const script = stageOutputs.framework_script_text || stageOutputs.stage12 || {};
+    const batchText = script.batchScriptText
+      || script.batch_script_text
+      || stageOutputs.batchScriptText
+      || stageOutputs.batch_script_text
+      || "";
+    const stage11BatchKeys = numericKeys((stage11 || {}).batches);
+    const inferredStartEpisode = script.batchStartEpisode
+      || script.batch_start_episode
+      || stageOutputs.batchStartEpisode
+      || stageOutputs.batch_start_episode
+      || stage11BatchKeys[0]
+      || "";
+    const inferredEndEpisode = script.batchEndEpisode
+      || script.batch_end_episode
+      || stageOutputs.batchEndEpisode
+      || stageOutputs.batch_end_episode
+      || (inferredStartEpisode ? Number(inferredStartEpisode) + 4 : "");
+    const batches = hasObject(script.batches)
+      ? script.batches
+      : (hasContent(batchText) && inferredStartEpisode
+        ? { [String(inferredStartEpisode)]: {
+          batchStartEpisode: inferredStartEpisode,
+          batchEndEpisode: inferredEndEpisode,
+          batchScriptText: batchText,
+        } }
+        : {});
+    if (!hasObject(script) && !hasContent(batchText) && !hasObject(batches)) return {};
+    const scriptMemory = script.scriptMemory
+      || script.script_memory
+      || stageOutputs.scriptMemory
+      || stageOutputs.script_memory
+      || "";
+    return {
+      ...script,
+      framework_script_text: script,
+      batchStartEpisode: script.batchStartEpisode || script.batch_start_episode || inferredStartEpisode,
+      batchEndEpisode: script.batchEndEpisode || script.batch_end_episode || inferredEndEpisode,
+      batchScriptText: batchText,
+      batch_script_text: script.batch_script_text || batchText,
+      batchScriptReview: script.batchScriptReview || script.batch_script_review || {},
+      batch_script_review: script.batch_script_review || script.batchScriptReview || {},
+      batches,
+      scriptMemory,
+      script_memory: script.script_memory || scriptMemory,
+      updated_at: script.updated_at || new Date().toISOString(),
+    };
+  }
+
+  function normalizeScriptStagesFromOutputs(scriptStages = {}, stageOutputs = {}) {
+    const next = { ...(scriptStages || {}) };
+    const stage11 = next.stage11 || {};
+    const restoredStage11 = restoreStage11FromOutputs(stageOutputs);
+    if (!numericKeys(stage11.batches).length && hasObject(restoredStage11)) {
+      next.stage11 = { ...restoredStage11, ...stage11, batches: stage11.batches || restoredStage11.batches };
+    }
+    const stage12 = next.stage12 || {};
+    const restoredStage12 = restoreStage12FromOutputs(stageOutputs, next.stage11 || {});
+    if (!numericKeys(stage12.batches).length && hasObject(restoredStage12)) {
+      next.stage12 = { ...restoredStage12, ...stage12, batches: stage12.batches || restoredStage12.batches };
+    }
+    return next;
   }
 
   function chineseNumberToInt(text) {
@@ -1155,7 +1372,7 @@
   }
 
   function renderStage11Batches(stage11) {
-    const batches = stage11.batches || {};
+    const batches = batchesForExpectedStarts(stage11.batches || {});
     const keys = numericKeys(batches);
     if (!keys.length && hasContent(stage11.batchCausalConflictPlan)) {
       return `
@@ -1177,7 +1394,7 @@
   }
 
   function renderStage12Batches(stage12) {
-    const batches = stage12.batches || {};
+    const batches = batchesForExpectedStarts(stage12.batches || {});
     const keys = numericKeys(batches);
     if (!keys.length && hasContent(stage12.batchScriptText || stage12.batch_script_text)) {
       return `
@@ -1262,11 +1479,12 @@
       state.stageOutputs = { ...(asset.stage_outputs || {}), ...(workspaceState.stageOutputs || {}) };
       state.stages = workspaceState.stages || {};
       state.completedStages = Array.isArray(workspaceState.completedStages) ? workspaceState.completedStages : [];
-      state.scriptStages = asset.scriptStages || workspaceState.scriptStages || {};
+      state.scriptStages = normalizeScriptStagesFromOutputs(asset.scriptStages || workspaceState.scriptStages || {}, state.stageOutputs);
       state.runningStartedAt = workspaceState.runningStartedAt || workspaceState.running_started_at || "";
       state.runningProgress = workspaceState.runningProgress || workspaceState.running_progress || null;
       state.runningRetryMessage = workspaceState.runningRetryMessage || workspaceState.running_retry_message || "";
       state.runningRetryCountdown = Number(workspaceState.runningRetryCountdown || workspaceState.running_retry_countdown || 0);
+      if (!state.runningStage) stopRunningProgress();
       state.frameworkSource = state.frameworkSource === "刚刚完成的框架" ? "刚刚完成的框架" : "我的资产 / 框架资产";
       setPreferenceSnapshot(asset.preference_snapshot || {}, "framework_asset_snapshot");
       const stage10 = state.scriptStages.stage10 || {};
@@ -1431,7 +1649,7 @@
       state.importedFrameworkAsset = asset;
       state.frameworkPlanPackage = asset.framework_plan_package || {};
       state.stageOutputs = asset.stage_outputs || {};
-      state.scriptStages = asset.scriptStages || {};
+      state.scriptStages = normalizeScriptStagesFromOutputs(asset.scriptStages || {}, state.stageOutputs);
       const importedHasStage10 = hasContent(stage10Plan(state.scriptStages.stage10 || {})) || hasContent(stage10Text(state.scriptStages.stage10 || {}));
       state.stages = importedHasStage10 ? { 10: { status: "completed", stage_key: "stage10", updated_at: new Date().toISOString() } } : {};
       state.completedStages = importedHasStage10 ? ["10"] : [];
@@ -1718,11 +1936,13 @@
     }
     const resetStage11 = Boolean(options.resetStage11);
     if (resetStage11 && !options.skipConfirm && !window.confirm("重新运行 11 会覆盖开头冲突钩子，并清空 12 正文批次。继续吗？")) return;
-    const expectedStarts = expectedBatchStartsFromPlan(allEnrichedEpisodePlan);
+    const expectedStarts = expectedStage11Starts();
     if (resetStage11) {
       state.scriptStages.stage11 = {};
+      clearStageCompletion("11", "12");
     }
     state.scriptStages.stage12 = {};
+    clearStageCompletion("12");
     saveRunningStage("11");
     state.error = null;
     clearStageFailure("11");
@@ -1757,20 +1977,25 @@
           mergeStage11(data);
           saveWorkspace();
           render();
-          const latestAfterCount = numericKeys((state.scriptStages.stage11 || {}).batches).length;
-          const latestAfterMissing = missingBatchStarts(expectedStarts, numericKeys((state.scriptStages.stage11 || {}).batches));
+          const latestAfterBatches = batchesForExpectedStarts((state.scriptStages.stage11 || {}).batches, expectedStarts);
+          const latestAfterCount = numericKeys(latestAfterBatches).length;
+          const latestAfterMissing = missingBatchStarts(expectedStarts, numericKeys(latestAfterBatches));
           if (latestAfterMissing.length && latestAfterCount <= latestBeforeCount) {
             throw new Error(`后端返回后未新增批次，仍缺少第 ${latestAfterMissing[0]} 集起。`);
           }
         });
         firstRequest = false;
       }
-      const finalMissing = missingBatchStarts(expectedStarts, numericKeys((state.scriptStages.stage11 || {}).batches));
+      const finalMissing = missingBatchStarts(
+        expectedStarts,
+        numericKeys(batchesForExpectedStarts((state.scriptStages.stage11 || {}).batches, expectedStarts))
+      );
       if (finalMissing.length) {
         throw new Error(`11 未完成全部批次，剩余第 ${finalMissing.join("、")} 集起。`);
       }
-      saveWorkspace();
+      markStageCompleted("11");
       clearStageFailure("11");
+      await saveWorkspaceToAsset();
     } catch (error) {
       markStageFailure("11", error, "11 开头冲突钩子失败");
     } finally {
@@ -1790,11 +2015,23 @@
     if (!stage11Completion().complete) {
       await runStage11();
       if (state.error) return;
+      if (!stage11Completion().complete) {
+        state.error = "11 开头冲突钩子尚未完成，12 正文及对话已暂停。请先完成 11 后再运行 12。";
+        render();
+        return;
+      }
     }
     const resetStage12 = Boolean(options.resetStage12);
     if (resetStage12 && !options.skipConfirm && !window.confirm("重新运行 12 会覆盖已生成的正文批次。继续吗？")) return;
     if (resetStage12) {
       state.scriptStages.stage12 = {};
+      clearStageCompletion("12");
+    }
+    const expectedStarts = expectedStage11Starts();
+    if (!expectedStarts.length) {
+      state.error = "第10阶段没有可用的分集批次，请先重新运行10。";
+      render();
+      return;
     }
     saveRunningStage("12");
     state.error = null;
@@ -1807,25 +2044,34 @@
         guard += 1;
         const currentStage11 = state.scriptStages.stage11 || {};
         const currentStage12 = state.scriptStages.stage12 || {};
-        const stage11Keys = numericKeys(currentStage11.batches);
-        const expectedCount = stage11Keys.length || (hasContent(currentStage11.batchCausalConflictPlan) ? 1 : 0);
-        const beforeCount = numericKeys(currentStage12.batches).length;
-        const beforeMissing = missingBatchStarts(stage11Keys, numericKeys(currentStage12.batches));
-        if (expectedCount && !beforeMissing.length) break;
-        const batchStart = beforeMissing[0] || stage11Keys[beforeCount] || stage11Keys[0];
+        const currentStage11Batches = batchesForExpectedStarts(currentStage11.batches, expectedStarts);
+        const currentStage12Batches = batchesForExpectedStarts(currentStage12.batches, expectedStarts);
+        const stage11Keys = numericKeys(currentStage11Batches);
+        const beforeCount = numericKeys(currentStage12Batches).length;
+        const beforeMissing = missingBatchStarts(expectedStarts, numericKeys(currentStage12Batches));
+        const unavailableStarts = missingBatchStarts(expectedStarts, stage11Keys);
+        if (unavailableStarts.length) {
+          throw new Error(`11 缺少第 ${unavailableStarts.join("、")} 集起的有效批次，不能继续生成正文。`);
+        }
+        if (!beforeMissing.length) break;
+        const batchStart = beforeMissing[0];
         await runResilientStageBatch("12", batchStart, async () => {
           const latestStage11 = state.scriptStages.stage11 || {};
           const latestStage12 = state.scriptStages.stage12 || {};
-          const latestStage11Keys = numericKeys(latestStage11.batches);
-          const latestBeforeCount = numericKeys(latestStage12.batches).length;
+          const latestStage11Batches = batchesForExpectedStarts(latestStage11.batches, expectedStarts);
+          const latestStage12Batches = batchesForExpectedStarts(latestStage12.batches, expectedStarts);
+          const latestStage11Keys = numericKeys(latestStage11Batches);
+          const latestBeforeCount = numericKeys(latestStage12Batches).length;
+          const sanitizedStage11 = Object.assign({}, latestStage11, { batches: latestStage11Batches });
+          const sanitizedStage12 = Object.assign({}, latestStage12, { batches: latestStage12Batches });
           const data = await requestJsonWithTimeout("/api/framework-to-script/stage/12", {
             method: "POST",
             body: JSON.stringify(attachKnowledgePayload({
               ...frameworkRequestBase(),
               stage08: state.scriptStages.stage08 || {},
               stage09: state.scriptStages.stage09 || {},
-              stage11: latestStage11,
-              stage12: latestStage12,
+              stage11: sanitizedStage11,
+              stage12: resetStage12 && firstRequest ? {} : sanitizedStage12,
               batchStartEpisode: batchStart,
               batch_start_episode: batchStart,
               reset_stage12: resetStage12 && firstRequest,
@@ -1834,21 +2080,25 @@
           mergeStage12(data);
           saveWorkspace();
           render();
-          const latestAfterCount = numericKeys((state.scriptStages.stage12 || {}).batches).length;
-          const latestAfterMissing = missingBatchStarts(latestStage11Keys, numericKeys((state.scriptStages.stage12 || {}).batches));
+          const latestAfterBatches = batchesForExpectedStarts((state.scriptStages.stage12 || {}).batches, expectedStarts);
+          const latestAfterCount = numericKeys(latestAfterBatches).length;
+          const latestAfterMissing = missingBatchStarts(latestStage11Keys, numericKeys(latestAfterBatches));
           if (latestAfterMissing.length && latestAfterCount <= latestBeforeCount) {
             throw new Error(`后端返回后未新增正文批次，仍缺少第 ${latestAfterMissing[0]} 集起。`);
           }
         });
         firstRequest = false;
       }
-      const finalStage11Keys = numericKeys((state.scriptStages.stage11 || {}).batches);
-      const finalMissing = missingBatchStarts(finalStage11Keys, numericKeys((state.scriptStages.stage12 || {}).batches));
+      const finalMissing = missingBatchStarts(
+        expectedStarts,
+        numericKeys(batchesForExpectedStarts((state.scriptStages.stage12 || {}).batches, expectedStarts))
+      );
       if (finalMissing.length) {
         throw new Error(`12 未完成全部正文批次，剩余第 ${finalMissing.join("、")} 集起。`);
       }
-      saveWorkspace();
+      markStageCompleted("12");
       clearStageFailure("12");
+      await saveWorkspaceToAsset();
     } catch (error) {
       markStageFailure("12", error, "12 正文及对话失败");
     } finally {
@@ -2470,6 +2720,7 @@
     importStructuredFrameworkFile(file);
   });
 
+  state.scriptStages = normalizeScriptStagesFromOutputs(state.scriptStages, state.stageOutputs);
   restoreRunningStage();
   reconcileRunningStageResult();
   render();

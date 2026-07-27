@@ -6518,7 +6518,6 @@ function renderToolForm(toolKey) {
             ${isToolAsset(item) ? "" : isFrameworkPlannerAsset(item)
               ? `<button class="btn btn-secondary" data-action="open-framework-asset" data-project-id="${escapeHtml(item.project_id)}">打开框架</button>`
               : `<button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>`}
-            ${isToolAsset(item) || isFrameworkPlannerAsset(item) ? "" : `<button class="btn btn-neutral" data-action="open-project-page" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>`}
             ${isSitcomAsset(item)
               ? `<button class="btn btn-edit" data-action="open-sitcom-asset" data-project-id="${escapeHtml(item.project_id)}">打开情景剧</button>`
               : `<button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">打开查看</button>`}
@@ -7268,8 +7267,6 @@ function renderToolForm(toolKey) {
           }
           closeProfilePanel();
           await loadProjectDetail(projectId, { restoreInputs: true, scroll: false });
-        } else if (button.dataset.action === "open-project-page") {
-          openWorkspaceInNewPage({ projectId });
         } else if (button.dataset.action === "open-sitcom-asset") {
           await openSitcomAsset(projectId);
         } else if (button.dataset.action === "edit-asset") {

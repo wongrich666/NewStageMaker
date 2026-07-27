@@ -1,0 +1,554 @@
+from __future__ import annotations
+
+import base64
+import gzip
+import json
+from pathlib import Path
+
+import pytest
+import requests
+
+from workflow_code_skeleton.app.services.codebuddy_npc import (
+    CodeBuddyNpcClient,
+    CodeBuddyNpcConfig,
+    CodeBuddyNpcError,
+    CodeBuddyNpcJobStore,
+    public_job,
+)
+from workflow_code_skeleton.app.services.codebuddy_npc_stage_runner import (
+    CodeBuddyNpcStageRunner,
+    _compact_story_state,
+    _episode_slice,
+)
+
+
+class _Response:
+    def __init__(self, payload, status_code: int = 200) -> None:
+        self._payload = payload
+        self.status_code = status_code
+        self.text = json.dumps(payload, ensure_ascii=False)
+
+    def json(self):
+        return self._payload
+
+
+class _Session:
+    def __init__(self, responses) -> None:
+        self.responses = list(responses)
+        self.calls = []
+
+    def request(self, method, url, **kwargs):
+        self.calls.append((method, url, kwargs))
+        return self.responses.pop(0)
+
+
+class _DnsRetrySession(_Session):
+    def request(self, method, url, **kwargs):
+        self.calls.append((method, url, kwargs))
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+def _config(tmp_path: Path, **overrides) -> CodeBuddyNpcConfig:
+    values = {
+        "api_base": "https://api.cnb.cool",
+        "repository": "demo/script-team",
+        "access_token": "token",
+        "event": "api_trigger_script_team_custom_api",
+        "model": "deepseek-v4-pro",
+        "context_window": "1m",
+        "branch": "main",
+        "timeout": 10,
+        "callback_token": "",
+        "job_dir": tmp_path,
+    }
+    values.update(overrides)
+    return CodeBuddyNpcConfig(**values)
+
+
+def test_job_store_preserves_request_and_user_boundary(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={
+            "project_title": "测试剧",
+            "production_type": "AI真人剧",
+            "episodes": 5,
+            "episode_word_count": 800,
+            "source_text": "一个不能被忘记的约定。",
+        },
+    )
+
+    assert job["request"]["project_title"] == "测试剧"
+    assert store.load(job["job_id"], user_id=7)["user_id"] == 7
+    assert store.load(job["job_id"], user_id=8) is None
+
+
+def test_job_store_returns_latest_job_for_user(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    first = store.create(
+        user_id=7,
+        request_payload={"project_title": "first", "source_text": "first source"},
+    )
+    second = store.create(
+        user_id=7,
+        request_payload={"project_title": "second", "source_text": "second source"},
+    )
+    store.create(
+        user_id=8,
+        request_payload={"project_title": "other", "source_text": "other source"},
+    )
+    first["updated_at"] = "2026-01-01T00:00:00+00:00"
+    store.save(first)
+    second["updated_at"] = "2026-01-02T00:00:00+00:00"
+    store.save(second)
+
+    assert store.latest(user_id=7)["job_id"] == second["job_id"]
+    assert store.latest(user_id=9) is None
+
+
+def test_client_stops_remote_build_with_official_endpoint(tmp_path: Path) -> None:
+    session = _Session([_Response({"success": True})])
+    client = CodeBuddyNpcClient(_config(tmp_path), session=session)
+
+    result = client.stop_build("cnb-demo-123")
+
+    assert result == {"success": True}
+    method, url, _kwargs = session.calls[0]
+    assert method == "POST"
+    assert url == "https://api.cnb.cool/demo/script-team/-/build/stop/cnb-demo-123"
+
+
+def test_job_store_lists_and_deletes_history(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={"project_title": "历史剧本", "source_text": "历史内容"},
+    )
+    job["final_script"] = "第1集\n场景1：家｜夜｜内\n人物：林深\n场景任务：回家\n道具：钥匙"
+    store.save(job)
+
+    assert [item["job_id"] for item in store.list(user_id=7)] == [job["job_id"]]
+    assert store.delete(job["job_id"], user_id=8) is False
+    assert store.delete(job["job_id"], user_id=7) is True
+    assert store.list(user_id=7) == []
+
+
+def test_editing_upstream_artifact_invalidates_downstream(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={"project_title": "节点修改", "source_text": "父子诀别"},
+    )
+    job["recovered_files"] = {
+        "contract": "旧合同",
+        "story": "旧架构",
+        "characters": "旧人物",
+        "episodes": "旧分集",
+        "draft": "旧初稿",
+        "story_state": '{"schema_version":"1.0"}',
+    }
+    job["final_script"] = "旧终稿"
+    store.save(job)
+
+    updated = CodeBuddyNpcStageRunner(store).edit_artifact(
+        job_id=job["job_id"],
+        user_id=7,
+        artifact_key="story",
+        content="新架构",
+    )
+
+    assert updated["recovered_files"]["contract"] == "旧合同"
+    assert updated["recovered_files"]["story"] == "新架构"
+    assert "characters" not in updated["recovered_files"]
+    assert updated["final_script"] == ""
+    assert updated["stage_versions"]["story"][-1]["content"] == "旧架构"
+
+
+def test_local_runner_can_stop_after_framework_team_stage(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={"project_title": "框架任务", "source_text": "父子诀别"},
+    )
+    runner = CodeBuddyNpcStageRunner(store)
+    executed: list[str] = []
+
+    def fake_execute(current_job, stage, feedback):
+        executed.append(stage)
+        artifact = {
+            "showrunner": "contract",
+            "story_architect": "story",
+            "character_emotion": "characters",
+            "episode_continuity": "episodes",
+        }[stage]
+        fresh = store.load(job["job_id"], user_id=7)
+        recovered = dict(fresh.get("recovered_files") or {})
+        recovered[artifact] = f"{stage} output"
+        fresh["recovered_files"] = recovered
+        store.save(fresh)
+
+    runner._execute_stage = fake_execute
+    runner._run(
+        job_id=job["job_id"],
+        user_id=7,
+        start_stage="showrunner",
+        feedback="",
+        continue_after=True,
+        stop_after_stage="episode_continuity",
+    )
+
+    finished = store.load(job["job_id"], user_id=7)
+    assert executed == [
+        "showrunner",
+        "story_architect",
+        "character_emotion",
+        "episode_continuity",
+    ]
+    assert finished["status"] == "completed_scope"
+    assert finished["progress"] == 100
+    assert "episodes" in finished["recovered_files"]
+    assert "draft" not in finished["recovered_files"]
+
+
+def test_job_store_materializes_recovered_stage_files(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={"project_title": "恢复测试", "source_text": "中断任务"},
+    )
+    job["recovered_files"] = {
+        "contract": "创作合同正文",
+        "draft": "第1集\n初稿正文",
+        "story_state": '{"schema_version":"1.0"}',
+    }
+    job["final_script"] = "第1集\n最终正文"
+    job["quality_gate"] = {"ok": True, "errors": [], "warnings": []}
+
+    saved = store.save(job)
+    artifact_dir = tmp_path / job["job_id"]
+
+    assert (artifact_dir / "01_contract.md").read_text(encoding="utf-8") == "创作合同正文"
+    assert (artifact_dir / "05_draft.txt").read_text(encoding="utf-8").startswith("第1集")
+    assert (artifact_dir / "final_script.txt").read_text(encoding="utf-8") == "第1集\n最终正文"
+    assert json.loads((artifact_dir / "gate_final.json").read_text(encoding="utf-8"))["ok"] is True
+    assert {item["key"] for item in saved["artifact_files"]} == {
+        "contract",
+        "draft",
+        "story_state",
+        "final_script",
+        "quality_gate",
+    }
+
+
+def test_job_store_uses_numeric_episode_count_as_hard_contract(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+
+    job = store.create(
+        user_id=7,
+        request_payload={
+            "project_title": "狼人复仇",
+            "episodes": 5,
+            "source_text": "狼人复仇计划",
+            "adaptation_direction": (
+                "第一句形成五秒钩子；只用一个核心场景；"
+                "最终文件只能是第1集剧本正文。"
+            ),
+        },
+    )
+
+    assert job["request"]["episodes"] == 5
+    assert "第1集至第5集" in job["request"]["episode_contract"]
+    assert "只用一个核心场景" in job["request"]["adaptation_direction"]
+    assert "最终文件只能是第1集" not in job["request"]["adaptation_direction"]
+    assert "总集数 5 集" in job["request_warnings"][0]
+
+
+@pytest.mark.parametrize("episodes", [1, 3, 12, 120])
+def test_job_store_builds_dynamic_episode_contract(tmp_path: Path, episodes: int) -> None:
+    job = CodeBuddyNpcJobStore(_config(tmp_path)).create(
+        user_id=7,
+        request_payload={
+            "project_title": f"{episodes}集项目",
+            "episodes": episodes,
+            "source_text": "动态集数测试",
+        },
+    )
+
+    assert job["request"]["episodes"] == episodes
+    assert f"共{episodes}集" in job["request"]["episode_contract"]
+
+
+def test_trigger_uses_one_async_cnb_build(tmp_path: Path) -> None:
+    session = _Session(
+        [_Response({"success": True, "sn": "build-1", "buildLogUrl": "https://log"})]
+    )
+    config = _config(tmp_path)
+    client = CodeBuddyNpcClient(config, session=session)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "钩子测试", "source_text": "父亲让我快跑。"},
+    )
+
+    result = client.trigger(job)
+
+    assert result["sn"] == "build-1"
+    method, url, kwargs = session.calls[0]
+    assert method == "POST"
+    assert url.endswith("/demo/script-team/-/build/start")
+    assert kwargs["headers"]["Authorization"] == "Bearer token"
+    assert kwargs["json"]["event"] == "api_trigger_script_team_custom_api"
+    assert kwargs["json"]["sync"] == "false"
+    assert json.loads(kwargs["json"]["env"]["scriptRequest"])["project_title"] == "钩子测试"
+
+
+def test_trigger_stage_uses_remote_event_and_compressed_checkpoint(tmp_path: Path) -> None:
+    session = _Session([_Response({"success": True, "sn": "stage-build"})])
+    config = _config(tmp_path)
+    client = CodeBuddyNpcClient(config, session=session)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "远程分步", "source_text": "父子诀别。"},
+    )
+    job["recovered_files"] = {"contract": "创作合同"}
+
+    result = client.trigger_stage(job, stage="story_architect", feedback="保留结局")
+
+    assert result["remote_stage"] == "story_architect"
+    payload = session.calls[0][2]["json"]
+    assert payload["event"] == "api_trigger_script_team_stage_custom_api"
+    assert payload["env"]["scriptStage"] == "story_architect"
+    checkpoint = json.loads(
+        gzip.decompress(base64.b64decode(payload["env"]["scriptStateBundle"])).decode("utf-8")
+    )
+    assert checkpoint["recovered_files"]["contract"] == "创作合同"
+    assert json.loads(payload["env"]["scriptRequest"])["stage_feedback"] == "保留结局"
+
+
+def test_refresh_remote_stage_recovers_artifact(tmp_path: Path) -> None:
+    status = {
+        "status": "success",
+        "pipelinesStatus": {
+            "pipeline-1": {
+                "id": "pipeline-1",
+                "stages": [{"id": "stage-1", "name": "远程单节点编剧", "status": "success"}],
+            }
+        },
+    }
+    log = {
+        "content": [
+            "__SCRIPT_TEAM_STAGE_BEGIN__",
+            "story_architect",
+            "主线：父亲失踪留下未偿还债务。",
+            "__SCRIPT_TEAM_STAGE_END__",
+        ]
+    }
+    session = _Session([_Response(status), _Response(log)])
+    config = _config(tmp_path)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "远程恢复", "source_text": "父亲失踪。"},
+    )
+    job.update(
+        {
+            "build": {"sn": "stage-build"},
+            "remote_kind": "stage",
+            "remote_stage": "story_architect",
+            "status": "running",
+        }
+    )
+
+    refreshed = CodeBuddyNpcClient(config, session=session).refresh(job)
+
+    assert refreshed["status"] == "stage_ready"
+    assert refreshed["recovered_files"]["story"].startswith("主线")
+
+
+def test_authorization_header_preserves_existing_bearer_prefix(tmp_path: Path) -> None:
+    config = _config(tmp_path, access_token="Bearer token")
+    client = CodeBuddyNpcClient(config, session=_Session([]))
+
+    assert client._headers()["Authorization"] == "Bearer token"
+
+
+def test_client_retries_dns_failure_with_configured_fallback(tmp_path: Path) -> None:
+    session = _DnsRetrySession(
+        [
+            requests.ConnectionError("getaddrinfo failed"),
+            _Response({"status": "running"}),
+        ]
+    )
+    config = _config(tmp_path, fallback_ip="159.75.173.90")
+
+    result = CodeBuddyNpcClient(config, session=session).build_status("build-1")
+
+    assert result["status"] == "running"
+    assert len(session.calls) == 2
+
+
+def test_refresh_reads_final_script_from_completed_stage_log(tmp_path: Path) -> None:
+    status = {
+        "status": "success",
+        "pipelinesStatus": {
+            "pipeline-1": {
+                "id": "pipeline-1",
+                "stages": [
+                    {"id": "stage-1", "name": "终审导演", "status": "success"}
+                ],
+            }
+        },
+    }
+    log = {
+        "content": [
+            "终审开始",
+            "__SCRIPT_TEAM_RESULT_BEGIN__",
+            "第1集\n“跑！别回头！”\n埃里克猛地睁开眼。",
+            "__SCRIPT_TEAM_RESULT_END__",
+        ]
+    }
+    session = _Session([_Response(status), _Response(log)])
+    config = _config(tmp_path)
+    client = CodeBuddyNpcClient(config, session=session)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "连续剧", "source_text": "父子诀别。"},
+    )
+    job["build"] = {"sn": "build-1"}
+    job["status"] = "running"
+    job["poll_warning"] = "temporary network error"
+
+    refreshed = client.refresh(job)
+
+    assert refreshed["status"] == "completed"
+    assert refreshed["progress"] == 100
+    assert "poll_warning" not in refreshed
+    assert refreshed["final_script"].startswith("第1集")
+    assert "跑！别回头！" in refreshed["final_script"]
+
+
+def test_refresh_recovers_final_script_when_strict_gate_failed(tmp_path: Path) -> None:
+    status = {
+        "status": "error",
+        "pipelinesStatus": {
+            "pipeline-1": {
+                "id": "pipeline-1",
+                "stages": [
+                    {"id": "stage-7", "name": "终审与钩子编辑", "status": "success"},
+                    {"id": "stage-8", "name": "最终连续性门禁", "status": "error"},
+                ],
+            }
+        },
+    }
+    final_log = {
+        "content": [
+            "Runner $ printf '%s' 'THE LAST HOWL",
+            "第1集：The Return",
+            "Kael opened the door. Joran stopped breathing.",
+            "' > '.script-team/final_script.txt'",
+        ]
+    }
+    gate_report = {
+        "schema_version": "1.0",
+        "mode": "strict",
+        "ok": False,
+        "errors": [
+            {
+                "code": "state.voice.samples",
+                "message": "Joran必须提供三句声音样本",
+            }
+        ],
+        "warnings": [],
+        "metrics": {},
+    }
+    gate_log = {
+        "content": [
+            "validator start",
+            json.dumps(gate_report, ensure_ascii=False),
+        ]
+    }
+    session = _Session(
+        [
+            _Response(status),
+            _Response(final_log),
+            _Response(gate_log),
+        ]
+    )
+    config = _config(tmp_path)
+    client = CodeBuddyNpcClient(config, session=session)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "狼人剧", "source_text": "狼人归来。"},
+    )
+    job["build"] = {"sn": "build-1"}
+    job["status"] = "running"
+
+    refreshed = client.refresh(job)
+
+    assert refreshed["status"] == "completed_with_warnings"
+    assert refreshed["progress"] == 100
+    assert refreshed["final_script"].startswith("THE LAST HOWL")
+    assert "Kael opened the door" in refreshed["final_script"]
+    assert refreshed["quality_gate"]["ok"] is False
+    assert "Joran必须提供三句声音样本" in refreshed["error"]
+
+
+def test_trigger_reports_missing_connection_settings(tmp_path: Path) -> None:
+    config = _config(tmp_path, repository="", access_token="")
+    client = CodeBuddyNpcClient(config, session=_Session([]))
+
+    with pytest.raises(CodeBuddyNpcError, match="尚未配置"):
+        client.trigger({"job_id": "npc-1", "request": {"project_title": "测试"}})
+
+
+@pytest.mark.parametrize("episode_count", [3, 12, 40])
+def test_compact_story_state_follows_dynamic_episode_count(episode_count: int) -> None:
+    draft = "\n\n".join(
+        f"第{episode}集\n场景1：办公室｜日｜内\n主角：第{episode}集开始。\n主角：第{episode}集结束。"
+        for episode in range(1, episode_count + 1)
+    )
+    payload = json.loads(
+        _compact_story_state(
+            {
+                "request": {
+                    "project_title": "动态剧",
+                    "episodes": episode_count,
+                    "episode_word_count": 600,
+                },
+                "recovered_files": {"draft": draft, "episodes": draft},
+            }
+        )
+    )
+
+    assert payload["project"]["episode_count"] == episode_count
+    assert len(payload["episodes"]) == episode_count
+    assert payload["episodes"][-1]["episode"] == episode_count
+    assert payload["cost_control"]["model_call_used"] is False
+
+
+def test_episode_slice_selects_requested_dynamic_range() -> None:
+    text = "\n".join(f"## 第{episode}集\n内容{episode}" for episode in range(1, 13))
+
+    selected = _episode_slice(text, 6, 10)
+
+    assert "第6集" in selected
+    assert "第10集" in selected
+    assert "第5集" not in selected
+    assert "第11集" not in selected
+
+
+def test_public_job_hides_large_internal_resume_and_stage_logs() -> None:
+    payload = public_job(
+        {
+            "job_id": "npc-test",
+            "user_id": 1,
+            "stage_resume_text": "正文" * 100,
+            "stage_outputs": {"总编剧": "日志"},
+        }
+    )
+
+    assert "stage_resume_text" not in payload
+    assert "stage_outputs" not in payload
+    assert payload["stage_checkpoint_chars"] == 200
+    assert payload["stage_output_keys"] == ["总编剧"]

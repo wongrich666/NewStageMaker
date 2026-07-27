@@ -49,13 +49,13 @@
           </button>
           <button class="wb-skill-card" type="button" data-skill="character_continuity">
             <span class="wb-skill-index">02</span>
-            <strong>人物连续性审查器</strong>
-            <em>人物动机、关系线、角色消失</em>
+            <strong>人物剧情连续审查器</strong>
+            <em>主角推动、集间承接、转场理由</em>
           </button>
           <button class="wb-skill-card" type="button" data-skill="hook_rhythm">
             <span class="wb-skill-index">03</span>
-            <strong>爽点节奏审查员</strong>
-            <em>开篇钩子、文采节奏、集尾反转</em>
+            <strong>前五秒爆点与爽点节奏审查员</strong>
+            <em>强台词先行、删除铺垫、强制改写</em>
           </button>
           <button class="wb-skill-card" type="button" data-skill="logic_holes">
             <span class="wb-skill-index">04</span>
@@ -64,13 +64,8 @@
           </button>
           <button class="wb-skill-card" type="button" data-skill="character_humanity">
             <span class="wb-skill-index">05</span>
-            <strong>人物人情味优化师</strong>
-            <em>真实心理、生活细节、潜台词</em>
-          </button>
-          <button class="wb-skill-card" type="button" data-skill="character_resonance">
-            <span class="wb-skill-index">06</span>
-            <strong>人物画像共鸣评估师</strong>
-            <em>共情入口、画像吸引、读者代入</em>
+            <strong>人物情感共鸣与人情味精修师</strong>
+            <em>心理共鸣、细腻感情、沉浸感、去AI腔</em>
           </button>
         </div>
 
@@ -79,7 +74,7 @@
             <strong>API配置</strong>
             <span id="wbConfigBadge">检测中</span>
           </div>
-          <p id="wbConfigText">正在读取 DeepSeek V4 Pro 配置。</p>
+          <p id="wbConfigText">正在读取剧本 Agent 配置。</p>
           <p id="wbAccountText" class="wb-account-text">账号信息检测中。</p>
           <p id="wbPointsText" class="wb-account-text">积分信息检测中。</p>
           <ul id="wbMissingList" class="wb-missing-list"></ul>
@@ -201,7 +196,7 @@
       <h2 id="wbApiConfigTitle">API 配置</h2>
       <p class="wb-dialog-intro">这里填写的 Key 只保存在当前浏览器，用于本页状态检测和剧本医生调用。不会写入项目代码。</p>
       <label class="wb-api-field">
-        <span>DeepSeek API Key（平台已统一配置）</span>
+        <span>剧本 Agent 凭证（平台已统一配置）</span>
         <input id="wbApiKeyInput" type="password" placeholder="ck_xxx..." autocomplete="off" spellcheck="false" />
       </label>
       <label class="wb-api-field">
@@ -224,6 +219,6 @@
       workspaceUrl: {{ url_for('workspace_page', auth_token=current_auth_token)|tojson }}
     };
   </script>
-  <script src="{{ url_for('static', filename='workbuddy_studio.js') }}?v=20260715-script-doctor-v17"></script>
+  <script src="{{ url_for('static', filename='workbuddy_studio.js') }}?v=20260723-empathy-humanity-merge-v24"></script>
 </body>
 </html>

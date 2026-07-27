@@ -36,6 +36,7 @@
         <a class="sidebar-create-btn" data-nav-icon="◉" href="{{ url_for('agent_studio_page', auth_token=current_auth_token) }}">AI Agent 创作</a>
         <a class="sidebar-create-btn" data-nav-icon="✦" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">新建框架</a>
         <a class="sidebar-create-btn" data-nav-icon="▶" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">框架到剧本</a>
+        <a class="sidebar-create-btn" data-nav-icon="测" href="{{ url_for('new_workflow_test_page', auth_token=current_auth_token) }}">新工作流测试</a>
         <a class="sidebar-create-btn" data-nav-icon="AI" href="{{ url_for('workbuddy_studio_page', auth_token=current_auth_token) }}">AI剧本医生</a>
       </div>
       <section class="sidebar-multi-open" aria-label="新开剧本窗口">
@@ -155,7 +156,7 @@
 
           <div class="workspace-landing__actions">
             <a class="workspace-landing__card primary agent-entry" href="{{ url_for('agent_studio_page', auth_token=current_auth_token) }}">
-              <span class="workspace-landing__card-badge">DEEPSEEK V4 PRO</span>
+              <span class="workspace-landing__card-badge">剧本 AGENT</span>
               <span class="workspace-landing__card-title">对话创作 Agent</span>
               <span class="workspace-landing__card-desc">说出需求，由智能体补齐信息并调度剧本平台执行</span>
             </a>
@@ -168,6 +169,12 @@
             <a class="workspace-landing__card" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">
               <span class="workspace-landing__card-title">框架到剧本</span>
               <span class="workspace-landing__card-desc">进入 08-12 剧本生成流程</span>
+            </a>
+
+            <a class="workspace-landing__card" href="{{ url_for('new_workflow_test_page', auth_token=current_auth_token) }}">
+              <span class="workspace-landing__card-badge">TEST LINE</span>
+              <span class="workspace-landing__card-title">新工作流测试</span>
+              <span class="workspace-landing__card-desc">使用独立 API 运行全新 01-12 工作流，不影响原线路</span>
             </a>
 
             <a class="workspace-landing__card" href="{{ url_for('workbuddy_studio_page', auth_token=current_auth_token) }}">
@@ -468,7 +475,7 @@
   </script>
   <script src="{{ url_for('static', filename='field_labels_cn.js') }}?v=20260527-readable-labels"></script>
   <script src="{{ url_for('static', filename='particles.js') }}?v=20260702-particles-v2"></script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260717-legacy-in-framework-v1"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260727-workspace-cleanup-v2"></script>
   <script src="{{ url_for('static', filename='global_theme.js') }}?v=20260617-cat-theme-v4"></script>
   <script>
     (function() {

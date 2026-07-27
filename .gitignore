@@ -27,3 +27,8 @@ fix_*.py
 *.bak_*
 *_verify.png
 .codex-runtime/
+
+# Local development servers and temporary remote deployment clones
+server_*.log
+.tmp_cnb_*/
+debug_*.txt

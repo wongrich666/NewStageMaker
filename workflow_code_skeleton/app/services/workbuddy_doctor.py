@@ -35,17 +35,17 @@ DOCTOR_SKILLS: tuple[DoctorSkill, ...] = (
     ),
     DoctorSkill(
         key="character_continuity",
-        name="人物连续性审查器",
-        short_name="人物线",
-        description="检查人物动机、关系变化、角色消失、行为反常和情感线跳跃。",
-        focus=("人物动机", "关系兑现", "角色消失", "行为一致性"),
+        name="人物剧情连续审查器",
+        short_name="剧情连续",
+        description="逐集检查核心主角是否推动剧情，以及上集结尾到下集开场的动作、任务和场景是否连续。",
+        focus=("主角推动", "集间承接", "转场理由", "动作连续", "状态一致"),
     ),
     DoctorSkill(
         key="hook_rhythm",
-        name="爽点节奏审查员",
-        short_name="爽点节奏",
-        description="检查开篇阅读钩子、段落与集尾钩子、反转密度、语言质感和爽点兑现。",
-        focus=("开篇钩子", "信息缺口", "集尾钩子", "文采节奏", "爽点兑现"),
+        name="前五秒爆点与爽点节奏审查改写师",
+        short_name="五秒爆点",
+        description="诊断并主动重写黄金五秒；爆点不足时依据人物、旧债、秘密和当集因果创造新钩子，并同步修好后续承接。",
+        focus=("黄金五秒原创改写", "强情绪与私人代价", "因果闭环", "上下文承接", "钩子接力", "爽点兑现"),
     ),
     DoctorSkill(
         key="logic_holes",
@@ -56,19 +56,22 @@ DOCTOR_SKILLS: tuple[DoctorSkill, ...] = (
     ),
     DoctorSkill(
         key="character_humanity",
-        name="人物人情味优化师",
-        short_name="人物人情味",
-        description="检查人物是否拥有真实内心、情绪层次、生活细节、人物化文风和有潜台词的反应，并给出局部优化样例。",
-        focus=("真实心理", "情绪层次", "生活细节", "人物化文风", "潜台词与身体反应"),
-    ),
-    DoctorSkill(
-        key="character_resonance",
-        name="人物画像共鸣评估师",
-        short_name="画像共鸣",
-        description="评估人物登场钩子、画像辨识度、共情入口、欲望与代价，判断目标读者是否愿意理解并追随角色。",
-        focus=("人物登场钩子", "共情入口", "人物吸引力", "欲望与代价", "读者代入"),
+        name="人物情感共鸣与人情味精修师",
+        short_name="情感共鸣",
+        description="判断读者能否理解、心疼并代入人物，精修细腻心理、关系潜台词、生活质感与人物化语言，消除AI腔。",
+        focus=("心理共鸣", "细腻感情", "身临其境", "人物画像", "关系潜台词", "去AI腔"),
     ),
 )
+
+DOCTOR_SKILL_ALIASES = {
+    "character_resonance": "character_humanity",
+}
+
+
+def resolve_doctor_skill(key: str, *, default: DoctorSkill | None = None) -> DoctorSkill | None:
+    requested_key = str(key or "").strip()
+    canonical_key = DOCTOR_SKILL_ALIASES.get(requested_key, requested_key)
+    return next((skill for skill in DOCTOR_SKILLS if skill.key == canonical_key), default)
 
 SKILL_PROMPT_DIR = Path(__file__).resolve().parents[1] / "skills" / "script_doctor"
 _METADATA_CACHE: dict[str, dict[str, Any]] = {}
@@ -242,6 +245,8 @@ def _history_summary(entry: dict[str, Any]) -> dict[str, Any]:
         "created_at_label": entry.get("created_at_label") or "",
         "can_optimize": bool(entry.get("ok") and entry.get("source_document_id")),
         "source_filename": entry.get("source_filename") or "",
+        "project_id": entry.get("project_id") or "",
+        "source_version_id": entry.get("source_version_id") or "",
     }
 
 
@@ -342,8 +347,9 @@ def save_workbuddy_history(
     payload: dict[str, Any],
     result: dict[str, Any],
 ) -> dict[str, Any]:
-    skill_key = str(payload.get("skill") or "")
-    skill = next((item for item in DOCTOR_SKILLS if item.key == skill_key), None)
+    requested_skill_key = str(payload.get("skill") or "")
+    skill = resolve_doctor_skill(requested_skill_key)
+    skill_key = skill.key if skill else requested_skill_key
     entry_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
     created_at = _now_iso()
     meta = _extract_report_meta(result)
@@ -363,6 +369,8 @@ def save_workbuddy_history(
         "user_goal": str(payload.get("user_goal") or ""),
         "source_document_id": str(payload.get("source_document_id") or ""),
         "source_filename": _safe_docx_name(payload.get("source_filename"), fallback="原始剧本.docx") if payload.get("source_document_id") else "",
+        "project_id": str(payload.get("project_id") or ""),
+        "source_version_id": str(payload.get("source_version_id") or ""),
         "message": result.get("error") or result.get("message") or "",
         "score": str(meta.get("score") or ""),
         "risk_level": str(meta.get("risk_level") or ""),
@@ -385,7 +393,7 @@ def _trim_workbuddy_history(user_id: Any) -> None:
 
 
 def skill_exists(key: str) -> bool:
-    return any(skill.key == key for skill in DOCTOR_SKILLS)
+    return resolve_doctor_skill(key) is not None
 
 
 def _resolve_codebuddy_config(
@@ -419,30 +427,29 @@ def workbuddy_config_status(
     provider = str(os.getenv("WORKBUDDY_PROVIDER") or "deepseek").strip().lower()
     if provider == "deepseek":
         status = deepseek_agent_status()
-        selected_model = str(model or status.get("model") or "deepseek-v4-pro").strip()
         return {
             "ok": True,
-            "provider": "deepseek",
+            "provider": "script_agent",
             "configured": bool(status.get("configured")),
             "sdk_available": True,
             "api_key_present": bool(status.get("api_key_present")),
             "api_key_source": "environment" if status.get("api_key_present") else "missing",
             "internet_environment": "cloud",
             "internet_environment_ok": True,
-            "model": selected_model,
-            "env_model": str(status.get("model") or ""),
+            "model": "",
+            "env_model": "",
             "models": [
                 {
-                    "id": str(status.get("model") or "deepseek-v4-pro"),
-                    "name": "DeepSeek V4 Pro",
-                    "description": "平台统一DeepSeek智能体模型",
+                    "id": "auto",
+                    "name": "剧本 Agent",
+                    "description": "平台统一剧本 Agent 服务",
                 }
             ],
             "account": {},
             "points": None,
             "points_supported": False,
             "metadata_error": "",
-            "missing": list(status.get("missing") or []),
+            "missing": ["剧本 Agent 配置"] if status.get("missing") else [],
             "skills": list_doctor_skills(),
         }
 
@@ -491,7 +498,7 @@ def workbuddy_config_status(
 
 
 def build_doctor_prompt(skill_key: str, title: str, script_text: str, user_goal: str) -> str:
-    skill = next((item for item in DOCTOR_SKILLS if item.key == skill_key), DOCTOR_SKILLS[0])
+    skill = resolve_doctor_skill(skill_key, default=DOCTOR_SKILLS[0])
     professional_prompt = _load_skill_prompt(skill.key)
     if professional_prompt:
         return f"""{professional_prompt}
@@ -556,7 +563,9 @@ def _load_skill_prompt(skill_key: str) -> str:
 
 def validate_doctor_payload(data: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
     title = str(data.get("title") or "").strip()
-    skill_key = str(data.get("skill") or "overall_dispatcher").strip()
+    requested_skill_key = str(data.get("skill") or "overall_dispatcher").strip()
+    skill = resolve_doctor_skill(requested_skill_key)
+    skill_key = skill.key if skill else requested_skill_key
     script_text = str(data.get("script_text") or "").strip()
     user_goal = str(data.get("user_goal") or "").strip()
     model = str(data.get("model") or "").strip()
@@ -574,6 +583,8 @@ def validate_doctor_payload(data: dict[str, Any]) -> tuple[dict[str, Any], str |
         "user_goal": user_goal,
         "model": model,
         "source_document_id": source_document_id,
+        "project_id": str(data.get("project_id") or "").strip(),
+        "source_version_id": str(data.get("source_version_id") or "").strip(),
     }, None
 
 
@@ -591,6 +602,45 @@ def build_doctor_optimization_prompt(
     user_goal: str = "",
 ) -> str:
     report_json = json.dumps(report, ensure_ascii=False, separators=(",", ":"))
+    hook_optimization_rules = ""
+    if "五秒" in str(skill_name or "") or "爽点节奏" in str(skill_name or ""):
+        hook_optimization_rules = """
+【本 Skill 强制改写要求：必须实际回写强钩子】
+1. 本次不是只做检查或提供建议，而是“诊断 + 编剧式重写”。无论报告评分是否及格，都必须处理第1集开头；不得因为 risk_level=low、status=pass 或原文已有钩子而跳过。
+2. 优先执行报告中的 opening_hook_rewrites、three_second_hook_gate、opening_hook_assessment 和 priority_fixes。operations 的第一项或前几项必须覆盖第1集第一段有效正文；如开头跨多个原段落，可分别返回最多3个连续段落修改。
+3. replacement_text 必须是可直接使用的成品正文，不得写“建议增加冲突”“此处改成强钩子”等说明性占位文字。
+4. 改写后的第一句有效对白或第一个有效动作必须落下具体爆点：人物碰撞、关系刺痛、身份/信息差、迫近危险、两难选择或有后果的反击。没有最低字数，一句话足够时必须收住，禁止补背景稀释爆点。
+5. 先通读本集和相邻集，提取主角此刻最怕失去什么、谁能刺中它、哪笔旧债/秘密/任务正在施压。必须在内部设计至少3个不同钩子候选，再选最强者写回，不得套固定模板。
+6. 情绪强度目标至少8/10，但必须来自人物最怕失去的关系、尊严、身份、安全、资源或承诺，禁止只堆夸张形容词、吼叫、扇耳光、车祸、绑架和凭空出现的大人物。
+7. 默认使用“剧情内生创造”：允许依据既有人物关系、动机、秘密、道具、场景、能力、旧债和当集结果，新增一句高压台词、一次人物主动行为、一个即时阻碍、一次小暴露或一个有代价的选择。可以创造原文没有逐字写出的开场拍点，但它必须能从既有事实自然推出，不能新增身世、能力、角色、世界规则或改变核心结局。
+8. 即使报告给出的 sample_patch 仍然偏平，也必须按上述标准继续增强，不能机械照抄弱样例。
+9. 提交前自检：若新开头相较原文没有明显提高即时性、私人代价、情绪强度和追看欲望，继续改写；不允许只做同义替换或润色，也不允许把短而有力的钩子扩成解释段。
+10. 高压台词、命令、警告、拒绝、指控、遗言或求救适合当前人物时，优先采用“台词先行”：台词既可以来自原文，也可以根据上下文重新创作。先落下这句话，再接最多一个必要反应和一个关键记忆/后果。禁止先写月光、天气、房间、道具、睡姿、喘息、脚步或连续动作。
+11. 必须直接替换旧开头的描述段，不能只在旧段前增加一句钩子后继续保留全部铺垫。删除被新钩子取代的气氛描写、道具罗列和重复动作，使新开头比原开头更短、更快、更有力。
+12. 第一个 replacement_text 的第一有效行若仍是环境描写或人物缓慢动作，而报告/原文存在可前移的强台词，则视为不合格，必须重写。允许一个 replacement_text 用换行写成“爆点台词 + 一个动作反应 + 一帧关键记忆”，但不要写成解释段。
+13. 禁止把后文冲突原封不动剪到开头。只有当该事件在时间、地点、人物状态和信息顺序上本来就能发生在开场，且前移不会透支后续高潮时，才允许前移；否则必须重新设计一个由同一矛盾生长出的新开场拍点。
+14. 新增或改写爆点后，必须检查它如何回到原剧情。必要时继续修改开头后1-3个相邻段落：补人物即时反应、行动理由和因果桥，删除与新钩子重复或矛盾的旧铺垫，让“新爆点 → 当集目标 → 原剧情”连续成立。禁止只加一句炸点后若无其事地回到旧正文。
+15. 新钩子必须在本集或后续已有剧情中产生回声：改变人物的判断、选择、关系压力或任务难度。纯预告片、与正文无关的噩梦、假危险、无后果狠话和故意误导均不合格。
+16. 审查报告若提供 creation_mode、contextual_basis、causal_bridge_to_original_plot、downstream_echo、protected_later_payoff，必须逐项落实。若报告缺少这些字段，执行器必须自行从全文补足后再改写，不能因此退回机械前移方案。
+17. 除第1集外，报告中 three_second_status 为 partial/fail 的每一集也必须实际修改其开头；优先保证黄金五秒、集间承接和后续因果，不要求为了凑数量修改已合格段落。
+"""
+    character_empathy_rules = ""
+    if "情感共鸣" in str(skill_name or "") or "人情味" in str(skill_name or ""):
+        character_empathy_rules = """
+【本 Skill 情感共鸣精修要求：必须实际回写】
+1. 本次不是只评估画像。必须修改最影响读者共鸣、沉浸感和人物可信度的段落，优先处理主要人物登场、关系转折、情绪爆发、选择代价和情感余波。
+2. 每次修改先判断：此刻人物最想要什么、最怕失去什么、在谁面前不肯承认什么。replacement_text 必须让至少一项通过选择、潜台词、误判、克制或关系动作被读者感知。
+3. 细腻不等于加长。只保留最能暴露人物的一两个细节；删除空泛形容词、同义反复和动作后的情绪解释。能用称呼变化、停顿、改口、回避、保护体面或反常动作表达时，不直接宣布情绪。
+4. 心理描写采用“刺激 → 人物化判断/联想 → 自我否认或矛盾冲动 → 行动后果”。禁止作者替人物总结人生，禁止大段分析式独白。
+5. 对白必须有对象、目的和关系历史。删除信息播报式台词、完整解释动机的台词、人人同口吻的金句；允许打断、避答、说反话、只说半句和用旧称呼刺痛对方，但信息仍须可理解。
+6. 主动消除AI腔：避免批量使用“瞳孔骤缩、呼吸一滞、攥紧拳头、嘴角勾起、眼底闪过、空气凝固、不容置疑、仿佛、宛如”等套式反应；同一身体反应不得跨角色反复复制。
+7. 感官细节必须属于人物经验并影响判断。不得为了“身临其境”堆光线、气味、声音、衣着和道具清单；每个细节至少承担触发记忆、暴露关系、增加压力或推动选择中的一项。
+8. 共鸣来自“普遍心理 + 私人细节 + 具体代价 + 主动选择”。禁止靠新增悲惨身世、疾病、死亡、童年创伤和强行卖惨索取同情。
+9. replacement_text 必须保持原人称、剧情事实、人物关系和场景功能。精修后人物应更像自己，而不是更像作者；不得把所有角色都改得温柔或会说漂亮话。
+10. 修改情绪爆点时必须保留余波：人物做出选择后，至少留下一个影响下一动作或关系的短反应。禁止哭完、吼完、和解完立刻无缝进入下一项任务。
+11. 提交前执行“遮住姓名测试”：主要角色的台词若仍可任意互换，继续改写其词汇、句长、回避方式、攻击方式或称呼习惯。
+12. 提交前执行“普通读者测试”：读者应能说清为什么心疼、理解或担心这个人，以及此刻最想看他做什么；若只能得到“很惨、很生气、很厉害”，说明共鸣仍然空泛，必须继续改写。
+"""
     return f"""你是“AI剧本医生实验室”的剧本精修执行器。
 本次审查器：{skill_name or "剧本医生"}
 剧本标题：{title or "未命名剧本"}
@@ -607,6 +657,9 @@ def build_doctor_optimization_prompt(
 6. 最多返回 30 项真正重要的修改。没有把握定位时不要修改，宁缺毋滥。
 7. 保留原叙事人称、人物口吻、剧本格式和上下文事实，避免把所有人物改成同一种文风。
 8. 禁止输出 Markdown、代码围栏或解释前缀，只输出一个 JSON 对象。
+
+{hook_optimization_rules}
+{character_empathy_rules}
 
 【输出 JSON】
 {{
@@ -659,12 +712,12 @@ def format_doctor_exception(exc: BaseException, *, timeout_seconds: int) -> dict
     if isinstance(exc, TimeoutError) or exc.__class__.__name__ in {"TimeoutError", "CancelledError"}:
         return {
             "type": exc.__class__.__name__,
-            "message": f"DeepSeek智能体调用超时（已等待 {timeout_seconds} 秒）。长剧本审查耗时较长，请重试或拆成前半/后半审查。",
+            "message": f"剧本 Agent 调用超时（已等待 {timeout_seconds} 秒）。长剧本审查耗时较长，请重试或拆成前半/后半审查。",
         }
     text = str(exc).strip()
     return {
         "type": exc.__class__.__name__,
-        "message": f"DeepSeek智能体调用失败：{text or exc.__class__.__name__}",
+        "message": f"剧本 Agent 调用失败：{text or exc.__class__.__name__}",
     }
 
 

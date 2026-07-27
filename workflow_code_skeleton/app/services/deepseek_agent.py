@@ -121,9 +121,7 @@ class DeepSeekAgentClient:
     ) -> dict[str, Any]:
         config = get_deepseek_agent_config()
         if not config.configured:
-            raise DeepSeekAgentError(
-                "DeepSeek智能体尚未配置完成：" + ", ".join(deepseek_agent_status()["missing"])
-            )
+            raise DeepSeekAgentError("剧本 Agent 尚未配置完成。")
 
         payload: dict[str, Any] = {
             "model": str(model or config.model),
@@ -148,9 +146,9 @@ class DeepSeekAgentClient:
                 timeout=max(30, int(timeout_seconds or config.timeout_seconds)),
             )
         except requests.Timeout as exc:
-            raise DeepSeekAgentError("DeepSeek V4 Pro请求超时，请稍后重试。") from exc
+            raise DeepSeekAgentError("剧本 Agent 请求超时，请稍后重试。") from exc
         except requests.RequestException as exc:
-            raise DeepSeekAgentError(f"DeepSeek V4 Pro连接失败：{exc}") from exc
+            raise DeepSeekAgentError(f"剧本 Agent 连接失败：{exc}") from exc
 
         if not response.ok:
             raise DeepSeekAgentError(_safe_upstream_error(response))
@@ -159,7 +157,7 @@ class DeepSeekAgentClient:
             data = response.json()
             message = data["choices"][0]["message"]
         except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise DeepSeekAgentError("DeepSeek V4 Pro返回格式异常。") from exc
+            raise DeepSeekAgentError("剧本 Agent 返回格式异常。") from exc
 
         return {
             "message": message if isinstance(message, dict) else {},
@@ -190,13 +188,13 @@ class DeepSeekAgentClient:
         )
         content = str((result.get("message") or {}).get("content") or "").strip()
         if not content:
-            raise DeepSeekAgentError("DeepSeek V4 Pro没有返回内容。")
+            raise DeepSeekAgentError("剧本 Agent 没有返回内容。")
         try:
             structured = json.loads(content)
         except json.JSONDecodeError as exc:
-            raise DeepSeekAgentError("DeepSeek V4 Pro没有返回合法JSON。") from exc
+            raise DeepSeekAgentError("剧本 Agent 没有返回合法JSON。") from exc
         if not isinstance(structured, dict):
-            raise DeepSeekAgentError("DeepSeek V4 Pro返回的JSON不是对象。")
+            raise DeepSeekAgentError("剧本 Agent 返回的数据格式不正确。")
         return {
             "content": content,
             "structured_output": structured,

@@ -1,1 +1,545 @@
-{ "nodes": [ { "nodeId": "userGuide", "name": "common:core.module.template.system_config", "intro": "common:core.module.template.system_config_info", "avatar": "core/workflow/template/systemConfig", "flowNodeType": "userGuide", "position": { "x": -2100, "y": -3600 }, "version": "481", "inputs": [ { "key": "welcomeText", "label": "core.app.Welcome Text", "valueType": "string", "renderTypeList": [ "hidden" ], "value": "" }, { "key": "variables", "label": "core.app.Chat Variable", "valueType": "any", "renderTypeList": [ "hidden" ], "value": [] }, { "key": "questionGuide", "label": "core.app.Question Guide", "valueType": "any", "renderTypeList": [ "hidden" ], "value": { "open": false } }, { "key": "tts", "label": "", "valueType": "any", "renderTypeList": [ "hidden" ], "value": { "type": "web" } }, { "key": "whisper", "label": "", "valueType": "any", "renderTypeList": [ "hidden" ], "value": { "open": false, "autoSend": false, "autoTTSResponse": false } }, { "key": "scheduleTrigger", "label": "", "valueType": "any", "renderTypeList": [ "hidden" ], "value": null } ], "outputs": [] }, { "nodeId": "start10EnrichedPlan", "name": "common:core.module.template.work_start", "intro": "", "avatar": "core/workflow/template/workflowStart", "flowNodeType": "workflowStart", "position": { "x": -1500, "y": -3600 }, "version": "481", "inputs": [ { "key": "userChatInput", "label": "workflow:user_question", "valueType": "string", "required": true, "renderTypeList": [ "reference", "textarea" ], "debugLabel": "", "toolDescription": "用户问题" } ], "outputs": [ { "id": "userChatInput", "key": "userChatInput", "type": "static", "valueType": "string", "label": "common:core.module.input.label.user question", "description": "" } ] }, { "nodeId": "ai10EnrichedEpisodePlan", "name": "10 丰富分集计划", "intro": "将十五节拍、人物故事线、场景字典和人设服装 alias 映射转写为全量 allEnrichedEpisodePlan。", "avatar": "core/workflow/template/aiChat", "flowNodeType": "chatNode", "showStatus": true, "position": { "x": -1005, "y": -3600 }, "version": "4.9.7", "inputs": [ { "key": "model", "label": "common:core.module.input.label.aiModel", "valueType": "string", "renderTypeList": [ "settingLLMModel", "reference" ], "value": "deepseek-v4-flash", "debugLabel": "", "toolDescription": "" }, { "key": "temperature", "label": "", "valueType": "number", "renderTypeList": [ "hidden" ], "value": 0.25, "debugLabel": "", "toolDescription": "" }, { "key": "maxToken", "label": "", "valueType": "number", "renderTypeList": [ "hidden" ], "value": 113600, "debugLabel": "", "toolDescription": "" }, { "key": "isResponseAnswerText", "label": "", "valueType": "boolean", "renderTypeList": [ "hidden" ], "value": true, "debugLabel": "", "toolDescription": "" }, { "key": "aiChatQuoteRole", "label": "", "valueType": "string", "renderTypeList": [ "hidden" ], "value": "system", "debugLabel": "", "toolDescription": "" }, { "key": "quoteTemplate", "label": "", "valueType": "string", "renderTypeList": [ "hidden" ], "debugLabel": "", "toolDescription": "" }, { "key": "quotePrompt", "label": "", "valueType": "string", "renderTypeList": [ "hidden" ], "debugLabel": "", "toolDescription": "" }, { "key": "aiChatVision", "label": "", "valueType": "boolean", "renderTypeList": [ "hidden" ], "value": true, "debugLabel": "", "toolDescription": "" }, { "key": "aiChatAudio", "renderTypeList": [ "hidden" ], "label": "", "valueType": "boolean", "value": false, "debugLabel": "", "toolDescription": "" }, { "key": "aiChatVideo", "renderTypeList": [ "hidden" ], "label": "", "valueType": "boolean", "value": false, "debugLabel": "", "toolDescription": "" }, { "key": "aiChatExtractFiles", "renderTypeList": [ "hidden" ], "label": "", "valueType": "boolean", "value": true, "debugLabel": "", "toolDescription": "" }, { "key": "aiChatReasoning", "label": "", "valueType": "boolean", "renderTypeList": [ "hidden" ], "value": true, "debugLabel": "", "toolDescription": "" }, { "key": "aiChatReasoningEffort", "renderTypeList": [ "hidden" ], "label": "", "valueType": "string", "debugLabel": "", "toolDescription": "" }, { "key": "aiChatTopP", "label": "", "valueType": "number", "renderTypeList": [ "hidden" ], "debugLabel": "", "toolDescription": "" }, { "key": "aiChatStopSign", "label": "", "valueType": "string", "renderTypeList": [ "hidden" ], "debugLabel": "", "toolDescription": "" }, { "key": "aiChatResponseFormat", "label": "", "valueType": "string", "renderTypeList": [ "hidden" ], "value": "json_object", "debugLabel": "", "toolDescription": "" }, { "key": "aiChatJsonSchema", "label": "", "valueType": "string", "renderTypeList": [ "hidden" ], "value": "{\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"allEnrichedEpisodePlan\", \"allEnrichedEpisodePlanText\"], \"properties\": {\"allEnrichedEpisodePlan\": {\"type\": \"array\", \"minItems\": 1, \"items\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"episode\", \"title\", \"characters\", \"scene_refs\", \"scenes\", \"specific_plot\", \"pressure_sources\", \"ending_hook\", \"beat_refs\", \"character_storyline_refs\", \"alias_notes\", \"text_view\"], \"properties\": {\"episode\": {\"type\": \"integer\", \"minimum\": 1}, \"title\": {\"type\": \"string\"}, \"characters\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"scene_refs\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"scenes\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"specific_plot\": {\"type\": \"string\"}, \"pressure_sources\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"ending_hook\": {\"type\": \"string\"}, \"beat_refs\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"character_storyline_refs\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"alias_notes\": {\"type\": \"string\"}, \"text_view\": {\"type\": \"string\"}}}}, \"allEnrichedEpisodePlanText\": {\"type\": \"string\"}}}", "debugLabel": "", "toolDescription": "" }, { "key": "systemPrompt", "label": "common:core.ai.Prompt", "valueType": "string", "isRichText": true, "placeholder": "common:core.app.tip.chatNodeSystemPromptTip", "maxLength": 100000, "renderTypeList": [ "textarea", "reference" ], "value": "你是“第10阶段：丰富分集计划生成器”。\n\n你的任务不是重新设计故事，不是改写十五节拍，不是生成剧本正文。\n你的任务是：基于 framework_plan_package、十五节拍卡点时间轴、人物故事线、场景字典和人设服装 alias 映射，生成后续因果冲突推进计划可以直接使用的 allEnrichedEpisodePlan。\n\nallEnrichedEpisodePlan 必须把原本抽象的节拍、人物线、场景资产和人物状态，转写成按集排列的“人物 / 场景 / 具体情节安排”格式。\n\n# 输入\n\n【完整框架策划包】\n{{$VARIABLE_NODE_ID.frameworkPlanPackage$}}\n\n【场景字典】\n{{$VARIABLE_NODE_ID.sceneDictionary$}}\n\n【人设服装 alias 映射】\n{{$VARIABLE_NODE_ID.appearanceMapping$}}\n\n【用户偏好提示词】\n{{$VARIABLE_NODE_ID.shmRs8OT$}}\n\n# 核心任务\n\n你必须输出全剧每一集的丰富分集计划。用户偏好提示词直接体现用户对剧本具体写法、文风、节奏、氛围、人物气质、对白风格、镜头感、情绪基调的核心期待，包含最关键的创作约束与风格指引。必须严格遵循其中的细节要求，确保每一处对白、场景、情绪、节奏都贴合用户偏好，才能让剧本精准符合预期。\n\n每一集必须明确：\n1. 本集集数；\n2. 本集标题；\n3. 本集出场人物；\n4. 本集使用的核心场景；\n5. 本集具体情节安排；\n6. 本集压力来源；\n7. 本集结尾钩子；\n8. 本集与十五节拍的关系；\n9. 本集与人物故事线的关系；\n10. 本集需要注意的 alias / 服装 / 人物状态。\n\n# 核心原则\n\n1. 不得重排十五节拍。\n2. 不得推翻人物故事线。\n3. 不得新增上游没有的关键人物。\n4. 不得新增 sceneDictionary 之外的同功能核心场景。\n5. 可以在具体情节安排里细化动作目标、人物关系和信息推进，但不能改变主线方向。\n6. 本阶段不写完整对白，不写剧本正文。\n7. 本阶段不生成因果冲突推进计划，不写 why_now，不写 scene_cause_chain 的完整版本；这些留给下一阶段。\n8. 本阶段要为下一阶段提供清晰素材，让因果冲突阶段能判断“这一集谁在什么场景里做什么，遇到什么压力，最后留下什么钩子”。\n9. 不要把 conflicts 写成必须爆发的吵架清单。pressure_sources 只能作为压力来源参考。\n10. 每集场景数量不宜过多，优先使用 1-2 个 sceneDictionary 中的核心场景。\n11. 如果 beatCheckpointTimeline 只给出节拍节点而没有逐集拆分，你必须根据总集数与节拍顺序，把节点合理分配到各集；不得跳集、漏集、重复集。\n12. 如果 frameworkPlanPackage.basic_config 或其他字段中能读到总集数，必须覆盖到总集数；如果无法读到总集数，则根据 beatCheckpointTimeline 已明确的集数范围输出，不得凭空扩写无限集。\n\n# 输出强约束\n\n1. 只输出合法 JSON object。\n2. 顶层必须且只能包含 allEnrichedEpisodePlan 和 allEnrichedEpisodePlanText。\n3. 禁止 Markdown。\n4. 禁止代码块。\n5. 禁止解释性前缀。\n6. 禁止输出 JSON 之外的任何文本。\n7. 输出必须能被 JSON.parse 直接解析。\n\n# allEnrichedEpisodePlan 字段要求\n\nallEnrichedEpisodePlan 必须是数组。\n\n每一项代表一集，必须包含：\n\nepisode：\n整数。实际集数。\n\ntitle：\n本集标题。标题要概括本集核心事件、选择、关系变化或结尾钩子。\n\ncharacters：\n本集实际参与剧情推进的人物显示名数组。\n必须写成“人物名(outfit_version_id)”格式。outfit_version_id通常是场景对应的大写字母。\n人物名必须来自 appearanceMapping 的 default_name / name / alias_to_use。\noutfit_version_id 必须来自 appearanceMapping，不得自造。\n示例：[\"小明(A)\", \"小红(A)\", \"小李(A)\"]\n\nscene_refs：\n本集使用的 sceneDictionary 场景 ID，例如 [\"scene_A\", \"scene_B\"]。\n\nscenes：\n本集使用的场景短名称数组，要和 scene_refs 对应。\n\nspecific_plot：\n本集具体情节安排。必须写清楚人物做什么、在哪里做、目标是什么、遇到什么阻力、产生什么结果。不要写成抽象大纲。\n\npressure_sources：\n本集压力来源数组。可以来自人物关系、规则限制、资源争夺、身份风险、时间压力、敌方动作、空间限制、信息差。不要写成“冲突1/冲突2/冲突3”的机械清单。\n\nending_hook：\n本集结尾钩子。必须是下一集能直接接住的具体事件、动作、发现、危机、选择或反转。\n\nbeat_refs：\n本集对应的十五节拍节点或节拍范围。引用 beatCheckpointTimeline 里的 beat 编号、名称或区间。\n\ncharacter_storyline_refs：\n本集对应的人物故事线推进。写清楚本集推进了哪些角色的哪条线。\n\nalias_notes：\n本集人物命名、服装版本、身份状态、alias 使用提醒。\n必须逐个说明 characters 中每个“人物名(outfit_id)”的来源。\n必须引用 appearanceMapping 中的 outfit_versions、episode_usage_plan 或 scene_trigger_rules。\n\ntext_view：\n给前端展示的文本格式。必须接近：\n\n第一集\n人物：林夜(A)、苏晴(A)、阿鬼(A)\n场景：废弃医院走廊、中央大厅\n具体情节安排：……\n压力来源：……\n结尾钩子：……\n\n# allEnrichedEpisodePlanText 字段要求\n\nallEnrichedEpisodePlanText 是 allEnrichedEpisodePlan 的人类可读文本版。\n必须按集排列。\n每集格式必须接近：\n\n第1集\n人物：林砚(A)、张力(A)、老陈(A)\n场景：少管所监舍区\n具体情节安排：……\n压力来源：……\n结尾钩子：……\n\n第2集\n人物：林砚(A)、张力(B)、老陈(A)\n场景：少管所食堂区\n具体情节安排：……\n压力来源：……\n结尾钩子：……\n\n# 人物显示名与 outfit_id 纪律\n\n本阶段必须把 appearanceMapping 中的 outfit_version_id 传递到后续阶段。\n\n1. characters 字段不要只写纯人物名，必须写成“人物名(outfit_version_id)”格式。\n 示例：\n [\"林砚(A)\"]\n\n本文中的 outfit_id 统一指 appearanceMapping 中可检索到的服装版本标识，包括 outfit_versions[].version_id、outfit_variants[].variant_id 或 linked_outfit_version。最终显示格式统一为“人物名(outfit_id)”，例如：林砚(A)。\n\n1. “人物名(outfit_version_id)”不是新角色名。\n 它是后续剧本正文使用的角色显示名。\n 括号内 outfit_version_id 只表示该集该角色使用的人设服装版本。\n\n1. outfit_version_id 必须从 appearanceMapping 中检索。\n 优先检索顺序：\n- characters[].episode_usage_plan[].outfit_version_id\n- characters[].scene_trigger_rules[].outfit_version_id\n- characters[].outfit_versions[].version_id\n- characters[].outfit_variants[].variant_id 或 linked_outfit_version\n\n1. 如果某一集能根据 episode_usage_plan 判断服装版本，必须使用对应 outfit_version_id。\n 例如第1-10集使用 A，则第一集人物必须写成 林砚(A)。\n\n1. 如果某一集同时有多个候选 outfit_id，优先选择 episode_usage_plan 对应的版本；其次选择 scene_trigger_rules 对应版本。\n 如果仍无法确定，只能使用该角色第一个可用 outfit_versions.version_id。\n 禁止自造不存在的 outfit_id。\n\n1. 如果 appearanceMapping 中完全找不到某角色的 outfit_id，则写成“人物名(outfit_unknown)”。\n 同时在 alias_notes 中说明：appearanceMapping 未提供该角色明确 outfit_version_id。\n\n1. alias_notes 必须写清本集每个出场人物的 outfit_id 来源。\n 示例：\n 林砚(A)：来自 episode_usage_plan 第1-10集；张力(A)：来自 outfit_versions 默认制服版本。\n\n1. text_view 和 allEnrichedEpisodePlanText 的“人物：”行必须与 characters 字段完全一致。\n 示例：\n 人物：林砚(A)、张力(A)、老陈(A)\n\n1. 后续阶段应直接沿用 characters 中的“人物名(outfit_id)”作为剧本角色显示名，不要删除括号内 outfit_id。\n2. 严禁输出“（后续共XX集在此省略，实际生成中会全部列出）”之类的话，你的输出就行是寄生成的过程，必须负责严谨，禁止嫌麻烦，必须毫无差错的输出所有集的分集计划，禁止缩略，禁止缺集漏集。\n\n# 输出格式\n\n{\n \"allEnrichedEpisodePlan\": [\n {\n \"episode\": 1,\n \"title\": \"第1集标题\",\n \"characters\": [\"林砚(A)\", \"张力(A)\", \"老陈(A)\"],\n \"scene_refs\": [\"scene_A\"],\n \"scenes\": [\"少管所监舍区\"],\n \"specific_plot\": \"本集具体情节安排。\",\n \"pressure_sources\": [\"压力来源1\", \"压力来源2\"],\n \"ending_hook\": \"本集结尾钩子。\",\n \"beat_refs\": [\"Beat 1 开场画面\"],\n \"character_storyline_refs\": [\"林砚主线推进到初步入局\"],\n \"alias_notes\": \"林砚(A)：来自 appearanceMapping.episode_usage_plan 第1-10集；张力(A)：来自 appearanceMapping.outfit_versions 默认所长制服；老陈(A)：来自 appearanceMapping.outfit_versions 默认管教服。\",\n \"text_view\": \"第一集\\n人物：林砚(A)、张力(A)、老陈(A)\\n场景：少管所监舍区\\n具体情节安排：……\\n压力来源：……\\n结尾钩子：……\"\n }\n ],\n \"allEnrichedEpisodePlanText\": \"第一集\\n人物：林砚(A)、张力(A)、老陈(A)\\n场景：少管所监舍区\\n具体情节安排：……\\n压力来源：……\\n结尾钩子：……\"\n}", "debugLabel": "", "description": "common:core.app.tip.systemPromptTip", "toolDescription": "" }, { "key": "history", "label": "common:core.module.input.label.chat history", "valueType": "chatHistory", "required": true, "max": 50, "min": 0, "renderTypeList": [ "numberInput", "reference" ], "value": 0, "debugLabel": "", "description": "workflow:max_dialog_rounds", "toolDescription": "" }, { "key": "quoteQA", "label": "", "valueType": "datasetQuote", "renderTypeList": [ "settingDatasetQuotePrompt" ], "debugLabel": "知识库引用", "description": "", "toolDescription": "" }, { "key": "fileUrlList", "label": "app:workflow.user_file_input", "valueType": "arrayString", "renderTypeList": [ "reference", "input" ], "value": [], "debugLabel": "文件链接", "description": "app:workflow.user_file_input_desc", "toolDescription": "" }, { "key": "userChatInput", "label": "workflow:user_question", "valueType": "string", "required": true, "selectedTypeIndex": 1, "renderTypeList": [ "reference", "textarea" ], "value": "按照提示词完成第十阶段丰富分集计划生成任务。", "debugLabel": "", "toolDescription": "用户问题" } ], "outputs": [ { "id": "history", "key": "history", "type": "static", "valueType": "chatHistory", "valueDesc": "{\n obj: System | Human | AI;\n value: string;\n}[]", "label": "common:core.module.output.label.New context", "description": "将本次回复内容拼接上历史记录，作为新的上下文返回", "required": true }, { "id": "answerText", "key": "answerText", "type": "static", "valueType": "string", "valueDesc": "", "label": "common:core.module.output.label.Ai response content", "description": "将在 stream 回复完毕后触发", "required": true }, { "id": "reasoningText", "key": "reasoningText", "type": "static", "valueType": "string", "valueDesc": "", "label": "workflow:reasoning_content", "description": "", "required": false, "invalid": false }, { "id": "system_error_text", "key": "system_error_text", "type": "error", "valueType": "string", "valueDesc": "", "label": "workflow:error_text", "description": "" } ], "catchError": false }, { "nodeId": "ans10EnrichedEpisodePlan", "name": "输出10 丰富分集计划", "intro": "最终只输出当前阶段的唯一 JSON 结果。", "avatar": "core/workflow/template/reply", "flowNodeType": "answerNode", "position": { "x": -45, "y": -3060 }, "inputs": [ { "key": "text", "label": "common:core.module.input.label.Response content", "valueType": "any", "required": true, "isRichText": false, "placeholder": "common:core.module.input.description.Response content", "maxLength": 100000, "selectedTypeIndex": 1, "renderTypeList": [ "textarea", "reference" ], "value": [ "ai10EnrichedEpisodePlan", "answerText" ], "debugLabel": "", "description": "common:core.module.input.description.Response content", "toolDescription": "" } ], "outputs": [] } ], "edges": [ { "source": "start10EnrichedPlan", "target": "ai10EnrichedEpisodePlan", "sourceHandle": "start10EnrichedPlan-source-right", "targetHandle": "ai10EnrichedEpisodePlan-target-left" }, { "source": "ai10EnrichedEpisodePlan", "target": "ans10EnrichedEpisodePlan", "sourceHandle": "ai10EnrichedEpisodePlan-source-right", "targetHandle": "ans10EnrichedEpisodePlan-target-left" } ], "chatConfig": { "variables": [ { "key": "frameworkPlanPackage", "label": "完整框架策划包", "valueType": "string", "required": false, "type": "input", "description": "07 阶段输出中的 framework_plan_package 对象或完整 07 输出 JSON。用于兜底参考。", "defaultValue": "", "maxLength": 120000, "icon": "core/workflow/inputType/input" }, { "key": "beatCheckpointTimeline", "label": "十五节拍卡点时间轴", "valueType": "string", "required": true, "type": "input", "description": "07 framework_plan_package.beat_checkpoint_timeline。", "defaultValue": "", "maxLength": 120000, "icon": "core/workflow/inputType/input" }, { "key": "characterStorylines", "label": "人物故事线", "valueType": "string", "required": true, "type": "input", "description": "07 framework_plan_package.character_storylines。", "defaultValue": "", "maxLength": 120000, "icon": "core/workflow/inputType/input" }, { "key": "sceneDictionary", "label": "场景字典", "valueType": "string", "required": true, "type": "input", "description": "08 阶段输出的 sceneDictionary，或包含 sceneDictionary 字段的完整 08 输出 JSON。", "defaultValue": "", "maxLength": 80000, "icon": "core/workflow/inputType/input" }, { "key": "appearanceMapping", "label": "人设服装alias映射", "valueType": "string", "required": true, "type": "input", "description": "09 阶段输出的 appearanceMapping，或包含 appearanceMapping 字段的完整 09 输出 JSON。", "defaultValue": "", "maxLength": 120000, "icon": "core/workflow/inputType/input" }, { "type": "input", "key": "shmRs8OT", "label": "用户偏好提示词", "valueType": "string", "description": "", "required": false } ], "scheduledTriggerConfig": { "cronString": "", "timezone": "Asia/Shanghai", "defaultPrompt": "" }, "_id": "f6162baad7824323823bea77" } }
+{
+  "nodes": [
+    {
+      "nodeId": "userGuide",
+      "name": "common:core.module.template.system_config",
+      "intro": "common:core.module.template.system_config_info",
+      "avatar": "core/workflow/template/systemConfig",
+      "flowNodeType": "userGuide",
+      "position": {
+        "x": -2100,
+        "y": -3600
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "welcomeText",
+          "label": "core.app.Welcome Text",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": ""
+        },
+        {
+          "key": "variables",
+          "label": "core.app.Chat Variable",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": []
+        },
+        {
+          "key": "questionGuide",
+          "label": "core.app.Question Guide",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false
+          }
+        },
+        {
+          "key": "tts",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "type": "web"
+          }
+        },
+        {
+          "key": "whisper",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": {
+            "open": false,
+            "autoSend": false,
+            "autoTTSResponse": false
+          }
+        },
+        {
+          "key": "scheduleTrigger",
+          "label": "",
+          "valueType": "any",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": null
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "nodeId": "start10EnrichedPlan",
+      "name": "common:core.module.template.work_start",
+      "intro": "",
+      "avatar": "core/workflow/template/workflowStart",
+      "flowNodeType": "workflowStart",
+      "position": {
+        "x": -1500,
+        "y": -3600
+      },
+      "version": "481",
+      "inputs": [
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "userChatInput",
+          "key": "userChatInput",
+          "type": "static",
+          "valueType": "string",
+          "label": "common:core.module.input.label.user question",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "nodeId": "ai10EnrichedEpisodePlan",
+      "name": "10 丰富分集计划",
+      "intro": "将十五节拍、人物故事线、场景字典和人设服装 alias 映射转写为全量 allEnrichedEpisodePlan。",
+      "avatar": "core/workflow/template/aiChat",
+      "flowNodeType": "chatNode",
+      "showStatus": true,
+      "position": {
+        "x": -1005,
+        "y": -3600
+      },
+      "version": "4.9.7",
+      "inputs": [
+        {
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "valueType": "string",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "value": "deepseek-v4-flash",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "temperature",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 0.25,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "maxToken",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": 256000,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "isResponseAnswerText",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "system",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteTemplate",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "quotePrompt",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVision",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatAudio",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatVideo",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": false,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatExtractFiles",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoning",
+          "label": "",
+          "valueType": "boolean",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": true,
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatReasoningEffort",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatTopP",
+          "label": "",
+          "valueType": "number",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatStopSign",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "json_object",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "valueType": "string",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "value": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"allEnrichedEpisodePlan\",\"allEnrichedEpisodePlanText\"],\"properties\":{\"allEnrichedEpisodePlan\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"episode\",\"title\",\"characters\",\"scene_refs\",\"scenes\",\"specific_plot\",\"pressure_sources\",\"ending_hook\",\"beat_refs\",\"character_storyline_refs\",\"alias_notes\",\"text_view\"],\"properties\":{\"episode\":{\"type\":\"integer\",\"minimum\":1},\"title\":{\"type\":\"string\"},\"characters\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"scene_refs\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1,\"maxItems\":2},\"scenes\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1,\"maxItems\":2},\"specific_plot\":{\"type\":\"string\"},\"pressure_sources\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"ending_hook\":{\"type\":\"string\"},\"beat_refs\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"character_storyline_refs\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"alias_notes\":{\"type\":\"string\"},\"text_view\":{\"type\":\"string\"}}}},\"allEnrichedEpisodePlanText\":{\"type\":\"string\"}}}",
+          "debugLabel": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "valueType": "string",
+          "isRichText": true,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "maxLength": 100000,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": "你是“第10阶段：丰富分集计划生成器”。\n\n你的任务不是重新设计故事，不是改写十五节拍，不是生成剧本正文。\n你的任务是：基于 framework_plan_package、十五节拍卡点时间轴、人物故事线、场景字典和人设服装 alias 映射，生成后续因果冲突推进计划可以直接使用的 allEnrichedEpisodePlan。\n\nallEnrichedEpisodePlan 必须把原本抽象的节拍、人物线、场景资产和人物状态，转写成按集排列的“人物 / 场景 / 具体情节安排”格式。\n\n# 输入\n\n【完整框架策划包】\n{{$VARIABLE_NODE_ID.frameworkPlanPackage$}}\n\n【场景字典】\n{{$VARIABLE_NODE_ID.sceneDictionary$}}\n\n【人设服装 alias 映射】\n{{$VARIABLE_NODE_ID.appearanceMapping$}}\n\n【用户偏好提示词】\n{{$VARIABLE_NODE_ID.shmRs8OT$}}\n\n# 核心任务\n\n你必须输出全剧每一集的丰富分集计划。用户偏好提示词直接体现用户对剧本具体写法、文风、节奏、氛围、人物气质、对白风格、镜头感、情绪基调的核心期待，包含最关键的创作约束与风格指引。必须严格遵循其中的细节要求，确保每一处对白、场景、情绪、节奏都贴合用户偏好，才能让剧本精准符合预期。\n\n每一集必须明确：\n1. 本集集数；\n2. 本集标题；\n3. 本集出场人物；\n4. 本集使用的核心场景；\n5. 本集具体情节安排；\n6. 本集压力来源；\n7. 本集结尾钩子；\n8. 本集与十五节拍的关系；\n9. 本集与人物故事线的关系；\n10. 本集需要注意的 alias / 服装 / 人物状态。\n\n# 核心原则\n\n# 新增：强开头、回忆冲突与多线并发要求\n\nallEnrichedEpisodePlan 是 11 因果冲突计划和 12 正文写作的直接燃料。每一集的 specific_plot、pressure_sources、ending_hook、character_storyline_refs 必须给出可落地的冲突发动机，避免后续正文只能平铺直叙。\n\n每集 specific_plot 必须尽量包含：\n1. 开场触发：一个正在发生的具体动作、误读句、突发来人、证据出现、制度卡点、公开羞辱、身体/道具反应或倒计时。\n2. 当下目标：角色此刻要拿到、挡住、隐瞒、确认、拒绝、救人、签字、交付或阻止什么。\n3. 即时阻力：谁挡住了他/她，或哪条规则、身份、资源、关系、空间限制挡住了他/她。\n4. 心理暗涌：这个当下事件触发了哪段旧账、羞耻、欲望、恐惧或自我防御，但只能写成后续能拍出来的动作/潜台词素材。\n5. 场末变化：本集结束时资源、关系、信息差、身份、退路或敌我优势必须发生实质变化。\n\npressure_sources 不要只写单一主线压力。优先组合三类压力：\n- 现实压力：职位、制度、金钱、规则、公开场合、时间限制、敌方动作。\n- 关系压力：旧爱、前任、亲属、上下级、竞争者、暧昧对象、背叛者。\n- 内在压力：人物害怕暴露真实欲望、害怕承认旧伤、害怕失控、害怕重蹈覆辙。\n\n如果本集包含回忆、倒叙或旧事揭露，必须写清“当下由什么触发回忆”，且回忆内部也必须有冲突：有人想靠近/隐瞒/逃走/挽留/证明，另一个人阻拦、误解、逼问或给出代价。禁止把回忆写成单纯背景介绍。\n\ncharacter_storyline_refs 必须体现多线并发：至少说明本集推进了主线和一条关系线/阻力线/副线，并写清它们如何互相影响，而不是各自独立发生。\n\n\n1. 不得重排十五节拍。\n2. 不得推翻人物故事线。\n3. 不得新增上游没有的关键人物。\n4. 不得新增 sceneDictionary 之外的同功能核心场景。\n5. 可以在具体情节安排里细化动作目标、人物关系和信息推进，但不能改变主线方向。\n6. 本阶段不写完整对白，不写剧本正文。\n7. 本阶段不生成因果冲突推进计划，不写 why_now，不写 scene_cause_chain 的完整版本；这些留给下一阶段。\n8. 本阶段要为下一阶段提供清晰素材，让因果冲突阶段能判断“这一集谁在什么场景里做什么，遇到什么压力，最后留下什么钩子”。\n9. 不要把 conflicts 写成必须爆发的吵架清单。pressure_sources 只能作为压力来源参考。\n10. 默认每集只使用 1 个 sceneDictionary 核心场景，scene_refs 和 scenes 通常都只能有 1 项。只有当上游事实明确要求不可替代的空间转移、且无法在同一场景内通过动作、人物进出、信息揭露或时间推进完成时，才允许第 2 个场景；禁止第 3 个场景。\n11. 使用第 2 个场景时，specific_plot 必须明确写出转场触发、人物为何必须离开原场景、上一场的目标/道具/伤势/信息差如何延续到下一场。仅为了节奏变化、视觉变化或增加事件，不得转场。\n12. 如果 beatCheckpointTimeline 只给出节拍节点而没有逐集拆分，你必须根据总集数与节拍顺序，把节点合理分配到各集；不得跳集、漏集、重复集。同一集承载多个节拍时，必须合并为同一主场景内前后相因的连续推进，不能每个节拍对应一个新场景。\n13. 如果 frameworkPlanPackage.basic_config 或其他字段中能读到总集数，必须覆盖到总集数；如果无法读到总集数，则根据 beatCheckpointTimeline 已明确的集数范围输出，不得凭空扩写无限集。\n\n# 单集场景预算与剧情连续性\n\n1. 每一集默认围绕一个主场景完成，不得把“节拍多”误解为“场景多”。同一场景内可以通过人物进出、目标变化、道具变化、信息揭露和冲突升级承载多个节拍。\n2. scene_refs 与 scenes 必须一一对应、顺序一致、不得重复，数量只能是 1 或 2；默认输出 1 项。\n3. specific_plot 必须按“承接上一集结果或钩子→本集人物目标→阻力升级→人物选择→结果变化→ending_hook”写成一条因果链，禁止写成互不相干的事件清单。\n4. 除第1集外，每集 specific_plot 的开头必须先说明如何直接承接上一集 ending_hook。不得用突然换地点、突然跳时间、突然出现新任务或新人物绕过上一集结果。\n5. ending_hook 必须由本集人物选择和结果自然产生，下一集必须能以其直接后果开场，不能只制造与主线无关的新意外。\n6. 同一地点的走廊、房间、门口、角落等相邻区域，若人物目标和行动连续，应视为同一主场景内的调度，不要拆成多个 scene_ref。\n7. 如果确需第二场，第二场必须完成第一场无法完成的剧情功能，并继承人物目标、情绪、伤势、道具位置、已知信息和关系状态；否则合并回第一场。\n8. text_view 与 allEnrichedEpisodePlanText 必须忠实反映 scenes，不能在文字版中额外发明转场。\n\n# 输出强约束\n\n1. 只输出合法 JSON object。\n2. 顶层必须且只能包含 allEnrichedEpisodePlan 和 allEnrichedEpisodePlanText。\n3. 禁止 Markdown。\n4. 禁止代码块。\n5. 禁止解释性前缀。\n6. 禁止输出 JSON 之外的任何文本。\n7. 输出必须能被 JSON.parse 直接解析。\n\n# allEnrichedEpisodePlan 字段要求\n\nallEnrichedEpisodePlan 必须是数组。\n\n每一项代表一集，必须包含：\n\nepisode：\n整数。实际集数。\n\ntitle：\n本集标题。标题要概括本集核心事件、选择、关系变化或结尾钩子。\n\ncharacters：\n本集实际参与剧情推进的人物显示名数组。\n必须写成“人物名(outfit_version_id)”格式。outfit_version_id通常是场景对应的大写字母。\n人物名必须来自 appearanceMapping 的 default_name / name / alias_to_use。\noutfit_version_id 必须来自 appearanceMapping，不得自造。\n示例：[\"小明(A)\", \"小红(A)\", \"小李(A)\"]\n\nscene_refs：\n本集使用的 sceneDictionary 场景 ID。默认只输出一个，例如 [\"scene_A\"]；确有不可替代转场时最多两个，禁止三个及以上。\n\nscenes：\n本集使用的场景短名称数组，必须和 scene_refs 一一对应。默认一个，最多两个，不得把同一地点的相邻区域拆成多个场景。\n\nspecific_plot：\n本集具体情节安排。必须写清楚如何承接上一集结果或钩子、人物在主场景里做什么、目标是什么、遇到什么阻力、做出什么选择、产生什么结果，并如何自然形成 ending_hook。必须是一条连续因果链，不得写成抽象大纲或并列事件清单。\n\npressure_sources：\n本集压力来源数组。可以来自人物关系、规则限制、资源争夺、身份风险、时间压力、敌方动作、空间限制、信息差。不要写成“冲突1/冲突2/冲突3”的机械清单。\n\nending_hook：\n本集结尾钩子。必须是下一集能直接接住的具体事件、动作、发现、危机、选择或反转。\n\nbeat_refs：\n本集对应的十五节拍节点或节拍范围。引用 beatCheckpointTimeline 里的 beat 编号、名称或区间。\n\ncharacter_storyline_refs：\n本集对应的人物故事线推进。写清楚本集推进了哪些角色的哪条线。\n\nalias_notes：\n本集人物命名、服装版本、身份状态、alias 使用提醒。\n必须逐个说明 characters 中每个“人物名(outfit_id)”的来源。\n必须引用 appearanceMapping 中的 outfit_versions、episode_usage_plan 或 scene_trigger_rules。\n\ntext_view：\n给前端展示的文本格式。必须接近：\n\n第一集\n人物：林夜(A)、苏晴(A)、阿鬼(A)\n场景：废弃医院走廊\n具体情节安排：……\n压力来源：……\n结尾钩子：……\n\n# allEnrichedEpisodePlanText 字段要求\n\nallEnrichedEpisodePlanText 是 allEnrichedEpisodePlan 的人类可读文本版。\n必须按集排列。\n每集格式必须接近：\n\n第1集\n人物：林砚(A)、张力(A)、老陈(A)\n场景：少管所监舍区\n具体情节安排：……\n压力来源：……\n结尾钩子：……\n\n第2集\n人物：林砚(A)、张力(B)、老陈(A)\n场景：少管所食堂区\n具体情节安排：……\n压力来源：……\n结尾钩子：……\n\n# 人物显示名与 outfit_id 纪律\n\n本阶段必须把 appearanceMapping 中的 outfit_version_id 传递到后续阶段。\n\n1. characters 字段不要只写纯人物名，必须写成“人物名(outfit_version_id)”格式。\n   示例：\n   [\"林砚(A)\"]\n\n本文中的 outfit_id 统一指 appearanceMapping 中可检索到的服装版本标识，包括 outfit_versions[].version_id、outfit_variants[].variant_id 或 linked_outfit_version。最终显示格式统一为“人物名(outfit_id)”，例如：林砚(A)。\n\n1. “人物名(outfit_version_id)”不是新角色名。\n   它是后续剧本正文使用的角色显示名。\n   括号内 outfit_version_id 只表示该集该角色使用的人设服装版本。\n\n1. outfit_version_id 必须从 appearanceMapping 中检索。\n   优先检索顺序：\n- characters[].episode_usage_plan[].outfit_version_id\n- characters[].scene_trigger_rules[].outfit_version_id\n- characters[].outfit_versions[].version_id\n- characters[].outfit_variants[].variant_id 或 linked_outfit_version\n\n1. 如果某一集能根据 episode_usage_plan 判断服装版本，必须使用对应 outfit_version_id。\n   例如第1-10集使用 A，则第一集人物必须写成 林砚(A)。\n\n1. 如果某一集同时有多个候选 outfit_id，优先选择 episode_usage_plan 对应的版本；其次选择 scene_trigger_rules 对应版本。\n   如果仍无法确定，只能使用该角色第一个可用 outfit_versions.version_id。\n   禁止自造不存在的 outfit_id。\n\n1. 如果 appearanceMapping 中完全找不到某角色的 outfit_id，则写成“人物名(outfit_unknown)”。\n   同时在 alias_notes 中说明：appearanceMapping 未提供该角色明确 outfit_version_id。\n\n1. alias_notes 必须写清本集每个出场人物的 outfit_id 来源。\n   示例：\n   林砚(A)：来自 episode_usage_plan 第1-10集；张力(A)：来自 outfit_versions 默认制服版本。\n\n1. text_view 和 allEnrichedEpisodePlanText 的“人物：”行必须与 characters 字段完全一致。\n   示例：\n   人物：林砚(A)、张力(A)、老陈(A)\n\n1. 后续阶段应直接沿用 characters 中的“人物名(outfit_id)”作为剧本角色显示名，不要删除括号内 outfit_id。\n2. 严禁输出“（后续共XX集在此省略，实际生成中会全部列出）”之类的话，你的输出就行是寄生成的过程，必须负责严谨，禁止嫌麻烦，必须毫无差错的输出所有集的分集计划，禁止缩略，禁止缺集漏集。\n\n# 输出格式\n\n{\n  \"allEnrichedEpisodePlan\": [\n    {\n      \"episode\": 1,\n      \"title\": \"第1集标题\",\n      \"characters\": [\"林砚(A)\", \"张力(A)\", \"老陈(A)\"],\n      \"scene_refs\": [\"scene_A\"],\n      \"scenes\": [\"少管所监舍区\"],\n      \"specific_plot\": \"本集具体情节安排。\",\n      \"pressure_sources\": [\"压力来源1\", \"压力来源2\"],\n      \"ending_hook\": \"本集结尾钩子。\",\n      \"beat_refs\": [\"Beat 1 开场画面\"],\n      \"character_storyline_refs\": [\"林砚主线推进到初步入局\"],\n      \"alias_notes\": \"林砚(A)：来自 appearanceMapping.episode_usage_plan 第1-10集；张力(A)：来自 appearanceMapping.outfit_versions 默认所长制服；老陈(A)：来自 appearanceMapping.outfit_versions 默认管教服。\",\n      \"text_view\": \"第一集\\n人物：林砚(A)、张力(A)、老陈(A)\\n场景：少管所监舍区\\n具体情节安排：……\\n压力来源：……\\n结尾钩子：……\"\n    }\n  ],\n  \"allEnrichedEpisodePlanText\": \"第一集\\n人物：林砚(A)、张力(A)、老陈(A)\\n场景：少管所监舍区\\n具体情节安排：……\\n压力来源：……\\n结尾钩子：……\"\n}",
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "toolDescription": ""
+        },
+        {
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "valueType": "chatHistory",
+          "required": true,
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "numberInput",
+            "reference"
+          ],
+          "value": 0,
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "toolDescription": ""
+        },
+        {
+          "key": "quoteQA",
+          "label": "",
+          "valueType": "datasetQuote",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "debugLabel": "知识库引用",
+          "description": "",
+          "toolDescription": ""
+        },
+        {
+          "key": "fileUrlList",
+          "label": "app:workflow.user_file_input",
+          "valueType": "arrayString",
+          "renderTypeList": [
+            "reference",
+            "input"
+          ],
+          "value": [],
+          "debugLabel": "文件链接",
+          "description": "app:workflow.user_file_input_desc",
+          "toolDescription": ""
+        },
+        {
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "valueType": "string",
+          "required": true,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "reference",
+            "textarea"
+          ],
+          "value": "按照提示词完成第十阶段丰富分集计划生成任务，禁止跳集漏集缩略回答。",
+          "debugLabel": "",
+          "toolDescription": "用户问题"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "history",
+          "key": "history",
+          "type": "static",
+          "valueType": "chatHistory",
+          "valueDesc": "{\n  obj: System | Human | AI;\n  value: string;\n}[]",
+          "label": "common:core.module.output.label.New context",
+          "description": "将本次回复内容拼接上历史记录，作为新的上下文返回",
+          "required": true
+        },
+        {
+          "id": "answerText",
+          "key": "answerText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "common:core.module.output.label.Ai response content",
+          "description": "将在 stream 回复完毕后触发",
+          "required": true
+        },
+        {
+          "id": "reasoningText",
+          "key": "reasoningText",
+          "type": "static",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:reasoning_content",
+          "description": "",
+          "required": false,
+          "invalid": false
+        },
+        {
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "type": "error",
+          "valueType": "string",
+          "valueDesc": "",
+          "label": "workflow:error_text",
+          "description": ""
+        }
+      ],
+      "catchError": false
+    },
+    {
+      "nodeId": "ans10EnrichedEpisodePlan",
+      "name": "输出10 丰富分集计划",
+      "intro": "最终只输出当前阶段的唯一 JSON 结果。",
+      "avatar": "core/workflow/template/reply",
+      "flowNodeType": "answerNode",
+      "position": {
+        "x": -45,
+        "y": -3060
+      },
+      "inputs": [
+        {
+          "key": "text",
+          "label": "common:core.module.input.label.Response content",
+          "valueType": "any",
+          "required": true,
+          "isRichText": false,
+          "placeholder": "common:core.module.input.description.Response content",
+          "maxLength": 100000,
+          "selectedTypeIndex": 1,
+          "renderTypeList": [
+            "textarea",
+            "reference"
+          ],
+          "value": [
+            "ai10EnrichedEpisodePlan",
+            "answerText"
+          ],
+          "debugLabel": "",
+          "description": "common:core.module.input.description.Response content",
+          "toolDescription": ""
+        }
+      ],
+      "outputs": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "start10EnrichedPlan",
+      "target": "ai10EnrichedEpisodePlan",
+      "sourceHandle": "start10EnrichedPlan-source-right",
+      "targetHandle": "ai10EnrichedEpisodePlan-target-left"
+    },
+    {
+      "source": "ai10EnrichedEpisodePlan",
+      "target": "ans10EnrichedEpisodePlan",
+      "sourceHandle": "ai10EnrichedEpisodePlan-source-right",
+      "targetHandle": "ans10EnrichedEpisodePlan-target-left"
+    }
+  ],
+  "chatConfig": {
+    "variables": [
+      {
+        "key": "frameworkPlanPackage",
+        "label": "完整框架策划包",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "maxLength": 50000,
+        "type": "input",
+        "description": "07 阶段输出中的 framework_plan_package 对象或完整 07 输出 JSON。用于兜底参考。"
+      },
+      {
+        "key": "beatCheckpointTimeline",
+        "label": "十五节拍卡点时间轴",
+        "valueType": "string",
+        "required": true,
+        "defaultValue": "",
+        "maxLength": 50000,
+        "type": "input",
+        "description": "07 framework_plan_package.beat_checkpoint_timeline。"
+      },
+      {
+        "key": "characterStorylines",
+        "label": "人物故事线",
+        "valueType": "string",
+        "required": true,
+        "defaultValue": "",
+        "maxLength": 12000,
+        "type": "input",
+        "description": "07 framework_plan_package.character_storylines。"
+      },
+      {
+        "key": "sceneDictionary",
+        "label": "场景字典",
+        "valueType": "string",
+        "required": true,
+        "defaultValue": "",
+        "maxLength": 8000,
+        "type": "input",
+        "description": "08 阶段输出的 sceneDictionary，或包含 sceneDictionary 字段的完整 08 输出 JSON。"
+      },
+      {
+        "key": "appearanceMapping",
+        "label": "人设服装alias映射",
+        "valueType": "string",
+        "required": false,
+        "defaultValue": "",
+        "maxLength": 10000,
+        "type": "input",
+        "description": "09 阶段输出的 appearanceMapping，或包含 appearanceMapping 字段的完整 09 输出 JSON。"
+      },
+      {
+        "key": "shmRs8OT",
+        "label": "用户偏好提示词",
+        "valueType": "string",
+        "required": false,
+        "type": "input",
+        "description": ""
+      }
+    ],
+    "scheduledTriggerConfig": {
+      "cronString": "",
+      "timezone": "Asia/Shanghai",
+      "defaultPrompt": ""
+    },
+    "_id": "6a3396600eeef28bd20f6d9a"
+  }
+}
