@@ -123,7 +123,7 @@
               <span class="sidebar-profile-avatar">登</span>
               <span class="sidebar-footer-text">登录创作</span>
             </a>
-            <a class="sidebar-logout-link" href="{{ url_for('register_page') }}">注册账号</a>
+            {% if registration_enabled %}<a class="sidebar-logout-link" href="{{ url_for('register_page') }}">注册账号</a>{% endif %}
           {% endif %}
         </div>
       </div>

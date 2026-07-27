@@ -2,6 +2,10 @@ from __future__ import annotations
 
 """Extracted TaskManager mixin for ProjectSnapshotStoreMixin."""
 
+import os
+import threading
+import uuid
+
 from . import task_manager_common as _task_manager_common
 from .task_manager_common import *
 globals().update(
@@ -15,6 +19,18 @@ from .task_manager_common import (
 )
 
 SNAPSHOT_LOG_LIMIT = 200
+_JSON_WRITE_LOCKS: dict[str, threading.RLock] = {}
+_JSON_WRITE_LOCKS_GUARD = threading.Lock()
+
+
+def _json_write_lock(path: Path) -> threading.RLock:
+    key = str(path.resolve())
+    with _JSON_WRITE_LOCKS_GUARD:
+        lock = _JSON_WRITE_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _JSON_WRITE_LOCKS[key] = lock
+        return lock
 
 
 def _read_json_object(path: Path) -> dict[str, Any] | None:
@@ -37,12 +53,21 @@ def _read_json_object(path: Path) -> dict[str, Any] | None:
 
 def _write_json_object(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.tmp")
-    temp_path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temp_path.replace(path)
+    serialized = json.dumps(data, ensure_ascii=False, indent=2)
+    lock = _json_write_lock(path)
+    with lock:
+        temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with temp_path.open("w", encoding="utf-8", newline="") as handle:
+                handle.write(serialized)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, path)
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _normalized_log_list(value: Any) -> list[dict[str, Any]]:
@@ -260,11 +285,26 @@ class ProjectSnapshotStoreMixin:
 
     def _persist_snapshot(self, record: TaskRecord) -> None:
         path = self._project_path(record.project_id)
-        with record.lock:
-            if bool(record.snapshot.get("_deleted")):
-                return
-            snapshot = copy.deepcopy(record.snapshot)
-        _write_json_object(path, snapshot)
+        with _json_write_lock(path):
+            with record.lock:
+                if bool(record.snapshot.get("_deleted")):
+                    return
+                snapshot = copy.deepcopy(record.snapshot)
+            _write_json_object(path, snapshot)
+
+    def _persist_project_snapshot_data(self, project_id: int, snapshot: dict[str, Any]) -> None:
+        """Persist an externally prepared project snapshot through the same atomic writer."""
+        normalized_project_id = int(project_id)
+        persisted = copy.deepcopy(snapshot)
+        path = self._project_path(normalized_project_id)
+        with _json_write_lock(path):
+            record = self._projects.get(normalized_project_id)
+            if record is not None:
+                with record.lock:
+                    if bool(record.snapshot.get("_deleted")):
+                        return
+                    record.snapshot = copy.deepcopy(persisted)
+            _write_json_object(path, persisted)
 
     def _build_resume_checkpoint(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         checkpoint = copy.deepcopy(snapshot)

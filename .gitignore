@@ -27,3 +27,4 @@ fix_*.py
 *.bak_*
 *_verify.png
 .codex-runtime/
+.codex-pet-runs/

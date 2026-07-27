@@ -236,10 +236,7 @@ class StageCacheMixin:
 
         persisted = copy.deepcopy(snapshot)
         persisted.setdefault("artifacts", {}).update(artifacts_update)
-        self._project_path(project_id).write_text(
-            json.dumps(persisted, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self._persist_project_snapshot_data(project_id, persisted)
         snapshot.setdefault("artifacts", {}).update(artifacts_update)
 
     def _available_rollback_stage_options(self, snapshot: dict[str, Any]) -> list[tuple[str, str]]:
@@ -785,10 +782,7 @@ class StageCacheMixin:
             return
         persisted = copy.deepcopy(snapshot)
         persisted.setdefault("artifacts", {}).update(artifacts_update)
-        self._project_path(project_id).write_text(
-            json.dumps(persisted, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self._persist_project_snapshot_data(project_id, persisted)
         snapshot.setdefault("artifacts", {}).update(artifacts_update)
 
     def _public_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -1781,9 +1775,6 @@ class StageCacheMixin:
 
         persisted = copy.deepcopy(snapshot)
         persisted.setdefault("artifacts", {}).update(artifacts_update)
-        self._project_path(project_id).write_text(
-            json.dumps(persisted, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self._persist_project_snapshot_data(project_id, persisted)
         snapshot.setdefault("artifacts", {}).update(artifacts_update)
 

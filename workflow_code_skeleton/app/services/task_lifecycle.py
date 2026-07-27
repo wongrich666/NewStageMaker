@@ -280,10 +280,7 @@ class TaskLifecycleMixin:
             )
             snapshot["artifacts"]["script_batches"] = copy.deepcopy(result.get("script_batches") or [])
         compacted = self._compact_completed_snapshot(snapshot)
-        self._project_path(project_id).write_text(
-            json.dumps(compacted, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self._persist_project_snapshot_data(project_id, compacted)
         return self._public_snapshot(compacted)
 
     def create_framework_planner_asset(
@@ -350,10 +347,7 @@ class TaskLifecycleMixin:
             "wait_elapsed_ms": 0,
             "wait_started_at": None,
         }
-        self._project_path(project_id).write_text(
-            json.dumps(snapshot, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self._persist_project_snapshot_data(project_id, snapshot)
         self._remember_latest_project(int(user_id), project_id)
         return self._public_snapshot(snapshot)
 
@@ -602,10 +596,7 @@ class TaskLifecycleMixin:
             "wait_elapsed_ms": 0,
             "wait_started_at": None,
         }
-        self._project_path(project_id).write_text(
-            json.dumps(snapshot, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self._persist_project_snapshot_data(project_id, snapshot)
         self._remember_latest_project(int(user_id), project_id)
         return self._public_snapshot(snapshot)
 
@@ -660,10 +651,7 @@ class TaskLifecycleMixin:
                 record.snapshot = snapshot
             self._persist_snapshot(record)
         else:
-            self._project_path(project_id).write_text(
-                json.dumps(snapshot, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            self._persist_project_snapshot_data(project_id, snapshot)
         return self._public_snapshot(snapshot)
 
     def confirm_project_completion(
@@ -703,10 +691,7 @@ class TaskLifecycleMixin:
             }
         )
         compacted = self._compact_completed_snapshot(snapshot)
-        self._project_path(project_id).write_text(
-            json.dumps(compacted, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self._persist_project_snapshot_data(project_id, compacted)
         return self._public_snapshot(compacted)
 
     def rollback_project_to_stage(

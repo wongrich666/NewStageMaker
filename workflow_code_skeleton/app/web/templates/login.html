@@ -67,9 +67,13 @@
         </button>
       </form>
 
-      <p class="auth-switch-v2">
-        还没有账号？<a href="{{ url_for('register_page') }}">创建账号</a>
-      </p>
+      {% if registration_enabled %}
+        <p class="auth-switch-v2">
+          还没有账号？<a href="{{ url_for('register_page') }}">创建账号</a>
+        </p>
+      {% elif admin_only_login %}
+        <p class="auth-switch-v2">个人专用平台，仅管理员账号可以登录</p>
+      {% endif %}
     </div>
 
     <div class="auth-features">

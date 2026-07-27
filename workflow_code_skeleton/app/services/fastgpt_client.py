@@ -55,6 +55,7 @@ from .fastgpt_contracts import (
     LEGACY_WIRE_INPUT_ALIASES_OVERRIDES,
     MAX_RETRIES,
     EPISODE_PLAN,
+    FRAMEWORK_PLAN_PACKAGE,
     NORMALIZED_EPISODE_PLAN,
     OUTFIT_SWITCH_RULES,
     PASS_REVIEW_JSON,
@@ -622,6 +623,10 @@ class FastGPTClient:
         stage_name: str,
     ) -> requests.Response:
         attempts = max(1, int(getattr(settings, "fastgpt_http_retries", 2)) + 1)
+        if stage_name == STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN:
+            # A timed-out 10-stage request can still be generating upstream.
+            # Retrying the same 30+ episode job duplicates both work and cost.
+            attempts = 1
         delay = max(0.0, float(getattr(settings, "fastgpt_http_retry_delay", 1.5)))
         last_error: Exception | None = None
 
@@ -871,6 +876,8 @@ class FastGPTClient:
             0,
             int(getattr(settings, "fastgpt_stage_payload_warn_chars", 120000)),
         )
+        if contract.stage_name == STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN:
+            warn_limit = min(warn_limit, 90000)
         hard_limit = max(
             warn_limit,
             int(getattr(settings, "fastgpt_stage_payload_hard_chars", 240000)),
@@ -1495,6 +1502,7 @@ def _compact_stage_request_variables(
     )
 
     for canonical_name in (
+        FRAMEWORK_PLAN_PACKAGE,
         PASS_REVIEW_JSON,
         HOOK_MEMORY,
         DIALOGUE_MEMORY,
@@ -1618,6 +1626,11 @@ def _compact_stage_canonical_value(
     batch_start_episode: int,
     total_episodes: int,
 ) -> Any | None:
+    if (
+        canonical_name == FRAMEWORK_PLAN_PACKAGE
+        and stage_name == STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN
+    ):
+        return _compact_stage10_framework_plan_package(value)
     if canonical_name == PASS_REVIEW_JSON:
         return _compact_review_payload_value(value)
     if canonical_name in {HOOK_MEMORY, DIALOGUE_MEMORY, SCRIPT_MEMORY, LAST_SUMMARY}:
@@ -1631,6 +1644,8 @@ def _compact_stage_canonical_value(
     if canonical_name == SCENES:
         return _compact_scene_payload_for_stage(stage_name, value)
     if canonical_name == APPEARANCE_MAPPING:
+        if stage_name == STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN:
+            return _compact_stage10_appearance_mapping(value)
         return _compact_appearanceMapping_payload(value)
     if canonical_name in {EPISODE_PLAN, NORMALIZED_EPISODE_PLAN}:
         return _compact_episode_plan_payload(
@@ -1795,6 +1810,122 @@ def _compact_previous_script_payload(value: Any) -> str:
     if len(sections) <= 2:
         return _compact_large_text_payload(text, max_chars=2200)
     return "\n\n".join(sections[-2:])[:2200].strip()
+
+
+def _compact_stage10_framework_plan_package(value: Any) -> str | None:
+    parsed = _try_parse_jsonish(value)
+    if not isinstance(parsed, dict):
+        return None
+
+    compacted = dict(parsed)
+    for key in (
+        "prompt_preferences",
+        "stage_prompts",
+        "user_knowledge_stage_prompts",
+        "user_edit_history",
+    ):
+        compacted.pop(key, None)
+
+    source_brief = compacted.get("source_brief")
+    if isinstance(source_brief, dict):
+        source_brief = dict(source_brief)
+        if (
+            "adaptation_direction" in source_brief
+            and _stable_payload_signature(source_brief.get("adaptation_direction"))
+            == _stable_payload_signature(compacted.get("adaptation_direction"))
+        ):
+            source_brief.pop("adaptation_direction", None)
+        compacted["source_brief"] = source_brief
+
+    basic_config = compacted.get("basic_config")
+    if isinstance(basic_config, dict):
+        basic_config = dict(basic_config)
+        if (
+            "adaptation_direction" in basic_config
+            and _stable_payload_signature(basic_config.get("adaptation_direction"))
+            == _stable_payload_signature(compacted.get("adaptation_direction"))
+        ):
+            basic_config.pop("adaptation_direction", None)
+        compacted["basic_config"] = basic_config
+
+    character_plan = compacted.get("character_plan")
+    if isinstance(character_plan, dict):
+        character_plan = dict(character_plan)
+        duplicate_pairs = (
+            ("main_characters", "characters"),
+            ("relationship_map", "character_relationships"),
+        )
+        for duplicate_key, canonical_key in duplicate_pairs:
+            if (
+                duplicate_key in character_plan
+                and _stable_payload_signature(character_plan.get(duplicate_key))
+                == _stable_payload_signature(character_plan.get(canonical_key))
+            ):
+                character_plan.pop(duplicate_key, None)
+        compacted["character_plan"] = character_plan
+
+    return json.dumps(
+        compacted,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _compact_stage10_appearance_mapping(value: Any) -> str | None:
+    parsed = _try_parse_jsonish(value)
+    if not isinstance(parsed, dict):
+        return None
+    mapping = parsed.get("appearanceMapping")
+    if not isinstance(mapping, dict):
+        mapping = parsed
+    characters = mapping.get("characters")
+    if not isinstance(characters, list):
+        return None
+
+    character_keys = (
+        "character_id",
+        "canonical_name",
+        "name",
+        "default_name",
+        "role_type",
+        "identity",
+        "appearance_anchor",
+        "outfit_versions",
+        "outfit_variants",
+        "episode_usage_plan",
+        "scene_trigger_rules",
+        "alias_rules",
+        "continuity_notes",
+    )
+    compacted_characters = []
+    for character in characters:
+        if not isinstance(character, dict):
+            continue
+        compacted_character = {
+            key: character[key]
+            for key in character_keys
+            if key in character and character[key] not in (None, "", [], {})
+        }
+        compacted_characters.append(compacted_character)
+
+    compacted = {
+        key: mapping[key]
+        for key in (
+            "mapping_version",
+            "naming_principle",
+            "global_alias_rules",
+            "continuity_warnings",
+        )
+        if key in mapping and mapping[key] not in (None, "", [], {})
+    }
+    compacted["characters"] = compacted_characters
+    return json.dumps(
+        compacted,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    )
 
 
 def _compact_appearanceMapping_payload(value: Any) -> str:

@@ -40,6 +40,7 @@ from workflow_code_skeleton.app.services.fastgpt_contracts import (
     STAGE_DIALOGUES_WRITING,
     STAGE_EPISODE_PLAN_NORMALIZE,
     STAGE_FRAMEWORK,
+    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
     STAGE_FRAMEWORK_NATURALIZE,
     STAGE_HOOKS_WRITING,
     STAGE_HOOK_REVIEW,
@@ -604,6 +605,166 @@ class FastGPTClientFrameworkTests(unittest.TestCase):
                 )
 
         self.assertEqual(mock_post.call_args.kwargs.get("timeout"), 17)
+
+    def test_stage10_timeout_does_not_submit_duplicate_paid_request(self) -> None:
+        client = FastGPTClient()
+        settings.fastgpt_http_retries = 2
+        endpoint = FastGPTEndpoint(
+            url="https://example.test/api/v1/chat/completions",
+            url_source="test",
+            api_key="test-key",
+            api_key_source="test",
+            chat_id="stage10-timeout-test",
+            timeout=600,
+        )
+
+        with patch("requests.post", side_effect=requests.Timeout("boom")) as mock_post:
+            with self.assertRaises(FastGPTTransientError):
+                client._post_with_retries(
+                    endpoint,
+                    {"Authorization": "Bearer test"},
+                    {"messages": []},
+                    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+                )
+
+        self.assertEqual(mock_post.call_count, 1)
+
+    def test_stage10_compacts_duplicates_but_keeps_episode_and_outfit_data(self) -> None:
+        repeated_episode_plan = "第1集推进。" * 3200
+        characters = [
+            {
+                "character_id": "char_001",
+                "name": "科尔",
+                "default_name": "科尔",
+                "identity": "流亡狼族",
+                "relationships_with_others": "关系说明" * 1200,
+                "outfit_versions": [
+                    {
+                        "version_id": "A",
+                        "outfit_description": "黑色作战服",
+                    }
+                ],
+                "outfit_variants": [
+                    {
+                        "variant_id": "A",
+                        "alias_name": "科尔",
+                        "linked_outfit_version": "A",
+                    }
+                ],
+                "episode_usage_plan": [
+                    {
+                        "episode_range": "1-30",
+                        "outfit_version_id": "A",
+                    }
+                ],
+                "episode_level_usage_plan": [
+                    {
+                        "episode_range": "1-30",
+                        "outfit_version_id": "A",
+                    }
+                ],
+                "scene_trigger_rules": [
+                    {
+                        "scene_id": "scene_A",
+                        "outfit_version_id": "A",
+                    }
+                ],
+                "alias_rules": ["正文使用科尔(A)"],
+            }
+        ]
+        framework_package = {
+            "basic_config": {
+                "total_episodes": 30,
+                "adaptation_direction": repeated_episode_plan,
+            },
+            "adaptation_direction": repeated_episode_plan,
+            "source_brief": {
+                "adaptation_direction": repeated_episode_plan,
+                "core_logline": "孤狼复仇",
+            },
+            "beat_checkpoint_timeline": [{"beat_no": 1, "episode_range": "1-2"}],
+            "character_storylines": [{"character": "科尔", "line": "复仇"}],
+            "character_plan": {
+                "characters": characters,
+                "main_characters": characters,
+                "character_relationships": [{"from": "科尔", "to": "凯尔"}],
+                "relationship_map": [{"from": "科尔", "to": "凯尔"}],
+            },
+            "stage_prompts": {"character": "偏好" * 7000},
+            "user_knowledge_stage_prompts": {"character": "偏好" * 7000},
+            "prompt_preferences": {"stage_prompts": {"character": "偏好" * 7000}},
+            "user_edit_history": ["历史" * 7000],
+        }
+        appearance_mapping = {
+            "mapping_version": "appearance_mapping_v1",
+            "naming_principle": "按集使用服装版本",
+            "characters": characters,
+        }
+        variables = {
+            "framework_plan_package": framework_package,
+            "sceneDictionary": {
+                "core_scenes": [
+                    {
+                        "scene_id": "scene_A",
+                        "scene_name": "北郊断崖",
+                        "description": "暴雨断崖" * 1200,
+                    }
+                ]
+            },
+            "appearanceMapping": appearance_mapping,
+            "beat_checkpoint_timeline": framework_package["beat_checkpoint_timeline"],
+            "character_storylines": framework_package["character_storylines"],
+            "shmRs8OT": "",
+        }
+        client = FastGPTClient()
+        contract = contract_for(STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN)
+        wire = client._build_wire_variables(
+            STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+            variables,
+            contract,
+        )
+
+        body = client._build_request_body(contract, wire, "stage10-compact-test")
+
+        body_variables = dict(body["variables"])
+        compacted_package = json.loads(body_variables["frameworkPlanPackage"])
+        compacted_appearance = json.loads(body_variables["appearanceMapping"])
+        debug_info = client.get_last_stage_debug_info(
+            STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN
+        )
+        self.assertEqual(compacted_package["basic_config"]["total_episodes"], 30)
+        self.assertNotIn(
+            "adaptation_direction",
+            compacted_package["basic_config"],
+        )
+        self.assertIn("adaptation_direction", compacted_package)
+        self.assertNotIn("stage_prompts", compacted_package)
+        self.assertNotIn(
+            "adaptation_direction",
+            compacted_package["source_brief"],
+        )
+        self.assertNotIn(
+            "main_characters",
+            compacted_package["character_plan"],
+        )
+        compacted_character = compacted_appearance["characters"][0]
+        self.assertEqual(
+            compacted_character["outfit_versions"][0]["version_id"],
+            "A",
+        )
+        self.assertEqual(
+            compacted_character["episode_usage_plan"][0]["outfit_version_id"],
+            "A",
+        )
+        self.assertEqual(
+            compacted_character["scene_trigger_rules"][0]["scene_id"],
+            "scene_A",
+        )
+        self.assertNotIn("episode_level_usage_plan", compacted_character)
+        self.assertLess(
+            int(debug_info["payload_stats"]["body_chars"]),
+            int(debug_info["payload_stats_before_compact"]["body_chars"]),
+        )
 
     def test_unstructured_stage_prefers_unstructured_api_key(self) -> None:
         with patch.dict(

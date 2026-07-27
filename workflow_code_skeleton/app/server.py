@@ -28,6 +28,7 @@ from flask import (
     session,
     url_for,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models.inputs import derive_script_title_content
 from .services.auth_store import auth_store
@@ -113,8 +114,39 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         template_folder=str(template_dir),
         static_folder=str(static_dir),
     )
+    if str(os.getenv("SCRIPTMAKER_TRUST_REVERSE_PROXY", "false")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     app.config["WORKFLOW_SPEC_PATH"] = workflow_spec_path or default_workflow_spec_path()
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY") or os.getenv("FLASK_SECRET_KEY") or "scriptmaker-dev-secret"
+    force_secure_cookies = str(
+        os.getenv("SCRIPTMAKER_SECURE_COOKIES", "false")
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    app.config.update(
+        SESSION_COOKIE_SECURE=force_secure_cookies,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+    )
+    app.config["REGISTRATION_ENABLED"] = str(
+        os.getenv("SCRIPTMAKER_REGISTRATION_ENABLED", "true")
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    app.config["ADMIN_ONLY_LOGIN"] = str(
+        os.getenv("SCRIPTMAKER_ADMIN_ONLY_LOGIN", "false")
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    app.config["LOGIN_ALLOWED_USERNAMES"] = {
+        username.strip()
+        for username in str(os.getenv("SCRIPTMAKER_LOGIN_ALLOWED_USERNAMES", "")).split(",")
+        if username.strip()
+    }
+    app.config["LOGIN_ALLOWED_USER_IDS"] = {
+        int(user_id.strip())
+        for user_id in str(os.getenv("SCRIPTMAKER_LOGIN_ALLOWED_USER_IDS", "")).split(",")
+        if user_id.strip().isdigit()
+    }
 
     @app.after_request
     def _apply_security_headers(response):
@@ -1234,10 +1266,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             task_manager._persist_snapshot(record)
         else:
             try:
-                task_manager._project_path(project_id).write_text(
-                    json.dumps(snapshot, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
+                task_manager._persist_project_snapshot_data(project_id, snapshot)
             except Exception:
                 logger.exception("framework-to-script stage snapshot persist failed project_id=%s", project_id)
 
@@ -1303,10 +1332,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             task_manager._persist_snapshot(record)
         else:
             try:
-                task_manager._project_path(project_id).write_text(
-                    json.dumps(snapshot, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
+                task_manager._persist_project_snapshot_data(project_id, snapshot)
             except Exception:
                 logger.exception("framework-to-script draft snapshot persist failed project_id=%s", project_id)
 
@@ -1410,10 +1436,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 record.snapshot = snapshot
             task_manager._persist_snapshot(record)
         else:
-            task_manager._project_path(project_id).write_text(
-                json.dumps(snapshot, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            task_manager._persist_project_snapshot_data(project_id, snapshot)
         return _json_ok(running_stage=running_stage, project_id=project_id)
 
     @app.post("/api/framework-to-script/save-progress")
@@ -1491,10 +1514,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 record.snapshot = snapshot
             task_manager._persist_snapshot(record)
         else:
-            task_manager._project_path(project_id).write_text(
-                json.dumps(snapshot, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            task_manager._persist_project_snapshot_data(project_id, snapshot)
 
         return _json_ok(
             message="剧本进度已保存到当前框架资产。",
@@ -2011,6 +2031,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         user = _current_user()
         return {
             "current_user_is_admin": bool(user and admin_store.is_admin(user.id, user.username)),
+            "registration_enabled": bool(app.config["REGISTRATION_ENABLED"]),
+            "admin_only_login": bool(app.config["ADMIN_ONLY_LOGIN"]),
         }
 
     def _workflow_request_identity(path: str) -> tuple[str, str] | None:
@@ -3056,6 +3078,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         username = str(request.form.get("username") or "").strip()
         password = str(request.form.get("password") or "")
         user = auth_store.authenticate(username, password)
+        allowed_usernames = app.config["LOGIN_ALLOWED_USERNAMES"]
+        allowed_user_ids = app.config["LOGIN_ALLOWED_USER_IDS"]
+        if user and (allowed_usernames or allowed_user_ids):
+            if user.username not in allowed_usernames and user.id not in allowed_user_ids:
+                user = None
+        if user and app.config["ADMIN_ONLY_LOGIN"] and not admin_store.is_admin(user.id, user.username):
+            user = None
         if not user:
             admin_store.record_event(
                 user_id=None,
@@ -3086,12 +3115,22 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
     @app.get("/register")
     def register_page():
+        if not app.config["REGISTRATION_ENABLED"]:
+            return render_template(
+                "login.html",
+                error="当前为个人专用平台，仅管理员账号可以登录。",
+            ), 403
         if _current_user():
             return redirect(url_for("workspace_page", auth_token=_current_auth_token()))
         return render_template("register.html")
 
     @app.post("/register")
     def register_submit():
+        if not app.config["REGISTRATION_ENABLED"]:
+            return render_template(
+                "login.html",
+                error="当前为个人专用平台，注册功能已关闭。",
+            ), 403
         username = str(request.form.get("username") or "").strip()
         password = str(request.form.get("password") or "")
         confirm_password = str(request.form.get("confirm_password") or "")
@@ -3432,10 +3471,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 record.snapshot = snapshot
             task_manager._persist_snapshot(record)
         else:
-            task_manager._project_path(project_id_int).write_text(
-                json.dumps(snapshot, ensure_ascii=False, indent=2, default=str),
-                encoding="utf-8",
-            )
+            task_manager._persist_project_snapshot_data(project_id_int, snapshot)
 
         return snapshot
 
