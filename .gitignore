@@ -28,3 +28,8 @@ fix_*.py
 *_verify.png
 .codex-runtime/
 .codex-pet-runs/
+
+# Local development servers and temporary remote deployment clones
+server_*.log
+.tmp_cnb_*/
+debug_*.txt

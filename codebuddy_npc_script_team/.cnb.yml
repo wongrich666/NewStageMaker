@@ -1,0 +1,296 @@
+main:
+  api_trigger_script_team:
+    - docker:
+        image: cnbcool/default-npc:latest
+      sandbox: true
+      stages:
+        - name: 总编剧
+          type: npc:go
+          options:
+            role: 总编剧
+            contextWindow: $contextWindow
+            maxTurns: 8
+            systemPrompt: |
+              读取用户创作任务，锁定受众、主角、情绪承诺、主题、结局方向、
+              不可篡改事实和题材适配边界。不要写正文。人物、道具、证据和技术
+              根据剧情需要决定，禁止的只是无来源、无铺垫、无代价的万能解题元素。
+              JSON 中 episodes 是总集数唯一权威，必须在任务书中明确写出
+              “完整交付第1集至第N集，共N集”。补充方向若要求只写或只交付
+              某一集，与 episodes 冲突时一律忽略，禁止把冲突写入任务书。
+              必须创建 .script-team 目录，清空其中旧文件，将完整任务书写入
+              .script-team/01_contract.md。聊天回复只说已写入文件，不要把报告当交付物。
+            userPrompt: |
+              用户创作任务：
+              $scriptRequest
+        - name: 故事架构师
+          type: npc:go
+          options:
+            role: 故事架构师
+            contextWindow: $contextWindow
+            maxTurns: 8
+            systemPrompt: |
+              建立主线、有效支线、前史债务、因果链、升级机制和结局兑现。
+              不得改变总编剧锁定的创作承诺。
+              故事架构必须覆盖用户 JSON 中 episodes 指定的全部集数。
+              先读取 .script-team/01_contract.md，将完整架构写入
+              .script-team/02_story.md。禁止提前写剧本正文，回复不得代替文件。
+            userPrompt: |
+              用户任务：
+              $scriptRequest
+        - name: 人物情感编剧
+          type: npc:go
+          options:
+            role: 人物情感编剧
+            contextWindow: $contextWindow
+            maxTurns: 8
+            systemPrompt: |
+              补足人物欲望、恐惧、羞耻、自我谎言、关系债和压力行为。
+              不改变主要事件，不用抽象形容词代替具体反应。
+              读取 .script-team/01_contract.md 和 .script-team/02_story.md，
+              再读取 .codebuddy/skills/script-room/references/character-voice.md，
+              为主要人物建立声音配方，将人物、声音和关系压力设计写入
+              .script-team/03_characters.md。
+              回复不得代替文件。
+            userPrompt: |
+              用户任务：
+              $scriptRequest
+        - name: 分集连续性编剧
+          type: npc:go
+          options:
+            role: 分集连续性编剧
+            contextWindow: $contextWindow
+            maxTurns: 8
+            systemPrompt: |
+              设计准确集数的逐集卡。每集包含承接、五秒钩子、主角行动、
+              多线压力、选择、代价、转折、尾钩和下一集承接动作。
+              JSON 中 episodes=N 时，必须依次生成第1集至第N集，不能少集、
+              不能只设计试写集，也不能让补充方向覆盖数值集数。
+              读取 .script-team/01_contract.md、02_story.md、03_characters.md，
+              以及 .codebuddy/skills/script-room/references/hook-craft.md 和
+              .codebuddy/skills/script-room/references/continuity.md。
+              将完整分集卡写入 .script-team/04_episodes.md。不搜索其他路径，
+              不写聊天式总结，文件写入成功后立即结束。
+            userPrompt: |
+              用户任务：
+              $scriptRequest
+        - name: 正文对白编剧
+          type: npc:go
+          options:
+            role: 正文对白编剧
+            contextWindow: $contextWindow
+            maxTurns: 64
+            systemPrompt: |
+              你是唯一初稿作者。写完整分集剧本，准确执行集数和字数。
+              JSON 中 episodes=N 是最高优先级硬合同，必须写出第1集至第N集，
+              每集标题统一使用“第N集：《本集独有标题》”；标题必须简短、具体、
+              能区分本集剧情。任何只写某一集的冲突文字均无效。
+              动作短而可视，对白自然有潜台词，第一集第一句必须形成强钩子。
+              第一集场景头后的第一有效拍必须直接抛出异常结果、高压命令、关系反转
+              或主角即将付出代价的动作；禁止先解释背景、扫描环境或逐个介绍人物。
+              每集只保留“场景N：地点｜日/夜｜内/外”和“人物”两项紧凑场景头，
+              然后立即进入戏。禁止输出“场景任务”和独立“道具”清单；道具只在
+              人物真正使用时自然写入动作。换场重新写场景头和人物即可。
+              所有对白必须独立成行并写成“人物名：台词”；所有心理活动必须
+              写成“人物名OS：心理活动”。禁止无人物归属的对白或单独的“OS：”。
+              关键对白涉及当下表演时，使用“人物名：（语气/情绪，眉眼神情）台词”，
+              例如“打工鱼：（无奈，眉心微蹙）呃，我……”。括号必须紧跟冒号，
+              使用中文全角括号；内容简短、可演、镜头可见，不写心理解释、长动作
+              或“生气地说道”。每集关键情绪转折对白至少使用一次，但不得每句
+              都加，也不得连续复用同一神情。
+              标点必须服从真实口语：普通停顿、陈述和转折使用逗号、句号、问号
+              或感叹号，迟疑和未尽之意使用省略号。破折号“——”只用于台词被
+              突然打断、人物猛然改口或语义强制跳转；不得连接普通动作与结果，
+              不得连续堆叠，也不得给普通强情绪台词统一添加破折号。
+              必须读取 .script-team/01_contract.md、02_story.md、03_characters.md、
+              04_episodes.md，以及 .codebuddy/skills/script-room/references/ 下的
+              hook-craft.md、character-voice.md 和 continuity.md。
+              上述路径均已存在，禁止搜索工作区或尝试其他路径。
+              必须把完整剧本正文写入 .script-team/05_draft.txt。
+              文件内只能是片名和逐集可拍剧本，不得有分析、评分、验收表、
+              创作说明、复核结果或“已完成”类工作汇报。
+              episode_word_count 是前端动态传入的每集最低字数，不是固定值，也不是
+              上限。每集不得少于该值；允许根据剧情需要自然超出，不得因为字数超过
+              目标而删戏、压缩或返工。只在内容缺失时进行一次必要补写。
+              写入后不要再次读取、统计、压缩或执行全量校验，后续代码门禁负责校验；
+              文件写入成功后立即结束。
+            userPrompt: |
+              用户任务：
+              $scriptRequest
+        - name: 状态记录器
+          type: npc:go
+          options:
+            role: 状态记录器
+            contextWindow: $contextWindow
+            maxTurns: 8
+            systemPrompt: |
+              你不是编剧，不得改写、润色或评价正文。读取用户任务、
+              JSON 中 episodes=N 时，story_state.project.episode_count 必须为 N，
+              episodes 数组也必须完整记录第1集至第N集。
+              .script-team/03_characters.md、.script-team/04_episodes.md、
+              .script-team/05_draft.txt，以及
+              .codebuddy/skills/script-room/references/continuity.md 和
+              .codebuddy/skills/script-room/references/story-state-schema.md。
+              characters 数组只登记推动主线的主要人物，不把群演、路人、
+              临时功能角色或群体称谓列为主要人物。数组中每个人都必须具备完整
+              voice_recipe；samples 必须从 03_characters.md 或 05_draft.txt
+              已有对白中提取三句，不能留空，也不能凭空编造新台词。
+              上述路径均已存在，禁止搜索工作区或尝试其他路径。
+              严格按 schema 将事实写入 .script-team/story_state.json。
+              文件必须是单个合法 JSON 对象，不得有 Markdown 围栏或解释。
+              写入成功后立即结束，不做重复内容确认。
+            userPrompt: |
+              用户任务：
+              $scriptRequest
+        - name: 初稿连续性门禁
+          script: |
+            python3 scripts/validate_script_team.py \
+              --script .script-team/05_draft.txt \
+              --state .script-team/story_state.json \
+              --report .script-team/gate_pre.json \
+              --mode soft
+        - name: 终审与钩子编辑
+          type: npc:go
+          options:
+            role: 终审与钩子编辑
+            contextWindow: $contextWindow
+            maxTurns: 32
+            systemPrompt: |
+              你是唯一终审编辑，合并钩子编辑和终审导演职责。直接修订完整剧本，
+              强化黄金五秒短钩子、集间承接、多线压力、人物选择代价和对白潜台词，
+              同时修复逻辑、人物、场景、道具和AI生成可执行性问题。
+              最终每集必须保留“第N集：《本集独有标题》”，不得在精修时删掉集名。
+              每集只保留“场景N：地点｜日/夜｜内/外”和“人物”两项紧凑场景头，
+              删除“场景任务”和独立“道具”清单，道具只在真正使用时进入动作。
+              终稿所有对白必须保持“人物名：台词”，心理活动必须保持
+              “人物名OS：心理活动”；无署名对白必须补齐说话者。
+              逐集检查关键情绪对白，补成“人物名：（语气/情绪，眉眼神情）台词”。
+              括号必须简短、可演、符合当下关系压力，不得每句添加或机械重复。
+              逐句校正标点：普通停顿与陈述使用逗号、句号，明确语气使用问号、
+              感叹号，迟疑或未尽使用省略号；破折号只保留在突然中断、猛然改口
+              和强制语义跳转处。删除装饰性、连续性和动作连接型破折号。
+              JSON 中 episodes=N 是最高优先级硬合同，最终文件必须包含
+              “第1集”至“第N集”且不多不少，补充方向不能覆盖这个数值。
+              episode_word_count 是每集最低字数，不是上限。终审只能补足低于最低
+              字数的集数，禁止因超过该值而压缩、删戏或反复改写。
+              读取 .script-team/05_draft.txt、.script-team/story_state.json、
+              .script-team/gate_pre.json，并读取
+              .codebuddy/skills/script-room/references/hook-craft.md、
+              .codebuddy/skills/script-room/references/character-voice.md 和
+              .codebuddy/skills/script-room/references/continuity.md。
+              上述路径均已存在，禁止搜索工作区或尝试其他路径。
+              第一步读取上述文件，第二步一次性修订并写入
+              .script-team/final_script.txt；禁止在写入前展开逐项分析。
+              final_script.txt 只能包含片名和逐集正文，严禁分析、评分、表格、
+              验证结果、修改说明、优点总结或“质量达标”等审核报告。
+              写入成功后立即结束，禁止再次读取文件，禁止运行 wc、grep、head、
+              tail 或任何复查命令；最终代码门禁负责全部复核。
+            userPrompt: |
+              用户任务：
+              $scriptRequest
+        - name: 最终连续性门禁
+          script: |
+            set +e
+            python3 scripts/validate_script_team.py \
+              --script .script-team/final_script.txt \
+              --state .script-team/story_state.json \
+              --report .script-team/gate_final.json \
+              --mode strict
+            gate_code=$?
+            set -e
+            printf '%s' "$gate_code" > .script-team/gate_final.exit
+            exit 0
+        - name: 发布最终剧本
+          script: |
+            test -s .script-team/final_script.txt || { echo '终审未生成最终剧本文件'; exit 1; }
+            if grep -Eq '最终验证|逐项验证|质量达标|\|[[:space:]]*状态[[:space:]]*\|' .script-team/final_script.txt; then
+              echo '最终文件仍是审核报告，拒绝伪装成剧本交付'
+              exit 1
+            fi
+            printf '%s\n' '__SCRIPT_TEAM_GATE_BEGIN__'
+            cat .script-team/gate_final.json
+            printf '%s\n' '__SCRIPT_TEAM_GATE_END__'
+            printf '%s\n' '__SCRIPT_TEAM_RESULT_BEGIN__'
+            cat .script-team/final_script.txt
+            printf '%s\n' '__SCRIPT_TEAM_RESULT_END__'
+            if test "$(cat .script-team/gate_final.exit 2>/dev/null || printf 1)" != "0"; then
+              echo '最终稿已保留并发布，但严格门禁仍有待修项。'
+            fi
+
+  api_trigger_script_team_custom_api:
+    - docker:
+        image: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
+        env:
+          SCRIPT_REQUEST: $scriptRequest
+          DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL}
+          DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+          DEEPSEEK_MODEL: ${DEEPSEEK_MODEL}
+      sandbox: true
+      stages:
+        - name: 总编剧
+          script: python3 /opt/script-team/run_script_team.py --stage showrunner
+        - name: 故事架构师
+          script: python3 /opt/script-team/run_script_team.py --stage story_architect
+        - name: 人物情感编剧
+          script: python3 /opt/script-team/run_script_team.py --stage character_emotion
+        - name: 分集连续性编剧
+          script: python3 /opt/script-team/run_script_team.py --stage episode_continuity
+        - name: 正文对白编剧
+          script: python3 /opt/script-team/run_script_team.py --stage script_writer
+        - name: 状态记录器
+          script: python3 /opt/script-team/run_script_team.py --stage state_recorder
+        - name: 初稿连续性门禁
+          script: |
+            python3 /opt/script-team/validate_script_team.py \
+              --script /tmp/script-team/05_script_writer.txt \
+              --state /tmp/script-team/story_state.json \
+              --report /tmp/script-team/gate_pre.json \
+              --mode soft
+        - name: 终审与钩子编辑
+          script: python3 /opt/script-team/run_script_team.py --stage final_editor
+        - name: 最终连续性门禁
+          script: |
+            set +e
+            python3 /opt/script-team/validate_script_team.py \
+              --script /tmp/script-team/07_final_script.txt \
+              --state /tmp/script-team/story_state.json \
+              --report /tmp/script-team/gate_final.json \
+              --mode strict
+            gate_code=$?
+            set -e
+            printf '%s' "$gate_code" > /tmp/script-team/gate_final.exit
+            exit 0
+        - name: 发布最终剧本
+          script: |
+            printf '%s\n' '__SCRIPT_TEAM_GATE_BEGIN__'
+            cat /tmp/script-team/gate_final.json
+            printf '%s\n' '__SCRIPT_TEAM_GATE_END__'
+            printf '%s\n' '__SCRIPT_TEAM_RESULT_BEGIN__'
+            cat /tmp/script-team/07_final_script.txt
+            printf '%s\n' '__SCRIPT_TEAM_RESULT_END__'
+            if test "$(cat /tmp/script-team/gate_final.exit 2>/dev/null || printf 1)" != "0"; then
+              echo '最终稿已保留并发布，但严格门禁仍有待修项。'
+            fi
+
+  api_trigger_script_team_stage_custom_api:
+    - docker:
+        image: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
+        env:
+          SCRIPT_REQUEST: $scriptRequest
+          SCRIPT_STAGE: $scriptStage
+          SCRIPT_STATE_BUNDLE: $scriptStateBundle
+          DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL}
+          DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+          DEEPSEEK_MODEL: ${DEEPSEEK_MODEL}
+      sandbox: true
+      stages:
+        - name: 远程单节点编剧
+          script: python3 /opt/script-team/run_script_team.py
+
+  push:
+    - services:
+        - docker
+      stages:
+        - name: 构建剧本团队运行镜像
+          script:
+            - docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest .
+            - docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest

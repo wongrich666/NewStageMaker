@@ -26,6 +26,11 @@ from .compact_context import (
     build_compact_worldview_context,
 )
 from ..utils.logger import get_logger
+from .workflow_line import (
+    is_test_workflow_line,
+    test_stage_api_key,
+    test_workflow_chat_completions_url,
+)
 from ..workflow_ids import (
     APPEARANCE_MAPPING_VAR,
     APPEARANCE_NATURAL_LANGUAGE_VAR,
@@ -546,6 +551,19 @@ class FastGPTClient:
                 response_text=response_preview,
             ) from exc
         _promote_unstructured_update_var_result(stage_name, data)
+        if is_test_workflow_line():
+            direct_output = _extract_test_workflow_direct_output(data, stage_name=stage_name)
+            self._remember_stage_debug_info(
+                stage_name,
+                status="direct_test_output",
+                answer_text_preview=_truncate_log_text(_first_text_candidate(data), limit=300),
+                response_preview=_response_log_summary(data, answer_limit=1000),
+                output_keys=list(direct_output.keys()) if isinstance(direct_output, dict) else [],
+                raw_response=data,
+                conversation_log_available=False,
+                last_failure_reason="",
+            )
+            return direct_output if isinstance(direct_output, dict) else {"output": direct_output}
         raw_output = self._extract_output_payload(
             data,
             contract,
@@ -794,6 +812,18 @@ class FastGPTClient:
         env_prefix = f"FASTGPT_{stage_name.upper()}"
         profile_aliases = _stage_api_profile_aliases(self._script_api_profile, stage_name)
         required_framework_key = FRAMEWORK_TO_SCRIPT_STAGE_API_KEY_ENVS.get(stage_name)
+        if is_test_workflow_line() and required_framework_key:
+            return FastGPTEndpoint(
+                url=_normalize_fastgpt_url(test_workflow_chat_completions_url()),
+                url_source="FASTGPT_TEST_WORKFLOW_BASE_URL",
+                api_key=test_stage_api_key(stage_name),
+                api_key_source=f"test-workflow:{stage_name}",
+                chat_id=f"new-workflow-test-{stage_name}-{uuid.uuid4().hex[:8]}",
+                timeout=int(
+                    _env(f"{env_prefix}_TIMEOUT", "FASTGPT_TIMEOUT")
+                    or getattr(settings, "fastgpt_timeout", 300)
+                ),
+            )
         if required_framework_key:
             stage_api_key_candidates = [required_framework_key]
         else:
@@ -1280,6 +1310,7 @@ class FastGPTClient:
         details = _format_rejected_candidate_details(rejected_candidates)
         response_summary = _response_log_summary(data, answer_limit=1000)
         answer_preview = _truncate_log_text(_first_text_candidate(data), limit=1000)
+        failure_diagnostics = _response_failure_diagnostics(data)
         candidate_sources = _collect_candidate_sources(data)
         probable_truncated_json, truncated_source = _probable_truncated_json_details(
             data,
@@ -1301,7 +1332,8 @@ class FastGPTClient:
             f"FastGPT 阶段 {contract.stage_name} 未返回契约字段：{', '.join(expected)}；"
             f"未找到通过校验的候选输出。{failure_reason}；"
             f"候选字段：{', '.join(_candidate_output_keys(data)[:24]) or '无'}；"
-            f"answerText 预览：{answer_preview or '空'}"
+            f"answerText 预览：{answer_preview or '空'}；"
+            f"上游诊断：{failure_diagnostics or '无'}"
         )
         self._remember_stage_debug_info(
             contract.stage_name,
@@ -1314,6 +1346,7 @@ class FastGPTClient:
             probable_truncated_json=probable_truncated_json,
             answer_text_preview=answer_preview,
             response_preview=response_summary,
+            failure_diagnostics=failure_diagnostics,
             output_keys=_candidate_output_keys(data),
             raw_response=data,
             conversation_log_available=False,
@@ -2281,6 +2314,49 @@ def _response_log_summary(data: Any, *, answer_limit: int = 1000) -> str:
         ),
     }
     return _truncate_log_text(_json_for_log(summary), limit=max(600, answer_limit + 200))
+
+
+def _response_failure_diagnostics(data: Any) -> str:
+    """Extract bounded upstream failure metadata without logging prompts or secrets."""
+    allowed = (
+        "errorText",
+        "finishReason",
+        "model",
+        "inputTokens",
+        "outputTokens",
+        "contextTotalLen",
+        "maxToken",
+    )
+    found: dict[str, Any] = {}
+    visited = 0
+
+    def visit(value: Any, depth: int = 0) -> None:
+        nonlocal visited
+        if depth > 8 or visited >= 2000 or len(found) == len(allowed):
+            return
+        visited += 1
+        if isinstance(value, dict):
+            for key in allowed:
+                candidate = value.get(key)
+                if key in found or candidate in (None, "", [], {}):
+                    continue
+                if isinstance(candidate, (str, int, float, bool)):
+                    found[key] = (
+                        _truncate_log_text(candidate, limit=300)
+                        if isinstance(candidate, str)
+                        else candidate
+                    )
+            for candidate in value.values():
+                if isinstance(candidate, (dict, list)):
+                    visit(candidate, depth + 1)
+        elif isinstance(value, list):
+            for candidate in value[:200]:
+                if isinstance(candidate, (dict, list)):
+                    visit(candidate, depth + 1)
+
+    visit(data)
+    ordered = {key: found[key] for key in allowed if key in found}
+    return _truncate_log_text(_json_for_log(ordered), limit=800) if ordered else ""
 
 
 def _collect_candidate_sources(data: Any, *, limit: int = 80) -> list[str]:
@@ -4394,6 +4470,151 @@ def _try_parse_json(text: str) -> Any | None:
                 return None
         candidate = parsed
     return candidate
+
+
+def _extract_test_workflow_direct_output(data: Any, *, stage_name: str = "") -> Any:
+    """Take the test workflow's final answer without enforcing production keys."""
+    if stage_name in {
+        STAGE_FRAMEWORK_SCRIPT_WRITE,
+        STAGE_FRAMEWORK_SCRIPT_REWRITE,
+    }:
+        script_candidates: list[str] = []
+        for content in _iter_choice_message_contents(data):
+            text = strip_code_fence(str(content or "")).strip()
+            if text and _try_parse_json(text) is None:
+                script_candidates.append(text)
+        for source, content in _iter_named_text_candidates(data):
+            lowered_source = str(source or "").lower()
+            if not any(
+                marker in lowered_source
+                for marker in ("answertext", "textoutput", "choices", "message.content")
+            ):
+                continue
+            text = strip_code_fence(str(content or "")).strip()
+            if text and _try_parse_json(text) is None:
+                script_candidates.append(text)
+        if script_candidates:
+            unique_candidates = list(dict.fromkeys(script_candidates))
+            episode_pattern = re.compile(
+                r"第\s*(\d+|[一二三四五六七八九十]+)\s*集"
+            )
+            chinese_numbers = {
+                "一": 1,
+                "二": 2,
+                "三": 3,
+                "四": 4,
+                "五": 5,
+                "六": 6,
+                "七": 7,
+                "八": 8,
+                "九": 9,
+                "十": 10,
+            }
+
+            def episode_numbers(text: str) -> list[int]:
+                result: list[int] = []
+                for value in episode_pattern.findall(text):
+                    if value.isdigit():
+                        result.append(int(value))
+                    elif value in chinese_numbers:
+                        result.append(chinese_numbers[value])
+                return result
+
+            best_complete = max(
+                unique_candidates,
+                key=lambda text: (len(set(episode_numbers(text))), len(text)),
+            )
+            if len(set(episode_numbers(best_complete))) > 1:
+                return {"batchScriptText": best_complete}
+
+            per_episode: dict[int, str] = {}
+            for text in unique_candidates:
+                numbers = episode_numbers(text)
+                if len(set(numbers)) != 1:
+                    continue
+                episode_no = numbers[0]
+                if len(text) > len(per_episode.get(episode_no, "")):
+                    per_episode[episode_no] = text
+            if len(per_episode) > 1:
+                return {
+                    "batchScriptText": "\n\n".join(
+                        per_episode[number] for number in sorted(per_episode)
+                    )
+                }
+            return {"batchScriptText": best_complete}
+
+    candidates: list[Any] = []
+    visited: set[int] = set()
+
+    def collect(value: Any, depth: int = 0) -> None:
+        if depth > 8:
+            return
+        parsed = _try_parse_json(value) if isinstance(value, str) else value
+        if isinstance(parsed, (dict, list)) and parsed:
+            identity = id(parsed)
+            if identity in visited:
+                return
+            visited.add(identity)
+            candidates.append(parsed)
+            if isinstance(parsed, dict):
+                nested_keys = (
+                    "output",
+                    "outputs",
+                    "data",
+                    "result",
+                    "response",
+                    "responseData",
+                    "payload",
+                    "message",
+                    "answerText",
+                    "textOutput",
+                    "content",
+                    "newVariables",
+                    "updateVarResult",
+                    "variableUpdate",
+                )
+                for key in nested_keys:
+                    if key in parsed:
+                        collect(parsed.get(key), depth + 1)
+            else:
+                for item in parsed:
+                    collect(item, depth + 1)
+
+    if isinstance(data, dict):
+        for content in _iter_choice_message_contents(data):
+            collect(content)
+
+        variables = data.get("newVariables")
+        if isinstance(variables, dict):
+            for value in variables.values():
+                collect(value)
+
+    for _, text in reversed(list(_iter_named_text_candidates(data))):
+        collect(text)
+
+    if candidates:
+        final_output_keys = {
+            "allEnrichedEpisodePlan",
+            "episode_plans",
+            "batchCausalConflictPlan",
+            "batchCausalConflictReview",
+            "conflictMemory",
+            "batchScriptText",
+            "batchScriptReview",
+            "scriptMemory",
+        }
+
+        def candidate_score(candidate: Any) -> tuple[int, int]:
+            keys = set(candidate) if isinstance(candidate, dict) else set()
+            final_key_hits = len(keys & final_output_keys)
+            try:
+                serialized_size = len(json.dumps(candidate, ensure_ascii=False, default=str))
+            except Exception:
+                serialized_size = len(str(candidate))
+            return final_key_hits, serialized_size
+
+        return max(candidates, key=candidate_score)
+    return data
 
 
 def _looks_like_probably_truncated_json(

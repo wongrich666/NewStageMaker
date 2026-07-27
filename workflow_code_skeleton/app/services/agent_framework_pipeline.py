@@ -119,8 +119,9 @@ class AgentFrameworkPipeline:
             description=expectation,
         )
         project_id = int(snapshot.get("project_id") or 0)
+        framework_only = str(payload.get("execution_scope") or "") == "framework_only"
         state = {
-            "generation_chain": "agent_framework_01_12",
+            "generation_chain": "agent_framework_01_07" if framework_only else "agent_framework_01_12",
             "pipeline_phase": "framework_01_07",
             "pipeline_stage": "01",
             "framework_project_id": project_id,
@@ -277,8 +278,12 @@ class AgentFrameworkPipeline:
         title = str(payload.get("title") or "未命名剧本").strip() or "未命名剧本"
         expectation = str(payload.get("user_expectation") or "").strip()
         conversation_material = str(payload.get("conversation_material") or "").strip()
-        source_text = expectation
-        if conversation_material and conversation_material != expectation:
+        source_document_text = str(payload.get("source_text") or "").strip()
+        source_filename = str(payload.get("source_filename") or "").strip()
+        source_mode = str(payload.get("source_mode") or "").strip()
+        execution_scope = str(payload.get("execution_scope") or "framework_and_script").strip()
+        source_text = source_document_text or expectation
+        if not source_document_text and conversation_material and conversation_material != expectation:
             source_text = (
                 f"【Agent整理后的创作要求】\n{expectation}\n\n"
                 f"【用户原始对话材料】\n{conversation_material}"
@@ -288,8 +293,8 @@ class AgentFrameworkPipeline:
         basic_config = {
             "project_title": title,
             "title": title,
-            "mode": "创作",
-            "source_title": title,
+            "mode": "改编" if source_document_text else "创作",
+            "source_title": source_filename or title,
             "source_text": source_text,
             "target_format": "短剧",
             "season_count": 1,
@@ -298,12 +303,15 @@ class AgentFrameworkPipeline:
             "episode_word_count": episode_word_count,
             "adaptation_direction": expectation,
             "user_constraints": "",
-            "user_requirements": "",
+            "user_requirements": expectation,
+            "source_document_id": str(payload.get("source_document_id") or ""),
+            "source_filename": source_filename,
+            "source_mode": source_mode,
         }
         framework_state: dict[str, Any] = {
             "project_id": framework_project_id,
             "project_title": title,
-            "mode": "创作",
+            "mode": "改编" if source_document_text else "创作",
             "basic_config": basic_config,
             "source_brief": {},
             "worldview_plan": {},
@@ -348,15 +356,22 @@ class AgentFrameworkPipeline:
                     stage_no=stage_no,
                     status="in_progress",
                 )
+                request_basic_config = copy.deepcopy(basic_config)
+                request_framework_state = copy.deepcopy(framework_state)
+                if source_document_text and stage_no != "01":
+                    # Stage 01 has already converted the original Word into source_brief.
+                    # Do not resend the paid model the entire document in stages 02-07.
+                    request_basic_config["source_text"] = "【原文已由01阶段提取，请基于 source_brief 与已确认阶段结果继续。】"
+                    request_framework_state["basic_config"] = copy.deepcopy(request_basic_config)
                 request_payload = {
-                    **copy.deepcopy(framework_state),
-                    **copy.deepcopy(basic_config),
-                    "locked_basic_config": copy.deepcopy(basic_config),
+                    **request_framework_state,
+                    **request_basic_config,
+                    "locked_basic_config": copy.deepcopy(request_basic_config),
                     "project_id": framework_project_id,
                     "project_title": title,
                     "title": title,
-                    "mode": "创作",
-                    "user_requirements": "",
+                    "mode": "改编" if source_document_text else "创作",
+                    "user_requirements": expectation,
                     "adaptation_direction": expectation,
                     "user_feedback": AGENT_CHARACTER_NAMING_FEEDBACK if stage_no == "03" else "",
                     "previous_worldview_plan": {},
@@ -419,6 +434,36 @@ class AgentFrameworkPipeline:
                     stage_no=stage_no,
                     status="completed" if stage_no == "07" else "in_progress",
                 )
+
+            if execution_scope == "framework_only":
+                state = self._conversation_state(user_id, conversation_id)
+                state.update(
+                    {
+                        "generation_chain": "agent_framework_01_07",
+                        "pipeline_phase": "completed",
+                        "pipeline_stage": "07",
+                        "pipeline_message": "Word 剧本框架分析完成",
+                        "framework_project_id": framework_project_id,
+                    }
+                )
+                agent_conversation_store.update(
+                    user_id,
+                    conversation_id,
+                    project_id=framework_project_id,
+                    state=state,
+                )
+                agent_conversation_store.add_message(
+                    user_id,
+                    conversation_id,
+                    role="assistant",
+                    content="Word 剧本的 01–07 框架分析已经完成，框架资产已保存。你可以进入框架工作台查看和调整；确认框架后可继续生成完整剧本。",
+                    metadata={
+                        "pipeline_completed": True,
+                        "framework_only": True,
+                        "project_id": framework_project_id,
+                    },
+                )
+                return
 
             request_base = {
                 "framework_asset_id": framework_project_id,

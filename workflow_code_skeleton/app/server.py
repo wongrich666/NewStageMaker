@@ -8,6 +8,7 @@ import tempfile
 import time
 import traceback
 import uuid
+import requests
 from io import BytesIO
 from functools import wraps
 import os
@@ -28,13 +29,23 @@ from flask import (
     session,
     url_for,
 )
-from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models.inputs import derive_script_title_content
 from .services.auth_store import auth_store
 from .services.admin_store import admin_store
 from .services.agent_conversation_store import agent_conversation_store
 from .services.platform_agent import platform_conversation_agent
+from .services.deepseek_agent import DeepSeekAgentError
+from .services.codebuddy_npc import (
+    STAGE_NAMES,
+    STAGE_ORDER,
+    CodeBuddyNpcClient,
+    CodeBuddyNpcConfig,
+    CodeBuddyNpcError,
+    CodeBuddyNpcJobStore,
+    public_job,
+)
+from .services.codebuddy_npc_stage_runner import CodeBuddyNpcStageRunner
 from .services.fastgpt_client import FastGPTTransientError
 from .services.framework_planner_service import (
     FRAMEWORK_PLANNER_STORAGE_KEY,
@@ -95,6 +106,15 @@ from .services.workflow_preference_keys import (
     preference_keys_for,
     stage_prompt_key_for,
 )
+from .services.workflow_line import (
+    PRODUCTION_WORKFLOW_LINE,
+    TEST_WORKFLOW_LINE,
+    WORKFLOW_LINE_HEADER,
+    is_test_workflow_line,
+    reset_workflow_line,
+    set_workflow_line,
+    test_workflow_status,
+)
 from .utils.logger import get_logger
 from .utils.readable_labels import readable_label, readable_scalar, readable_text
 
@@ -114,39 +134,103 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         template_folder=str(template_dir),
         static_folder=str(static_dir),
     )
-    if str(os.getenv("SCRIPTMAKER_TRUST_REVERSE_PROXY", "false")).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }:
-        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    codebuddy_npc_config = CodeBuddyNpcConfig.from_env()
+    codebuddy_npc_jobs = CodeBuddyNpcJobStore(codebuddy_npc_config)
+    codebuddy_npc_client = CodeBuddyNpcClient(codebuddy_npc_config)
+    codebuddy_npc_stage_runner = CodeBuddyNpcStageRunner(codebuddy_npc_jobs)
+
+    def _submit_remote_npc_stage(
+        job: dict[str, Any],
+        *,
+        stage: str,
+        feedback: str = "",
+        continue_after: bool = False,
+    ) -> dict[str, Any]:
+        trigger_result = codebuddy_npc_client.trigger_stage(
+            job,
+            stage=stage,
+            feedback=feedback,
+            continue_after=continue_after,
+        )
+        job["build"] = {
+            "sn": trigger_result.get("sn"),
+            "build_log_url": trigger_result.get("buildLogUrl"),
+            "message": trigger_result.get("message"),
+        }
+        job["execution_target"] = "remote_cnb"
+        job["remote_kind"] = "stage"
+        job["remote_stage"] = stage
+        job["remote_continue_after"] = bool(continue_after)
+        job["active_stage"] = stage
+        job.pop("fallback_reason", None)
+        job["status"] = "running"
+        job["status_text"] = f"已提交 CNB，{STAGE_NAMES[stage]}正在远程运行"
+        job["error"] = ""
+        job["progress"] = round(STAGE_ORDER.index(stage) / len(STAGE_ORDER) * 100)
+        return codebuddy_npc_jobs.save(job)
+
+    def _refresh_remote_npc_job(job: dict[str, Any]) -> dict[str, Any]:
+        job_id = str(job.get("job_id") or "")
+        if (
+            str(job.get("execution_target") or "") != "remote_cnb"
+            or str(job.get("status") or "") not in {"running", "result_pending"}
+            or codebuddy_npc_stage_runner.is_running(job_id)
+        ):
+            return job
+        try:
+            job = codebuddy_npc_client.refresh(job)
+            job = codebuddy_npc_jobs.save(job)
+            if (
+                str(job.get("status") or "") == "stage_ready"
+                and bool(job.get("remote_continue_after"))
+                and str(job.get("remote_stage") or "") in STAGE_ORDER
+            ):
+                current_index = STAGE_ORDER.index(str(job["remote_stage"]))
+                if current_index + 1 < len(STAGE_ORDER):
+                    next_stage = STAGE_ORDER[current_index + 1]
+                    try:
+                        job = _submit_remote_npc_stage(
+                            job,
+                            stage=next_stage,
+                            continue_after=True,
+                        )
+                    except CodeBuddyNpcError as remote_exc:
+                        job = codebuddy_npc_stage_runner.start(
+                            job_id=job_id,
+                            user_id=int(job["user_id"]),
+                            stage=next_stage,
+                            continue_after=True,
+                        )
+                        job["fallback_reason"] = str(remote_exc)
+                        job["status_text"] = (
+                            f"CNB 暂不可用，已切换本地兜底运行{STAGE_NAMES[next_stage]}"
+                        )
+                        job = codebuddy_npc_jobs.save(job)
+        except CodeBuddyNpcError as exc:
+            job["status_text"] = "暂时无法读取 CNB 进度"
+            job["poll_warning"] = str(exc)
+            job = codebuddy_npc_jobs.save(job)
+        except Exception as exc:
+            logger.exception("codebuddy npc refresh failed: job_id=%s", job_id)
+            job["poll_warning"] = str(exc)
+            job = codebuddy_npc_jobs.save(job)
+        return job
     app.config["WORKFLOW_SPEC_PATH"] = workflow_spec_path or default_workflow_spec_path()
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY") or os.getenv("FLASK_SECRET_KEY") or "scriptmaker-dev-secret"
-    force_secure_cookies = str(
-        os.getenv("SCRIPTMAKER_SECURE_COOKIES", "false")
-    ).strip().lower() in {"1", "true", "yes", "on"}
-    app.config.update(
-        SESSION_COOKIE_SECURE=force_secure_cookies,
-        SESSION_COOKIE_HTTPONLY=True,
-        SESSION_COOKIE_SAMESITE="Lax",
-    )
-    app.config["REGISTRATION_ENABLED"] = str(
-        os.getenv("SCRIPTMAKER_REGISTRATION_ENABLED", "true")
-    ).strip().lower() in {"1", "true", "yes", "on"}
-    app.config["ADMIN_ONLY_LOGIN"] = str(
-        os.getenv("SCRIPTMAKER_ADMIN_ONLY_LOGIN", "false")
-    ).strip().lower() in {"1", "true", "yes", "on"}
-    app.config["LOGIN_ALLOWED_USERNAMES"] = {
-        username.strip()
-        for username in str(os.getenv("SCRIPTMAKER_LOGIN_ALLOWED_USERNAMES", "")).split(",")
-        if username.strip()
-    }
-    app.config["LOGIN_ALLOWED_USER_IDS"] = {
-        int(user_id.strip())
-        for user_id in str(os.getenv("SCRIPTMAKER_LOGIN_ALLOWED_USER_IDS", "")).split(",")
-        if user_id.strip().isdigit()
-    }
+
+    @app.before_request
+    def _select_workflow_line():
+        g.workflow_line_token = set_workflow_line(
+            request.headers.get(WORKFLOW_LINE_HEADER, PRODUCTION_WORKFLOW_LINE)
+        )
+
+    @app.after_request
+    def _reset_selected_workflow_line(response):
+        token = getattr(g, "workflow_line_token", None)
+        if token is not None:
+            reset_workflow_line(token)
+            g.workflow_line_token = None
+        return response
 
     @app.after_request
     def _apply_security_headers(response):
@@ -710,6 +794,49 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 outputs.setdefault(key, value)
         return _strip_raw_fastgpt_fields(outputs)
 
+    def _hydrate_framework_planner_stage_payload(data: dict, user_id: int) -> dict:
+        """Recover saved upstream fields when a stale browser cache sends an incomplete stage payload."""
+        if not isinstance(data, dict):
+            return {}
+        hydrated = dict(data)
+        try:
+            project_id = int(str(hydrated.get("project_id") or hydrated.get("asset_id") or "").strip())
+        except Exception:
+            project_id = 0
+        if project_id <= 0:
+            return hydrated
+
+        snapshot = task_manager.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+        if not isinstance(snapshot, dict):
+            return hydrated
+        framework_state = _framework_state_from_project(snapshot)
+        stage_outputs = _framework_stage_outputs(framework_state)
+        saved_basic = framework_state.get("basic_config") if isinstance(framework_state.get("basic_config"), dict) else {}
+        saved_fields = {
+            "basic_config": saved_basic,
+            "locked_basic_config": saved_basic,
+            "source_brief": stage_outputs.get("source_brief"),
+            "worldview_plan": stage_outputs.get("worldview_plan"),
+            "character_plan": stage_outputs.get("character_plan"),
+            "beat_checkpoint_timeline": stage_outputs.get("beat_checkpoint_timeline"),
+            "checkpoint_explanation": stage_outputs.get("checkpoint_explanation"),
+            "character_storylines": stage_outputs.get("character_storylines"),
+            "storyline_decisions": stage_outputs.get("storyline_decisions"),
+            "adaptation_guide": stage_outputs.get("adaptation_guide"),
+        }
+        recovered: list[str] = []
+        for key, value in saved_fields.items():
+            if not _framework_value_present(hydrated.get(key)) and _framework_value_present(value):
+                hydrated[key] = copy.deepcopy(value)
+                recovered.append(key)
+        if recovered:
+            logger.warning(
+                "framework planner request recovered saved upstream fields: project_id=%s fields=%s",
+                project_id,
+                recovered,
+            )
+        return hydrated
+
     def _framework_project_history_name(project_id: object, requested_name: object = "") -> str:
         requested = str(requested_name or "").strip()
         if requested and requested not in {"未命名项目", "unsaved", "draft", "null", "undefined"}:
@@ -973,6 +1100,52 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
         return asset
 
+    def _save_new_workflow_test_stage_output(
+        *,
+        user_id: int,
+        project_id: Any,
+        stage: str,
+        output: Any,
+    ) -> None:
+        try:
+            numeric_project_id = int(str(project_id or "").strip())
+        except Exception:
+            return
+        if numeric_project_id <= 0 or output in (None, "", [], {}):
+            return
+        snapshot = task_manager.get_project_snapshot(
+            numeric_project_id,
+            user_id=user_id,
+            public_view=False,
+        )
+        if not snapshot:
+            return
+        artifacts = snapshot.setdefault("artifacts", {})
+        if not isinstance(artifacts, dict):
+            artifacts = {}
+            snapshot["artifacts"] = artifacts
+        test_state = artifacts.get("new_workflow_test_state")
+        if not isinstance(test_state, dict):
+            test_state = {}
+        outputs = test_state.get("outputs")
+        if not isinstance(outputs, dict):
+            outputs = {}
+        outputs[str(stage or "").zfill(2)] = _strip_raw_fastgpt_fields(copy.deepcopy(output))
+        test_state["outputs"] = outputs
+        test_state["updated_at"] = _now_iso()
+        artifacts["new_workflow_test_state"] = test_state
+        snapshot["updated_at"] = test_state["updated_at"]
+        record = task_manager._projects.get(numeric_project_id)
+        if record:
+            with record.lock:
+                record.snapshot = snapshot
+            task_manager._persist_snapshot(record)
+        else:
+            task_manager._project_path(numeric_project_id).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
     def _framework_asset_payload(project: dict, *, include_detail: bool) -> dict:
         def _safe_positive_int(value, default=0):
             try:
@@ -1135,6 +1308,61 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         key = (int(user_id), str(asset_id or "").strip(), str(stage or "").strip())
         with framework_stage_runs_lock:
             framework_stage_runs.pop(key, None)
+        try:
+            project_id = int(str(asset_id or "").strip())
+        except Exception:
+            project_id = 0
+        if project_id <= 0:
+            return
+        snapshot = task_manager.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+        if not snapshot:
+            return
+        artifacts = snapshot.get("artifacts")
+        workspace_state = artifacts.get("framework_to_script_state") if isinstance(artifacts, dict) else None
+        if not isinstance(workspace_state, dict):
+            return
+        persisted_stage = str(
+            workspace_state.get("runningStage") or workspace_state.get("running_stage") or ""
+        ).strip()
+        if persisted_stage and persisted_stage != str(stage or "").strip():
+            return
+        workspace_state["runningStage"] = ""
+        workspace_state["running_stage"] = ""
+        workspace_state["updated_at"] = _now_iso()
+        snapshot["updated_at"] = workspace_state["updated_at"]
+        record = task_manager._projects.get(project_id)
+        if record:
+            with record.lock:
+                record.snapshot = snapshot
+            task_manager._persist_snapshot(record)
+        else:
+            task_manager._project_path(project_id).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+    def _active_framework_stage(user_id: int, asset_id: str) -> tuple[str, int]:
+        asset_key = str(asset_id or "").strip()
+        if not asset_key:
+            return "", 0
+        now = time.monotonic()
+        with framework_stage_runs_lock:
+            expired_keys = [
+                run_key
+                for run_key, started_at in framework_stage_runs.items()
+                if now - float(started_at or 0) > FRAMEWORK_STAGE_RUN_TTL_SECONDS
+            ]
+            for run_key in expired_keys:
+                framework_stage_runs.pop(run_key, None)
+            active = [
+                (run_key, started_at)
+                for run_key, started_at in framework_stage_runs.items()
+                if run_key[0] == int(user_id) and run_key[1] == asset_key
+            ]
+        if not active:
+            return "", 0
+        run_key, started_at = max(active, key=lambda item: float(item[1] or 0))
+        return str(run_key[2] or ""), max(0, int(now - float(started_at or now)))
 
     def _save_framework_to_script_stage(
         *,
@@ -1220,6 +1448,45 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             stages_state = {}
         stage_number = str(stage_key).replace("stage", "")
         normalized_status = str(status or "completed").strip() or "completed"
+        if normalized_status == "completed" and str(stage_key) in {"stage11", "stage12"}:
+            stage10 = script_stages.get("stage10") if isinstance(script_stages.get("stage10"), dict) else {}
+            plan = (
+                stage10.get("allEnrichedEpisodePlan")
+                or stage10.get("enrichedEpisodePlan")
+                or stage10.get("batchEnrichedEpisodePlan")
+                or []
+            )
+            nested_plan = stage10.get("framework_enriched_episode_plan")
+            if not isinstance(plan, list) and isinstance(nested_plan, dict):
+                plan = (
+                    nested_plan.get("allEnrichedEpisodePlan")
+                    or nested_plan.get("enrichedEpisodePlan")
+                    or nested_plan.get("batchEnrichedEpisodePlan")
+                    or []
+                )
+            episode_limit = _positive_int(
+                snapshot.get("episodes_per_season")
+                or snapshot.get("total_episodes")
+                or workspace_state.get("episodes_per_season")
+                or workspace_state.get("total_episodes"),
+                0,
+            )
+            expected_batch_starts = _framework_expected_batch_starts(plan, episode_limit)
+            batches = clean_output.get("batches") if isinstance(clean_output.get("batches"), dict) else {}
+            valid_batch_starts = set()
+            for batch_start, batch in batches.items():
+                if not isinstance(batch, dict):
+                    continue
+                if str(stage_key) == "stage11":
+                    batch_value = batch.get("batchCausalConflictPlan") or batch.get("batch_causal_conflict_plan")
+                else:
+                    batch_value = batch.get("batchScriptText") or batch.get("batch_script_text")
+                if _framework_value_present(batch_value):
+                    valid_batch_starts.add(str(batch_start))
+            if expected_batch_starts and any(
+                batch_start not in valid_batch_starts for batch_start in expected_batch_starts
+            ):
+                normalized_status = "partial"
         stages_state[stage_number] = {
             "status": normalized_status,
             "stage_key": str(stage_key),
@@ -1249,6 +1516,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             stage_drafts.pop(str(stage_key), None)
             for downstream_stage in cascade.get(str(stage_key), ()):
                 stage_drafts.pop(str(downstream_stage), None)
+            for failed_stage_key in ("lastFailedStage", "last_failed_stage"):
+                if str(workspace_state.get(failed_stage_key) or "") == stage_number:
+                    workspace_state[failed_stage_key] = ""
         workspace_state["completedStages"] = sorted(completed_set, key=lambda item: int(item) if item.isdigit() else 999)
         workspace_state["scriptStages"] = script_stages
         workspace_state["stageOutputs"] = stage_outputs
@@ -1266,7 +1536,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             task_manager._persist_snapshot(record)
         else:
             try:
-                task_manager._persist_project_snapshot_data(project_id, snapshot)
+                task_manager._project_path(project_id).write_text(
+                    json.dumps(snapshot, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
             except Exception:
                 logger.exception("framework-to-script stage snapshot persist failed project_id=%s", project_id)
 
@@ -1332,7 +1605,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             task_manager._persist_snapshot(record)
         else:
             try:
-                task_manager._persist_project_snapshot_data(project_id, snapshot)
+                task_manager._project_path(project_id).write_text(
+                    json.dumps(snapshot, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
             except Exception:
                 logger.exception("framework-to-script draft snapshot persist failed project_id=%s", project_id)
 
@@ -1395,10 +1671,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         return wrapper
 
-    @app.post("/api/framework-to-script/running-stage")
+    @app.route("/api/framework-to-script/running-stage", methods=["GET", "POST"])
     @_login_required
     def mark_framework_to_script_running_stage():
-        data = request.get_json(silent=True) or {}
+        data = request.args.to_dict() if request.method == "GET" else (request.get_json(silent=True) or {})
         user_id = _require_user_id()
         asset_id = str(data.get("framework_asset_id") or data.get("asset_id") or "").strip()
         running_stage = str(data.get("running_stage") or data.get("runningStage") or "").strip()
@@ -1419,6 +1695,34 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         workspace_state = artifacts.get("framework_to_script_state")
         if not isinstance(workspace_state, dict):
             workspace_state = {"scriptStages": {}, "stageOutputs": {}}
+        active_stage, active_age_seconds = _active_framework_stage(user_id, asset_id)
+        persisted_stage = str(workspace_state.get("runningStage") or workspace_state.get("running_stage") or "").strip()
+        if request.method == "GET":
+            if persisted_stage and not active_stage:
+                persisted_stage = ""
+                workspace_state["runningStage"] = ""
+                workspace_state["running_stage"] = ""
+                workspace_state["updated_at"] = now
+                artifacts["framework_to_script_state"] = workspace_state
+                snapshot["updated_at"] = now
+                record = task_manager._projects.get(project_id)
+                if record:
+                    with record.lock:
+                        record.snapshot = snapshot
+                    task_manager._persist_snapshot(record)
+                else:
+                    task_manager._project_path(project_id).write_text(
+                        json.dumps(snapshot, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+            return _json_ok(
+                running_stage=active_stage or persisted_stage,
+                backend_running=bool(active_stage),
+                active_age_seconds=active_age_seconds,
+                project_id=project_id,
+            )
+        if active_stage:
+            running_stage = active_stage
         workspace_state["runningStage"] = running_stage
         workspace_state["running_stage"] = running_stage
         if "last_failed_stage" in data or "lastFailedStage" in data:
@@ -1436,8 +1740,16 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 record.snapshot = snapshot
             task_manager._persist_snapshot(record)
         else:
-            task_manager._persist_project_snapshot_data(project_id, snapshot)
-        return _json_ok(running_stage=running_stage, project_id=project_id)
+            task_manager._project_path(project_id).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        return _json_ok(
+            running_stage=running_stage,
+            backend_running=bool(active_stage),
+            active_age_seconds=active_age_seconds,
+            project_id=project_id,
+        )
 
     @app.post("/api/framework-to-script/save-progress")
     @_login_required
@@ -1480,6 +1792,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         running_stage = str(data.get("runningStage") or data.get("running_stage") or workspace_state.get("runningStage") or "").strip()
         last_failed_stage = str(data.get("lastFailedStage") or data.get("last_failed_stage") or workspace_state.get("lastFailedStage") or "").strip()
+        if running_stage:
+            script_stages = workspace_state.get("scriptStages")
+            completed_stages = workspace_state.get("completedStages")
+            completed_set = {str(item).zfill(2) for item in completed_stages} if isinstance(completed_stages, list) else set()
+            existing_stage = script_stages.get(f"stage{running_stage.zfill(2)}") if isinstance(script_stages, dict) else {}
+            existing_batches = existing_stage.get("batches") if isinstance(existing_stage, dict) and isinstance(existing_stage.get("batches"), dict) else {}
+            if running_stage.zfill(2) in completed_set and (existing_batches or _framework_value_present(existing_stage)):
+                running_stage = ""
         workspace_state["runningStage"] = running_stage
         workspace_state["running_stage"] = running_stage
         workspace_state["lastFailedStage"] = last_failed_stage
@@ -1514,7 +1834,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 record.snapshot = snapshot
             task_manager._persist_snapshot(record)
         else:
-            task_manager._persist_project_snapshot_data(project_id, snapshot)
+            task_manager._project_path(project_id).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
         return _json_ok(
             message="剧本进度已保存到当前框架资产。",
@@ -1554,6 +1877,100 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "batchEnrichedEpisodePlan": plan,
                     "allEnrichedEpisodePlanText": text,
                     "enrichedEpisodePlanText": text,
+                }
+        if stage_key == "stage11" and isinstance(stage_outputs, dict):
+            framework_output = stage_outputs.get("framework_causal_conflict_plan")
+            framework_output = framework_output if isinstance(framework_output, dict) else {}
+            batch_plan = (
+                framework_output.get("batchCausalConflictPlan")
+                or framework_output.get("batch_causal_conflict_plan")
+                or stage_outputs.get("batchCausalConflictPlan")
+                or stage_outputs.get("batch_causal_conflict_plan")
+                or {}
+            )
+            batches = framework_output.get("batches") if isinstance(framework_output.get("batches"), dict) else {}
+            if not batches and _framework_value_present(batch_plan):
+                start_episode = (
+                    framework_output.get("batchStartEpisode")
+                    or framework_output.get("batch_start_episode")
+                    or stage_outputs.get("batchStartEpisode")
+                    or stage_outputs.get("batch_start_episode")
+                    or 1
+                )
+                batches = {
+                    str(start_episode): {
+                        "batchStartEpisode": start_episode,
+                        "batchEndEpisode": framework_output.get("batchEndEpisode")
+                        or framework_output.get("batch_end_episode")
+                        or stage_outputs.get("batchEndEpisode")
+                        or stage_outputs.get("batch_end_episode")
+                        or "",
+                        "batchCausalConflictPlan": batch_plan,
+                        "batch_causal_conflict_plan": batch_plan,
+                    }
+                }
+            if _framework_value_present(batch_plan) or batches:
+                return {
+                    **framework_output,
+                    "batchCausalConflictPlan": batch_plan,
+                    "batch_causal_conflict_plan": framework_output.get("batch_causal_conflict_plan") or batch_plan,
+                    "conflictMemory": framework_output.get("conflictMemory")
+                    or framework_output.get("conflict_memory")
+                    or stage_outputs.get("conflictMemory")
+                    or "",
+                    "batches": batches,
+                }
+        if stage_key == "stage12" and isinstance(stage_outputs, dict):
+            framework_output = stage_outputs.get("framework_script_text")
+            framework_output = framework_output if isinstance(framework_output, dict) else {}
+            batch_text = (
+                framework_output.get("batchScriptText")
+                or framework_output.get("batch_script_text")
+                or stage_outputs.get("batchScriptText")
+                or stage_outputs.get("batch_script_text")
+                or ""
+            )
+            batches = framework_output.get("batches") if isinstance(framework_output.get("batches"), dict) else {}
+            if not batches and str(batch_text or "").strip():
+                stage11_output = stage_outputs.get("framework_causal_conflict_plan")
+                stage11_batches = stage11_output.get("batches") if isinstance(stage11_output, dict) and isinstance(stage11_output.get("batches"), dict) else {}
+                stage11_keys = sorted(
+                    [str(key) for key in stage11_batches.keys() if str(key).isdigit()],
+                    key=lambda item: int(item),
+                )
+                start_episode = (
+                    framework_output.get("batchStartEpisode")
+                    or framework_output.get("batch_start_episode")
+                    or stage_outputs.get("batchStartEpisode")
+                    or stage_outputs.get("batch_start_episode")
+                    or (stage11_keys[0] if stage11_keys else 1)
+                )
+                try:
+                    end_episode = int(start_episode) + 4
+                except Exception:
+                    end_episode = ""
+                batches = {
+                    str(start_episode): {
+                        "batchStartEpisode": start_episode,
+                        "batchEndEpisode": framework_output.get("batchEndEpisode")
+                        or framework_output.get("batch_end_episode")
+                        or stage_outputs.get("batchEndEpisode")
+                        or stage_outputs.get("batch_end_episode")
+                        or end_episode,
+                        "batchScriptText": batch_text,
+                        "batch_script_text": batch_text,
+                    }
+                }
+            if str(batch_text or "").strip() or batches:
+                return {
+                    **framework_output,
+                    "batchScriptText": batch_text,
+                    "batch_script_text": framework_output.get("batch_script_text") or batch_text,
+                    "scriptMemory": framework_output.get("scriptMemory")
+                    or framework_output.get("script_memory")
+                    or stage_outputs.get("scriptMemory")
+                    or "",
+                    "batches": batches,
                 }
         return {}
 
@@ -1704,6 +2121,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     item.get("episode")
                     or item.get("episodeNumber")
                     or item.get("episode_number")
+                    or item.get("episode_index")
                     or item.get("ep")
                     or index,
                     index,
@@ -1724,6 +2142,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 item.get("episode")
                 or item.get("episodeNumber")
                 or item.get("episode_number")
+                or item.get("episode_index")
                 or item.get("ep")
                 or index,
                 index,
@@ -1735,9 +2154,83 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             end_episode = max(batch_episode_numbers)
         return start_episode, end_episode, batch
 
+    def _framework_expected_batch_starts(plan: object, max_episodes: int = 0) -> list[str]:
+        starts = set()
+        episode_limit = _positive_int(max_episodes, 0)
+        for index, item in enumerate(plan if isinstance(plan, list) else [], start=1):
+            if not isinstance(item, dict):
+                continue
+            episode = _positive_int(
+                item.get("episode")
+                or item.get("episodeNumber")
+                or item.get("episode_number")
+                or item.get("episode_index")
+                or item.get("ep")
+                or index,
+                index,
+            )
+            if episode > 0 and (not episode_limit or episode <= episode_limit):
+                starts.add(((episode - 1) // 5) * 5 + 1)
+        return [str(start) for start in sorted(starts)]
+
+    def _stage12_chinese_episode_number(value: str) -> int:
+        """Parse common Chinese episode numerals so model formatting cannot hide valid output."""
+        digits = {
+            "零": 0,
+            "〇": 0,
+            "一": 1,
+            "二": 2,
+            "两": 2,
+            "三": 3,
+            "四": 4,
+            "五": 5,
+            "六": 6,
+            "七": 7,
+            "八": 8,
+            "九": 9,
+        }
+        text = str(value or "").strip()
+        if not text:
+            return 0
+        if text.isdigit():
+            return int(text)
+        if "百" in text:
+            left, right = text.split("百", 1)
+            hundreds = digits.get(left, 1)
+            return hundreds * 100 + _stage12_chinese_episode_number(right)
+        if "十" in text:
+            left, right = text.split("十", 1)
+            tens = digits.get(left, 1) if left else 1
+            return tens * 10 + digits.get(right, 0)
+        if all(char in digits for char in text):
+            return int("".join(str(digits[char]) for char in text))
+        return 0
+
+    def _normalize_stage12_episode_headings(script_text: object) -> str:
+        """Normalize Chinese or Arabic episode headings to the frontend's `第N集：` contract."""
+        text = str(script_text or "").replace("\r\n", "\n").replace("\r", "\n")
+        pattern = re.compile(
+            r"(?m)^(?P<indent>[ \t]*)(?:[#＃]{1,6}[ \t]*)?"
+            r"(?:[*_]{1,3})?"
+            r"第[ \t]*(?P<number>\d+|[零〇一二两三四五六七八九十百]+)[ \t]*集"
+            r"(?P<suffix>\s*(?:[:：]\s*)?[^\n]*)$"
+        )
+
+        def replace(match: re.Match) -> str:
+            episode_no = _stage12_chinese_episode_number(match.group("number"))
+            if episode_no <= 0:
+                return match.group(0)
+            suffix = str(match.group("suffix") or "").strip()
+            suffix = re.sub(r"[*_]{1,3}\s*$", "", suffix).strip()
+            suffix = re.sub(r"^[:：]\s*", "", suffix).strip()
+            title = f"：{suffix}" if suffix else "："
+            return f"{match.group('indent')}第{episode_no}集{title}"
+
+        return pattern.sub(replace, text)
+
     def _stage12_script_episode_numbers(script_text: object) -> set[int]:
         """Return episode headings that are actually present in a generated batch."""
-        text = str(script_text or "")
+        text = _normalize_stage12_episode_headings(script_text)
         return {
             int(match.group(1))
             for match in re.finditer(r"(?m)^\s*第\s*(\d+)\s*集(?:\s*[:：]|\s|$)", text)
@@ -1751,6 +2244,82 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         expected = set(range(int(start_episode), int(end_episode) + 1))
         return sorted(expected - _stage12_script_episode_numbers(script_text))
 
+    def _stage12_opening_quality_issues(script_text: object) -> list[str]:
+        """Catch weak cold opens that a remote reviewer may incorrectly approve."""
+        text = _normalize_stage12_episode_headings(script_text)
+        episode_matches = [
+            match
+            for match in re.finditer(
+                r"(?m)^[ \t]*第[ \t]*(\d+)[ \t]*集(?:[ \t]*[：:][ \t]*(?P<title>[^\n]*))?[ \t]*$",
+                text,
+            )
+            if str(match.group("title") or "").strip() not in {"完", "结束", "本集完"}
+        ]
+        if not episode_matches:
+            return ["正文无法识别分集标题，无法验证每集开头钩子。"]
+
+        metadata_prefixes = (
+            "场次：", "场次:", "场次",
+            "角色：", "角色:", "人物：", "人物:",
+            "场景：", "场景:", "道具：", "道具:",
+        )
+        generic_speakers = {
+            "同事", "众人", "广播", "系统", "手机", "电视", "新闻", "画外音", "旁白", "人群",
+        }
+        procedural_terms = (
+            "报表", "审批单", "文件", "资料", "账本", "记录", "邮件", "合同", "会议",
+            "汇报", "系统数据", "工作台", "电脑屏幕", "环境", "街道", "办公室里",
+        )
+        immediate_stakes = (
+            "枪", "刀", "血", "尸体", "爆炸", "着火", "坠落", "绑架", "追杀", "窒息",
+            "停职", "开除", "逮捕", "抓捕", "离婚", "退婚", "死亡", "死了", "失踪",
+            "直播", "当众", "曝光", "倒计时", "最后一分钟", "只剩", "来不及",
+        )
+        collision_terms = (
+            "对视", "认出", "掐住", "拦住", "推开", "夺过", "扇", "跪", "吻", "抱住",
+            "指认", "质问", "威胁", "背叛", "前任", "前夫", "前妻", "未婚夫", "未婚妻",
+        )
+        issues: list[str] = []
+
+        for index, match in enumerate(episode_matches):
+            episode_no = int(match.group(1))
+            end = episode_matches[index + 1].start() if index + 1 < len(episode_matches) else len(text)
+            lines = []
+            for raw_line in text[match.end():end].split("\n"):
+                line = raw_line.strip()
+                if not line or line.startswith(metadata_prefixes):
+                    continue
+                if re.match(r"^\d+\s*[-－—]\s*\d+\b", line):
+                    continue
+                lines.append(line)
+                if len(lines) >= 4:
+                    break
+            if not lines:
+                issues.append(f"第{episode_no}集场次资料后没有可验证的有效戏。")
+                continue
+
+            opening = "\n".join(lines)
+            has_immediate_stakes = any(term in opening for term in immediate_stakes)
+            has_collision_action = any(term in opening for term in collision_terms)
+            has_named_dialogue = False
+            for line in lines:
+                dialogue = re.match(r"^([^▲△\s：:]{1,12})(?:\([^)]*\))?[：:]", line)
+                if not dialogue:
+                    continue
+                speaker = re.sub(r"\([^)]*\)$", "", dialogue.group(1)).strip()
+                if speaker not in generic_speakers:
+                    has_named_dialogue = True
+                    break
+
+            first_line_is_procedural = any(term in lines[0] for term in procedural_terms)
+            if first_line_is_procedural and not (has_named_dialogue or has_immediate_stakes or has_collision_action):
+                issues.append(
+                    f"第{episode_no}集以报表/文件/环境等程序性信息起笔，前4个有效拍点内没有形成"
+                    "具名人物碰撞、公开且不可逆的代价或迫近危险；这属于铺垫，不是强钩子。"
+                )
+
+        return issues
+
     def _stage12_episode_plan_slice(plan: object, episode_no: int) -> list[dict]:
         if not isinstance(plan, list):
             return []
@@ -1762,6 +2331,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 item.get("episode")
                 or item.get("episodeNumber")
                 or item.get("episode_number")
+                or item.get("episode_index")
                 or item.get("ep"),
                 index,
             )
@@ -2031,8 +2601,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         user = _current_user()
         return {
             "current_user_is_admin": bool(user and admin_store.is_admin(user.id, user.username)),
-            "registration_enabled": bool(app.config["REGISTRATION_ENABLED"]),
-            "admin_only_login": bool(app.config["ADMIN_ONLY_LOGIN"]),
         }
 
     def _workflow_request_identity(path: str) -> tuple[str, str] | None:
@@ -2636,6 +3204,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def agent_status_api():
         return _json_ok(agent=platform_conversation_agent.status())
 
+    def _public_agent_message(message: dict[str, Any] | None) -> dict[str, Any]:
+        public_message = copy.deepcopy(message) if isinstance(message, dict) else {}
+        metadata = public_message.get("metadata") if isinstance(public_message.get("metadata"), dict) else {}
+        if "model" in metadata:
+            metadata["model"] = "剧本 Agent"
+        public_message["metadata"] = metadata
+        return public_message
+
     @app.route("/api/agent/conversations", methods=["GET", "POST"])
     @_login_required
     def agent_conversations_api():
@@ -2651,11 +3227,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             user.id,
             conversation["id"],
             role="assistant",
-            content=(
-                "告诉我你想创作什么剧本。我会从对话里提取题材、集数、角色和风格，"
-                "只追问缺少的必要信息，确认后直接调度现有剧本平台。"
-            ),
-            metadata={"kind": "welcome", "model": "deepseek-v4-pro"},
+            content="告诉我你想创作什么剧本。我会从对话里提取题材、集数、角色和风格，只追问缺少的必要信息，确认后直接调度现有剧本平台。",
+            metadata={"kind": "welcome", "model": "剧本 Agent"},
         )
         return _json_ok(conversation=conversation, messages=[welcome])
 
@@ -2671,7 +3244,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_ok(conversation_id=conversation_id)
         return _json_ok(
             conversation=conversation,
-            messages=agent_conversation_store.messages(user.id, conversation_id),
+            messages=[
+                _public_agent_message(item)
+                for item in agent_conversation_store.messages(user.id, conversation_id)
+            ],
             context=platform_conversation_agent._conversation_context(conversation, user.id),
         )
 
@@ -2692,7 +3268,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if len(content) > 12000:
             return _json_error("单条消息不能超过12000字。", status=400)
         if not platform_conversation_agent.status().get("configured"):
-            return _json_error("DeepSeek V4 Pro智能体尚未配置完成。", status=501)
+            return _json_error("剧本 Agent 尚未配置完成。", status=501)
         try:
             result = platform_conversation_agent.handle_message(
                 user_id=user.id,
@@ -2710,7 +3286,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=400)
         if not result.get("success"):
             return jsonify(result), 502
-        return jsonify(result)
+        public_result = copy.deepcopy(result)
+        public_result["model"] = "剧本 Agent"
+        if isinstance(public_result.get("user_message"), dict):
+            public_result["user_message"] = _public_agent_message(public_result["user_message"])
+        if isinstance(public_result.get("assistant_message"), dict):
+            public_result["assistant_message"] = _public_agent_message(public_result["assistant_message"])
+        return jsonify(public_result)
 
     def _request_codebuddy_api_key(data: dict[str, Any] | None = None) -> str | None:
         value = (
@@ -2750,6 +3332,16 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             )
         )
 
+    def _public_workbuddy_history_entry(entry: dict[str, Any] | None) -> dict[str, Any]:
+        public_entry = copy.deepcopy(entry) if isinstance(entry, dict) else {}
+        public_entry["provider"] = "script_agent"
+        public_entry["model"] = "剧本 Agent"
+        result = public_entry.get("result") if isinstance(public_entry.get("result"), dict) else None
+        if result is not None:
+            result["provider"] = "script_agent"
+            result["model"] = "剧本 Agent"
+        return public_entry
+
     @app.get("/api/workbuddy/doctor/history")
     @_login_required
     def workbuddy_doctor_history_list():
@@ -2758,7 +3350,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             limit = min(max(int(request.args.get("limit") or 50), 1), 100)
         except (TypeError, ValueError):
             limit = 50
-        return jsonify({"ok": True, "items": list_workbuddy_history(user.id, limit=limit)})
+        items = [_public_workbuddy_history_entry(item) for item in list_workbuddy_history(user.id, limit=limit)]
+        return jsonify({"ok": True, "items": items})
 
     @app.delete("/api/workbuddy/doctor/history")
     @_login_required
@@ -2774,14 +3367,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         entry = load_workbuddy_history(user.id, entry_id)
         if not entry:
             return jsonify({"ok": False, "error": "历史记录不存在或已删除。"}), 404
-        return jsonify({"ok": True, "entry": entry})
+        return jsonify({"ok": True, "entry": _public_workbuddy_history_entry(entry)})
 
     @app.delete("/api/workbuddy/doctor/history/<entry_id>")
     @_login_required
     def workbuddy_doctor_history_delete(entry_id: str):
         user = _current_user()
         deleted = delete_workbuddy_history(user.id, entry_id)
-        return jsonify({"ok": True, "deleted": deleted, "items": list_workbuddy_history(user.id)})
+        items = [_public_workbuddy_history_entry(item) for item in list_workbuddy_history(user.id)]
+        return jsonify({"ok": True, "deleted": deleted, "items": items})
 
     @app.post("/api/workbuddy/framework/generate")
     @_login_required
@@ -2836,12 +3430,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return jsonify(
                 {
                     "ok": False,
-                    "error": "DeepSeek V4 Pro尚未配置完成，暂不能调用AI剧本医生。",
+                    "error": "剧本 Agent 尚未配置完成，暂不能调用 AI 剧本医生。",
                     "missing": status["missing"],
                     "accepted_payload": {
                         "title": payload["title"],
                         "skill": payload["skill"],
-                        "model": payload.get("model") or "",
+                        "model": "剧本 Agent",
                         "script_length": len(payload["script_text"]),
                         "user_goal": payload["user_goal"],
                     },
@@ -2869,7 +3463,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     "accepted_payload": {
                         "title": payload["title"],
                         "skill": payload["skill"],
-                        "model": payload.get("model") or "",
+                        "model": "剧本 Agent",
                         "script_length": len(payload["script_text"]),
                         "timeout_seconds": timeout_seconds,
                     },
@@ -2879,7 +3473,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
         response_payload = {
             "ok": True,
-            "provider": status.get("provider") or "deepseek",
+            "provider": "script_agent",
             "title": payload["title"],
             "skill": payload["skill"],
             "script_length": len(payload["script_text"]),
@@ -2900,6 +3494,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         except Exception as exc:
             logger.warning("WorkBuddy 历史保存失败: %s", exc)
             response_payload["history_warning"] = "报告已生成，但历史记录保存失败。"
+
+        response_payload["model"] = "剧本 Agent"
+        response_payload["provider"] = "script_agent"
+        if isinstance(response_payload.get("history_entry"), dict):
+            response_payload["history_entry"] = _public_workbuddy_history_entry(response_payload["history_entry"])
 
         return jsonify(response_payload)
 
@@ -2923,7 +3522,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         data = request.get_json(silent=True) or {}
         codebuddy_api_key = _request_codebuddy_api_key(data)
         codebuddy_internet_env = _request_codebuddy_internet_env(data)
-        codebuddy_model = str(data.get("model") or entry.get("model") or _request_codebuddy_model(data) or "").strip()
+        codebuddy_model = str(data.get("model") or _request_codebuddy_model(data) or "").strip()
         status = workbuddy_config_status(
             api_key=codebuddy_api_key,
             internet_env=codebuddy_internet_env,
@@ -2933,10 +3532,151 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return jsonify(
                 {
                     "ok": False,
-                    "error": "DeepSeek V4 Pro尚未配置完成，暂不能执行一键优化。",
+                    "error": "剧本 Agent 尚未配置完成，暂不能执行一键优化。",
                     "missing": status["missing"],
                 }
             ), 501
+
+        conversation_id = str(data.get("conversation_id") or "").strip()
+        background = bool(data.get("background")) and bool(conversation_id)
+        if background:
+            conversation = agent_conversation_store.get(user.id, conversation_id)
+            if not conversation:
+                return jsonify({"ok": False, "error": "对话不存在或无权访问。"}), 404
+            state = dict(conversation.get("state") or {})
+            existing_operation = state.get("active_operation") if isinstance(state.get("active_operation"), dict) else {}
+            if existing_operation.get("type") == "word_optimization" and existing_operation.get("status") == "running":
+                return jsonify({
+                    "ok": True,
+                    "accepted": True,
+                    "already_running": True,
+                    "operation": existing_operation,
+                    "context": platform_conversation_agent._conversation_context(conversation, user.id),
+                }), 202
+
+            operation_id = uuid.uuid4().hex
+            started_at = datetime.now(timezone.utc).astimezone().isoformat()
+            operation = {
+                "request_id": operation_id,
+                "type": "word_optimization",
+                "status": "running",
+                "progress_percent": 20,
+                "stage": "preparing",
+                "message": "正在读取原始 Word 和剧本医生报告",
+                "filename": str(source.get("original_filename") or entry.get("source_filename") or "原始剧本.docx"),
+                "char_count": int(entry.get("script_length") or 0),
+                "skill_key": str(entry.get("skill") or ""),
+                "skill_name": str(entry.get("skill_name") or entry.get("skill") or "剧本医生"),
+                "history_entry_id": entry_id,
+                "started_at": started_at,
+            }
+            state["active_operation"] = operation
+            platform_conversation_agent.remember_operation(state, operation)
+            updated_conversation = agent_conversation_store.update(user.id, conversation_id, state=state) or conversation
+            agent_conversation_store.add_message(
+                user.id,
+                conversation_id,
+                role="assistant",
+                content="Word 一键优化任务已经开始，现已转入后台。刷新或离开页面不会中止，完成后会在本对话提供下载按钮。",
+                metadata={"background_operation_started": True, "operation_type": "word_optimization", "request_id": operation_id},
+            )
+            local_port = int(request.environ.get("SERVER_PORT") or 5002)
+            local_url = f"http://127.0.0.1:{local_port}/api/workbuddy/doctor/history/{quote(entry_id, safe='')}/optimize"
+            local_auth_token = _current_auth_token() or auth_store.create_session_token(user.id)
+
+            def _run_background_word_optimization() -> None:
+                current = agent_conversation_store.get(user.id, conversation_id) or updated_conversation
+                current_state = dict(current.get("state") or {})
+                active = dict(current_state.get("active_operation") or {})
+                if str(active.get("request_id") or "") == operation_id:
+                    active.update({
+                        "progress_percent": 45,
+                        "stage": "ai_optimize",
+                        "message": "剧本 Agent 正在生成并校验 Word 修改方案",
+                    })
+                    current_state["active_operation"] = active
+                    agent_conversation_store.update(user.id, conversation_id, state=current_state)
+                try:
+                    response = requests.post(
+                        local_url,
+                        headers={"Authorization": f"Bearer {local_auth_token}"},
+                        json={"model": codebuddy_model} if codebuddy_model else {},
+                        timeout=720,
+                    )
+                    try:
+                        result_payload = response.json()
+                    except Exception:
+                        result_payload = {}
+                    succeeded = response.ok and bool(result_payload.get("ok"))
+                    if not succeeded:
+                        result_payload = {
+                            "ok": False,
+                            "error": str(result_payload.get("error") or result_payload.get("message") or f"优化请求失败：HTTP {response.status_code}"),
+                        }
+                except Exception as exc:
+                    succeeded = False
+                    result_payload = {"ok": False, "error": f"Word 优化任务失败：{exc}"}
+
+                current = agent_conversation_store.get(user.id, conversation_id) or current
+                current_state = dict(current.get("state") or {})
+                current_active = dict(current_state.get("active_operation") or {})
+                if str(current_active.get("request_id") or "") == operation_id:
+                    current_state.pop("active_operation", None)
+                message = (
+                    f"Word 优化完成，已应用 {int(result_payload.get('applied_count') or 0)} 处修改。"
+                    if succeeded
+                    else str(result_payload.get("error") or "Word 优化任务失败。")
+                )
+                current_state["last_operation"] = {
+                    **operation,
+                    "status": "completed" if succeeded else "failed",
+                    "progress_percent": 100 if succeeded else 45,
+                    "stage": "completed" if succeeded else "failed",
+                    "message": message,
+                    "finished_at": datetime.now(timezone.utc).astimezone().isoformat(),
+                    "download_url": str(result_payload.get("download_url") or ""),
+                    "download_name": str(result_payload.get("download_name") or ""),
+                }
+                platform_conversation_agent.remember_operation(current_state, current_state["last_operation"])
+                agent_conversation_store.update(user.id, conversation_id, state=current_state)
+                if succeeded:
+                    event_result = {
+                        "ok": True,
+                        "filename": str(result_payload.get("download_name") or "AI优化版剧本.docx"),
+                        "download_url": str(result_payload.get("download_url") or ""),
+                        "applied_count": int(result_payload.get("applied_count") or 0),
+                        "summary": str(result_payload.get("summary") or ""),
+                        "ui": {"kind": "download"},
+                    }
+                    assistant_content = message + " 点击下方按钮即可下载修改后的 Word。"
+                else:
+                    event_result = {"ok": False, "error": message}
+                    assistant_content = f"一键优化没有完成：{message}"
+                agent_conversation_store.add_message(
+                    user.id,
+                    conversation_id,
+                    role="assistant",
+                    content=assistant_content,
+                    metadata={
+                        "events": [{"tool": "optimize_word", "result": event_result}],
+                        "background_operation_completed": succeeded,
+                        "background_operation_failed": not succeeded,
+                        "request_id": operation_id,
+                    },
+                )
+
+            thread = threading.Thread(
+                target=_run_background_word_optimization,
+                daemon=False,
+                name=f"agent-word-optimize-{operation_id[:8]}",
+            )
+            thread.start()
+            return jsonify({
+                "ok": True,
+                "accepted": True,
+                "operation": operation,
+                "context": platform_conversation_agent._conversation_context(updated_conversation, user.id),
+            }), 202
 
         try:
             indexed_paragraphs = indexed_docx_text(source["path"])
@@ -3048,6 +3788,23 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             current_auth_token=_current_auth_token(),
             framework_backend_ready=framework_planner_backend_ready(),
             framework_planner_storage_key=FRAMEWORK_PLANNER_STORAGE_KEY,
+            workflow_line=PRODUCTION_WORKFLOW_LINE,
+            framework_to_script_url="/framework-to-script",
+            page_title="剧本框架策划工作台",
+        )
+
+    @app.get("/framework-planner-test")
+    @_login_required
+    def framework_planner_test_page():
+        return redirect(url_for("new_workflow_test_page", **request.args.to_dict(flat=True)))
+
+    @app.get("/new-workflow-test")
+    @_login_required
+    def new_workflow_test_page():
+        return render_template(
+            "new_workflow_test.html",
+            current_user=_current_user(),
+            current_auth_token=_current_auth_token(),
         )
 
     @app.get("/community/<int:project_id>")
@@ -3078,13 +3835,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         username = str(request.form.get("username") or "").strip()
         password = str(request.form.get("password") or "")
         user = auth_store.authenticate(username, password)
-        allowed_usernames = app.config["LOGIN_ALLOWED_USERNAMES"]
-        allowed_user_ids = app.config["LOGIN_ALLOWED_USER_IDS"]
-        if user and (allowed_usernames or allowed_user_ids):
-            if user.username not in allowed_usernames and user.id not in allowed_user_ids:
-                user = None
-        if user and app.config["ADMIN_ONLY_LOGIN"] and not admin_store.is_admin(user.id, user.username):
-            user = None
         if not user:
             admin_store.record_event(
                 user_id=None,
@@ -3115,22 +3865,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
     @app.get("/register")
     def register_page():
-        if not app.config["REGISTRATION_ENABLED"]:
-            return render_template(
-                "login.html",
-                error="当前为个人专用平台，仅管理员账号可以登录。",
-            ), 403
         if _current_user():
             return redirect(url_for("workspace_page", auth_token=_current_auth_token()))
         return render_template("register.html")
 
     @app.post("/register")
     def register_submit():
-        if not app.config["REGISTRATION_ENABLED"]:
-            return render_template(
-                "login.html",
-                error="当前为个人专用平台，注册功能已关闭。",
-            ), 403
         username = str(request.form.get("username") or "").strip()
         password = str(request.form.get("password") or "")
         confirm_password = str(request.form.get("confirm_password") or "")
@@ -3471,7 +4211,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 record.snapshot = snapshot
             task_manager._persist_snapshot(record)
         else:
-            task_manager._persist_project_snapshot_data(project_id_int, snapshot)
+            task_manager._project_path(project_id_int).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
 
         return snapshot
 
@@ -4312,6 +5055,9 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @_login_required
     def run_framework_planner_stage_api(stage: str):
         data = request.get_json(silent=True) or {}
+        user_id = _require_user_id()
+        if isinstance(data, dict):
+            data = _hydrate_framework_planner_stage_payload(data, user_id)
         if isinstance(data, dict):
             _attach_user_knowledge_payload(data, data, stage)
         project_id = data.get("project_id") if isinstance(data, dict) else None
@@ -4327,7 +5073,6 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             len(source_text),
         )
         try:
-            user_id = _require_user_id()
             payload = run_framework_planner_stage(stage, data)
             payload["history"] = save_framework_stage_history(
                 project_id=project_id,
@@ -4347,6 +5092,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     payload["autosaved"] = True
                     payload["autosaved_asset"] = _strip_raw_fastgpt_fields(autosaved_asset)
                     payload["project_id"] = autosaved_asset.get("project_id")
+                    if is_test_workflow_line():
+                        _save_new_workflow_test_stage_output(
+                            user_id=user_id,
+                            project_id=payload.get("project_id"),
+                            stage=stage,
+                            output=payload.get("data"),
+                        )
             except Exception as autosave_exc:
                 logger.exception(
                     "framework planner stage autosave failed: stage=%s project_id=%s",
@@ -4695,6 +5447,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     variables,
                 )
             except Exception as exc:
+                if is_test_workflow_line():
+                    return _json_error(
+                        str(exc),
+                        status=502,
+                        fallback="08 测试工作流远端请求失败，未获得新结果，请稍后重试。",
+                    )
                 return _json_error(
                     str(exc),
                     status=500,
@@ -5162,10 +5920,31 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     variables,
                 )
             except Exception as exc:
+                if is_test_workflow_line():
+                    return _json_error(
+                        str(exc),
+                        status=502,
+                        fallback="09 测试工作流远端请求失败，未获得新结果，请稍后重试。",
+                    )
                 return _json_error(
                     str(exc),
                     status=500,
                     fallback="09 人设服装 alias 映射调用失败，请检查 FASTGPT_FRAMEWORK_APPEARANCE_MAPPING_API_KEY 和工作流变量。",
+                )
+
+            if is_test_workflow_line():
+                if asset_id:
+                    _save_framework_to_script_stage(
+                        user_id=user_id,
+                        asset_id=asset_id,
+                        stage_key="stage09",
+                        output=raw_output,
+                    )
+                return _json_ok(
+                    stage="09",
+                    framework_asset_id=asset_id,
+                    data=raw_output,
+                    output=raw_output,
                 )
 
             appearanceMapping = _extract_appearance_payload(raw_output)
@@ -5340,7 +6119,17 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             parsed = _try_parse_json_text(value)
                             if parsed is not None:
                                 visit(parsed)
-                    for key in ("data", "result", "output", "response", "responseData", "enrichedEpisodePlanResult", "enriched_episode_plan_result"):
+                    for key in (
+                        "data",
+                        "result",
+                        "output",
+                        "payload",
+                        "message",
+                        "response",
+                        "responseData",
+                        "enrichedEpisodePlanResult",
+                        "enriched_episode_plan_result",
+                    ):
                         value = obj.get(key)
                         if isinstance(value, (dict, list)):
                             visit(value)
@@ -5376,40 +6165,159 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     or item.get("enrichedEpisodePlan")
                     or item.get("all_enriched_episode_plan")
                     or item.get("enriched_episode_plan")
+                    or item.get("episode_plans")
+                    or item.get("episodePlans")
+                    or item.get("episodes")
                 )
                 text = (
                     item.get("allEnrichedEpisodePlanText")
                     or item.get("enrichedEpisodePlanText")
                     or item.get("all_enriched_episode_plan_text")
                     or item.get("enriched_episode_plan_text")
+                    or item.get("episode_plans_text")
+                    or item.get("episodePlansText")
                     or ""
                 )
                 if isinstance(plan, str):
                     parsed_plan = _try_parse_json_text(plan)
                     if isinstance(parsed_plan, list):
                         plan = parsed_plan
+                    elif isinstance(parsed_plan, dict):
+                        plan = (
+                            parsed_plan.get("episode_plans")
+                            or parsed_plan.get("episodePlans")
+                            or parsed_plan.get("episodes")
+                            or parsed_plan
+                        )
+                if isinstance(plan, dict):
+                    nested_plan = (
+                        plan.get("episode_plans")
+                        or plan.get("episodePlans")
+                        or plan.get("episodes")
+                    )
+                    if isinstance(nested_plan, list):
+                        plan = nested_plan
+                    elif plan and all(str(key).strip().isdigit() for key in plan):
+                        plan = list(plan.values())
                 if isinstance(plan, list) and plan:
-                    return plan, str(text or "")
+                    plan_text = str(text or "").strip()
+                    if not plan_text:
+                        plan_text = _json.dumps(plan, ensure_ascii=False, indent=2)
+                    return plan, plan_text
             return None, ""
 
         asset_id = str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip()
         if not _try_begin_framework_stage(user_id, asset_id, "10"):
             return _json_error("10 正在运行中，请稍后刷新页面，已完成输出会自动恢复。", status=409)
-        try:
-            try:
-                from .services.fastgpt_client import fastgpt_client
-                from .services.fastgpt_contracts import STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN
+        generation_source = "fastgpt"
 
-                raw_output = fastgpt_client.run_stage(
-                    STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
-                    variables,
+        def _run_compact_direct_stage10():
+            from .services.framework_stage10_fallback import generate_stage10_plan
+
+            direct_plan, direct_text = generate_stage10_plan(
+                framework_plan_package=framework_plan_package,
+                scene_dictionary=scene_dictionary,
+                appearance_mapping=appearance_mapping,
+                preference_prompt=str(variables.get("shmRs8OT") or ""),
+            )
+            return {
+                "allEnrichedEpisodePlan": direct_plan,
+                "allEnrichedEpisodePlanText": direct_text,
+            }
+
+        try:
+            basic_config = framework_plan_package.get("basic_config")
+            basic_config = basic_config if isinstance(basic_config, dict) else {}
+            episode_count = _positive_int(
+                basic_config.get("episodes_per_season")
+                or basic_config.get("total_episodes")
+                or (framework_asset or {}).get("episodes_per_season")
+                or (framework_asset or {}).get("total_episodes"),
+                0,
+            )
+            import os as _os
+
+            direct_threshold = _positive_int(
+                _os.getenv("FRAMEWORK_STAGE10_DIRECT_THRESHOLD_EPISODES"),
+                20,
+            )
+            if episode_count >= direct_threshold:
+                logger.info(
+                    "framework-to-script stage10 using compact direct generation: "
+                    "asset_id=%s episodes=%s threshold=%s",
+                    asset_id,
+                    episode_count,
+                    direct_threshold,
                 )
-            except Exception as exc:
-                return _json_error(
-                    str(exc),
-                    status=500,
-                    fallback="10 优化分集计划调用失败，请检查 FASTGPT_FRAMEWORK_ENRICHED_EPISODE_PLAN_API_KEY 和工作流变量。",
-                )
+                try:
+                    raw_output = _run_compact_direct_stage10()
+                except Exception as fallback_exc:
+                    logger.exception(
+                        "framework-to-script stage10 compact direct generation failed: asset_id=%s",
+                        asset_id,
+                    )
+                    return _json_error(
+                        str(fallback_exc),
+                        status=500,
+                        fallback="10 优化分集计划精简生成失败，请查看后端诊断日志。",
+                    )
+                generation_source = "deepseek_direct_compact"
+            else:
+                try:
+                    from .services.fastgpt_client import fastgpt_client
+                    from .services.fastgpt_contracts import (
+                        STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+                    )
+
+                    raw_output = fastgpt_client.run_stage(
+                        STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN,
+                        variables,
+                    )
+                except Exception as exc:
+                    try:
+                        debug_info = (
+                            fastgpt_client.get_last_stage_debug_info(
+                                STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN
+                            )
+                            if "fastgpt_client" in locals()
+                            and "STAGE_FRAMEWORK_ENRICHED_EPISODE_PLAN" in locals()
+                            else {}
+                        )
+                    except Exception:
+                        debug_info = {}
+                    diagnostics = str(
+                        (debug_info or {}).get("failure_diagnostics") or ""
+                    )
+                    is_zero_token_timeout = (
+                        "Request timed out" in diagnostics
+                        and '"inputTokens": 0' in diagnostics
+                        and '"outputTokens": 0' in diagnostics
+                    )
+                    if not is_zero_token_timeout:
+                        return _json_error(
+                            str(exc),
+                            status=500,
+                            fallback="10 优化分集计划调用失败，请检查 FASTGPT_FRAMEWORK_ENRICHED_EPISODE_PLAN_API_KEY 和工作流变量。",
+                        )
+                    logger.warning(
+                        "framework-to-script stage10 FastGPT zero-token timeout; "
+                        "using compact direct fallback: asset_id=%s diagnostics=%s",
+                        asset_id,
+                        diagnostics,
+                    )
+                    try:
+                        raw_output = _run_compact_direct_stage10()
+                    except Exception as fallback_exc:
+                        logger.exception(
+                            "framework-to-script stage10 direct fallback failed: asset_id=%s",
+                            asset_id,
+                        )
+                        return _json_error(
+                            str(fallback_exc),
+                            status=500,
+                            fallback="10 优化分集计划的 FastGPT 与精简兜底均执行失败，请查看后端诊断日志。",
+                        )
+                    generation_source = "deepseek_direct_compact"
 
             plan, plan_text = _extract_enriched_payload(raw_output)
             if not plan:
@@ -5418,6 +6326,38 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     status=500,
                     fallback="请检查 10 工作流是否把 allEnrichedEpisodePlan 写入变量或 answerText JSON。",
                 )
+            episode_limit = _positive_int(
+                (framework_asset or {}).get("episodes_per_season")
+                or (framework_asset or {}).get("total_episodes")
+                or data.get("episodes_per_season")
+                or data.get("total_episodes"),
+                0,
+            )
+            if episode_limit:
+                original_plan = plan
+                plan = [
+                    item
+                    for index, item in enumerate(original_plan, start=1)
+                    if isinstance(item, dict)
+                    and _positive_int(
+                        item.get("episode")
+                        or item.get("episodeNumber")
+                        or item.get("episode_number")
+                        or item.get("episode_index")
+                        or item.get("ep")
+                        or index,
+                        index,
+                    ) <= episode_limit
+                ]
+                if len(plan) != len(original_plan):
+                    logger.warning(
+                        "framework-to-script stage10 trimmed out-of-range episodes: asset_id=%s limit=%s before=%s after=%s",
+                        asset_id,
+                        episode_limit,
+                        len(original_plan),
+                        len(plan),
+                    )
+                    plan_text = _json.dumps(plan, ensure_ascii=False, indent=2)
             if asset_id:
                 _save_framework_to_script_stage(
                     user_id=user_id,
@@ -5428,12 +6368,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "allEnrichedEpisodePlan": plan,
                             "allEnrichedEpisodePlanText": plan_text,
                             "batchEnrichedEpisodePlan": plan,
+                            "generationSource": generation_source,
                         },
                         "allEnrichedEpisodePlan": plan,
                         "allEnrichedEpisodePlanText": plan_text,
                         "batchEnrichedEpisodePlan": plan,
                         "enrichedEpisodePlan": plan,
                         "enrichedEpisodePlanText": plan_text,
+                        "generationSource": generation_source,
                     },
                 )
         finally:
@@ -5452,6 +6394,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             batchEnrichedEpisodePlan=plan,
             enrichedEpisodePlan=plan,
             enrichedEpisodePlanText=plan_text,
+            generationSource=generation_source,
             stageOutputs={
                 "framework_enriched_episode_plan": {
                     "allEnrichedEpisodePlan": plan,
@@ -5522,12 +6465,28 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
         if not isinstance(plan, list) or not plan:
             return _stage11_400("缺少 allEnrichedEpisodePlan，请先完成 10 优化分集计划。", "missing_all_enriched_episode_plan")
+        episode_limit = _positive_int(
+            (framework_asset or {}).get("episodes_per_season")
+            or (framework_asset or {}).get("total_episodes")
+            or data.get("episodes_per_season")
+            or data.get("total_episodes"),
+            0,
+        )
+        expected_batch_starts = _framework_expected_batch_starts(plan, episode_limit)
 
         stage08 = _framework_script_stage_cache(framework_asset, "stage08")
         stage09 = _framework_script_stage_cache(framework_asset, "stage09")
         scene_dictionary = data.get("sceneDictionary") or stage08.get("sceneDictionary") or {}
         rules_digest = data.get("scriptWorldRulesDigest") or stage08.get("scriptWorldRulesDigest") or {}
-        appearance_mapping = data.get("appearanceMapping") or stage09.get("appearanceMapping") or {}
+        appearance_mapping = (
+            data.get("appearanceMapping")
+            or data.get("appearance_mapping")
+            or stage09.get("appearanceMapping")
+            or stage09.get("appearance_mapping")
+            or {}
+        )
+        if is_test_workflow_line() and not appearance_mapping and isinstance(stage09, dict):
+            appearance_mapping = stage09
         if not isinstance(scene_dictionary, dict) or not scene_dictionary:
             return _stage11_400("缺少 sceneDictionary，请先完成 08 提炼核心场景。", "missing_scene_dictionary")
         if not isinstance(appearance_mapping, dict) or not appearance_mapping:
@@ -5559,6 +6518,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     existing_batch.get("batchStartEpisode") or existing_key,
                     _positive_int(existing_key, 1),
                 )
+                if str(existing_start) not in expected_batch_starts:
+                    logger.warning(
+                        "framework-to-script stage11 dropping stale cached batch outside stage10 plan: "
+                        "asset_id=%s batchStartEpisode=%s expected_batch_starts=%s",
+                        asset_id,
+                        existing_start,
+                        expected_batch_starts,
+                    )
+                    continue
                 existing_end = _positive_int(existing_batch.get("batchEndEpisode"), existing_start + 4)
                 existing_plan, _ = _unwrap_dict_alias(
                     existing_batch,
@@ -5609,16 +6577,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _stage11_400(
                 "当前批次缺少 batchEnrichedEpisodePlan，请检查 10 输出集数。",
                 "empty_batch_enriched_episode_plan",
-                expected_batch_starts=[
-                    str(start)
-                    for start in sorted(
-                        {
-                            ((_positive_int(item.get("episode") or item.get("episodeNumber") or item.get("episode_number"), index + 1) - 1) // 5) * 5 + 1
-                            for index, item in enumerate(plan)
-                            if isinstance(item, dict)
-                        }
-                    )
-                ],
+                expected_batch_starts=expected_batch_starts,
             )
 
         def _autosave_stage11_draft(
@@ -5681,7 +6640,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     or _first_present(existing_stage11, "conflictMemory", "conflict_memory", default="")
                     or ""
                 )
-                if reset_stage11:
+                if reset_stage11 or start_episode <= 1:
                     conflict_memory = ""
                 base_vars = {
                     **_framework_context_vars(data, framework_plan_package),
@@ -5751,7 +6710,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 write_failure_reason = ""
                 write_output_keys = []
                 write_retry_count = 0
-                max_write_retries = 3
+                direct_test_write = False
+                max_write_retries = 0 if is_test_workflow_line() else 3
                 for retry_count in range(max_write_retries + 1):
                     write_retry_count = retry_count
                     if retry_count:
@@ -5773,6 +6733,38 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "batchCausalConflictPlan",
                             "batch_causal_conflict_plan",
                         )
+                        direct_episodes = None
+                        if is_test_workflow_line():
+                            for direct_candidate in (
+                                write_output_data.get("output"),
+                                write_output_data.get("batchCausalConflictPlan"),
+                                write_output_data.get("batch_causal_conflict_plan"),
+                                conflict_plan,
+                            ):
+                                if isinstance(direct_candidate, list) and direct_candidate:
+                                    direct_episodes = direct_candidate
+                                    break
+                                if isinstance(direct_candidate, dict):
+                                    nested_episodes = (
+                                        direct_candidate.get("output")
+                                        or direct_candidate.get("episode_plans")
+                                        or direct_candidate.get("episodes")
+                                    )
+                                    if isinstance(nested_episodes, list) and nested_episodes:
+                                        direct_episodes = nested_episodes
+                                        break
+                        if isinstance(direct_episodes, list) and direct_episodes:
+                            direct_test_write = True
+                            conflict_plan = {
+                                "batch_meta": {
+                                    "start_episode": start_episode,
+                                    "end_episode": end_episode,
+                                    "source": "test_workflow_direct_output",
+                                },
+                                "episodes": direct_episodes,
+                            }
+                            conflict_plan_unwrapped = True
+                            write_failure_reason = ""
                     except FastGPTStageFormatError as exc:
                         write_output_data = {}
                         write_output_keys = []
@@ -5790,6 +6782,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             break
                         continue
                     if isinstance(conflict_plan, dict) and conflict_plan:
+                        if direct_test_write:
+                            break
                         contract_issues = _validate_stage11_causal_conflict_plan(
                             conflict_plan,
                             start_episode=start_episode,
@@ -5838,7 +6832,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     return jsonify(
                         {
                             "success": False,
-                            "message": "11 write 阶段未返回可用的 batchCausalConflictPlan，已自动重试 3 次；请查看后端调试终端日志。",
+                            "message": (
+                                "11 write 阶段未返回可用的因果计划。"
+                                if is_test_workflow_line()
+                                else "11 write 阶段未返回可用的 batchCausalConflictPlan，已自动重试 3 次；请查看后端调试终端日志。"
+                            ),
                             "detail": {
                                 "failed_sub_stage": "causal_conflict_write",
                                 "retry_count": write_retry_count,
@@ -5855,8 +6853,25 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     conflict_plan_value=conflict_plan,
                     conflict_memory_value=conflict_memory,
                 )
-                max_review_rounds = 5
-                conflict_review = {}
+                max_review_rounds = 0 if direct_test_write else 3
+                conflict_review = (
+                    {
+                        "reviewPassed": True,
+                        "passed": True,
+                        "rewriteRequired": False,
+                        "rewrite_required": False,
+                        "blockingIssues": [],
+                        "blocking_issues": [],
+                        "nonBlockingIssues": [],
+                        "non_blocking_issues": [],
+                        "rewriteBrief": "",
+                        "rewrite_brief": "",
+                        "qualityGateStatus": "test_direct_output",
+                        "quality_gate_status": "test_direct_output",
+                    }
+                    if direct_test_write
+                    else {}
+                )
                 rewrite_round = 0
                 for review_round in range(1, max_review_rounds + 1):
                     failed_sub_stage = "causal_conflict_review"
@@ -5935,30 +6950,30 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     if review_passed is True and rewrite_required is False:
                         break
                     if review_round >= max_review_rounds:
+                        conflict_review = {
+                            **(conflict_review if isinstance(conflict_review, dict) else {}),
+                            "acceptedAfterReviewLimit": True,
+                            "accepted_after_review_limit": True,
+                            "qualityGateStatus": "accepted_with_warnings",
+                            "quality_gate_status": "accepted_with_warnings",
+                        }
                         _autosave_stage11_draft(
-                            "causal_conflict_review_failed",
+                            "causal_conflict_review_limit_reached",
                             conflict_plan_value=conflict_plan,
                             conflict_review_value=conflict_review,
                             conflict_memory_value=conflict_memory,
-                            status="failed",
+                            status="accepted_with_warnings",
                         )
-                        return jsonify(
-                            {
-                                "success": False,
-                                "message": "11 因果冲突审核修订 5 轮后仍未通过，已停止保存当前批次。",
-                                "detail": {
-                                    "failed_sub_stage": "causal_conflict_review",
-                                    "max_review_rounds": max_review_rounds,
-                                    "review_round": review_round,
-                                    "rewrite_round": rewrite_round,
-                                    "start_episode": start_episode,
-                                    "end_episode": end_episode,
-                                    "last_review": conflict_review,
-                                    "blockingIssues": blocking_issues,
-                                    "blocking_issues": blocking_issues,
-                                },
-                            }
-                        ), 422
+                        logger.warning(
+                            "framework-to-script stage11 review limit reached; saving latest revision with warnings: "
+                            "asset_id=%s batch=%s-%s rounds=%s blocking=%s",
+                            asset_id,
+                            start_episode,
+                            end_episode,
+                            max_review_rounds,
+                            len(blocking_issues),
+                        )
+                        break
                     failed_sub_stage = "causal_conflict_rewrite"
                     rewrite_round += 1
                     logger.info(
@@ -6017,15 +7032,31 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     )
                 failed_sub_stage = "causal_conflict_memory"
                 try:
-                    memory_output = fastgpt_client.run_stage(
-                        STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
-                        {
-                            **base_vars,
-                            "batchCausalConflictPlan": conflict_plan,
-                            "conflictMemory": conflict_memory,
-                            "conflictStartEpisode": start_episode,
-                        },
-                    )
+                    if direct_test_write:
+                        memory_output = {}
+                        last_episode = (
+                            conflict_plan.get("episodes", [])[-1]
+                            if isinstance(conflict_plan.get("episodes"), list)
+                            and conflict_plan.get("episodes")
+                            else {}
+                        )
+                        conflict_memory = json.dumps(
+                            {
+                                "last_episode": last_episode,
+                                "next_batch_start_episode": end_episode + 1,
+                            },
+                            ensure_ascii=False,
+                        )
+                    else:
+                        memory_output = fastgpt_client.run_stage(
+                            STAGE_FRAMEWORK_CAUSAL_CONFLICT_MEMORY,
+                            {
+                                **base_vars,
+                                "batchCausalConflictPlan": conflict_plan,
+                                "conflictMemory": conflict_memory,
+                                "conflictStartEpisode": start_episode,
+                            },
+                        )
                 except FastGPTStageFormatError as exc:
                     logger.warning(
                         "framework-to-script stage11 memory missing conflictMemory, keeping previous memory: "
@@ -6134,12 +7165,40 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             or data.get("frameworkPlanPackage")
             or {}
         )
+        stage10 = _framework_script_stage_cache(framework_asset, "stage10")
+        all_episode_plan = (
+            data.get("allEnrichedEpisodePlan")
+            or data.get("enrichedEpisodePlan")
+            or stage10.get("allEnrichedEpisodePlan")
+            or stage10.get("enrichedEpisodePlan")
+            or []
+        )
+        episode_limit = _positive_int(
+            (framework_asset or {}).get("episodes_per_season")
+            or (framework_asset or {}).get("total_episodes")
+            or data.get("episodes_per_season")
+            or data.get("total_episodes"),
+            0,
+        )
+        expected_batch_starts = _framework_expected_batch_starts(all_episode_plan, episode_limit)
+        if not expected_batch_starts:
+            return _json_error("缺少第10阶段有效分集计划，请先重新运行10。", status=400)
         stage08 = data.get("stage08") if isinstance(data.get("stage08"), dict) else _framework_script_stage_cache(framework_asset, "stage08")
         stage09 = data.get("stage09") if isinstance(data.get("stage09"), dict) else _framework_script_stage_cache(framework_asset, "stage09")
         stage11 = data.get("stage11") if isinstance(data.get("stage11"), dict) else _framework_script_stage_cache(framework_asset, "stage11")
         stage11_batches = stage11.get("batches") if isinstance(stage11.get("batches"), dict) else {}
         existing_stage12 = data.get("stage12") if isinstance(data.get("stage12"), dict) else _framework_script_stage_cache(framework_asset, "stage12")
         existing_batches = existing_stage12.get("batches") if isinstance(existing_stage12.get("batches"), dict) else {}
+        stage11_batches = {
+            str(key): value
+            for key, value in stage11_batches.items()
+            if str(key) in expected_batch_starts and isinstance(value, dict)
+        }
+        existing_batches = {
+            str(key): value
+            for key, value in existing_batches.items()
+            if str(key) in expected_batch_starts and isinstance(value, dict)
+        }
         reset_stage12 = bool(data.get("reset_stage12") or data.get("resetStage12"))
         if reset_stage12:
             existing_stage12 = {}
@@ -6149,7 +7208,18 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if requested_start:
             batch_key = str(_positive_int(requested_start, 1))
             selected_batch_source = "explicit_request"
-            if not stage11_batches and _first_present(stage11, "batchCausalConflictPlan", "batch_causal_conflict_plan", default=None):
+            if batch_key not in expected_batch_starts:
+                return _json_error(
+                    f"请求的第 {batch_key} 集批次不在第10阶段分集计划中。",
+                    status=400,
+                    detail={"expected_batch_starts": expected_batch_starts, "requested_batch_start": batch_key},
+                )
+            top_level_start = str(_positive_int(stage11.get("batchStartEpisode"), 0))
+            if (
+                not stage11_batches
+                and top_level_start == batch_key
+                and _first_present(stage11, "batchCausalConflictPlan", "batch_causal_conflict_plan", default=None)
+            ):
                 stage11_batches = {batch_key: stage11}
                 logger.warning(
                     "framework-to-script stage12 stage11.batches empty, falling back to top-level stage11 batch: "
@@ -6158,20 +7228,28 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     batch_key,
                 )
         else:
-            stage11_batch_keys = _sorted_numeric_batch_keys(stage11_batches)
+            stage11_batch_keys = [key for key in expected_batch_starts if key in stage11_batches]
             existing_stage12_keys = set(_sorted_numeric_batch_keys(existing_batches))
             batch_key = next((key for key in stage11_batch_keys if key not in existing_stage12_keys), "")
             selected_batch_source = "first_missing_from_stage11_batches"
             if not batch_key and not stage11_batch_keys and _first_present(stage11, "batchCausalConflictPlan", "batch_causal_conflict_plan", default=None):
-                batch_key = str(_positive_int(stage11.get("batchStartEpisode"), 1))
-                stage11_batches = {batch_key: stage11}
-                selected_batch_source = "fallback_top_level"
-                logger.warning(
-                    "framework-to-script stage12 stage11.batches empty, falling back to top-level stage11 batch: "
-                    "asset_id=%s batchStartEpisode=%s",
-                    str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip(),
-                    batch_key,
-                )
+                top_level_key = str(_positive_int(stage11.get("batchStartEpisode"), 0))
+                if top_level_key in expected_batch_starts and top_level_key not in existing_stage12_keys:
+                    batch_key = top_level_key
+                    stage11_batches = {batch_key: stage11}
+                    selected_batch_source = "fallback_top_level"
+                    logger.warning(
+                        "framework-to-script stage12 stage11.batches empty, falling back to top-level stage11 batch: "
+                        "asset_id=%s batchStartEpisode=%s",
+                        str((framework_asset or {}).get("asset_id") or data.get("framework_asset_id") or "").strip(),
+                        batch_key,
+                    )
+        if batch_key not in expected_batch_starts:
+            return _json_error(
+                "第11阶段没有与第10阶段分集计划匹配的可运行批次。",
+                status=400,
+                detail={"expected_batch_starts": expected_batch_starts, "selected_batch_start": batch_key},
+            )
         stage11_batch = stage11_batches.get(batch_key) if isinstance(stage11_batches, dict) else None
         logger.info(
             "framework-to-script stage12 selected batchStartEpisode=%s source=%s stage11_batch_keys=%s stage12_batch_keys=%s",
@@ -6206,7 +7284,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             "batch_causal_conflict_plan",
         )
         scene_dictionary = stage08.get("sceneDictionary") or {}
-        appearance_mapping = stage09.get("appearanceMapping") or {}
+        appearance_mapping = (
+            stage09.get("appearanceMapping")
+            or stage09.get("appearance_mapping")
+            or (stage09 if is_test_workflow_line() else {})
+        )
         if not isinstance(batch_plan, list) or not batch_plan:
             return _json_error("缺少第11阶段批次分集计划，请先重新运行11。", status=400)
         if not isinstance(conflict_plan, dict) or not conflict_plan:
@@ -6273,6 +7355,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     or _first_present(existing_stage12, "scriptMemory", "script_memory", default="")
                     or ""
                 )
+                if reset_stage12 or start_episode <= 1:
+                    script_memory = ""
                 base_vars = {
                     **_framework_context_vars(data, framework_plan_package),
                     "totalEpisodes": total_episodes,
@@ -6445,13 +7529,88 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 debug_record.update({"status": "requesting_fastgpt", "failed_sub_stage": failed_sub_stage, "updated_at": _now_iso()})
                 debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                 write_started = time.monotonic()
-                write_output = fastgpt_client.run_stage(STAGE_FRAMEWORK_SCRIPT_WRITE, base_vars)
+                if is_test_workflow_line() and start_episode < end_episode:
+                    episode_scripts: list[str] = []
+                    for episode_no in range(start_episode, end_episode + 1):
+                        episode_plan = _stage12_episode_plan_slice(batch_plan, episode_no)
+                        episode_conflict_plan = _stage12_conflict_plan_slice(
+                            conflict_plan,
+                            episode_no,
+                        )
+                        if not episode_plan or not episode_conflict_plan.get("episodes"):
+                            raise RuntimeError(
+                                f"12 测试流程无法生成第 {episode_no} 集：缺少该集计划。"
+                            )
+                        episode_output = fastgpt_client.run_stage(
+                            STAGE_FRAMEWORK_SCRIPT_WRITE,
+                            {
+                                **base_vars,
+                                "totalEpisodes": total_episodes,
+                                "total_episodes": total_episodes,
+                                "scriptStartEpisode": episode_no,
+                                "script_start_episode": episode_no,
+                                "batchEnrichedEpisodePlan": episode_plan,
+                                "batch_enriched_episode_plan": episode_plan,
+                                "batchCausalConflictPlan": episode_conflict_plan,
+                                "batch_causal_conflict_plan": episode_conflict_plan,
+                            },
+                        )
+                        episode_script = _normalize_stage12_episode_headings(
+                            _first_present(
+                                episode_output,
+                                "batchScriptText",
+                                "batch_script_text",
+                                default="",
+                            )
+                        ).strip()
+                        returned_episodes = _stage12_script_episode_numbers(
+                            episode_script
+                        )
+                        if episode_no not in returned_episodes:
+                            if returned_episodes:
+                                raise RuntimeError(
+                                    f"12 测试流程第 {episode_no} 集返回不匹配："
+                                    f"实际识别集号 {sorted(returned_episodes)}。"
+                                )
+                            if not episode_script:
+                                raise RuntimeError(
+                                    f"12 测试流程第 {episode_no} 集返回空正文。"
+                                )
+                            episode_source = (
+                                episode_plan[0]
+                                if episode_plan and isinstance(episode_plan[0], dict)
+                                else {}
+                            )
+                            episode_title = str(
+                                episode_source.get("episode_title")
+                                or episode_source.get("title")
+                                or ""
+                            ).strip()
+                            heading = f"第{episode_no}集"
+                            if episode_title:
+                                heading += f"：{episode_title}"
+                            episode_script = f"{heading}\n\n{episode_script}"
+                        episode_scripts.append(episode_script)
+                        _autosave_stage12_draft(
+                            f"script_write_episode_{episode_no}",
+                            batch_script_value="\n\n".join(episode_scripts),
+                            script_memory_value=script_memory,
+                            debug_path_value=debug_path,
+                        )
+                    write_output = {
+                        "batchScriptText": "\n\n".join(episode_scripts)
+                    }
+                else:
+                    write_output = fastgpt_client.run_stage(
+                        STAGE_FRAMEWORK_SCRIPT_WRITE,
+                        base_vars,
+                    )
                 write_event["fastgpt_request_ended_at"] = _now_iso()
                 write_event["duration_ms"] = int((time.monotonic() - write_started) * 1000)
                 write_event["fastgpt_debug"] = _stage12_fastgpt_debug_summary(fastgpt_client, STAGE_FRAMEWORK_SCRIPT_WRITE)
                 write_keys = sorted(write_output.keys()) if isinstance(write_output, dict) else []
                 batch_script_value = _first_present(write_output, "batchScriptText", "batch_script_text", default=None)
-                batch_script = str(batch_script_value or "")
+                batch_script = _normalize_stage12_episode_headings(batch_script_value)
                 write_event["raw_response_summary"] = _stage12_debug_summary(write_output, preview_limit=600)
                 write_event["parsed_fields"] = write_keys
                 write_event["batchScriptText_length"] = len(batch_script)
@@ -6510,7 +7669,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     _stage12_script_episode_numbers(batch_script)
                 )
                 write_event["missing_episode_numbers"] = missing_script_episodes
-                if missing_script_episodes and start_episode < end_episode:
+                if (
+                    missing_script_episodes
+                    and start_episode < end_episode
+                    and not is_test_workflow_line()
+                ):
                     # The batch workflow occasionally returns only the first episode despite
                     # receiving a complete five-episode plan. Regenerate the batch as explicit
                     # one-episode calls before asking the reviewer to judge it.
@@ -6563,14 +7726,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             STAGE_FRAMEWORK_SCRIPT_WRITE,
                             episode_vars,
                         )
-                        episode_script = str(
+                        episode_script = _normalize_stage12_episode_headings(
                             _first_present(
                                 episode_output,
                                 "batchScriptText",
                                 "batch_script_text",
                                 default="",
                             )
-                            or ""
                         ).strip()
                         episode_event = {
                             "episode": episode_no,
@@ -6614,8 +7776,25 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     script_memory_value=script_memory,
                     debug_path_value=debug_path,
                 )
-                max_review_rounds = 5
-                script_review = {}
+                max_review_rounds = 0 if is_test_workflow_line() else 3
+                script_review = (
+                    {
+                        "reviewPassed": True,
+                        "passed": True,
+                        "rewriteRequired": False,
+                        "rewrite_required": False,
+                        "blockingIssues": [],
+                        "blocking_issues": [],
+                        "nonBlockingIssues": [],
+                        "non_blocking_issues": [],
+                        "rewriteBrief": "",
+                        "rewrite_brief": "",
+                        "qualityGateStatus": "test_direct_output",
+                        "quality_gate_status": "test_direct_output",
+                    }
+                    if is_test_workflow_line()
+                    else {}
+                )
                 rewrite_round = 0
                 for review_round in range(1, max_review_rounds + 1):
                     failed_sub_stage = "script_review"
@@ -6669,6 +7848,19 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         )
                         review_passed = False
                         rewrite_required = True
+                    local_opening_issues = _stage12_opening_quality_issues(batch_script)
+                    if local_opening_issues:
+                        blocking_issues = list(dict.fromkeys([*blocking_issues, *local_opening_issues]))
+                        review_passed = False
+                        rewrite_required = True
+                        local_brief = "；".join(local_opening_issues)
+                        rewrite_brief = "；".join(
+                            part for part in (str(rewrite_brief or "").strip(), local_brief) if part
+                        )
+                        logger.warning(
+                            "framework-to-script stage12 local opening gate rejected remote approval: issues=%s",
+                            local_opening_issues,
+                        )
                     script_review = {
                         "reviewPassed": review_passed,
                         "passed": review_passed,
@@ -6737,11 +7929,18 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     if review_passed is True and rewrite_required is False:
                         break
                     if review_round >= max_review_rounds:
+                        script_review = {
+                            **(script_review if isinstance(script_review, dict) else {}),
+                            "acceptedAfterReviewLimit": True,
+                            "accepted_after_review_limit": True,
+                            "qualityGateStatus": "accepted_with_warnings",
+                            "quality_gate_status": "accepted_with_warnings",
+                        }
                         debug_record.update(
                             {
-                                "status": "failed",
-                                "failure_phase": "审核/重写",
-                                "failed_sub_stage": "script_review",
+                                "status": "review_limit_reached",
+                                "failure_phase": "",
+                                "failed_sub_stage": "",
                                 "review_attempt": review_round,
                                 "rewrite_attempt": rewrite_round,
                                 "rewrite_reason": _stage12_debug_preview(blocking_issues or rewrite_brief),
@@ -6750,31 +7949,23 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         )
                         debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                         _autosave_stage12_draft(
-                            "script_review_failed",
+                            "script_review_limit_reached",
                             batch_script_value=batch_script,
                             script_review_value=script_review,
                             script_memory_value=script_memory,
-                            status="failed",
+                            status="accepted_with_warnings",
                             debug_path_value=debug_path,
                         )
-                        return jsonify(
-                            {
-                                "success": False,
-                                "message": f"12 阶段第 {start_episode}-{end_episode} 集审核重写失败：5 轮后仍未通过。",
-                                "detail": {
-                                    "failed_sub_stage": "script_review",
-                                    "max_review_rounds": max_review_rounds,
-                                    "review_round": review_round,
-                                    "rewrite_round": rewrite_round,
-                                    "start_episode": start_episode,
-                                    "end_episode": end_episode,
-                                    "last_review": script_review,
-                                    "blockingIssues": blocking_issues,
-                                    "blocking_issues": blocking_issues,
-                                    "debug_path": debug_path,
-                                },
-                            }
-                        ), 422
+                        logger.warning(
+                            "framework-to-script stage12 review limit reached; saving latest revision with warnings: "
+                            "asset_id=%s batch=%s-%s rounds=%s blocking=%s",
+                            asset_id,
+                            start_episode,
+                            end_episode,
+                            max_review_rounds,
+                            len(blocking_issues),
+                        )
+                        break
                     failed_sub_stage = "script_rewrite"
                     rewrite_round += 1
                     debug_record.update(
@@ -6834,7 +8025,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     rewrite_event["http_status"] = rewrite_event["fastgpt_debug"].get("http_status")
                     rewrite_keys = sorted(rewrite_output.keys()) if isinstance(rewrite_output, dict) else []
                     rewrite_script_value = _first_present(rewrite_output, "batchScriptText", "batch_script_text", default=None)
-                    batch_script = str(rewrite_script_value or "")
+                    batch_script = _normalize_stage12_episode_headings(rewrite_script_value)
                     rewrite_event["raw_response_summary"] = _stage12_debug_summary(rewrite_output, preview_limit=600)
                     rewrite_event["parsed_fields"] = rewrite_keys
                     rewrite_event["batchScriptText_length_after"] = len(batch_script)
@@ -6918,10 +8109,21 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 debug_record["events"].append(memory_event)
                 debug_path = _write_stage12_debug_file(debug_record, data=data, framework_asset=framework_asset)
                 memory_started = time.monotonic()
-                memory_output = fastgpt_client.run_stage(
-                    STAGE_FRAMEWORK_SCRIPT_MEMORY,
-                    memory_vars,
-                )
+                if is_test_workflow_line():
+                    memory_output = {}
+                    script_memory = json.dumps(
+                        {
+                            "batch_start_episode": start_episode,
+                            "batch_end_episode": end_episode,
+                            "script_tail": batch_script[-2000:],
+                        },
+                        ensure_ascii=False,
+                    )
+                else:
+                    memory_output = fastgpt_client.run_stage(
+                        STAGE_FRAMEWORK_SCRIPT_MEMORY,
+                        memory_vars,
+                    )
                 memory_event["fastgpt_request_ended_at"] = _now_iso()
                 memory_event["duration_ms"] = int((time.monotonic() - memory_started) * 1000)
                 memory_event["fastgpt_debug"] = _stage12_fastgpt_debug_summary(fastgpt_client, STAGE_FRAMEWORK_SCRIPT_MEMORY)
@@ -7136,7 +8338,369 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @app.get("/framework-to-script")
     @_login_required
     def framework_to_script_workspace():
-        return render_template("framework_to_script.html")
+        return render_template(
+            "framework_to_script.html",
+            workflow_line=PRODUCTION_WORKFLOW_LINE,
+            framework_planner_url="/framework-planner",
+            page_title="框架转剧本工作台",
+        )
+
+    @app.get("/framework-to-script-test")
+    @_login_required
+    def framework_to_script_test_workspace():
+        return render_template(
+            "framework_to_script.html",
+            workflow_line=TEST_WORKFLOW_LINE,
+            framework_planner_url="/framework-planner-test",
+            page_title="新工作流测试线路 08-12",
+        )
+
+    @app.get("/api/test-workflow/status")
+    @_login_required
+    def test_workflow_status_api():
+        return _json_ok(**test_workflow_status())
+
+    @app.get("/api/new-workflow-test/npc/config")
+    @_login_required
+    def codebuddy_npc_config_api():
+        return _json_ok(config=codebuddy_npc_config.public_status())
+
+    @app.post("/api/new-workflow-test/npc/jobs")
+    @_login_required
+    def codebuddy_npc_create_job_api():
+        payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            return _json_error("NPC 剧本任务格式不正确。", status=400)
+        try:
+            job = codebuddy_npc_jobs.create(
+                user_id=_require_user_id(),
+                request_payload=payload,
+            )
+            if job.get("execution_mode") == "auto":
+                trigger_result = codebuddy_npc_client.trigger(job)
+                job["build"] = {
+                    "sn": trigger_result.get("sn"),
+                    "build_log_url": trigger_result.get("buildLogUrl"),
+                    "message": trigger_result.get("message"),
+                }
+                job["status"] = "running"
+                job["status_text"] = "已提交，CodeBuddy NPC 团队正在启动"
+                job["execution_target"] = "remote_cnb"
+                job["remote_kind"] = "full"
+                job["progress"] = 3
+                job = codebuddy_npc_jobs.save(job)
+            else:
+                job = codebuddy_npc_jobs.save(job)
+                try:
+                    job = _submit_remote_npc_stage(
+                        job,
+                        stage="showrunner",
+                        continue_after=False,
+                    )
+                except CodeBuddyNpcError as remote_exc:
+                    job = codebuddy_npc_stage_runner.start(
+                        job_id=str(job["job_id"]),
+                        user_id=_require_user_id(),
+                        stage="showrunner",
+                        continue_after=False,
+                    )
+                    job["fallback_reason"] = str(remote_exc)
+                    job["status_text"] = "CNB 暂不可用，已切换本地兜底运行总编剧"
+                    job = codebuddy_npc_jobs.save(job)
+        except CodeBuddyNpcError as exc:
+            logger.warning("codebuddy npc create failed: %s", exc)
+            return _json_error(
+                str(exc),
+                status=exc.status_code,
+                detail=exc.detail if isinstance(exc.detail, dict) else None,
+            )
+        except Exception as exc:
+            logger.exception("codebuddy npc create failed")
+            return _json_error(str(exc), status=500, fallback="NPC 剧本任务创建失败。")
+        return _json_ok(job=public_job(job))
+
+    @app.get("/api/new-workflow-test/npc/jobs/latest")
+    @_login_required
+    def codebuddy_npc_latest_job_api():
+        job = codebuddy_npc_jobs.latest(user_id=_require_user_id())
+        return _json_ok(job=public_job(job) if job else None)
+
+    @app.get("/api/new-workflow-test/npc/jobs")
+    @_login_required
+    def codebuddy_npc_list_jobs_api():
+        jobs = codebuddy_npc_jobs.list(user_id=_require_user_id())
+        history = []
+        for item in jobs:
+            item = _refresh_remote_npc_job(item)
+            request_data = item.get("request") if isinstance(item.get("request"), dict) else {}
+            history.append(
+                {
+                    "job_id": item.get("job_id"),
+                    "project_title": request_data.get("project_title") or "未命名剧本",
+                    "episodes": request_data.get("episodes"),
+                    "production_type": request_data.get("production_type"),
+                    "status": item.get("status"),
+                    "status_text": item.get("status_text"),
+                    "progress": item.get("progress"),
+                    "active_stage": item.get("active_stage"),
+                    "execution_mode": item.get("execution_mode"),
+                    "execution_target": item.get("execution_target"),
+                    "build_log_url": (item.get("build") or {}).get("build_log_url"),
+                    "has_final_script": bool(str(item.get("final_script") or "").strip()),
+                    "created_at": item.get("created_at"),
+                    "updated_at": item.get("updated_at"),
+                }
+            )
+        return _json_ok(jobs=history)
+
+    @app.get("/api/new-workflow-test/npc/jobs/<job_id>")
+    @_login_required
+    def codebuddy_npc_job_api(job_id: str):
+        job = codebuddy_npc_jobs.load(job_id, user_id=_require_user_id())
+        if not job:
+            return _json_error("NPC 剧本任务不存在。", status=404)
+        job = _refresh_remote_npc_job(job)
+        return _json_ok(job=public_job(job))
+
+    @app.delete("/api/new-workflow-test/npc/jobs/<job_id>")
+    @_login_required
+    def codebuddy_npc_delete_job_api(job_id: str):
+        if codebuddy_npc_stage_runner.is_running(job_id):
+            return _json_error("节点正在运行，请先停止后再删除。", status=409)
+        deleted = codebuddy_npc_jobs.delete(job_id, user_id=_require_user_id())
+        if not deleted:
+            return _json_error("NPC 剧本任务不存在。", status=404)
+        return _json_ok(deleted=True)
+
+    @app.get("/api/new-workflow-test/npc/jobs/<job_id>/export/docx")
+    @_login_required
+    def codebuddy_npc_export_docx_api(job_id: str):
+        job = codebuddy_npc_jobs.load(job_id, user_id=_require_user_id())
+        if not job:
+            return _json_error("NPC 剧本任务不存在。", status=404)
+        final_script = str(job.get("final_script") or "").strip()
+        if not final_script:
+            return _json_error("当前任务还没有可导出的最终剧本。", status=409)
+        request_data = job.get("request") if isinstance(job.get("request"), dict) else {}
+        title = str(request_data.get("project_title") or "完整剧本").strip()
+        safe_title = re.sub(r'[\\/:*?"<>|\r\n]+', "_", title).strip(" ._") or "完整剧本"
+        try:
+            from .utils.txt_to_docx import convert as convert_txt_to_docx
+
+            with tempfile.TemporaryDirectory(prefix="npc-script-docx-") as tmp_dir:
+                tmp_path = Path(tmp_dir)
+                txt_path = tmp_path / "final_script.txt"
+                docx_path = tmp_path / "final_script.docx"
+                txt_path.write_text(final_script, encoding="utf-8")
+                convert_txt_to_docx(str(txt_path), str(docx_path))
+                docx_bytes = docx_path.read_bytes()
+        except ModuleNotFoundError as exc:
+            if exc.name == "docx":
+                return _json_error("当前环境缺少 python-docx，暂时无法导出 Word。", status=500)
+            raise
+        except Exception as exc:
+            logger.exception("codebuddy npc docx export failed: job_id=%s", job_id)
+            return _json_error(str(exc), status=500, fallback="Word 导出失败，请稍后重试。")
+        return send_file(
+            BytesIO(docx_bytes),
+            as_attachment=True,
+            download_name=f"{safe_title}.docx",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+    @app.post("/api/new-workflow-test/npc/jobs/<job_id>/stages/<stage>/run")
+    @_login_required
+    def codebuddy_npc_run_stage_api(job_id: str, stage: str):
+        payload = request.get_json(silent=True) or {}
+        try:
+            if bool(payload.get("local_fallback")):
+                job = codebuddy_npc_stage_runner.start(
+                    job_id=job_id,
+                    user_id=_require_user_id(),
+                    stage=stage,
+                    feedback=str(payload.get("feedback") or ""),
+                    continue_after=bool(payload.get("continue_after")),
+                )
+            else:
+                job = codebuddy_npc_stage_runner.prepare_remote(
+                    job_id=job_id,
+                    user_id=_require_user_id(),
+                    stage=stage,
+                )
+                try:
+                    job = _submit_remote_npc_stage(
+                        job,
+                        stage=stage,
+                        feedback=str(payload.get("feedback") or ""),
+                        continue_after=bool(payload.get("continue_after")),
+                    )
+                except CodeBuddyNpcError as remote_exc:
+                    job = codebuddy_npc_stage_runner.start(
+                        job_id=job_id,
+                        user_id=_require_user_id(),
+                        stage=stage,
+                        feedback=str(payload.get("feedback") or ""),
+                        continue_after=bool(payload.get("continue_after")),
+                    )
+                    job["fallback_reason"] = str(remote_exc)
+                    job["status_text"] = (
+                        f"CNB 暂不可用，已切换本地兜底运行{STAGE_NAMES[stage]}"
+                    )
+                    job = codebuddy_npc_jobs.save(job)
+        except CodeBuddyNpcError as exc:
+            return _json_error(str(exc), status=exc.status_code)
+        return _json_ok(job=public_job(job))
+
+    @app.post("/api/new-workflow-test/npc/jobs/<job_id>/cancel")
+    @_login_required
+    def codebuddy_npc_cancel_stage_api(job_id: str):
+        try:
+            job = codebuddy_npc_stage_runner.request_cancel(
+                job_id=job_id,
+                user_id=_require_user_id(),
+            )
+        except CodeBuddyNpcError as exc:
+            return _json_error(str(exc), status=exc.status_code)
+        return _json_ok(job=public_job(job))
+
+    @app.put("/api/new-workflow-test/npc/jobs/<job_id>/artifacts/<artifact_key>")
+    @_login_required
+    def codebuddy_npc_edit_artifact_api(job_id: str, artifact_key: str):
+        payload = request.get_json(silent=True) or {}
+        try:
+            job = codebuddy_npc_stage_runner.edit_artifact(
+                job_id=job_id,
+                user_id=_require_user_id(),
+                artifact_key=artifact_key,
+                content=str(payload.get("content") or ""),
+            )
+        except CodeBuddyNpcError as exc:
+            return _json_error(str(exc), status=exc.status_code)
+        return _json_ok(job=public_job(job))
+
+    @app.post("/api/new-workflow-test/npc/jobs/<job_id>/recover")
+    @_login_required
+    def codebuddy_npc_recover_job_api(job_id: str):
+        job = codebuddy_npc_jobs.load(job_id, user_id=_require_user_id())
+        if not job:
+            return _json_error("NPC 剧本任务不存在。", status=404)
+        try:
+            job = codebuddy_npc_client.refresh(job)
+            job = codebuddy_npc_jobs.save(job)
+        except CodeBuddyNpcError as exc:
+            return _json_error(
+                str(exc),
+                status=exc.status_code,
+                detail=exc.detail if isinstance(exc.detail, dict) else None,
+            )
+        except Exception as exc:
+            logger.exception("codebuddy npc recovery failed: job_id=%s", job_id)
+            return _json_error(str(exc), status=500, fallback="NPC 任务产物恢复失败。")
+        if not job.get("final_script"):
+            return _json_error(
+                "已检查成功阶段日志，但没有找到可恢复的完整最终稿。可使用原任务参数重新生成。",
+                status=409,
+                detail={
+                    "recovered_files": sorted(
+                        (job.get("recovered_files") or {}).keys()
+                    )
+                },
+            )
+        return _json_ok(job=public_job(job))
+
+    @app.get("/api/new-workflow-test/projects/<int:project_id>/outputs")
+    @_login_required
+    def new_workflow_test_outputs_api(project_id: int):
+        snapshot = task_manager.get_project_snapshot(
+            project_id,
+            user_id=_require_user_id(),
+            public_view=False,
+        )
+        if not snapshot:
+            return _json_error("测试项目不存在。", status=404)
+
+        outputs: dict[str, Any] = {}
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        test_state = artifacts.get("new_workflow_test_state") if isinstance(artifacts.get("new_workflow_test_state"), dict) else {}
+        saved_outputs = test_state.get("outputs") if isinstance(test_state.get("outputs"), dict) else {}
+        for stage, value in saved_outputs.items():
+            if _framework_value_present(value):
+                outputs[str(stage).zfill(2)] = _strip_raw_fastgpt_fields(copy.deepcopy(value))
+
+        framework_state = _framework_state_from_project(snapshot)
+        planner_fields = {
+            "01": framework_state.get("source_brief"),
+            "02": framework_state.get("worldview_plan"),
+            "03": framework_state.get("character_plan"),
+            "04": framework_state.get("beat_checkpoint_timeline"),
+            "05": framework_state.get("character_storylines"),
+            "06": framework_state.get("adaptation_guide"),
+            "07": framework_state.get("framework_plan_package"),
+        }
+        for stage, value in planner_fields.items():
+            if stage not in outputs and _framework_value_present(value):
+                outputs[stage] = _strip_raw_fastgpt_fields(copy.deepcopy(value))
+
+        def _has_test_business_content(value: Any) -> bool:
+            if not isinstance(value, dict):
+                return _framework_value_present(value)
+            ignored = {
+                "prompt_preferences",
+                "stage_prompts",
+                "user_knowledge_stage_prompts",
+                "parse_warning",
+                "warnings",
+            }
+            return any(
+                key not in ignored and _framework_value_present(item)
+                for key, item in value.items()
+            )
+
+        project_title = str(snapshot.get("title") or framework_state.get("project_title") or "").strip()
+        cache_root = Path(__file__).resolve().parents[2] / "cache"
+        safe_project_name = Path(project_title).name
+        project_cache = (cache_root / safe_project_name).resolve()
+        if safe_project_name and project_cache.parent == cache_root.resolve():
+            for stage in ("01", "02", "03", "04", "05", "06", "07"):
+                if _has_test_business_content(outputs.get(stage)):
+                    continue
+                cache_path = project_cache / f"latest_stage{stage}.json"
+                try:
+                    cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                cached_output = cached.get("output") if isinstance(cached, dict) else None
+                if str(cached.get("status") or "") == "success" and _has_test_business_content(cached_output):
+                    outputs[stage] = _strip_raw_fastgpt_fields(copy.deepcopy(cached_output))
+
+        workspace = artifacts.get("framework_to_script_state") if isinstance(artifacts.get("framework_to_script_state"), dict) else {}
+        script_stages = workspace.get("scriptStages") if isinstance(workspace.get("scriptStages"), dict) else {}
+        for stage in ("08", "09", "10", "11", "12"):
+            value = script_stages.get(f"stage{stage}")
+            if _framework_value_present(value):
+                outputs[stage] = _strip_raw_fastgpt_fields(copy.deepcopy(value))
+
+        test_state["outputs"] = copy.deepcopy(outputs)
+        test_state["updated_at"] = _now_iso()
+        artifacts["new_workflow_test_state"] = test_state
+        snapshot["artifacts"] = artifacts
+        snapshot["updated_at"] = test_state["updated_at"]
+        record = task_manager._projects.get(project_id)
+        if record:
+            with record.lock:
+                record.snapshot = snapshot
+            task_manager._persist_snapshot(record)
+        else:
+            task_manager._project_path(project_id).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+        return _json_ok(
+            project_id=project_id,
+            outputs=outputs,
+            updated_at=test_state.get("updated_at") or workspace.get("updated_at") or snapshot.get("updated_at"),
+        )
 
     @app.post("/api/framework-planner/assets/save")
     @_login_required

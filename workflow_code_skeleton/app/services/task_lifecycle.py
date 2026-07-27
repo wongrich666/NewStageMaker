@@ -394,6 +394,49 @@ class TaskLifecycleMixin:
         self._remember_latest_project(int(user_id), project_id)
         return self._public_snapshot(snapshot)
 
+    def update_framework_script_pipeline_status(
+        self,
+        project_id: int,
+        *,
+        user_id: int,
+        status: str,
+        current_stage: str,
+        current_stage_label: str,
+        message: str,
+        progress_percent: int,
+    ) -> dict[str, Any]:
+        snapshot = self.get_project_snapshot(project_id, user_id=user_id, public_view=False)
+        if not snapshot or not self._snapshot_belongs_to_user(snapshot, user_id):
+            raise ValueError("项目不存在或无权操作")
+        if str(snapshot.get("asset_kind") or "").strip() != "framework_planner":
+            raise ValueError("该项目不是人工模式框架资产")
+        now = now_iso()
+        snapshot.update(
+            {
+                "status": str(status or "in_progress"),
+                "current_stage": str(current_stage or ""),
+                "current_stage_label": str(current_stage_label or ""),
+                "message": str(message or ""),
+                "progress_percent": max(0, min(100, int(progress_percent or 0))),
+                "updated_at": now,
+                "finished_at": now if status in {"completed", "failed", "terminated"} else None,
+                "completion_confirmed": False,
+                "awaiting_user_confirmation": False,
+            }
+        )
+        record = self._projects.get(project_id)
+        if record:
+            with record.lock:
+                record.snapshot = snapshot
+            self._persist_snapshot(record)
+        else:
+            self._project_path(project_id).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        self._remember_latest_project(int(user_id), project_id)
+        return self._public_snapshot(snapshot)
+
     def save_framework_planner_asset(
         self,
         *,

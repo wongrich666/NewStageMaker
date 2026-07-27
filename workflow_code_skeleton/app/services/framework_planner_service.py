@@ -19,6 +19,11 @@ from ..config import settings
 from ..utils.logger import get_logger
 from .json_utils import parse_json, strip_code_fence
 from .runtime_paths import get_runtime_data_dir
+from .workflow_line import (
+    is_test_workflow_line,
+    test_stage_api_key,
+    test_workflow_chat_completions_url,
+)
 
 logger = get_logger("framework_planner_service")
 
@@ -32,7 +37,6 @@ FASTGPT_RAW_RESPONSE_KEYS = (
     "historyPreview",
     "raw",
     "answerText",
-    "display_text",
     "choices",
     "usage",
 )
@@ -1207,6 +1211,39 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
     except Exception:
         logger.exception("[framework_planner_raw_debug] failed to write raw response")
 
+    if is_test_workflow_line():
+        direct_output = _extract_test_workflow_direct_output(response_json, response_text)
+        display_text = (
+            direct_output
+            if isinstance(direct_output, str)
+            else json.dumps(direct_output, ensure_ascii=False, indent=2, default=str)
+        )
+        print_stage_debug(
+            definition.stage,
+            {
+                "ok": True,
+                "stage": definition.stage,
+                "status": "success",
+                "data": direct_output,
+                "display_text": display_text,
+                "direct_test_output": True,
+            },
+            normalized_payload,
+        )
+        return {
+            "ok": True,
+            "stage": definition.stage,
+            "data": direct_output,
+            "display_text": display_text,
+            "raw": {
+                "mock": False,
+                "direct_test_output": True,
+                "url": endpoint.url,
+                "response": response_json,
+                "diagnostics": diagnostics,
+            },
+        }
+
     try:
         data, display_text, parse_warnings = _extract_stage_output(
             definition=definition,
@@ -1322,6 +1359,45 @@ def run_framework_planner_stage(stage: str, payload: dict[str, Any] | None) -> d
         data,
         normalized_payload,
     )
+
+    if definition.stage == "02":
+        stage_02_detail = _stage_02_output_detail(
+            response_json=response_json,
+            data=data,
+            parse_warnings=parse_warnings,
+        )
+        if stage_02_detail:
+            print_stage_debug(
+                definition.stage,
+                {
+                    "ok": False,
+                    "stage": definition.stage,
+                    "status": "failed",
+                    "reason": "阶段 02 未返回有效世界观方案",
+                    "data": data,
+                    "parse_warnings": parse_warnings,
+                    "detail": stage_02_detail,
+                },
+                normalized_payload,
+            )
+            raise FrameworkPlannerStageError(
+                "阶段 02 只返回了搜索计划或不完整内容，未生成有效世界观方案，请重新运行 02",
+                stage=definition.stage,
+                status_code=502,
+                detail=stage_02_detail,
+            )
+
+    if definition.stage == "04" and not _beat_timeline_is_substantive(data.get("beat_checkpoint_timeline")):
+        raise FrameworkPlannerStageError(
+            "阶段 04 未解析到有效的十五节拍内容，请重新运行 04",
+            stage=definition.stage,
+            status_code=502,
+            detail={
+                "reason": "beat_checkpoint_timeline 仅包含空白占位或不足 15 条",
+                "beat_count": len(data.get("beat_checkpoint_timeline") or []),
+                "parse_warnings": list(parse_warnings),
+            },
+        )
 
     if not display_text:
         display_text = _extract_display_text(
@@ -1664,7 +1740,14 @@ def _build_stage_request_variables(
             continue
         if _is_blank(value):
             continue
-        cleaned_value = _sanitize_stage_input_value(definition.stage, field, value)
+        # The independent test line intentionally accepts evolving workflow
+        # schemas. Pass each previous stage result through unchanged instead
+        # of forcing it into the production framework contract.
+        cleaned_value = (
+            value
+            if is_test_workflow_line()
+            else _sanitize_stage_input_value(definition.stage, field, value)
+        )
         if cleaned_value is not value:
             logger.warning(
                 "framework planner payload field cleaned before FastGPT request: stage=%s field=%s original_type=%s cleaned_type=%s original_preview=%s",
@@ -1834,6 +1917,21 @@ def _build_stage_request_variables(
 
 
 def _resolve_stage_endpoint(definition: FrameworkPlannerStageDefinition) -> FrameworkPlannerEndpoint:
+    if is_test_workflow_line():
+        timeout = int(
+            _env(f"{definition.env_prefix}_TIMEOUT", "FASTGPT_TIMEOUT")
+            or getattr(settings, "fastgpt_timeout", 300)
+        )
+        return FrameworkPlannerEndpoint(
+            url=_normalize_fastgpt_url(test_workflow_chat_completions_url()),
+            url_source="FASTGPT_TEST_WORKFLOW_BASE_URL",
+            api_key=test_stage_api_key(definition.stage),
+            api_key_source=f"test-workflow:{definition.stage}",
+            workflow_id="",
+            workflow_id_source="",
+            chat_id=f"new-workflow-test-{definition.stage}-{uuid.uuid4().hex[:8]}",
+            timeout=max(1, timeout),
+        )
     api_key_envs = _stage_api_key_env_names(definition)
     api_key_source, api_key = _env_with_name(*api_key_envs)
     if not api_key:
@@ -2256,6 +2354,28 @@ def _iter_choice_message_texts(response_json: Any) -> list[str]:
     return texts
 
 
+def _extract_test_workflow_direct_output(response_json: Any, response_text: str = "") -> Any:
+    """Return the test workflow's final answer without production schema checks."""
+    choice_texts = _iter_choice_message_texts(response_json)
+    for text in reversed(choice_texts):
+        parsed = _parse_candidate_value(text)
+        if parsed not in (None, "", [], {}):
+            return parsed
+
+    if isinstance(response_json, dict):
+        variables = response_json.get("newVariables")
+        if isinstance(variables, dict):
+            for value in reversed(list(variables.values())):
+                parsed = _parse_candidate_value(value)
+                if isinstance(parsed, (dict, list)) and parsed:
+                    return parsed
+
+    parsed_response = _parse_candidate_value(response_text)
+    if parsed_response not in (None, "", [], {}):
+        return parsed_response
+    return response_json
+
+
 def _iter_fastgpt_structured_output_candidates(
     response_json: Any,
     output_fields: tuple[str, ...],
@@ -2351,6 +2471,86 @@ def _stage_payload_object_from_candidate(candidate: Any, output_fields: tuple[st
     return {}
 
 
+def _extract_balanced_json_array_after_key(text: str, key: str) -> list[Any]:
+    if not isinstance(text, str) or not text:
+        return []
+    match = re.search(rf'["\']{re.escape(key)}["\']\s*:\s*', text)
+    if not match:
+        return []
+    start = text.find("[", match.end())
+    if start < 0:
+        return []
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+            if depth == 0:
+                try:
+                    parsed = json.loads(text[start:index + 1])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    return []
+                return parsed if isinstance(parsed, list) else []
+    return []
+
+
+def _salvage_stage_04_timeline(response_json: Any) -> list[dict[str, Any]]:
+    text_candidates: list[str] = []
+
+    def collect(value: Any, depth: int = 0) -> None:
+        if depth > 8:
+            return
+        if isinstance(value, str):
+            if "beat_checkpoint_timeline" in value:
+                text_candidates.append(value)
+            return
+        if isinstance(value, dict):
+            for nested in value.values():
+                collect(nested, depth + 1)
+            return
+        if isinstance(value, list):
+            for nested in value:
+                collect(nested, depth + 1)
+
+    collect(response_json)
+    best: list[dict[str, Any]] = []
+    for text in text_candidates:
+        parsed = _extract_balanced_json_array_after_key(text, "beat_checkpoint_timeline")
+        beats = [item for item in parsed if isinstance(item, dict)]
+        if len(beats) > len(best):
+            best = beats
+    return best
+
+
+def _beat_timeline_is_substantive(value: Any) -> bool:
+    if not isinstance(value, list) or len(value) != 15:
+        return False
+    detailed = 0
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        if any(str(item.get(key) or "").strip() for key in (
+            "narrative_function", "plot_content", "character_change", "conflict_upgrade", "hook_or_reversal"
+        )):
+            detailed += 1
+    return detailed >= 12
+
+
 def _force_repair_stage_output_from_raw_fastgpt(
     *,
     definition: Any,
@@ -2366,6 +2566,19 @@ def _force_repair_stage_output_from_raw_fastgpt(
 
     repaired = dict(data if isinstance(data, dict) else {})
     warnings = list(parse_warnings or [])
+
+    if str(getattr(definition, "stage", "")).zfill(2) == "04":
+        salvaged_timeline = _salvage_stage_04_timeline(response_json)
+        if len(salvaged_timeline) == 15:
+            repaired["beat_checkpoint_timeline"] = salvaged_timeline
+            repaired["checkpoint_explanation"] = _normalize_checkpoint_explanation({}, salvaged_timeline)
+            warnings.append(
+                "FastGPT 返回在 checkpoint_explanation 处截断；已恢复完整 15 条 beat_checkpoint_timeline，并由节拍内容重建卡点说明"
+            )
+            logger.warning(
+                "[framework_planner_parser_repair] stage=04 source=truncated_json_salvage fields=beat_checkpoint_timeline,checkpoint_explanation"
+            )
+            return repaired, display_text, warnings
 
     candidates = _iter_fastgpt_structured_output_candidates(response_json, output_fields)
     if not candidates:
@@ -2960,17 +3173,49 @@ def _coerce_non_list_candidate_to_stage_output(
         if isinstance(parsed, dict):
             direct = _find_value_by_aliases(parsed, output_aliases.get(field, (field,)))
             if direct is not None:
+                if field == "adaptation_guide" and isinstance(direct, dict):
+                    sibling_constraints = (
+                        parsed.get("hard_constraints_for_script_workflow")
+                        or parsed.get("hard_constraints")
+                    )
+                    if (
+                        sibling_constraints not in (None, "", [], {})
+                        and direct.get("hard_constraints_for_script_workflow")
+                        in (None, "", [], {})
+                    ):
+                        direct = dict(direct)
+                        direct["hard_constraints_for_script_workflow"] = sibling_constraints
                 return _with_optional_display_text({field: direct}, parsed), warnings
             if "data" in parsed and isinstance(parsed["data"], dict):
                 nested = _find_value_by_aliases(parsed["data"], output_aliases.get(field, (field,)))
                 if nested is not None:
+                    if field == "adaptation_guide" and isinstance(nested, dict):
+                        sibling_constraints = (
+                            parsed["data"].get("hard_constraints_for_script_workflow")
+                            or parsed["data"].get("hard_constraints")
+                            or parsed.get("hard_constraints_for_script_workflow")
+                            or parsed.get("hard_constraints")
+                        )
+                        if (
+                            sibling_constraints not in (None, "", [], {})
+                            and nested.get("hard_constraints_for_script_workflow")
+                            in (None, "", [], {})
+                        ):
+                            nested = dict(nested)
+                            nested["hard_constraints_for_script_workflow"] = sibling_constraints
                     return _with_optional_display_text({field: nested}, parsed, parsed["data"]), warnings
             if field in parsed:
                 return _with_optional_display_text({field: parsed[field]}, parsed), warnings
+            if _looks_like_direct_object_field_payload(field, parsed):
+                logger.info("阶段 %s 已识别直接返回的 %s 结构化对象", definition.stage, field)
+                return _with_optional_display_text({field: parsed}, parsed), warnings
             if allow_dict_as_field:
                 warnings.append(f"未找到 {field} 对应键，已将整个 dict 作为 {field} 的解析对象")
                 return _with_optional_display_text({field: parsed}, parsed), warnings
             warnings.append(f"未找到 {field} 对应键，已跳过该 dict 候选")
+            return None, warnings
+        if field in {"source_brief", "worldview_plan", "character_plan", "adaptation_guide"}:
+            warnings.append(f"{field} 需要结构化对象，已跳过 {type(parsed).__name__} 标量候选")
             return None, warnings
         return {field: parsed}, warnings
 
@@ -2999,6 +3244,43 @@ def _coerce_non_list_candidate_to_stage_output(
         return mapped, warnings
     warnings.append(f"未能从 dict 中识别阶段 {definition.stage} 的输出字段 {definition.output_fields}")
     return None, warnings
+
+
+def _looks_like_direct_object_field_payload(field: str, value: Any) -> bool:
+    if not isinstance(value, dict) or not value:
+        return False
+
+    signatures: dict[str, set[str]] = {
+        "source_brief": {
+            "source_type", "genre", "core_logline", "core_conflict",
+            "must_keep_elements", "available_material_summary", "missing_information_risks",
+            "story_facts", "characters", "core_conflicts", "conflicts",
+            "adaptation_boundaries", "relationship_debts", "opening_hooks",
+        },
+        "worldview_plan": {
+            "summary", "world_type", "core_rules", "core_resource", "social_order",
+            "power_structure", "conflict_engine", "space_logic", "visual_style",
+            "must_keep", "forbidden_deviations",
+            "core_protagonist_mode", "protagonist", "world_rules", "locations",
+            "organizations", "key_relationships", "pressure_rules",
+        },
+        "character_plan": {
+            "characters", "main_characters", "protagonist", "antagonist",
+            "character_relationships", "relationship_map", "emotion_engine",
+        },
+        "adaptation_guide": {
+            "core_setting_adjustment", "core_setting_adjustments",
+            "narrative_rhythm_structure", "visualization", "character_emotion_shaping",
+            "hard_constraints_for_script_workflow",
+            "core_principles", "beat_checkpoint_timeline", "immutable_plot_events",
+            "character_hard_constraints", "line_collision_requirements",
+            "tone_style_requirements", "dialogue_style_requirements",
+        },
+    }
+    signature = signatures.get(field)
+    if not signature:
+        return False
+    return len(signature.intersection(str(key) for key in value.keys())) >= 2
 
 
 def _parse_candidate_value(candidate: Any) -> Any:
@@ -3150,6 +3432,21 @@ def _normalize_stage_output(
                 "guide",
             ),
         )
+        if isinstance(adaptation_guide, dict):
+            adaptation_guide = dict(adaptation_guide)
+            root_constraints = _first_present_value(
+                normalized,
+                (
+                    "hard_constraints_for_script_workflow",
+                    "hard_constraints",
+                ),
+            )
+            if (
+                root_constraints not in (None, "", [], {})
+                and adaptation_guide.get("hard_constraints_for_script_workflow")
+                in (None, "", [], {})
+            ):
+                adaptation_guide["hard_constraints_for_script_workflow"] = root_constraints
         if not isinstance(adaptation_guide, (dict, list, str)):
             warnings.append("adaptation_guide 类型异常，已回退为空对象")
             _log_field_type_mismatch(stage, "adaptation_guide", "dict/list/str", adaptation_guide)
@@ -3220,6 +3517,21 @@ def _extract_display_text(
         value = safe_data.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+
+    nested_summary_keys = {
+        "source_brief": ("display_text", "displayText", "available_material_summary", "core_logline", "core_premise"),
+        "worldview_plan": ("display_text", "displayText", "summary", "overview", "core_setting"),
+        "character_plan": ("display_text", "displayText", "emotion_engine", "summary", "overview"),
+        "adaptation_guide": ("display_text", "displayText", "summary", "overview", "core_setting_adjustment"),
+    }
+    for payload_key, summary_keys in nested_summary_keys.items():
+        payload = safe_data.get(payload_key)
+        if not isinstance(payload, dict):
+            continue
+        for summary_key in summary_keys:
+            value = payload.get(summary_key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
 
     try:
         root_response = normalize_stage_response(
@@ -4050,7 +4362,82 @@ def _normalize_object_like(value: Any, *, key_name: str = "content") -> dict[str
 
 def _ensure_source_brief_core_fields(value: dict[str, Any]) -> dict[str, Any]:
     result = dict(value if isinstance(value, dict) else {})
-    content = str(result.get("content") or result.get("summary") or result.get("core_premise") or "").strip()
+
+    def readable_text(item: Any) -> str:
+        if item in (None, "", [], {}):
+            return ""
+        if isinstance(item, str):
+            return item.strip()
+        if isinstance(item, dict):
+            preferred = (
+                "name", "title", "summary", "description", "identity", "goal",
+                "content", "conflict", "fact", "risk", "rule",
+            )
+            parts = [str(item.get(key) or "").strip() for key in preferred if item.get(key)]
+            if parts:
+                return "：".join(dict.fromkeys(parts))
+            return "；".join(f"{key}：{readable_text(val)}" for key, val in item.items() if readable_text(val))
+        if isinstance(item, list):
+            return "；".join(text for text in (readable_text(entry) for entry in item) if text)
+        return str(item).strip()
+
+    def first_text(*items: Any) -> str:
+        for item in items:
+            if isinstance(item, list):
+                for entry in item:
+                    text = readable_text(entry)
+                    if text:
+                        return text
+                continue
+            text = readable_text(item)
+            if text:
+                return text
+        return ""
+
+    def text_list(*items: Any) -> list[str]:
+        collected: list[str] = []
+        for item in items:
+            entries = item if isinstance(item, list) else [item]
+            for entry in entries:
+                text = readable_text(entry)
+                if text and text not in collected:
+                    collected.append(text)
+        return collected
+
+    story_facts = result.get("story_facts") or result.get("facts") or result.get("key_facts")
+    characters = result.get("characters") or result.get("main_characters") or result.get("character_profiles")
+    conflicts = result.get("core_conflicts") or result.get("conflicts") or result.get("conflict_lines")
+    boundaries = result.get("adaptation_boundaries") or result.get("boundaries") or result.get("forbidden_changes")
+
+    if not result.get("available_material_summary"):
+        result["available_material_summary"] = readable_text(story_facts)
+    if not result.get("protagonist"):
+        result["protagonist"] = first_text(result.get("main_character"), characters)
+    if not result.get("main_opposition"):
+        result["main_opposition"] = first_text(
+            result.get("antagonist"), result.get("opposition"), result.get("pressure_lines"), conflicts,
+        )
+    if not result.get("core_conflict"):
+        result["core_conflict"] = first_text(result.get("conflict_summary"), conflicts)
+    if not result.get("must_keep_elements"):
+        result["must_keep_elements"] = text_list(
+            result.get("must_keep"), result.get("opening_hooks"), result.get("relationship_debts"),
+            result.get("memory_arcs"), result.get("signature_mechanisms"),
+        )
+    if not result.get("forbidden_deviations"):
+        result["forbidden_deviations"] = text_list(boundaries)
+    if not result.get("missing_information_risks"):
+        result["missing_information_risks"] = text_list(
+            result.get("missing_information"), result.get("risks"), result.get("uncertainties"),
+        )
+
+    content = str(
+        result.get("content")
+        or result.get("summary")
+        or result.get("core_premise")
+        or result.get("available_material_summary")
+        or ""
+    ).strip()
     result.setdefault("source_title", result.get("title") or result.get("project_title") or "未命名项目")
     result.setdefault("target_format", result.get("format") or "短剧")
     result.setdefault("season_count", 1)
@@ -4059,6 +4446,19 @@ def _ensure_source_brief_core_fields(value: dict[str, Any]) -> dict[str, Any]:
     result.setdefault("core_premise", content or "核心故事信息待人工补充")
     result.setdefault("story_outline", result.get("outline") or result["core_premise"])
     result.setdefault("adaptation_direction", result.get("direction") or "保持强钩子、强反转、强情绪推进")
+    result.setdefault("title", result.get("source_title") or result.get("project_title") or "未命名项目")
+    result.setdefault("source_type", result.get("material_type") or "原始文本")
+    result.setdefault("genre", result.get("story_genre") or "待确认")
+    result.setdefault("tone", result.get("tone_keywords") or result.get("style") or "待确认")
+    result.setdefault("core_logline", result.get("logline") or result.get("core_premise") or content or "待提炼")
+    result.setdefault("protagonist", "待提炼")
+    result.setdefault("main_opposition", "待提炼")
+    result.setdefault("core_conflict", result.get("main_conflict") or "待提炼")
+    result.setdefault("must_keep_elements", [])
+    result.setdefault("forbidden_deviations", [])
+    result.setdefault("available_material_summary", content or "待提炼")
+    result.setdefault("missing_information_risks", [])
+    result.setdefault("minutes_per_episode", result.get("episode_minutes") or "待确认")
     result["ready_for_script_workflow"] = True
     return result
 
@@ -4067,18 +4467,35 @@ def _ensure_worldview_core_fields(value: dict[str, Any]) -> dict[str, Any]:
     result = dict(value if isinstance(value, dict) else {})
 
     summary = str(result.get("summary") or result.get("content") or result.get("core_setting") or "").strip()
+    locations = result.get("locations") if isinstance(result.get("locations"), list) else []
+    organizations = result.get("organizations") if isinstance(result.get("organizations"), list) else []
+    pressure_rules = result.get("pressure_rules") if isinstance(result.get("pressure_rules"), list) else []
+    first_location = locations[0] if locations and isinstance(locations[0], dict) else {}
+    first_organization = organizations[0] if organizations and isinstance(organizations[0], dict) else {}
+    first_pressure = pressure_rules[0] if pressure_rules and isinstance(pressure_rules[0], dict) else {}
 
     result.setdefault("world_type", result.get("type") or "现实/类型化世界")
 
     if "core_setting" not in result or result.get("core_setting") in (None, "", [], {}):
-        result["core_setting"] = summary or result.get("setting") or "核心世界设定待人工补充"
+        result["core_setting"] = (
+            summary
+            or result.get("setting")
+            or first_location.get("description")
+            or first_location.get("name")
+            or "核心世界设定待人工补充"
+        )
 
     if "main_conflict" not in result or result.get("main_conflict") in (None, "", [], {}):
         conflict_engine = result.get("conflict_engine")
         if isinstance(conflict_engine, list) and conflict_engine:
             result["main_conflict"] = str(conflict_engine[0])
         else:
-            result["main_conflict"] = result.get("conflict") or "主角目标与外部阻力形成持续对抗"
+            result["main_conflict"] = (
+                result.get("conflict")
+                or first_organization.get("why_oppose_now")
+                or first_pressure.get("description")
+                or "主角目标与外部阻力形成持续对抗"
+            )
 
     if "rules" not in result or result.get("rules") in (None, "", [], {}):
         core_rules = result.get("core_rules")
@@ -4097,8 +4514,82 @@ def _ensure_worldview_core_fields(value: dict[str, Any]) -> dict[str, Any]:
         else:
             result["tone"] = result.get("style") or "强情绪、强节奏、强反转"
 
-    result["ready_for_script_workflow"] = True
+    result["ready_for_script_workflow"] = _worldview_plan_is_substantive(result)
     return result
+
+
+def _worldview_plan_is_substantive(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+
+    serialized = json.dumps(value, ensure_ascii=False, default=str).lower()
+    if "search_plan" in serialized or "search_dimension" in serialized or "expected_extract" in serialized:
+        return False
+
+    required_text_fields = ("summary", "world_type", "core_resource", "social_order", "power_structure")
+    required_list_fields = ("core_rules", "conflict_engine", "space_logic", "visual_style")
+    legacy_complete = (
+        all(str(value.get(field) or "").strip() for field in required_text_fields)
+        and all(
+            isinstance(value.get(field), list)
+            and any(str(item or "").strip() for item in value.get(field, []))
+            for field in required_list_fields
+        )
+    )
+    if legacy_complete:
+        return True
+
+    # The new causal-world workflow keeps richer typed collections instead of
+    # the legacy flattened fields. Accept it only when several story-driving
+    # sections are populated, so empty placeholders still fail closed.
+    causal_signals = (
+        bool(str(value.get("protagonist") or "").strip()),
+        bool(value.get("world_rules")) if isinstance(value.get("world_rules"), list) else False,
+        bool(value.get("locations")) if isinstance(value.get("locations"), list) else False,
+        bool(value.get("organizations")) if isinstance(value.get("organizations"), list) else False,
+        bool(value.get("key_relationships")) if isinstance(value.get("key_relationships"), list) else False,
+        bool(value.get("pressure_rules")) if isinstance(value.get("pressure_rules"), list) else False,
+    )
+    return sum(causal_signals) >= 4
+
+
+def _stage_02_output_detail(
+    *,
+    response_json: Any,
+    data: dict[str, Any],
+    parse_warnings: list[str],
+) -> dict[str, Any]:
+    worldview_plan = data.get("worldview_plan") if isinstance(data, dict) else None
+    if _worldview_plan_is_substantive(worldview_plan):
+        return {}
+
+    missing_fields: list[str] = []
+    if not isinstance(worldview_plan, dict):
+        missing_fields.append("worldview_plan")
+    else:
+        for field in ("summary", "world_type", "core_resource", "social_order", "power_structure"):
+            if not str(worldview_plan.get(field) or "").strip():
+                missing_fields.append(field)
+        for field in ("core_rules", "conflict_engine", "space_logic", "visual_style"):
+            items = worldview_plan.get(field)
+            if not isinstance(items, list) or not any(str(item or "").strip() for item in items):
+                missing_fields.append(field)
+
+    serialized = json.dumps(response_json, ensure_ascii=False, default=str).lower()
+    returned_search_plan = any(
+        marker in serialized for marker in ("search_plan", "search_dimension", "expected_extract")
+    )
+    return {
+        "reason": (
+            "FastGPT 工具调度器返回了搜索计划，但没有调用世界观创作工具"
+            if returned_search_plan
+            else "FastGPT 未返回完整 worldview_plan"
+        ),
+        "returned_search_plan": returned_search_plan,
+        "missing_fields": sorted(set(missing_fields)),
+        "parse_warnings": list(parse_warnings),
+        "response_preview": _preview_return_object(response_json, limit=1200),
+    }
 
 
 def _ensure_character_core_fields(value: dict[str, Any]) -> dict[str, Any]:
@@ -4356,11 +4847,41 @@ def _normalize_adaptation_guide(value: Any) -> dict[str, Any]:
             return str(item)
         return ""
 
+    def section_text(
+        source: dict[str, Any],
+        sections: tuple[tuple[str, str], ...],
+    ) -> str:
+        rendered: list[str] = []
+        for key, label in sections:
+            item = source.get(key)
+            if item in (None, "", [], {}):
+                continue
+            if isinstance(item, (dict, list)):
+                body = json.dumps(item, ensure_ascii=False, indent=2)
+            else:
+                body = str(item).strip()
+            if body:
+                rendered.append(f"{label}\n{body}")
+        return "\n\n".join(rendered)
+
     value = _decode_jsonish_value(value)
 
     if isinstance(value, dict):
         nested = value.get("adaptation_guide")
         if nested not in (None, "", [], {}) and nested is not value:
+            if isinstance(nested, dict):
+                merged_nested = dict(nested)
+                sibling_constraints = (
+                    value.get("hard_constraints_for_script_workflow")
+                    or value.get("hard_constraints")
+                )
+                if (
+                    sibling_constraints not in (None, "", [], {})
+                    and merged_nested.get("hard_constraints_for_script_workflow")
+                    in (None, "", [], {})
+                ):
+                    merged_nested["hard_constraints_for_script_workflow"] = sibling_constraints
+                return _normalize_adaptation_guide(merged_nested)
             return _normalize_adaptation_guide(nested)
 
         packed = value.get("core_setting_adjustments")
@@ -4411,6 +4932,56 @@ def _normalize_adaptation_guide(value: Any) -> dict[str, Any]:
                 ),
             ),
         }
+
+        if not result["core_setting_adjustments"]:
+            result["core_setting_adjustments"] = section_text(
+                value,
+                (
+                    ("core_logline", "核心故事"),
+                    ("core_principles", "改编核心原则"),
+                    ("must_keep_elements", "必须保留"),
+                    ("forbidden_deviations", "禁止偏离"),
+                    ("immutable_plot_events", "不可改动剧情事件"),
+                    ("world_rules_as_writing_constraints", "世界规则"),
+                    ("space_logic_as_writing_constraints", "空间逻辑"),
+                ),
+            )
+        if not result["structure_and_rhythm"]:
+            result["structure_and_rhythm"] = section_text(
+                value,
+                (
+                    ("beat_checkpoint_timeline_contract", "节拍时间线"),
+                    ("beat_checkpoint_timeline", "节拍时间线"),
+                    ("beat_immovability", "节拍不可挪动规则"),
+                    ("ending_immutability", "结局不可改动规则"),
+                    ("narrative_rhythm_requirements", "叙事节奏"),
+                    ("line_collision_requirements", "多线碰撞要求"),
+                    ("info_gap_planting_requirements", "信息差埋设要求"),
+                    ("information_gap_management", "信息差管理"),
+                    ("cross_genre_production_principles", "跨题材执行原则"),
+                ),
+            )
+        if not result["visualization_strategy"]:
+            result["visualization_strategy"] = section_text(
+                value,
+                (
+                    ("visual_style_writing_guide", "视觉写作指南"),
+                    ("tone_style_requirements", "影调与风格要求"),
+                    ("space_logic_as_writing_constraints", "空间与调度"),
+                ),
+            )
+        if not result["character_emotion_strategy"]:
+            result["character_emotion_strategy"] = section_text(
+                value,
+                (
+                    ("character_storyline_contracts", "人物故事线"),
+                    ("character_hard_constraints", "人物硬约束"),
+                    ("emotion_engine_principles", "情绪引擎"),
+                    ("dialogue_style_requirements", "对白风格要求"),
+                    ("protagonist", "主角"),
+                    ("tone", "情绪基调"),
+                ),
+            )
 
         constraints = value.get("hard_constraints_for_script_workflow") or value.get("hard_constraints")
         if constraints not in (None, "", [], {}):

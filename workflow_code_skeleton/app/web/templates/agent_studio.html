@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
-  <title>WorkBuddy Agent｜剧本平台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='agent_studio.css') }}?v=20260717-agent-task-panel-v11">
+  <title>剧本 Agent｜剧本平台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='agent_studio.css') }}?v=20260727-script-team-only-v25">
 </head>
 <body class="agent-body">
   <main class="agent-shell">
@@ -55,10 +55,26 @@
           <h2>一句话，把整套剧本流程交给我</h2>
           <p>我会理解你的创作目标，自动补齐缺失字段，再调用原有剧本平台完成生成、控制、质检与导出。</p>
           <div class="agent-quick-grid">
-            <button type="button" data-prompt="帮我生成一部60集都市情感复仇女频短剧，每集600字，5个主要角色，开篇要有强钩子。">从一句话生成剧本</button>
-            <button type="button" data-prompt="查看我最近的剧本项目，并告诉我各自进行到哪里。">查看最近项目</button>
-            <button type="button" data-prompt="检查当前项目状态，如果失败请告诉我可以怎么继续。">恢复中断任务</button>
-            <button type="button" data-prompt="对当前已完成剧本运行人物人情味审查，重点检查真实心理和潜台词。">运行剧本医生</button>
+            <button type="button" data-tone="create" data-prompt="帮我生成一部60集都市情感复仇女频短剧，每集600字，5个主要角色，开篇要有强钩子。">
+              <span class="agent-quick-icon" aria-hidden="true">创</span>
+              <span class="agent-quick-copy"><strong>从一句话生成剧本</strong><small>补齐创作参数并启动完整流程</small></span>
+              <span class="agent-quick-arrow" aria-hidden="true">→</span>
+            </button>
+            <button type="button" data-tone="project" data-prompt="查看我最近的剧本项目，并告诉我各自进行到哪里。">
+              <span class="agent-quick-icon" aria-hidden="true">项</span>
+              <span class="agent-quick-copy"><strong>查看最近项目</strong><small>快速了解项目进度与当前状态</small></span>
+              <span class="agent-quick-arrow" aria-hidden="true">→</span>
+            </button>
+            <button type="button" data-tone="resume" data-prompt="检查当前项目状态，如果失败请告诉我可以怎么继续。">
+              <span class="agent-quick-icon" aria-hidden="true">续</span>
+              <span class="agent-quick-copy"><strong>恢复中断任务</strong><small>定位断点、失败原因并继续执行</small></span>
+              <span class="agent-quick-arrow" aria-hidden="true">→</span>
+            </button>
+            <button type="button" data-tone="doctor" data-prompt="对当前已完成剧本运行人物情感共鸣与人情味精修，重点检查细腻心理、读者代入、关系潜台词和AI腔。">
+              <span class="agent-quick-icon" aria-hidden="true">诊</span>
+              <span class="agent-quick-copy"><strong>运行剧本医生</strong><small>调用 Skill 进行诊断与一键优化</small></span>
+              <span class="agent-quick-arrow" aria-hidden="true">→</span>
+            </button>
           </div>
         </div>
         <div id="messageList" class="agent-message-list"></div>
@@ -100,6 +116,10 @@
 
     <aside id="agentContextPanel" class="agent-context-panel">
       <button id="taskPanelClose" class="agent-task-close" type="button" aria-label="关闭任务栏">×</button>
+      <section id="agentTaskHistory" class="agent-task-history" hidden>
+        <div class="agent-task-history-head"><span>任务记录</span><b id="agentTaskHistoryCount">0</b></div>
+        <div id="agentTaskHistoryList" class="agent-task-history-list"></div>
+      </section>
       <section id="agentTaskRail" class="agent-task-rail" aria-live="polite" hidden>
         <div class="agent-task-head">
           <span class="agent-context-label">任务执行轨道</span>
@@ -115,7 +135,7 @@
 
       <section id="agentTaskIdle" class="agent-task-idle">
         <span class="agent-context-label">任务开始后显示在这里</span>
-        <p>01–12 阶段会持续更新，完成后可逐项打开人工页面。</p>
+        <p>七个专业编剧节点会持续更新，完成后可打开剧本团队查看产物。</p>
       </section>
 
       <section id="agentWaitingActions" class="agent-waiting-actions" hidden>
@@ -151,10 +171,9 @@
       authToken: {{ current_auth_token|tojson }},
       username: {{ current_user.username|tojson }},
       conversationsUrl: "/api/agent/conversations",
-      statusUrl: "/api/agent/status",
-      workspaceUrl: "/workspace"
+      statusUrl: "/api/agent/status"
     };
   </script>
-  <script src="{{ url_for('static', filename='agent_studio.js') }}?v=20260717-agent-task-panel-v11"></script>
+  <script src="{{ url_for('static', filename='agent_studio.js') }}?v=20260727-script-team-only-v25"></script>
 </body>
 </html>

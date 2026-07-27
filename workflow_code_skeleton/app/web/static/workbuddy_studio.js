@@ -2,11 +2,10 @@
   const config = window.workbuddyStudioConfig || {};
   const skillNames = {
     overall_dispatcher: "总质检调度器",
-    character_continuity: "人物连续性审查器",
-    hook_rhythm: "爽点节奏审查员",
+    character_continuity: "人物剧情连续审查器",
+    hook_rhythm: "前五秒爆点与爽点节奏审查改写师",
     logic_holes: "逻辑漏洞审查员",
-    character_humanity: "人物人情味优化师",
-    character_resonance: "人物画像共鸣评估师",
+    character_humanity: "人物情感共鸣与人情味精修师",
   };
   const skillGoalOptions = {
     overall_dispatcher: {
@@ -19,21 +18,21 @@
       ],
     },
     character_continuity: {
-      hint: "人物连续性会重点检查角色动机、关系变化、角色消失和行为反常。",
+      hint: "逐集检查核心主角是否推动剧情，以及上集结尾与下集开场是否自然承接。",
       options: [
-        "重点检查人物线是否断裂",
-        "找出角色突然消失或戏份断档的问题",
-        "检查主角、反派、关键配角的动机是否前后一致",
-        "检查人物关系转变是否有铺垫和兑现",
+        "逐集检查男频男主或女频女主是否主动推动剧情",
+        "检查每集结尾与下一集开场是否直接承接",
+        "找出换场景却没交代去向和行动目标的瞬移问题",
+        "检查任务、情绪、伤势、道具和人物关系是否跨集连续",
       ],
     },
     hook_rhythm: {
-      hint: "爽点节奏会检查开篇为什么让人继续读、段落与集尾钩子、信息缺口、语言节奏和爽点兑现。",
+      hint: "强台词先落下，再接一个必要反应；一句能爆就删除前面的描述铺垫。",
       options: [
-        "重点优化开篇阅读钩子和文字质感",
-        "检查前300字和前三集是否让人继续读",
-        "找出集尾钩子弱、反转不足的集数",
-        "检查段落钩子、语言节奏和爽点兑现",
+        "逐集检查前五秒是否有强劲爆点",
+        "找出情绪强度不足、只有信息没有冲突的开场",
+        "把警告、命令、拒绝等最强台词直接放在第一句",
+        "检查钩子回收、集尾卡点和爽点兑现",
       ],
     },
     logic_holes: {
@@ -46,21 +45,12 @@
       ],
     },
     character_humanity: {
-      hint: "人物人情味会检查角色有没有真实的内心波动、生活质感、矛盾反应和不直说的潜台词。",
+      hint: "同时检查人物画像、心理共鸣、细腻情感、读者沉浸、关系潜台词和AI腔，并可直接精修正文。",
       options: [
-        "让主要人物更真实、更有人情味",
-        "丰富关键场景的内心活动和身体反应",
-        "减少口号式心理描写和工具人对白",
-        "为情感转折补足细节、潜台词和记忆触发",
-      ],
-    },
-    character_resonance: {
-      hint: "画像共鸣会判断目标读者能否理解人物、在意人物，并愿意跟随人物继续看下去。",
-      options: [
-        "评估主角画像是否足够吸引人",
-        "找出读者最容易共鸣和最容易出戏的位置",
-        "增强人物的欲望、软肋、矛盾和选择代价",
-        "让反派和配角也有辨识度与可理解动机",
+        "让读者真正理解、心疼并代入主要人物",
+        "精修关键场景的细腻心理、矛盾情绪和情感余波",
+        "删除AI腔、套话、形容词堆砌和工具人对白",
+        "增强人物画像、语言辨识度、生活质感和关系潜台词",
       ],
     },
   };
@@ -188,11 +178,10 @@
     const shared = ["读取正文", "识别集数", "整理报告"];
     const map = {
       overall_dispatcher: ["拆分分集", "判断缺集", "评分风险", "排序修复"],
-      character_continuity: ["提取人物", "检查动机", "追踪关系", "定位断线"],
-      hook_rhythm: ["审查开篇", "定位缺口", "检查文采", "扫描集尾"],
+      character_continuity: ["锁定主角", "逐集核对", "检查转场", "定位断线"],
+      hook_rhythm: ["截取五秒", "判定爆点", "测量情绪", "扫描集尾"],
       logic_holes: ["提取规则", "检查因果", "核对信息差", "定位漏洞"],
-      character_humanity: ["读取内心", "核对情绪", "检查文风", "生成样例"],
-      character_resonance: ["提取画像", "匹配受众", "评估共鸣", "增强吸引"],
+      character_humanity: ["提取画像", "追踪心理", "评估共鸣", "清理AI腔", "生成精修"],
     };
     return map[skillKey] || shared;
   }
@@ -730,7 +719,7 @@
     const missingList = $("#wbMissingList");
 
     if (data.configured) {
-      statusPill.textContent = options.hydrated ? "DeepSeek 已就绪" : "API 已配置";
+      statusPill.textContent = options.hydrated ? "剧本 Agent 已就绪" : "服务已配置";
       statusPill.className = "wb-status-pill is-ready";
       configBadge.textContent = options.hydrated ? "已配置" : "已连接";
       configBadge.className = "is-ready";
@@ -743,7 +732,7 @@
       const models = Array.isArray(data.models) && data.models.length ? data.models : cachedModels;
       renderModels(models, data.model || activeModel || "");
     } else {
-      statusPill.textContent = "DeepSeek 未配置";
+      statusPill.textContent = "剧本 Agent 未配置";
       statusPill.className = "wb-status-pill is-missing";
       configBadge.textContent = "缺配置";
       configBadge.className = "is-missing";
@@ -768,7 +757,7 @@
     if (data.metadata_error) {
       return `积分余额：暂未读取（${data.metadata_error}）`;
     }
-    return "用量由平台统一的 DeepSeek V4 Pro API 账户结算。";
+    return "用量由平台统一的剧本 Agent 服务结算。";
   }
 
   function renderModels(models, currentModel) {
@@ -806,9 +795,9 @@
     box.innerHTML = visibleModels
       .map((item) => {
         const active = item.id === activeModel ? " is-active" : "";
-        return `<button class="wb-model-chip${active}" type="button" data-model="${escapeHtml(item.id)}" title="${escapeHtml(item.description || item.id)}">
+        return `<button class="wb-model-chip${active}" type="button" data-model="${escapeHtml(item.id)}" title="${escapeHtml(item.description || "剧本 Agent")}">
           <strong>${escapeHtml(item.name || item.id)}</strong>
-          <span>${escapeHtml(item.id)}</span>
+          <span>平台统一服务</span>
         </button>`;
       })
       .join("");
@@ -816,7 +805,7 @@
       button.addEventListener("click", () => {
         activeModel = button.dataset.model || "";
         input.value = modelValueForSubmit(activeModel);
-        hint.textContent = `本次调用使用：${activeModel}`;
+        hint.textContent = "本次调用使用：剧本 Agent";
         $$(".wb-model-chip", box).forEach((item) => item.classList.toggle("is-active", item === button));
       });
     });
@@ -827,7 +816,7 @@
       {
         id: "auto",
         name: "Auto 自动选择",
-        description: "使用平台统一配置的 DeepSeek V4 Pro 模型。",
+        description: "使用平台统一配置的剧本 Agent。",
       },
       ...models.filter((item) => item.id !== "auto"),
     ];
@@ -838,14 +827,7 @@
   }
 
   function prioritizeModels(models, currentModel) {
-    const preferred = [
-      "auto",
-      "glm-5.2",
-      "deepseek-v4-flash",
-      "glm-5.1",
-      "deepseek-v4-pro",
-      "kimi-k2.7",
-    ].filter(Boolean);
+    const preferred = ["auto"];
     return [...models].sort((a, b) => {
       const ai = preferred.indexOf(a.id);
       const bi = preferred.indexOf(b.id);
@@ -1082,7 +1064,7 @@
     saveButton.addEventListener("click", async () => {
       const apiKey = apiKeyInput.value.trim();
       if (!apiKey) {
-        hint.textContent = "DeepSeek API Key 已由平台统一配置，无需在浏览器填写。";
+        hint.textContent = "剧本 Agent 凭证已由平台统一配置，无需在浏览器填写。";
         apiKeyInput.focus();
         return;
       }

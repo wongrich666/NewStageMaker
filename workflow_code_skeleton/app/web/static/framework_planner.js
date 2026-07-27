@@ -6,6 +6,7 @@
   const KNOWLEDGE_PANEL_STORAGE_KEY = config.knowledgePanelStorageKey || "frameworkPlannerKnowledgePanelOpen.v1";
   const STORAGE_FORMAT_VERSION = 1;
   const API_BASE = config.apiBase || "/api/framework-planner";
+  const WORKFLOW_LINE = String(config.workflowLine || "production");
   const authToken = String(config.authToken || "").trim();
   const RAW_RESPONSE_KEYS = ["responseData", "reasoningText", "historyPreview", "raw", "answerText", "choices", "usage", "updateVarResult", "newVariables"];
   const TECHNICAL_FIELD_KEYS = new Set(RAW_RESPONSE_KEYS.concat([
@@ -51,15 +52,26 @@
       ["risk_flags", "改编风险"],
     ],
     worldview: [
+      ["summary", "世界观概述"],
       ["overview", "世界观概述"],
       ["worldview_overview", "世界观概述"],
+      ["world_type", "世界类型"],
       ["core_rules", "核心规则"],
       ["rules", "核心规则"],
+      ["core_resource", "核心资源 / 争夺物"],
+      ["social_order", "社会秩序"],
+      ["power_structure", "权力结构"],
+      ["conflict_engine", "冲突引擎"],
       ["taboos_and_costs", "禁忌与代价"],
       ["taboo_and_cost", "禁忌与代价"],
       ["conflict_pressure", "冲突压力"],
+      ["space_logic", "空间与场景逻辑"],
+      ["visual_style", "视觉与氛围"],
       ["visual_tone", "视觉与氛围"],
       ["visual_and_atmosphere", "视觉与氛围"],
+      ["must_keep", "必须保留"],
+      ["forbidden_deviations", "禁止偏离"],
+      ["ready_for_script_workflow", "是否可进入剧本正文阶段"],
       ["downstream_requirements", "下游写作要求"],
       ["writing_requirements", "下游写作要求"],
     ],
@@ -596,6 +608,7 @@
   function buildHeaders() {
     const headers = { "Content-Type": "application/json" };
     if (authToken) headers.Authorization = `Bearer ${authToken}`;
+    if (WORKFLOW_LINE !== "production") headers["X-Workflow-Line"] = WORKFLOW_LINE;
     return headers;
   }
 
@@ -662,9 +675,28 @@
     );
   }
 
+  function isLegacyWorldviewPlaceholder(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const keys = Object.keys(value);
+    if (!keys.length) return false;
+    const placeholderKeys = new Set([
+      "content", "world_type", "core_setting", "main_conflict",
+      "rules", "tone", "ready_for_script_workflow",
+    ]);
+    const onlyPlaceholderKeys = keys.every((key) => placeholderKeys.has(key));
+    return onlyPlaceholderKeys && (
+      String(value.content || "").trim() === "创作"
+      || !Array.isArray(value.core_rules)
+      || !Array.isArray(value.conflict_engine)
+    );
+  }
+
   function canUseCurrentAssetCache(projectId, item) {
     if (Number(currentProjectId() || 0) !== Number(projectId || 0)) return false;
     if (!hasRestoredFrameworkState()) return false;
+    if (isLegacyWorldviewPlaceholder(state.worldview_plan)) return false;
+    if (isPlaceholderBeatTimeline(state.beat_checkpoint_timeline)) return false;
+    if (hasBrokenGeneratedStageCache()) return false;
     const itemUpdatedAt = String((item && item.updated_at) || "").trim();
     const localUpdatedAt = String((state && state.asset_state && state.asset_state.updated_at) || "").trim();
     if (itemUpdatedAt && localUpdatedAt && itemUpdatedAt !== localUpdatedAt) {
@@ -675,6 +707,32 @@
       return false;
     }
     return true;
+  }
+
+  function isPlaceholderBeatTimeline(value) {
+    if (!Array.isArray(value) || value.length !== 15) return false;
+    return value.every((item) => {
+      if (!item || typeof item !== "object") return true;
+      return ["narrative_function", "plot_content", "character_change", "conflict_upgrade", "hook_or_reversal"]
+        .every((key) => !String(item[key] || "").trim());
+    });
+  }
+
+  function hasBrokenGeneratedStageCache() {
+    const checks = [
+      ["basic", state.source_brief],
+      ["worldview", state.worldview_plan],
+      ["character", state.character_plan],
+      ["beat", state.beat_checkpoint_timeline],
+      ["storylines", state.character_storylines],
+      ["guide", state.adaptation_guide],
+      ["package", state.framework_plan_package],
+    ];
+    return checks.some(([stageKey, value]) => {
+      const stage = (state.stage_state || {})[stageKey] || {};
+      const claimsOutput = Boolean(stage.confirmed || stage.stageCommitted || ["generated", "updated", "confirmed"].includes(stage.status));
+      return claimsOutput && isEmptyValue(value);
+    });
   }
 
   function hasCompleteFrameworkState() {
@@ -1294,10 +1352,7 @@
   }
 
   function promptUnsaved(label, handlers) {
-    if (!hasUnsavedChanges()) {
-      if (handlers && typeof handlers.discard === "function") handlers.discard();
-      return false;
-    }
+    if (!hasUnsavedChanges()) return false;
     ui.unsavedPrompt = {
       label,
       save: handlers && handlers.save,
@@ -2546,6 +2601,15 @@
     worldviewPlan: "世界观方案",
     core_rules: "核心规则",
     coreRules: "核心规则",
+    world_type: "世界类型",
+    core_resource: "核心资源 / 争夺物",
+    social_order: "社会秩序",
+    power_structure: "权力结构",
+    conflict_engine: "冲突引擎",
+    space_logic: "空间与场景逻辑",
+    must_keep: "必须保留",
+    forbidden_deviations: "禁止偏离",
+    ready_for_script_workflow: "是否可进入剧本正文阶段",
     forbidden_rules: "禁忌与代价",
     taboos_and_costs: "禁忌与代价",
     narrative_risks: "叙事风险",
@@ -6968,7 +7032,7 @@ function renderPackageBlocks() {
         console.warn("清理框架转剧本本地上下文失败", error);
       }
 
-      const workspaceUrl = new URL("/framework-to-script", window.location.origin);
+      const workspaceUrl = new URL(config.frameworkToScriptUrl || "/framework-to-script", window.location.origin);
       workspaceUrl.searchParams.set("framework_asset_id", String(sourceProjectId));
       workspaceUrl.searchParams.set("source_framework_project_id", String(sourceProjectId));
       workspaceUrl.searchParams.set("project_id", String(sourceProjectId));
@@ -7450,14 +7514,14 @@ function renderPackageBlocks() {
     }
   }
 
-  async function openAsset(projectId) {
+  async function openAsset(projectId, options = {}) {
     if (ui.assetImporting) return;
     if (promptUnsaved("切换到已有项目", {
-      save: async () => openAsset(projectId),
-      discard: async () => openAsset(projectId),
+      save: async () => openAsset(projectId, options),
+      discard: async () => openAsset(projectId, options),
     })) return;
     const cachedItem = assetListItem(projectId);
-    if (canUseCurrentAssetCache(projectId, cachedItem)) {
+    if (!options.forceServer && canUseCurrentAssetCache(projectId, cachedItem)) {
       ui.assetsOpen = false;
       ui.assetImportProgress = null;
       state.current_view = state.current_view || "basic";
@@ -8594,10 +8658,7 @@ function renderPackageBlocks() {
       const urlParams = new URLSearchParams(window.location.search);
       const autoProjectId = urlParams.get("project_id");
       if (autoProjectId) {
-        const asset = (ui.assets || []).find((a) => String(a.project_id) === String(autoProjectId));
-        const restore = asset && !canUseCurrentAssetCache(autoProjectId, asset)
-          ? openAsset(autoProjectId)
-          : Promise.resolve();
+        const restore = openAsset(autoProjectId, { forceServer: true });
         restore.then(focusRequestedAgentStage).catch(() => {});
         return;
       }
