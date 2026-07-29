@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import base64
+import binascii
 import gzip
 import json
 import os
@@ -23,6 +24,8 @@ RESULT_BEGIN = "__SCRIPT_TEAM_RESULT_BEGIN__"
 RESULT_END = "__SCRIPT_TEAM_RESULT_END__"
 STAGE_RESULT_BEGIN = "__SCRIPT_TEAM_STAGE_BEGIN__"
 STAGE_RESULT_END = "__SCRIPT_TEAM_STAGE_END__"
+STAGE_RESULT_GZIP_BEGIN = "__SCRIPT_TEAM_STAGE_GZIP_BEGIN__"
+STAGE_RESULT_GZIP_END = "__SCRIPT_TEAM_STAGE_GZIP_END__"
 GATE_BEGIN = "__SCRIPT_TEAM_GATE_BEGIN__"
 GATE_END = "__SCRIPT_TEAM_GATE_END__"
 TERMINAL_SUCCESS = {"success", "succeeded", "completed", "complete"}
@@ -768,6 +771,9 @@ def _extract_result_marker(text: str) -> str:
 
 
 def _extract_stage_result_marker(text: str) -> tuple[str, str]:
+    compressed = _extract_compressed_stage_result_marker(text)
+    if compressed[0]:
+        return compressed
     if STAGE_RESULT_BEGIN not in text or STAGE_RESULT_END not in text:
         return "", ""
     start = text.rfind(STAGE_RESULT_BEGIN) + len(STAGE_RESULT_BEGIN)
@@ -776,6 +782,28 @@ def _extract_stage_result_marker(text: str) -> tuple[str, str]:
         return "", ""
     payload = text[start:end].strip()
     payload = re.sub(r"^\[[^\]]+\]\s*", "", payload, flags=re.MULTILINE)
+    stage, separator, result = payload.partition("\n")
+    if not separator or stage.strip() not in STAGE_ORDER:
+        return "", ""
+    return stage.strip(), result.strip()
+
+
+def _extract_compressed_stage_result_marker(text: str) -> tuple[str, str]:
+    if STAGE_RESULT_GZIP_BEGIN not in text or STAGE_RESULT_GZIP_END not in text:
+        return "", ""
+    start = text.rfind(STAGE_RESULT_GZIP_BEGIN) + len(STAGE_RESULT_GZIP_BEGIN)
+    end = text.find(STAGE_RESULT_GZIP_END, start)
+    if end < start:
+        return "", ""
+    encoded = "".join(
+        re.sub(r"^\[[^\]]+\]\s*", "", line.strip())
+        for line in text[start:end].splitlines()
+        if line.strip()
+    )
+    try:
+        payload = gzip.decompress(base64.b64decode(encoded, validate=True)).decode("utf-8")
+    except (binascii.Error, OSError, UnicodeDecodeError, ValueError):
+        return "", ""
     stage, separator, result = payload.partition("\n")
     if not separator or stage.strip() not in STAGE_ORDER:
         return "", ""
