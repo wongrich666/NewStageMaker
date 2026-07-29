@@ -697,15 +697,30 @@ def parse_doctor_optimization_result(result: dict[str, Any]) -> dict[str, Any]:
 
 def doctor_timeout_seconds(script_length: int, skill_key: str) -> int:
     length = max(0, int(script_length or 0))
-    # Character/logic audits are more expensive because they track cross-episode dependencies.
-    skill_extra = 90 if skill_key in {
+    try:
+        base_timeout = max(120, int(os.getenv("SCRIPT_DOCTOR_TIMEOUT_BASE", "480")))
+    except ValueError:
+        base_timeout = 480
+    try:
+        max_timeout = max(base_timeout, int(os.getenv("SCRIPT_DOCTOR_TIMEOUT_MAX", "1200")))
+    except ValueError:
+        max_timeout = 1200
+    try:
+        length_step = max(30, int(os.getenv("SCRIPT_DOCTOR_TIMEOUT_PER_8K", "90")))
+    except ValueError:
+        length_step = 90
+
+    # Cross-episode audits need more reasoning time than local dialogue or hook checks.
+    skill_extra = 120 if skill_key in {
         "character_continuity",
         "logic_holes",
         "character_humanity",
         "character_resonance",
-    } else 45
-    length_extra = min(300, max(0, (length - 12000) // 8000 * 60))
-    return min(540, 240 + skill_extra + length_extra)
+    } else 60
+    extra_chars = max(0, length - 12000)
+    length_buckets = (extra_chars + 7999) // 8000
+    length_extra = length_buckets * length_step
+    return min(max_timeout, base_timeout + skill_extra + length_extra)
 
 
 def format_doctor_exception(exc: BaseException, *, timeout_seconds: int) -> dict[str, str]:

@@ -135,6 +135,7 @@ class DeepSeekAgentClient:
         if response_format:
             payload["response_format"] = response_format
 
+        request_timeout = max(30, int(timeout_seconds or config.timeout_seconds))
         try:
             response = requests.post(
                 _chat_completions_url(config.base_url),
@@ -143,10 +144,13 @@ class DeepSeekAgentClient:
                     "Content-Type": "application/json",
                 },
                 json=payload,
-                timeout=max(30, int(timeout_seconds or config.timeout_seconds)),
+                timeout=request_timeout,
             )
         except requests.Timeout as exc:
-            raise DeepSeekAgentError("剧本 Agent 请求超时，请稍后重试。") from exc
+            raise DeepSeekAgentError(
+                f"剧本 Agent 请求超时（已等待 {request_timeout} 秒），"
+                "任务未自动重试，避免重复消耗 token。"
+            ) from exc
         except requests.RequestException as exc:
             raise DeepSeekAgentError(f"剧本 Agent 连接失败：{exc}") from exc
 

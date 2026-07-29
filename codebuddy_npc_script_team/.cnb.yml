@@ -73,6 +73,8 @@ main:
             systemPrompt: |
               设计准确集数的逐集卡。每集包含承接、五秒钩子、主角行动、
               多线压力、选择、代价、转折、尾钩和下一集承接动作。
+              JSON 中 scenes_per_episode 是逐集场景数量合同，必须严格执行；
+              只有值为 flexible 时才允许按剧情灵活安排场景。
               JSON 中 episodes=N 时，必须依次生成第1集至第N集，不能少集、
               不能只设计试写集，也不能让补充方向覆盖数值集数。
               读取 .script-team/01_contract.md、02_story.md、03_characters.md，
@@ -97,6 +99,9 @@ main:
               JSON 中 episodes=N 是最高优先级硬合同，必须写出第1集至第N集，
               每集标题统一使用“第N集：《本集独有标题》”；标题必须简短、具体、
               能区分本集剧情。任何只写某一集的冲突文字均无效。
+              严格执行 JSON 中 scenes_per_episode：1=每集一个场景，1-2=每集
+              一至两个场景，2=每集两个场景，2-3=每集两至三个场景，
+              flexible=按剧情灵活安排。换场必须交代去向、目的和承接动作。
               动作短而可视，对白自然有潜台词，第一集第一句必须形成强钩子。
               第一集场景头后的第一有效拍必须直接抛出异常结果、高压命令、关系反转
               或主角即将付出代价的动作；禁止先解释背景、扫描环境或逐个介绍人物。
@@ -180,6 +185,8 @@ main:
               强化黄金五秒短钩子、集间承接、多线压力、人物选择代价和对白潜台词，
               同时修复逻辑、人物、场景、道具和AI生成可执行性问题。
               最终每集必须保留“第N集：《本集独有标题》”，不得在精修时删掉集名。
+              严格保留 JSON 中 scenes_per_episode 的场景数量合同；不得在终审中
+              随意增删场景造成瞬移，换场必须保留去向、目的与承接动作。
               每集只保留“场景N：地点｜日/夜｜内/外”和“人物”两项紧凑场景头，
               删除“场景任务”和独立“道具”清单，道具只在真正使用时进入动作。
               终稿所有对白必须保持“人物名：台词”，心理活动必须保持
@@ -249,6 +256,8 @@ main:
           DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL}
           DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
           DEEPSEEK_MODEL: ${DEEPSEEK_MODEL}
+      imports:
+        - https://cnb.cool/xdsyjbpt/miyao/-/blob/main/deepseek.yml
       sandbox: true
       stages:
         - name: 总编剧
@@ -306,6 +315,8 @@ main:
           DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL}
           DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
           DEEPSEEK_MODEL: ${DEEPSEEK_MODEL}
+      imports:
+        - https://cnb.cool/xdsyjbpt/miyao/-/blob/main/deepseek.yml
       sandbox: true
       stages:
         - name: 远程单节点编剧

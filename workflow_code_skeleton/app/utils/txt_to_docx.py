@@ -683,6 +683,184 @@ def convert(input_path: str, output_path: str):
 
     doc.save(output_path)
 
+
+SCRIPT_EPISODE_HEADER = re.compile(
+    r"^\s*(?:#{1,6}\s*)?第\s*(\d{1,3})\s*集"
+    r"(?:\s*[：:]\s*(《[^》\r\n]+》|[^\r\n]+))?\s*$"
+)
+SCRIPT_SCENE_HEADER = re.compile(
+    r"^\s*(?:场景\s*)?(\d{1,3})(?:\s*[-—]\s*(\d{1,3}))?"
+    r"\s*[：:]\s*(.+?)\s*$"
+)
+SCRIPT_NUMBERED_SCENE_HEADER = re.compile(
+    r"^\s*(\d{1,3})\s*[-—]\s*(\d{1,3})\s+(.+?)\s*$"
+)
+SCRIPT_PEOPLE_LINE = re.compile(r"^\s*人物\s*[：:]\s*(.+?)\s*$")
+SCRIPT_DIALOGUE_LINE = re.compile(
+    r"^\s*([\w\u3400-\u9fff·]{1,24}(?:OS)?)\s*[：:]\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _set_script_run_font(run, *, size: float = 12, bold: bool = False, italic: bool = False):
+    run.font.name = "SimSun"
+    run.font.size = Pt(size)
+    run.bold = bold
+    run.italic = italic
+    run._element.get_or_add_rPr().rFonts.set(qn("w:eastAsia"), "宋体")
+
+
+def _clean_script_line(value: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"^\s*[-*]\s+", "", text)
+    text = text.replace("**", "")
+    return text.strip()
+
+
+def convert_script_team(input_path: str, output_path: str, *, title: str = ""):
+    """Convert the NPC team's final script into a navigable production-script DOCX."""
+    raw_text = Path(input_path).read_text(encoding="utf-8", errors="replace")
+    lines = str(raw_text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    document = Document()
+    section = document.sections[0]
+    section.page_height = Cm(29.7)
+    section.page_width = Cm(21.0)
+    section.left_margin = Cm(2.7)
+    section.right_margin = Cm(2.5)
+    section.top_margin = Cm(2.2)
+    section.bottom_margin = Cm(2.2)
+
+    normal = document.styles["Normal"]
+    normal.font.name = "SimSun"
+    normal.font.size = Pt(12)
+    normal._element.get_or_add_rPr().rFonts.set(qn("w:eastAsia"), "宋体")
+    normal.paragraph_format.line_spacing = 1.45
+    normal.paragraph_format.space_after = Pt(5)
+
+    for style_name, size in (("Heading 1", 16), ("Heading 2", 13)):
+        style = document.styles[style_name]
+        style.font.name = "SimSun"
+        style.font.size = Pt(size)
+        style.font.bold = True
+        style._element.get_or_add_rPr().rFonts.set(qn("w:eastAsia"), "宋体")
+        style.paragraph_format.keep_with_next = True
+
+    first_episode_index = next(
+        (index for index, line in enumerate(lines) if SCRIPT_EPISODE_HEADER.match(_clean_script_line(line))),
+        None,
+    )
+    source_title = ""
+    if first_episode_index is not None:
+        for line in lines[:first_episode_index]:
+            candidate = _clean_script_line(line)
+            if candidate and candidate not in {"剧本正文", "四、剧本正文"}:
+                source_title = candidate
+                break
+    display_title = _clean_script_line(title) or source_title or "完整剧本"
+    if not (display_title.startswith("《") and display_title.endswith("》")):
+        display_title = f"《{display_title.strip('《》')}》"
+
+    title_paragraph = document.add_paragraph()
+    title_paragraph.style = document.styles["Title"]
+    title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_paragraph.paragraph_format.space_before = Pt(12)
+    title_paragraph.paragraph_format.space_after = Pt(22)
+    title_run = title_paragraph.add_run(display_title)
+    _set_script_run_font(title_run, size=20, bold=True)
+
+    episode_number = 0
+    scene_number = 0
+    content_started = False
+    previous_blank = False
+    for raw_line in lines:
+        stripped = _clean_script_line(raw_line)
+        if not stripped:
+            if content_started and not previous_blank:
+                spacer = document.add_paragraph()
+                spacer.paragraph_format.space_after = Pt(2)
+            previous_blank = True
+            continue
+        previous_blank = False
+
+        episode_match = SCRIPT_EPISODE_HEADER.match(stripped)
+        if episode_match:
+            if content_started:
+                document.add_page_break()
+            content_started = True
+            episode_number = int(episode_match.group(1))
+            scene_number = 0
+            episode_heading = document.add_paragraph(style="Heading 1")
+            episode_heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            episode_heading.paragraph_format.space_before = Pt(0)
+            episode_heading.paragraph_format.space_after = Pt(8)
+            episode_run = episode_heading.add_run(f"第 {episode_number} 集")
+            _set_script_run_font(episode_run, size=16, bold=True)
+            episode_title = _clean_script_line(episode_match.group(2) or "")
+            if episode_title:
+                subtitle = document.add_paragraph()
+                subtitle.paragraph_format.space_after = Pt(14)
+                subtitle_run = subtitle.add_run(episode_title)
+                _set_script_run_font(subtitle_run, size=12, bold=True)
+                set_run_color(subtitle_run, "4B5E66")
+            continue
+
+        if not content_started:
+            continue
+
+        numbered_scene = SCRIPT_NUMBERED_SCENE_HEADER.match(stripped)
+        scene_match = SCRIPT_SCENE_HEADER.match(stripped)
+        if numbered_scene:
+            scene_number = int(numbered_scene.group(2))
+            scene_text = numbered_scene.group(3).strip()
+        elif scene_match:
+            scene_number = int(scene_match.group(2) or scene_match.group(1))
+            scene_text = scene_match.group(3).strip()
+        else:
+            scene_text = ""
+        if scene_text:
+            scene_heading = document.add_paragraph(style="Heading 2")
+            scene_heading.paragraph_format.space_before = Pt(8)
+            scene_heading.paragraph_format.space_after = Pt(8)
+            scene_run = scene_heading.add_run(
+                f"{episode_number}-{scene_number} {scene_text}"
+            )
+            _set_script_run_font(scene_run, size=13, bold=True)
+            continue
+
+        people_match = SCRIPT_PEOPLE_LINE.match(stripped)
+        if people_match:
+            people_paragraph = document.add_paragraph()
+            people_paragraph.paragraph_format.keep_with_next = True
+            people_paragraph.paragraph_format.space_after = Pt(10)
+            people_run = people_paragraph.add_run(f"人物：{people_match.group(1).strip()}")
+            _set_script_run_font(people_run, size=12, bold=True)
+            continue
+
+        dialogue_match = SCRIPT_DIALOGUE_LINE.match(stripped)
+        if dialogue_match and not stripped.startswith(("场景", "人物")):
+            dialogue_paragraph = document.add_paragraph()
+            dialogue_paragraph.paragraph_format.left_indent = Cm(0.2)
+            dialogue_paragraph.paragraph_format.space_before = Pt(3)
+            dialogue_paragraph.paragraph_format.space_after = Pt(6)
+            dialogue_run = dialogue_paragraph.add_run(
+                f"{dialogue_match.group(1)}：{dialogue_match.group(2).strip()}"
+            )
+            _set_script_run_font(dialogue_run, size=12, bold=True)
+            continue
+
+        action_text = re.sub(r"^[▲△]\s*", "", stripped).strip()
+        if action_text:
+            action_paragraph = document.add_paragraph()
+            action_paragraph.paragraph_format.left_indent = Cm(0.2)
+            action_paragraph.paragraph_format.space_after = Pt(6)
+            action_run = action_paragraph.add_run(f"△ {action_text}")
+            _set_script_run_font(action_run, size=12)
+
+    document.core_properties.title = display_title.strip("《》")
+    document.core_properties.subject = "剧本正文"
+    document.save(output_path)
+
+
 if __name__ == "__main__":
     convert(r'C:\Users\Administrator\Desktop\txt_script\txt\西幻：葬爱武神.txt',
             r'C:\Users\Administrator\Desktop\西幻：葬爱武神.docx')

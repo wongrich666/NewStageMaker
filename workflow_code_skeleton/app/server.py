@@ -146,6 +146,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     codebuddy_npc_jobs = CodeBuddyNpcJobStore(codebuddy_npc_config)
     codebuddy_npc_client = CodeBuddyNpcClient(codebuddy_npc_config)
     codebuddy_npc_stage_runner = CodeBuddyNpcStageRunner(codebuddy_npc_jobs)
+    try:
+        codebuddy_npc_remote_retry_limit = int(
+            os.getenv("CODEBUDDY_NPC_REMOTE_STAGE_RETRIES", "2")
+        )
+    except (TypeError, ValueError):
+        codebuddy_npc_remote_retry_limit = 2
+    codebuddy_npc_remote_retry_limit = min(
+        5, max(0, codebuddy_npc_remote_retry_limit)
+    )
 
     def _submit_remote_npc_stage(
         job: dict[str, Any],
@@ -153,6 +162,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         stage: str,
         feedback: str = "",
         continue_after: bool = False,
+        retry_count: int = 0,
     ) -> dict[str, Any]:
         trigger_result = codebuddy_npc_client.trigger_stage(
             job,
@@ -169,10 +179,19 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         job["remote_kind"] = "stage"
         job["remote_stage"] = stage
         job["remote_continue_after"] = bool(continue_after)
+        job["remote_retry_count"] = max(0, int(retry_count))
+        job["remote_retry_limit"] = codebuddy_npc_remote_retry_limit
         job["active_stage"] = stage
         job.pop("fallback_reason", None)
         job["status"] = "running"
-        job["status_text"] = f"已提交 CNB，{STAGE_NAMES[stage]}正在远程运行"
+        retry_suffix = (
+            f"（自动重试 {retry_count}/{codebuddy_npc_remote_retry_limit}）"
+            if retry_count
+            else ""
+        )
+        job["status_text"] = (
+            f"已提交 CNB，{STAGE_NAMES[stage]}正在远程运行{retry_suffix}"
+        )
         job["error"] = ""
         job["progress"] = round(STAGE_ORDER.index(stage) / len(STAGE_ORDER) * 100)
         return codebuddy_npc_jobs.save(job)
@@ -195,6 +214,29 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             ):
                 failed_stage = str(job["remote_stage"])
                 remote_error = str(job.get("error") or "CNB远程节点执行失败")
+                retry_count = max(0, int(job.get("remote_retry_count") or 0))
+                retry_limit = max(
+                    0,
+                    int(
+                        job.get("remote_retry_limit")
+                        if job.get("remote_retry_limit") is not None
+                        else codebuddy_npc_remote_retry_limit
+                    ),
+                )
+                if retry_count < retry_limit:
+                    try:
+                        job = _submit_remote_npc_stage(
+                            job,
+                            stage=failed_stage,
+                            continue_after=bool(job.get("remote_continue_after")),
+                            retry_count=retry_count + 1,
+                        )
+                        job["last_remote_error"] = remote_error
+                        return codebuddy_npc_jobs.save(job)
+                    except CodeBuddyNpcError as retry_exc:
+                        remote_error = (
+                            f"{remote_error}；自动重试提交失败：{retry_exc}"
+                        )
                 job = codebuddy_npc_stage_runner.start(
                     job_id=job_id,
                     user_id=int(job["user_id"]),
@@ -219,6 +261,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             job,
                             stage=next_stage,
                             continue_after=True,
+                            retry_count=0,
                         )
                     except CodeBuddyNpcError as remote_exc:
                         job = codebuddy_npc_stage_runner.start(
@@ -8421,37 +8464,25 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 user_id=_require_user_id(),
                 request_payload=payload,
             )
-            if job.get("execution_mode") == "auto":
-                trigger_result = codebuddy_npc_client.trigger(job)
-                job["build"] = {
-                    "sn": trigger_result.get("sn"),
-                    "build_log_url": trigger_result.get("buildLogUrl"),
-                    "message": trigger_result.get("message"),
-                }
-                job["status"] = "running"
-                job["status_text"] = "已提交，CodeBuddy NPC 团队正在启动"
-                job["execution_target"] = "remote_cnb"
-                job["remote_kind"] = "full"
-                job["progress"] = 3
+            continue_after = job.get("execution_mode") == "auto"
+            job = codebuddy_npc_jobs.save(job)
+            try:
+                job = _submit_remote_npc_stage(
+                    job,
+                    stage="showrunner",
+                    continue_after=continue_after,
+                    retry_count=0,
+                )
+            except CodeBuddyNpcError as remote_exc:
+                job = codebuddy_npc_stage_runner.start(
+                    job_id=str(job["job_id"]),
+                    user_id=_require_user_id(),
+                    stage="showrunner",
+                    continue_after=continue_after,
+                )
+                job["fallback_reason"] = str(remote_exc)
+                job["status_text"] = "CNB 暂不可用，已切换本地兜底运行总编剧"
                 job = codebuddy_npc_jobs.save(job)
-            else:
-                job = codebuddy_npc_jobs.save(job)
-                try:
-                    job = _submit_remote_npc_stage(
-                        job,
-                        stage="showrunner",
-                        continue_after=False,
-                    )
-                except CodeBuddyNpcError as remote_exc:
-                    job = codebuddy_npc_stage_runner.start(
-                        job_id=str(job["job_id"]),
-                        user_id=_require_user_id(),
-                        stage="showrunner",
-                        continue_after=False,
-                    )
-                    job["fallback_reason"] = str(remote_exc)
-                    job["status_text"] = "CNB 暂不可用，已切换本地兜底运行总编剧"
-                    job = codebuddy_npc_jobs.save(job)
         except CodeBuddyNpcError as exc:
             logger.warning("codebuddy npc create failed: %s", exc)
             return _json_error(
@@ -8530,14 +8561,18 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         title = str(request_data.get("project_title") or "完整剧本").strip()
         safe_title = re.sub(r'[\\/:*?"<>|\r\n]+', "_", title).strip(" ._") or "完整剧本"
         try:
-            from .utils.txt_to_docx import convert as convert_txt_to_docx
+            from .utils.txt_to_docx import convert_script_team
 
             with tempfile.TemporaryDirectory(prefix="npc-script-docx-") as tmp_dir:
                 tmp_path = Path(tmp_dir)
                 txt_path = tmp_path / "final_script.txt"
                 docx_path = tmp_path / "final_script.docx"
                 txt_path.write_text(final_script, encoding="utf-8")
-                convert_txt_to_docx(str(txt_path), str(docx_path))
+                convert_script_team(
+                    str(txt_path),
+                    str(docx_path),
+                    title=title,
+                )
                 docx_bytes = docx_path.read_bytes()
         except ModuleNotFoundError as exc:
             if exc.name == "docx":

@@ -82,8 +82,23 @@ def test_job_store_preserves_request_and_user_boundary(tmp_path: Path) -> None:
     )
 
     assert job["request"]["project_title"] == "测试剧"
+    assert job["request"]["scenes_per_episode"] == "1"
     assert store.load(job["job_id"], user_id=7)["user_id"] == 7
     assert store.load(job["job_id"], user_id=8) is None
+
+
+def test_job_store_preserves_dynamic_scene_contract(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={
+            "project_title": "双场景测试",
+            "source_text": "一集需要两个连续场景。",
+            "scenes_per_episode": "2",
+        },
+    )
+
+    assert job["request"]["scenes_per_episode"] == "2"
 
 
 def test_job_store_returns_latest_job_for_user(tmp_path: Path) -> None:
