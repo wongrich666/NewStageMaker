@@ -17,7 +17,12 @@ class _FakeAuth:
         return None
 
 
-def _install_fakes(monkeypatch, *, refresh_fails: bool = False):
+def _install_fakes(
+    monkeypatch,
+    *,
+    refresh_fails: bool = False,
+    refresh_replaces_build: bool = False,
+):
     from workflow_code_skeleton.app import server
 
     state = {"job": None, "stage_calls": [], "full_calls": 0, "fallback_calls": []}
@@ -87,6 +92,13 @@ def _install_fakes(monkeypatch, *, refresh_fails: bool = False):
 
         def refresh(self, job):
             updated = dict(job)
+            if refresh_replaces_build:
+                newer = dict(state["job"])
+                newer["build"] = {"sn": "build-newer"}
+                newer["status"] = "running"
+                newer["remote_stage"] = "story_architect"
+                state["job"] = newer
+                updated["status"] = "result_pending"
             if refresh_fails:
                 updated["status"] = "failed"
                 updated["error"] = "remote stage failed"
@@ -190,3 +202,33 @@ def test_failed_remote_stage_retries_twice_then_uses_local_checkpoint(monkeypatc
         }
     ]
     assert state["job"]["execution_target"] == "local_fallback"
+
+
+def test_stale_poll_cannot_overwrite_a_newer_remote_build(monkeypatch):
+    server, state = _install_fakes(monkeypatch, refresh_replaces_build=True)
+    app = server.create_app()
+    app.config.update(TESTING=True)
+    client = app.test_client()
+    headers = {"Authorization": "Bearer writer-token"}
+
+    created = client.post(
+        "/api/new-workflow-test/npc/jobs",
+        headers=headers,
+        json={
+            "project_title": "并发轮询保护",
+            "source_text": "旧轮询不能覆盖新节点。",
+            "execution_mode": "auto",
+        },
+    )
+    assert created.status_code == 200
+    assert state["job"]["build"]["sn"] == "build-1"
+
+    response = client.get(
+        "/api/new-workflow-test/npc/jobs/npc-orchestration-test",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert state["job"]["build"]["sn"] == "build-newer"
+    assert state["job"]["remote_stage"] == "story_architect"
+    assert state["job"]["status"] == "running"

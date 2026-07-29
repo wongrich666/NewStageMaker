@@ -197,7 +197,22 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         ):
             return job
         try:
-            job = codebuddy_npc_client.refresh(job)
+            requested_build_sn = str((job.get("build") or {}).get("sn") or "")
+            refreshed_job = codebuddy_npc_client.refresh(job)
+            latest_job = codebuddy_npc_jobs.load(
+                job_id,
+                user_id=int(job["user_id"]),
+            )
+            latest_build_sn = str(
+                ((latest_job or {}).get("build") or {}).get("sn") or ""
+            )
+            if (
+                requested_build_sn
+                and latest_build_sn
+                and latest_build_sn != requested_build_sn
+            ):
+                return latest_job
+            job = refreshed_job
             job = codebuddy_npc_jobs.save(job)
             if (
                 str(job.get("status") or "") == "failed"
