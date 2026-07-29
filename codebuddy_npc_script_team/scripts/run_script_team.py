@@ -351,10 +351,12 @@ def run(stage: str) -> None:
         )
     else:
         output_path.write_text(result, encoding="utf-8")
-    print("__SCRIPT_TEAM_STAGE_BEGIN__", flush=True)
-    print(stage, flush=True)
-    print(output_path.read_text(encoding="utf-8"), flush=True)
-    print("__SCRIPT_TEAM_STAGE_END__", flush=True)
+    payload = f"{stage}\n{output_path.read_text(encoding='utf-8')}".encode("utf-8")
+    encoded = base64.b64encode(gzip.compress(payload, compresslevel=9)).decode("ascii")
+    print("__SCRIPT_TEAM_STAGE_GZIP_BEGIN__", flush=True)
+    for index in range(0, len(encoded), 160):
+        print(encoded[index : index + 160], flush=True)
+    print("__SCRIPT_TEAM_STAGE_GZIP_END__", flush=True)
     print(f"{stage} completed: {output_path}", flush=True)
 
 

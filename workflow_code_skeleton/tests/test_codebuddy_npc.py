@@ -381,6 +381,51 @@ def test_refresh_remote_stage_recovers_artifact(tmp_path: Path) -> None:
     assert refreshed["recovered_files"]["story"].startswith("主线")
 
 
+def test_refresh_remote_stage_recovers_compressed_artifact_after_log_truncation(
+    tmp_path: Path,
+) -> None:
+    result = "第1集：囚笼裂缝\n" + ("主角承担代价并推动下一步。\n" * 4_000)
+    encoded = base64.b64encode(
+        gzip.compress(f"episode_continuity\n{result}".encode("utf-8"))
+    ).decode("ascii")
+    status = {
+        "status": "success",
+        "pipelinesStatus": {
+            "pipeline-1": {
+                "id": "pipeline-1",
+                "stages": [{"id": "stage-1", "name": "远程单节点编剧", "status": "success"}],
+            }
+        },
+    }
+    log = {
+        "content": [
+            "The log is truncated because the original stage output was too long.",
+            "__SCRIPT_TEAM_STAGE_GZIP_BEGIN__",
+            *[encoded[index : index + 160] for index in range(0, len(encoded), 160)],
+            "__SCRIPT_TEAM_STAGE_GZIP_END__",
+        ]
+    }
+    session = _Session([_Response(status), _Response(log)])
+    config = _config(tmp_path)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "长分集卡", "source_text": "百年囚笼。"},
+    )
+    job.update(
+        {
+            "build": {"sn": "compressed-stage-build"},
+            "remote_kind": "stage",
+            "remote_stage": "episode_continuity",
+            "status": "running",
+        }
+    )
+
+    refreshed = CodeBuddyNpcClient(config, session=session).refresh(job)
+
+    assert refreshed["status"] == "stage_ready"
+    assert refreshed["recovered_files"]["episodes"] == result.strip()
+
+
 def test_authorization_header_preserves_existing_bearer_prefix(tmp_path: Path) -> None:
     config = _config(tmp_path, access_token="Bearer token")
     client = CodeBuddyNpcClient(config, session=_Session([]))
