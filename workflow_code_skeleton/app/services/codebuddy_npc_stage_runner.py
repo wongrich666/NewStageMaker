@@ -21,6 +21,8 @@ PROMPTS = {
     "showrunner": """
 你是跨题材、跨市场的剧集总编剧。输出精炼、可执行的《创作任务书》。
 锁定题材、受众、主角、核心欲望、核心阻力、情绪承诺、主题、结局方向和不可篡改事实。
+按照技能路由模块判断增强能力，并原样输出一行合法的 SKILL_ROUTING_JSON。
+题材不能直接决定套路；用户信息不足时由你作出专业判断，不把选择责任退还给用户。
 episodes 是总集数唯一权威，必须明确完整交付第1集至第N集。
 不要写正文。所有人物、道具、技术、证据和事件都按题材与因果需要决定：
 需要时可以使用，不需要时不得为了套模板硬塞；禁止的不是某类元素，而是无来源、无铺垫、
@@ -243,6 +245,15 @@ def _compact_story_state(job: dict[str, Any]) -> str:
         "props": [],
         "episodes": episodes,
         "open_threads": [],
+        "narrative_pressure": {
+            "adversity_payoff_level": _dynamic_skill_level(
+                str((job.get("recovered_files") or {}).get("contract") or ""),
+                "adversity_payoff",
+            ),
+            "pressure_lines": [],
+            "emotional_debts": [],
+            "reversal_assets": [],
+        },
         "cost_control": {
             "mode": "deterministic_compact_ledger",
             "model_call_used": False,
@@ -263,14 +274,42 @@ def _skill_root() -> Path:
     )
 
 
-def _module_text(stage: str) -> str:
-    names = {
+ROUTING_RE = re.compile(r"SKILL_ROUTING_JSON\s*:\s*(\{[^\r\n]+\})")
+
+
+def _dynamic_skill_level(contract: str, key: str) -> str:
+    match = ROUTING_RE.search(str(contract or ""))
+    if not match:
+        return "off"
+    try:
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return "off"
+    if not isinstance(payload, dict):
+        return "off"
+    return str(payload.get(key) or "off").strip().lower()
+
+
+def _module_text(stage: str, artifacts: dict[str, Any] | None = None) -> str:
+    names = list({
+        "showrunner": ("skill-routing.md",),
         "character_emotion": ("character-voice.md",),
         "episode_continuity": ("hook-craft.md", "continuity.md"),
         "script_writer": ("hook-craft.md", "character-voice.md", "continuity.md"),
         "state_recorder": ("continuity.md", "story-state-schema.md"),
         "final_editor": ("hook-craft.md", "character-voice.md", "continuity.md"),
-    }.get(stage, ())
+    }.get(stage, ()))
+    dynamic_stages = {
+        "story_architect",
+        "character_emotion",
+        "episode_continuity",
+        "script_writer",
+        "state_recorder",
+        "final_editor",
+    }
+    contract = str((artifacts or {}).get("contract") or "")
+    if stage in dynamic_stages and _dynamic_skill_level(contract, "adversity_payoff") in {"core", "support"}:
+        names.append("adversity-payoff.md")
     chunks: list[str] = []
     for name in names:
         path = _skill_root() / name
@@ -568,7 +607,7 @@ class CodeBuddyNpcStageRunner:
         user_prompt = (
             f"===== 用户创作任务 =====\n{request_text}"
             + "".join(context)
-            + _module_text(stage)
+            + _module_text(stage, artifacts)
             + revision
             + "\n\n严格执行 episodes；episode_word_count 是前端动态传入的每集"
             "最低字数，只能多不能少且不设上限；不得改变上游已锁定事实。"
@@ -701,6 +740,7 @@ class CodeBuddyNpcStageRunner:
             for key in ("contract", "story", "characters")
             if str(artifacts.get(key) or "").strip()
         )
+        fixed_context += _module_text(stage, artifacts)
         batch_total = (total - start_episode + BATCH_SIZE - 1) // BATCH_SIZE
         completed_ranges: list[list[int]] = []
         for batch_start in range(start_episode, total + 1, BATCH_SIZE):

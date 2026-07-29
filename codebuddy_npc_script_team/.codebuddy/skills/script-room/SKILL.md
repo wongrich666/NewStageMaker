@@ -35,6 +35,9 @@ description: 生成、修订和验收AI漫剧或AI真人剧；用于创作合同
 
 ## 按需读取
 
+- 总编剧先读取
+  [references/skill-routing.md](references/skill-routing.md)，在创作合同中输出机器可识别的
+  `SKILL_ROUTING_JSON`。基础模块按节点职责常驻，增强模块只在合同启用后读取。
 - 设计或修订开头、尾钩和局势变化时读取
   [references/hook-craft.md](references/hook-craft.md)。
 - 建立人物、声音配方或改写对白时读取
@@ -43,6 +46,9 @@ description: 生成、修订和验收AI漫剧或AI真人剧；用于创作合同
   [references/continuity.md](references/continuity.md)。
 - 写入或读取 `story_state.json` 时严格遵守
   [references/story-state-schema.md](references/story-state-schema.md)。
+- 创作合同将 `adversity_payoff` 路由为 `core` 或 `support` 时，故事架构、分集、
+  正文、状态和终审读取
+  [references/adversity-payoff.md](references/adversity-payoff.md)；路由为 `off` 时不得套用。
 
 ## 发布条件
 

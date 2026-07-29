@@ -89,9 +89,39 @@
       "status": "open|resolved",
       "resolved_episode": null
     }
-  ]
+  ],
+  "narrative_pressure": {
+    "adversity_payoff_level": "core|support|off",
+    "pressure_lines": [
+      {
+        "source": "string",
+        "rational_motive": "string",
+        "current_stakes": "string",
+        "status": "active|resolved"
+      }
+    ],
+    "emotional_debts": [
+      {
+        "event": "string",
+        "owed_by": "string",
+        "owed_to": "string",
+        "expected_payoff": "string",
+        "status": "open|partially_paid|paid"
+      }
+    ],
+    "reversal_assets": [
+      {
+        "asset": "string",
+        "source_episode": 1,
+        "planned_use": "string",
+        "status": "planted|developed|paid_off"
+      }
+    ]
+  }
 }
 ```
 
 数组没有事实时使用空数组。未知事实用明确字符串“未明确”，不得猜测。
 `continuity_bridge` 仅第一集允许为 `null`；其他集必须填写上一集动作和本集承接动作。
+当创作合同将 `adversity_payoff` 设为 `off` 时，`narrative_pressure` 的三个数组使用空数组；
+设为 `core` 或 `support` 时，只记录上游和正文已经存在的压力、情绪债和翻盘资产。

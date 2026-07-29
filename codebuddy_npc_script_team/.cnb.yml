@@ -14,6 +14,10 @@ main:
               读取用户创作任务，锁定受众、主角、情绪承诺、主题、结局方向、
               不可篡改事实和题材适配边界。不要写正文。人物、道具、证据和技术
               根据剧情需要决定，禁止的只是无来源、无铺垫、无代价的万能解题元素。
+              必须先读取 .codebuddy/skills/script-room/references/skill-routing.md，
+              根据用户材料和创作承诺智能选择增强 Skill。题材名不能直接决定套路，
+              用户信息不足时由你作出专业判断，不把选择责任退还给用户。任务书必须
+              原样包含一行合法的 SKILL_ROUTING_JSON。
               JSON 中 episodes 是总集数唯一权威，必须在任务书中明确写出
               “完整交付第1集至第N集，共N集”。补充方向若要求只写或只交付
               某一集，与 episodes 冲突时一律忽略，禁止把冲突写入任务书。
@@ -32,7 +36,10 @@ main:
               建立主线、有效支线、前史债务、因果链、升级机制和结局兑现。
               不得改变总编剧锁定的创作承诺。
               故事架构必须覆盖用户 JSON 中 episodes 指定的全部集数。
-              先读取 .script-team/01_contract.md，将完整架构写入
+              先读取 .script-team/01_contract.md。读取其中的 SKILL_ROUTING_JSON；
+              adversity_payoff 为 core 或 support 时，再读取
+              .codebuddy/skills/script-room/references/adversity-payoff.md 并落实，
+              为 off 时禁止套用逆风打脸结构。将完整架构写入
               .script-team/02_story.md。禁止提前写剧本正文，回复不得代替文件。
             userPrompt: |
               用户任务：
@@ -48,6 +55,9 @@ main:
               不改变主要事件，不用抽象形容词代替具体反应。
               读取 .script-team/01_contract.md 和 .script-team/02_story.md，
               再读取 .codebuddy/skills/script-room/references/character-voice.md，
+              并检查合同的 SKILL_ROUTING_JSON；adversity_payoff 为 core 或
+              support 时读取 adversity-payoff.md，设计有合理动机的压力来源、
+              情绪债和主角压力下的主动选择；为 off 时不得强行迫害主角。
               为主要人物建立声音配方，将人物、声音和关系压力设计写入
               .script-team/03_characters.md。
               回复不得代替文件。
@@ -68,6 +78,9 @@ main:
               读取 .script-team/01_contract.md、02_story.md、03_characters.md，
               以及 .codebuddy/skills/script-room/references/hook-craft.md 和
               .codebuddy/skills/script-room/references/continuity.md。
+              检查合同的 SKILL_ROUTING_JSON；adversity_payoff 为 core 或 support
+              时读取 adversity-payoff.md，为每集落实压力、主动行动、代价、情绪债、
+              翻盘资产和阶段性回报；为 off 时不得套用。
               将完整分集卡写入 .script-team/04_episodes.md。不搜索其他路径，
               不写聊天式总结，文件写入成功后立即结束。
             userPrompt: |
@@ -104,6 +117,9 @@ main:
               必须读取 .script-team/01_contract.md、02_story.md、03_characters.md、
               04_episodes.md，以及 .codebuddy/skills/script-room/references/ 下的
               hook-craft.md、character-voice.md 和 continuity.md。
+              检查合同的 SKILL_ROUTING_JSON；adversity_payoff 为 core 或 support
+              时额外读取 adversity-payoff.md，并执行分集卡已有的压力与兑现设计；
+              为 off 时不得自行改成逆风打脸故事。
               上述路径均已存在，禁止搜索工作区或尝试其他路径。
               必须把完整剧本正文写入 .script-team/05_draft.txt。
               文件内只能是片名和逐集可拍剧本，不得有分析、评分、验收表、
@@ -121,7 +137,7 @@ main:
           options:
             role: 状态记录器
             contextWindow: $contextWindow
-            maxTurns: 8
+            maxTurns: 16
             systemPrompt: |
               你不是编剧，不得改写、润色或评价正文。读取用户任务、
               JSON 中 episodes=N 时，story_state.project.episode_count 必须为 N，
@@ -130,6 +146,9 @@ main:
               .script-team/05_draft.txt，以及
               .codebuddy/skills/script-room/references/continuity.md 和
               .codebuddy/skills/script-room/references/story-state-schema.md。
+              检查 01_contract.md 的 SKILL_ROUTING_JSON；adversity_payoff 为 core
+              或 support 时读取 adversity-payoff.md，并把已有压力线、情绪债和
+              翻盘资产写入 narrative_pressure；为 off 时对应数组为空。
               characters 数组只登记推动主线的主要人物，不把群演、路人、
               临时功能角色或群体称谓列为主要人物。数组中每个人都必须具备完整
               voice_recipe；samples 必须从 03_characters.md 或 05_draft.txt
@@ -137,7 +156,9 @@ main:
               上述路径均已存在，禁止搜索工作区或尝试其他路径。
               严格按 schema 将事实写入 .script-team/story_state.json。
               文件必须是单个合法 JSON 对象，不得有 Markdown 围栏或解释。
-              写入成功后立即结束，不做重复内容确认。
+              JSON 字符串内部需要引用原台词时使用「」或『』，不得直接嵌入未转义的
+              ASCII 双引号。一次性写入完整文件；写入成功后立即结束，禁止读取、
+              解析、验证、修补或重复确认，后续代码门禁负责合法性检查。
             userPrompt: |
               用户任务：
               $scriptRequest
@@ -177,6 +198,10 @@ main:
               .codebuddy/skills/script-room/references/hook-craft.md、
               .codebuddy/skills/script-room/references/character-voice.md 和
               .codebuddy/skills/script-room/references/continuity.md。
+              同时读取 .script-team/01_contract.md 的 SKILL_ROUTING_JSON；
+              adversity_payoff 为 core 或 support 时额外读取 adversity-payoff.md，
+              修复被初稿写丢的压力、主角行动、情绪债、翻盘资产与兑现；为 off 时
+              不得把原作品强行改成打脸套路。
               上述路径均已存在，禁止搜索工作区或尝试其他路径。
               第一步读取上述文件，第二步一次性修订并写入
               .script-team/final_script.txt；禁止在写入前展开逐项分析。

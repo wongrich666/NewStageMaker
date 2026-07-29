@@ -58,24 +58,38 @@ SKILL_ROOT = Path(
     os.getenv("SCRIPT_ROOM_SKILL_DIR", "/root/.codebuddy/skills/script-room")
 )
 MODULE_FILES = {
+    "routing": "skill-routing.md",
     "hook": "hook-craft.md",
     "voice": "character-voice.md",
     "continuity": "continuity.md",
     "state": "story-state-schema.md",
+    "adversity_payoff": "adversity-payoff.md",
 }
 STAGE_MODULES = {
+    "showrunner": ("routing",),
     "character_emotion": ("voice",),
     "episode_continuity": ("hook", "continuity"),
     "script_writer": ("hook", "voice", "continuity"),
     "state_recorder": ("continuity", "state"),
     "final_editor": ("hook", "voice", "continuity"),
 }
+DYNAMIC_STAGE_MODULES = {
+    "story_architect": ("adversity_payoff",),
+    "character_emotion": ("adversity_payoff",),
+    "episode_continuity": ("adversity_payoff",),
+    "script_writer": ("adversity_payoff",),
+    "state_recorder": ("adversity_payoff",),
+    "final_editor": ("adversity_payoff",),
+}
+ROUTING_RE = re.compile(r"SKILL_ROUTING_JSON\s*:\s*(\{[^\r\n]+\})")
 
 PROMPTS = {
     "showrunner": """
 你是专业剧集总编剧。根据用户任务输出精炼的《创作任务书》。
 必须锁定：题材与目标观众、主角、核心欲望、核心阻力、情绪承诺、主题、结局方向、
 不可篡改事实、禁用套路。识别AI漫剧或AI真人剧及目标市场。
+按照 skill-routing 模块判断增强能力，并原样输出一行合法的 SKILL_ROUTING_JSON。
+题材不能直接决定套路；用户信息不足时由你作出专业判断，不把选择责任退还给用户。
 episodes 是总集数唯一权威。必须明确写出“完整交付第1集至第N集，共N集”，
 忽略补充方向中与数值集数冲突的单集试写或只交付某一集要求。
 不要写正文，不要堆砌事件。人物、道具、证据与技术根据剧情需要决定；
@@ -221,7 +235,23 @@ def previous_context(stage: str) -> str:
 
 def skill_modules(stage: str) -> str:
     chunks: list[str] = []
-    for module in STAGE_MODULES.get(stage, ()):
+    modules = list(STAGE_MODULES.get(stage, ()))
+    if stage in DYNAMIC_STAGE_MODULES:
+        contract_path = ROOT / ROLE_FILES["showrunner"]
+        contract = contract_path.read_text(encoding="utf-8") if contract_path.is_file() else ""
+        match = ROUTING_RE.search(contract)
+        routing: dict[str, str] = {}
+        if match:
+            try:
+                parsed = json.loads(match.group(1))
+                if isinstance(parsed, dict):
+                    routing = {str(key): str(value) for key, value in parsed.items()}
+            except json.JSONDecodeError:
+                routing = {}
+        for module in DYNAMIC_STAGE_MODULES[stage]:
+            if routing.get(module, "").lower() in {"core", "support"}:
+                modules.append(module)
+    for module in modules:
         path = SKILL_ROOT / "references" / MODULE_FILES[module]
         if path.is_file():
             chunks.append(f"\n\n===== skill:{module} =====\n{path.read_text(encoding='utf-8')}")
