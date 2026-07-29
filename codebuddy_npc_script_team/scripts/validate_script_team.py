@@ -49,6 +49,19 @@ PERFORMANCE_CUE_DIALOGUE = re.compile(
 )
 
 
+def _scene_contract(request: dict[str, Any]) -> tuple[str, int, int | None]:
+    policy = str(request.get("scenes_per_episode") or "1").strip().lower()
+    contracts = {
+        "1": (1, 1),
+        "1-2": (1, 2),
+        "2": (2, 2),
+        "2-3": (2, 3),
+        "flexible": (1, None),
+    }
+    minimum, maximum = contracts.get(policy, contracts["1"])
+    return policy if policy in contracts else "1", minimum, maximum
+
+
 @dataclass
 class GateReport:
     mode: str
@@ -194,6 +207,10 @@ def _validate_state_episodes(
     report: GateReport,
     state_episodes: Any,
     expected_count: int,
+    *,
+    minimum_scenes: int,
+    maximum_scenes: int | None,
+    strict: bool,
 ) -> None:
     if not isinstance(state_episodes, list):
         report.issue("state.episodes.invalid", "story_state.episodes 必须是数组")
@@ -215,11 +232,19 @@ def _validate_state_episodes(
         scenes = item.get("core_scenes")
         if not isinstance(scenes, list) or not scenes:
             report.issue("state.scenes.empty", "缺少核心场景", episode=episode_no)
-        elif len(scenes) > 2 and not str(item.get("scene_exception_reason") or "").strip():
+        elif len(scenes) < minimum_scenes or (
+            maximum_scenes is not None and len(scenes) > maximum_scenes
+        ):
+            expected = (
+                f"{minimum_scenes}个"
+                if maximum_scenes == minimum_scenes
+                else f"{minimum_scenes}至{maximum_scenes}个"
+            )
             report.issue(
-                "state.scenes.excess",
-                "核心场景超过两个且未说明必要性",
+                "state.scenes.contract",
+                f"核心场景应为{expected}，实际为{len(scenes)}个",
                 episode=episode_no,
+                error=strict,
             )
         states = item.get("character_states")
         if not isinstance(states, list) or not states:
@@ -260,6 +285,7 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
     report = GateReport(mode=mode)
     expected_count = max(1, int(request.get("episodes") or 1))
     target_words = max(100, int(request.get("episode_word_count") or 800))
+    scene_policy, minimum_scenes, maximum_scenes = _scene_contract(request)
     episodes = _split_episodes(script)
     numbers = [number for number, _ in episodes]
     report.metrics.update(
@@ -267,6 +293,7 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
             "expected_episode_count": expected_count,
             "actual_episode_count": len(episodes),
             "minimum_words_per_episode": target_words,
+            "scenes_per_episode": scene_policy,
             "script_chars": _text_size(script),
         }
     )
@@ -341,12 +368,19 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
                 "该集缺少明确场景标题；必须标注地点、日夜和内外",
                 episode=episode_no,
             )
-        if scene_count > 2:
+        if scene_count < minimum_scenes or (
+            maximum_scenes is not None and scene_count > maximum_scenes
+        ):
+            expected = (
+                f"{minimum_scenes}个"
+                if maximum_scenes == minimum_scenes
+                else f"{minimum_scenes}至{maximum_scenes}个"
+            )
             report.issue(
-                "script.scene_headers.excess",
-                f"检测到 {scene_count} 个显式场景标题，请确认是否必要",
+                "script.scene_headers.contract",
+                f"前端场景设置要求每集{expected}场，检测到{scene_count}场",
                 episode=episode_no,
-                error=False,
+                error=mode == "strict",
             )
         if dash_metrics["dash_groups"] >= 4 and dash_metrics["dash_groups_per_1000_chars"] > 6:
             report.issue(
@@ -370,7 +404,14 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
             report.issue("state.project.episode_count", "状态中的总集数与用户要求不一致")
         _require_text(report, project, "protagonist", code="state.project.protagonist")
     _validate_voice(report, state.get("characters"))
-    _validate_state_episodes(report, state.get("episodes"), expected_count)
+    _validate_state_episodes(
+        report,
+        state.get("episodes"),
+        expected_count,
+        minimum_scenes=minimum_scenes,
+        maximum_scenes=maximum_scenes,
+        strict=mode == "strict",
+    )
     if not isinstance(state.get("props"), list):
         report.issue("state.props.invalid", "story_state.props 必须是数组")
     if not isinstance(state.get("open_threads"), list):

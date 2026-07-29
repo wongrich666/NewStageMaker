@@ -45,6 +45,17 @@ DEEPSEEK_API_KEY=你的API Key
 DEEPSEEK_MODEL=deepseek-v4-pro
 ```
 
+当前流水线从 CNB 密钥仓库安全导入这些变量：
+
+```text
+https://cnb.cool/xdsyjbpt/miyao/-/blob/main/deepseek.yml
+```
+
+`deepseek.yml` 只能在 CNB 密钥仓库网页端维护，不得提交到普通代码仓库。
+密钥文件应限制 `allow_slugs: xdsyjbpt/jbpt`、`allow_branches: main`，并只允许
+`api_trigger_script_team_custom_api` 与
+`api_trigger_script_team_stage_custom_api` 两个事件引用。
+
 不要把真实 API Key 写入 `.cnb.yml`、Git 仓库或5002前端。
 
 ## 部署

@@ -337,6 +337,11 @@ class CodeBuddyNpcJobStore:
             episode_word_count = min(5000, max(100, int(request_payload.get("episode_word_count") or 800)))
         except (TypeError, ValueError) as exc:
             raise CodeBuddyNpcError("集数或每集字数格式不正确。", status_code=400) from exc
+        scenes_per_episode = _clean_text(
+            request_payload.get("scenes_per_episode"), limit=20
+        ) or "1"
+        if scenes_per_episode not in {"1", "1-2", "2", "2-3", "flexible"}:
+            scenes_per_episode = "1"
         direction, ignored_directions = _normalize_episode_direction(direction, episodes)
 
         job_id = f"npc-{uuid.uuid4().hex[:16]}"
@@ -354,6 +359,7 @@ class CodeBuddyNpcJobStore:
                 "genre": _clean_text(request_payload.get("genre"), limit=100),
                 "episodes": episodes,
                 "episode_word_count": episode_word_count,
+                "scenes_per_episode": scenes_per_episode,
                 "source_text": source_text,
                 "adaptation_direction": direction,
                 "episode_contract": _episode_contract(episodes),
@@ -371,6 +377,8 @@ class CodeBuddyNpcJobStore:
             "execution_target": "remote_cnb",
             "remote_kind": "",
             "remote_stage": "",
+            "remote_retry_count": 0,
+            "remote_retry_limit": 0,
             "active_stage": "",
             "cancel_requested": False,
             "final_script": "",

@@ -41,6 +41,7 @@
       genre: "",
       episodes: 5,
       episode_word_count: 800,
+      scenes_per_episode: "1",
       source_text: "",
       adaptation_direction: "",
       execution_mode: "step",
@@ -298,6 +299,28 @@
     }).join("");
   }
 
+  function renderTeamFlow() {
+    const activeStage = state.job && state.job.active_stage;
+    return `
+      <div class="nwt-team-flow" aria-label="剧本团队工作流">
+        ${TEAM.map((member, index) => {
+          const status = stageStatusByName(member.name);
+          const [, klass] = statusLabel(status);
+          const isRunning = member.id === activeStage && isActive();
+          return `
+            <div class="nwt-flow-step ${klass} ${isRunning ? "active" : ""}">
+              <span class="nwt-flow-node">
+                ${isRunning ? icon("loader-circle", 15) : klass === "done" ? icon("check", 15) : String(index + 1)}
+              </span>
+              <strong>${escapeHtml(member.name)}</strong>
+              ${index < TEAM.length - 1 ? '<i class="nwt-flow-connector"></i>' : ""}
+            </div>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
   function renderBatchProgress(job) {
     const total = Math.max(1, Number((job.request || {}).episodes || state.form.episodes) || 1);
     const progress = job.batch_progress || {};
@@ -460,11 +483,11 @@
       <div class="nwt-shell">
         <header class="nwt-header">
           <div class="nwt-brand">
-            <span class="nwt-brand-mark">剧</span>
+            <span class="nwt-brand-mark">${icon("clapperboard", 22)}</span>
             <div>
-              <p class="nwt-kicker">SCRIPT TEAM · TEST LINE</p>
+              <p class="nwt-kicker">SCRIPT PRODUCTION WORKSPACE</p>
               <h1>专业剧本制作台</h1>
-              <p>动态编剧团队 · 分批断点 · 成本可视</p>
+              <p>从故事架构到成品剧本，节点独立、过程可见、断点可续</p>
             </div>
           </div>
           <div class="nwt-actions">
@@ -493,20 +516,30 @@
               <span>项目名称</span>
               <input data-form-key="project_title" value="${escapeHtml(state.form.project_title)}" placeholder="例如：狼人复仇记" ${active ? "disabled" : ""} />
             </label>
-            <label class="nwt-field">
+            <div class="nwt-field">
               <span>创作模式</span>
-              <select data-form-key="mode" ${active ? "disabled" : ""}>
-                <option value="原创" ${state.form.mode === "原创" ? "selected" : ""}>原创</option>
-                <option value="改编" ${state.form.mode === "改编" ? "selected" : ""}>改编</option>
-              </select>
-            </label>
-            <label class="nwt-field">
+              <div class="nwt-segmented" role="group" aria-label="创作模式">
+                <input type="hidden" data-form-key="mode" value="${escapeHtml(state.form.mode)}" />
+                <button class="nwt-segment-option ${state.form.mode === "原创" ? "active" : ""}" type="button" data-choice-key="mode" data-choice-value="原创" aria-pressed="${state.form.mode === "原创"}" ${active ? "disabled" : ""}>
+                  ${icon("pen-line", 14)}<span>原创</span>
+                </button>
+                <button class="nwt-segment-option ${state.form.mode === "改编" ? "active" : ""}" type="button" data-choice-key="mode" data-choice-value="改编" aria-pressed="${state.form.mode === "改编"}" ${active ? "disabled" : ""}>
+                  ${icon("book-open", 14)}<span>改编</span>
+                </button>
+              </div>
+            </div>
+            <div class="nwt-field">
               <span>成片类型</span>
-              <select data-form-key="production_type" ${active ? "disabled" : ""}>
-                <option value="AI漫剧" ${state.form.production_type === "AI漫剧" ? "selected" : ""}>AI漫剧</option>
-                <option value="AI真人剧" ${state.form.production_type === "AI真人剧" ? "selected" : ""}>AI真人剧</option>
-              </select>
-            </label>
+              <div class="nwt-segmented" role="group" aria-label="成片类型">
+                <input type="hidden" data-form-key="production_type" value="${escapeHtml(state.form.production_type)}" />
+                <button class="nwt-segment-option ${state.form.production_type === "AI漫剧" ? "active" : ""}" type="button" data-choice-key="production_type" data-choice-value="AI漫剧" aria-pressed="${state.form.production_type === "AI漫剧"}" ${active ? "disabled" : ""}>
+                  ${icon("panels-top-left", 14)}<span>AI漫剧</span>
+                </button>
+                <button class="nwt-segment-option ${state.form.production_type === "AI真人剧" ? "active" : ""}" type="button" data-choice-key="production_type" data-choice-value="AI真人剧" aria-pressed="${state.form.production_type === "AI真人剧"}" ${active ? "disabled" : ""}>
+                  ${icon("film", 14)}<span>AI真人剧</span>
+                </button>
+              </div>
+            </div>
             <label class="nwt-field">
               <span>目标市场</span>
               <input data-form-key="target_market" value="${escapeHtml(state.form.target_market)}" placeholder="中国大陆、北美、东南亚..." ${active ? "disabled" : ""} />
@@ -523,13 +556,34 @@
               <span>每集最低字数</span>
               <input type="number" min="100" max="5000" data-form-key="episode_word_count" value="${escapeHtml(state.form.episode_word_count)}" ${active ? "disabled" : ""} />
             </label>
-            <label class="nwt-field">
-              <span>执行方式</span>
-              <select data-form-key="execution_mode" ${active ? "disabled" : ""}>
-                <option value="step" ${state.form.execution_mode === "step" ? "selected" : ""}>CNB远程逐节点确认</option>
-                <option value="auto" ${state.form.execution_mode === "auto" ? "selected" : ""}>CNB远程自动跑到底</option>
-              </select>
+            <label class="nwt-field control-wide">
+              <span>每集场景</span>
+              <div class="nwt-select-control">
+                <span class="nwt-control-icon">${icon("panels-top-left", 16)}</span>
+                <select data-form-key="scenes_per_episode" ${active ? "disabled" : ""}>
+                  <option value="1" ${state.form.scenes_per_episode === "1" ? "selected" : ""}>每集 1 场（默认）</option>
+                  <option value="1-2" ${state.form.scenes_per_episode === "1-2" ? "selected" : ""}>每集 1 至 2 场</option>
+                  <option value="2" ${state.form.scenes_per_episode === "2" ? "selected" : ""}>每集 2 场</option>
+                  <option value="2-3" ${state.form.scenes_per_episode === "2-3" ? "selected" : ""}>每集 2 至 3 场</option>
+                  <option value="flexible" ${state.form.scenes_per_episode === "flexible" ? "selected" : ""}>按剧情灵活安排</option>
+                </select>
+                <span class="nwt-select-chevron">${icon("chevron-down", 15)}</span>
+              </div>
+              <small class="nwt-field-hint">换场会自动要求人物去向与行动承接</small>
             </label>
+            <div class="nwt-field control-wide">
+              <span>执行方式</span>
+              <div class="nwt-segmented nwt-segmented-detail" role="group" aria-label="执行方式">
+                <input type="hidden" data-form-key="execution_mode" value="${escapeHtml(state.form.execution_mode)}" />
+                <button class="nwt-segment-option ${state.form.execution_mode === "step" ? "active" : ""}" type="button" data-choice-key="execution_mode" data-choice-value="step" aria-pressed="${state.form.execution_mode === "step"}" ${active ? "disabled" : ""}>
+                  ${icon("list-checks", 14)}<span>逐节点确认</span>
+                </button>
+                <button class="nwt-segment-option ${state.form.execution_mode === "auto" ? "active" : ""}" type="button" data-choice-key="execution_mode" data-choice-value="auto" aria-pressed="${state.form.execution_mode === "auto"}" ${active ? "disabled" : ""}>
+                  ${icon("fast-forward", 14)}<span>自动跑到底</span>
+                </button>
+              </div>
+              <small class="nwt-field-hint">均由 CNB 远程执行，本地节点仅在失败时兜底</small>
+            </div>
             <label class="nwt-field wide">
               <span>原始材料或创作要求</span>
               <textarea data-form-key="source_text" placeholder="粘贴原文，或写清主角、目标、阻力、结局和必须保留的信息。" ${active ? "disabled" : ""}>${escapeHtml(state.form.source_text)}</textarea>
@@ -600,6 +654,7 @@
             </div>
             ${renderBuildLink()}
           </div>
+          ${renderTeamFlow()}
           ${job.job_id && !active ? `
             <div class="nwt-stage-controls">
               <label>
@@ -910,6 +965,17 @@
   });
 
   app.addEventListener("click", (event) => {
+    const choice = event.target.closest("[data-choice-key]");
+    if (choice) {
+      if (choice.disabled) return;
+      const key = String(choice.dataset.choiceKey || "");
+      const value = String(choice.dataset.choiceValue || "");
+      if (!key || state.form[key] === value) return;
+      state.form[key] = value;
+      saveState();
+      render();
+      return;
+    }
     const button = event.target.closest("[data-action]");
     if (!button) return;
     const action = button.dataset.action;

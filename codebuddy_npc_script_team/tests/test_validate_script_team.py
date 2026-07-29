@@ -205,7 +205,7 @@ def test_english_word_target_is_not_compared_to_character_count() -> None:
     assert not any(item["code"] == "script.episode.too_long" for item in report.errors)
 
 
-def test_more_than_two_state_scenes_requires_reason() -> None:
+def test_default_scene_contract_rejects_extra_state_scenes() -> None:
     state = _state()
     state["episodes"][0]["core_scenes"] = ["工作室", "楼道", "电梯井"]
     script = f"第1集：《第三扇门》\n{_body('别动。')}"
@@ -217,7 +217,53 @@ def test_more_than_two_state_scenes_requires_reason() -> None:
         mode="strict",
     )
 
-    assert any(item["code"] == "state.scenes.excess" for item in report.errors)
+    assert any(item["code"] == "state.scenes.contract" for item in report.errors)
+
+
+def test_two_scene_contract_accepts_two_scenes() -> None:
+    state = _state()
+    state["episodes"][0]["core_scenes"] = ["工作室", "楼道"]
+    script = (
+        "第1集：《第二扇门》\n"
+        f"{_body('别动。')}\n"
+        "场景2：楼道｜夜｜内\n人物：林深\n"
+        "△林深撞开门。\n林深：（急促，眉头紧锁）快走。"
+    )
+
+    report = gate.validate(
+        script,
+        state,
+        {"episodes": 1, "episode_word_count": 100, "scenes_per_episode": "2"},
+        mode="strict",
+    )
+
+    assert not any(item["code"] == "state.scenes.contract" for item in report.errors)
+    assert not any(item["code"] == "script.scene_headers.contract" for item in report.errors)
+
+
+def test_flexible_scene_contract_allows_more_scenes() -> None:
+    state = _state()
+    state["episodes"][0]["core_scenes"] = ["工作室", "楼道", "电梯井"]
+    script = (
+        "第1集：《第三扇门》\n"
+        f"{_body('别动。')}\n"
+        "场景2：楼道｜夜｜内\n人物：林深\n△林深冲进楼道。\n"
+        "场景3：电梯井｜夜｜内\n人物：林深\n△钢索在他头顶断裂。"
+    )
+
+    report = gate.validate(
+        script,
+        state,
+        {
+            "episodes": 1,
+            "episode_word_count": 100,
+            "scenes_per_episode": "flexible",
+        },
+        mode="strict",
+    )
+
+    assert not any(item["code"] == "state.scenes.contract" for item in report.errors)
+    assert not any(item["code"] == "script.scene_headers.contract" for item in report.errors)
 
 
 def test_each_episode_requires_scene_header() -> None:
