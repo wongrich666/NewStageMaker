@@ -59,6 +59,15 @@ STAGE_ARTIFACTS = {
     "state_recorder": "story_state",
     "final_editor": "final_script",
 }
+STAGE_REQUIRED_ARTIFACTS = {
+    "showrunner": (),
+    "story_architect": ("contract",),
+    "character_emotion": ("contract", "story"),
+    "episode_continuity": ("contract", "story", "characters"),
+    "script_writer": ("contract", "story", "characters", "episodes"),
+    "state_recorder": ("contract", "characters", "episodes", "draft"),
+    "final_editor": ("contract", "draft", "story_state"),
+}
 STAGE_NAMES = {
     "showrunner": "总编剧",
     "story_architect": "故事架构师",
@@ -215,10 +224,13 @@ class CodeBuddyNpcJobStore:
         payload["updated_at"] = _now_iso()
         path = self._path(str(payload["job_id"]))
         payload["artifact_files"] = self._persist_artifacts(payload)
-        tmp = path.with_suffix(".tmp")
         with self._lock:
-            tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            tmp.replace(path)
+            tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                tmp.replace(path)
+            finally:
+                tmp.unlink(missing_ok=True)
         return payload
 
     def _persist_artifacts(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -252,9 +264,12 @@ class CodeBuddyNpcJobStore:
         manifest: list[dict[str, Any]] = []
         for key, filename, content in files:
             destination = artifact_dir / filename
-            tmp = destination.with_suffix(destination.suffix + ".tmp")
-            tmp.write_text(content, encoding="utf-8")
-            tmp.replace(destination)
+            tmp = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                tmp.write_text(content, encoding="utf-8")
+                tmp.replace(destination)
+            finally:
+                tmp.unlink(missing_ok=True)
             manifest.append(
                 {
                     "key": key,
@@ -513,9 +528,15 @@ class CodeBuddyNpcClient:
             )
         if stage not in STAGE_ORDER:
             raise CodeBuddyNpcError("未知的剧本团队节点。", status_code=400)
+        recovered_files = job.get("recovered_files")
+        recovered_files = recovered_files if isinstance(recovered_files, dict) else {}
+        required_artifacts = STAGE_REQUIRED_ARTIFACTS[stage]
         artifact_bundle = {
-            "recovered_files": job.get("recovered_files") or {},
-            "final_script": str(job.get("final_script") or ""),
+            "recovered_files": {
+                key: recovered_files[key]
+                for key in required_artifacts
+                if str(recovered_files.get(key) or "").strip()
+            }
         }
         compressed = gzip.compress(
             json.dumps(artifact_bundle, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
