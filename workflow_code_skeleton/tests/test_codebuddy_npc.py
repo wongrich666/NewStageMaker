@@ -342,6 +342,41 @@ def test_trigger_stage_uses_remote_event_and_compressed_checkpoint(tmp_path: Pat
     assert json.loads(payload["env"]["scriptRequest"])["stage_feedback"] == "保留结局"
 
 
+def test_trigger_final_editor_sends_only_required_checkpoint_artifacts(tmp_path: Path) -> None:
+    session = _Session([_Response({"success": True, "sn": "stage-build"})])
+    config = _config(tmp_path)
+    client = CodeBuddyNpcClient(config, session=session)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "终审精简", "source_text": "父子诀别。"},
+    )
+    job["recovered_files"] = {
+        "contract": "创作合同",
+        "story": "不应发送的故事圣经" * 10_000,
+        "characters": "不应发送的人物方案" * 10_000,
+        "episodes": "不应发送的分集卡" * 10_000,
+        "draft": "完整正文",
+        "story_state": '{"continuity":"状态"}',
+    }
+    job["final_script"] = "旧终稿也不应发送"
+
+    client.trigger_stage(job, stage="final_editor")
+
+    payload = session.calls[0][2]["json"]
+    encoded = payload["env"]["scriptStateBundle"]
+    checkpoint = json.loads(
+        gzip.decompress(base64.b64decode(encoded)).decode("utf-8")
+    )
+    assert checkpoint == {
+        "recovered_files": {
+            "contract": "创作合同",
+            "draft": "完整正文",
+            "story_state": '{"continuity":"状态"}',
+        }
+    }
+    assert len(encoded) < 2_000
+
+
 def test_refresh_remote_stage_recovers_artifact(tmp_path: Path) -> None:
     status = {
         "status": "success",
