@@ -182,6 +182,45 @@ def test_editing_upstream_artifact_invalidates_downstream(tmp_path: Path) -> Non
     assert updated["stage_versions"]["story"][-1]["content"] == "旧架构"
 
 
+def test_edited_artifact_is_sent_to_the_next_remote_stage(tmp_path: Path) -> None:
+    session = _Session([_Response({"success": True, "sn": "stage-build"})])
+    config = _config(tmp_path)
+    store = CodeBuddyNpcJobStore(config)
+    job = store.create(
+        user_id=7,
+        request_payload={"project_title": "修改应用", "source_text": "父子诀别"},
+    )
+    job["recovered_files"] = {
+        "contract": "创作合同",
+        "story": "旧故事架构",
+        "characters": "旧人物",
+    }
+    store.save(job)
+    edited = CodeBuddyNpcStageRunner(store).edit_artifact(
+        job_id=job["job_id"],
+        user_id=7,
+        artifact_key="story",
+        content="人工修改后的故事架构",
+    )
+
+    CodeBuddyNpcClient(config, session=session).trigger_stage(
+        edited,
+        stage="character_emotion",
+    )
+
+    payload = session.calls[0][2]["json"]
+    checkpoint = json.loads(
+        gzip.decompress(
+            base64.b64decode(payload["env"]["scriptStateBundle"])
+        ).decode("utf-8")
+    )
+    assert checkpoint["recovered_files"] == {
+        "contract": "创作合同",
+        "story": "人工修改后的故事架构",
+    }
+    assert "characters" not in edited["recovered_files"]
+
+
 def test_local_runner_can_stop_after_framework_team_stage(tmp_path: Path) -> None:
     store = CodeBuddyNpcJobStore(_config(tmp_path))
     job = store.create(

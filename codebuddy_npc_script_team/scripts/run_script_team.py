@@ -82,6 +82,21 @@ DYNAMIC_STAGE_MODULES = {
     "final_editor": ("adversity_payoff",),
 }
 ROUTING_RE = re.compile(r"SKILL_ROUTING_JSON\s*:\s*(\{[^\r\n]+\})")
+EPISODE_HEADER_RE = re.compile(
+    r"(?im)^\s*(?:#{1,6}\s*)?"
+    r"(?:(?:第\s*(?P<zh>\d{1,3})\s*集)|(?:Episode\s*(?P<en>\d{1,3})))"
+    r"(?:\s*[-—:：].*)?\s*$"
+)
+SCENE_HEADER_RE = re.compile(
+    r"(?im)^\s*(?:场景\s*\d+|(?:内|外|内外)\s*[·.．]|(?:INT|EXT)\s*[.．])"
+)
+SCENE_CONTRACTS = {
+    "1": (1, 1, "每一大集必须且只能有1个场景"),
+    "1-2": (1, 2, "每一大集允许1至2个场景"),
+    "2": (2, 2, "每一大集必须且只能有2个场景"),
+    "2-3": (2, 3, "每一大集允许2至3个场景"),
+    "flexible": (1, None, "每一大集按剧情灵活安排，但至少有1个明确场景"),
+}
 
 PROMPTS = {
     "showrunner": """
@@ -116,6 +131,9 @@ episodes 是总集数唯一权威。必须明确写出“完整交付第1集至�
 episodes=N 时必须依次设计第1集至第N集，不得缺集或只设计试写集。
 每集写清：承接点、前五秒短钩子、主角目标、A线与至少一条叠加压力线、场景、
 行动、阻力、选择、代价、转折、结尾钩子、下一集开场承接动作。
+scenes_per_episode 是逐集场景数量硬合同。1表示每一大集只能有一个场景，
+1-2表示每集一至两个，2表示每集必须两个，2-3表示每集两至三个，
+只有 flexible 才允许按剧情灵活安排。不得把一个场景内的小节拍拆成新场景。
 第一集第一有效拍必须达到黄金三秒门槛：至少同时形成冲突、悬念、反差、
 危险后果中的两项。每集至少一个情绪高点，每30至60秒出现一次局势变化或情绪释放。
 前五集必须完成基础立剧，后续只升级、变奏和兑现，不得再补基础人设。
@@ -133,6 +151,8 @@ episode_word_count 是前端动态传入的每集最低字数，不是固定值�
 至少同时形成冲突、悬念、反差、危险后果中的两项；一句话足够时立即收住。
 禁止先铺陈环境、解释背景、逐个介绍人物或罗列道具，再让核心事件迟到。
 每集开头承接上一集结尾动作，每集由主角行动推动，不得瞬移。
+严格执行 scenes_per_episode。场景数按每一大集内出现的“场景N”标题计数；
+一个动作段、冲突阶段或人物进入不能自行升级为新场景。
 每集至少出现一次改变资源、关系、认知、身份、行动条件或风险等级的情绪高点，
 并用尾钩直接改变下一集开场行动，禁止集间冷却或另起无关事件。
 每集只写紧凑场景头“场景N：地点｜日/夜｜内/外”和“人物”，然后立刻进入戏。
@@ -182,9 +202,66 @@ episode_word_count 是前端动态传入的每集最低字数，不是上限。�
 迟疑或未尽之意使用省略号；破折号只保留在突然中断、猛然改口和强制语义跳转处。
 删除装饰性、连续性和动作连接型破折号，不得用破折号给普通句子强行制造紧张感。
 同时修复人物、服装、伤势、道具、时间、场景和AI生成可执行性问题。
+严格保留 scenes_per_episode 的逐集场景数量，不得为了增强节奏擅自增加场景。
 只输出最终完整剧本，不输出评分、解释、JSON、修改说明或复核过程。
 """,
 }
+
+
+def scene_contract_instruction(request_payload: dict) -> str:
+    policy = str(request_payload.get("scenes_per_episode") or "1").strip().lower()
+    if policy not in SCENE_CONTRACTS:
+        policy = "1"
+    _minimum, _maximum, description = SCENE_CONTRACTS[policy]
+    return (
+        f"逐集场景硬合同：scenes_per_episode={policy}，{description}。"
+        "这里的“每集”指第N集这一整集，不是集内的小阶段；"
+        "场景数只按该集中的“场景N：地点｜日/夜｜内/外”标题计算。"
+    )
+
+
+def scene_contract_violations(script: str, request_payload: dict) -> list[str]:
+    policy = str(request_payload.get("scenes_per_episode") or "1").strip().lower()
+    if policy not in SCENE_CONTRACTS:
+        policy = "1"
+    minimum, maximum, _description = SCENE_CONTRACTS[policy]
+    matches = list(EPISODE_HEADER_RE.finditer(script))
+    violations: list[str] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(script)
+        episode = int(match.group("zh") or match.group("en"))
+        scene_count = len(SCENE_HEADER_RE.findall(script[match.end() : end]))
+        if scene_count < minimum or (maximum is not None and scene_count > maximum):
+            expected = str(minimum) if minimum == maximum else (
+                f"{minimum}至{maximum}" if maximum is not None else f"至少{minimum}"
+            )
+            violations.append(
+                f"第{episode}集要求{expected}个场景，实际检测到{scene_count}个"
+            )
+    return violations
+
+
+def prepare_final_editor_gate(request_payload: dict) -> None:
+    draft_path = ROOT / ROLE_FILES["script_writer"]
+    state_path = ROOT / ROLE_FILES["state_recorder"]
+    if not draft_path.is_file() or not state_path.is_file():
+        return
+    try:
+        from validate_script_team import validate
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        report = validate(
+            draft_path.read_text(encoding="utf-8"),
+            state,
+            request_payload,
+            mode="soft",
+        )
+        (ROOT / "gate_pre.json").write_text(
+            json.dumps(report.as_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except (ImportError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"终审前连续性门禁生成失败：{exc}") from exc
 
 
 def read_request() -> dict:
@@ -331,6 +408,8 @@ def call_model(system_prompt: str, user_prompt: str) -> str:
 def run(stage: str) -> None:
     hydrate_remote_state()
     request_payload = read_request()
+    if stage == "final_editor":
+        prepare_final_editor_gate(request_payload)
     request_text = json.dumps(request_payload, ensure_ascii=False, indent=2)
     context = previous_context(stage)
     modules = skill_modules(stage)
@@ -340,9 +419,14 @@ def run(stage: str) -> None:
         f"{context}\n\n"
         f"{modules}\n\n"
         "episodes 是总集数硬合同；episode_word_count 是前端动态传入的每集"
-        "最低字数，只能多不能少且不设上限；补充要求不得与这两项冲突。"
+        "最低字数，只能多不能少且不设上限；补充要求不得与这两项冲突。\n"
+        f"{scene_contract_instruction(request_payload)}"
     )
     result = call_model(PROMPTS[stage], user_prompt)
+    if stage in {"script_writer", "final_editor"}:
+        violations = scene_contract_violations(result, request_payload)
+        if violations:
+            raise SystemExit("逐集场景合同未满足：" + "；".join(violations[:20]))
     output_path = ROOT / ROLE_FILES[stage]
     if stage == "state_recorder":
         output_path.write_text(

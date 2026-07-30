@@ -22,6 +22,7 @@ def _install_fakes(
     *,
     refresh_fails: bool = False,
     refresh_replaces_build: bool = False,
+    refresh_result_pending: bool = False,
 ):
     from workflow_code_skeleton.app import server
 
@@ -92,6 +93,8 @@ def _install_fakes(
 
         def refresh(self, job):
             updated = dict(job)
+            if refresh_result_pending:
+                updated["status"] = "result_pending"
             if refresh_replaces_build:
                 newer = dict(state["job"])
                 newer["build"] = {"sn": "build-newer"}
@@ -232,3 +235,36 @@ def test_stale_poll_cannot_overwrite_a_newer_remote_build(monkeypatch):
     assert state["job"]["build"]["sn"] == "build-newer"
     assert state["job"]["remote_stage"] == "story_architect"
     assert state["job"]["status"] == "running"
+
+
+def test_completed_cloud_stage_cannot_remain_result_pending_forever(monkeypatch):
+    monkeypatch.setenv("CODEBUDDY_NPC_REMOTE_STAGE_RETRIES", "2")
+    server, state = _install_fakes(monkeypatch, refresh_result_pending=True)
+    app = server.create_app()
+    app.config.update(TESTING=True)
+    client = app.test_client()
+    headers = {"Authorization": "Bearer writer-token"}
+
+    created = client.post(
+        "/api/new-workflow-test/npc/jobs",
+        headers=headers,
+        json={
+            "project_title": "云端成功产物恢复",
+            "source_text": "云端结束后必须恢复产物。",
+            "execution_mode": "auto",
+        },
+    )
+    assert created.status_code == 200
+    state["job"]["result_pending_since"] = "2000-01-01T00:00:00+00:00"
+
+    response = client.get(
+        "/api/new-workflow-test/npc/jobs/npc-orchestration-test",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert state["job"]["remote_retry_count"] == 1
+    assert state["job"]["status"] == "running"
+    assert state["job"]["last_remote_error"].startswith(
+        "CNB 构建已成功，但平台未能"
+    )

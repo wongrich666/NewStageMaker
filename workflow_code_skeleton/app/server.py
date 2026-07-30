@@ -155,6 +155,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     codebuddy_npc_remote_retry_limit = min(
         5, max(0, codebuddy_npc_remote_retry_limit)
     )
+    try:
+        codebuddy_npc_result_pending_timeout = int(
+            os.getenv("CODEBUDDY_NPC_RESULT_PENDING_TIMEOUT", "120")
+        )
+    except (TypeError, ValueError):
+        codebuddy_npc_result_pending_timeout = 120
+    codebuddy_npc_result_pending_timeout = max(
+        30, min(600, codebuddy_npc_result_pending_timeout)
+    )
 
     def _submit_remote_npc_stage(
         job: dict[str, Any],
@@ -183,6 +192,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         job["remote_retry_limit"] = codebuddy_npc_remote_retry_limit
         job["active_stage"] = stage
         job.pop("fallback_reason", None)
+        job.pop("result_pending_since", None)
+        job.pop("result_pending_polls", None)
         job["status"] = "running"
         retry_suffix = (
             f"（自动重试 {retry_count}/{codebuddy_npc_remote_retry_limit}）"
@@ -221,6 +232,39 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             ):
                 return latest_job
             job = refreshed_job
+            if str(job.get("status") or "") == "result_pending":
+                pending_since = str(job.get("result_pending_since") or "").strip()
+                if not pending_since:
+                    pending_since = _now_iso()
+                    job["result_pending_since"] = pending_since
+                job["result_pending_polls"] = (
+                    max(0, int(job.get("result_pending_polls") or 0)) + 1
+                )
+                try:
+                    pending_at = datetime.fromisoformat(
+                        pending_since.replace("Z", "+00:00")
+                    )
+                    if pending_at.tzinfo is None:
+                        pending_at = pending_at.replace(tzinfo=timezone.utc)
+                    pending_seconds = max(
+                        0,
+                        (datetime.now(timezone.utc) - pending_at).total_seconds(),
+                    )
+                except (TypeError, ValueError):
+                    pending_seconds = 0
+                if pending_seconds >= codebuddy_npc_result_pending_timeout:
+                    job["status"] = "failed"
+                    job["status_text"] = (
+                        f"{STAGE_NAMES.get(str(job.get('remote_stage') or ''), '远程节点')}"
+                        "云端已结束，但产物读取超时"
+                    )
+                    job["error"] = (
+                        "CNB 构建已成功，但平台未能在限定时间内读取节点产物。"
+                    )
+                    job["active_stage"] = ""
+            else:
+                job.pop("result_pending_since", None)
+                job.pop("result_pending_polls", None)
             job = codebuddy_npc_jobs.save(job)
             if (
                 str(job.get("status") or "") == "failed"
