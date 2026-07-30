@@ -51,6 +51,7 @@
     error: "",
     loading: false,
     selectedArtifact: "",
+    activeView: "brief",
   };
 
   let state = loadState();
@@ -85,6 +86,7 @@
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
         form: state.form,
+        activeView: state.activeView,
         job: state.job ? {
           job_id: state.job.job_id,
           status: state.job.status,
@@ -479,15 +481,17 @@
       : [];
     const episodes = Math.max(1, Number(state.form.episodes) || 1);
     const requestWarnings = Array.isArray(job.request_warnings) ? job.request_warnings : [];
+    const activeView = ["brief", "team", "delivery"].includes(state.activeView)
+      ? state.activeView
+      : (finalScript ? "delivery" : job.job_id ? "team" : "brief");
     app.innerHTML = `
-      <div class="nwt-shell">
+      <div class="nwt-shell nwt-view-${escapeHtml(activeView)}">
         <header class="nwt-header">
           <div class="nwt-brand">
             <span class="nwt-brand-mark">${icon("clapperboard", 22)}</span>
             <div>
-              <p class="nwt-kicker">SCRIPT PRODUCTION WORKSPACE</p>
               <h1>专业剧本制作台</h1>
-              <p>从故事架构到成品剧本，节点独立、过程可见、断点可续</p>
+              <p>项目制创作 · 专业编剧协作 · 全过程可追踪</p>
             </div>
           </div>
           <div class="nwt-actions">
@@ -497,20 +501,42 @@
 
         ${renderConfig()}
 
-        <div class="nwt-layout">
+        <div class="nwt-studio-layout">
         ${renderTaskCenter()}
         <main class="nwt-main">
-        <div class="nwt-create-grid">
+        <nav class="nwt-viewbar" aria-label="制作台工作区">
+          <button type="button" class="${activeView === "brief" ? "active" : ""}" data-action="switch-view" data-view="brief" aria-pressed="${activeView === "brief"}">
+            ${icon("sliders-horizontal", 16)}
+            <span><strong>创作设置</strong><small>需求与生产规格</small></span>
+          </button>
+          <button type="button" class="${activeView === "team" ? "active" : ""}" data-action="switch-view" data-view="team" aria-pressed="${activeView === "team"}">
+            ${icon("workflow", 16)}
+            <span><strong>团队制作</strong><small>节点与中间产物</small></span>
+            ${active ? '<i class="nwt-tab-live"></i>' : ""}
+          </button>
+          <button type="button" class="${activeView === "delivery" ? "active" : ""}" data-action="switch-view" data-view="delivery" aria-pressed="${activeView === "delivery"}">
+            ${icon("file-check-2", 16)}
+            <span><strong>成品交付</strong><small>终稿与文件下载</small></span>
+            ${finalScript ? '<i class="nwt-tab-ready">已就绪</i>' : ""}
+          </button>
+        </nav>
+
+        <div class="nwt-view-panel nwt-brief-view ${activeView === "brief" ? "active" : ""}">
         <section class="nwt-setup">
           <div class="nwt-section-head">
             <div class="nwt-section-title">
               <span class="nwt-section-icon">${icon("clapperboard", 18)}</span>
               <div>
-              <h2>创作任务</h2>
-              <p>按你的题材、集数和成片要求组织专业编剧团队。</p>
+              <h2>项目创作要求</h2>
+              <p>先定义故事方向和交付规格，团队会据此建立统一创作合同。</p>
               </div>
             </div>
           </div>
+          <div class="nwt-form-band">
+            <div class="nwt-form-band-head">
+              <span>01</span>
+              <div><strong>项目定位</strong><small>确定作品身份、受众和题材方向</small></div>
+            </div>
           <div class="nwt-form-grid">
             <label class="nwt-field project">
               <span>项目名称</span>
@@ -548,6 +574,14 @@
               <span>题材</span>
               <input data-form-key="genre" value="${escapeHtml(state.form.genre)}" placeholder="复仇、爱情、悬疑..." ${active ? "disabled" : ""} />
             </label>
+          </div>
+          </div>
+          <div class="nwt-form-band">
+            <div class="nwt-form-band-head">
+              <span>02</span>
+              <div><strong>制作规格</strong><small>控制篇幅、场景密度和执行节奏</small></div>
+            </div>
+          <div class="nwt-form-grid nwt-form-grid-spec">
             <label class="nwt-field">
               <span>总集数</span>
               <input type="number" min="1" max="120" data-form-key="episodes" value="${escapeHtml(state.form.episodes)}" ${active ? "disabled" : ""} />
@@ -584,6 +618,14 @@
               </div>
               <small class="nwt-field-hint">均由 CNB 远程执行，本地节点仅在失败时兜底</small>
             </div>
+          </div>
+          </div>
+          <div class="nwt-form-band nwt-form-band-material">
+            <div class="nwt-form-band-head">
+              <span>03</span>
+              <div><strong>故事材料</strong><small>提供原始内容与本次创作必须遵守的方向</small></div>
+            </div>
+          <div class="nwt-form-grid nwt-material-grid">
             <label class="nwt-field wide">
               <span>原始材料或创作要求</span>
               <textarea data-form-key="source_text" placeholder="粘贴原文，或写清主角、目标、阻力、结局和必须保留的信息。" ${active ? "disabled" : ""}>${escapeHtml(state.form.source_text)}</textarea>
@@ -607,6 +649,7 @@
               </div>
             </label>
           </div>
+          </div>
           <div class="nwt-runbar">
             <div>
               <strong>${escapeHtml(job.status_text || "尚未提交任务")}</strong>
@@ -622,9 +665,9 @@
             </div>
           </div>
         </section>
-        ${renderLiveMonitor(job)}
         </div>
 
+        <div class="nwt-view-panel nwt-team-view ${activeView === "team" ? "active" : ""}">
         ${state.error ? `<div class="nwt-error">${escapeHtml(state.error)}</div>` : ""}
         ${job.poll_warning ? `<div class="nwt-warning">${escapeHtml(job.poll_warning)}</div>` : ""}
         ${job.fallback_reason ? `<div class="nwt-warning">远程 CNB 未能接管，本次已启用本地兜底：${escapeHtml(job.fallback_reason)}</div>` : ""}
@@ -666,8 +709,9 @@
           ` : ""}
           <div class="nwt-team">${renderTeam()}</div>
         </section>
+        </div>
 
-        <section class="nwt-final">
+        <section class="nwt-final nwt-view-panel nwt-delivery-view ${activeView === "delivery" ? "active" : ""}">
           <div class="nwt-final-head">
             <div>
               <h2>最终完整剧本</h2>
@@ -681,6 +725,13 @@
           <div class="nwt-output">${finalScript ? escapeHtml(finalScript) : '<span class="nwt-empty">等待团队交付...</span>'}</div>
         </section>
         </main>
+        <aside class="nwt-inspector">
+          ${renderLiveMonitor(job)}
+          <div class="nwt-inspector-note">
+            <span>${icon("shield-check", 16)}</span>
+            <div><strong>自动保存已开启</strong><small>每个节点完成后立即落盘，可从任务中心继续。</small></div>
+          </div>
+        </aside>
         </div>
       </div>
     `;
@@ -741,6 +792,7 @@
     try {
       const data = await request(`/api/new-workflow-test/npc/jobs/${encodeURIComponent(jobId)}`);
       state.job = data.job || null;
+      state.activeView = state.job && state.job.final_script ? "delivery" : "team";
       if (state.job && state.job.request) {
         state.form = { ...state.form, ...state.job.request };
       }
@@ -772,6 +824,7 @@
     syncForm();
     state.loading = true;
     state.error = "";
+    state.activeView = "team";
     render();
     try {
       const data = await request("/api/new-workflow-test/npc/jobs", state.form);
@@ -1015,6 +1068,15 @@
       saveState();
       render();
       window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    if (action === "switch-view") {
+      const view = String(button.dataset.view || "");
+      if (["brief", "team", "delivery"].includes(view)) {
+        state.activeView = view;
+        saveState();
+        render();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
     }
     if (action === "download") {
       const text = String((state.job || {}).final_script || "");
