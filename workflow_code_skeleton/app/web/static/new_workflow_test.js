@@ -52,6 +52,18 @@
     loading: false,
     selectedArtifact: "",
     activeView: "brief",
+    editor: {
+      open: false,
+      artifactKey: "",
+      stageId: "",
+      mode: "manual",
+      sectionId: "full",
+      content: "",
+      dirty: false,
+      notice: "",
+      feedback: "",
+      continueAfter: false,
+    },
   };
 
   let state = loadState();
@@ -248,13 +260,20 @@
       const chars = artifactChars(member, files, job);
       const stageInfo = (Array.isArray(job.team_stages) ? job.team_stages : [])
         .find((item) => String(item.name || "").includes(member.name));
-      const duration = formatDuration(stageInfo && stageInfo.duration);
-      const expanded = hasOutput && state.selectedArtifact === member.key;
-      const artifactValue = member.key === "final_script"
-        ? String(job.final_script || "")
-        : String(files[member.key] || "");
+      const timing = job.stage_timings && typeof job.stage_timings === "object"
+        ? job.stage_timings[member.id]
+        : null;
+      const durationMs = Number(
+        (timing && (timing.elapsed_ms || timing.duration_ms))
+        || (stageInfo && stageInfo.duration)
+        || 0,
+      );
+      const duration = formatDuration(durationMs);
+      const durationLabel = duration
+        ? `${timing && timing.status === "running" ? "已运行" : "耗时"} ${duration}`
+        : "";
       return `
-        <article class="nwt-member ${klass} ${status === "running" ? "active" : ""} ${expanded ? "expanded" : ""}">
+        <article class="nwt-member ${klass} ${status === "running" ? "active" : ""}">
           <div class="nwt-member-rail">
             <span class="nwt-member-index">${status === "running" ? '<i class="nwt-spinner"></i>' : String(index + 1).padStart(2, "0")}</span>
             ${index < TEAM.length - 1 ? '<span class="nwt-rail-line"></span>' : ""}
@@ -267,35 +286,21 @@
             <p>${escapeHtml(member.responsibility)}</p>
             <div class="nwt-member-meta">
               ${chars ? `<span>${formatNumber(chars)} 字</span>` : ""}
-              ${duration ? `<span>${escapeHtml(duration)}</span>` : ""}
+              ${durationLabel ? `<span>${escapeHtml(durationLabel)}</span>` : ""}
               ${status === "running" && job.batch_progress ? `<span>第${escapeHtml(job.batch_progress.current_start)}-${escapeHtml(job.batch_progress.current_end)}集</span>` : ""}
             </div>
           </div>
           <div class="nwt-member-actions">
             ${hasOutput ? `
-              <button class="nwt-icon-btn ${expanded ? "active" : ""}" type="button" title="${expanded ? "收起产物" : "查看产物"}" data-action="artifact" data-artifact="${member.key}">
-                ${icon(expanded ? "chevron-up" : "file-text")}
+              <button class="nwt-stage-edit" type="button" data-action="open-editor" data-artifact="${member.key}" data-stage="${member.id}">
+                ${icon("file-pen-line", 14)}<span>查看与修改</span>
               </button>
-            ` : ""}
-            <button class="nwt-stage-run" type="button" data-action="run-stage" data-stage="${member.id}" ${canRun ? "" : "disabled"}>
-              ${icon(hasOutput ? "refresh-cw" : "play", 14)}<span>${hasOutput ? "重新运行" : "运行"}</span>
-            </button>
+            ` : `
+              <button class="nwt-stage-run" type="button" data-action="run-stage" data-stage="${member.id}" ${canRun ? "" : "disabled"}>
+                ${icon("play", 14)}<span>运行</span>
+              </button>
+            `}
           </div>
-          ${expanded ? `
-            <div class="nwt-member-artifact">
-              <div class="nwt-artifact-toolbar">
-                <div>
-                  <strong>${escapeHtml(ARTIFACT_LABELS[member.key] || member.name)}</strong>
-                  <span>${formatNumber(artifactValue.length)} 字 · 已保存到任务历史</span>
-                </div>
-                <div class="nwt-actions">
-                  <button class="nwt-btn compact" type="button" data-action="download-artifact" data-artifact="${member.key}">${icon("download", 14)}<span>下载</span></button>
-                  <button class="nwt-btn compact primary-soft" type="button" data-action="save-artifact" data-artifact="${member.key}" ${active ? "disabled" : ""}>${icon("save", 14)}<span>保存修改</span></button>
-                </div>
-              </div>
-              <textarea class="nwt-artifact-editor" data-artifact-editor="${member.key}" ${active ? "disabled" : ""}>${escapeHtml(artifactValue)}</textarea>
-            </div>
-          ` : ""}
         </article>
       `;
     }).join("");
@@ -364,6 +369,14 @@
   function renderLiveMonitor(job) {
     const activeStage = TEAM.find((member) => member.id === job.active_stage);
     const progress = Math.max(0, Math.min(100, Number(job.progress) || 0));
+    const activeDuration = formatDuration(job.active_stage_elapsed_ms);
+    const runtimeText = isActive(job)
+      ? (
+        job.execution_target === "local_fallback"
+          ? `本地兜底正在生成${activeDuration ? ` · 已运行 ${activeDuration}` : ""}`
+          : `CNB Runner 已连接 · 30秒心跳${activeDuration ? ` · 已运行 ${activeDuration}` : ""}`
+      )
+      : "";
     return `
       <aside class="nwt-monitor">
         <div class="nwt-monitor-head">
@@ -374,6 +387,7 @@
           <span class="nwt-live-state ${isActive(job) ? "active" : ""}">${isActive(job) ? "运行中" : progress === 100 ? "已完成" : "待命"}</span>
         </div>
         <p class="nwt-monitor-message">${escapeHtml(job.status_text || "填写任务后开始创作")}</p>
+        ${runtimeText ? `<div class="nwt-runtime-live"><i class="nwt-mini-pulse"></i><span>${escapeHtml(runtimeText)}</span></div>` : ""}
         <div class="nwt-monitor-progress"><span style="width:${progress}%"></span></div>
         <div class="nwt-monitor-progress-meta"><strong>${progress}%</strong><span>${escapeHtml(job.job_id || "尚未创建任务")}</span></div>
         ${job.job_id ? renderBatchProgress(job) : ""}
@@ -392,40 +406,122 @@
     return `<a class="nwt-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">查看 CNB 执行记录</a>`;
   }
 
-  function renderArtifacts(job) {
+  function artifactContent(key) {
+    const job = state.job || {};
+    if (key === "final_script") return String(job.final_script || "");
     const files = job.recovered_files && typeof job.recovered_files === "object"
-      ? { ...job.recovered_files }
+      ? job.recovered_files
       : {};
-    if (job.final_script) files.final_script = job.final_script;
-    const available = Object.keys(files).filter((key) => String(files[key] || "").trim());
-    const keys = [
-      ...Object.keys(ARTIFACT_LABELS).filter((key) => available.includes(key)),
-      ...available.filter((key) => !Object.hasOwn(ARTIFACT_LABELS, key)).sort(),
-    ];
-    if (!keys.length) return "";
-    const selected = keys.includes(state.selectedArtifact) ? state.selectedArtifact : keys[0];
-    state.selectedArtifact = selected;
+    return String(files[key] || "");
+  }
+
+  function artifactSections(content) {
+    const text = String(content || "");
+    const sections = [{ id: "full", title: "全文", start: 0, end: text.length }];
+    if (!text.trim() || /^[\s]*[\[{]/.test(text)) return sections;
+    const matches = [];
+    const headingPattern = /^(#{1,4}\s+.+|第\s*[一二三四五六七八九十百零〇两\d]+\s*集(?:[：:·\s].*)?)\s*$/gm;
+    let match;
+    while ((match = headingPattern.exec(text)) !== null) {
+      matches.push({
+        start: match.index,
+        title: String(match[1] || "").replace(/^#{1,4}\s*/, "").trim(),
+      });
+    }
+    matches.forEach((item, index) => {
+      sections.push({
+        id: `section-${index}`,
+        title: item.title || `片段 ${index + 1}`,
+        start: item.start,
+        end: index + 1 < matches.length ? matches[index + 1].start : text.length,
+      });
+    });
+    return sections;
+  }
+
+  function currentEditorSection() {
+    const editor = state.editor || initialState.editor;
+    const sections = artifactSections(editor.content);
+    return sections.find((item) => item.id === editor.sectionId) || sections[0];
+  }
+
+  function renderEditorWorkspace() {
+    const editor = state.editor || {};
+    if (!editor.open || !editor.artifactKey) return "";
+    const member = TEAM.find((item) => item.id === editor.stageId || item.key === editor.artifactKey);
+    if (!member) return "";
+    const sections = artifactSections(editor.content);
+    const selected = sections.find((item) => item.id === editor.sectionId) || sections[0];
+    const selectedText = String(editor.content || "").slice(selected.start, selected.end);
+    const active = isActive();
+    const manual = editor.mode !== "rewrite";
     return `
-      <section class="nwt-artifacts">
-        <div class="nwt-section-head">
-          <div>
-            <h2>中间产物</h2>
-            <p>任务完成或中断后保存在 5002，可逐项查看和下载。</p>
+      <div class="nwt-editor-backdrop" role="presentation" data-action="editor-backdrop">
+        <section class="nwt-editor-workspace" role="dialog" aria-modal="true" aria-label="查看与修改 ${escapeHtml(member.name)}" data-editor-dialog>
+          <header class="nwt-editor-head">
+            <div>
+              <span class="nwt-editor-kicker">${escapeHtml(member.name)}</span>
+              <h2>${escapeHtml(ARTIFACT_LABELS[editor.artifactKey] || member.name)}</h2>
+              <p>${formatNumber(String(editor.content || "").length)} 字 · 修改会保存到任务历史</p>
+            </div>
+            <div class="nwt-editor-head-actions">
+              <button class="nwt-icon-btn" type="button" title="下载当前产物" data-action="download-artifact" data-artifact="${escapeHtml(editor.artifactKey)}">${icon("download", 17)}</button>
+              <button class="nwt-icon-btn" type="button" title="关闭" data-action="close-editor">${icon("x", 18)}</button>
+            </div>
+          </header>
+          <div class="nwt-editor-body">
+            <aside class="nwt-editor-nav">
+              <strong>内容定位</strong>
+              <span>${sections.length > 1 ? `已识别 ${sections.length - 1} 个章节` : "当前产物按全文编辑"}</span>
+              <nav>
+                ${sections.map((item) => `
+                  <button type="button" class="${item.id === selected.id ? "active" : ""}" data-action="select-editor-section" data-section-id="${item.id}">
+                    ${icon(item.id === "full" ? "align-left" : "bookmark", 14)}
+                    <span>${escapeHtml(item.title)}</span>
+                  </button>
+                `).join("")}
+              </nav>
+            </aside>
+            <div class="nwt-editor-main">
+              <div class="nwt-editor-mode" role="tablist" aria-label="修改方式">
+                <button type="button" class="${manual ? "active" : ""}" data-action="editor-mode" data-mode="manual">
+                  ${icon("text-cursor-input", 15)}<span>直接编辑</span>
+                </button>
+                <button type="button" class="${manual ? "" : "active"}" data-action="editor-mode" data-mode="rewrite">
+                  ${icon("sparkles", 15)}<span>AI 按意见重写</span>
+                </button>
+              </div>
+              ${editor.notice ? `<div class="nwt-editor-notice">${icon("circle-check", 15)}<span>${escapeHtml(editor.notice)}</span></div>` : ""}
+              ${manual ? `
+                <div class="nwt-editor-context">
+                  <div><strong>${escapeHtml(selected.title)}</strong><span>${formatNumber(selectedText.length)} 字</span></div>
+                  <p>直接保存会精确保留你的文字，并使依赖它的后续节点等待重新生成。</p>
+                </div>
+                <textarea class="nwt-editor-textarea" data-editor-section-text ${active ? "disabled" : ""}>${escapeHtml(selectedText)}</textarea>
+                <footer class="nwt-editor-footer">
+                  <span>${editor.dirty ? "有尚未保存的修改" : "当前内容已保存"}</span>
+                  <button class="nwt-btn primary" type="button" data-action="save-editor" ${active ? "disabled" : ""}>${icon("save", 15)}<span>保存修改</span></button>
+                </footer>
+              ` : `
+                <div class="nwt-editor-context">
+                  <div><strong>让 ${escapeHtml(member.name)} 重写</strong><span>范围：${escapeHtml(selected.title)}</span></div>
+                  <p>描述想达到的效果，系统会结合当前产物和上下文重新运行本节点。</p>
+                </div>
+                <div class="nwt-editor-suggestions">
+                  ${["保留主线", "减少解释性对白", "加强开场钩子", "修复集间承接"].map((text) => `
+                    <button type="button" data-action="append-feedback" data-feedback="${escapeHtml(text)}">${escapeHtml(text)}</button>
+                  `).join("")}
+                </div>
+                <textarea class="nwt-editor-feedback" id="nwt-editor-feedback" placeholder="例如：保留现有主线，只重写第一集开场。用一句短促、有即时后果的话制造悬念，人物反应自然，不堆形容词。">${escapeHtml(editor.feedback || "")}</textarea>
+                <footer class="nwt-editor-footer rewrite">
+                  <label class="nwt-check"><input id="nwt-editor-continue" type="checkbox" ${editor.continueAfter ? "checked" : ""} /> 本节点完成后继续运行后续节点</label>
+                  <button class="nwt-btn primary" type="button" data-action="rewrite-editor" ${active ? "disabled" : ""}>${icon("sparkles", 15)}<span>按意见重写本节点</span></button>
+                </footer>
+              `}
+            </div>
           </div>
-          <div class="nwt-actions">
-            <button class="nwt-btn" type="button" data-action="save-artifact" data-artifact="${escapeHtml(selected)}" ${isActive(job) ? "disabled" : ""}>保存修改</button>
-            <button class="nwt-btn" type="button" data-action="download-artifact" data-artifact="${escapeHtml(selected)}">下载当前文件</button>
-          </div>
-        </div>
-        <div class="nwt-artifact-tabs">
-          ${keys.map((key) => `
-            <button class="${key === selected ? "active" : ""}" type="button" data-action="artifact" data-artifact="${escapeHtml(key)}">
-              ${escapeHtml(ARTIFACT_LABELS[key] || key)}
-            </button>
-          `).join("")}
-        </div>
-        <textarea class="nwt-artifact-editor" data-artifact-editor="${escapeHtml(selected)}" ${isActive(job) ? "disabled" : ""}>${escapeHtml(files[selected])}</textarea>
-      </section>
+        </section>
+      </div>
     `;
   }
 
@@ -472,6 +568,7 @@
     const progress = Math.max(0, Math.min(100, Number(job.progress) || 0));
     const active = isActive();
     const finalScript = String(job.final_script || "");
+    const deliveryScript = String(job.delivery_script || finalScript);
     const canRecover = Boolean(job.job_id && String(job.status || "").toLowerCase() === "failed" && !finalScript);
     const qualityGate = job.quality_gate && typeof job.quality_gate === "object" ? job.quality_gate : {};
     const gateErrors = Array.isArray(qualityGate.errors) ? qualityGate.errors : [];
@@ -698,15 +795,6 @@
             ${renderBuildLink()}
           </div>
           ${renderTeamFlow()}
-          ${job.job_id && !active ? `
-            <div class="nwt-stage-controls">
-              <label>
-                <span>给本次节点的修改意见</span>
-                <textarea id="nwt-stage-feedback" placeholder="例如：保留主线，只重写第一集开场；钩子改成一句有危险后果的命令。"></textarea>
-              </label>
-              <label class="nwt-check"><input id="nwt-continue-after" type="checkbox" /> 本节点完成后自动继续到最终剧本</label>
-            </div>
-          ` : ""}
           <div class="nwt-team">${renderTeam()}</div>
         </section>
         </div>
@@ -722,7 +810,7 @@
               <button class="nwt-btn" type="button" data-action="download" ${finalScript ? "" : "disabled"}>${icon("download", 15)}<span>TXT</span></button>
             </div>
           </div>
-          <div class="nwt-output">${finalScript ? escapeHtml(finalScript) : '<span class="nwt-empty">等待团队交付...</span>'}</div>
+          <div class="nwt-output">${deliveryScript ? escapeHtml(deliveryScript) : '<span class="nwt-empty">等待团队交付...</span>'}</div>
         </section>
         </main>
         <aside class="nwt-inspector">
@@ -733,6 +821,7 @@
           </div>
         </aside>
         </div>
+        ${renderEditorWorkspace()}
       </div>
     `;
     window.queueMicrotask(() => window.lucide && window.lucide.createIcons());
@@ -913,10 +1002,10 @@
     }
   }
 
-  async function runStage(stage, localFallback = false) {
+  async function runStage(stage, localFallback = false, options = {}) {
     if (!state.job || !state.job.job_id) return;
-    const feedback = String((document.getElementById("nwt-stage-feedback") || {}).value || "");
-    const continueAfter = Boolean((document.getElementById("nwt-continue-after") || {}).checked);
+    const feedback = String(options.feedback || "");
+    const continueAfter = Boolean(options.continueAfter);
     state.loading = true;
     state.error = "";
     render();
@@ -934,6 +1023,102 @@
       state.loading = false;
       render();
     }
+  }
+
+  function openEditor(stageId, artifactKey) {
+    const content = artifactContent(artifactKey);
+    if (!content.trim()) return;
+    state.editor = {
+      open: true,
+      artifactKey,
+      stageId,
+      mode: "manual",
+      sectionId: "full",
+      content,
+      dirty: false,
+      notice: "",
+      feedback: "",
+      continueAfter: false,
+    };
+    render();
+  }
+
+  function syncEditorBuffer() {
+    const editor = state.editor || {};
+    if (!editor.open) return;
+    const textarea = app.querySelector("[data-editor-section-text]");
+    if (!textarea) return;
+    const selected = currentEditorSection();
+    const replacement = String(textarea.value || "");
+    const current = String(editor.content || "");
+    const previous = current.slice(selected.start, selected.end);
+    if (replacement === previous) return;
+    editor.content = selected.id === "full"
+      ? replacement
+      : `${current.slice(0, selected.start)}${replacement}${current.slice(selected.end)}`;
+    editor.dirty = true;
+    editor.notice = "";
+  }
+
+  function closeEditor() {
+    if (state.editor && state.editor.dirty && !window.confirm("当前修改还没有保存，确定关闭吗？")) return;
+    state.editor = clone(initialState.editor);
+    render();
+  }
+
+  function selectEditorSection(sectionId) {
+    syncEditorBuffer();
+    const sections = artifactSections((state.editor || {}).content);
+    state.editor.sectionId = sections.some((item) => item.id === sectionId) ? sectionId : "full";
+    render();
+  }
+
+  async function saveEditor() {
+    if (!state.job || !state.job.job_id || !(state.editor || {}).artifactKey) return;
+    syncEditorBuffer();
+    const key = state.editor.artifactKey;
+    const content = String(state.editor.content || "");
+    state.loading = true;
+    state.editor.notice = "";
+    render();
+    try {
+      const data = await request(
+        `/api/new-workflow-test/npc/jobs/${encodeURIComponent(state.job.job_id)}/artifacts/${encodeURIComponent(key)}`,
+        { content },
+        "PUT",
+      );
+      state.job = data.job || state.job;
+      state.editor.content = content;
+      state.editor.dirty = false;
+      state.editor.notice = "修改已保存，依赖该内容的后续节点已标记为待重新生成。";
+      saveState();
+      loadHistory(true);
+    } catch (error) {
+      state.error = `保存修改失败：${error.message || error}`;
+    } finally {
+      state.loading = false;
+      render();
+    }
+  }
+
+  function rewriteEditor() {
+    const editor = state.editor || {};
+    if (!editor.open || !editor.stageId) return;
+    const feedbackInput = document.getElementById("nwt-editor-feedback");
+    const feedback = String((feedbackInput || {}).value || editor.feedback || "").trim();
+    if (!feedback) {
+      state.editor.notice = "请先写明希望编剧如何修改。";
+      render();
+      return;
+    }
+    const selected = currentEditorSection();
+    const scopedFeedback = selected.id === "full"
+      ? feedback
+      : `${feedback}\n\n本次只修改“${selected.title}”，其余内容保持原有事实、顺序和结构。`;
+    const continueAfter = Boolean((document.getElementById("nwt-editor-continue") || {}).checked || editor.continueAfter);
+    const stageId = editor.stageId;
+    state.editor = clone(initialState.editor);
+    runStage(stageId, false, { feedback: scopedFeedback, continueAfter });
   }
 
   function fallbackStage() {
@@ -964,29 +1149,6 @@
     }
   }
 
-  async function saveArtifact(key) {
-    if (!state.job || !state.job.job_id) return;
-    const editor = app.querySelector(`[data-artifact-editor="${CSS.escape(key)}"]`);
-    if (!editor) return;
-    state.loading = true;
-    render();
-    try {
-      const data = await request(
-        `/api/new-workflow-test/npc/jobs/${encodeURIComponent(state.job.job_id)}/artifacts/${encodeURIComponent(key)}`,
-        { content: editor.value },
-        "PUT",
-      );
-      state.job = data.job || state.job;
-      saveState();
-      loadHistory();
-    } catch (error) {
-      state.error = `保存修改失败：${error.message || error}`;
-    } finally {
-      state.loading = false;
-      render();
-    }
-  }
-
   function schedulePoll(delay = POLL_MS) {
     if (pollTimer) window.clearTimeout(pollTimer);
     pollTimer = window.setTimeout(pollJob, delay);
@@ -1008,6 +1170,10 @@
   }
 
   app.addEventListener("change", (event) => {
+    if (event.target.id === "nwt-editor-continue") {
+      state.editor.continueAfter = Boolean(event.target.checked);
+      return;
+    }
     if (event.target.matches("[data-upload-target]")) {
       uploadFiles(event.target.files, String(event.target.dataset.uploadTarget || ""));
       return;
@@ -1015,6 +1181,19 @@
     if (!event.target.matches("[data-form-key]")) return;
     syncForm();
     saveState();
+  });
+
+  app.addEventListener("input", (event) => {
+    if (event.target.matches("[data-editor-section-text]")) {
+      state.editor.dirty = true;
+      state.editor.notice = "";
+      const status = app.querySelector(".nwt-editor-footer > span");
+      if (status) status.textContent = "有尚未保存的修改";
+    }
+    if (event.target.id === "nwt-editor-feedback") {
+      state.editor.feedback = String(event.target.value || "");
+      state.editor.notice = "";
+    }
   });
 
   app.addEventListener("click", (event) => {
@@ -1037,21 +1216,37 @@
     if (action === "cancel") cancelRun();
     if (action === "run-stage") runStage(String(button.dataset.stage || ""));
     if (action === "fallback") runStage(fallbackStage(), true);
-    if (action === "save-artifact") saveArtifact(String(button.dataset.artifact || ""));
+    if (action === "open-editor") {
+      openEditor(String(button.dataset.stage || ""), String(button.dataset.artifact || ""));
+    }
+    if (action === "editor-backdrop" && event.target === button) closeEditor();
+    if (action === "close-editor") closeEditor();
+    if (action === "select-editor-section") selectEditorSection(String(button.dataset.sectionId || "full"));
+    if (action === "editor-mode") {
+      if ((state.editor || {}).mode === "manual") syncEditorBuffer();
+      state.editor.mode = String(button.dataset.mode || "manual");
+      state.editor.notice = "";
+      render();
+    }
+    if (action === "append-feedback") {
+      const addition = String(button.dataset.feedback || "");
+      const current = String((state.editor || {}).feedback || "").trim();
+      state.editor.feedback = current ? `${current}；${addition}` : addition;
+      render();
+      const feedback = document.getElementById("nwt-editor-feedback");
+      if (feedback) feedback.focus();
+    }
+    if (action === "save-editor") saveEditor();
+    if (action === "rewrite-editor") rewriteEditor();
     if (action === "refresh-history") loadHistory();
     if (action === "open-history") openHistory(String(button.dataset.jobId || ""));
     if (action === "delete-history") deleteHistory(String(button.dataset.jobId || ""));
-    if (action === "artifact") {
-      const selected = String(button.dataset.artifact || "");
-      state.selectedArtifact = state.selectedArtifact === selected ? "" : selected;
-      render();
-    }
     if (action === "download-artifact") {
       const key = String(button.dataset.artifact || "");
       const files = (state.job || {}).recovered_files || {};
       const extension = key === "story_state" ? "json" : (key === "draft" ? "txt" : "md");
       downloadText(
-        String(files[key] || ""),
+        key === "final_script" ? String((state.job || {}).final_script || "") : String(files[key] || ""),
         `${state.form.project_title || "NPC剧本团队"}-${ARTIFACT_LABELS[key] || key}.${extension}`,
       );
     }
@@ -1079,7 +1274,7 @@
       }
     }
     if (action === "download") {
-      const text = String((state.job || {}).final_script || "");
+      const text = String((state.job || {}).delivery_script || (state.job || {}).final_script || "");
       downloadText(text, `${state.form.project_title || "NPC剧本团队成品"}.txt`);
     }
     if (action === "download-word" && state.job && state.job.job_id) {

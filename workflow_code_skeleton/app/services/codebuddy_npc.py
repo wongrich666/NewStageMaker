@@ -19,6 +19,8 @@ from urllib.parse import urlsplit
 
 import requests
 
+from .script_delivery import build_delivery_script
+
 
 RESULT_BEGIN = "__SCRIPT_TEAM_RESULT_BEGIN__"
 RESULT_END = "__SCRIPT_TEAM_RESULT_END__"
@@ -81,6 +83,65 @@ STAGE_NAMES = {
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _elapsed_ms(started_at: str, ended_at: str = "") -> int:
+    try:
+        start = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+        end = (
+            datetime.fromisoformat(str(ended_at).replace("Z", "+00:00"))
+            if ended_at
+            else datetime.now(timezone.utc)
+        )
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, int((end - start).total_seconds() * 1000))
+
+
+def start_stage_timing(
+    job: dict[str, Any],
+    stage: str,
+    *,
+    reset: bool,
+    execution_target: str,
+) -> None:
+    timings = copy.deepcopy(job.get("stage_timings") or {})
+    current = timings.get(stage) if isinstance(timings.get(stage), dict) else {}
+    if reset or not str(current.get("started_at") or ""):
+        current = {
+            "started_at": _now_iso(),
+            "completed_at": "",
+            "duration_ms": 0,
+        }
+    current["status"] = "running"
+    current["execution_target"] = execution_target
+    current["attempt"] = max(1, int(current.get("attempt") or 0) + (1 if reset else 0))
+    timings[stage] = current
+    job["stage_timings"] = timings
+    job["active_stage_started_at"] = str(current.get("started_at") or "")
+
+
+def finish_stage_timing(job: dict[str, Any], stage: str, *, status: str) -> None:
+    timings = copy.deepcopy(job.get("stage_timings") or {})
+    current = timings.get(stage) if isinstance(timings.get(stage), dict) else {}
+    completed_at = _now_iso()
+    started_at = str(current.get("started_at") or completed_at)
+    current.update(
+        {
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "duration_ms": _elapsed_ms(started_at, completed_at),
+            "status": status,
+        }
+    )
+    timings[stage] = current
+    job["stage_timings"] = timings
+    if str(job.get("active_stage") or "") == stage:
+        job.pop("active_stage_started_at", None)
 
 
 def _clean_text(value: Any, *, limit: int = 200_000) -> str:
@@ -389,6 +450,7 @@ class CodeBuddyNpcJobStore:
             "provider": self.config.public_status(),
             "build": {},
             "team_stages": [],
+            "stage_timings": {},
             "stage_outputs": {},
             "stage_versions": {},
             "execution_mode": _clean_text(request_payload.get("execution_mode"), limit=20) or "step",
@@ -714,6 +776,7 @@ class CodeBuddyNpcClient:
                     if artifact_key == "final_script"
                     else f"{STAGE_NAMES[remote_stage]}已完成，等待确认"
                 )
+                finish_stage_timing(refreshed, remote_stage, status="success")
                 refreshed["active_stage"] = ""
                 refreshed["progress"] = round(
                     (STAGE_ORDER.index(remote_stage) + 1) / len(STAGE_ORDER) * 100
@@ -908,6 +971,23 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
     provider = payload.get("provider")
     if isinstance(provider, dict):
         provider.pop("access_token", None)
+    timings = payload.get("stage_timings")
+    if isinstance(timings, dict):
+        for timing in timings.values():
+            if not isinstance(timing, dict):
+                continue
+            if str(timing.get("status") or "") == "running":
+                timing["elapsed_ms"] = _elapsed_ms(str(timing.get("started_at") or ""))
+            else:
+                timing["elapsed_ms"] = max(0, int(timing.get("duration_ms") or 0))
+    active_stage = str(payload.get("active_stage") or "")
+    active_timing = timings.get(active_stage) if isinstance(timings, dict) else {}
+    payload["active_stage_elapsed_ms"] = (
+        max(0, int((active_timing or {}).get("elapsed_ms") or 0))
+        if isinstance(active_timing, dict)
+        else 0
+    )
+    payload["delivery_script"] = build_delivery_script(payload)
     return payload
 
 

@@ -49,3 +49,89 @@ def test_script_team_docx_uses_episode_scene_and_script_styles(tmp_path: Path) -
     assert by_text["△ 艾拉攥紧账单，门外传来三声敲门。"].runs[0].bold is not True
     assert by_text["艾拉：（压低声音，眉心微蹙）谁？"].runs[0].bold is True
     assert by_text["艾拉OS：他不该知道这里。"].runs[0].bold is True
+
+
+def test_script_team_docx_accepts_markdown_combined_title_and_episode(tmp_path: Path) -> None:
+    source = tmp_path / "markdown-script.txt"
+    output = tmp_path / "markdown-script.docx"
+    source.write_text(
+        "\n".join(
+            [
+                "# 《暗夜吸血鬼不恋爱脑》第1集：《银刃》",
+                "",
+                "## 场景1：瓦伦丁集团顶层会议室｜夜｜内",
+                "",
+                "人物：莱奥诺尔、马尔科",
+                "",
+                "莱奥诺尔翻开董事会文件。",
+                "",
+                "**莱奥诺尔**：（未抬眼）背叛者不自裁。",
+                "",
+                "---",
+                "",
+                "## 场景2：集团地下车库｜夜｜内",
+                "",
+                "人物：莱奥诺尔",
+                "",
+                "▲莱奥诺尔停在银色轿车前。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    convert_script_team(str(source), str(output), title="暗夜吸血鬼不恋爱脑")
+
+    document = Document(output)
+    paragraphs = [paragraph for paragraph in document.paragraphs if paragraph.text.strip()]
+    by_text = {paragraph.text: paragraph for paragraph in paragraphs}
+
+    assert len(paragraphs) > 5
+    assert by_text["第 1 集"].style.name == "Heading 1"
+    assert "《银刃》" in by_text
+    assert by_text["1-1 瓦伦丁集团顶层会议室｜夜｜内"].style.name == "Heading 2"
+    assert by_text["1-2 集团地下车库｜夜｜内"].style.name == "Heading 2"
+    assert by_text["莱奥诺尔：（未抬眼）背叛者不自裁。"].runs[0].bold is True
+    assert "---" not in by_text
+
+
+def test_script_team_docx_renders_delivery_overview_before_script(tmp_path: Path) -> None:
+    source = tmp_path / "delivery-script.txt"
+    output = tmp_path / "delivery-script.docx"
+    source.write_text(
+        "\n".join(
+            [
+                "# 剧本大纲",
+                "## 基本信息",
+                "- **作品名称**：《我有99条命但没人信》",
+                "- **总集数**：5集",
+                "## 故事背景",
+                "天阶城以命格划分人的价值。",
+                "## 故事梗概",
+                "林烬必须在三天内完成第99次死亡。",
+                "第1集：主角完成第98次死亡，第2集继续追查。",
+                "## 核心主线",
+                "- **主角目标**：活过夺格大典。",
+                "## 主要人物",
+                "- **林烬——主角**：被全城当成废物的复活者。",
+                "# 剧本正文",
+                "第1集：《第98次死亡》",
+                "场景1：暗巷｜夜｜外",
+                "人物：林烬",
+                "林烬睁开眼。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    convert_script_team(str(source), str(output), title="我有99条命但没人信")
+
+    document = Document(output)
+    paragraphs = [paragraph for paragraph in document.paragraphs if paragraph.text.strip()]
+    by_text = {paragraph.text: paragraph for paragraph in paragraphs}
+
+    assert by_text["剧本大纲"].style.name == "Heading 1"
+    assert by_text["故事背景"].style.name == "Heading 2"
+    assert "天阶城以命格划分人的价值。" in by_text
+    assert by_text["第 1 集"].style.name == "Heading 1"
+    assert paragraphs.index(by_text["主要人物"]) < paragraphs.index(by_text["第 1 集"])
+    assert [paragraph.text for paragraph in paragraphs].count("第 1 集") == 1

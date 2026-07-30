@@ -13,7 +13,9 @@ from workflow_code_skeleton.app.services.codebuddy_npc import (
     CodeBuddyNpcConfig,
     CodeBuddyNpcError,
     CodeBuddyNpcJobStore,
+    finish_stage_timing,
     public_job,
+    start_stage_timing,
 )
 from workflow_code_skeleton.app.services.codebuddy_npc_stage_runner import (
     CodeBuddyNpcStageRunner,
@@ -85,6 +87,29 @@ def test_job_store_preserves_request_and_user_boundary(tmp_path: Path) -> None:
     assert job["request"]["scenes_per_episode"] == "1"
     assert store.load(job["job_id"], user_id=7)["user_id"] == 7
     assert store.load(job["job_id"], user_id=8) is None
+
+
+def test_stage_timing_is_live_then_persists_completed_duration() -> None:
+    job = {"stage_timings": {}, "active_stage": "story_architect"}
+
+    start_stage_timing(
+        job,
+        "story_architect",
+        reset=True,
+        execution_target="remote_cnb",
+    )
+    live = public_job(job)
+
+    assert live["stage_timings"]["story_architect"]["status"] == "running"
+    assert live["stage_timings"]["story_architect"]["execution_target"] == "remote_cnb"
+    assert live["active_stage_elapsed_ms"] >= 0
+
+    finish_stage_timing(job, "story_architect", status="success")
+    finished = public_job(job)
+
+    assert finished["stage_timings"]["story_architect"]["status"] == "success"
+    assert finished["stage_timings"]["story_architect"]["completed_at"]
+    assert finished["stage_timings"]["story_architect"]["duration_ms"] >= 0
 
 
 def test_job_store_preserves_dynamic_scene_contract(tmp_path: Path) -> None:

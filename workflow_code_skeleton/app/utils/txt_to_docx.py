@@ -685,7 +685,8 @@ def convert(input_path: str, output_path: str):
 
 
 SCRIPT_EPISODE_HEADER = re.compile(
-    r"^\s*(?:#{1,6}\s*)?第\s*(\d{1,3})\s*集"
+    r"^\s*(?:#{1,6}\s*)?(?:《[^》\r\n]+》\s*[·\-—]?\s*)?"
+    r"第\s*(\d{1,3})\s*集"
     r"(?:\s*[：:]\s*(《[^》\r\n]+》|[^\r\n]+))?\s*$"
 )
 SCRIPT_SCENE_HEADER = re.compile(
@@ -712,6 +713,7 @@ def _set_script_run_font(run, *, size: float = 12, bold: bool = False, italic: b
 
 def _clean_script_line(value: str) -> str:
     text = str(value or "").strip()
+    text = re.sub(r"^\s*#{1,6}\s*", "", text)
     text = re.sub(r"^\s*[-*]\s+", "", text)
     text = text.replace("**", "")
     return text.strip()
@@ -737,7 +739,7 @@ def convert_script_team(input_path: str, output_path: str, *, title: str = ""):
     normal.paragraph_format.line_spacing = 1.45
     normal.paragraph_format.space_after = Pt(5)
 
-    for style_name, size in (("Heading 1", 16), ("Heading 2", 13)):
+    for style_name, size in (("Heading 1", 16), ("Heading 2", 13), ("Heading 3", 12)):
         style = document.styles[style_name]
         style.font.name = "SimSun"
         style.font.size = Pt(size)
@@ -745,16 +747,39 @@ def convert_script_team(input_path: str, output_path: str, *, title: str = ""):
         style._element.get_or_add_rPr().rFonts.set(qn("w:eastAsia"), "宋体")
         style.paragraph_format.keep_with_next = True
 
-    first_episode_index = next(
-        (index for index, line in enumerate(lines) if SCRIPT_EPISODE_HEADER.match(_clean_script_line(line))),
+    script_body_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if _clean_script_line(line) in {"剧本正文", "四、剧本正文"}
+        ),
         None,
     )
+    script_start_index = script_body_index + 1 if script_body_index is not None else 0
+    first_episode_index = next(
+        (
+            index
+            for index, line in enumerate(lines[script_start_index:], start=script_start_index)
+            if SCRIPT_EPISODE_HEADER.match(_clean_script_line(line))
+        ),
+        None,
+    )
+    overview_end_index = (
+        script_body_index
+        if script_body_index is not None
+        else first_episode_index
+    )
     source_title = ""
-    if first_episode_index is not None:
-        for line in lines[:first_episode_index]:
+    if overview_end_index is not None:
+        for line in lines[:overview_end_index]:
             candidate = _clean_script_line(line)
-            if candidate and candidate not in {"剧本正文", "四、剧本正文"}:
+            title_match = re.fullmatch(r"《[^》\r\n]+》", candidate)
+            labeled_title = re.match(r"^作品名称\s*[：:]\s*(《[^》\r\n]+》)", candidate)
+            if title_match:
                 source_title = candidate
+                break
+            if labeled_title:
+                source_title = labeled_title.group(1)
                 break
     display_title = _clean_script_line(title) or source_title or "完整剧本"
     if not (display_title.startswith("《") and display_title.endswith("》")):
@@ -768,11 +793,46 @@ def convert_script_team(input_path: str, output_path: str, *, title: str = ""):
     title_run = title_paragraph.add_run(display_title)
     _set_script_run_font(title_run, size=20, bold=True)
 
+    has_overview = False
+    if overview_end_index is not None:
+        for raw_line in lines[:overview_end_index]:
+            stripped = _clean_script_line(raw_line)
+            if (
+                not stripped
+                or stripped in {"剧本正文", "四、剧本正文"}
+                or re.fullmatch(r"[-*_]{3,}", stripped)
+                or stripped == display_title
+            ):
+                continue
+            heading_match = re.match(r"^\s*(#{1,6})\s*(.+?)\s*$", raw_line)
+            if heading_match:
+                heading_text = _clean_script_line(heading_match.group(2))
+                if heading_text in {"剧本正文", "四、剧本正文"}:
+                    continue
+                heading_level = min(3, len(heading_match.group(1)))
+                paragraph = document.add_paragraph(style=f"Heading {heading_level}")
+                paragraph.paragraph_format.space_before = Pt(8)
+                paragraph.paragraph_format.space_after = Pt(6)
+                run = paragraph.add_run(heading_text)
+                _set_script_run_font(
+                    run,
+                    size={1: 16, 2: 13, 3: 12}[heading_level],
+                    bold=True,
+                )
+                has_overview = True
+                continue
+            is_list_item = bool(re.match(r"^\s*[-+*]\s+", raw_line))
+            paragraph = document.add_paragraph(style="List Bullet" if is_list_item else None)
+            paragraph.paragraph_format.space_after = Pt(4)
+            run = paragraph.add_run(stripped)
+            _set_script_run_font(run, size=12)
+            has_overview = True
+
     episode_number = 0
     scene_number = 0
     content_started = False
     previous_blank = False
-    for raw_line in lines:
+    for raw_line in lines[script_start_index:]:
         stripped = _clean_script_line(raw_line)
         if not stripped:
             if content_started and not previous_blank:
@@ -780,11 +840,13 @@ def convert_script_team(input_path: str, output_path: str, *, title: str = ""):
                 spacer.paragraph_format.space_after = Pt(2)
             previous_blank = True
             continue
+        if re.fullmatch(r"[-*_]{3,}", stripped):
+            continue
         previous_blank = False
 
         episode_match = SCRIPT_EPISODE_HEADER.match(stripped)
         if episode_match:
-            if content_started:
+            if content_started or has_overview:
                 document.add_page_break()
             content_started = True
             episode_number = int(episode_match.group(1))

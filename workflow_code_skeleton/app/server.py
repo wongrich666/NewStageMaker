@@ -44,6 +44,7 @@ from .services.codebuddy_npc import (
     CodeBuddyNpcConfig,
     CodeBuddyNpcError,
     CodeBuddyNpcJobStore,
+    start_stage_timing,
     public_job,
 )
 from .services.codebuddy_npc_stage_runner import CodeBuddyNpcStageRunner
@@ -191,6 +192,12 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         job["remote_retry_count"] = max(0, int(retry_count))
         job["remote_retry_limit"] = codebuddy_npc_remote_retry_limit
         job["active_stage"] = stage
+        start_stage_timing(
+            job,
+            stage,
+            reset=retry_count == 0,
+            execution_target="remote_cnb",
+        )
         job.pop("fallback_reason", None)
         job.pop("result_pending_since", None)
         job.pop("result_pending_polls", None)
@@ -8620,13 +8627,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         title = str(request_data.get("project_title") or "完整剧本").strip()
         safe_title = re.sub(r'[\\/:*?"<>|\r\n]+', "_", title).strip(" ._") or "完整剧本"
         try:
+            from .services.script_delivery import build_delivery_script
             from .utils.txt_to_docx import convert_script_team
 
             with tempfile.TemporaryDirectory(prefix="npc-script-docx-") as tmp_dir:
                 tmp_path = Path(tmp_dir)
                 txt_path = tmp_path / "final_script.txt"
                 docx_path = tmp_path / "final_script.docx"
-                txt_path.write_text(final_script, encoding="utf-8")
+                txt_path.write_text(build_delivery_script(job), encoding="utf-8")
                 convert_script_team(
                     str(txt_path),
                     str(docx_path),

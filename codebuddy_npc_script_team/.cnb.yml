@@ -106,6 +106,7 @@ main:
               第一集场景头后的第一有效拍必须直接抛出异常结果、高压命令、关系反转
               或主角即将付出代价的动作；禁止先解释背景、扫描环境或逐个介绍人物。
               每集只保留“场景N：地点｜日/夜｜内/外”和“人物”两项紧凑场景头，
+              场景头和人物行使用纯文本，不添加 Markdown 加粗或标题符号，
               然后立即进入戏。禁止输出“场景任务”和独立“道具”清单；道具只在
               人物真正使用时自然写入动作。换场重新写场景头和人物即可。
               所有对白必须独立成行并写成“人物名：台词”；所有心理活动必须
@@ -256,6 +257,8 @@ main:
           DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL}
           DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
           DEEPSEEK_MODEL: ${DEEPSEEK_MODEL}
+          DEEPSEEK_TIMEOUT: "1200"
+          SCRIPT_TEAM_HEARTBEAT_SECONDS: "30"
       imports:
         - https://cnb.cool/xdsyjbpt/miyao/-/blob/main/deepseek.yml
       sandbox: true
@@ -315,6 +318,8 @@ main:
           DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL}
           DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
           DEEPSEEK_MODEL: ${DEEPSEEK_MODEL}
+          DEEPSEEK_TIMEOUT: "1200"
+          SCRIPT_TEAM_HEARTBEAT_SECONDS: "30"
       imports:
         - https://cnb.cool/xdsyjbpt/miyao/-/blob/main/deepseek.yml
       sandbox: true

@@ -7,6 +7,8 @@ import json
 import os
 import re
 import sys
+import threading
+import time
 from pathlib import Path
 
 import requests
@@ -83,12 +85,15 @@ DYNAMIC_STAGE_MODULES = {
 }
 ROUTING_RE = re.compile(r"SKILL_ROUTING_JSON\s*:\s*(\{[^\r\n]+\})")
 EPISODE_HEADER_RE = re.compile(
-    r"(?im)^\s*(?:#{1,6}\s*)?"
+    r"(?im)^\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*"
     r"(?:(?:第\s*(?P<zh>\d{1,3})\s*集)|(?:Episode\s*(?P<en>\d{1,3})))"
-    r"(?:\s*[-—:：].*)?\s*$"
+    r"(?:\s*[-—:：].*)?(?:\*\*|__)?\s*$"
 )
 SCENE_HEADER_RE = re.compile(
-    r"(?im)^\s*(?:场景\s*\d+|(?:内|外|内外)\s*[·.．]|(?:INT|EXT)\s*[.．])"
+    r"(?im)^\s*(?:#{1,6}\s+)?(?:[-+*]\s+)?(?:\*\*|__)?\s*"
+    r"(?:场景\s*(?:\d+|[一二三四五六七八九十百零〇两]+)?\s*(?=[：:])"
+    r"|\d{1,3}\s*[-－—]\s*\d{1,2}(?=\s|[：:])"
+    r"|(?:内|外|内外)\s*[·.．]|(?:INT|EXT)\s*[.．])"
 )
 SCENE_CONTRACTS = {
     "1": (1, 1, "每一大集必须且只能有1个场景"),
@@ -138,7 +143,6 @@ scenes_per_episode 是逐集场景数量硬合同。1表示每一大集只能有
 危险后果中的两项。每集至少一个情绪高点，每30至60秒出现一次局势变化或情绪释放。
 前五集必须完成基础立剧，后续只升级、变奏和兑现，不得再补基础人设。
 男频默认男主持续推动，女频默认女主持续推动；场景转换必须说明为什么去。
-原则上每集1至2个核心场景，剧情需要时可以增加。
 """,
     "script_writer": """
 你是唯一的正文与对白编剧。根据全部锁定材料写出完整分集剧本。
@@ -156,6 +160,7 @@ episode_word_count 是前端动态传入的每集最低字数，不是固定值�
 每集至少出现一次改变资源、关系、认知、身份、行动条件或风险等级的情绪高点，
 并用尾钩直接改变下一集开场行动，禁止集间冷却或另起无关事件。
 每集只写紧凑场景头“场景N：地点｜日/夜｜内/外”和“人物”，然后立刻进入戏。
+场景头和人物行使用纯文本，不添加 Markdown 加粗符号或标题符号。
 禁止输出“场景任务”和独立“道具”清单；道具只在人物真正使用时自然写入动作。
 每次换场重新写场景头和人物即可。
 所有对白必须独立成行，采用“人物名：台词”；所有心理活动必须采用
@@ -367,7 +372,35 @@ def parse_json_result(text: str) -> dict:
     return payload
 
 
-def call_model(system_prompt: str, user_prompt: str) -> str:
+def _positive_env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _emit_heartbeats(
+    stop_event: threading.Event,
+    interval_seconds: int,
+    label: str,
+    *,
+    started_at: float | None = None,
+    clock=time.monotonic,
+) -> None:
+    started = clock() if started_at is None else started_at
+    sequence = 0
+    while not stop_event.wait(interval_seconds):
+        sequence += 1
+        elapsed = max(0, int(clock() - started))
+        print(
+            f"__SCRIPT_TEAM_HEARTBEAT__ stage={label} "
+            f"sequence={sequence} elapsed_seconds={elapsed}",
+            flush=True,
+        )
+
+
+def call_model(system_prompt: str, user_prompt: str, *, stage: str = "unknown") -> str:
     url = os.getenv("DEEPSEEK_BASE_URL", "").strip()
     api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
     model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro").strip()
@@ -376,23 +409,58 @@ def call_model(system_prompt: str, user_prompt: str) -> str:
     normalized_url = url.rstrip("/")
     if not normalized_url.endswith("/chat/completions"):
         normalized_url = f"{normalized_url}/chat/completions"
-    response = requests.post(
-        normalized_url,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt.strip()},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.55,
-            "stream": False,
-        },
-        timeout=int(os.getenv("DEEPSEEK_TIMEOUT", "600")),
+    timeout_seconds = _positive_env_int(
+        "DEEPSEEK_TIMEOUT",
+        1200,
+        minimum=60,
+        maximum=3600,
     )
+    heartbeat_seconds = _positive_env_int(
+        "SCRIPT_TEAM_HEARTBEAT_SECONDS",
+        30,
+        minimum=10,
+        maximum=120,
+    )
+    stop_event = threading.Event()
+    heartbeat = threading.Thread(
+        target=_emit_heartbeats,
+        args=(stop_event, heartbeat_seconds, stage),
+        daemon=True,
+        name=f"script-team-heartbeat-{stage}",
+    )
+    print(
+        f"__SCRIPT_TEAM_MODEL_BEGIN__ stage={stage} "
+        f"timeout_seconds={timeout_seconds} heartbeat_seconds={heartbeat_seconds}",
+        flush=True,
+    )
+    heartbeat.start()
+    started_at = time.monotonic()
+    try:
+        response = requests.post(
+            normalized_url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt.strip()},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.55,
+                "stream": False,
+            },
+            timeout=timeout_seconds,
+        )
+    finally:
+        stop_event.set()
+        heartbeat.join(timeout=1)
+        print(
+            f"__SCRIPT_TEAM_MODEL_END__ stage={stage} "
+            f"elapsed_seconds={max(0, int(time.monotonic() - started_at))}",
+            flush=True,
+        )
     if response.status_code >= 400:
         raise SystemExit(f"DeepSeek HTTP {response.status_code}: {response.text[:1000]}")
     payload = response.json()
@@ -422,7 +490,7 @@ def run(stage: str) -> None:
         "最低字数，只能多不能少且不设上限；补充要求不得与这两项冲突。\n"
         f"{scene_contract_instruction(request_payload)}"
     )
-    result = call_model(PROMPTS[stage], user_prompt)
+    result = call_model(PROMPTS[stage], user_prompt, stage=stage)
     if stage in {"script_writer", "final_editor"}:
         violations = scene_contract_violations(result, request_payload)
         if violations:

@@ -13,6 +13,8 @@ from .codebuddy_npc import (
     STAGE_ORDER,
     CodeBuddyNpcError,
     CodeBuddyNpcJobStore,
+    finish_stage_timing,
+    start_stage_timing,
 )
 from .deepseek_agent import DeepSeekAgentError, deepseek_agent_client
 
@@ -442,12 +444,24 @@ class CodeBuddyNpcStageRunner:
             )
         self._invalidate_from(job, stage)
         # A failed CNB auto job can be taken over locally from any recovered checkpoint.
+        timing = (job.get("stage_timings") or {}).get(stage) or {}
+        continuing_remote_attempt = (
+            str(job.get("execution_target") or "") == "remote_cnb"
+            and str(job.get("remote_stage") or "") == stage
+            and str(timing.get("status") or "") == "running"
+        )
         job["execution_mode"] = "step"
         job["execution_target"] = "local_fallback"
         job["remote_continue_after"] = False
         job["status"] = "stage_running"
         job["status_text"] = f"{STAGE_NAMES[stage]}正在运行"
         job["active_stage"] = stage
+        start_stage_timing(
+            job,
+            stage,
+            reset=not continuing_remote_attempt,
+            execution_target="local_fallback",
+        )
         job["cancel_requested"] = False
         job["stop_after_stage"] = stop_after_stage
         job["progress"] = round(STAGE_ORDER.index(stage) / len(STAGE_ORDER) * 100)
@@ -594,6 +608,9 @@ class CodeBuddyNpcStageRunner:
         except (CodeBuddyNpcError, DeepSeekAgentError, Exception) as exc:
             job = self.store.load(job_id, user_id=user_id)
             if job:
+                failed_stage = str(job.get("active_stage") or "")
+                if failed_stage in STAGE_ORDER:
+                    finish_stage_timing(job, failed_stage, status="failed")
                 job["status"] = "failed"
                 job["status_text"] = f"{STAGE_NAMES.get(job.get('active_stage'), '节点')}运行失败"
                 job["error"] = str(exc)
@@ -605,6 +622,13 @@ class CodeBuddyNpcStageRunner:
 
     def _execute_stage(self, job: dict[str, Any], stage: str, feedback: str) -> None:
         job["active_stage"] = stage
+        timing = (job.get("stage_timings") or {}).get(stage) or {}
+        start_stage_timing(
+            job,
+            stage,
+            reset=str(timing.get("status") or "") != "running",
+            execution_target="local_fallback",
+        )
         job["status"] = "stage_running"
         job["status_text"] = f"{STAGE_NAMES[stage]}正在运行"
         job["error"] = ""
@@ -672,6 +696,7 @@ class CodeBuddyNpcStageRunner:
         outputs = copy.deepcopy(fresh.get("stage_outputs") or {})
         outputs[STAGE_NAMES[stage]] = result
         fresh["stage_outputs"] = outputs
+        finish_stage_timing(fresh, stage, status="success")
         stages = []
         for item in STAGE_ORDER:
             artifact_key = STAGE_ARTIFACTS[item]
@@ -683,7 +708,10 @@ class CodeBuddyNpcStageRunner:
                     "id": item,
                     "name": STAGE_NAMES[item],
                     "status": "success" if has_output else ("running" if item == stage else "pending"),
-                    "duration": None,
+                    "duration": int(
+                        ((fresh.get("stage_timings") or {}).get(item) or {}).get("duration_ms")
+                        or 0
+                    ),
                 }
             )
         fresh["team_stages"] = stages

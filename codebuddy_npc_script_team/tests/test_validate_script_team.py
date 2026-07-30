@@ -266,6 +266,25 @@ def test_flexible_scene_contract_allows_more_scenes() -> None:
     assert not any(item["code"] == "script.scene_headers.contract" for item in report.errors)
 
 
+def test_scene_gate_accepts_markdown_bold_scene_header() -> None:
+    script = (
+        "第1集：《第二扇门》\n"
+        "**场景1：工作室｜夜｜内**\n"
+        "**人物**：林深\n"
+        "△林深撞开门。\n"
+        "林深：（急促，眉头紧锁）快走。"
+    )
+
+    report = gate.validate(
+        script,
+        _state(),
+        {"episodes": 1, "episode_word_count": 20, "scenes_per_episode": "1"},
+        mode="strict",
+    )
+
+    assert not any(item["code"].startswith("script.scene_headers") for item in report.errors)
+
+
 def test_each_episode_requires_scene_header() -> None:
     script = "片名：墙后的人\n第1集：《墙后三响》\n" + (
         "别回头。林深盯着自动出现的句子，手指停在退格键上。" * 5
