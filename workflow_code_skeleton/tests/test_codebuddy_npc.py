@@ -79,12 +79,15 @@ def test_job_store_preserves_request_and_user_boundary(tmp_path: Path) -> None:
             "production_type": "AI真人剧",
             "episodes": 5,
             "episode_word_count": 800,
+            "episode_duration_seconds": 75,
             "source_text": "一个不能被忘记的约定。",
         },
     )
 
     assert job["request"]["project_title"] == "测试剧"
     assert job["request"]["scenes_per_episode"] == "1"
+    assert job["request"]["episode_duration_seconds"] == 75
+    assert job["request"]["total_duration_seconds"] == 375
     assert store.load(job["job_id"], user_id=7)["user_id"] == 7
     assert store.load(job["job_id"], user_id=8) is None
 
@@ -124,6 +127,70 @@ def test_job_store_preserves_dynamic_scene_contract(tmp_path: Path) -> None:
     )
 
     assert job["request"]["scenes_per_episode"] == "2"
+
+
+def test_job_store_builds_continuation_episode_range(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={
+            "project_title": "未完的王座",
+            "mode": "续写",
+            "source_text": "\n\n".join(
+                [
+                    f"第{episode}集：《旧事{episode}》\n场景1：王宫｜夜｜内\n林烬：继续。"
+                    for episode in range(1, 6)
+                ]
+            ),
+            "continuation_target_episode": 10,
+            "episode_duration_seconds": 75,
+            "continuation_policy": "strict",
+        },
+    )
+
+    assert job["request"]["mode"] == "续写"
+    assert job["request"]["source_last_episode"] == 5
+    assert job["request"]["episode_start"] == 6
+    assert job["request"]["episode_end"] == 10
+    assert job["request"]["episodes"] == 5
+    assert job["request"]["series_total_episodes"] == 10
+    assert job["request"]["total_duration_seconds"] == 375
+    assert job["request"]["continuation_policy"] == "strict"
+    assert "第6集至第10集" in job["request"]["episode_contract"]
+    assert "不得重写第1集至第5集" in job["request"]["episode_contract"]
+
+
+def test_continuation_requires_existing_script_material(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+
+    with pytest.raises(CodeBuddyNpcError, match="已有剧本"):
+        store.create(
+            user_id=7,
+            request_payload={
+                "project_title": "未完的王座",
+                "mode": "续写",
+                "adaptation_direction": "承接上一集继续调查。",
+                "continuation_target_episode": 10,
+            },
+        )
+
+
+def test_continuation_can_fall_back_to_manual_last_episode(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={
+            "project_title": "无集号旧稿",
+            "mode": "续写",
+            "source_text": "旧稿没有规范集号，但人物已经进入王宫。",
+            "source_last_episode": 17,
+            "continuation_target_episode": 30,
+        },
+    )
+
+    assert job["request"]["episode_start"] == 18
+    assert job["request"]["episode_end"] == 30
+    assert job["request"]["episodes"] == 13
 
 
 def test_job_store_returns_latest_job_for_user(tmp_path: Path) -> None:
@@ -684,6 +751,35 @@ def test_compact_story_state_follows_dynamic_episode_count(episode_count: int) -
     assert len(payload["episodes"]) == episode_count
     assert payload["episodes"][-1]["episode"] == episode_count
     assert payload["cost_control"]["model_call_used"] is False
+
+
+def test_compact_story_state_preserves_continuation_episode_numbers() -> None:
+    draft = "\n\n".join(
+        f"第{episode}集\n场景1：办公室｜日｜内\n主角：第{episode}集开始。\n主角：第{episode}集结束。"
+        for episode in range(18, 31)
+    )
+
+    payload = json.loads(
+        _compact_story_state(
+            {
+                "request": {
+                    "project_title": "续写剧",
+                    "mode": "续写",
+                    "episodes": 13,
+                    "source_last_episode": 17,
+                    "episode_start": 18,
+                    "episode_end": 30,
+                    "episode_word_count": 600,
+                },
+                "recovered_files": {"draft": draft, "episodes": draft},
+            }
+        )
+    )
+
+    assert payload["project"]["episode_count"] == 13
+    assert [item["episode"] for item in payload["episodes"]] == list(range(18, 31))
+    assert payload["episodes"][0]["continuity_bridge"]["previous_episode"] == 17
+    assert "已有第17集结尾" in payload["episodes"][0]["continuity_bridge"]["from_action"]
 
 
 def test_episode_slice_selects_requested_dynamic_range() -> None:

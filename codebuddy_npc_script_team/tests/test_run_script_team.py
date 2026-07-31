@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -17,6 +18,53 @@ def test_single_scene_contract_means_one_scene_per_whole_episode() -> None:
     assert "每一大集必须且只能有1个场景" in instruction
     assert "不是集内的小阶段" in instruction
     assert "剧情需要时可以增加" not in MODULE.PROMPTS["episode_continuity"]
+
+
+def test_duration_contract_uses_dynamic_episode_and_total_seconds() -> None:
+    instruction = MODULE.duration_contract_instruction(
+        {"episodes": 30, "episode_duration_seconds": 75}
+    )
+
+    assert "每集目标约75秒" in instruction
+    assert "全剧约2250秒" in instruction
+    assert "眨眼" in instruction
+    assert "每秒约4个汉字" in instruction
+
+
+def test_opening_hook_keeps_a_short_causal_anchor_after_the_first_beat() -> None:
+    episode_prompt = MODULE.PROMPTS["episode_continuity"]
+    writer_prompt = MODULE.PROMPTS["script_writer"]
+    editor_prompt = MODULE.PROMPTS["final_editor"]
+
+    assert "开场因果锚" in episode_prompt
+    assert "强钩子后的1至3个有效拍内" in writer_prompt
+    assert "不得固定使用路人解释" in writer_prompt
+    assert "缺少开场因果锚" in editor_prompt
+
+
+def test_continuation_contract_uses_actual_episode_range(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "scriptRequest",
+        json.dumps(
+            {
+                "mode": "续写",
+                "episodes": 5,
+                "source_last_episode": 5,
+                "episode_start": 6,
+                "episode_end": 10,
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    request = MODULE.read_request()
+    instruction = MODULE.continuation_contract_instruction(request)
+
+    assert request["episode_start"] == 6
+    assert request["episode_end"] == 10
+    assert "第6集至第10集" in request["episode_contract"]
+    assert "已有第5集结尾" in instruction
+    assert "只输出第6集至第10集" in instruction
 
 
 def test_single_scene_contract_rejects_three_scene_headers() -> None:

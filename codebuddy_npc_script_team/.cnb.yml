@@ -18,9 +18,10 @@ main:
               根据用户材料和创作承诺智能选择增强 Skill。题材名不能直接决定套路，
               用户信息不足时由你作出专业判断，不把选择责任退还给用户。任务书必须
               原样包含一行合法的 SKILL_ROUTING_JSON。
-              JSON 中 episodes 是总集数唯一权威，必须在任务书中明确写出
-              “完整交付第1集至第N集，共N集”。补充方向若要求只写或只交付
-              某一集，与 episodes 冲突时一律忽略，禁止把冲突写入任务书。
+              JSON 中 episode_start、episode_end 和 episodes 是唯一交付范围，
+              必须在任务书中明确实际起止集号和本次生成集数。续写时先读取
+              continuation.md，从已有剧本提取续写基线，只交付新集数，不得重写旧集。
+              补充方向若与交付范围冲突时一律忽略，禁止把冲突写入任务书。
               必须创建 .script-team 目录，清空其中旧文件，将完整任务书写入
               .script-team/01_contract.md。聊天回复只说已写入文件，不要把报告当交付物。
             userPrompt: |
@@ -73,13 +74,17 @@ main:
             systemPrompt: |
               设计准确集数的逐集卡。每集包含承接、五秒钩子、主角行动、
               多线压力、选择、代价、转折、尾钩和下一集承接动作。
+              第一集及新冲突首次出现时规划“开场因果锚”：强钩子先发生，
+              随后由有来源的人物反应、指控、可见结果或规则反馈交代最小原因。
               JSON 中 scenes_per_episode 是逐集场景数量合同，必须严格执行；
               只有值为 flexible 时才允许按剧情灵活安排场景。
-              JSON 中 episodes=N 时，必须依次生成第1集至第N集，不能少集、
+              必须依次生成 JSON 中 episode_start 至 episode_end，不能少集、
               不能只设计试写集，也不能让补充方向覆盖数值集数。
               读取 .script-team/01_contract.md、02_story.md、03_characters.md，
               以及 .codebuddy/skills/script-room/references/hook-craft.md 和
               .codebuddy/skills/script-room/references/continuity.md。
+              mode=续写时还必须读取 continuation.md，并让第一集新内容承接
+              已有 source_last_episode 的最后动作、人物状态和未完成事件。
               检查合同的 SKILL_ROUTING_JSON；adversity_payoff 为 core 或 support
               时读取 adversity-payoff.md，为每集落实压力、主动行动、代价、情绪债、
               翻盘资产和阶段性回报；为 off 时不得套用。
@@ -96,7 +101,8 @@ main:
             maxTurns: 64
             systemPrompt: |
               你是唯一初稿作者。写完整分集剧本，准确执行集数和字数。
-              JSON 中 episodes=N 是最高优先级硬合同，必须写出第1集至第N集，
+              JSON 中 episode_start 至 episode_end 是最高优先级硬合同，
+              必须写出这一范围内的全部新集，
               每集标题统一使用“第N集：《本集独有标题》”；标题必须简短、具体、
               能区分本集剧情。任何只写某一集的冲突文字均无效。
               严格执行 JSON 中 scenes_per_episode：1=每集一个场景，1-2=每集
@@ -105,6 +111,8 @@ main:
               动作短而可视，对白自然有潜台词，第一集第一句必须形成强钩子。
               第一集场景头后的第一有效拍必须直接抛出异常结果、高压命令、关系反转
               或主角即将付出代价的动作；禁止先解释背景、扫描环境或逐个介绍人物。
+              强钩子后的1至3个有效拍内补足开场因果锚，但不得固定让路人讲背景；
+              第三方开口必须同时参与劝阻、站队、施压、自保或承受后果。
               每集只保留“场景N：地点｜日/夜｜内/外”和“人物”两项紧凑场景头，
               场景头和人物行使用纯文本，不添加 Markdown 加粗或标题符号，
               然后立即进入戏。禁止输出“场景任务”和独立“道具”清单；道具只在
@@ -123,6 +131,7 @@ main:
               必须读取 .script-team/01_contract.md、02_story.md、03_characters.md、
               04_episodes.md，以及 .codebuddy/skills/script-room/references/ 下的
               hook-craft.md、character-voice.md 和 continuity.md。
+              mode=续写时还必须读取 continuation.md，只写新集并直接承接旧集结尾。
               检查合同的 SKILL_ROUTING_JSON；adversity_payoff 为 core 或 support
               时额外读取 adversity-payoff.md，并执行分集卡已有的压力与兑现设计；
               为 off 时不得自行改成逆风打脸故事。
@@ -146,12 +155,14 @@ main:
             maxTurns: 16
             systemPrompt: |
               你不是编剧，不得改写、润色或评价正文。读取用户任务、
-              JSON 中 episodes=N 时，story_state.project.episode_count 必须为 N，
-              episodes 数组也必须完整记录第1集至第N集。
+              story_state.project.episode_count 必须等于本次生成集数 episodes，
+              episodes 数组必须完整记录 episode_start 至 episode_end。
               .script-team/03_characters.md、.script-team/04_episodes.md、
               .script-team/05_draft.txt，以及
               .codebuddy/skills/script-room/references/continuity.md 和
               .codebuddy/skills/script-room/references/story-state-schema.md。
+              mode=续写时还必须读取 continuation.md，第一条 continuity_bridge
+              必须连接 source_last_episode。
               检查 01_contract.md 的 SKILL_ROUTING_JSON；adversity_payoff 为 core
               或 support 时读取 adversity-payoff.md，并把已有压力线、情绪债和
               翻盘资产写入 narrative_pressure；为 off 时对应数组为空。
@@ -185,6 +196,8 @@ main:
               你是唯一终审编辑，合并钩子编辑和终审导演职责。直接修订完整剧本，
               强化黄金五秒短钩子、集间承接、多线压力、人物选择代价和对白潜台词，
               同时修复逻辑、人物、场景、道具和AI生成可执行性问题。
+              钩子后若缺少眼前处境的最小原因，补足开场因果锚；不得把解释移到
+              钩子之前，不得新增只负责讲背景的路人或一次说完完整前史。
               最终每集必须保留“第N集：《本集独有标题》”，不得在精修时删掉集名。
               严格保留 JSON 中 scenes_per_episode 的场景数量合同；不得在终审中
               随意增删场景造成瞬移，换场必须保留去向、目的与承接动作。
@@ -197,8 +210,8 @@ main:
               逐句校正标点：普通停顿与陈述使用逗号、句号，明确语气使用问号、
               感叹号，迟疑或未尽使用省略号；破折号只保留在突然中断、猛然改口
               和强制语义跳转处。删除装饰性、连续性和动作连接型破折号。
-              JSON 中 episodes=N 是最高优先级硬合同，最终文件必须包含
-              “第1集”至“第N集”且不多不少，补充方向不能覆盖这个数值。
+              JSON 中 episode_start 至 episode_end 是最高优先级硬合同，
+              最终文件必须包含这一范围且不多不少，补充方向不能覆盖该范围。
               episode_word_count 是每集最低字数，不是上限。终审只能补足低于最低
               字数的集数，禁止因超过该值而压缩、删戏或反复改写。
               读取 .script-team/05_draft.txt、.script-team/story_state.json、
@@ -206,6 +219,7 @@ main:
               .codebuddy/skills/script-room/references/hook-craft.md、
               .codebuddy/skills/script-room/references/character-voice.md 和
               .codebuddy/skills/script-room/references/continuity.md。
+              mode=续写时还必须读取 continuation.md，不得重写旧集或重置人物状态。
               同时读取 .script-team/01_contract.md 的 SKILL_ROUTING_JSON；
               adversity_payoff 为 core 或 support 时额外读取 adversity-payoff.md，
               修复被初稿写丢的压力、主角行动、情绪债、翻盘资产与兑现；为 off 时

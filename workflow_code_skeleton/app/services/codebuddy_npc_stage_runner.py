@@ -27,7 +27,7 @@ PROMPTS = {
 题材不能直接决定套路；用户信息不足时由你作出专业判断，不把选择责任退还给用户。
 为主角锁定“外在身份/处境+长期欲望或伤口+反差能力/秘密”的可执行标签，
 并规定前五集立住主角标签、核心矛盾、主要阻力、情绪承诺和追剧主问题。
-episodes 是总集数唯一权威，必须明确完整交付第1集至第N集。
+episode_start、episode_end 与 episodes 共同构成交付范围，必须只交付该范围。
 不要写正文。所有人物、道具、技术、证据和事件都按题材与因果需要决定：
 需要时可以使用，不需要时不得为了套模板硬塞；禁止的不是某类元素，而是无来源、无铺垫、
 无代价、承担万能解题功能的元素。
@@ -50,7 +50,7 @@ episodes 是总集数唯一权威，必须明确完整交付第1集至第N集。
 不得改写主线和主要事件。
 """,
     "episode_continuity": """
-你是分集与连续性编剧。严格按 episodes=N 设计第1集至第N集完整逐集卡。
+你是分集与连续性编剧。严格按 episode_start 至 episode_end 设计完整逐集卡。
 每集写清：承接点、前五秒短钩子、主角目标、A线与叠加压力线、核心场景、
 行动、阻力、选择、代价、转折、尾钩、下一集开场承接动作。
 第一集第一有效拍必须达到黄金三秒门槛：至少同时形成冲突、悬念、反差、
@@ -63,7 +63,7 @@ scenes_per_episode 是前端动态传入的逐集场景合同，必须执行；�
 换场必须说明人物为什么去以及准备做什么，禁止人物和关键道具无来源突然出现。
 """,
     "script_writer": """
-你是唯一的正文与对白编剧。根据全部锁定材料写出第1集至第N集完整可拍剧本。
+你是唯一的正文与对白编剧。根据全部锁定材料写出 episode_start 至 episode_end 的完整可拍剧本。
 每集必须使用以下结构，不得省略场景信息：
 第N集：《本集独有标题》
 场景1：地点｜日/夜｜内/外
@@ -109,7 +109,7 @@ episode_word_count 是前端动态传入的每集最低字数，不是固定值�
 你是状态记录器，不是编剧。只从人物设计、分集卡和初稿中提取事实。
 严格按照给定 story_state schema 输出单个合法 JSON 对象，记录人物声音、位置、
 知情范围、伤势、服装、持有道具、关系变化、新人物与新道具来源、伏笔和未完成动作。
-episodes 数组必须完整覆盖第1集至第N集。未知事实写“未明确”，不得猜测、评价或改写正文。
+episodes 数组必须完整覆盖 episode_start 至 episode_end。未知事实写“未明确”，不得猜测、评价或改写正文。
 """,
     "final_editor": """
 你是唯一终审编辑。直接修订完整剧本，不只审查和打分。
@@ -134,7 +134,7 @@ episodes 数组必须完整覆盖第1集至第N集。未知事实写“未明确
 所有元素按剧情需要使用；只删除无来源、无铺垫、无代价或承担万能解题功能的元素。
 episode_word_count 是前端动态传入的每集最低字数，不是上限。终审只能补足
 低于最低字数的集数，禁止因超过该值而压缩、删戏或反复返工。
-只输出片名和第1集至第N集完整剧本，不输出评分、解释、JSON或修改说明。
+只输出片名和 episode_start 至 episode_end 的完整剧本，不输出评分、解释、JSON或修改说明。
 """,
 }
 
@@ -218,9 +218,15 @@ def _compact_story_state(job: dict[str, Any]) -> str:
     draft = str(artifacts.get("draft") or "")
     episode_cards = str(artifacts.get("episodes") or "")
     total = max(1, int(request_data.get("episodes") or 1))
+    episode_start = max(1, int(request_data.get("episode_start") or 1))
+    episode_end = max(
+        episode_start,
+        int(request_data.get("episode_end") or (episode_start + total - 1)),
+    )
+    source_last_episode = max(0, int(request_data.get("source_last_episode") or 0))
     episodes: list[dict[str, Any]] = []
     previous_closing = ""
-    for episode in range(1, total + 1):
+    for episode in range(episode_start, episode_end + 1):
         body = _episode_slice(draft, episode, episode)
         card = _episode_slice(episode_cards, episode, episode)
         opening = _line_excerpt(body or card, first=True)
@@ -237,10 +243,15 @@ def _compact_story_state(job: dict[str, Any]) -> str:
                 "core_scenes": scenes,
                 "scene_exception_reason": "",
                 "continuity_bridge": None
-                if episode == 1
+                if episode == episode_start and not source_last_episode
                 else {
                     "previous_episode": episode - 1,
-                    "from_action": previous_closing or "见上一集结尾",
+                    "from_action": previous_closing
+                    or (
+                        f"见已有第{source_last_episode}集结尾"
+                        if episode == episode_start and source_last_episode
+                        else "见上一集结尾"
+                    ),
                     "to_action": opening,
                     "reason": "承接上一集未完成动作或结果",
                 },
@@ -313,12 +324,12 @@ def _dynamic_skill_level(contract: str, key: str) -> str:
 
 def _module_text(stage: str, artifacts: dict[str, Any] | None = None) -> str:
     names = list({
-        "showrunner": ("skill-routing.md",),
+        "showrunner": ("skill-routing.md", "continuation.md"),
         "character_emotion": ("character-voice.md",),
-        "episode_continuity": ("hook-craft.md", "continuity.md"),
-        "script_writer": ("hook-craft.md", "character-voice.md", "continuity.md"),
-        "state_recorder": ("continuity.md", "story-state-schema.md"),
-        "final_editor": ("hook-craft.md", "character-voice.md", "continuity.md"),
+        "episode_continuity": ("hook-craft.md", "continuity.md", "continuation.md"),
+        "script_writer": ("hook-craft.md", "character-voice.md", "continuity.md", "continuation.md"),
+        "state_recorder": ("continuity.md", "continuation.md", "story-state-schema.md"),
+        "final_editor": ("hook-craft.md", "character-voice.md", "continuity.md", "continuation.md"),
     }.get(stage, ()))
     dynamic_stages = {
         "story_architect",
@@ -337,6 +348,23 @@ def _module_text(stage: str, artifacts: dict[str, Any] | None = None) -> str:
         if path.is_file():
             chunks.append(f"\n\n===== 专业模块：{name} =====\n{path.read_text(encoding='utf-8')}")
     return "".join(chunks)
+
+
+def _continuation_instruction(request_data: dict[str, Any]) -> str:
+    if str(request_data.get("mode") or "") != "续写":
+        return ""
+    source_last = max(1, int(request_data.get("source_last_episode") or 1))
+    episode_start = max(source_last + 1, int(request_data.get("episode_start") or (source_last + 1)))
+    episode_end = max(episode_start, int(request_data.get("episode_end") or episode_start))
+    policy = str(request_data.get("continuation_policy") or "strict")
+    return (
+        "\n\n===== 续写硬合同 =====\n"
+        f"已有剧本写至第{source_last}集，本次只能输出第{episode_start}集至"
+        f"第{episode_end}集，不得重写已有集数。续写策略：{policy}。\n"
+        f"第{episode_start}集必须承接已有第{source_last}集最后的地点、动作、"
+        "人物知情、伤势、关系、道具和未完成事件；先延续后升级，禁止重置人物、"
+        "跳过过程、无解释换场或让既有后果自动消失。"
+    )
 
 
 def _strip_fence(text: str) -> str:
@@ -436,10 +464,17 @@ class CodeBuddyNpcStageRunner:
         if stage == "final_editor":
             current_final = str(job.get("final_script") or "").strip()
             numbers = _episode_numbers(current_final)
-            expected = int((job.get("request") or {}).get("episodes") or 1)
+            request_data = job.get("request") or {}
+            episode_start = max(1, int(request_data.get("episode_start") or 1))
+            episode_end = max(
+                episode_start,
+                int(request_data.get("episode_end") or episode_start),
+            )
             job["stage_resume_text"] = (
                 current_final
-                if numbers == list(range(1, len(numbers) + 1)) and len(numbers) < expected
+                if numbers == list(range(episode_start, episode_start + len(numbers)))
+                and numbers
+                and numbers[-1] < episode_end
                 else ""
             )
         self._invalidate_from(job, stage)
@@ -645,14 +680,17 @@ class CodeBuddyNpcStageRunner:
         artifacts = job.get("recovered_files") or {}
         for key in DEPENDENCIES[stage]:
             context.append(f"\n\n===== {ARTIFACT_LABELS[key]} =====\n{artifacts[key]}")
-        request_text = json.dumps(job.get("request") or {}, ensure_ascii=False, indent=2)
+        request_data = job.get("request") or {}
+        request_text = json.dumps(request_data, ensure_ascii=False, indent=2)
         revision = f"\n\n===== 用户本次修改意见 =====\n{feedback}" if feedback else ""
         user_prompt = (
             f"===== 用户创作任务 =====\n{request_text}"
             + "".join(context)
             + _module_text(stage, artifacts)
+            + _continuation_instruction(request_data)
             + revision
-            + "\n\n严格执行 episodes；episode_word_count 是前端动态传入的每集"
+            + "\n\n严格执行 episode_start、episode_end 与 episodes；"
+            "episode_word_count 是前端动态传入的每集"
             "最低字数，只能多不能少且不设上限；scenes_per_episode 是前端动态"
             "场景合同，必须逐集执行；不得改变上游已锁定事实。"
         )
@@ -773,12 +811,22 @@ class CodeBuddyNpcStageRunner:
     ) -> str:
         request_data = job.get("request") or {}
         total = int(request_data.get("episodes") or 1)
+        episode_start = max(1, int(request_data.get("episode_start") or 1))
+        episode_end = max(
+            episode_start,
+            int(request_data.get("episode_end") or (episode_start + total - 1)),
+        )
         minimum = int(request_data.get("episode_word_count") or 800)
         artifacts = job.get("recovered_files") or {}
         result = str(job.get("stage_resume_text") or "").strip() if stage == "final_editor" else ""
         existing = _episode_numbers(result)
-        start_episode = len(existing) + 1 if existing == list(range(1, len(existing) + 1)) else 1
-        if start_episode > total:
+        expected_prefix = list(range(episode_start, episode_start + len(existing)))
+        start_episode = (
+            episode_start + len(existing)
+            if existing == expected_prefix
+            else episode_start
+        )
+        if start_episode > episode_end:
             return result
 
         context_limits = {"contract": 5_000, "story": 8_000, "characters": 8_000}
@@ -789,13 +837,14 @@ class CodeBuddyNpcStageRunner:
             if str(artifacts.get(key) or "").strip()
         )
         fixed_context += _module_text(stage, artifacts)
-        batch_total = (total - start_episode + BATCH_SIZE - 1) // BATCH_SIZE
+        fixed_context += _continuation_instruction(request_data)
+        batch_total = (episode_end - start_episode + BATCH_SIZE) // BATCH_SIZE
         completed_ranges: list[list[int]] = []
-        for batch_start in range(start_episode, total + 1, BATCH_SIZE):
+        for batch_start in range(start_episode, episode_end + 1, BATCH_SIZE):
             fresh = self.store.load(str(job["job_id"]), user_id=int(job["user_id"]))
             if not fresh or fresh.get("cancel_requested"):
                 raise CodeBuddyNpcError("流程已停止，已完成批次将作为断点保留。", status_code=409)
-            batch_end = min(total, batch_start + BATCH_SIZE - 1)
+            batch_end = min(episode_end, batch_start + BATCH_SIZE - 1)
             expected = list(range(batch_start, batch_end + 1))
             fresh["batch_progress"] = {
                 "stage": stage,
@@ -806,11 +855,13 @@ class CodeBuddyNpcStageRunner:
                 "completed_batches": len(completed_ranges),
                 "total_batches": batch_total,
                 "episode_total": total,
+                "episode_start": episode_start,
+                "episode_end": episode_end,
                 "batch_size": BATCH_SIZE,
             }
             fresh["status_text"] = (
                 f"{STAGE_NAMES[stage]}正在处理第{batch_start}-{batch_end}集，"
-                f"共{total}集"
+                f"本次共{total}集"
             )
             self.store.save(fresh)
             episode_cards = _episode_slice(str(artifacts.get("episodes") or ""), batch_start, batch_end)
@@ -876,14 +927,21 @@ class CodeBuddyNpcStageRunner:
                     "completed_batches": len(completed_ranges),
                     "total_batches": batch_total,
                     "episode_total": total,
+                    "episode_start": episode_start,
+                    "episode_end": episode_end,
                     "batch_size": BATCH_SIZE,
                 }
                 checkpoint["status_text"] = (
                     f"{STAGE_NAMES[stage]}已完成第{batch_start}-{batch_end}集，"
-                    f"继续处理至第{total}集"
+                    f"继续处理至第{episode_end}集"
                 )
                 checkpoint["progress"] = round(
-                    (STAGE_ORDER.index(stage) + batch_end / total) / len(STAGE_ORDER) * 100
+                    (
+                        STAGE_ORDER.index(stage)
+                        + (batch_end - episode_start + 1) / total
+                    )
+                    / len(STAGE_ORDER)
+                    * 100
                 )
                 self.store.save(checkpoint)
         return result

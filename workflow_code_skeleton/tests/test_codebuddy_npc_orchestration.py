@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 
@@ -23,6 +25,7 @@ def _install_fakes(
     refresh_fails: bool = False,
     refresh_replaces_build: bool = False,
     refresh_result_pending: bool = False,
+    refresh_first_build_ready: bool = False,
 ):
     from workflow_code_skeleton.app import server
 
@@ -93,6 +96,12 @@ def _install_fakes(
 
         def refresh(self, job):
             updated = dict(job)
+            if (
+                refresh_first_build_ready
+                and str((job.get("build") or {}).get("sn") or "") == "build-1"
+            ):
+                time.sleep(0.1)
+                updated["status"] = "stage_ready"
             if refresh_result_pending:
                 updated["status"] = "result_pending"
             if refresh_replaces_build:
@@ -235,6 +244,46 @@ def test_stale_poll_cannot_overwrite_a_newer_remote_build(monkeypatch):
     assert state["job"]["build"]["sn"] == "build-newer"
     assert state["job"]["remote_stage"] == "story_architect"
     assert state["job"]["status"] == "running"
+
+
+def test_concurrent_polls_submit_the_next_remote_stage_only_once(monkeypatch):
+    server, state = _install_fakes(
+        monkeypatch,
+        refresh_first_build_ready=True,
+    )
+    app = server.create_app()
+    app.config.update(TESTING=True)
+    headers = {"Authorization": "Bearer writer-token"}
+
+    with app.test_client() as client:
+        created = client.post(
+            "/api/new-workflow-test/npc/jobs",
+            headers=headers,
+            json={
+                "project_title": "并发轮询幂等测试",
+                "source_text": "同一节点完成时只能提交一次下一节点。",
+                "execution_mode": "auto",
+            },
+        )
+    assert created.status_code == 200
+
+    def poll_job():
+        with app.test_client() as client:
+            return client.get(
+                "/api/new-workflow-test/npc/jobs/npc-orchestration-test",
+                headers=headers,
+            ).status_code
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        statuses = list(executor.map(lambda _: poll_job(), range(2)))
+
+    assert statuses == [200, 200]
+    assert [call["stage"] for call in state["stage_calls"]] == [
+        "showrunner",
+        "story_architect",
+    ]
+    assert state["job"]["build"]["sn"] == "build-2"
+    assert state["job"]["remote_stage"] == "story_architect"
 
 
 def test_completed_cloud_stage_cannot_remain_result_pending_forever(monkeypatch):

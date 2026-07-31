@@ -64,16 +64,17 @@ MODULE_FILES = {
     "hook": "hook-craft.md",
     "voice": "character-voice.md",
     "continuity": "continuity.md",
+    "continuation": "continuation.md",
     "state": "story-state-schema.md",
     "adversity_payoff": "adversity-payoff.md",
 }
 STAGE_MODULES = {
-    "showrunner": ("routing",),
+    "showrunner": ("routing", "continuation"),
     "character_emotion": ("voice",),
-    "episode_continuity": ("hook", "continuity"),
-    "script_writer": ("hook", "voice", "continuity"),
-    "state_recorder": ("continuity", "state"),
-    "final_editor": ("hook", "voice", "continuity"),
+    "episode_continuity": ("hook", "continuity", "continuation"),
+    "script_writer": ("hook", "voice", "continuity", "continuation"),
+    "state_recorder": ("continuity", "continuation", "state"),
+    "final_editor": ("hook", "voice", "continuity", "continuation"),
 }
 DYNAMIC_STAGE_MODULES = {
     "story_architect": ("adversity_payoff",),
@@ -112,7 +113,7 @@ PROMPTS = {
 题材不能直接决定套路；用户信息不足时由你作出专业判断，不把选择责任退还给用户。
 为主角锁定“外在身份/处境+长期欲望或伤口+反差能力/秘密”的可执行标签，
 并规定前五集必须立住主角标签、核心矛盾、主要阻力、情绪承诺和追剧主问题。
-episodes 是总集数唯一权威。必须明确写出“完整交付第1集至第N集，共N集”，
+episode_start、episode_end 与 episodes 共同定义本次唯一交付范围，必须原样锁定，
 忽略补充方向中与数值集数冲突的单集试写或只交付某一集要求。
 不要写正文，不要堆砌事件。人物、道具、证据与技术根据剧情需要决定；
 禁止的是无来源、无铺垫、无代价的万能解题元素。
@@ -132,10 +133,13 @@ episodes 是总集数唯一权威。必须明确写出“完整交付第1集至�
 不得用抽象形容词代替具体反应，不得让人物为推动剧情突然降智。
 """,
     "episode_continuity": """
-你是分集与连续性编剧。严格按用户要求的集数和每集字数规模设计逐集卡。
-episodes=N 时必须依次设计第1集至第N集，不得缺集或只设计试写集。
+你是分集与连续性编剧。严格按用户要求的集号范围、每集字数规模和画面时长设计逐集卡。
+必须依次设计 episode_start 至 episode_end，不得缺集、越界或只设计试写集。
 每集写清：承接点、前五秒短钩子、主角目标、A线与至少一条叠加压力线、场景、
-行动、阻力、选择、代价、转折、结尾钩子、下一集开场承接动作。
+行动、阻力、选择、代价、转折、结尾钩子、下一集开场承接动作，以及各段预计秒数。
+第一集及新冲突首次出现时必须规划“开场因果锚”：钩子本身已包含原因则标记“已内嵌”；
+否则指定在钩子后由哪个在场人物、哪项可见结果或哪条正在生效的规则，用最短一拍让
+观众理解为什么此刻发生、为什么落到这个人物身上，不得泄露完整前史。
 scenes_per_episode 是逐集场景数量硬合同。1表示每一大集只能有一个场景，
 1-2表示每集一至两个，2表示每集必须两个，2-3表示每集两至三个，
 只有 flexible 才允许按剧情灵活安排。不得把一个场景内的小节拍拆成新场景。
@@ -146,14 +150,20 @@ scenes_per_episode 是逐集场景数量硬合同。1表示每一大集只能有
 """,
     "script_writer": """
 你是唯一的正文与对白编剧。根据全部锁定材料写出完整分集剧本。
-episodes=N 时必须完整写出第1集至第N集且不多不少，每集标题统一使用
+必须完整写出 episode_start 至 episode_end 且不多不少，每集标题统一使用
 “第N集：《本集独有标题》”；标题必须简短、具体并能区分本集剧情。
 数值集数优先于补充方向中的单集试写文字。
 episode_word_count 是前端动态传入的每集最低字数，不是固定值，也不是上限。
 每集不得少于该值；允许根据剧情需要自然超出，禁止因超过该值而删戏、压缩或返工。
+episode_duration_seconds 是每集目标画面时长。按对白实际说完、自然停顿、人物反应、
+动作完成、信息揭示和必要转场所占时间组织内容，不得把字数机械换算成秒数。
 第一集场景头之后的第一句台词或第一个动作必须构成短而强的黄金三秒钩子，
 至少同时形成冲突、悬念、反差、危险后果中的两项；一句话足够时立即收住。
 禁止先铺陈环境、解释背景、逐个介绍人物或罗列道具，再让核心事件迟到。
+强钩子后的1至3个有效拍内补足“开场因果锚”，只让观众理解眼前处境为何发生：
+优先使用本来就在场且有信息来源的人物反应、对手指控、主角反问、公开通知、可见痕迹
+或规则反馈。不得固定使用路人解释；第三方开口必须同时在劝阻、站队、起哄、施压、
+自保或受到波及，不能像作者一样概述背景。钩子本身已经包含清楚原因时不得重复解释。
 每集开头承接上一集结尾动作，每集由主角行动推动，不得瞬移。
 严格执行 scenes_per_episode。场景数按每一大集内出现的“场景N”标题计数；
 一个动作段、冲突阶段或人物进入不能自行升级为新场景。
@@ -186,16 +196,21 @@ JSON 对象，记录人物声音、位置、知情范围、伤势、服装、持
 """,
     "final_editor": """
 你是唯一终审编辑，合并钩子编辑和终审导演职责。必须直接修稿，不只审查和打分。
-episodes=N 时最终稿必须完整包含第1集至第N集且不多不少。保持主要事件、
+最终稿必须完整包含 episode_start 至 episode_end 且不多不少。保持主要事件、
 人物关系和结局不变，逐集修复：
 1. 第一集黄金三秒必须是一句命令、双关、禁忌信息、危险动作或关系反转形成的爆点，
    至少同时形成冲突、悬念、反差、危险后果中的两项；
+1.1 若缺少开场因果锚、观众仍不明白眼前处境为何发生，在强钩子后1至3个有效拍内补足：
+    使用有来源的人物反应、指控、可见结果或规则反馈交代最小原因；不得在钩子前铺垫，
+    不得新增只负责讲解的路人，也不得把完整前史一次说完；
 2. 其他集开头必须承接上集结尾；
 3. 增强同场多线压力、人物选择代价和每集至少一个真正改变局势的情绪高点；
 4. 改写泄气、解释性、AI味对白；
 5. 删掉不影响动作、信息和情绪的形容词。
 episode_word_count 是前端动态传入的每集最低字数，不是上限。只能补足低于
 最低字数的集数，不得因超过该值而压缩、删戏或反复返工。
+逐集修正 deterministic_gate 中的时长偏差，使对白、停顿、动作与镜头节拍合计
+接近 episode_duration_seconds；优先删重复解释或补有效反应与因果动作，不得注水。
 钩子不足时可以依据上下文新增，不得只是把后文冲突搬到前面。
 最终每集必须保留“第N集：《本集独有标题》”，不得在终审时删掉集名。
 每集只保留“场景N：地点｜日/夜｜内/外”和“人物”两项紧凑场景信息；
@@ -222,6 +237,39 @@ def scene_contract_instruction(request_payload: dict) -> str:
         f"逐集场景硬合同：scenes_per_episode={policy}，{description}。"
         "这里的“每集”指第N集这一整集，不是集内的小阶段；"
         "场景数只按该集中的“场景N：地点｜日/夜｜内/外”标题计算。"
+    )
+
+
+def duration_contract_instruction(request_payload: dict) -> str:
+    episodes = max(1, int(request_payload.get("episodes") or 1))
+    seconds = max(15, int(request_payload.get("episode_duration_seconds") or 90))
+    return (
+        f"逐集画面时长合同：每集目标约{seconds}秒，全剧约{episodes * seconds}秒，"
+        "允许单集在目标上下约15%内自然浮动。按可见画面实际计时："
+        "短促眼神、眨眼、吸气或反应约1至2秒，明确手势或单步动作约1至3秒，"
+        "移动、操作或关系动作约3至8秒；中文对白通常按每秒约4个汉字并叠加"
+        "情绪停顿估算。动作可并行时不得重复累计，禁止靠空镜、慢动作或重复台词凑时长。"
+    )
+
+
+def continuation_contract_instruction(request_payload: dict) -> str:
+    if str(request_payload.get("mode") or "").strip() != "续写":
+        return ""
+    source_last = max(1, int(request_payload.get("source_last_episode") or 1))
+    episode_start = max(source_last + 1, int(request_payload.get("episode_start") or source_last + 1))
+    episode_end = max(episode_start, int(request_payload.get("episode_end") or episode_start))
+    policy = str(request_payload.get("continuation_policy") or "strict").strip()
+    policy_text = (
+        "允许修复不改变既有事件结果的轻微连续性问题"
+        if policy == "light"
+        else "严格保留既有事实、人物声音、关系温度、伤势、位置、道具与未完成动作"
+    )
+    return (
+        f"续写硬合同：已有剧本写至第{source_last}集，已有第{source_last}集结尾是"
+        f"第{episode_start}集唯一开场起点；本次只输出第{episode_start}集至第{episode_end}集。"
+        f"{policy_text}。先从已有全文提取续写基线，再规划新剧情；"
+        "不得重写、摘要代替或重新解释已有各集，不得让人物失忆、瞬移、伤势复原，"
+        "不得让旧道具和旧关系无因变化。第一集新稿必须直接处理旧稿最后的动作、决定或后果。"
     )
 
 
@@ -282,12 +330,26 @@ def read_request() -> dict:
     except (TypeError, ValueError) as exc:
         raise SystemExit("episodes 必须是整数") from exc
     payload["episodes"] = episodes
+    episode_start = max(1, int(payload.get("episode_start") or 1))
+    episode_end = episode_start + episodes - 1
+    payload["episode_start"] = episode_start
+    payload["episode_end"] = episode_end
+    source_last = max(0, int(payload.get("source_last_episode") or 0))
+    payload["source_last_episode"] = source_last
     payload["episode_contract"] = (
-        "总集数硬合同：必须交付且只能交付第1集，共1集。"
-        if episodes == 1
+        (
+            f"续写范围硬合同：已有剧本写至第{source_last}集；必须且只能交付"
+            f"第{episode_start}集至第{episode_end}集，共{episodes}集；"
+            f"不得重写第1集至第{source_last}集。"
+        )
+        if str(payload.get("mode") or "").strip() == "续写"
         else (
-            f"总集数硬合同：必须完整交付第1集至第{episodes}集，共{episodes}集；"
-            "任何单集试写或只交付某一集要求均不得覆盖该数值。"
+            "总集数硬合同：必须交付且只能交付第1集，共1集。"
+            if episodes == 1
+            else (
+                f"总集数硬合同：必须完整交付第1集至第{episodes}集，共{episodes}集；"
+                "任何单集试写或只交付某一集要求均不得覆盖该数值。"
+            )
         )
     )
     return payload
@@ -486,9 +548,12 @@ def run(stage: str) -> None:
         f"{request_text}"
         f"{context}\n\n"
         f"{modules}\n\n"
-        "episodes 是总集数硬合同；episode_word_count 是前端动态传入的每集"
+        "episode_start、episode_end 与 episodes 是本次交付范围硬合同；"
+        "episode_word_count 是前端动态传入的每集"
         "最低字数，只能多不能少且不设上限；补充要求不得与这两项冲突。\n"
-        f"{scene_contract_instruction(request_payload)}"
+        f"{continuation_contract_instruction(request_payload)}\n"
+        f"{scene_contract_instruction(request_payload)}\n"
+        f"{duration_contract_instruction(request_payload)}"
     )
     result = call_model(PROMPTS[stage], user_prompt, stage=stage)
     if stage in {"script_writer", "final_editor"}:
