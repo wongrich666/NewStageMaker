@@ -40,7 +40,11 @@
       target_market: "中国大陆",
       genre: "",
       episodes: 5,
+      source_last_episode: 0,
+      continuation_target_episode: 10,
+      continuation_policy: "strict",
       episode_word_count: 800,
+      episode_duration_seconds: 90,
       scenes_per_episode: "1",
       source_text: "",
       adaptation_direction: "",
@@ -156,8 +160,153 @@
     });
   }
 
+  function formatTargetDuration(seconds) {
+    const safeSeconds = Math.max(0, Math.round(Number(seconds) || 0));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const remainder = safeSeconds % 60;
+    if (hours) return `${hours}小时${minutes ? `${minutes}分` : ""}`;
+    if (minutes) return `${minutes}分${remainder ? `${remainder}秒` : ""}`;
+    return `${remainder}秒`;
+  }
+
+  function detectLastEpisode(text = state.form.source_text) {
+    const value = String(text || "");
+    const pattern = /(?:^|\n)\s*(?:#{1,6}\s*)?(?:第\s*(\d{1,3})\s*集|(?:EPISODE|EP)\s*(\d{1,3})\b)/gi;
+    let lastEpisode = 0;
+    let match;
+    while ((match = pattern.exec(value)) !== null) {
+      lastEpisode = Math.max(lastEpisode, Number(match[1] || match[2]) || 0);
+    }
+    return lastEpisode;
+  }
+
+  function continuationLastEpisode() {
+    return detectLastEpisode() || Math.max(0, Number(state.form.source_last_episode) || 0);
+  }
+
+  function generationEpisodeCount() {
+    if (state.form.mode !== "续写") {
+      return Math.max(1, Number(state.form.episodes) || 1);
+    }
+    const lastEpisode = continuationLastEpisode();
+    const targetEpisode = Math.max(0, Number(state.form.continuation_target_episode) || 0);
+    if (!lastEpisode) return 0;
+    return Math.max(0, targetEpisode - lastEpisode);
+  }
+
+  function deliveryRange() {
+    if (state.form.mode !== "续写") {
+      const count = Math.max(1, Number(state.form.episodes) || 1);
+      return { start: 1, end: count, count };
+    }
+    const lastEpisode = continuationLastEpisode();
+    const targetEpisode = Math.max(0, Number(state.form.continuation_target_episode) || 0);
+    return {
+      start: lastEpisode ? lastEpisode + 1 : 0,
+      end: targetEpisode,
+      count: Math.max(0, targetEpisode - lastEpisode),
+    };
+  }
+
+  function updateDurationPreview() {
+    const preview = app.querySelector("[data-duration-preview]");
+    if (!preview) return;
+    const total = generationEpisodeCount()
+      * Math.max(15, Number(state.form.episode_duration_seconds) || 90);
+    preview.textContent = formatTargetDuration(total);
+    const hint = app.querySelector("[data-duration-hint]");
+    if (hint) {
+      hint.textContent = `${generationEpisodeCount()} 集 × ${Math.max(15, Number(state.form.episode_duration_seconds) || 90)} 秒`;
+    }
+  }
+
+  function updateContinuationPreview() {
+    if (state.form.mode !== "续写") return;
+    const title = app.querySelector("[data-continuation-title]");
+    const detail = app.querySelector("[data-continuation-detail]");
+    const runRange = app.querySelector("[data-delivery-range]");
+    const startButton = app.querySelector('[data-action="start"]');
+    const status = app.querySelector(".nwt-continuation-status");
+    if (!title || !detail || !status) return;
+    const detected = detectLastEpisode();
+    const lastEpisode = continuationLastEpisode();
+    const range = deliveryRange();
+    const ready = Boolean(lastEpisode && range.end > lastEpisode);
+    status.classList.toggle("ready", ready);
+    status.classList.toggle("needs-input", !ready);
+    title.textContent = detected
+      ? `已识别写至第${detected}集`
+      : lastEpisode
+        ? `当前按第${lastEpisode}集计算`
+        : "未识别到集号";
+    detail.textContent = ready
+      ? `将只生成第${range.start}集至第${range.end}集，共${range.count}集；已有正文不会重写。`
+      : "请上传带有“第N集”标题的已有剧本，或手动填写当前最后一集；目标集数必须更大。";
+    if (runRange && !(state.job || {}).job_id) {
+      runRange.textContent = ready
+        ? `本次交付第${range.start}集至第${range.end}集，共${range.count}集`
+        : "请先确认续写范围";
+    }
+    if (startButton && !state.loading && !isActive() && (state.configStatus || {}).ready) {
+      startButton.disabled = !ready;
+    }
+  }
+
   function isActive(job = state.job) {
     return Boolean(job && ACTIVE_JOB_STATUSES.has(String(job.status || "").toLowerCase()));
+  }
+
+  function renderSignature(job) {
+    const value = job && typeof job === "object" ? job : {};
+    const files = value.recovered_files && typeof value.recovered_files === "object"
+      ? value.recovered_files
+      : {};
+    const stages = Array.isArray(value.team_stages)
+      ? value.team_stages.map((stage) => ({
+        id: stage.id,
+        name: stage.name,
+        status: stage.status,
+        error: stage.error,
+        output_key: stage.output_key,
+      }))
+      : [];
+    return JSON.stringify({
+      status: value.status,
+      progress: value.progress,
+      active_stage: value.active_stage,
+      execution_target: value.execution_target,
+      stages,
+      batch_progress: value.batch_progress,
+      recovered_files: Object.fromEntries(
+        Object.entries(files).map(([key, content]) => [key, String(content || "").length]),
+      ),
+      final_script_length: String(value.final_script || "").length,
+      delivery_script_length: String(value.delivery_script || "").length,
+      quality_gate: value.quality_gate,
+      request_warnings: value.request_warnings,
+      error: value.error,
+      poll_warning: value.poll_warning,
+      fallback_reason: value.fallback_reason,
+      build_log_url: value.build && value.build.build_log_url,
+      usage_metrics: value.usage_metrics,
+    });
+  }
+
+  function historyRenderSignature(items) {
+    return JSON.stringify((Array.isArray(items) ? items : []).map((item) => ({
+      job_id: item.job_id,
+      project_title: item.project_title,
+      production_type: item.production_type,
+      mode: item.mode,
+      episodes: item.episodes,
+      episode_start: item.episode_start,
+      episode_end: item.episode_end,
+      status: item.status,
+      status_text: item.status_text,
+      progress: item.progress,
+      has_final_script: item.has_final_script,
+    })));
   }
 
   function stageStatusByName(name) {
@@ -188,6 +337,35 @@
     return statuses[statuses.length - 1] || "";
   }
 
+  function memberHasOutput(member, job = state.job) {
+    if (!member || !job) return false;
+    if (member.key === "final_script") {
+      return Boolean(String(job.final_script || job.delivery_script || "").trim());
+    }
+    const files = job.recovered_files && typeof job.recovered_files === "object"
+      ? job.recovered_files
+      : {};
+    return Boolean(String(files[member.key] || "").trim());
+  }
+
+  function memberVisualStatus(member, job = state.job) {
+    const explicit = stageStatusByName(member.name);
+    if (["failed", "error", "failure", "cancel", "cancelled"].includes(String(explicit).toLowerCase())) {
+      return "failed";
+    }
+    if (
+      member.id === String((job || {}).active_stage || "")
+      && isActive(job)
+    ) {
+      return "running";
+    }
+    if (["running", "start", "in_progress"].includes(String(explicit).toLowerCase())) {
+      return "running";
+    }
+    if (memberHasOutput(member, job)) return "success";
+    return explicit;
+  }
+
   function statusLabel(status) {
     const value = String(status || "").toLowerCase();
     if (["success", "succeeded", "completed", "complete"].includes(value)) return ["已完成", "done"];
@@ -206,6 +384,33 @@
     const seconds = Math.round(milliseconds / 1000);
     if (seconds < 60) return `${seconds}秒`;
     return `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
+  }
+
+  function liveRuntimeText(job) {
+    const activeDuration = formatDuration(job.active_stage_elapsed_ms);
+    if (!isActive(job)) return "";
+    return job.execution_target === "local_fallback"
+      ? `本地兜底正在生成${activeDuration ? ` · 已运行 ${activeDuration}` : ""}`
+      : `CNB Runner 已连接 · 30秒心跳${activeDuration ? ` · 已运行 ${activeDuration}` : ""}`;
+  }
+
+  function patchLiveTelemetry(job) {
+    const progress = Math.max(0, Math.min(100, Number(job.progress) || 0));
+    const statusText = String(job.status_text || "填写任务后开始创作");
+    app.querySelectorAll("[data-live-status-text]").forEach((node) => {
+      node.textContent = statusText;
+    });
+    const runtime = app.querySelector("[data-live-runtime]");
+    const runtimeText = liveRuntimeText(job);
+    if (runtime) {
+      runtime.hidden = !runtimeText;
+      const textNode = runtime.querySelector("[data-live-runtime-text]");
+      if (textNode) textNode.textContent = runtimeText;
+    }
+    const progressBar = app.querySelector("[data-live-progress]");
+    if (progressBar) progressBar.style.width = `${progress}%`;
+    const progressValue = app.querySelector("[data-live-progress-value]");
+    if (progressValue) progressValue.textContent = `${progress}%`;
   }
 
   function artifactChars(member, files, job) {
@@ -245,11 +450,9 @@
     const active = isActive();
     const remotelyControllable = Boolean(job.job_id);
     return TEAM.map((member, index) => {
-      const status = stageStatusByName(member.name);
+      const status = memberVisualStatus(member, job);
       const [label, klass] = statusLabel(status);
-      const hasOutput = member.key === "final_script"
-        ? Boolean(String(job.final_script || "").trim())
-        : Boolean(String(files[member.key] || "").trim());
+      const hasOutput = memberHasOutput(member, job);
       const previous = index ? TEAM[index - 1] : null;
       const previousReady = !previous || (
         previous.key === "final_script"
@@ -273,15 +476,15 @@
         ? `${timing && timing.status === "running" ? "已运行" : "耗时"} ${duration}`
         : "";
       return `
-        <article class="nwt-member ${klass} ${status === "running" ? "active" : ""}">
+        <article class="nwt-member ${klass} ${status === "running" ? "active" : ""}" data-stage-status="${escapeHtml(klass || "waiting")}">
           <div class="nwt-member-rail">
-            <span class="nwt-member-index">${status === "running" ? '<i class="nwt-spinner"></i>' : String(index + 1).padStart(2, "0")}</span>
+            <span class="nwt-member-index">${status === "running" ? '<i class="nwt-spinner"></i>' : klass === "done" ? icon("check", 15) : String(index + 1).padStart(2, "0")}</span>
             ${index < TEAM.length - 1 ? '<span class="nwt-rail-line"></span>' : ""}
           </div>
           <div class="nwt-member-copy">
             <div class="nwt-member-title">
               <strong>${escapeHtml(member.name)}</strong>
-              <span class="nwt-member-status ${klass}">${escapeHtml(label)}</span>
+              <span class="nwt-member-status ${klass}">${klass === "done" ? icon("check", 11) : klass === "running" ? '<i class="nwt-mini-pulse"></i>' : ""}${escapeHtml(label)}</span>
             </div>
             <p>${escapeHtml(member.responsibility)}</p>
             <div class="nwt-member-meta">
@@ -307,34 +510,66 @@
   }
 
   function renderTeamFlow() {
+    const job = state.job || {};
     const activeStage = state.job && state.job.active_stage;
+    const completedCount = TEAM.filter((member) => memberVisualStatus(member, job) === "success").length;
     return `
-      <div class="nwt-team-flow" aria-label="剧本团队工作流">
-        ${TEAM.map((member, index) => {
-          const status = stageStatusByName(member.name);
-          const [, klass] = statusLabel(status);
-          const isRunning = member.id === activeStage && isActive();
-          return `
-            <div class="nwt-flow-step ${klass} ${isRunning ? "active" : ""}">
-              <span class="nwt-flow-node">
-                ${isRunning ? icon("loader-circle", 15) : klass === "done" ? icon("check", 15) : String(index + 1)}
-              </span>
-              <strong>${escapeHtml(member.name)}</strong>
-              ${index < TEAM.length - 1 ? '<i class="nwt-flow-connector"></i>' : ""}
-            </div>
-          `;
-        }).join("")}
+      <div class="nwt-team-flow-wrap">
+        <div class="nwt-team-flow-head">
+          <div>
+            <span>${icon("route", 14)}创作链路</span>
+            <small>每个节点完成后自动保存，可随时从当前进度继续</small>
+          </div>
+          <strong><b>${completedCount}</b> / ${TEAM.length} 节点完成</strong>
+        </div>
+        <div class="nwt-team-flow" aria-label="剧本团队工作流">
+          ${TEAM.map((member, index) => {
+            const status = memberVisualStatus(member, job);
+            const [, klass] = statusLabel(status);
+            const isRunning = member.id === activeStage && isActive();
+            return `
+              <div class="nwt-flow-step ${klass} ${isRunning ? "active" : ""}" data-stage-status="${escapeHtml(klass || "waiting")}">
+                <span class="nwt-flow-node">
+                  ${isRunning ? icon("loader-circle", 15) : klass === "done" ? icon("check", 15) : klass === "error" ? icon("x", 14) : String(index + 1)}
+                </span>
+                <strong>${escapeHtml(member.name)}</strong>
+                <small>${klass === "done" ? "已完成" : isRunning ? "正在创作" : klass === "error" ? "需要处理" : "等待接力"}</small>
+                ${index < TEAM.length - 1 ? '<i class="nwt-flow-connector"><b></b></i>' : ""}
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderRecoveredNotice(keys) {
+    const labels = keys
+      .map((key) => ARTIFACT_LABELS[key] || key)
+      .filter(Boolean);
+    return `
+      <div class="nwt-recovered">
+        <span class="nwt-recovered-icon">${icon("archive-restore", 16)}</span>
+        <div>
+          <strong>已恢复 ${labels.length} 项创作产物</strong>
+          <small>${escapeHtml(labels.join(" · "))}</small>
+        </div>
       </div>
     `;
   }
 
   function renderBatchProgress(job) {
     const total = Math.max(1, Number((job.request || {}).episodes || state.form.episodes) || 1);
+    const episodeStart = Math.max(1, Number((job.request || {}).episode_start) || 1);
+    const episodeEnd = Math.max(
+      episodeStart,
+      Number((job.request || {}).episode_end) || (episodeStart + total - 1),
+    );
     const progress = job.batch_progress || {};
     const batchSize = Math.max(1, Number(progress.batch_size) || Math.min(5, total));
     const ranges = [];
-    for (let start = 1; start <= total; start += batchSize) {
-      ranges.push([start, Math.min(total, start + batchSize - 1)]);
+    for (let start = episodeStart; start <= episodeEnd; start += batchSize) {
+      ranges.push([start, Math.min(episodeEnd, start + batchSize - 1)]);
     }
     const completed = Array.isArray(progress.completed_ranges) ? progress.completed_ranges : [];
     return `
@@ -369,14 +604,7 @@
   function renderLiveMonitor(job) {
     const activeStage = TEAM.find((member) => member.id === job.active_stage);
     const progress = Math.max(0, Math.min(100, Number(job.progress) || 0));
-    const activeDuration = formatDuration(job.active_stage_elapsed_ms);
-    const runtimeText = isActive(job)
-      ? (
-        job.execution_target === "local_fallback"
-          ? `本地兜底正在生成${activeDuration ? ` · 已运行 ${activeDuration}` : ""}`
-          : `CNB Runner 已连接 · 30秒心跳${activeDuration ? ` · 已运行 ${activeDuration}` : ""}`
-      )
-      : "";
+    const runtimeText = liveRuntimeText(job);
     return `
       <aside class="nwt-monitor">
         <div class="nwt-monitor-head">
@@ -386,10 +614,10 @@
           </div>
           <span class="nwt-live-state ${isActive(job) ? "active" : ""}">${isActive(job) ? "运行中" : progress === 100 ? "已完成" : "待命"}</span>
         </div>
-        <p class="nwt-monitor-message">${escapeHtml(job.status_text || "填写任务后开始创作")}</p>
-        ${runtimeText ? `<div class="nwt-runtime-live"><i class="nwt-mini-pulse"></i><span>${escapeHtml(runtimeText)}</span></div>` : ""}
-        <div class="nwt-monitor-progress"><span style="width:${progress}%"></span></div>
-        <div class="nwt-monitor-progress-meta"><strong>${progress}%</strong><span>${escapeHtml(job.job_id || "尚未创建任务")}</span></div>
+        <p class="nwt-monitor-message" data-live-status-text>${escapeHtml(job.status_text || "填写任务后开始创作")}</p>
+        <div class="nwt-runtime-live" data-live-runtime ${runtimeText ? "" : "hidden"}><i class="nwt-mini-pulse"></i><span data-live-runtime-text>${escapeHtml(runtimeText)}</span></div>
+        <div class="nwt-monitor-progress"><span data-live-progress style="width:${progress}%"></span></div>
+        <div class="nwt-monitor-progress-meta"><strong data-live-progress-value>${progress}%</strong><span>${escapeHtml(job.job_id || "尚未创建任务")}</span></div>
         ${job.job_id ? renderBatchProgress(job) : ""}
         ${renderUsage(job)}
         <div class="nwt-cost-note">
@@ -551,7 +779,7 @@
             <article class="nwt-task-item ${state.job && state.job.job_id === item.job_id ? "active" : ""}">
               <button class="nwt-task-open" type="button" data-action="open-history" data-job-id="${escapeHtml(item.job_id)}">
                 <span class="nwt-task-title"><strong>${escapeHtml(item.project_title || "未命名剧本")}</strong><i class="nwt-task-state ${ACTIVE_JOB_STATUSES.has(String(item.status || "").toLowerCase()) ? "running" : item.has_final_script ? "done" : String(item.status || "").toLowerCase() === "failed" ? "failed" : ""}"></i></span>
-                <span class="nwt-task-meta">${escapeHtml(item.production_type || "")} · ${escapeHtml(item.episodes || 0)}集</span>
+                <span class="nwt-task-meta">${escapeHtml(item.production_type || "")} · ${item.mode === "续写" ? `续写第${escapeHtml(item.episode_start || "?")}-${escapeHtml(item.episode_end || "?")}集` : `${escapeHtml(item.episodes || 0)}集`}</span>
                 <span class="nwt-task-status">${escapeHtml(item.status_text || item.status || "")}</span>
                 <span class="nwt-task-progress"><i style="width:${Math.max(0, Math.min(100, Number(item.progress) || 0))}%"></i></span>
               </button>
@@ -576,7 +804,12 @@
     const recoveredFiles = job.recovered_files && typeof job.recovered_files === "object"
       ? Object.keys(job.recovered_files)
       : [];
-    const episodes = Math.max(1, Number(state.form.episodes) || 1);
+    const detectedLastEpisode = detectLastEpisode();
+    const currentLastEpisode = continuationLastEpisode();
+    const delivery = deliveryRange();
+    const episodes = delivery.count;
+    const continuationReady = state.form.mode !== "续写"
+      || Boolean(currentLastEpisode && delivery.end > currentLastEpisode);
     const requestWarnings = Array.isArray(job.request_warnings) ? job.request_warnings : [];
     const activeView = ["brief", "team", "delivery"].includes(state.activeView)
       ? state.activeView
@@ -649,6 +882,9 @@
                 <button class="nwt-segment-option ${state.form.mode === "改编" ? "active" : ""}" type="button" data-choice-key="mode" data-choice-value="改编" aria-pressed="${state.form.mode === "改编"}" ${active ? "disabled" : ""}>
                   ${icon("book-open", 14)}<span>改编</span>
                 </button>
+                <button class="nwt-segment-option ${state.form.mode === "续写" ? "active" : ""}" type="button" data-choice-key="mode" data-choice-value="续写" aria-pressed="${state.form.mode === "续写"}" ${active ? "disabled" : ""}>
+                  ${icon("forward", 14)}<span>续写</span>
+                </button>
               </div>
             </div>
             <div class="nwt-field">
@@ -679,14 +915,39 @@
               <div><strong>制作规格</strong><small>控制篇幅、场景密度和执行节奏</small></div>
             </div>
           <div class="nwt-form-grid nwt-form-grid-spec">
-            <label class="nwt-field">
-              <span>总集数</span>
-              <input type="number" min="1" max="120" data-form-key="episodes" value="${escapeHtml(state.form.episodes)}" ${active ? "disabled" : ""} />
-            </label>
+            ${state.form.mode === "续写" ? `
+              <label class="nwt-field">
+                <span>续写到第几集</span>
+                <input type="number" min="2" max="999" data-form-key="continuation_target_episode" value="${escapeHtml(state.form.continuation_target_episode)}" ${active ? "disabled" : ""} />
+                <small class="nwt-field-hint">填写最终希望写到的集号，系统自动计算新增集数</small>
+              </label>
+              ${detectedLastEpisode ? "" : `
+                <label class="nwt-field">
+                  <span>当前最后一集</span>
+                  <input type="number" min="1" max="998" data-form-key="source_last_episode" value="${escapeHtml(state.form.source_last_episode || "")}" placeholder="未识别时手动填写" ${active ? "disabled" : ""} />
+                  <small class="nwt-field-hint">上传或粘贴正文后通常会自动识别</small>
+                </label>
+              `}
+            ` : `
+              <label class="nwt-field">
+                <span>总集数</span>
+                <input type="number" min="1" max="120" data-form-key="episodes" value="${escapeHtml(state.form.episodes)}" ${active ? "disabled" : ""} />
+              </label>
+            `}
             <label class="nwt-field">
               <span>每集最低字数</span>
               <input type="number" min="100" max="5000" data-form-key="episode_word_count" value="${escapeHtml(state.form.episode_word_count)}" ${active ? "disabled" : ""} />
             </label>
+            <label class="nwt-field">
+              <span>每集视频时长（秒）</span>
+              <input type="number" min="15" max="1800" step="5" data-form-key="episode_duration_seconds" value="${escapeHtml(state.form.episode_duration_seconds)}" ${active ? "disabled" : ""} />
+              <small class="nwt-field-hint">对白、停顿、动作和镜头共同计时</small>
+            </label>
+            <div class="nwt-field nwt-duration-total" aria-live="polite">
+              <span>全剧预计时长</span>
+              <strong data-duration-preview>${escapeHtml(formatTargetDuration(generationEpisodeCount() * (Number(state.form.episode_duration_seconds) || 90)))}</strong>
+              <small class="nwt-field-hint" data-duration-hint>${escapeHtml(generationEpisodeCount())} 集 × ${escapeHtml(state.form.episode_duration_seconds)} 秒</small>
+            </div>
             <label class="nwt-field control-wide">
               <span>每集场景</span>
               <div class="nwt-select-control">
@@ -716,16 +977,27 @@
               <small class="nwt-field-hint">均由 CNB 远程执行，本地节点仅在失败时兜底</small>
             </div>
           </div>
+          ${state.form.mode === "续写" ? `
+            <div class="nwt-continuation-status ${continuationReady ? "ready" : "needs-input"}" aria-live="polite">
+              <span class="nwt-continuation-icon">${icon(continuationReady ? "scan-search" : "circle-alert", 17)}</span>
+              <div>
+                <strong data-continuation-title>${detectedLastEpisode ? `已识别写至第${detectedLastEpisode}集` : currentLastEpisode ? `当前按第${currentLastEpisode}集计算` : "未识别到集号"}</strong>
+                <small data-continuation-detail>${continuationReady
+                  ? `将只生成第${delivery.start}集至第${delivery.end}集，共${delivery.count}集；已有正文不会重写。`
+                  : "请上传带有“第N集”标题的已有剧本，或手动填写当前最后一集；目标集数必须更大。"}</small>
+              </div>
+            </div>
+          ` : ""}
           </div>
           <div class="nwt-form-band nwt-form-band-material">
             <div class="nwt-form-band-head">
               <span>03</span>
-              <div><strong>故事材料</strong><small>提供原始内容与本次创作必须遵守的方向</small></div>
+              <div><strong>${state.form.mode === "续写" ? "已有剧本与续写方向" : "故事材料"}</strong><small>${state.form.mode === "续写" ? "已有正文作为正典，只创作新的集数" : "提供原始内容与本次创作必须遵守的方向"}</small></div>
             </div>
           <div class="nwt-form-grid nwt-material-grid">
             <label class="nwt-field wide">
-              <span>原始材料或创作要求</span>
-              <textarea data-form-key="source_text" placeholder="粘贴原文，或写清主角、目标、阻力、结局和必须保留的信息。" ${active ? "disabled" : ""}>${escapeHtml(state.form.source_text)}</textarea>
+              <span>${state.form.mode === "续写" ? "已有完整剧本" : "原始材料或创作要求"}</span>
+              <textarea data-form-key="source_text" placeholder="${state.form.mode === "续写" ? "粘贴或上传已有剧本，系统会自动识别当前最后一集。" : "粘贴原文，或写清主角、目标、阻力、结局和必须保留的信息。"}" ${active ? "disabled" : ""}>${escapeHtml(state.form.source_text)}</textarea>
               <div class="nwt-upload-row">
                 <label class="nwt-upload-button">
                   ${icon("paperclip", 14)}<span>上传材料</span>
@@ -735,7 +1007,7 @@
               </div>
             </label>
             <label class="nwt-field wide">
-              <span>补充方向</span>
+              <span>${state.form.mode === "续写" ? "续写方向" : "补充方向"}</span>
               <textarea data-form-key="adaptation_direction" placeholder="例如：前五秒一句话爆点；每集承接上一集动作；人物细腻但不堆形容词；所有道具和证据根据剧情需要自然出现。" ${active ? "disabled" : ""}>${escapeHtml(state.form.adaptation_direction)}</textarea>
               <div class="nwt-upload-row">
                 <label class="nwt-upload-button">
@@ -749,14 +1021,14 @@
           </div>
           <div class="nwt-runbar">
             <div>
-              <strong>${escapeHtml(job.status_text || "尚未提交任务")}</strong>
-              <small>${job.job_id ? `任务 ${escapeHtml(job.job_id)}` : `本次交付第1集至第${episodes}集，共${episodes}集`}</small>
+              <strong data-live-status-text>${escapeHtml(job.status_text || "尚未提交任务")}</strong>
+              <small data-delivery-range>${job.job_id ? `任务 ${escapeHtml(job.job_id)}` : continuationReady ? `本次交付第${delivery.start}集至第${delivery.end}集，共${episodes}集` : "请先确认续写范围"}</small>
             </div>
             <div class="nwt-run-actions">
               ${canRecover ? '<button class="nwt-btn" type="button" data-action="recover">恢复中断产物</button>' : ""}
               ${active && job.execution_target === "local_fallback" ? '<button class="nwt-btn danger" type="button" data-action="cancel">停止本地兜底</button>' : ""}
               ${String(job.status || "").toLowerCase() === "failed" ? '<button class="nwt-btn danger" type="button" data-action="fallback">本地兜底继续</button>' : ""}
-              <button class="nwt-btn primary" type="button" data-action="start" ${state.loading || active || !(state.configStatus || {}).ready ? "disabled" : ""}>
+              <button class="nwt-btn primary" type="button" data-action="start" ${state.loading || active || !(state.configStatus || {}).ready || !continuationReady ? "disabled" : ""}>
                 ${state.loading ? `${icon("loader-circle", 16)}<span>正在提交</span>` : active ? `${icon("activity", 16)}<span>团队创作中</span>` : finalScript ? `${icon("refresh-cw", 16)}<span>重新生成</span>` : `${icon("sparkles", 16)}<span>开始创作</span>`}
               </button>
             </div>
@@ -781,7 +1053,7 @@
             ${gateWarnings.slice(0, 5).map((item) => `<span>${escapeHtml(item.message || item.code || "优化提示")}</span>`).join("")}
           </div>
         ` : ""}
-        ${recoveredFiles.length ? `<div class="nwt-recovered">已恢复中间产物：${escapeHtml(recoveredFiles.join("、"))}</div>` : ""}
+        ${recoveredFiles.length ? renderRecoveredNotice(recoveredFiles) : ""}
 
         <section class="nwt-team-section">
           <div class="nwt-section-head">
@@ -806,6 +1078,7 @@
               <p>${finalScript ? (gateErrors.length ? "终审稿已恢复，可下载；门禁待修项保留在上方" : "已完成终审并通过严格门禁") : "NPC团队完成后，正文会直接显示在这里"}</p>
             </div>
             <div class="nwt-actions">
+              <button class="nwt-btn" type="button" data-action="continue-script" ${finalScript ? "" : "disabled"}>${icon("forward", 15)}<span>续写本剧</span></button>
               <button class="nwt-btn" type="button" data-action="download-word" ${finalScript ? "" : "disabled"}>${icon("file-down", 15)}<span>Word</span></button>
               <button class="nwt-btn" type="button" data-action="download" ${finalScript ? "" : "disabled"}>${icon("download", 15)}<span>TXT</span></button>
             </div>
@@ -859,6 +1132,7 @@
   }
 
   async function loadHistory(silent = false) {
+    const previousSignature = historyRenderSignature(state.history);
     try {
       const data = await request("/api/new-workflow-test/npc/jobs");
       state.history = Array.isArray(data.jobs) ? data.jobs : [];
@@ -866,9 +1140,11 @@
       state.error = `读取历史记录失败：${error.message || error}`;
     }
     if (silent) {
-      const current = app.querySelector(".nwt-task-center");
-      if (current) current.outerHTML = renderTaskCenter();
-      window.queueMicrotask(() => window.lucide && window.lucide.createIcons());
+      if (previousSignature !== historyRenderSignature(state.history)) {
+        const current = app.querySelector(".nwt-task-center");
+        if (current) current.outerHTML = renderTaskCenter();
+        window.queueMicrotask(() => window.lucide && window.lucide.createIcons());
+      }
     } else {
       render();
     }
@@ -932,14 +1208,40 @@
     }
   }
 
+  function continueCurrentScript() {
+    const script = String((state.job || {}).final_script || "").trim();
+    if (!script) return;
+    const lastEpisode = detectLastEpisode(script);
+    state.form = {
+      ...state.form,
+      mode: "续写",
+      source_text: script,
+      source_last_episode: lastEpisode,
+      continuation_target_episode: Math.max(2, lastEpisode + 5),
+      adaptation_direction: "",
+    };
+    state.job = null;
+    state.error = "";
+    state.selectedArtifact = "";
+    state.activeView = "brief";
+    saveState();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   async function pollJob() {
     if (!state.job || !state.job.job_id || !isActive()) return;
+    const previousSignature = renderSignature(state.job);
     try {
       const data = await request(`/api/new-workflow-test/npc/jobs/${encodeURIComponent(state.job.job_id)}`);
       state.job = data.job || state.job;
       state.error = state.job.status === "failed" ? (state.job.error || "NPC团队执行失败。") : "";
       saveState();
-      render();
+      if (previousSignature !== renderSignature(state.job)) {
+        render();
+      } else {
+        patchLiveTelemetry(state.job);
+      }
       if (!isActive()) loadHistory();
       if (isActive()) schedulePoll(POLL_MS);
     } catch (error) {
@@ -993,6 +1295,12 @@
       }
       const current = String(state.form[targetKey] || "").trim();
       state.form[targetKey] = [current, ...sections].filter(Boolean).join("\n\n");
+      if (targetKey === "source_text" && state.form.mode === "续写") {
+        const detected = detectLastEpisode(state.form.source_text);
+        if (detected && Number(state.form.continuation_target_episode) <= detected) {
+          state.form.continuation_target_episode = detected + 5;
+        }
+      }
       saveState();
     } catch (error) {
       state.error = `上传失败：${error.message || error}`;
@@ -1181,9 +1489,29 @@
     if (!event.target.matches("[data-form-key]")) return;
     syncForm();
     saveState();
+    if (
+      state.form.mode === "续写"
+      && ["source_text", "source_last_episode", "continuation_target_episode"].includes(
+        String(event.target.dataset.formKey || ""),
+      )
+    ) {
+      render();
+    }
   });
 
   app.addEventListener("input", (event) => {
+    if (event.target.matches("[data-form-key]")) {
+      syncForm();
+      if (
+        ["episodes", "source_last_episode", "continuation_target_episode", "episode_duration_seconds"].includes(
+          String(event.target.dataset.formKey || ""),
+        )
+      ) {
+        updateDurationPreview();
+        updateContinuationPreview();
+      }
+      saveState();
+    }
     if (event.target.matches("[data-editor-section-text]")) {
       state.editor.dirty = true;
       state.editor.notice = "";
@@ -1204,6 +1532,12 @@
       const value = String(choice.dataset.choiceValue || "");
       if (!key || state.form[key] === value) return;
       state.form[key] = value;
+      if (key === "mode" && value === "续写") {
+        const lastEpisode = continuationLastEpisode();
+        if (lastEpisode && Number(state.form.continuation_target_episode) <= lastEpisode) {
+          state.form.continuation_target_episode = lastEpisode + 5;
+        }
+      }
       saveState();
       render();
       return;
@@ -1282,6 +1616,7 @@
         `/api/new-workflow-test/npc/jobs/${encodeURIComponent(state.job.job_id)}/export/docx`,
       );
     }
+    if (action === "continue-script") continueCurrentScript();
   });
 
   render();

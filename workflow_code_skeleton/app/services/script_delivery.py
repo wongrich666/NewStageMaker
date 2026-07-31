@@ -95,11 +95,31 @@ def build_script_overview(job: dict[str, Any]) -> str:
     title = str(request.get("project_title") or "未命名剧本").strip()
     basic_items = [
         ("作品名称", title),
+        ("创作模式", request.get("mode")),
         ("成片类型", request.get("production_type")),
         ("目标市场", request.get("target_market")),
         ("题材方向", request.get("genre")),
-        ("总集数", f"{request.get('episodes')}集" if request.get("episodes") else ""),
     ]
+    if str(request.get("mode") or "") == "续写":
+        episode_start = int(request.get("episode_start") or 1)
+        episode_end = int(request.get("episode_end") or episode_start)
+        basic_items.extend(
+            [
+                (
+                    "本次续写范围",
+                    f"第{episode_start}集至第{episode_end}集"
+                    f"（{request.get('episodes')}集）",
+                ),
+                (
+                    "全剧当前目标",
+                    f"写至第{request.get('series_total_episodes') or episode_end}集",
+                ),
+            ]
+        )
+    else:
+        basic_items.append(
+            ("总集数", f"{request.get('episodes')}集" if request.get("episodes") else "")
+        )
     basic = "\n".join(
         f"- **{label}**：{str(value).strip()}"
         for label, value in basic_items

@@ -147,6 +147,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     codebuddy_npc_jobs = CodeBuddyNpcJobStore(codebuddy_npc_config)
     codebuddy_npc_client = CodeBuddyNpcClient(codebuddy_npc_config)
     codebuddy_npc_stage_runner = CodeBuddyNpcStageRunner(codebuddy_npc_jobs)
+    codebuddy_npc_refresh_locks: dict[str, threading.RLock] = {}
+    codebuddy_npc_refresh_locks_guard = threading.Lock()
     try:
         codebuddy_npc_remote_retry_limit = int(
             os.getenv("CODEBUDDY_NPC_REMOTE_STAGE_RETRIES", "2")
@@ -214,7 +216,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         job["progress"] = round(STAGE_ORDER.index(stage) / len(STAGE_ORDER) * 100)
         return codebuddy_npc_jobs.save(job)
 
-    def _refresh_remote_npc_job(job: dict[str, Any]) -> dict[str, Any]:
+    def _refresh_remote_npc_job_unlocked(job: dict[str, Any]) -> dict[str, Any]:
         job_id = str(job.get("job_id") or "")
         if (
             str(job.get("execution_target") or "") != "remote_cnb"
@@ -350,6 +352,22 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             job["poll_warning"] = str(exc)
             job = codebuddy_npc_jobs.save(job)
         return job
+
+    def _refresh_remote_npc_job(job: dict[str, Any]) -> dict[str, Any]:
+        job_id = str(job.get("job_id") or "")
+        if not job_id:
+            return job
+        with codebuddy_npc_refresh_locks_guard:
+            refresh_lock = codebuddy_npc_refresh_locks.setdefault(
+                job_id,
+                threading.RLock(),
+            )
+        with refresh_lock:
+            latest_job = codebuddy_npc_jobs.load(
+                job_id,
+                user_id=int(job["user_id"]),
+            )
+            return _refresh_remote_npc_job_unlocked(latest_job or job)
     app.config["WORKFLOW_SPEC_PATH"] = workflow_spec_path or default_workflow_spec_path()
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY") or os.getenv("FLASK_SECRET_KEY") or "scriptmaker-dev-secret"
     force_secure_cookies = str(
@@ -8579,7 +8597,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 {
                     "job_id": item.get("job_id"),
                     "project_title": request_data.get("project_title") or "未命名剧本",
+                    "mode": request_data.get("mode") or "原创",
                     "episodes": request_data.get("episodes"),
+                    "episode_start": request_data.get("episode_start") or 1,
+                    "episode_end": request_data.get("episode_end") or request_data.get("episodes"),
                     "production_type": request_data.get("production_type"),
                     "status": item.get("status"),
                     "status_text": item.get("status_text"),

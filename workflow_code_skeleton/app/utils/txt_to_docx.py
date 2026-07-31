@@ -687,7 +687,7 @@ def convert(input_path: str, output_path: str):
 SCRIPT_EPISODE_HEADER = re.compile(
     r"^\s*(?:#{1,6}\s*)?(?:《[^》\r\n]+》\s*[·\-—]?\s*)?"
     r"第\s*(\d{1,3})\s*集"
-    r"(?:\s*[：:]\s*(《[^》\r\n]+》|[^\r\n]+))?\s*$"
+    r"(?:\s*(?:[：:]\s*)?(《[^》\r\n]+》)|\s*[：:]\s*([^\r\n]+))?\s*$"
 )
 SCRIPT_SCENE_HEADER = re.compile(
     r"^\s*(?:场景\s*)?(\d{1,3})(?:\s*[-—]\s*(\d{1,3}))?"
@@ -857,7 +857,9 @@ def convert_script_team(input_path: str, output_path: str, *, title: str = ""):
             episode_heading.paragraph_format.space_after = Pt(8)
             episode_run = episode_heading.add_run(f"第 {episode_number} 集")
             _set_script_run_font(episode_run, size=16, bold=True)
-            episode_title = _clean_script_line(episode_match.group(2) or "")
+            episode_title = _clean_script_line(
+                episode_match.group(2) or episode_match.group(3) or ""
+            )
             if episode_title:
                 subtitle = document.add_paragraph()
                 subtitle.paragraph_format.space_after = Pt(14)

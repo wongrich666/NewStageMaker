@@ -50,6 +50,10 @@ PERFORMANCE_CUE_DIALOGUE = re.compile(
     r"(?m)^\s*(?![\w\u4e00-\u9fff·]{1,20}OS\s*[：:])"
     r"[\w\u4e00-\u9fff·]{1,20}\s*[：:]\s*（[^）\r\n]{2,36}）\s*\S[^\r\n]*$"
 )
+SPEAKER_LINE = re.compile(
+    r"^\s*(?!场景\s*\d+\s*[：:])(?!人物\s*[：:])"
+    r"[\w\u4e00-\u9fff·]{1,20}(?:OS)?\s*[：:]\s*(?P<content>.+)$"
+)
 
 
 def _scene_contract(request: dict[str, Any]) -> tuple[str, int, int | None]:
@@ -146,6 +150,39 @@ def _dash_metrics(text: str) -> dict[str, float | int]:
     }
 
 
+def _estimate_screen_seconds(body: str) -> dict[str, int]:
+    spoken_units = 0
+    dialogue_pause_seconds = 0.0
+    action_seconds = 0.0
+    scene_count = len(SCENE_HEADER.findall(body))
+    for raw_line in body.splitlines():
+        line = re.sub(r"^\s*(?:#{1,6}\s+|[-+*]\s+|[△▲]\s*)", "", raw_line).strip()
+        line = line.strip("*_ ")
+        if not line or EPISODE_HEADER.match(line) or SCENE_HEADER.match(line):
+            continue
+        if re.match(r"^人物\s*[：:]", line):
+            continue
+        speaker = SPEAKER_LINE.match(line)
+        if speaker:
+            content = re.sub(r"^\s*（[^）\r\n]{1,50}）\s*", "", speaker.group("content"))
+            spoken_units += _word_units(content)
+            dialogue_pause_seconds += 0.15 * len(re.findall(r"[，、；,;]", content))
+            dialogue_pause_seconds += 0.35 * len(re.findall(r"[。！？!?]", content))
+            dialogue_pause_seconds += 0.6 * content.count("……")
+            continue
+        units = _word_units(line)
+        if not units:
+            continue
+        visible_beats = max(1, len(re.findall(r"[。！？!?；;]", line)))
+        action_seconds += max(1.0, min(8.0, units / 12 + visible_beats * 0.6))
+    estimated = spoken_units / 4.0 + dialogue_pause_seconds + action_seconds + scene_count
+    return {
+        "estimated_seconds": max(1, round(estimated)),
+        "spoken_units": spoken_units,
+        "action_seconds": round(action_seconds),
+    }
+
+
 def _require_text(
     report: GateReport,
     obj: dict[str, Any],
@@ -211,6 +248,7 @@ def _validate_state_episodes(
     state_episodes: Any,
     expected_count: int,
     *,
+    episode_start: int,
     minimum_scenes: int,
     maximum_scenes: int | None,
     strict: bool,
@@ -219,10 +257,11 @@ def _validate_state_episodes(
         report.issue("state.episodes.invalid", "story_state.episodes 必须是数组")
         return
     numbers = [item.get("episode") for item in state_episodes if isinstance(item, dict)]
-    if numbers != list(range(1, expected_count + 1)):
+    expected_numbers = list(range(episode_start, episode_start + expected_count))
+    if numbers != expected_numbers:
         report.issue(
             "state.episodes.sequence",
-            f"状态集号应为 1..{expected_count}，实际为 {numbers}",
+            f"状态集号应为 {expected_numbers}，实际为 {numbers}",
         )
     for item in state_episodes:
         if not isinstance(item, dict):
@@ -287,7 +326,10 @@ def _validate_state_episodes(
 def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mode: str) -> GateReport:
     report = GateReport(mode=mode)
     expected_count = max(1, int(request.get("episodes") or 1))
+    episode_start = max(1, int(request.get("episode_start") or 1))
+    expected_numbers = list(range(episode_start, episode_start + expected_count))
     target_words = max(100, int(request.get("episode_word_count") or 800))
+    target_seconds = max(15, int(request.get("episode_duration_seconds") or 90))
     scene_policy, minimum_scenes, maximum_scenes = _scene_contract(request)
     episodes = _split_episodes(script)
     numbers = [number for number, _ in episodes]
@@ -296,6 +338,8 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
             "expected_episode_count": expected_count,
             "actual_episode_count": len(episodes),
             "minimum_words_per_episode": target_words,
+            "target_seconds_per_episode": target_seconds,
+            "target_total_seconds": target_seconds * expected_count,
             "scenes_per_episode": scene_policy,
             "script_chars": _text_size(script),
         }
@@ -303,8 +347,11 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
 
     if any(marker in script for marker in AUDIT_MARKERS) or re.search(r"\|\s*状态\s*\|", script):
         report.issue("script.audit_report", "最终交付疑似审核报告，不是逐集剧本正文")
-    if numbers != list(range(1, expected_count + 1)):
-        report.issue("script.episodes.sequence", f"剧本集号应为 1..{expected_count}，实际为 {numbers}")
+    if numbers != expected_numbers:
+        report.issue(
+            "script.episodes.sequence",
+            f"剧本集号应为 {expected_numbers}，实际为 {numbers}",
+        )
     header_matches = list(EPISODE_HEADER.finditer(script))
     for index, match in enumerate(header_matches):
         if not TITLED_EPISODE_HEADER.search(match.group(0)):
@@ -327,6 +374,7 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
         dash_metrics = _dash_metrics(body)
         dialogue_count = len(ATTRIBUTED_DIALOGUE.findall(body))
         performance_cue_count = len(PERFORMANCE_CUE_DIALOGUE.findall(body))
+        timing = _estimate_screen_seconds(body)
         episode_metrics.append(
             {
                 "episode": episode_no,
@@ -335,6 +383,7 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
                 "scene_headers": scene_count,
                 "dialogue_lines": dialogue_count,
                 "performance_cue_dialogues": performance_cue_count,
+                **timing,
                 **dash_metrics,
             }
         )
@@ -395,6 +444,17 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
                 episode=episode_no,
                 error=False,
             )
+        duration_ratio = timing["estimated_seconds"] / target_seconds
+        if duration_ratio < 0.85 or duration_ratio > 1.15:
+            report.issue(
+                "script.episode.duration_deviation",
+                (
+                    f"预计画面时长约 {timing['estimated_seconds']} 秒，"
+                    f"前端目标为 {target_seconds} 秒；请通过有效对白、反应、动作和镜头节拍调整"
+                ),
+                episode=episode_no,
+                error=False,
+            )
     report.metrics["episodes"] = episode_metrics
 
     if state.get("schema_version") != "1.0":
@@ -411,6 +471,7 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
         report,
         state.get("episodes"),
         expected_count,
+        episode_start=episode_start,
         minimum_scenes=minimum_scenes,
         maximum_scenes=maximum_scenes,
         strict=mode == "strict",

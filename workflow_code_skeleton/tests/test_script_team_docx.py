@@ -94,6 +94,42 @@ def test_script_team_docx_accepts_markdown_combined_title_and_episode(tmp_path: 
     assert "---" not in by_text
 
 
+def test_script_team_docx_accepts_episode_title_without_colon(tmp_path: Path) -> None:
+    source = tmp_path / "episode-without-colon.txt"
+    output = tmp_path / "episode-without-colon.docx"
+    source.write_text(
+        "\n".join(
+            [
+                "# 剧本正文",
+                "第1集《从天而降的“锅”》",
+                "",
+                "场景1：会议室｜日｜内",
+                "人物：打工鱼、波士鱼",
+                "波士鱼：从今天起，你就是组长。",
+                "",
+                "第2集《半包纸巾》",
+                "场景1：办公室｜日｜内",
+                "人物：打工鱼",
+                "打工鱼OS：这班还能上吗？",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    convert_script_team(str(source), str(output), title="今天也在努力打工呢")
+
+    document = Document(output)
+    paragraphs = [paragraph for paragraph in document.paragraphs if paragraph.text.strip()]
+    by_text = {paragraph.text: paragraph for paragraph in paragraphs}
+
+    assert by_text["第 1 集"].style.name == "Heading 1"
+    assert "《从天而降的“锅”》" in by_text
+    assert by_text["1-1 会议室｜日｜内"].style.name == "Heading 2"
+    assert by_text["波士鱼：从今天起，你就是组长。"].runs[0].bold is True
+    assert by_text["第 2 集"].style.name == "Heading 1"
+    assert by_text["2-1 办公室｜日｜内"].style.name == "Heading 2"
+
+
 def test_script_team_docx_renders_delivery_overview_before_script(tmp_path: Path) -> None:
     source = tmp_path / "delivery-script.txt"
     output = tmp_path / "delivery-script.docx"

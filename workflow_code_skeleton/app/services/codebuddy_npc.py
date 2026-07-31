@@ -151,9 +151,20 @@ def _clean_text(value: Any, *, limit: int = 200_000) -> str:
 _EXCLUSIVE_EPISODE = re.compile(r"(?:只能|只(?:需|要)?|仅(?:需|要)?)")
 _EPISODE_REFERENCE = re.compile(r"第\s*(\d{1,3})\s*集")
 _DELIVERY_REFERENCE = re.compile(r"(?:最终|文件|正文|剧本|成品|交付|输出|生成|编写|写出|只写)")
+_SOURCE_EPISODE_HEADER = re.compile(
+    r"(?im)^\s*(?:#{1,6}\s*)?(?:《[^》\r\n]+》\s*[·\-—]?\s*)?"
+    r"(?:第\s*(\d{1,3})\s*集|Episode\s*(\d{1,3})\b)"
+)
+_CREATION_MODES = {"原创", "改编", "续写"}
+_CONTINUATION_POLICIES = {"strict", "light"}
 
 
-def _normalize_episode_direction(direction: str, episodes: int) -> tuple[str, list[str]]:
+def _normalize_episode_direction(
+    direction: str,
+    episodes: int,
+    *,
+    episode_start: int = 1,
+) -> tuple[str, list[str]]:
     """Remove single-episode delivery clauses that contradict the numeric episode contract."""
     if not direction:
         return "", []
@@ -169,7 +180,7 @@ def _normalize_episode_direction(direction: str, episodes: int) -> tuple[str, li
         )
         if is_single_episode_delivery:
             requested_episode = int(episode_match.group(1))
-            if episodes != 1 or requested_episode != 1:
+            if episodes != 1 or requested_episode != episode_start:
                 ignored.append(clause.strip(" \t\r\n；;。"))
                 continue
         kept.append(clause)
@@ -177,7 +188,27 @@ def _normalize_episode_direction(direction: str, episodes: int) -> tuple[str, li
     return normalized, ignored
 
 
-def _episode_contract(episodes: int) -> str:
+def _detect_last_episode(source_text: str) -> int:
+    numbers = [
+        int(match.group(1) or match.group(2))
+        for match in _SOURCE_EPISODE_HEADER.finditer(str(source_text or ""))
+    ]
+    return max(numbers, default=0)
+
+
+def _episode_contract(
+    episodes: int,
+    *,
+    episode_start: int = 1,
+    source_last_episode: int = 0,
+) -> str:
+    episode_end = episode_start + episodes - 1
+    if source_last_episode:
+        return (
+            f"续写范围硬合同：已有剧本写至第{source_last_episode}集；"
+            f"必须且只能交付第{episode_start}集至第{episode_end}集，共{episodes}集；"
+            f"不得重写第1集至第{source_last_episode}集。"
+        )
     if episodes == 1:
         return "总集数硬合同：必须交付且只能交付第1集，共1集。"
     return (
@@ -406,22 +437,92 @@ class CodeBuddyNpcJobStore:
         title = _clean_text(request_payload.get("project_title"), limit=120)
         source_text = _clean_text(request_payload.get("source_text"))
         direction = _clean_text(request_payload.get("adaptation_direction"), limit=20_000)
+        mode = _clean_text(request_payload.get("mode"), limit=30) or "原创"
+        if mode not in _CREATION_MODES:
+            mode = "原创"
         if not title:
             raise CodeBuddyNpcError("请填写项目名称。", status_code=400)
+        if mode == "续写" and not source_text:
+            raise CodeBuddyNpcError("续写模式必须上传或粘贴已有剧本。", status_code=400)
         if not source_text and not direction:
             raise CodeBuddyNpcError("请填写原始材料或创作要求。", status_code=400)
 
         try:
-            episodes = min(120, max(1, int(request_payload.get("episodes") or 5)))
+            requested_episodes = min(120, max(1, int(request_payload.get("episodes") or 5)))
             episode_word_count = min(5000, max(100, int(request_payload.get("episode_word_count") or 800)))
+            episode_duration_seconds = min(
+                1800,
+                max(15, int(request_payload.get("episode_duration_seconds") or 90)),
+            )
         except (TypeError, ValueError) as exc:
-            raise CodeBuddyNpcError("集数或每集字数格式不正确。", status_code=400) from exc
+            raise CodeBuddyNpcError("集数、每集字数或剧集时长格式不正确。", status_code=400) from exc
         scenes_per_episode = _clean_text(
             request_payload.get("scenes_per_episode"), limit=20
         ) or "1"
         if scenes_per_episode not in {"1", "1-2", "2", "2-3", "flexible"}:
             scenes_per_episode = "1"
-        direction, ignored_directions = _normalize_episode_direction(direction, episodes)
+
+        source_last_episode = 0
+        episode_start = 1
+        episode_end = requested_episodes
+        series_total_episodes = requested_episodes
+        episodes = requested_episodes
+        continuation_policy = _clean_text(
+            request_payload.get("continuation_policy"), limit=20
+        ) or "strict"
+        if continuation_policy not in _CONTINUATION_POLICIES:
+            continuation_policy = "strict"
+        if mode == "续写":
+            detected_last_episode = _detect_last_episode(source_text)
+            try:
+                manual_last_episode = max(
+                    0,
+                    min(999, int(request_payload.get("source_last_episode") or 0)),
+                )
+                target_episode = max(
+                    1,
+                    min(
+                        999,
+                        int(
+                            request_payload.get("continuation_target_episode")
+                            or (
+                                (detected_last_episode or manual_last_episode)
+                                + requested_episodes
+                            )
+                        ),
+                    ),
+                )
+            except (TypeError, ValueError) as exc:
+                raise CodeBuddyNpcError(
+                    "当前最后一集或续写目标集数格式不正确。",
+                    status_code=400,
+                ) from exc
+            source_last_episode = detected_last_episode or manual_last_episode
+            if source_last_episode < 1:
+                raise CodeBuddyNpcError(
+                    "未能从已有剧本识别集号，请手动填写当前最后一集。",
+                    status_code=400,
+                )
+            if target_episode <= source_last_episode:
+                raise CodeBuddyNpcError(
+                    f"续写目标必须大于当前第{source_last_episode}集。",
+                    status_code=400,
+                )
+            episodes = target_episode - source_last_episode
+            if episodes > 120:
+                raise CodeBuddyNpcError(
+                    "单次最多续写120集，请缩小本次续写范围。",
+                    status_code=400,
+                )
+            episode_start = source_last_episode + 1
+            episode_end = target_episode
+            series_total_episodes = target_episode
+
+        direction, ignored_directions = _normalize_episode_direction(
+            direction,
+            episodes,
+            episode_start=episode_start,
+        )
 
         job_id = f"npc-{uuid.uuid4().hex[:16]}"
         job = {
@@ -432,16 +533,28 @@ class CodeBuddyNpcJobStore:
             "progress": 0,
             "request": {
                 "project_title": title,
-                "mode": _clean_text(request_payload.get("mode"), limit=30) or "原创",
+                "mode": mode,
                 "production_type": _clean_text(request_payload.get("production_type"), limit=50) or "AI漫剧",
                 "target_market": _clean_text(request_payload.get("target_market"), limit=100) or "中国大陆",
                 "genre": _clean_text(request_payload.get("genre"), limit=100),
                 "episodes": episodes,
+                "source_last_episode": source_last_episode,
+                "episode_start": episode_start,
+                "episode_end": episode_end,
+                "series_total_episodes": series_total_episodes,
+                "continuation_target_episode": episode_end,
+                "continuation_policy": continuation_policy,
                 "episode_word_count": episode_word_count,
+                "episode_duration_seconds": episode_duration_seconds,
+                "total_duration_seconds": episodes * episode_duration_seconds,
                 "scenes_per_episode": scenes_per_episode,
                 "source_text": source_text,
                 "adaptation_direction": direction,
-                "episode_contract": _episode_contract(episodes),
+                "episode_contract": _episode_contract(
+                    episodes,
+                    episode_start=episode_start,
+                    source_last_episode=source_last_episode,
+                ),
             },
             "request_warnings": [
                 f"已忽略与总集数 {episodes} 集冲突的补充要求：{item}"

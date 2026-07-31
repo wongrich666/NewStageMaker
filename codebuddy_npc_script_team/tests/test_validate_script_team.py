@@ -13,6 +13,22 @@ sys.modules[SPEC.name] = gate
 SPEC.loader.exec_module(gate)
 
 
+def test_screen_duration_estimator_counts_dialogue_pauses_and_visible_actions() -> None:
+    timing = gate._estimate_screen_seconds(
+        """
+场景1：当铺｜夜｜内
+人物：宋砚、林栀
+△宋砚眨了眨眼，抬手按住即将坠落的玻璃弹珠。
+林栀：（屏住呼吸，眉心微蹙）别碰它。那不是你的记忆！
+宋砚OS：她认识这颗弹珠？
+"""
+    )
+
+    assert timing["spoken_units"] > 10
+    assert timing["action_seconds"] >= 1
+    assert timing["estimated_seconds"] >= 5
+
+
 def _character(name: str = "林深") -> dict:
     return {
         "name": name,
@@ -183,6 +199,37 @@ def test_validator_accepts_english_episode_headers() -> None:
 
     assert report.metrics["actual_episode_count"] == 2
     assert not any(item["code"] == "script.episodes.sequence" for item in report.errors)
+
+
+def test_validator_accepts_continuation_episode_range() -> None:
+    state = _state(episodes=2)
+    state["episodes"][0]["episode"] = 6
+    state["episodes"][0]["continuity_bridge"] = {
+        "previous_episode": 5,
+        "from_action": "林深推开通往电梯井的门。",
+        "to_action": "林深按住仍在震动的门把手。",
+        "reason": "承接已有剧本第5集结尾动作",
+    }
+    state["episodes"][1]["episode"] = 7
+    state["episodes"][1]["continuity_bridge"]["previous_episode"] = 6
+    script = f"第6集：《门后》\n{_body('别回头。')}\n第7集：《回声》\n{_body('关门。')}"
+
+    report = gate.validate(
+        script,
+        state,
+        {
+            "mode": "续写",
+            "episodes": 2,
+            "episode_start": 6,
+            "episode_end": 7,
+            "episode_word_count": 100,
+        },
+        mode="strict",
+    )
+
+    codes = {item["code"] for item in report.errors}
+    assert "script.episodes.sequence" not in codes
+    assert "state.episodes.sequence" not in codes
 
 
 def test_english_word_target_is_not_compared_to_character_count() -> None:

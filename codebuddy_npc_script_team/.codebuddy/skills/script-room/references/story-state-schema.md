@@ -3,6 +3,10 @@
 状态记录器只提取事实，不改写剧本。输出必须是单个合法 JSON 对象，不得使用 Markdown
 代码围栏或附加解释。
 
+`project.episode_count` 记录本次生成集数。`episodes` 数组必须覆盖请求中的
+`episode_start` 至 `episode_end`；续写模式下第一条记录的 `continuity_bridge`
+连接 `source_last_episode`，不得强制从第1集开始。
+
 ```json
 {
   "schema_version": "1.0",

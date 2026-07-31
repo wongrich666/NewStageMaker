@@ -71,3 +71,23 @@ def test_build_delivery_script_places_overview_before_episodes() -> None:
 
     assert delivery.index("# 剧本大纲") < delivery.index("# 剧本正文")
     assert delivery.index("# 剧本正文") < delivery.index("第1集")
+
+
+def test_continuation_overview_shows_new_range_and_series_target() -> None:
+    job = _job()
+    job["request"].update(
+        {
+            "mode": "续写",
+            "episodes": 13,
+            "source_last_episode": 17,
+            "episode_start": 18,
+            "episode_end": 30,
+            "series_total_episodes": 30,
+        }
+    )
+
+    overview = build_script_overview(job)
+
+    assert "**创作模式**：续写" in overview
+    assert "**本次续写范围**：第18集至第30集（13集）" in overview
+    assert "**全剧当前目标**：写至第30集" in overview
