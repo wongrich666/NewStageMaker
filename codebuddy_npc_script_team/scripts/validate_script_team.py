@@ -329,6 +329,10 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
     episode_start = max(1, int(request.get("episode_start") or 1))
     expected_numbers = list(range(episode_start, episode_start + expected_count))
     target_words = max(100, int(request.get("episode_word_count") or 800))
+    maximum_words = max(
+        target_words,
+        int(request.get("episode_word_count_max") or ((target_words * 110 + 99) // 100)),
+    )
     target_seconds = max(15, int(request.get("episode_duration_seconds") or 90))
     scene_policy, minimum_scenes, maximum_scenes = _scene_contract(request)
     episodes = _split_episodes(script)
@@ -338,6 +342,7 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
             "expected_episode_count": expected_count,
             "actual_episode_count": len(episodes),
             "minimum_words_per_episode": target_words,
+            "maximum_words_per_episode": maximum_words,
             "target_seconds_per_episode": target_seconds,
             "target_total_seconds": target_seconds * expected_count,
             "scenes_per_episode": scene_policy,
@@ -391,6 +396,12 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
             report.issue(
                 "script.episode.too_short",
                 f"正文 {size} 字，低于前端设定的最低字数 {target_words}",
+                episode=episode_no,
+            )
+        if size > maximum_words:
+            report.issue(
+                "script.episode.too_long",
+                f"正文 {size} 字，超过前端目标字数允许上浮10%的上限 {maximum_words}",
                 episode=episode_no,
             )
         if not body:

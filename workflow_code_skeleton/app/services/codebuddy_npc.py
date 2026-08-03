@@ -313,6 +313,15 @@ class CodeBuddyNpcJobStore:
 
     def save(self, job: dict[str, Any]) -> dict[str, Any]:
         payload = copy.deepcopy(job)
+        request_data = payload.get("request")
+        if isinstance(request_data, dict):
+            target_words = min(
+                5000,
+                max(100, int(request_data.get("episode_word_count") or 800)),
+            )
+            request_data["episode_word_count"] = target_words
+            request_data["episode_word_count_max"] = (target_words * 110 + 99) // 100
+            request_data["episode_word_count_tolerance_percent"] = 10
         payload["updated_at"] = _now_iso()
         path = self._path(str(payload["job_id"]))
         payload["artifact_files"] = self._persist_artifacts(payload)
@@ -450,6 +459,7 @@ class CodeBuddyNpcJobStore:
         try:
             requested_episodes = min(120, max(1, int(request_payload.get("episodes") or 5)))
             episode_word_count = min(5000, max(100, int(request_payload.get("episode_word_count") or 800)))
+            episode_word_count_max = (episode_word_count * 110 + 99) // 100
             episode_duration_seconds = min(
                 1800,
                 max(15, int(request_payload.get("episode_duration_seconds") or 90)),
@@ -545,6 +555,8 @@ class CodeBuddyNpcJobStore:
                 "continuation_target_episode": episode_end,
                 "continuation_policy": continuation_policy,
                 "episode_word_count": episode_word_count,
+                "episode_word_count_max": episode_word_count_max,
+                "episode_word_count_tolerance_percent": 10,
                 "episode_duration_seconds": episode_duration_seconds,
                 "total_duration_seconds": episodes * episode_duration_seconds,
                 "scenes_per_episode": scenes_per_episode,

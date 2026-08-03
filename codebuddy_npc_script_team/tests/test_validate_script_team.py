@@ -122,7 +122,7 @@ def test_valid_script_and_state_pass_strict_gate() -> None:
     report = gate.validate(
         script,
         _state(),
-        {"episodes": 1, "episode_word_count": 100},
+        {"episodes": 1, "episode_word_count": 125},
         mode="strict",
     )
 
@@ -250,6 +250,21 @@ def test_english_word_target_is_not_compared_to_character_count() -> None:
     assert episode_metric["chars"] > 630
     assert 175 <= episode_metric["word_units"] <= 630
     assert not any(item["code"] == "script.episode.too_long" for item in report.errors)
+
+
+def test_episode_above_ten_percent_word_tolerance_is_rejected() -> None:
+    body = "场景1：工作室｜夜｜内\n人物：林深\n" + "林深盯着门缝。" * 20
+    script = f"第1集：《门缝》\n{body}"
+
+    report = gate.validate(
+        script,
+        _state(),
+        {"episodes": 1, "episode_word_count": 100},
+        mode="strict",
+    )
+
+    assert report.metrics["maximum_words_per_episode"] == 110
+    assert any(item["code"] == "script.episode.too_long" for item in report.errors)
 
 
 def test_default_scene_contract_rejects_extra_state_scenes() -> None:

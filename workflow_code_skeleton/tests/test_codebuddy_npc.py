@@ -88,6 +88,8 @@ def test_job_store_preserves_request_and_user_boundary(tmp_path: Path) -> None:
     assert job["request"]["scenes_per_episode"] == "1"
     assert job["request"]["episode_duration_seconds"] == 75
     assert job["request"]["total_duration_seconds"] == 375
+    assert job["request"]["episode_word_count_max"] == 880
+    assert job["request"]["episode_word_count_tolerance_percent"] == 10
     assert store.load(job["job_id"], user_id=7)["user_id"] == 7
     assert store.load(job["job_id"], user_id=8) is None
 
@@ -127,6 +129,26 @@ def test_job_store_preserves_dynamic_scene_contract(tmp_path: Path) -> None:
     )
 
     assert job["request"]["scenes_per_episode"] == "2"
+
+
+def test_job_store_migrates_existing_job_to_ten_percent_word_limit(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={
+            "project_title": "旧任务",
+            "source_text": "旧任务断点继续。",
+            "episode_word_count": 1200,
+        },
+    )
+    job["request"].pop("episode_word_count_max")
+    job["request"].pop("episode_word_count_tolerance_percent")
+
+    saved = store.save(job)
+
+    assert saved["request"]["episode_word_count"] == 1200
+    assert saved["request"]["episode_word_count_max"] == 1320
+    assert saved["request"]["episode_word_count_tolerance_percent"] == 10
 
 
 def test_job_store_builds_continuation_episode_range(tmp_path: Path) -> None:

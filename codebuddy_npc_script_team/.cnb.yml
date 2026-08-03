@@ -139,9 +139,10 @@ main:
               必须把完整剧本正文写入 .script-team/05_draft.txt。
               文件内只能是片名和逐集可拍剧本，不得有分析、评分、验收表、
               创作说明、复核结果或“已完成”类工作汇报。
-              episode_word_count 是前端动态传入的每集最低字数，不是固定值，也不是
-              上限。每集不得少于该值；允许根据剧情需要自然超出，不得因为字数超过
-              目标而删戏、压缩或返工。只在内容缺失时进行一次必要补写。
+              episode_word_count 是每集目标下限，episode_word_count_max 是硬上限；
+              每集必须落在该闭区间内，默认最多上浮10%。低于下限必须补足，超过
+              上限只压缩重复解释、冗余动作、同义对白和无效铺垫；不得删除钩子、
+              关键转折、人物选择、情绪爆点、结尾钩子或集间承接。
               写入后不要再次读取、统计、压缩或执行全量校验，后续代码门禁负责校验；
               文件写入成功后立即结束。
             userPrompt: |
@@ -212,8 +213,10 @@ main:
               和强制语义跳转处。删除装饰性、连续性和动作连接型破折号。
               JSON 中 episode_start 至 episode_end 是最高优先级硬合同，
               最终文件必须包含这一范围且不多不少，补充方向不能覆盖该范围。
-              episode_word_count 是每集最低字数，不是上限。终审只能补足低于最低
-              字数的集数，禁止因超过该值而压缩、删戏或反复改写。
+              episode_word_count 是每集目标下限，episode_word_count_max 是最多上浮
+              10%的硬上限。低于下限必须补足，超过上限必须精简重复说明、冗余动作、
+              同义对白和无效铺垫；不得删除钩子、关键转折、人物选择、情绪爆点、
+              结尾钩子或集间承接。
               读取 .script-team/05_draft.txt、.script-team/story_state.json、
               .script-team/gate_pre.json，并读取
               .codebuddy/skills/script-room/references/hook-craft.md、

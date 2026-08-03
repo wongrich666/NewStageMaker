@@ -935,8 +935,9 @@
               </label>
             `}
             <label class="nwt-field">
-              <span>每集最低字数</span>
+              <span>每集目标字数</span>
               <input type="number" min="100" max="5000" data-form-key="episode_word_count" value="${escapeHtml(state.form.episode_word_count)}" ${active ? "disabled" : ""} />
+              <small class="nwt-field-hint">不少于目标值，最多上浮10%</small>
             </label>
             <label class="nwt-field">
               <span>每集视频时长（秒）</span>

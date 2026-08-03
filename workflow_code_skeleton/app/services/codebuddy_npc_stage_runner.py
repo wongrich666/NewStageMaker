@@ -98,8 +98,9 @@ scenes_per_episode 是前端动态传入的逐集场景合同，必须执行；�
 例如“实习生是吧——这个月工资扣一半！”应写成“实习生是吧？这个月工资扣一半！”；
 “说啊。说啊。你倒是说啊——”应按情绪写成“说啊。你倒是说啊！”。
 所有人物、证据和道具必须来自既有剧情或在使用前完成自然引入。
-episode_word_count 是前端动态传入的每集最低字数，不是固定值，也不是上限。
-每集不得少于该值；允许根据剧情需要自然超出，禁止因超过该值而删戏、压缩或返工。
+episode_word_count 是前端动态传入的每集目标下限，episode_word_count_max 是硬上限。
+每集必须落在该闭区间内，默认最多上浮10%。超过上限时只压缩重复解释、冗余动作、
+同义对白和无效铺垫，不得删除钩子、转折、人物选择、情绪爆点或结尾承接。
 严格执行 scenes_per_episode：1 表示每集一个场景；1-2 表示每集一至两个场景；
 2 表示每集两个场景；2-3 表示每集两至三个场景；flexible 才允许按剧情灵活安排。
 不得为了凑场景数拆碎同一地点的连续动作；换场必须有可见动机和行动承接。
@@ -132,8 +133,9 @@ episodes 数组必须完整覆盖 episode_start 至 episode_end。未知事实�
 省略号承担迟疑或未尽之意；破折号只保留在突然中断、猛然改口和强制语义跳转处。
 删除装饰性、连续性和动作连接型破折号，不得为了制造紧张感给普通句子统一加“——”。
 所有元素按剧情需要使用；只删除无来源、无铺垫、无代价或承担万能解题功能的元素。
-episode_word_count 是前端动态传入的每集最低字数，不是上限。终审只能补足
-低于最低字数的集数，禁止因超过该值而压缩、删戏或反复返工。
+episode_word_count 是每集目标下限，episode_word_count_max 是最多上浮10%的硬上限。
+低于下限必须补足，超过上限必须精简重复说明、冗余动作、同义对白和无效铺垫；
+不得删除钩子、关键转折、人物选择、情绪爆点、结尾钩子或集间承接。
 只输出片名和 episode_start 至 episode_end 的完整剧本，不输出评分、解释、JSON或修改说明。
 """,
 }
@@ -690,8 +692,8 @@ class CodeBuddyNpcStageRunner:
             + _continuation_instruction(request_data)
             + revision
             + "\n\n严格执行 episode_start、episode_end 与 episodes；"
-            "episode_word_count 是前端动态传入的每集"
-            "最低字数，只能多不能少且不设上限；scenes_per_episode 是前端动态"
+            "episode_word_count 是每集目标下限，episode_word_count_max 是最多上浮10%的"
+            "硬上限，每集必须处于闭区间内；scenes_per_episode 是前端动态"
             "场景合同，必须逐集执行；不得改变上游已锁定事实。"
         )
         if stage in {"script_writer", "final_editor"} and int((job.get("request") or {}).get("episodes") or 1) > BATCH_SIZE:
@@ -817,6 +819,10 @@ class CodeBuddyNpcStageRunner:
             int(request_data.get("episode_end") or (episode_start + total - 1)),
         )
         minimum = int(request_data.get("episode_word_count") or 800)
+        maximum = int(
+            request_data.get("episode_word_count_max")
+            or ((minimum * 110 + 99) // 100)
+        )
         artifacts = job.get("recovered_files") or {}
         result = str(job.get("stage_resume_text") or "").strip() if stage == "final_editor" else ""
         existing = _episode_numbers(result)
@@ -883,8 +889,9 @@ class CodeBuddyNpcStageRunner:
 {previous_tail}
 
 只输出第{batch_start}集至第{batch_end}集，共{len(expected)}集，不得输出其他集。
-每集不得少于前端动态设定的最低字数 {minimum} 字，允许自然超出且不设上限。
-不得因超字数压缩、删戏或返工。保持统一场景格式、人物署名对白和人物名OS。
+每集必须在 {minimum} 至 {maximum} 字之间（含边界），不得少写，也不得超过。
+超上限时只压缩重复解释、冗余动作、同义对白和无效铺垫；不得删除钩子、关键转折、
+人物选择、情绪爆点、结尾钩子与集间承接。保持统一场景格式、人物署名对白和人物名OS。
 普通停顿使用逗号、句号、问号或感叹号；迟疑和未尽使用省略号。
 破折号只用于突然打断、猛然改口或强制语义跳转，禁止把它当成通用节奏符号。
 {("本次修改意见：" + feedback) if feedback else ""}

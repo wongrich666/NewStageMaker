@@ -686,8 +686,8 @@ def convert(input_path: str, output_path: str):
 
 SCRIPT_EPISODE_HEADER = re.compile(
     r"^\s*(?:#{1,6}\s*)?(?:《[^》\r\n]+》\s*[·\-—]?\s*)?"
-    r"第\s*(\d{1,3})\s*集"
-    r"(?:\s*(?:[：:]\s*)?(《[^》\r\n]+》)|\s*[：:]\s*([^\r\n]+))?\s*$"
+    r"第\s*([0-9０-９一二三四五六七八九十百千万两零〇]+)\s*集"
+    r"(?:\s*[：:｜|·\-—]?\s*(《[^》\r\n]+》|[^\r\n]+))?\s*$"
 )
 SCRIPT_SCENE_HEADER = re.compile(
     r"^\s*(?:场景\s*)?(\d{1,3})(?:\s*[-—]\s*(\d{1,3}))?"
@@ -717,6 +717,51 @@ def _clean_script_line(value: str) -> str:
     text = re.sub(r"^\s*[-*]\s+", "", text)
     text = text.replace("**", "")
     return text.strip()
+
+
+def _episode_number(value: str) -> int | None:
+    token = str(value or "").strip().translate(
+        str.maketrans("０１２３４５６７８９", "0123456789")
+    )
+    if token.isdigit():
+        number = int(token)
+        return number if number > 0 else None
+
+    digits = {
+        "零": 0,
+        "〇": 0,
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
+    units = {"十": 10, "百": 100, "千": 1000, "万": 10000}
+    if not token or any(char not in digits and char not in units for char in token):
+        return None
+    total = 0
+    section = 0
+    current = 0
+    for char in token:
+        if char in digits:
+            current = digits[char]
+            continue
+        unit = units[char]
+        if unit == 10000:
+            section = (section + current) * unit
+            total += section
+            section = 0
+            current = 0
+        else:
+            section += (current or 1) * unit
+            current = 0
+    number = total + section + current
+    return number if number > 0 else None
 
 
 def convert_script_team(input_path: str, output_path: str, *, title: str = ""):
@@ -764,6 +809,7 @@ def convert_script_team(input_path: str, output_path: str, *, title: str = ""):
         ),
         None,
     )
+    preserve_unrecognized_script = first_episode_index is None
     overview_end_index = (
         script_body_index
         if script_body_index is not None
@@ -830,7 +876,7 @@ def convert_script_team(input_path: str, output_path: str, *, title: str = ""):
 
     episode_number = 0
     scene_number = 0
-    content_started = False
+    content_started = preserve_unrecognized_script
     previous_blank = False
     for raw_line in lines[script_start_index:]:
         stripped = _clean_script_line(raw_line)
@@ -849,7 +895,10 @@ def convert_script_team(input_path: str, output_path: str, *, title: str = ""):
             if content_started or has_overview:
                 document.add_page_break()
             content_started = True
-            episode_number = int(episode_match.group(1))
+            parsed_episode_number = _episode_number(episode_match.group(1))
+            if parsed_episode_number is None:
+                parsed_episode_number = episode_number + 1 if episode_number else 1
+            episode_number = parsed_episode_number
             scene_number = 0
             episode_heading = document.add_paragraph(style="Heading 1")
             episode_heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -858,7 +907,7 @@ def convert_script_team(input_path: str, output_path: str, *, title: str = ""):
             episode_run = episode_heading.add_run(f"第 {episode_number} 集")
             _set_script_run_font(episode_run, size=16, bold=True)
             episode_title = _clean_script_line(
-                episode_match.group(2) or episode_match.group(3) or ""
+                episode_match.group(2) or ""
             )
             if episode_title:
                 subtitle = document.add_paragraph()
@@ -869,6 +918,16 @@ def convert_script_team(input_path: str, output_path: str, *, title: str = ""):
             continue
 
         if not content_started:
+            continue
+
+        if preserve_unrecognized_script and episode_number == 0 and re.search(
+            r"(?:第\s*.+?\s*集|\bepisode\s+\w+\b)",
+            stripped,
+            flags=re.IGNORECASE,
+        ):
+            fallback_heading = document.add_paragraph(style="Heading 1")
+            fallback_run = fallback_heading.add_run(stripped)
+            _set_script_run_font(fallback_run, size=16, bold=True)
             continue
 
         numbered_scene = SCRIPT_NUMBERED_SCENE_HEADER.match(stripped)
