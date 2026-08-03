@@ -153,8 +153,9 @@ scenes_per_episode 是逐集场景数量硬合同。1表示每一大集只能有
 必须完整写出 episode_start 至 episode_end 且不多不少，每集标题统一使用
 “第N集：《本集独有标题》”；标题必须简短、具体并能区分本集剧情。
 数值集数优先于补充方向中的单集试写文字。
-episode_word_count 是前端动态传入的每集最低字数，不是固定值，也不是上限。
-每集不得少于该值；允许根据剧情需要自然超出，禁止因超过该值而删戏、压缩或返工。
+episode_word_count 是前端动态传入的每集目标下限，episode_word_count_max 是硬上限。
+每集必须落在该闭区间内；默认最多上浮10%。超上限时只压缩重复解释、冗余动作、
+同义对白和无效铺垫，不得删除钩子、关键转折、人物选择、情绪爆点或结尾承接。
 episode_duration_seconds 是每集目标画面时长。按对白实际说完、自然停顿、人物反应、
 动作完成、信息揭示和必要转场所占时间组织内容，不得把字数机械换算成秒数。
 第一集场景头之后的第一句台词或第一个动作必须构成短而强的黄金三秒钩子，
@@ -207,8 +208,9 @@ JSON 对象，记录人物声音、位置、知情范围、伤势、服装、持
 3. 增强同场多线压力、人物选择代价和每集至少一个真正改变局势的情绪高点；
 4. 改写泄气、解释性、AI味对白；
 5. 删掉不影响动作、信息和情绪的形容词。
-episode_word_count 是前端动态传入的每集最低字数，不是上限。只能补足低于
-最低字数的集数，不得因超过该值而压缩、删戏或反复返工。
+episode_word_count 是每集目标下限，episode_word_count_max 是最多上浮10%的硬上限。
+低于下限必须补足，超过上限必须精简重复说明、冗余动作、同义对白和无效铺垫；
+不得删除钩子、关键转折、人物选择、情绪爆点、结尾钩子与集间承接。
 逐集修正 deterministic_gate 中的时长偏差，使对白、停顿、动作与镜头节拍合计
 接近 episode_duration_seconds；优先删重复解释或补有效反应与因果动作，不得注水。
 钩子不足时可以依据上下文新增，不得只是把后文冲突搬到前面。
@@ -549,8 +551,8 @@ def run(stage: str) -> None:
         f"{context}\n\n"
         f"{modules}\n\n"
         "episode_start、episode_end 与 episodes 是本次交付范围硬合同；"
-        "episode_word_count 是前端动态传入的每集"
-        "最低字数，只能多不能少且不设上限；补充要求不得与这两项冲突。\n"
+        "episode_word_count 是每集目标下限，episode_word_count_max 是最多上浮10%的"
+        "硬上限；每集必须处于闭区间内，补充要求不得与该字数合同冲突。\n"
         f"{continuation_contract_instruction(request_payload)}\n"
         f"{scene_contract_instruction(request_payload)}\n"
         f"{duration_contract_instruction(request_payload)}"

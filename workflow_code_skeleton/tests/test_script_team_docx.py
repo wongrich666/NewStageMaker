@@ -130,6 +130,92 @@ def test_script_team_docx_accepts_episode_title_without_colon(tmp_path: Path) ->
     assert by_text["2-1 办公室｜日｜内"].style.name == "Heading 2"
 
 
+def test_script_team_docx_accepts_pipe_separated_episode_title(tmp_path: Path) -> None:
+    source = tmp_path / "pipe-separated-script.txt"
+    output = tmp_path / "pipe-separated-script.docx"
+    source.write_text(
+        "\n".join(
+            [
+                "# 剧本正文",
+                "# 第1集｜《从天而降的“锅”》",
+                "",
+                "**场景1：会议室｜日｜内**",
+                "",
+                "**人物：** 波士鱼、打工鱼",
+                "",
+                "△ 波士鱼的指挥棒敲在会议桌上。",
+                "",
+                "波士鱼：降本增效，谁有想法？",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    convert_script_team(str(source), str(output), title="今天也在努力打工呢")
+
+    document = Document(output)
+    paragraphs = [paragraph for paragraph in document.paragraphs if paragraph.text.strip()]
+    by_text = {paragraph.text: paragraph for paragraph in paragraphs}
+
+    assert by_text["第 1 集"].style.name == "Heading 1"
+    assert "《从天而降的“锅”》" in by_text
+    assert by_text["1-1 会议室｜日｜内"].style.name == "Heading 2"
+    assert "△ 波士鱼的指挥棒敲在会议桌上。" in by_text
+    assert by_text["波士鱼：降本增效，谁有想法？"].runs[0].bold is True
+
+
+def test_script_team_docx_accepts_chinese_episode_number(tmp_path: Path) -> None:
+    source = tmp_path / "chinese-episode-number.txt"
+    output = tmp_path / "chinese-episode-number.docx"
+    source.write_text(
+        "\n".join(
+            [
+                "# 剧本正文",
+                "第十二集·《旧账》",
+                "12-1 古堡大厅｜夜｜内",
+                "人物：伊莎贝拉、塞缪尔",
+                "伊莎贝拉：你终于肯说真话了。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    convert_script_team(str(source), str(output), title="旧账")
+
+    document = Document(output)
+    paragraphs = [paragraph for paragraph in document.paragraphs if paragraph.text.strip()]
+    by_text = {paragraph.text: paragraph for paragraph in paragraphs}
+
+    assert by_text["第 12 集"].style.name == "Heading 1"
+    assert by_text["12-1 古堡大厅｜夜｜内"].style.name == "Heading 2"
+    assert by_text["伊莎贝拉：你终于肯说真话了。"].runs[0].bold is True
+
+
+def test_script_team_docx_preserves_body_when_episode_heading_is_unknown(tmp_path: Path) -> None:
+    source = tmp_path / "unknown-heading-script.txt"
+    output = tmp_path / "unknown-heading-script.docx"
+    source.write_text(
+        "\n".join(
+            [
+                "# 剧本正文",
+                "EPISODE ONE / THE DOOR",
+                "INT. HALLWAY - NIGHT",
+                "MIRA: Do not open it.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    convert_script_team(str(source), str(output), title="The Door")
+
+    document = Document(output)
+    body = "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+    assert "EPISODE ONE / THE DOOR" in body
+    assert "INT. HALLWAY - NIGHT" in body
+    assert "MIRA：Do not open it." in body
+
+
 def test_script_team_docx_renders_delivery_overview_before_script(tmp_path: Path) -> None:
     source = tmp_path / "delivery-script.txt"
     output = tmp_path / "delivery-script.docx"
