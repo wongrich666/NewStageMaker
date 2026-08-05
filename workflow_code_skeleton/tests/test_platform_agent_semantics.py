@@ -15,6 +15,12 @@ from workflow_code_skeleton.app.services.platform_agent import (
 
 
 class PlatformAgentSemanticTests(unittest.TestCase):
+    def test_status_exposes_the_selected_agent_runtime(self) -> None:
+        status = PlatformConversationAgent().status()
+        self.assertIn(status["requested_engine"], {"auto", "legacy", "openai_agents"})
+        self.assertIn(status["active_engine"], {"legacy", "openai_agents"})
+        self.assertIsInstance(status["openai_agents_available"], bool)
+
     def test_prompt_requires_semantic_understanding_instead_of_keywords(self) -> None:
         self.assertIn("不要依赖固定关键词", AGENT_SYSTEM_PROMPT)
         self.assertIn("口语、省略句、错别字、代词或承接上文", AGENT_SYSTEM_PROMPT)
@@ -88,6 +94,7 @@ class PlatformAgentSemanticTests(unittest.TestCase):
             user_content="",
             attached_document=None,
             selected_knowledge={},
+            selected_distilled_skill={},
             internal_api_base_url="",
             internal_auth_token="",
         )
@@ -130,9 +137,11 @@ if __name__ == "__main__":
 
 def test_confirm_generation_creates_script_team_job(monkeypatch) -> None:
     saved_jobs = []
+    created_payloads = []
 
     class FakeJobs:
         def create(self, *, user_id, request_payload):
+            created_payloads.append(dict(request_payload))
             return {
                 "job_id": "npc-agent-test",
                 "user_id": user_id,
@@ -143,7 +152,15 @@ def test_confirm_generation_creates_script_team_job(monkeypatch) -> None:
                     "project_title": request_payload["project_title"],
                     "episodes": request_payload["episodes"],
                     "episode_word_count": request_payload["episode_word_count"],
+                    "distilled_skill": {
+                        "name": "现实情感爆款架构",
+                        "version": "v3",
+                    } if request_payload.get("distilled_skill_snapshot") else {},
                 },
+                "selected_skill": {
+                    "name": "现实情感爆款架构",
+                    "version": "v3",
+                } if request_payload.get("distilled_skill_snapshot") else {},
                 "recovered_files": {},
                 "final_script": "",
             }
@@ -165,6 +182,17 @@ def test_confirm_generation_creates_script_team_job(monkeypatch) -> None:
     monkeypatch.setattr(platform_agent_module, "_SCRIPT_TEAM_JOBS", FakeJobs())
     monkeypatch.setattr(platform_agent_module, "_SCRIPT_TEAM_CLIENT", FakeClient())
     monkeypatch.setattr(platform_agent_module, "agent_conversation_store", FakeConversationStore())
+    monkeypatch.setattr(
+        platform_agent_module.distillation_lab_store,
+        "resolve_runtime_skill",
+        lambda user_id, skill_id, version_id: {
+            "skill_id": skill_id,
+            "version_id": version_id,
+            "name": "现实情感爆款架构",
+            "version": "v3",
+            "modules": {"showrunner_contract": "规则"},
+        },
+    )
     conversation = {
         "id": "conversation-test",
         "user_id": 7,
@@ -181,6 +209,8 @@ def test_confirm_generation_creates_script_team_job(monkeypatch) -> None:
                     "character_count": 4,
                     "episode_word_count": 600,
                     "execution_scope": "framework_and_script",
+                    "distilled_skill_id": "skill-reality",
+                    "distilled_skill_version_id": "version-3",
                 },
             }
         },
@@ -195,6 +225,7 @@ def test_confirm_generation_creates_script_team_job(monkeypatch) -> None:
         user_content="开始",
         attached_document=None,
         selected_knowledge={},
+        selected_distilled_skill={},
         internal_api_base_url="",
         internal_auth_token="",
     )
@@ -204,6 +235,52 @@ def test_confirm_generation_creates_script_team_job(monkeypatch) -> None:
     assert result["project"]["job_id"] == "npc-agent-test"
     assert conversation["state"]["script_team_job_id"] == "npc-agent-test"
     assert saved_jobs[-1]["execution_target"] == "remote_cnb"
+    assert created_payloads[-1]["distilled_skill_snapshot"]["version_id"] == "version-3"
+    assert result["project"]["selected_skill"]["version"] == "v3"
+
+
+def test_prepare_generation_keeps_selected_distilled_skill_version(monkeypatch) -> None:
+    class FakeConversationStore:
+        @staticmethod
+        def messages(user_id, conversation_id, limit=36):
+            return [{"role": "user", "content": "做一部现实情感短剧"}]
+
+        @staticmethod
+        def update(user_id, conversation_id, **changes):
+            return {"id": conversation_id, "user_id": user_id, **changes}
+
+    monkeypatch.setattr(platform_agent_module, "agent_conversation_store", FakeConversationStore())
+    conversation = {"id": "conversation-prepare", "state": {}}
+    selected = {
+        "skill_id": "skill-reality",
+        "version_id": "version-3",
+        "name": "现实情感爆款架构",
+        "version": "v3",
+    }
+
+    result = PlatformConversationAgent()._execute_tool(
+        user_id=7,
+        username="tester",
+        conversation=conversation,
+        name="prepare_script_generation",
+        arguments={
+            "user_expectation": "创作一部现实情感短剧，强调人物共鸣和连续冲突。",
+            "total_episodes": 10,
+            "character_count": 5,
+        },
+        user_content="",
+        attached_document=None,
+        selected_knowledge={},
+        selected_distilled_skill=selected,
+        internal_api_base_url="",
+        internal_auth_token="",
+    )
+
+    payload = conversation["state"]["pending_action"]["payload"]
+    assert result["prepared"] is True
+    assert payload["distilled_skill_id"] == "skill-reality"
+    assert payload["distilled_skill_version_id"] == "version-3"
+    assert result["summary"]["distilled_skill_name"] == "现实情感爆款架构"
 
 
 def test_agent_can_pause_remote_script_team_job(monkeypatch) -> None:
@@ -253,6 +330,7 @@ def test_agent_can_pause_remote_script_team_job(monkeypatch) -> None:
         user_content="暂停正在运行的任务",
         attached_document=None,
         selected_knowledge={},
+        selected_distilled_skill={},
         internal_api_base_url="",
         internal_auth_token="",
     )

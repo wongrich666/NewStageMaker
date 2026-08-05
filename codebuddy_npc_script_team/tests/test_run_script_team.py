@@ -42,6 +42,19 @@ def test_opening_hook_keeps_a_short_causal_anchor_after_the_first_beat() -> None
     assert "缺少开场因果锚" in editor_prompt
 
 
+def test_character_specific_os_and_performance_rules_reach_writer_and_editor() -> None:
+    character_prompt = MODULE.PROMPTS["character_emotion"]
+    writer_prompt = MODULE.PROMPTS["script_writer"]
+    editor_prompt = MODULE.PROMPTS["final_editor"]
+
+    assert "表演指纹" in character_prompt
+    assert "OS的用词、句长、判断习惯" in character_prompt
+    assert "动作、表情和潜台词已经能表达" in writer_prompt
+    assert "微反应与OS各自提供新信息" in writer_prompt
+    assert "不得为了满足数量给每句加括号" in editor_prompt
+    assert "删除复述动作、台词或已知情绪的OS" in editor_prompt
+
+
 def test_continuation_contract_uses_actual_episode_range(monkeypatch) -> None:
     monkeypatch.setenv(
         "scriptRequest",
@@ -52,6 +65,7 @@ def test_continuation_contract_uses_actual_episode_range(monkeypatch) -> None:
                 "source_last_episode": 5,
                 "episode_start": 6,
                 "episode_end": 10,
+                "continuation_bible": "女主不能失去左眼；第9集关系彻底决裂。",
             },
             ensure_ascii=False,
         ),
@@ -65,6 +79,9 @@ def test_continuation_contract_uses_actual_episode_range(monkeypatch) -> None:
     assert "第6集至第10集" in request["episode_contract"]
     assert "已有第5集结尾" in instruction
     assert "只输出第6集至第10集" in instruction
+    assert "续写创作圣经" in instruction
+    assert "已有正文明确事实 > 续写创作圣经" in instruction
+    assert "第9集关系彻底决裂" in instruction
 
 
 def test_single_scene_contract_rejects_three_scene_headers() -> None:
@@ -160,3 +177,32 @@ def test_heartbeat_reports_stage_and_elapsed_time(capsys) -> None:
     assert "stage=script_writer" in output
     assert "sequence=1" in output
     assert "elapsed_seconds=30" in output
+
+
+def test_distilled_skill_loads_only_modules_routed_to_current_stage() -> None:
+    request = {
+        "distilled_skill": {
+            "schema_version": "script-team-skill/v1",
+            "name": "现实情感",
+            "version": "v1.2",
+            "manifest": {
+                "modules": [
+                    {"key": "genre_profile", "stages": ["showrunner"]},
+                    {"key": "hook_craft", "stages": ["script_writer", "final_editor"]},
+                ]
+            },
+            "modules": {
+                "genre_profile": "题材情绪承诺",
+                "hook_craft": "开篇钩子规则",
+            },
+        }
+    }
+
+    writer = MODULE.distilled_skill_modules("script_writer", request)
+    showrunner = MODULE.distilled_skill_modules("showrunner", request)
+
+    assert "开篇钩子规则" in writer
+    assert "题材情绪承诺" not in writer
+    assert "题材情绪承诺" in showrunner
+    assert "开篇钩子规则" not in showrunner
+    assert "v1.2" in writer

@@ -37,6 +37,7 @@ from .services.admin_store import admin_store
 from .services.agent_conversation_store import agent_conversation_store
 from .services.platform_agent import platform_conversation_agent
 from .services.deepseek_agent import DeepSeekAgentError
+from .services.distillation_lab import distillation_lab_store
 from .services.codebuddy_npc import (
     STAGE_NAMES,
     STAGE_ORDER,
@@ -3416,6 +3417,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         data = request.get_json(silent=True) or {}
         content = str(data.get("content") or "").strip()
         selected_skill = str(data.get("selected_skill") or "").strip()
+        distilled_skill_id = str(data.get("distilled_skill_id") or "").strip()
+        distilled_skill_version_id = str(data.get("distilled_skill_version_id") or "").strip()
         selected_knowledge_tag_ids = data.get("selected_knowledge_tag_ids")
         if not isinstance(selected_knowledge_tag_ids, list):
             selected_knowledge_tag_ids = []
@@ -3435,6 +3438,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 content=content,
                 request_id=request_id,
                 selected_skill=selected_skill,
+                distilled_skill_id=distilled_skill_id,
+                distilled_skill_version_id=distilled_skill_version_id,
                 selected_knowledge_tag_ids=selected_knowledge_tag_ids,
                 attachment_id=attachment_id,
                 internal_api_base_url=f"http://127.0.0.1:{int(request.environ.get('SERVER_PORT') or 5002)}",
@@ -3961,6 +3966,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def new_workflow_test_page():
         return render_template(
             "new_workflow_test.html",
+            current_user=_current_user(),
+            current_auth_token=_current_auth_token(),
+        )
+
+    @app.get("/distillation-lab")
+    @_login_required
+    def distillation_lab_page():
+        return render_template(
+            "distillation_lab.html",
             current_user=_current_user(),
             current_auth_token=_current_auth_token(),
         )
@@ -8532,10 +8546,178 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def test_workflow_status_api():
         return _json_ok(**test_workflow_status())
 
+    @app.get("/api/distillation-lab/overview")
+    @_login_required
+    def distillation_lab_overview_api():
+        return _json_ok(**distillation_lab_store.overview(_require_user_id()))
+
+    @app.post("/api/distillation-lab/projects")
+    @_login_required
+    def distillation_lab_create_project_api():
+        payload = request.get_json(silent=True) or {}
+        try:
+            project = distillation_lab_store.create_project(_require_user_id(), payload)
+            return _json_ok(project=project)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+    @app.get("/api/distillation-lab/projects/<project_id>")
+    @_login_required
+    def distillation_lab_project_api(project_id: str):
+        try:
+            return _json_ok(
+                project=distillation_lab_store.get_project(_require_user_id(), project_id)
+            )
+        except KeyError as exc:
+            return _json_error(str(exc).strip("'"), status=404)
+
+    @app.put("/api/distillation-lab/projects/<project_id>")
+    @_login_required
+    def distillation_lab_update_project_api(project_id: str):
+        payload = request.get_json(silent=True) or {}
+        try:
+            project = distillation_lab_store.update_project(
+                _require_user_id(), project_id, payload
+            )
+            return _json_ok(project=project)
+        except KeyError as exc:
+            return _json_error(str(exc).strip("'"), status=404)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+    @app.delete("/api/distillation-lab/projects/<project_id>")
+    @_login_required
+    def distillation_lab_delete_project_api(project_id: str):
+        try:
+            distillation_lab_store.delete_project(_require_user_id(), project_id)
+            return _json_ok(deleted=True)
+        except KeyError as exc:
+            return _json_error(str(exc).strip("'"), status=404)
+
+    @app.post("/api/distillation-lab/projects/<project_id>/sources")
+    @_login_required
+    def distillation_lab_upload_sources_api(project_id: str):
+        files = request.files.getlist("files")
+        if not files:
+            return _json_error("请选择要上传的素材文件。", status=400)
+        polarity = str(request.form.get("polarity") or "positive")
+        try:
+            weight = float(request.form.get("weight") or 1.0)
+        except ValueError:
+            weight = 1.0
+        created: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
+        for uploaded in files:
+            try:
+                created.append(
+                    distillation_lab_store.add_source(
+                        _require_user_id(),
+                        project_id,
+                        uploaded.filename or "source.txt",
+                        uploaded.read(),
+                        polarity=polarity,
+                        weight=weight,
+                    )
+                )
+            except (KeyError, ValueError) as exc:
+                errors.append({"name": uploaded.filename or "未命名文件", "error": str(exc).strip("'")})
+        if not created:
+            return _json_error(errors[0]["error"] if errors else "素材上传失败。", status=400)
+        return _json_ok(sources=created, errors=errors)
+
+    @app.delete("/api/distillation-lab/projects/<project_id>/sources/<source_id>")
+    @_login_required
+    def distillation_lab_delete_source_api(project_id: str, source_id: str):
+        try:
+            distillation_lab_store.delete_source(_require_user_id(), project_id, source_id)
+            return _json_ok(deleted=True)
+        except KeyError as exc:
+            return _json_error(str(exc).strip("'"), status=404)
+
+    @app.post("/api/distillation-lab/projects/<project_id>/runs")
+    @_login_required
+    def distillation_lab_start_run_api(project_id: str):
+        try:
+            run = distillation_lab_store.start_run(_require_user_id(), project_id)
+            return _json_ok(run=run)
+        except KeyError as exc:
+            return _json_error(str(exc).strip("'"), status=404)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+    @app.get("/api/distillation-lab/runs/<run_id>")
+    @_login_required
+    def distillation_lab_run_api(run_id: str):
+        try:
+            return _json_ok(run=distillation_lab_store.get_run(_require_user_id(), run_id))
+        except KeyError as exc:
+            return _json_error(str(exc).strip("'"), status=404)
+
+    @app.put("/api/distillation-lab/projects/<project_id>/versions/<version_id>")
+    @_login_required
+    def distillation_lab_update_version_api(project_id: str, version_id: str):
+        payload = request.get_json(silent=True) or {}
+        try:
+            version = distillation_lab_store.update_version(
+                _require_user_id(), project_id, version_id, payload
+            )
+            return _json_ok(version=version)
+        except KeyError as exc:
+            return _json_error(str(exc).strip("'"), status=404)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+    @app.post("/api/distillation-lab/projects/<project_id>/versions/<version_id>/publish")
+    @_login_required
+    def distillation_lab_publish_version_api(project_id: str, version_id: str):
+        try:
+            version = distillation_lab_store.publish_version(
+                _require_user_id(), project_id, version_id
+            )
+            return _json_ok(version=version)
+        except KeyError as exc:
+            return _json_error(str(exc).strip("'"), status=404)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+    @app.post("/api/distillation-lab/projects/<project_id>/versions/<version_id>/unpublish")
+    @_login_required
+    def distillation_lab_unpublish_version_api(project_id: str, version_id: str):
+        try:
+            version = distillation_lab_store.unpublish_version(
+                _require_user_id(), project_id, version_id
+            )
+            return _json_ok(version=version)
+        except KeyError as exc:
+            return _json_error(str(exc).strip("'"), status=404)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+    @app.get("/api/distillation-lab/projects/<project_id>/versions/<version_id>/export")
+    @_login_required
+    def distillation_lab_export_version_api(project_id: str, version_id: str):
+        try:
+            buffer, filename = distillation_lab_store.export_version(
+                _require_user_id(), project_id, version_id
+            )
+            return send_file(
+                buffer,
+                as_attachment=True,
+                download_name=filename,
+                mimetype="application/zip",
+            )
+        except KeyError as exc:
+            return _json_error(str(exc).strip("'"), status=404)
+
     @app.get("/api/new-workflow-test/npc/config")
     @_login_required
     def codebuddy_npc_config_api():
         return _json_ok(config=codebuddy_npc_config.public_status())
+
+    @app.get("/api/new-workflow-test/skills")
+    @_login_required
+    def new_workflow_skill_catalog_api():
+        return _json_ok(skills=distillation_lab_store.list_published_skills(_require_user_id()))
 
     @app.post("/api/new-workflow-test/npc/jobs")
     @_login_required
@@ -8544,6 +8726,13 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not isinstance(payload, dict):
             return _json_error("NPC 剧本任务格式不正确。", status=400)
         try:
+            skill_id = str(payload.get("distilled_skill_id") or "").strip()
+            if skill_id:
+                payload["distilled_skill_snapshot"] = distillation_lab_store.resolve_runtime_skill(
+                    _require_user_id(),
+                    skill_id,
+                    str(payload.get("distilled_skill_version_id") or "").strip(),
+                )
             job = codebuddy_npc_jobs.create(
                 user_id=_require_user_id(),
                 request_payload=payload,
@@ -8567,6 +8756,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 job["fallback_reason"] = str(remote_exc)
                 job["status_text"] = "CNB 暂不可用，已切换本地兜底运行总编剧"
                 job = codebuddy_npc_jobs.save(job)
+        except (ValueError, KeyError) as exc:
+            return _json_error(str(exc).strip("'"), status=400)
         except CodeBuddyNpcError as exc:
             logger.warning("codebuddy npc create failed: %s", exc)
             return _json_error(

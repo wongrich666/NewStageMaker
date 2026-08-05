@@ -18,6 +18,7 @@
     knowledgeView: "main",
     knowledgeActiveTagId: "",
     knowledgeFilmPage: 1,
+    distilledSkillLocked: false,
     taskPanelOpen: null,
     taskPanelProjectId: "",
     selectedTaskIdentity: "",
@@ -233,7 +234,8 @@
             <span>${summary.execution_scope === "framework_only" ? "剧本团队前四个策划节点" : "剧本团队七节点完整生成"}</span>
             ${costEstimate.paid_call_range ? `<span>预计付费调用 ${escapeHtml(costEstimate.paid_call_range)}</span>` : ""}
             ${costEstimate.estimated_output_chars ? `<span>预计正文 ${Number(costEstimate.estimated_output_chars).toLocaleString()} 字</span>` : ""}
-            ${knowledgeNames.length ? `<span>智慧库：${escapeHtml(knowledgeNames.join("、"))}</span>` : ""}
+            ${summary.distilled_skill_name ? `<span>蒸馏架构：${escapeHtml(summary.distilled_skill_name)} · ${escapeHtml(summary.distilled_skill_version || "")}</span>` : ""}
+            ${knowledgeNames.length ? `<span>历史创作偏好：${escapeHtml(knowledgeNames.join("、"))}</span>` : ""}
           </div>
           ${costEstimate.notice ? `<p class="agent-cost-notice">${escapeHtml(costEstimate.notice)}</p>` : ""}
           <div class="agent-event-actions">
@@ -254,6 +256,7 @@
             <span>${escapeHtml(userFacingText(project.current_stage_label || project.current_stage || "等待"))}</span>
             <span>${progress}%</span>
             ${project.total_episodes ? `<span>${escapeHtml(project.generated_episodes || 0)}/${escapeHtml(project.total_episodes)} 集</span>` : ""}
+            ${(project.selected_skill || {}).name ? `<span>Skill：${escapeHtml(project.selected_skill.name)} · ${escapeHtml(project.selected_skill.version || "")}</span>` : ""}
           </div>
           <div class="agent-event-actions"><a href="${escapeHtml(withAuth(project.workspace_url || "/new-workflow-test"))}">打开专业剧本团队</a></div>
         </section>`;
@@ -303,7 +306,8 @@
     const previousScrollTop = viewport.scrollTop;
     const wasNearBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 120;
     const visible = state.messages.filter((item) => item.role === "user" || item.role === "assistant");
-    $("#agentHero").hidden = visible.length > 1;
+    const heroVisible = visible.length <= 1;
+    $("#agentHero").hidden = !heroVisible;
     list.innerHTML = visible.map((item, messageIndex) => {
       const isUser = item.role === "user";
       const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : {};
@@ -317,13 +321,16 @@
         : "";
       const knowledgeNames = Array.isArray(metadata.selected_knowledge_tag_names) ? metadata.selected_knowledge_tag_names : [];
       const knowledgeChip = knowledgeNames.length
-        ? `<div class="agent-message-knowledge"><span>智慧库</span>${escapeHtml(knowledgeNames.join("、"))}</div>`
+        ? `<div class="agent-message-knowledge"><span>创作偏好</span>${escapeHtml(knowledgeNames.join("、"))}</div>`
+        : "";
+      const distilledSkillChip = metadata.distilled_skill_name
+        ? `<div class="agent-message-skill is-distilled"><span>蒸馏架构</span>${escapeHtml(metadata.distilled_skill_name)} · ${escapeHtml(metadata.distilled_skill_version || "")}</div>`
         : "";
       return `
         <article class="agent-message ${isUser ? "is-user" : "is-assistant"} ${hasTable ? "has-table" : ""}">
           <div class="agent-message-avatar">${isUser ? escapeHtml((config.username || "我").slice(0, 1)) : "AI"}</div>
           <div class="agent-message-body">
-            ${fileChip}${skillChip}${knowledgeChip}
+            ${fileChip}${skillChip}${distilledSkillChip}${knowledgeChip}
             <div class="agent-message-copy">${formatMessageContent(userFacingText(item.content || ""))}</div>
             ${events.length ? `<div class="agent-event-stack">${events.map((event) => eventCard(event, {
               answered: !isUser && visible.slice(messageIndex + 1).some((later) => later.role === "user"),
@@ -333,7 +340,8 @@
         </article>`;
     }).join("");
     requestAnimationFrame(() => {
-      if (scrollToBottom || wasNearBottom) viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
+      if (heroVisible && scrollToBottom) viewport.scrollTo({ top: 0, behavior: "auto" });
+      else if (scrollToBottom || wasNearBottom) viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
       else viewport.scrollTop = previousScrollTop;
     });
   }
@@ -637,184 +645,76 @@
     };
   }
 
-  function knowledgeTagGroup(tag) {
-    const group = String(tag && tag.group || "").trim();
-    if (group) return group;
-    if (String(tag && tag.id || "").startsWith("excellent_film_beat_")) return "excellent_film_beat";
-    return tag && tag.builtin ? "default_style" : "user_custom";
-  }
-
   function selectedKnowledgeTags() {
     const selected = new Set(state.selectedKnowledgeTagIds.map(String));
-    return state.knowledgeTags.filter((tag) => selected.has(String(tag.id || "")));
+    return state.knowledgeTags.filter((tag) => selected.has(String(tag.skill_id || "")));
   }
 
   function knowledgeTagById(tagId) {
-    return state.knowledgeTags.find((tag) => String(tag.id || "") === String(tagId || "")) || null;
+    return state.knowledgeTags.find((tag) => String(tag.skill_id || "") === String(tagId || "")) || null;
   }
 
-  function knowledgeOption(tag, { actions = false } = {}) {
-    const id = String(tag.id || "");
+  function knowledgeOption(tag) {
+    const id = String(tag.skill_id || "");
     const checked = state.selectedKnowledgeTagIds.map(String).includes(id);
     return `
-      <div class="agent-knowledge-option-row ${checked ? "is-selected" : ""}">
-        <label class="agent-knowledge-option ${checked ? "is-selected" : ""}">
-          <input type="checkbox" data-knowledge-tag-id="${escapeHtml(id)}" ${checked ? "checked" : ""}>
-          <span class="agent-knowledge-check" aria-hidden="true">${checked ? "✓" : ""}</span>
-          <span class="agent-knowledge-copy"><strong>${escapeHtml(tag.name || id)}</strong><small>${escapeHtml(tag.category || "创作偏好")}</small></span>
-        </label>
-        ${actions ? `<span class="agent-knowledge-row-actions">
-          <button type="button" data-knowledge-action="edit" data-tag-id="${escapeHtml(id)}">编辑</button>
-          <button type="button" data-knowledge-action="pin" data-tag-id="${escapeHtml(id)}">${tag.pinned ? "取消置顶" : "置顶"}</button>
-          <button class="is-danger" type="button" data-knowledge-action="delete" data-tag-id="${escapeHtml(id)}">删除</button>
-        </span>` : ""}
-      </div>`;
+      <label class="agent-distilled-card ${checked ? "is-selected" : ""}">
+        <input type="checkbox" data-knowledge-tag-id="${escapeHtml(id)}" ${checked ? "checked" : ""}>
+        <img src="${escapeHtml(withAuth(tag.cover_url || ""))}" alt="" loading="lazy">
+        <span class="agent-distilled-card-shade"></span>
+        <span class="agent-distilled-check" aria-hidden="true">${checked ? "✓" : "+"}</span>
+        <span class="agent-distilled-copy">
+          <small>${escapeHtml(tag.genre || "垂类剧本")} · ${escapeHtml(tag.market || "通用市场")}</small>
+          <strong>${escapeHtml(tag.name || id)}</strong>
+          <span><b>${escapeHtml(tag.version || "")}</b><i>${escapeHtml(tag.module_count || 0)} 个创作模块</i><em>${escapeHtml(tag.score || 0)} 分</em></span>
+        </span>
+      </label>`;
   }
 
   function renderKnowledgeMain(query) {
-    const defaults = state.knowledgeTags.filter((tag) => knowledgeTagGroup(tag) === "default_style" && (!query || [tag.name, tag.category].some((v) => String(v || "").toLowerCase().includes(query))));
-    const custom = state.knowledgeTags.filter((tag) => knowledgeTagGroup(tag) === "user_custom" && (!query || [tag.name, tag.category, tag.description].some((v) => String(v || "").toLowerCase().includes(query))));
-    const films = state.knowledgeTags.filter((tag) => knowledgeTagGroup(tag) === "excellent_film_beat");
+    const skills = state.knowledgeTags.filter((tag) => !query || [tag.name, tag.genre, tag.market, tag.description].some((v) => String(v || "").toLowerCase().includes(query)));
     return `
-      <section class="agent-knowledge-group">
-        <h3>默认风格<span>${defaults.length}</span></h3>
-        <div class="agent-knowledge-options">${defaults.map((tag) => knowledgeOption(tag)).join("") || `<p class="agent-knowledge-empty">暂无匹配标签</p>`}</div>
-      </section>
-      <button class="agent-knowledge-folder" type="button" data-knowledge-action="open-films">
-        <span class="agent-knowledge-folder-mark">影</span><span><strong>优秀电影节拍</strong><small>选择电影作为团队创作参考</small></span><b>${films.length} ›</b>
-      </button>
-      <section class="agent-knowledge-group">
-        <div class="agent-knowledge-group-head"><h3>用户自定义<span>${custom.length}</span></h3><button type="button" data-knowledge-action="new">＋ 新建</button></div>
-        <div class="agent-knowledge-custom-list">${custom.map((tag) => knowledgeOption(tag, { actions: true })).join("") || `<p class="agent-knowledge-empty">还没有自定义标签</p>`}</div>
-      </section>`;
-  }
-
-  function renderKnowledgeFilms(query) {
-    const films = state.knowledgeTags.filter((tag) => knowledgeTagGroup(tag) === "excellent_film_beat" && (!query || String(tag.name || "").toLowerCase().includes(query)));
-    const pageSize = 16;
-    const visible = films.slice(0, state.knowledgeFilmPage * pageSize);
-    return `
-      <section class="agent-knowledge-film-list">
-        <div class="agent-knowledge-view-head"><button type="button" data-knowledge-action="back">‹ 返回</button><span>点击电影查看详情</span></div>
-        ${visible.map((tag) => `<button type="button" class="agent-knowledge-film" data-knowledge-action="film-detail" data-tag-id="${escapeHtml(tag.id)}"><span>${escapeHtml(tag.name)}</span><small>查看创作参考</small><b>›</b></button>`).join("") || `<p class="agent-knowledge-empty is-search">没有找到电影</p>`}
-        ${visible.length < films.length ? `<button class="agent-knowledge-more" type="button" data-knowledge-action="more-films">继续加载（${films.length - visible.length}）</button>` : ""}
-      </section>`;
-  }
-
-  function renderKnowledgeDetail(tag) {
-    if (!tag) return renderKnowledgeMain("");
-    const checked = state.selectedKnowledgeTagIds.map(String).includes(String(tag.id || ""));
-    return `
-      <section class="agent-knowledge-detail">
-        <div class="agent-knowledge-view-head"><button type="button" data-knowledge-action="back-films">‹ 返回电影</button><button type="button" data-knowledge-action="edit" data-tag-id="${escapeHtml(tag.id)}">编辑为我的版本</button></div>
-        <div class="agent-knowledge-detail-title"><span class="agent-knowledge-folder-mark">影</span><span><h3>${escapeHtml(tag.name)}</h3><p>${escapeHtml(tag.description || "优秀电影节拍参考模板")}</p></span></div>
-        <label class="agent-knowledge-detail-select"><input type="checkbox" data-knowledge-tag-id="${escapeHtml(tag.id)}" ${checked ? "checked" : ""}><span>${checked ? "已选择用于 Agent 创作" : "选择用于 Agent 创作"}</span></label>
-        <div class="agent-knowledge-general"><strong>通用创作偏好</strong><p>${escapeHtml(tag.prompt_text || "暂无通用偏好，可编辑为个人版本。")}</p></div>
-      </section>`;
-  }
-
-  function renderKnowledgeForm(tag) {
-    const editing = Boolean(tag);
-    return `
-      <section class="agent-knowledge-form" data-editing-id="${escapeHtml(tag && tag.id || "")}">
-        <div class="agent-knowledge-view-head"><button type="button" data-knowledge-action="back">‹ 返回</button><span>${editing ? "保存后生成个人副本" : "创建后自动选中"}</span></div>
-        <h3>${editing ? `编辑：${escapeHtml(tag.name || "未命名")}` : "新建自定义标签"}</h3>
-        <div class="agent-knowledge-form-grid">
-          <label><span>名称</span><input data-knowledge-form="name" value="${escapeHtml(tag && tag.name || "")}"></label>
-          <label><span>分类</span><input data-knowledge-form="category" value="${escapeHtml(tag && tag.category || "自定义")}"></label>
-        </div>
-        <label><span>描述</span><input data-knowledge-form="description" value="${escapeHtml(tag && tag.description || "")}"></label>
-        <label><span>通用创作偏好</span><textarea data-knowledge-form="prompt_text">${escapeHtml(tag && tag.prompt_text || "")}</textarea></label>
-        <button class="agent-knowledge-form-save" type="button" data-knowledge-action="save-form">${editing ? "保存为我的标签" : "创建标签"}</button>
-      </section>`;
+      <div class="agent-distilled-grid">
+        <label class="agent-distilled-card is-base ${state.selectedKnowledgeTagIds.length ? "" : "is-selected"}">
+          <input type="checkbox" data-knowledge-tag-id="" ${state.selectedKnowledgeTagIds.length ? "" : "checked"}>
+          <span class="agent-distilled-base-art">ITS</span>
+          <span class="agent-distilled-check" aria-hidden="true">${state.selectedKnowledgeTagIds.length ? "+" : "✓"}</span>
+          <span class="agent-distilled-copy"><small>通用 · 七节点团队</small><strong>基础专业工作流</strong><span><b>稳定版</b><i>不套用垂类样本架构</i></span></span>
+        </label>
+        ${skills.map((tag) => knowledgeOption(tag)).join("")}
+        ${!skills.length ? `<a class="agent-distilled-empty" href="${escapeHtml(withAuth('/distillation-lab'))}"><strong>还没有匹配的已发布 Skill</strong><small>前往爆款蒸馏实验室创建并发布</small></a>` : ""}
+      </div>`;
   }
 
   function renderKnowledgeButton() {
     const tags = selectedKnowledgeTags();
     $("#knowledgeSelectionLabel").textContent = tags.length
-      ? (tags.length <= 2 ? tags.map((tag) => tag.name).join("、") : `已选择 ${tags.length} 种风格`)
-      : "选择创作风格";
+      ? `${tags[0].name} · ${tags[0].version || "已发布"}`
+      : "使用基础专业工作流";
     $("#knowledgePickerBtn").classList.toggle("has-selection", tags.length > 0);
-    $("#knowledgeSelectedCount").textContent = `已选择 ${tags.length} 项`;
+    $("#knowledgeSelectedCount").textContent = tags.length ? `已锁定 ${tags[0].name} · ${tags[0].version}` : "未选择垂类 Skill";
   }
 
   function renderKnowledgePicker() {
     const query = String($("#knowledgeSearchInput")?.value || "").trim().toLowerCase();
     $("#knowledgePickerStatus").textContent = state.knowledgeTags.length
-      ? `共 ${state.knowledgeTags.length} 个可用标签，可多选。`
-      : "暂无可用标签。";
-    const activeTag = knowledgeTagById(state.knowledgeActiveTagId);
-    $("#knowledgeTagGroups").innerHTML = state.knowledgeView === "films"
-      ? renderKnowledgeFilms(query)
-      : state.knowledgeView === "detail"
-        ? renderKnowledgeDetail(activeTag)
-        : state.knowledgeView === "form"
-          ? renderKnowledgeForm(activeTag)
-          : renderKnowledgeMain(query);
-    $("#knowledgeSearchInput").closest("label").hidden = ["detail", "form"].includes(state.knowledgeView);
+      ? `${state.knowledgeTags.length} 个已发布 Skill；每次创作只能锁定一个版本。`
+      : "暂无已发布 Skill，可继续使用基础专业工作流。";
+    $("#knowledgeTagGroups").innerHTML = renderKnowledgeMain(query);
     renderKnowledgeButton();
-  }
-
-  async function saveKnowledgeTagForm() {
-    const form = $("#knowledgeTagGroups .agent-knowledge-form");
-    if (!form) return;
-    const editingId = String(form.dataset.editingId || "");
-    const editingTag = knowledgeTagById(editingId);
-    const payload = {
-      name: String(form.querySelector('[data-knowledge-form="name"]')?.value || "").trim(),
-      category: String(form.querySelector('[data-knowledge-form="category"]')?.value || "自定义").trim(),
-      description: String(form.querySelector('[data-knowledge-form="description"]')?.value || "").trim(),
-      prompt_text: String(form.querySelector('[data-knowledge-form="prompt_text"]')?.value || "").trim(),
-      stage_prompts: { ...((editingTag && editingTag.stage_prompts) || {}) },
-    };
-    if (!payload.name) {
-      $("#knowledgePickerStatus").textContent = "请填写标签名称。";
-      return;
-    }
-    const data = await fetchJson(editingId ? `/api/user-knowledge/tags/${encodeURIComponent(editingId)}` : "/api/user-knowledge/tags", {
-      method: editingId ? "PATCH" : "POST",
-      body: JSON.stringify(payload),
-    });
-    const tag = data.tag;
-    const savedTagId = String(tag && tag.id || "");
-    await loadKnowledgeLibrary();
-    if (savedTagId) {
-      state.selectedKnowledgeTagIds = Array.from(new Set(state.selectedKnowledgeTagIds.concat(savedTagId)));
-    }
-    state.knowledgeView = "main";
-    state.knowledgeActiveTagId = "";
-    renderKnowledgePicker();
-  }
-
-  async function updateKnowledgeTag(tagId, changes) {
-    await fetchJson(`/api/user-knowledge/tags/${encodeURIComponent(tagId)}`, {
-      method: "PATCH",
-      body: JSON.stringify(changes),
-    });
-    await loadKnowledgeLibrary();
-  }
-
-  async function deleteKnowledgeTag(tagId) {
-    if (!window.confirm("确认删除这个自定义标签吗？已生成项目会保留历史内容。")) return;
-    await fetchJson(`/api/user-knowledge/tags/${encodeURIComponent(tagId)}`, { method: "DELETE" });
-    await loadKnowledgeLibrary();
-    state.selectedKnowledgeTagIds = state.selectedKnowledgeTagIds.filter((id) => String(id) !== String(tagId));
   }
 
   async function loadKnowledgeLibrary() {
     try {
-      const [tagsData, preferencesData] = await Promise.all([
-        fetchJson("/api/user-knowledge/tags"),
-        fetchJson("/api/user-knowledge/preferences"),
-      ]);
-      state.knowledgeTags = Array.isArray(tagsData.tags) ? tagsData.tags : [];
-      state.knowledgePreferences = preferencesData.preferences || {};
-      state.selectedKnowledgeTagIds = Array.isArray(state.knowledgePreferences.selected_preference_tag_ids)
-        ? state.knowledgePreferences.selected_preference_tag_ids.map(String)
-        : [];
+      const data = await fetchJson("/api/new-workflow-test/skills");
+      state.knowledgeTags = Array.isArray(data.skills) ? data.skills : [];
+      const savedId = String(window.localStorage.getItem("agentDistilledSkillId") || "");
+      const savedVersionId = String(window.localStorage.getItem("agentDistilledSkillVersionId") || "");
+      const saved = state.knowledgeTags.find((item) => String(item.skill_id || "") === savedId && String(item.version_id || "") === savedVersionId);
+      state.selectedKnowledgeTagIds = saved ? [savedId] : [];
     } catch (error) {
       state.knowledgeTags = [];
-      $("#knowledgePickerStatus").textContent = error.message || "智慧库加载失败";
+      $("#knowledgePickerStatus").textContent = error.message || "爆款蒸馏库加载失败";
     }
     renderKnowledgePicker();
   }
@@ -824,31 +724,24 @@
     state.knowledgeSaving = true;
     const button = $("#knowledgeApplyBtn");
     button.disabled = true;
-    button.textContent = "正在应用…";
+    button.textContent = "正在锁定…";
     try {
-      const applied = await fetchJson("/api/user-knowledge/apply-tags", {
-        method: "POST",
-        body: JSON.stringify({ selected_tag_ids: state.selectedKnowledgeTagIds }),
-      });
-      const saved = await fetchJson("/api/user-knowledge/preferences", {
-        method: "PUT",
-        body: JSON.stringify({
-          selected_preference_tag_ids: applied.selected_preference_tag_ids || state.selectedKnowledgeTagIds,
-          user_preference_prompt: state.knowledgePreferences.user_preference_prompt || "",
-          stage_prompts: state.knowledgePreferences.stage_prompts || {},
-        }),
-      });
-      state.knowledgePreferences = saved.preferences || state.knowledgePreferences;
-      state.selectedKnowledgeTagIds = (applied.selected_preference_tag_ids || state.selectedKnowledgeTagIds).map(String);
-      $("#knowledgePicker").hidden = true;
-      $("#knowledgePickerBtn").setAttribute("aria-expanded", "false");
+      const skill = selectedKnowledgeTags()[0] || null;
+      if (skill) {
+        window.localStorage.setItem("agentDistilledSkillId", String(skill.skill_id || ""));
+        window.localStorage.setItem("agentDistilledSkillVersionId", String(skill.version_id || ""));
+      } else {
+        window.localStorage.removeItem("agentDistilledSkillId");
+        window.localStorage.removeItem("agentDistilledSkillVersionId");
+      }
+      state.distilledSkillLocked = true;
       renderKnowledgePicker();
     } catch (error) {
-      $("#knowledgePickerStatus").textContent = error.message || "智慧库应用失败";
+      $("#knowledgePickerStatus").textContent = error.message || "Skill 锁定失败";
     } finally {
       state.knowledgeSaving = false;
       button.disabled = false;
-      button.textContent = "应用到 Agent";
+      button.textContent = "锁定到本次创作";
     }
   }
 
@@ -1066,15 +959,18 @@
     const attachedSkill = selectedSkillRecord();
     const attachedDocument = state.selectedAttachment;
     const attachedKnowledgeTags = selectedKnowledgeTags();
+    const distilledSkill = attachedKnowledgeTags[0] || null;
     const optimistic = {
       id: `local-${Date.now()}`,
       role: "user",
       content,
       metadata: {
         ...(attachedSkill ? { selected_skill: attachedSkill.key, selected_skill_name: attachedSkill.name } : {}),
-        ...(attachedKnowledgeTags.length ? {
-          selected_knowledge_tag_ids: attachedKnowledgeTags.map((tag) => String(tag.id || "")),
-          selected_knowledge_tag_names: attachedKnowledgeTags.map((tag) => String(tag.name || tag.id || "")),
+        ...(distilledSkill ? {
+          distilled_skill_id: String(distilledSkill.skill_id || ""),
+          distilled_skill_version_id: String(distilledSkill.version_id || ""),
+          distilled_skill_name: String(distilledSkill.name || ""),
+          distilled_skill_version: String(distilledSkill.version || ""),
         } : {}),
         ...(attachedDocument ? {
           attachment_id: attachedDocument.id,
@@ -1097,7 +993,9 @@
           content,
           request_id: requestId,
           selected_skill: attachedSkill ? attachedSkill.key : "",
-          selected_knowledge_tag_ids: attachedKnowledgeTags.map((tag) => String(tag.id || "")),
+          distilled_skill_id: distilledSkill ? String(distilledSkill.skill_id || "") : "",
+          distilled_skill_version_id: distilledSkill ? String(distilledSkill.version_id || "") : "",
+          selected_knowledge_tag_ids: [],
           attachment_id: attachedDocument ? attachedDocument.id : "",
         }) },
       );
@@ -1192,60 +1090,17 @@
     $("#knowledgePickerBtn").setAttribute("aria-expanded", "false");
   });
   $("#knowledgeSearchInput").addEventListener("input", renderKnowledgePicker);
-  $("#knowledgeTagGroups").addEventListener("click", async (event) => {
-    const action = event.target.closest("[data-knowledge-action]");
-    if (!action) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const tagId = String(action.dataset.tagId || "");
-    try {
-      if (action.dataset.knowledgeAction === "open-films") {
-        state.knowledgeView = "films";
-        state.knowledgeFilmPage = 1;
-      } else if (action.dataset.knowledgeAction === "film-detail") {
-        state.knowledgeView = "detail";
-        state.knowledgeActiveTagId = tagId;
-      } else if (action.dataset.knowledgeAction === "more-films") {
-        state.knowledgeFilmPage += 1;
-      } else if (action.dataset.knowledgeAction === "back-films") {
-        state.knowledgeView = "films";
-        state.knowledgeActiveTagId = "";
-      } else if (action.dataset.knowledgeAction === "back") {
-        state.knowledgeView = "main";
-        state.knowledgeActiveTagId = "";
-      } else if (action.dataset.knowledgeAction === "new") {
-        state.knowledgeView = "form";
-        state.knowledgeActiveTagId = "";
-      } else if (action.dataset.knowledgeAction === "edit") {
-        state.knowledgeView = "form";
-        state.knowledgeActiveTagId = tagId;
-      } else if (action.dataset.knowledgeAction === "save-form") {
-        await saveKnowledgeTagForm();
-        return;
-      } else if (action.dataset.knowledgeAction === "pin") {
-        const tag = knowledgeTagById(tagId);
-        await updateKnowledgeTag(tagId, { pinned: !(tag && tag.pinned) });
-      } else if (action.dataset.knowledgeAction === "delete") {
-        await deleteKnowledgeTag(tagId);
-      }
-      renderKnowledgePicker();
-      $("#knowledgeTagGroups").scrollTop = 0;
-    } catch (error) {
-      $("#knowledgePickerStatus").textContent = error.message || "智慧库操作失败";
-    }
-  });
   $("#knowledgeTagGroups").addEventListener("change", (event) => {
     const checkbox = event.target.closest("input[data-knowledge-tag-id]");
     if (!checkbox) return;
     const id = String(checkbox.dataset.knowledgeTagId || "");
-    const selected = new Set(state.selectedKnowledgeTagIds.map(String));
-    if (checkbox.checked) selected.add(id);
-    else selected.delete(id);
-    state.selectedKnowledgeTagIds = Array.from(selected);
+    state.selectedKnowledgeTagIds = checkbox.checked && id ? [id] : [];
+    state.distilledSkillLocked = false;
     renderKnowledgePicker();
   });
   $("#knowledgeClearBtn").addEventListener("click", () => {
     state.selectedKnowledgeTagIds = [];
+    state.distilledSkillLocked = false;
     renderKnowledgePicker();
   });
   $("#knowledgeApplyBtn").addEventListener("click", saveKnowledgeSelection);
@@ -1329,6 +1184,10 @@
     if (!promptButton) return;
     const prompt = promptButton.dataset.prompt || promptButton.dataset.agentPrompt || "";
     if (prompt) sendMessage(prompt);
+  });
+
+  window.addEventListener("storage", (event) => {
+    if (event.key === "distilledSkillCatalogChanged") loadKnowledgeLibrary();
   });
 
   Promise.all([loadStatus(), loadKnowledgeLibrary(), loadConversations()]).catch((error) => {

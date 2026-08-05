@@ -20,6 +20,7 @@ from workflow_code_skeleton.app.services.codebuddy_npc import (
 from workflow_code_skeleton.app.services.codebuddy_npc_stage_runner import (
     CodeBuddyNpcStageRunner,
     _compact_story_state,
+    _continuation_instruction,
     _episode_slice,
 )
 
@@ -167,6 +168,7 @@ def test_job_store_builds_continuation_episode_range(tmp_path: Path) -> None:
             "continuation_target_episode": 10,
             "episode_duration_seconds": 75,
             "continuation_policy": "strict",
+            "continuation_bible": "林烬怕火；第8集必须揭开王室血契。",
         },
     )
 
@@ -178,8 +180,14 @@ def test_job_store_builds_continuation_episode_range(tmp_path: Path) -> None:
     assert job["request"]["series_total_episodes"] == 10
     assert job["request"]["total_duration_seconds"] == 375
     assert job["request"]["continuation_policy"] == "strict"
+    assert job["request"]["continuation_bible"] == "林烬怕火；第8集必须揭开王室血契。"
     assert "第6集至第10集" in job["request"]["episode_contract"]
     assert "不得重写第1集至第5集" in job["request"]["episode_contract"]
+
+    instruction = _continuation_instruction(job["request"])
+    assert "续写创作圣经" in instruction
+    assert "已有正文明确事实 > 续写创作圣经" in instruction
+    assert "第8集必须揭开王室血契" in instruction
 
 
 def test_continuation_requires_existing_script_material(tmp_path: Path) -> None:

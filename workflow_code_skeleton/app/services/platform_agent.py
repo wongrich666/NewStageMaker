@@ -23,6 +23,13 @@ from .codebuddy_npc import (
 )
 from .codebuddy_npc_stage_runner import CodeBuddyNpcStageRunner
 from .deepseek_agent import DeepSeekAgentError, deepseek_agent_client, deepseek_agent_status
+from .distillation_lab import distillation_lab_store
+from .platform_agent_openai_sdk import (
+    PlatformAgentSdkError,
+    agents_sdk_available,
+    configured_agent_engine,
+    run_openai_agents_platform_turn,
+)
 from .user_knowledge_store import user_knowledge_store
 from .workbuddy_doctor import (
     DOCTOR_SKILLS,
@@ -57,7 +64,7 @@ AGENT_SYSTEM_PROMPT = """你是“IDEA TO SCRIPT 剧本平台”的总控“剧�
 8. 最终回复使用简洁中文，先说结果，再说下一步。不要暴露工具名和JSON参数。
 9. 剧本生成固定走“专业剧本团队”链路：总编剧→故事架构师→人物情感编剧→分集连续性编剧→正文对白编剧→状态记录器→终审与钩子编辑。用户只要求分析框架时，同一团队运行到“分集连续性编剧”即停止；要求完整成品时运行全部七个节点。
 10. 剧本医生可直接调用 run_project_doctor，既支持平台中已完成且存在正文的项目，也支持用户本轮独立上传的完整剧本附件。附件存在时优先审查附件，不要求先创建项目或先做框架分析。
-11. 用户选择的智慧库标签是本轮新剧本的创作约束，准备生成方案时必须保留，并写入专业剧本团队的创作要求。
+11. 用户在界面勾选的爆款蒸馏 Skill 是本轮新剧本的强制创作架构。准备生成方案时必须保留其名称和发布版本；确认后必须把该精确版本交给专业剧本团队，不能自行替换、降级或忽略。
 12. 用户上传附件仅表示该文件可供本次对话使用，上传本身绝不等同于开始分析、审查、改编、重构或生成，也不得自动调用任何工具。先根据用户本轮明确指令判断用途：只有用户明确要求“分析框架/拆解重构/改编生成/续写”时，才可以把附件作为剧本源材料；只有用户明确要求“审查/质检/剧本医生/优化”时，才可以调用剧本医生。
 13. 有附件且用户明确要求框架分析或改编时，仍需收集总集数和主要角色数量；收集齐后调用 prepare_script_generation。该工具只会生成确认卡，用户明确确认后才可启动专业剧本团队。不要把附件全文复述到普通对话中；附件会由后端工作流在确认后读取。
 """
@@ -117,6 +124,7 @@ def _script_team_summary(job: dict[str, Any]) -> dict[str, Any]:
         "total_episodes": int(request_data.get("episodes") or 0),
         "generation_chain": "script_team_v2",
         "execution_scope": execution_scope,
+        "selected_skill": dict(job.get("selected_skill") or {}),
         "workspace_url": "/new-workflow-test",
         "download_url": (
             f"/api/new-workflow-test/npc/jobs/{job.get('job_id')}/export/docx"
@@ -465,8 +473,17 @@ def _safe_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
 class PlatformConversationAgent:
     def status(self) -> dict[str, Any]:
         status = deepseek_agent_status()
+        requested_engine = configured_agent_engine()
+        sdk_available = agents_sdk_available()
         status["provider"] = "script_agent"
         status["model"] = "剧本 Agent"
+        status["requested_engine"] = requested_engine
+        status["active_engine"] = (
+            "openai_agents"
+            if requested_engine != "legacy" and sdk_available
+            else "legacy"
+        )
+        status["openai_agents_available"] = sdk_available
         status["missing"] = ["剧本 Agent 配置"] if status.get("missing") else []
         status["tools"] = [item["function"]["name"] for item in TOOL_DEFINITIONS]
         status["doctor_skills"] = list_doctor_skills()
@@ -477,7 +494,7 @@ class PlatformConversationAgent:
             "项目查询与选择",
             "暂停、继续、重试和终止",
             "剧本医生Skill",
-            "智慧库创作风格注入",
+            "爆款蒸馏 Skill 精确版本注入",
             "成品导出",
             "打开专业剧本团队与剧本医生",
             "Word 剧本按意图执行框架分析或完整生成",
@@ -598,6 +615,7 @@ class PlatformConversationAgent:
         user_content: str,
         attached_document: dict[str, Any] | None,
         selected_knowledge: dict[str, Any],
+        selected_distilled_skill: dict[str, Any],
         internal_api_base_url: str,
         internal_auth_token: str,
     ) -> dict[str, Any]:
@@ -734,6 +752,10 @@ class PlatformConversationAgent:
                 "selected_preference_tag_ids": list(selected_knowledge.get("selected_preference_tag_ids") or []),
                 "selected_preference_tags": list(selected_knowledge.get("selected_tags") or []),
                 "user_knowledge_tag_prompt": str(selected_knowledge.get("tag_prompt_text") or ""),
+                "distilled_skill_id": str(selected_distilled_skill.get("skill_id") or ""),
+                "distilled_skill_version_id": str(selected_distilled_skill.get("version_id") or ""),
+                "distilled_skill_name": str(selected_distilled_skill.get("name") or ""),
+                "distilled_skill_version": str(selected_distilled_skill.get("version") or ""),
             }
             framework_only = payload["execution_scope"] == "framework_only"
             estimated_batches = max(1, (total_episodes + 4) // 5)
@@ -816,6 +838,15 @@ class PlatformConversationAgent:
                 str(payload.get("conversation_material") or "").strip(),
                 str(payload.get("user_knowledge_tag_prompt") or "").strip(),
             ]
+            distilled_skill_id = str(payload.get("distilled_skill_id") or "").strip()
+            distilled_skill_version_id = str(payload.get("distilled_skill_version_id") or "").strip()
+            distilled_skill_snapshot: dict[str, Any] = {}
+            if distilled_skill_id:
+                distilled_skill_snapshot = distillation_lab_store.resolve_runtime_skill(
+                    user_id,
+                    distilled_skill_id,
+                    distilled_skill_version_id,
+                )
             job = _SCRIPT_TEAM_JOBS.create(
                 user_id=user_id,
                 request_payload={
@@ -829,6 +860,7 @@ class PlatformConversationAgent:
                     "source_text": str(payload.get("source_text") or ""),
                     "adaptation_direction": "\n\n".join(item for item in direction_parts if item),
                     "execution_mode": "step" if framework_only else "auto",
+                    "distilled_skill_snapshot": distilled_skill_snapshot,
                 },
             )
             job["execution_scope"] = "framework_only" if framework_only else "framework_and_script"
@@ -1103,6 +1135,7 @@ class PlatformConversationAgent:
                 user_content=content,
                 attached_document=attached_document,
                 selected_knowledge=selected_knowledge,
+                selected_distilled_skill={},
                 internal_api_base_url=internal_api_base_url,
                 internal_auth_token=internal_auth_token,
             )
@@ -1168,6 +1201,8 @@ class PlatformConversationAgent:
         content: str,
         request_id: str,
         selected_skill: str = "",
+        distilled_skill_id: str = "",
+        distilled_skill_version_id: str = "",
         selected_knowledge_tag_ids: list[Any] | None = None,
         attachment_id: str = "",
         internal_api_base_url: str = "",
@@ -1191,6 +1226,13 @@ class PlatformConversationAgent:
         if attachment_id and not attached_document:
             raise ValueError("附件不存在或无权使用，请重新上传。")
         selected_doctor_skill = resolve_doctor_skill(str(selected_skill or "").strip())
+        selected_distilled_skill: dict[str, Any] = {}
+        if str(distilled_skill_id or "").strip():
+            selected_distilled_skill = distillation_lab_store.resolve_runtime_skill(
+                user_id,
+                str(distilled_skill_id or "").strip(),
+                str(distilled_skill_version_id or "").strip(),
+            )
         selected_knowledge = user_knowledge_store.apply_tags(
             selected_knowledge_tag_ids or [],
             user_id=user_id,
@@ -1215,6 +1257,15 @@ class PlatformConversationAgent:
                 {
                     "selected_knowledge_tag_ids": list(selected_knowledge.get("selected_preference_tag_ids") or []),
                     "selected_knowledge_tag_names": selected_knowledge_names,
+                }
+            )
+        if selected_distilled_skill:
+            message_metadata.update(
+                {
+                    "distilled_skill_id": selected_distilled_skill.get("skill_id"),
+                    "distilled_skill_version_id": selected_distilled_skill.get("version_id"),
+                    "distilled_skill_name": selected_distilled_skill.get("name"),
+                    "distilled_skill_version": selected_distilled_skill.get("version"),
                 }
             )
         if attached_document:
@@ -1357,6 +1408,13 @@ class PlatformConversationAgent:
                         + "、".join(selected_knowledge_names)
                         + "。准备新剧本生成方案时必须保留这些偏好，确认后写入专业剧本团队的创作合同与后续节点。"
                     )
+                if selected_distilled_skill and item.get("id") == user_message.get("id"):
+                    message_content += (
+                        "\n\n【已锁定爆款蒸馏 Skill】"
+                        f"{selected_distilled_skill.get('name')} · {selected_distilled_skill.get('version')}。"
+                        "本轮准备新剧本时必须保留这个精确发布版本；调用 prepare_script_generation，"
+                        "后端会把它作为七节点专业剧本团队的强制架构快照。"
+                    )
                 if attached_document and item.get("id") == user_message.get("id") and not selected_doctor_skill:
                     message_content += (
                         f"\n\n【本轮可用附件】{attached_document.get('filename')}，"
@@ -1372,82 +1430,153 @@ class PlatformConversationAgent:
         model = ""
         assistant_content = ""
         try:
-            tool_rounds = _agent_int_env("AGENT_TOOL_ROUNDS", 3, minimum=1, maximum=6)
             response_max_tokens = _agent_int_env("AGENT_RESPONSE_MAX_TOKENS", 1400, minimum=400, maximum=4096)
-            for _ in range(tool_rounds):
-                completion = deepseek_agent_client.complete(
-                    model_messages,
-                    tools=TOOL_DEFINITIONS,
-                    temperature=0.15,
-                    max_tokens=response_max_tokens,
-                    timeout_seconds=180,
-                )
-                usage = completion.get("usage") if isinstance(completion.get("usage"), dict) else usage
-                model = str(completion.get("model") or model)
-                message = completion.get("message") if isinstance(completion.get("message"), dict) else {}
-                tool_calls = message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
-                if not tool_calls:
-                    assistant_content = str(message.get("content") or "").strip()
-                    break
+            runtime_engine = "legacy"
+            fallback_reason = ""
 
-                tool_calls = _safe_tool_calls(tool_calls)
-
-                model_messages.append(message)
-                awaiting_user_input = False
-                for call in tool_calls:
-                    function = call.get("function") if isinstance(call, dict) else {}
-                    tool_name = str((function or {}).get("name") or "")
-                    raw_arguments = str((function or {}).get("arguments") or "{}")
-                    try:
-                        arguments = json.loads(raw_arguments)
-                        if not isinstance(arguments, dict):
-                            arguments = {}
-                    except json.JSONDecodeError:
-                        arguments = {}
-                    action_id = str(call.get("id") or uuid.uuid4().hex)
-                    cached_action = agent_conversation_store.cached_action(user_id, action_id)
-                    if cached_action is None:
-                        try:
-                            result = self._execute_tool(
-                                user_id=user_id,
-                                username=username,
-                                conversation=conversation,
-                                name=tool_name,
-                                arguments=arguments,
-                                user_content=content,
-                                attached_document=attached_document,
-                                selected_knowledge=selected_knowledge,
-                                internal_api_base_url=internal_api_base_url,
-                                internal_auth_token=internal_auth_token,
-                            )
-                        except DeepSeekAgentError as exc:
-                            result = {"ok": False, "error": str(exc)}
-                        except Exception as exc:
-                            result = {"ok": False, "error": f"平台操作失败：{exc}"}
-                        agent_conversation_store.save_action(
-                            user_id,
-                            conversation_id,
-                            action_id,
-                            tool_name,
-                            arguments,
-                            result,
-                        )
-                    else:
-                        result = cached_action
-                    events.append({"tool": tool_name, "result": result})
-                    model_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": action_id,
-                            "content": json.dumps(result, ensure_ascii=False, default=str),
-                        }
+            def execute_sdk_tool(tool_name: str, arguments: dict[str, Any], call_id: str) -> dict[str, Any]:
+                action_id = str(call_id or uuid.uuid4().hex)
+                cached_action = agent_conversation_store.cached_action(user_id, action_id)
+                if cached_action is not None:
+                    return cached_action
+                try:
+                    result = self._execute_tool(
+                        user_id=user_id,
+                        username=username,
+                        conversation=conversation,
+                        name=tool_name,
+                        arguments=arguments,
+                        user_content=content,
+                        attached_document=attached_document,
+                        selected_knowledge=selected_knowledge,
+                        selected_distilled_skill=selected_distilled_skill,
+                        internal_api_base_url=internal_api_base_url,
+                        internal_auth_token=internal_auth_token,
                     )
-                    if result.get("awaiting_user_input"):
-                        assistant_content = str(result.get("question") or "请先确认一个关键选项。")
-                        awaiting_user_input = True
+                except DeepSeekAgentError as exc:
+                    result = {"ok": False, "error": str(exc)}
+                except Exception as exc:
+                    result = {"ok": False, "error": f"平台操作失败：{exc}"}
+                agent_conversation_store.save_action(
+                    user_id,
+                    conversation_id,
+                    action_id,
+                    tool_name,
+                    arguments,
+                    result,
+                )
+                return result
+
+            requested_engine = configured_agent_engine()
+            if requested_engine != "legacy":
+                try:
+                    sdk_result = run_openai_agents_platform_turn(
+                        instructions=str(model_messages[0].get("content") or AGENT_SYSTEM_PROMPT),
+                        messages=model_messages[1:],
+                        tool_definitions=TOOL_DEFINITIONS,
+                        execute_tool=execute_sdk_tool,
+                        max_turns=_agent_int_env("AGENT_SDK_MAX_TURNS", 6, minimum=2, maximum=12),
+                        max_tokens=response_max_tokens,
+                        group_id=conversation_id,
+                    )
+                    assistant_content = str(sdk_result.get("content") or "").strip()
+                    events.extend(list(sdk_result.get("events") or []))
+                    usage = sdk_result.get("usage") if isinstance(sdk_result.get("usage"), dict) else usage
+                    model = str(sdk_result.get("model") or model)
+                    runtime_engine = "openai_agents"
+                except PlatformAgentSdkError as exc:
+                    if exc.tools_executed:
+                        events.extend(exc.events)
+                        latest_result = (
+                            events[-1].get("result")
+                            if events and isinstance(events[-1].get("result"), dict)
+                            else {}
+                        )
+                        assistant_content = str(
+                            latest_result.get("question")
+                            or latest_result.get("message")
+                            or "平台操作已经完成，但智能体整理回复时超时。你可以继续发送下一条指令。"
+                        ).strip()
+                        runtime_engine = "openai_agents"
+                    fallback_reason = str(exc)
+
+            if runtime_engine == "legacy":
+                tool_rounds = _agent_int_env("AGENT_TOOL_ROUNDS", 3, minimum=1, maximum=6)
+                for _ in range(tool_rounds):
+                    completion = deepseek_agent_client.complete(
+                        model_messages,
+                        tools=TOOL_DEFINITIONS,
+                        temperature=0.15,
+                        max_tokens=response_max_tokens,
+                        timeout_seconds=180,
+                    )
+                    usage = completion.get("usage") if isinstance(completion.get("usage"), dict) else usage
+                    model = str(completion.get("model") or model)
+                    message = completion.get("message") if isinstance(completion.get("message"), dict) else {}
+                    tool_calls = message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
+                    if not tool_calls:
+                        assistant_content = str(message.get("content") or "").strip()
                         break
-                if awaiting_user_input:
-                    break
+
+                    tool_calls = _safe_tool_calls(tool_calls)
+
+                    model_messages.append(message)
+                    awaiting_user_input = False
+                    for call in tool_calls:
+                        function = call.get("function") if isinstance(call, dict) else {}
+                        tool_name = str((function or {}).get("name") or "")
+                        raw_arguments = str((function or {}).get("arguments") or "{}")
+                        try:
+                            arguments = json.loads(raw_arguments)
+                            if not isinstance(arguments, dict):
+                                arguments = {}
+                        except json.JSONDecodeError:
+                            arguments = {}
+                        action_id = str(call.get("id") or uuid.uuid4().hex)
+                        cached_action = agent_conversation_store.cached_action(user_id, action_id)
+                        if cached_action is None:
+                            try:
+                                result = self._execute_tool(
+                                    user_id=user_id,
+                                    username=username,
+                                    conversation=conversation,
+                                    name=tool_name,
+                                    arguments=arguments,
+                                    user_content=content,
+                                    attached_document=attached_document,
+                                    selected_knowledge=selected_knowledge,
+                                    selected_distilled_skill=selected_distilled_skill,
+                                    internal_api_base_url=internal_api_base_url,
+                                    internal_auth_token=internal_auth_token,
+                                )
+                            except DeepSeekAgentError as exc:
+                                result = {"ok": False, "error": str(exc)}
+                            except Exception as exc:
+                                result = {"ok": False, "error": f"平台操作失败：{exc}"}
+                            agent_conversation_store.save_action(
+                                user_id,
+                                conversation_id,
+                                action_id,
+                                tool_name,
+                                arguments,
+                                result,
+                            )
+                        else:
+                            result = cached_action
+                        events.append({"tool": tool_name, "result": result})
+                        model_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": action_id,
+                                "content": json.dumps(result, ensure_ascii=False, default=str),
+                            }
+                        )
+                        if result.get("awaiting_user_input"):
+                            assistant_content = str(result.get("question") or "请先确认一个关键选项。")
+                            awaiting_user_input = True
+                            break
+                    if awaiting_user_input:
+                        break
             if not assistant_content:
                 assistant_content = "操作已处理。你可以继续告诉我下一步要做什么。"
 
@@ -1456,7 +1585,13 @@ class PlatformConversationAgent:
                 conversation_id,
                 role="assistant",
                 content=assistant_content,
-                metadata={"events": events, "model": "剧本 Agent", "usage": usage or {}},
+                metadata={
+                    "events": events,
+                    "model": "剧本 Agent",
+                    "usage": usage or {},
+                    "agent_engine": runtime_engine,
+                    "agent_fallback_reason": fallback_reason,
+                },
             )
             conversation = agent_conversation_store.get(user_id, conversation_id) or conversation
             response = {
@@ -1468,6 +1603,7 @@ class PlatformConversationAgent:
                 "context": self._conversation_context(conversation, user_id),
                 "model": "剧本 Agent",
                 "usage": usage,
+                "agent_engine": runtime_engine,
             }
             agent_conversation_store.finish_request(user_id, request_id, response)
             return response

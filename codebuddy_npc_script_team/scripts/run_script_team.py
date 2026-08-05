@@ -127,7 +127,12 @@ episode_start、episode_end 与 episodes 共同定义本次唯一交付范围，
     "character_emotion": """
 你是人物与情感编剧。基于已锁定的故事，不改变主要事件，补足人物内在动力。
 为主要人物写：外在目标、隐藏需求、恐惧、羞耻、自我谎言、关系债、压力行为、
-声音配方和情感转折。心理活动采用假设、验证、被推翻的动态过程。
+声音配方和情感转折。再为每个主要人物建立可执行的“表演指纹”：平静时的身体基线、
+受压时最先泄露情绪的眼神/眉眼/嘴角/手部或姿态微反应、撒谎与回避的破绽、
+面对不同关系对象时的变化、失控前征兆和重新夺回控制的动作。表演指纹必须来自人物
+身份、经历、关系和当下欲望，不得给所有人物套用同一组表情。
+心理活动采用假设、验证、被推翻的动态过程；同时规定该人物OS的用词、句长、判断习惯、
+幽默或防御方式及绝不会使用的措辞，使OS无法与其他人物互换。
 每个主要人物必须有一句可被观众记住的标签及一组真正参与剧情的反差；
 前五集内用行动落地标签、伤口、自我谎言和主要关系压力。
 不得用抽象形容词代替具体反应，不得让人物为推动剧情突然降智。
@@ -174,13 +179,21 @@ episode_duration_seconds 是每集目标画面时长。按对白实际说完、�
 场景头和人物行使用纯文本，不添加 Markdown 加粗符号或标题符号。
 禁止输出“场景任务”和独立“道具”清单；道具只在人物真正使用时自然写入动作。
 每次换场重新写场景头和人物即可。
-所有对白必须独立成行，采用“人物名：台词”；所有心理活动必须采用
-“人物名OS：心理活动”。不得输出无人物名前缀的对白或单独的“OS：”。
-关键对白涉及当下表演时，采用“人物名：（语气/情绪，眉眼神情）台词”，例如：
-“打工鱼：（无奈，眉心微蹙）呃，我……”。括号必须紧跟冒号并使用中文全角括号；
-内容要短、可演、镜头可见，不能写心理解释、长动作或“生气地说道”。
-每集关键情绪转折对白至少使用一次，但不得每句都加或连续复用同一神情。
-动作短、可视、可由AI生成；对白口语化、有潜台词，人物声音可区分。
+所有对白必须独立成行，采用“人物名：台词”。只有外表与真实判断不一致、人物发生误判/
+自我欺骗/私人联想，或这个判断会改变下一步行动时才写OS；动作、表情和潜台词已经能表达的
+内容不得再用OS复述。保留的心理活动采用“人物名OS：心理活动”，不得输出无人物名前缀的
+对白或单独的“OS：”。OS必须继承该人物的声音配方与表演指纹，不能是作者总结或任何人物
+都能说的“怎么会这样、我不能输”；连续OS应合并为一个短判断单元。
+OS出现时，若镜头需要承载人物的掩饰、破绽或判断变化，在OS紧邻处写一个人物专属的可见
+微反应，再让OS改变随后的台词、选择、观察或动作。微反应与OS各自提供新信息，不得把同一
+情绪用动作、OS和对白重复三遍。例如：
+“△ 打工鱼盯着群名，嘴角抽了一下，拇指按灭手机。”
+“打工鱼OS：优惠券没抢到，锅倒是抢到了。”
+对白表演按戏剧需要选择：普通台词直接写；只有去掉提示会读错潜台词或关系态度时，才采用
+“人物名：（简短语气或可见微反应）台词”。括号必须紧跟冒号并使用中文全角括号，内容从
+人物表演指纹和当下关系压力产生，不要求同时罗列语气、情绪和眉眼，也不写心理解释、长动作
+或“生气地说道”。较完整动作写在台词前后，听者反应也可承担表演，不得每句加括号。
+动作短、具体、可视、可由AI生成；对白口语化、有潜台词，人物声音和身体反应均可区分。
 删除多余形容词、气氛铺垫、剧情复述和解释性对白。
 标点服从真实口语与动作节奏，禁止把破折号“——”当成默认停顿符。
 完整陈述和普通转折使用逗号、句号、问号或感叹号；迟疑、吞回半句话或声音渐弱使用省略号；
@@ -217,9 +230,14 @@ episode_word_count 是每集目标下限，episode_word_count_max 是最多上�
 最终每集必须保留“第N集：《本集独有标题》”，不得在终审时删掉集名。
 每集只保留“场景N：地点｜日/夜｜内/外”和“人物”两项紧凑场景信息；
 删除“场景任务”和独立“道具”清单，道具只在真正使用时进入动作。
-所有对白保持“人物名：台词”，所有心理活动保持“人物名OS：心理活动”。
-逐集为关键情绪对白补充“人物名：（语气/情绪，眉眼神情）台词”格式，
-括号必须简短、可演并符合当下压力；不得滥用、不得机械重复同一表情。
+所有对白保持“人物名：台词”；只给确有必要的心理活动保留“人物名OS：心理活动”。
+逐处执行OS必要性审查：删除复述动作、台词或已知情绪的OS，合并连续OS；保留的OS必须
+符合该人物声音，并改变观察、判断、台词、选择或下一动作。需要镜头承载其掩饰或破绽时，
+在OS紧邻处补一个人物专属的眼神、眉眼、嘴角、手部、停顿或姿态微反应；微反应不得复述OS。
+逐场修复人物表演拍。普通对白不强加括号；只有提示会改变台词读法时才使用
+“人物名：（简短语气或可见微反应）台词”。较完整动作放在台词前后，也允许由听者反应
+完成情绪回声。所有表演必须来自人物表演指纹与当下关系压力，删除机械重复、形容词堆叠
+和人人通用的套式神情，不得为了满足数量给每句加括号。
 逐句校正标点：普通停顿与陈述使用逗号、句号，明确语气使用问号、感叹号，
 迟疑或未尽之意使用省略号；破折号只保留在突然中断、猛然改口和强制语义跳转处。
 删除装饰性、连续性和动作连接型破折号，不得用破折号给普通句子强行制造紧张感。
@@ -261,17 +279,28 @@ def continuation_contract_instruction(request_payload: dict) -> str:
     episode_start = max(source_last + 1, int(request_payload.get("episode_start") or source_last + 1))
     episode_end = max(episode_start, int(request_payload.get("episode_end") or episode_start))
     policy = str(request_payload.get("continuation_policy") or "strict").strip()
+    bible = str(request_payload.get("continuation_bible") or "").strip()
     policy_text = (
         "允许修复不改变既有事件结果的轻微连续性问题"
         if policy == "light"
         else "严格保留既有事实、人物声音、关系温度、伤势、位置、道具与未完成动作"
     )
+    bible_contract = ""
+    if bible:
+        bible_contract = (
+            "\n《续写创作圣经》是所有后续节点共同遵守的长期正典：\n"
+            f"{bible}\n"
+            "执行优先级固定为：已有正文明确事实 > 续写创作圣经 > 本次临时续写方向 > "
+            "模型自由发挥。圣经不得反向改写已发生事件；其人物设定、关系、世界规则、"
+            "主支线走向、未来节点与风格偏好必须落实到新集，不得无故遗忘、替换或弱化。"
+        )
     return (
         f"续写硬合同：已有剧本写至第{source_last}集，已有第{source_last}集结尾是"
         f"第{episode_start}集唯一开场起点；本次只输出第{episode_start}集至第{episode_end}集。"
         f"{policy_text}。先从已有全文提取续写基线，再规划新剧情；"
         "不得重写、摘要代替或重新解释已有各集，不得让人物失忆、瞬移、伤势复原，"
         "不得让旧道具和旧关系无因变化。第一集新稿必须直接处理旧稿最后的动作、决定或后果。"
+        + bible_contract
     )
 
 
@@ -415,6 +444,41 @@ def skill_modules(stage: str) -> str:
     return "".join(chunks)
 
 
+def distilled_skill_modules(stage: str, request_payload: dict) -> str:
+    """Load only the selected distilled modules routed to this team role."""
+    skill = request_payload.get("distilled_skill")
+    if not isinstance(skill, dict) or skill.get("schema_version") != "script-team-skill/v1":
+        return ""
+    manifest = skill.get("manifest") if isinstance(skill.get("manifest"), dict) else {}
+    descriptors = manifest.get("modules") if isinstance(manifest.get("modules"), list) else []
+    module_values = skill.get("modules") if isinstance(skill.get("modules"), dict) else {}
+    chunks: list[str] = []
+    used = 0
+    for descriptor in descriptors:
+        if not isinstance(descriptor, dict) or stage not in (descriptor.get("stages") or []):
+            continue
+        key = str(descriptor.get("key") or "").strip()
+        value = str(module_values.get(key) or "").strip()
+        if not key or not value:
+            continue
+        value = value[: min(12_000, 48_000 - used)]
+        if not value:
+            break
+        chunks.append(
+            f"\n\n===== 已关联垂类Skill：{skill.get('name') or '未命名'} / {key} =====\n{value}"
+        )
+        used += len(value)
+    if not chunks:
+        return ""
+    return (
+        "\n\n===== 蒸馏Skill运行合同 =====\n"
+        f"本任务已锁定 {skill.get('name') or '垂类Skill'} {skill.get('version') or ''}。"
+        "以下模块用于决定该题材的架构、钩子、人物与表达；必须落实，但不得覆盖用户明确要求、"
+        "既有剧情事实、节点职责、输出格式和安全约束。\n"
+        + "".join(chunks)
+    )
+
+
 def parse_json_result(text: str) -> dict:
     value = text.strip()
     if value.startswith("```"):
@@ -544,7 +608,7 @@ def run(stage: str) -> None:
         prepare_final_editor_gate(request_payload)
     request_text = json.dumps(request_payload, ensure_ascii=False, indent=2)
     context = previous_context(stage)
-    modules = skill_modules(stage)
+    modules = skill_modules(stage) + distilled_skill_modules(stage, request_payload)
     user_prompt = (
         "用户创作任务：\n"
         f"{request_text}"

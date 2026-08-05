@@ -29,3 +29,12 @@ def test_continuation_duration_and_delivery_range_use_new_episode_count():
     assert "function deliveryRange" in source
     assert "generationEpisodeCount()" in source
     assert "deliveryRange()" in source
+
+
+def test_continuation_ui_exposes_uploadable_locked_story_bible():
+    source = SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert 'continuation_bible: ""' in source
+    assert 'data-form-key="continuation_bible"' in source
+    assert 'data-upload-target="continuation_bible"' in source
+    assert "续写创作圣经（锁定项）" in source

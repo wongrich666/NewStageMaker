@@ -5,3 +5,4 @@ python-docx>=1.1.2
 pypdf>=5.0.0
 
 codebuddy-agent-sdk>=0.3.202
+openai-agents==0.19.2
