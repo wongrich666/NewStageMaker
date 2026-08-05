@@ -537,6 +537,16 @@ class CodeBuddyNpcJobStore:
             episode_start=episode_start,
         )
 
+        runtime_skill = request_payload.get("distilled_skill_snapshot")
+        runtime_skill = runtime_skill if isinstance(runtime_skill, dict) else {}
+        selected_skill = {
+            key: runtime_skill.get(key)
+            for key in (
+                "skill_id", "project_id", "name", "genre", "market", "audience",
+                "version_id", "version", "score", "schema_version", "published_at",
+            )
+            if runtime_skill.get(key) not in (None, "")
+        }
         job_id = f"npc-{uuid.uuid4().hex[:16]}"
         job = {
             "job_id": job_id,
@@ -571,7 +581,10 @@ class CodeBuddyNpcJobStore:
                     episode_start=episode_start,
                     source_last_episode=source_last_episode,
                 ),
+                "distilled_skill": selected_skill,
             },
+            "selected_skill": selected_skill,
+            "skill_snapshot": copy.deepcopy(runtime_skill),
             "request_warnings": [
                 f"已忽略与总集数 {episodes} 集冲突的补充要求：{item}"
                 for item in ignored_directions
@@ -684,7 +697,10 @@ class CodeBuddyNpcClient:
                 status_code=503,
             )
         repo = quote(self.config.repository, safe="/")
-        request_json = json.dumps(job.get("request") or {}, ensure_ascii=False, separators=(",", ":"))
+        request_data = copy.deepcopy(job.get("request") or {})
+        if isinstance(job.get("skill_snapshot"), dict) and job.get("skill_snapshot"):
+            request_data["distilled_skill"] = copy.deepcopy(job["skill_snapshot"])
+        request_json = json.dumps(request_data, ensure_ascii=False, separators=(",", ":"))
         payload = {
             "event": self.config.event,
             "branch": self.config.branch,
@@ -734,6 +750,8 @@ class CodeBuddyNpcClient:
         )
         state_bundle = base64.b64encode(compressed).decode("ascii")
         request_data = copy.deepcopy(job.get("request") or {})
+        if isinstance(job.get("skill_snapshot"), dict) and job.get("skill_snapshot"):
+            request_data["distilled_skill"] = copy.deepcopy(job["skill_snapshot"])
         if feedback:
             request_data["stage_feedback"] = _clean_text(feedback, limit=20_000)
         payload = {
@@ -1086,6 +1104,7 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
     payload = copy.deepcopy(job)
     payload.pop("user_id", None)
     payload.pop("build_status", None)
+    payload.pop("skill_snapshot", None)
     resume_text = str(payload.pop("stage_resume_text", "") or "")
     if resume_text:
         payload["stage_checkpoint_chars"] = len(resume_text)

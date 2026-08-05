@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <title>剧本 Agent｜剧本平台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='agent_studio.css') }}?v=20260727-script-team-only-v25">
+  <link rel="stylesheet" href="{{ url_for('static', filename='agent_studio.css') }}?v=20260805-distilled-library-v1">
 </head>
 <body class="agent-body">
   <main class="agent-shell">
@@ -26,8 +26,8 @@
 
       <div class="agent-sidebar-spacer"></div>
       <button id="knowledgePickerBtn" class="agent-knowledge-button" type="button" aria-haspopup="dialog" aria-expanded="false">
-        <span class="agent-knowledge-button-mark">智</span>
-        <span><strong>智慧库</strong><small id="knowledgeSelectionLabel">选择创作风格</small></span>
+        <span class="agent-knowledge-button-mark">爆</span>
+        <span><strong>爆款蒸馏库</strong><small id="knowledgeSelectionLabel">选择垂类创作架构</small></span>
         <b aria-hidden="true">›</b>
       </button>
 
@@ -51,32 +51,34 @@
 
       <section id="chatViewport" class="agent-chat-viewport">
         <div id="agentHero" class="agent-hero">
-          <div class="agent-hero-chip">SCRIPT CREATION WORKSPACE</div>
-          <h2>一句话，把整套剧本流程交给我</h2>
-          <p>我会理解你的创作目标，自动补齐缺失字段，再调用原有剧本平台完成生成、控制、质检与导出。</p>
+          <div class="agent-hero-chip">PERSONAL SCRIPT AGENT</div>
+          <h2>一个想法，调度完整剧本团队</h2>
+          <p>描述题材、集数与成片要求；Agent 会补齐关键条件并调度七个专业节点。</p>
           <div class="agent-quick-grid">
-            <button type="button" data-tone="create" data-prompt="帮我生成一部60集都市情感复仇女频短剧，每集600字，5个主要角色，开篇要有强钩子。">
-              <span class="agent-quick-icon" aria-hidden="true">创</span>
-              <span class="agent-quick-copy"><strong>从一句话生成剧本</strong><small>补齐创作参数并启动完整流程</small></span>
-              <span class="agent-quick-arrow" aria-hidden="true">→</span>
-            </button>
-            <button type="button" data-tone="project" data-prompt="查看我最近的剧本项目，并告诉我各自进行到哪里。">
-              <span class="agent-quick-icon" aria-hidden="true">项</span>
-              <span class="agent-quick-copy"><strong>查看最近项目</strong><small>快速了解项目进度与当前状态</small></span>
-              <span class="agent-quick-arrow" aria-hidden="true">→</span>
-            </button>
-            <button type="button" data-tone="resume" data-prompt="检查当前项目状态，如果失败请告诉我可以怎么继续。">
-              <span class="agent-quick-icon" aria-hidden="true">续</span>
-              <span class="agent-quick-copy"><strong>恢复中断任务</strong><small>定位断点、失败原因并继续执行</small></span>
-              <span class="agent-quick-arrow" aria-hidden="true">→</span>
-            </button>
-            <button type="button" data-tone="doctor" data-prompt="对当前已完成剧本运行人物情感共鸣与人情味精修，重点检查细腻心理、读者代入、关系潜台词和AI腔。">
-              <span class="agent-quick-icon" aria-hidden="true">诊</span>
-              <span class="agent-quick-copy"><strong>运行剧本医生</strong><small>调用 Skill 进行诊断与一键优化</small></span>
-              <span class="agent-quick-arrow" aria-hidden="true">→</span>
-            </button>
+            <button type="button" data-tone="create" data-prompt="我想创作一部短剧，请根据我的想法补齐必要信息并给出执行摘要。"><span class="agent-quick-icon" aria-hidden="true">创</span><span class="agent-quick-copy"><strong>开始新剧本</strong><small>从想法进入专业团队</small></span></button>
+            <button type="button" data-tone="project" data-prompt="查看我最近的剧本任务和当前进度。"><span class="agent-quick-icon" aria-hidden="true">项</span><span class="agent-quick-copy"><strong>查看任务</strong><small>继续未完成的创作</small></span></button>
+            <button type="button" data-tone="doctor" data-prompt="我想优化一份已有剧本，请先询问我要审查的方向。"><span class="agent-quick-icon" aria-hidden="true">诊</span><span class="agent-quick-copy"><strong>精修成品</strong><small>调用剧本医生工具</small></span></button>
           </div>
         </div>
+        <section id="knowledgePicker" class="agent-knowledge-picker" aria-labelledby="knowledgePickerTitle">
+          <header>
+            <span class="agent-knowledge-picker-mark">爆</span>
+            <span><strong id="knowledgePickerTitle">爆款蒸馏库</strong><small>勾选后，Agent 会把该发布版本锁定到七节点新工作流</small></span>
+            <a class="agent-knowledge-manage" href="{{ url_for('distillation_lab_page', auth_token=current_auth_token) }}">管理蒸馏 Skill</a>
+            <button id="knowledgePickerClose" type="button" aria-label="收起爆款蒸馏库" title="收起">×</button>
+          </header>
+          <label class="agent-knowledge-search">
+            <span aria-hidden="true">⌕</span>
+            <input id="knowledgeSearchInput" type="search" placeholder="搜索题材、市场或 Skill 名称" autocomplete="off">
+          </label>
+          <div id="knowledgePickerStatus" class="agent-knowledge-status">正在读取已发布 Skill…</div>
+          <div id="knowledgeTagGroups" class="agent-knowledge-groups"></div>
+          <footer>
+            <button id="knowledgeClearBtn" type="button">使用基础工作流</button>
+            <span id="knowledgeSelectedCount">未选择垂类 Skill</span>
+            <button id="knowledgeApplyBtn" class="is-primary" type="button">锁定到本次创作</button>
+          </footer>
+        </section>
         <div id="messageList" class="agent-message-list"></div>
         <div id="agentThinking" class="agent-thinking" hidden>
           <span></span><span></span><span></span><em>正在理解并调度平台…</em>
@@ -101,7 +103,7 @@
             <div class="agent-composer-tools">
               <button id="filePickerBtn" class="agent-tool-button" type="button">＋ 文件</button>
               <input id="agentFileInput" type="file" accept=".txt,.md,.json,.docx,.pdf" hidden>
-              <button id="skillPickerBtn" class="agent-tool-button" type="button" aria-haspopup="listbox" aria-expanded="false">＋ Skill</button>
+              <button id="skillPickerBtn" class="agent-tool-button" type="button" aria-haspopup="listbox" aria-expanded="false">＋ 剧本医生</button>
               <span>Enter 发送 · Shift + Enter 换行</span>
             </div>
             <button id="agentSendBtn" type="submit" aria-label="发送消息">
@@ -147,25 +149,6 @@
     </aside>
   </main>
 
-  <section id="knowledgePicker" class="agent-knowledge-picker" role="dialog" aria-modal="false" aria-labelledby="knowledgePickerTitle" hidden>
-    <header>
-      <span class="agent-knowledge-picker-mark">智</span>
-      <span><strong id="knowledgePickerTitle">智慧库</strong><small>为 Agent 选择题材、结构与文字风格</small></span>
-      <button id="knowledgePickerClose" type="button" aria-label="关闭智慧库" title="关闭">×</button>
-    </header>
-    <label class="agent-knowledge-search">
-      <span aria-hidden="true">⌕</span>
-      <input id="knowledgeSearchInput" type="search" placeholder="搜索风格、题材或自定义标签" autocomplete="off">
-    </label>
-    <div id="knowledgePickerStatus" class="agent-knowledge-status">正在读取智慧库…</div>
-    <div id="knowledgeTagGroups" class="agent-knowledge-groups"></div>
-    <footer>
-      <button id="knowledgeClearBtn" type="button">清空选择</button>
-      <span id="knowledgeSelectedCount">已选择 0 项</span>
-      <button id="knowledgeApplyBtn" class="is-primary" type="button">应用到 Agent</button>
-    </footer>
-  </section>
-
   <script>
     window.agentStudioConfig = {
       authToken: {{ current_auth_token|tojson }},
@@ -174,6 +157,6 @@
       statusUrl: "/api/agent/status"
     };
   </script>
-  <script src="{{ url_for('static', filename='agent_studio.js') }}?v=20260727-script-team-only-v25"></script>
+  <script src="{{ url_for('static', filename='agent_studio.js') }}?v=20260805-distilled-library-v1"></script>
 </body>
 </html>

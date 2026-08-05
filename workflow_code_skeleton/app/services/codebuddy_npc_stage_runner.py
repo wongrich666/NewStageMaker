@@ -42,7 +42,11 @@ episode_start、episode_end 与 episodes 共同构成交付范围，必须只交
     "character_emotion": """
 你是人物与情感编剧。基于锁定故事补足主要人物的外在目标、隐藏需求、恐惧、羞耻、
 自我谎言、关系债、压力行为、声音配方和情感转折。
-心理活动采用“假设—验证—被推翻”的动态过程。用具体行为和语言表现感情，
+为每个主要人物建立可执行的表演指纹：平静时的身体基线、受压时最先泄露情绪的眼神/
+眉眼/嘴角/手部或姿态微反应、撒谎与回避的破绽、关系对象变化、失控前征兆和恢复控制动作。
+这些反应必须来自人物身份、经历、关系和欲望，不能让所有人物共享同一套表情。
+心理活动采用“假设—验证—被推翻”的动态过程，并规定该人物OS的用词、句长、判断习惯、
+幽默或防御方式及绝不会使用的措辞。用具体行为和语言表现感情，
 不以抽象形容词代替反应，不让人物为推进情节突然降智。
 每个主要人物必须有一句可记忆标签及一组真正参与剧情的反差；
 前五集内用行动落地标签、伤口、自我谎言和主要关系压力。
@@ -73,14 +77,15 @@ scenes_per_episode 是前端动态传入的逐集场景合同，必须执行；�
 每集必须有简短、具体、能区分剧情的标题，禁止只写“第N集”或使用“新的开始”等空泛标题。
 所有对白必须独立成行并采用“人物名：说了什么”的格式，例如：
 埃里克：别回头。
-关键对白需要呈现当下语气或情绪与眉眼神情时，统一采用
-“人物名：（语气/情绪，眉眼神情）台词”，例如：
-打工鱼：（无奈，眉心微蹙）呃，我……
-括号必须紧跟冒号并使用中文全角括号。括号内写简短、可表演、镜头可见的信息，
-优先同时包含语气或情绪与眼神、眉头等面部反应；禁止写心理解释、长动作或“生气地说道”。
-每集的关键情绪转折对白至少使用一次，但不得每句都加、不得连续复用同一神情。
-所有需要呈现给观众的心理活动必须采用“人物名OS：心理活动”的格式，例如：
-埃里克OS：他怎么会知道这件事？
+只有去掉提示会读错潜台词或关系态度时，才采用
+“人物名：（简短语气或可见微反应）台词”。括号必须紧跟冒号并使用中文全角括号；
+内容从人物表演指纹与当下关系压力产生，不要求同时罗列语气、情绪和眉眼，不写心理解释、
+长动作或“生气地说道”。较完整动作写在台词前后，听者反应也可承担表演，不得每句加括号。
+只有外表与真实判断不一致、人物发生误判/自我欺骗/私人联想，或判断会改变下一步行动时
+才写OS。动作、表情和潜台词已经能表达的内容不得再用OS复述；连续OS合并为一个短判断单元。
+保留的心理活动采用“人物名OS：心理活动”，必须继承人物声音，不能是作者总结或任何人物
+都能说的套话。需要镜头承载掩饰、破绽或判断变化时，在OS紧邻处先写一个人物专属可见
+微反应；微反应与OS不得重复，OS之后必须改变台词、选择、观察或动作。
 禁止出现没有人物名前缀的对白，禁止只写“OS：”或“内心：”，也不要给普通动作错误添加人物冒号。
 第一集场景头之后的第一句台词或第一个动作必须形成短而强的黄金三秒钩子，
 至少同时形成冲突、悬念、反差、危险后果中的两项；一句话足够时立即收住。
@@ -125,10 +130,13 @@ episodes 数组必须完整覆盖 episode_start 至 episode_end。未知事实�
 不得在终审中随意增删场景造成瞬移。
 每一集只保留紧凑场景头：“场景N：地点｜日/夜｜内/外”“人物”，随后立即进入戏。
 删除所有“场景任务”和独立“道具”清单，道具只能在被使用时写入动作。
-所有对白必须保持“人物名：台词”；所有心理活动必须保持“人物名OS：心理活动”。
-发现无人物归属的对白时必须补齐说话者，发现“OS/内心旁白”时必须改成对应人物名OS。
-逐集检查关键情绪对白，补成“人物名：（语气/情绪，眉眼神情）台词”。
-括号内容必须简短、可演、符合当下关系压力，不得每句添加或重复同一套表情。
+所有对白必须保持“人物名：台词”；只给确有必要的心理活动保留“人物名OS：心理活动”。
+发现无人物归属的对白时补齐说话者；逐处删除复述动作、台词或已知情绪的OS并合并连续OS。
+保留的OS必须符合人物声音并改变观察、判断、台词、选择或下一动作；需要镜头承载掩饰或
+破绽时，在OS紧邻处补一个人物专属的眼神、眉眼、嘴角、手部、停顿或姿态微反应，且不复述OS。
+逐场修复人物表演拍。普通对白不强加括号；只有提示会改变台词读法时才采用
+“人物名：（简短语气或可见微反应）台词”。较完整动作放在台词前后，听者反应也可承担表演。
+删除机械重复、形容词堆叠和人人通用的套式神情，不得为了满足数量给每句加括号。
 逐句校正标点：逗号和句号承担普通停顿与陈述，问号和感叹号承担明确语气，
 省略号承担迟疑或未尽之意；破折号只保留在突然中断、猛然改口和强制语义跳转处。
 删除装饰性、连续性和动作连接型破折号，不得为了制造紧张感给普通句子统一加“——”。
@@ -293,6 +301,11 @@ def _compact_story_state(job: dict[str, Any]) -> str:
             "model_call_used": False,
             "note": "该账本由代码从分集卡与正文提取，用于断点和集间承接，不重复调用大模型。",
         },
+        "distilled_skill": {
+            key: (job.get("selected_skill") or {}).get(key)
+            for key in ("skill_id", "name", "version_id", "version", "schema_version")
+            if (job.get("selected_skill") or {}).get(key)
+        },
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -350,6 +363,40 @@ def _module_text(stage: str, artifacts: dict[str, Any] | None = None) -> str:
         if path.is_file():
             chunks.append(f"\n\n===== 专业模块：{name} =====\n{path.read_text(encoding='utf-8')}")
     return "".join(chunks)
+
+
+def _distilled_skill_text(stage: str, job: dict[str, Any]) -> str:
+    """Mirror CNB stage routing for local fallback without loading every module."""
+    skill = job.get("skill_snapshot")
+    if not isinstance(skill, dict) or skill.get("schema_version") != "script-team-skill/v1":
+        return ""
+    manifest = skill.get("manifest") if isinstance(skill.get("manifest"), dict) else {}
+    descriptors = manifest.get("modules") if isinstance(manifest.get("modules"), list) else []
+    module_values = skill.get("modules") if isinstance(skill.get("modules"), dict) else {}
+    chunks: list[str] = []
+    used = 0
+    for descriptor in descriptors:
+        if not isinstance(descriptor, dict) or stage not in (descriptor.get("stages") or []):
+            continue
+        key = str(descriptor.get("key") or "").strip()
+        value = str(module_values.get(key) or "").strip()
+        if not key or not value:
+            continue
+        value = value[: min(12_000, 48_000 - used)]
+        if not value:
+            break
+        chunks.append(
+            f"\n\n===== 已关联垂类Skill：{skill.get('name') or '未命名'} / {key} =====\n{value}"
+        )
+        used += len(value)
+    if not chunks:
+        return ""
+    return (
+        "\n\n===== 蒸馏Skill运行合同 =====\n"
+        f"本任务已锁定 {skill.get('name') or '垂类Skill'} {skill.get('version') or ''}。"
+        "以下模块必须落实，但不得覆盖用户要求、既有事实、节点职责和输出格式。\n"
+        + "".join(chunks)
+    )
 
 
 def _continuation_instruction(request_data: dict[str, Any]) -> str:
@@ -700,6 +747,7 @@ class CodeBuddyNpcStageRunner:
             f"===== 用户创作任务 =====\n{request_text}"
             + "".join(context)
             + _module_text(stage, artifacts)
+            + _distilled_skill_text(stage, job)
             + _continuation_instruction(request_data)
             + revision
             + "\n\n严格执行 episode_start、episode_end 与 episodes；"
@@ -854,6 +902,7 @@ class CodeBuddyNpcStageRunner:
             if str(artifacts.get(key) or "").strip()
         )
         fixed_context += _module_text(stage, artifacts)
+        fixed_context += _distilled_skill_text(stage, job)
         fixed_context += _continuation_instruction(request_data)
         batch_total = (episode_end - start_episode + BATCH_SIZE) // BATCH_SIZE
         completed_ranges: list[list[int]] = []

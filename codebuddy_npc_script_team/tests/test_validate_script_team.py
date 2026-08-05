@@ -426,7 +426,7 @@ def test_character_prefixed_dialogue_and_os_pass_format_gate() -> None:
     assert "script.os.speaker_missing" not in codes
 
 
-def test_dialogue_requires_performance_cue_in_strict_gate() -> None:
+def test_visible_action_can_carry_performance_without_forced_parenthesis() -> None:
     script = (
         "片名：墙后的人\n第1集：《墙后三响》\n"
         "场景1：工作室｜夜｜内\n人物：林深\n"
@@ -440,10 +440,8 @@ def test_dialogue_requires_performance_cue_in_strict_gate() -> None:
         mode="strict",
     )
 
-    assert any(
-        item["code"] == "script.dialogue.performance_cue_missing"
-        for item in report.errors
-    )
+    assert not any(item["code"].startswith("script.performance") for item in report.errors)
+    assert not any(item["code"] == "script.performance.beat_sparse" for item in report.warnings)
 
 
 def test_dialogue_performance_cue_format_passes_gate() -> None:
@@ -460,10 +458,91 @@ def test_dialogue_performance_cue_format_passes_gate() -> None:
         mode="strict",
     )
 
-    assert not any(
-        item["code"] == "script.dialogue.performance_cue_missing"
-        for item in report.errors
+    assert not any(item["code"].startswith("script.performance") for item in report.errors)
+
+
+def test_dialogue_only_scene_gets_non_blocking_performance_warning() -> None:
+    dialogue = "\n".join(f"林深：第{index}句话。" for index in range(1, 8))
+    script = (
+        "片名：墙后的人\n第1集：《墙后三响》\n"
+        "场景1：工作室｜夜｜内\n人物：林深\n"
+        f"{dialogue}\n" + "门外传来敲击声。" * 12
     )
+    report = gate.validate(
+        script,
+        _state(),
+        {"episodes": 1, "episode_word_count": 100},
+        mode="strict",
+    )
+
+    assert any(item["code"] == "script.performance.beat_sparse" for item in report.warnings)
+    assert not any(item["code"] == "script.performance.beat_sparse" for item in report.errors)
+
+
+def test_os_quality_metrics_warn_without_blocking_release() -> None:
+    script = (
+        "片名：墙后的人\n第1集：《墙后三响》\n"
+        "场景1：工作室｜夜｜内\n人物：林深\n"
+        "林深OS：怎么会这样？\n"
+        "林深OS：我不能输。\n"
+        "林深OS：他到底是谁？\n"
+        "林深：别开门。\n"
+        + "门外的影子停在磨砂玻璃后。" * 10
+    )
+    report = gate.validate(
+        script,
+        _state(),
+        {"episodes": 1, "episode_word_count": 100},
+        mode="strict",
+    )
+    warning_codes = {item["code"] for item in report.warnings}
+
+    assert "script.os.consecutive" in warning_codes
+    assert "script.os.density" in warning_codes
+    assert "script.os.generic_voice" in warning_codes
+    assert "script.os.visual_reaction_missing" in warning_codes
+    assert not any(item["code"].startswith("script.os.") for item in report.errors)
+
+
+def test_os_can_be_paired_with_character_specific_visible_reaction() -> None:
+    script = (
+        "片名：墙后的人\n第1集：《墙后三响》\n"
+        "场景1：工作室｜夜｜内\n人物：林深\n"
+        "△林深的拇指停在退格键上，视线移向墙缝。\n"
+        "林深OS：第三声比昨晚近了一米。\n"
+        "林深：别开门。\n"
+        + "墙灰沿着桌沿落下。" * 14
+    )
+    report = gate.validate(
+        script,
+        _state(),
+        {"episodes": 1, "episode_word_count": 100},
+        mode="strict",
+    )
+    metrics = report.metrics["episodes"][0]
+
+    assert metrics["os_lines"] == 1
+    assert metrics["os_with_adjacent_visible_reaction"] == 1
+    assert metrics["generic_os_lines"] == 0
+
+
+def test_repeated_performance_cue_is_reported_as_warning() -> None:
+    repeated = "\n".join(
+        f"林深：（压低声音，眉峰绷紧）第{index}句。" for index in range(1, 4)
+    )
+    script = (
+        "片名：墙后的人\n第1集：《墙后三响》\n"
+        "场景1：工作室｜夜｜内\n人物：林深\n"
+        f"{repeated}\n" + "墙后的敲击越来越近。" * 12
+    )
+    report = gate.validate(
+        script,
+        _state(),
+        {"episodes": 1, "episode_word_count": 100},
+        mode="strict",
+    )
+
+    assert any(item["code"] == "script.performance.cue_repeated" for item in report.warnings)
 
 
 def test_dash_metrics_count_groups_not_individual_characters() -> None:

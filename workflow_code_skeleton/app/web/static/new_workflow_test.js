@@ -50,7 +50,12 @@
       continuation_bible: "",
       adaptation_direction: "",
       execution_mode: "step",
+      distilled_skill_id: "",
+      distilled_skill_version_id: "",
     },
+    skillCatalog: [],
+    skillCatalogLoading: false,
+    skillPickerOpen: false,
     job: null,
     history: [],
     expandedProjects: [],
@@ -516,6 +521,50 @@
         </div>
       </div>
     `;
+  }
+
+  function renderSkillCatalog(active) {
+    const skills = Array.isArray(state.skillCatalog) ? state.skillCatalog : [];
+    const selectedId = String(state.form.distilled_skill_id || "");
+    const cards = skills.map((skill) => {
+      const selected = selectedId === String(skill.skill_id || "");
+      return `
+        <button class="nwt-skill-card ${selected ? "selected" : ""}" type="button"
+          data-skill-id="${escapeHtml(skill.skill_id)}"
+          data-skill-version-id="${escapeHtml(skill.version_id)}"
+          aria-pressed="${selected}" ${active ? "disabled" : ""}>
+          <img src="${escapeHtml(skill.cover_url)}" alt="" loading="lazy" />
+          <span class="nwt-skill-shade"></span>
+          <span class="nwt-skill-check">${icon(selected ? "check" : "plus", 14)}</span>
+          <span class="nwt-skill-card-copy">
+            <small>${escapeHtml(skill.genre || "垂类剧本")} · ${escapeHtml(skill.market || "通用市场")}</small>
+            <strong>${escapeHtml(skill.name)}</strong>
+            <span><b>${escapeHtml(skill.version)}</b><i>${escapeHtml(skill.module_count)} 个专业模块</i><em>${escapeHtml(skill.score)} 分</em></span>
+          </span>
+        </button>`;
+    }).join("");
+    return `
+      <div class="nwt-skill-picker">
+        <button class="nwt-skill-none ${selectedId ? "" : "selected"}" type="button"
+          data-skill-id="" data-skill-version-id="" aria-pressed="${!selectedId}" ${active ? "disabled" : ""}>
+          <span>${icon("sparkles", 18)}</span>
+          <strong>基础专业工作流</strong>
+          <small>不套用垂类样本架构</small>
+        </button>
+        ${state.skillCatalogLoading ? `<div class="nwt-skill-loading">${icon("loader-circle", 18)} 正在读取已发布 Skill...</div>` : cards}
+        ${!state.skillCatalogLoading && !skills.length ? `
+          <a class="nwt-skill-empty" href="${escapeHtml(apiUrl('/distillation-lab'))}">
+            <span>${icon("flask-conical", 19)}</span>
+            <strong>还没有已发布 Skill</strong>
+            <small>前往爆款蒸馏实验室创建并发布</small>
+          </a>` : ""}
+      </div>`;
+  }
+
+  function selectedCatalogSkill() {
+    return (state.skillCatalog || []).find(
+      (item) => String(item.skill_id || "") === String(state.form.distilled_skill_id || ""),
+    ) || null;
   }
 
   function renderTeam() {
@@ -1029,9 +1078,29 @@
             </label>
           </div>
           </div>
+          <div class="nwt-form-band nwt-skill-band ${state.skillPickerOpen ? "open" : ""}">
+            <button class="nwt-skill-toggle" type="button" data-action="toggle-skill-picker" aria-expanded="${state.skillPickerOpen}">
+              <span class="nwt-band-index">02</span>
+              <span class="nwt-skill-toggle-copy"><strong>创作 Skill</strong><small>选择后，七个编剧节点按职责读取对应垂类架构</small></span>
+              <span class="nwt-skill-current">
+                ${selectedCatalogSkill() ? `<b>${escapeHtml(selectedCatalogSkill().name)}</b><small>${escapeHtml(selectedCatalogSkill().version)} · 已关联</small>` : `<b>基础专业工作流</b><small>未关联垂类 Skill</small>`}
+              </span>
+              <span class="nwt-skill-toggle-icon">${icon(state.skillPickerOpen ? "chevron-up" : "chevron-down", 17)}</span>
+            </button>
+            ${state.skillPickerOpen ? `
+              <div class="nwt-skill-picker-panel">
+                ${renderSkillCatalog(active)}
+                <div class="nwt-skill-contract">
+                  ${icon("lock-keyhole", 14)}
+                  <span>${state.form.distilled_skill_id
+                    ? "任务创建后锁定当前发布版本；后续迭代不会改变本次创作。"
+                    : "未选择时使用平台基础专业 Skill，仍可正常生成高质量剧本。"}</span>
+                </div>
+              </div>` : ""}
+          </div>
           <div class="nwt-form-band">
             <div class="nwt-form-band-head">
-              <span>02</span>
+              <span>03</span>
               <div><strong>制作规格</strong><small>控制篇幅、场景密度和执行节奏</small></div>
             </div>
           <div class="nwt-form-grid nwt-form-grid-spec">
@@ -1112,7 +1181,7 @@
           </div>
           <div class="nwt-form-band nwt-form-band-material">
             <div class="nwt-form-band-head">
-              <span>03</span>
+              <span>04</span>
               <div><strong>${state.form.mode === "续写" ? "已有剧本与续写方向" : "故事材料"}</strong><small>${state.form.mode === "续写" ? "已有正文作为正典，只创作新的集数" : "提供原始内容与本次创作必须遵守的方向"}</small></div>
             </div>
           <div class="nwt-form-grid nwt-material-grid">
@@ -1198,6 +1267,11 @@
               <p>节点、运行状态和中间产物集中在同一条创作链路中。</p>
               </div>
             </div>
+            ${(job.selected_skill || (job.request || {}).distilled_skill || {}).name ? `
+              <div class="nwt-runtime-skill" title="本任务已冻结该 Skill 发布版本">
+                ${icon("badge-check", 15)}
+                <span><small>已关联 Skill</small><strong>${escapeHtml((job.selected_skill || job.request.distilled_skill).name)} · ${escapeHtml((job.selected_skill || job.request.distilled_skill).version || "")}</strong></span>
+              </div>` : ""}
             ${renderBuildLink()}
           </div>
           ${renderTeamFlow()}
@@ -1244,6 +1318,26 @@
     render();
   }
 
+  async function loadSkillCatalog() {
+    state.skillCatalogLoading = true;
+    render();
+    try {
+      const data = await request("/api/new-workflow-test/skills");
+      state.skillCatalog = Array.isArray(data.skills) ? data.skills : [];
+      const selected = state.skillCatalog.find((item) => item.skill_id === state.form.distilled_skill_id);
+      if (state.form.distilled_skill_id && !selected) {
+        state.form.distilled_skill_id = "";
+        state.form.distilled_skill_version_id = "";
+      }
+    } catch (error) {
+      state.error = `读取蒸馏 Skill 失败：${error.message || error}`;
+    } finally {
+      state.skillCatalogLoading = false;
+      saveState();
+      render();
+    }
+  }
+
   async function loadLatestJob() {
     try {
       const data = await request("/api/new-workflow-test/npc/jobs/latest");
@@ -1255,10 +1349,13 @@
         state.job = latest;
         expandProjectForJob(state.job);
         if (latest.request && typeof latest.request === "object") {
+          const selectedSkill = latest.request.distilled_skill || latest.selected_skill || {};
           state.form = {
             ...state.form,
             ...latest.request,
             continuation_bible: String(latest.request.continuation_bible || ""),
+            distilled_skill_id: String(selectedSkill.skill_id || ""),
+            distilled_skill_version_id: String(selectedSkill.version_id || ""),
           };
         }
         saveState();
@@ -1340,7 +1437,13 @@
       state.job = data.job || null;
       expandProjectForJob(state.job);
       if (state.job && state.job.request && typeof state.job.request === "object") {
-        state.form = { ...state.form, ...state.job.request };
+        const selectedSkill = state.job.request.distilled_skill || state.job.selected_skill || {};
+        state.form = {
+          ...state.form,
+          ...state.job.request,
+          distilled_skill_id: String(selectedSkill.skill_id || state.form.distilled_skill_id || ""),
+          distilled_skill_version_id: String(selectedSkill.version_id || state.form.distilled_skill_version_id || ""),
+        };
       }
       saveState();
       loadHistory();
@@ -1671,6 +1774,16 @@
   });
 
   app.addEventListener("click", (event) => {
+    const skillCard = event.target.closest("[data-skill-id]");
+    if (skillCard) {
+      if (skillCard.disabled || isActive()) return;
+      state.form.distilled_skill_id = String(skillCard.dataset.skillId || "");
+      state.form.distilled_skill_version_id = String(skillCard.dataset.skillVersionId || "");
+      state.skillPickerOpen = false;
+      saveState();
+      render();
+      return;
+    }
     const choice = event.target.closest("[data-choice-key]");
     if (choice) {
       if (choice.disabled) return;
@@ -1691,6 +1804,11 @@
     const button = event.target.closest("[data-action]");
     if (!button) return;
     const action = button.dataset.action;
+    if (action === "toggle-skill-picker") {
+      state.skillPickerOpen = !state.skillPickerOpen;
+      render();
+      return;
+    }
     if (action === "start") startJob();
     if (action === "recover") recoverJob();
     if (action === "cancel") cancelRun();
@@ -1735,9 +1853,11 @@
       window.localStorage.removeItem(STORAGE_KEY);
       const history = Array.isArray(state.history) ? state.history : [];
       const configStatus = state.configStatus;
+      const skillCatalog = Array.isArray(state.skillCatalog) ? state.skillCatalog : [];
       state = clone(initialState);
       state.history = history;
       state.configStatus = configStatus;
+      state.skillCatalog = skillCatalog;
       state.job = null;
       state.selectedArtifact = "";
       state.error = "";
@@ -1766,8 +1886,13 @@
     if (action === "continue-script") continueCurrentScript();
   });
 
+  window.addEventListener("storage", (event) => {
+    if (event.key === "distilledSkillCatalogChanged") loadSkillCatalog();
+  });
+
   render();
   loadConfig();
+  loadSkillCatalog();
   loadLatestJob();
   loadHistory();
 })();

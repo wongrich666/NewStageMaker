@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -193,10 +194,21 @@ class DeepSeekAgentClient:
         content = str((result.get("message") or {}).get("content") or "").strip()
         if not content:
             raise DeepSeekAgentError("剧本 Agent 没有返回内容。")
+        candidate = content
+        if candidate.startswith("```"):
+            candidate = re.sub(r"^```(?:json)?\s*", "", candidate, count=1, flags=re.IGNORECASE)
+            candidate = re.sub(r"\s*```$", "", candidate, count=1)
         try:
-            structured = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise DeepSeekAgentError("剧本 Agent 没有返回合法JSON。") from exc
+            structured = json.loads(candidate)
+        except json.JSONDecodeError:
+            start = candidate.find("{")
+            end = candidate.rfind("}")
+            if start < 0 or end <= start:
+                raise DeepSeekAgentError("剧本 Agent 没有返回合法JSON。")
+            try:
+                structured = json.loads(candidate[start : end + 1])
+            except json.JSONDecodeError as exc:
+                raise DeepSeekAgentError("剧本 Agent 没有返回合法JSON。") from exc
         if not isinstance(structured, dict):
             raise DeepSeekAgentError("剧本 Agent 返回的数据格式不正确。")
         return {

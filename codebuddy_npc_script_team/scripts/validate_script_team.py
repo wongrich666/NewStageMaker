@@ -48,11 +48,22 @@ ATTRIBUTED_DIALOGUE = re.compile(
 )
 PERFORMANCE_CUE_DIALOGUE = re.compile(
     r"(?m)^\s*(?![\w\u4e00-\u9fff·]{1,20}OS\s*[：:])"
-    r"[\w\u4e00-\u9fff·]{1,20}\s*[：:]\s*（[^）\r\n]{2,36}）\s*\S[^\r\n]*$"
+    r"[\w\u4e00-\u9fff·]{1,20}\s*[：:]\s*（(?P<cue>[^）\r\n]{2,36})）\s*\S[^\r\n]*$"
+)
+ATTRIBUTED_OS_LINE = re.compile(
+    r"^\s*(?:[-*]\s*)?(?P<speaker>[\w\u4e00-\u9fff·]{1,20})OS\s*[：:]\s*(?P<content>\S.*)$"
 )
 SPEAKER_LINE = re.compile(
     r"^\s*(?!场景\s*\d+\s*[：:])(?!人物\s*[：:])"
     r"[\w\u4e00-\u9fff·]{1,20}(?:OS)?\s*[：:]\s*(?P<content>.+)$"
+)
+VISIBLE_REACTION = re.compile(
+    r"眼|眉|嘴|唇|下颌|视线|目光|手|指|肩|背|呼吸|吸气|吐气|停顿|僵|颤|"
+    r"抬头|低头|偏头|移开|避开|退了|后退|笑|抿|吞咽|咬牙|松开|攥|按住"
+)
+GENERIC_OS = re.compile(
+    r"怎么会这样|这不可能|我不能输|我一定要赢|我该怎么办|怎么办才好|"
+    r"他到底是谁|她到底是谁|到底发生了什么"
 )
 
 
@@ -180,6 +191,64 @@ def _estimate_screen_seconds(body: str) -> dict[str, int]:
         "estimated_seconds": max(1, round(estimated)),
         "spoken_units": spoken_units,
         "action_seconds": round(action_seconds),
+    }
+
+
+def _performance_metrics(body: str, dialogue_count: int) -> dict[str, Any]:
+    lines = [
+        re.sub(r"^\s*(?:#{1,6}\s+|[-+*]\s+|[△▲]\s*)", "", raw).strip("*_ ")
+        for raw in body.splitlines()
+        if raw.strip()
+    ]
+    os_items: list[tuple[int, str]] = []
+    visible_reaction_lines = 0
+    for index, line in enumerate(lines):
+        match = ATTRIBUTED_OS_LINE.match(line)
+        if match:
+            os_items.append((index, match.group("content").strip()))
+            continue
+        if not SPEAKER_LINE.match(line) and VISIBLE_REACTION.search(line):
+            visible_reaction_lines += 1
+
+    os_indices = {index for index, _content in os_items}
+    consecutive_os = 0
+    longest_os_run = 0
+    for index, line in enumerate(lines):
+        if index in os_indices:
+            consecutive_os += 1
+            longest_os_run = max(longest_os_run, consecutive_os)
+        elif line:
+            consecutive_os = 0
+
+    paired_os = 0
+    for index, _content in os_items:
+        neighbours = [
+            lines[near]
+            for near in (index - 1, index + 1)
+            if 0 <= near < len(lines)
+        ]
+        if any(
+            VISIBLE_REACTION.search(line) and not SPEAKER_LINE.match(line)
+            for line in neighbours
+        ):
+            paired_os += 1
+
+    cue_values = [match.group("cue").strip() for match in PERFORMANCE_CUE_DIALOGUE.finditer(body)]
+    cue_counts: dict[str, int] = {}
+    for cue in cue_values:
+        normalized = re.sub(r"[\s，、,。]", "", cue)
+        cue_counts[normalized] = cue_counts.get(normalized, 0) + 1
+    maximum_repeated_cue = max(cue_counts.values(), default=0)
+    generic_os_count = sum(1 for _index, content in os_items if GENERIC_OS.search(content))
+    os_count = len(os_items)
+    return {
+        "os_lines": os_count,
+        "os_dialogue_ratio": round(os_count / max(1, os_count + dialogue_count), 3),
+        "longest_consecutive_os": longest_os_run,
+        "os_with_adjacent_visible_reaction": paired_os,
+        "generic_os_lines": generic_os_count,
+        "visible_reaction_lines": visible_reaction_lines,
+        "maximum_repeated_performance_cue": maximum_repeated_cue,
     }
 
 
@@ -379,6 +448,7 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
         dash_metrics = _dash_metrics(body)
         dialogue_count = len(ATTRIBUTED_DIALOGUE.findall(body))
         performance_cue_count = len(PERFORMANCE_CUE_DIALOGUE.findall(body))
+        performance = _performance_metrics(body, dialogue_count)
         timing = _estimate_screen_seconds(body)
         episode_metrics.append(
             {
@@ -388,6 +458,7 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
                 "scene_headers": scene_count,
                 "dialogue_lines": dialogue_count,
                 "performance_cue_dialogues": performance_cue_count,
+                **performance,
                 **timing,
                 **dash_metrics,
             }
@@ -418,12 +489,54 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
                 "心理活动缺少人物归属；必须使用“人物名OS：心理活动”",
                 episode=episode_no,
             )
-        if dialogue_count and performance_cue_count < 1:
+        if (
+            dialogue_count >= 6
+            and performance_cue_count < 1
+            and performance["visible_reaction_lines"] < 1
+        ):
             report.issue(
-                "script.dialogue.performance_cue_missing",
-                "该集关键对白缺少“人物名：（语气/情绪，眉眼神情）台词”表演提示",
+                "script.performance.beat_sparse",
+                "对白较多但缺少可见人物反应；请按人物表演指纹补关键表演拍，不要机械给每句加括号",
                 episode=episode_no,
-                error=mode == "strict",
+                error=False,
+            )
+        if performance["longest_consecutive_os"] >= 2:
+            report.issue(
+                "script.os.consecutive",
+                "检测到连续OS；请合并为一个人物化判断，并让下一拍转为台词、选择或可见动作",
+                episode=episode_no,
+                error=False,
+            )
+        if performance["os_lines"] >= 3 and performance["os_dialogue_ratio"] > 0.35:
+            report.issue(
+                "script.os.density",
+                "OS相对对白偏密；请删除可由动作、表情或潜台词表达的心理复述",
+                episode=episode_no,
+                error=False,
+            )
+        if performance["generic_os_lines"]:
+            report.issue(
+                "script.os.generic_voice",
+                "检测到可互换的通用OS；请改成人物基于身份、经历和关系作出的私人判断",
+                episode=episode_no,
+                error=False,
+            )
+        if (
+            performance["os_lines"] >= 2
+            and performance["os_with_adjacent_visible_reaction"] < 1
+        ):
+            report.issue(
+                "script.os.visual_reaction_missing",
+                "多处OS均缺少相邻可见反应；需要镜头承载掩饰或破绽时，请补人物专属微动作",
+                episode=episode_no,
+                error=False,
+            )
+        if performance["maximum_repeated_performance_cue"] >= 3:
+            report.issue(
+                "script.performance.cue_repeated",
+                "同一表演提示重复至少三次；请依据人物、关系对象和压力阶段做延续与变奏",
+                episode=episode_no,
+                error=False,
             )
         if scene_count < 1:
             report.issue(
