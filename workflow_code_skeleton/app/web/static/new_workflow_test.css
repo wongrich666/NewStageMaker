@@ -1850,6 +1850,202 @@ body {
   background: #f0f8f6;
 }
 
+.nwt-project-group {
+  margin-bottom: 7px;
+  overflow: hidden;
+  border: 1px solid #e1e9ec;
+  border-radius: 7px;
+  background: #fff;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.nwt-project-group:hover {
+  border-color: #bfd4da;
+}
+
+.nwt-project-group.active {
+  border-color: #8fcfc3;
+  box-shadow: 0 0 0 2px rgba(7, 134, 119, 0.07);
+}
+
+.nwt-project-group.expanded {
+  background: #f9fbfb;
+}
+
+.nwt-project-toggle {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 22px;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+  padding: 11px 8px 10px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--nwt-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.nwt-project-toggle:hover {
+  background: #f5f9f9;
+}
+
+.nwt-project-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #c5ddd9;
+  border-radius: 6px;
+  background: #edf7f5;
+  color: var(--nwt-accent-dark);
+}
+
+.nwt-project-copy {
+  min-width: 0;
+}
+
+.nwt-project-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--nwt-muted);
+  font-size: 10px;
+}
+
+.nwt-project-meta span + span::before {
+  margin-right: 6px;
+  color: #b0bcc0;
+  content: "·";
+}
+
+.nwt-project-chevron {
+  display: grid;
+  place-items: center;
+  color: #788d95;
+  transition: transform 0.18s ease;
+}
+
+.nwt-project-group.expanded .nwt-project-chevron {
+  transform: rotate(180deg);
+}
+
+.nwt-version-list {
+  position: relative;
+  padding: 2px 7px 7px 24px;
+  border-top: 1px solid #e7edef;
+}
+
+.nwt-version-list::before {
+  position: absolute;
+  top: 10px;
+  bottom: 14px;
+  left: 15px;
+  width: 1px;
+  background: #cddadd;
+  content: "";
+}
+
+.nwt-version-list[hidden] {
+  display: none;
+}
+
+.nwt-version-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: center;
+  margin-top: 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.nwt-version-item::before {
+  position: absolute;
+  top: 17px;
+  left: -13px;
+  width: 7px;
+  height: 7px;
+  border: 2px solid #f9fbfb;
+  border-radius: 50%;
+  background: #9aabb1;
+  content: "";
+}
+
+.nwt-version-item:hover {
+  border-color: #d2e0e3;
+}
+
+.nwt-version-item.active {
+  border-color: #91cfc4;
+  background: #edf8f5;
+}
+
+.nwt-version-item.active::before {
+  background: var(--nwt-accent);
+}
+
+.nwt-version-open {
+  min-width: 0;
+  padding: 8px 5px 8px 9px;
+  border: 0;
+  background: transparent;
+  color: var(--nwt-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.nwt-version-line,
+.nwt-version-status {
+  display: flex;
+  align-items: center;
+}
+
+.nwt-version-line {
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.nwt-version-line strong {
+  color: #29454e;
+  font-size: 11px;
+}
+
+.nwt-version-line time {
+  color: #87979d;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.nwt-version-detail,
+.nwt-version-status {
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--nwt-muted);
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nwt-version-status {
+  gap: 5px;
+  color: #405a65;
+}
+
+.nwt-version-status .nwt-task-state {
+  width: 6px;
+  height: 6px;
+  flex-basis: 6px;
+}
+
+.nwt-version-delete {
+  width: 28px;
+  height: 28px;
+}
+
 .nwt-task-open {
   padding: 10px 8px 10px 10px;
 }
@@ -2728,6 +2924,28 @@ body {
 
 .nwt-material-grid .nwt-field.wide {
   grid-column: auto;
+}
+
+.nwt-material-grid .nwt-continuation-bible {
+  grid-column: 1 / -1;
+  padding: 11px;
+  border: 1px solid #b8ded6;
+  border-radius: 7px;
+  background: #f5fbf9;
+}
+
+.nwt-continuation-bible .nwt-lock-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #126c61;
+  font-weight: 700;
+}
+
+.nwt-continuation-bible textarea {
+  min-height: 132px;
+  border-color: #c9e2dd;
+  background: #fff;
 }
 
 .nwt-field.project {

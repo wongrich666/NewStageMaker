@@ -445,6 +445,9 @@ class CodeBuddyNpcJobStore:
     def create(self, *, user_id: int, request_payload: dict[str, Any]) -> dict[str, Any]:
         title = _clean_text(request_payload.get("project_title"), limit=120)
         source_text = _clean_text(request_payload.get("source_text"))
+        continuation_bible = _clean_text(
+            request_payload.get("continuation_bible"), limit=60_000
+        )
         direction = _clean_text(request_payload.get("adaptation_direction"), limit=20_000)
         mode = _clean_text(request_payload.get("mode"), limit=30) or "原创"
         if mode not in _CREATION_MODES:
@@ -561,6 +564,7 @@ class CodeBuddyNpcJobStore:
                 "total_duration_seconds": episodes * episode_duration_seconds,
                 "scenes_per_episode": scenes_per_episode,
                 "source_text": source_text,
+                "continuation_bible": continuation_bible if mode == "续写" else "",
                 "adaptation_direction": direction,
                 "episode_contract": _episode_contract(
                     episodes,

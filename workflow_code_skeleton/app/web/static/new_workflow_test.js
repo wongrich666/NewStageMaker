@@ -47,11 +47,13 @@
       episode_duration_seconds: 90,
       scenes_per_episode: "1",
       source_text: "",
+      continuation_bible: "",
       adaptation_direction: "",
       execution_mode: "step",
     },
     job: null,
     history: [],
+    expandedProjects: [],
     error: "",
     loading: false,
     selectedArtifact: "",
@@ -103,6 +105,7 @@
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
         form: state.form,
         activeView: state.activeView,
+        expandedProjects: Array.isArray(state.expandedProjects) ? state.expandedProjects : [],
         job: state.job ? {
           job_id: state.job.job_id,
           status: state.job.status,
@@ -120,6 +123,77 @@
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#39;");
+  }
+
+  function projectGroupKey(title) {
+    return String(title || "未命名剧本")
+      .trim()
+      .replace(/^《\s*|\s*》$/g, "")
+      .replace(/\s+/g, " ")
+      .toLocaleLowerCase("zh-CN");
+  }
+
+  function groupHistory(items) {
+    const groups = new Map();
+    items.forEach((item) => {
+      const key = projectGroupKey(item.project_title);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          title: String(item.project_title || "未命名剧本").trim(),
+          versions: [],
+        });
+      }
+      groups.get(key).versions.push(item);
+    });
+    return Array.from(groups.values()).map((group) => {
+      group.versions.sort((a, b) => {
+        const aTime = Date.parse(a.updated_at || a.created_at || "") || 0;
+        const bTime = Date.parse(b.updated_at || b.created_at || "") || 0;
+        return bTime - aTime;
+      });
+      group.latest = group.versions[0] || {};
+      group.running = group.versions.filter((item) => ACTIVE_JOB_STATUSES.has(String(item.status || "").toLowerCase())).length;
+      group.completed = group.versions.filter((item) => Boolean(item.has_final_script)).length;
+      group.failed = group.versions.filter((item) => String(item.status || "").toLowerCase() === "failed").length;
+      return group;
+    }).sort((a, b) => {
+      const aTime = Date.parse(a.latest.updated_at || a.latest.created_at || "") || 0;
+      const bTime = Date.parse(b.latest.updated_at || b.latest.created_at || "") || 0;
+      return bTime - aTime;
+    });
+  }
+
+  function formatHistoryTime(value) {
+    const date = new Date(value || "");
+    if (Number.isNaN(date.getTime())) return "时间未知";
+    const now = new Date();
+    const sameYear = date.getFullYear() === now.getFullYear();
+    const datePart = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    const timePart = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    return `${sameYear ? datePart : `${date.getFullYear()}-${datePart}`} ${timePart}`;
+  }
+
+  function isProjectExpanded(group) {
+    const expanded = new Set(Array.isArray(state.expandedProjects) ? state.expandedProjects : []);
+    return expanded.has(group.key);
+  }
+
+  function expandProjectForJob(job) {
+    const title = ((job || {}).request || {}).project_title || "";
+    if (!title) return;
+    const expanded = new Set(Array.isArray(state.expandedProjects) ? state.expandedProjects : []);
+    expanded.add(projectGroupKey(title));
+    state.expandedProjects = Array.from(expanded);
+  }
+
+  function toggleProjectGroup(key) {
+    const expanded = new Set(Array.isArray(state.expandedProjects) ? state.expandedProjects : []);
+    if (expanded.has(key)) expanded.delete(key);
+    else expanded.add(key);
+    state.expandedProjects = Array.from(expanded);
+    saveState();
+    render();
   }
 
   function authHeaders(json = true) {
@@ -755,8 +829,8 @@
 
   function renderTaskCenter() {
     const items = Array.isArray(state.history) ? state.history : [];
+    const groups = groupHistory(items);
     const running = items.filter((item) => ACTIVE_JOB_STATUSES.has(String(item.status || "").toLowerCase())).length;
-    const completed = items.filter((item) => Boolean(item.has_final_script)).length;
     return `
       <aside class="nwt-task-center">
         <div class="nwt-task-head">
@@ -768,24 +842,70 @@
         </div>
         <div class="nwt-task-summary">
           <div><strong>${running}</strong><span>运行中</span></div>
-          <div><strong>${completed}</strong><span>已交付</span></div>
-          <div><strong>${items.length}</strong><span>全部</span></div>
+          <div><strong>${groups.length}</strong><span>剧本项目</span></div>
+          <div><strong>${items.length}</strong><span>生成版本</span></div>
         </div>
         <button class="nwt-btn primary nwt-new-task" type="button" data-action="new-job">
           ${icon("plus", 17)}<span>新建剧本任务</span>
         </button>
         <div class="nwt-task-list">
-          ${items.length ? items.map((item) => `
-            <article class="nwt-task-item ${state.job && state.job.job_id === item.job_id ? "active" : ""}">
-              <button class="nwt-task-open" type="button" data-action="open-history" data-job-id="${escapeHtml(item.job_id)}">
-                <span class="nwt-task-title"><strong>${escapeHtml(item.project_title || "未命名剧本")}</strong><i class="nwt-task-state ${ACTIVE_JOB_STATUSES.has(String(item.status || "").toLowerCase()) ? "running" : item.has_final_script ? "done" : String(item.status || "").toLowerCase() === "failed" ? "failed" : ""}"></i></span>
-                <span class="nwt-task-meta">${escapeHtml(item.production_type || "")} · ${item.mode === "续写" ? `续写第${escapeHtml(item.episode_start || "?")}-${escapeHtml(item.episode_end || "?")}集` : `${escapeHtml(item.episodes || 0)}集`}</span>
-                <span class="nwt-task-status">${escapeHtml(item.status_text || item.status || "")}</span>
-                <span class="nwt-task-progress"><i style="width:${Math.max(0, Math.min(100, Number(item.progress) || 0))}%"></i></span>
-              </button>
-              <button class="nwt-icon-btn danger" type="button" title="${ACTIVE_JOB_STATUSES.has(String(item.status || "").toLowerCase()) ? "运行中的任务不能删除" : "删除任务"}" data-action="delete-history" data-job-id="${escapeHtml(item.job_id)}" ${ACTIVE_JOB_STATUSES.has(String(item.status || "").toLowerCase()) ? "disabled" : ""}>${icon("trash-2", 15)}</button>
-            </article>
-          `).join("") : '<div class="nwt-task-empty"><span>暂无任务</span><small>创建后会在这里持续显示进度</small></div>'}
+          ${groups.length ? groups.map((group) => {
+            const expanded = isProjectExpanded(group);
+            const active = Boolean(state.job && group.versions.some((item) => item.job_id === state.job.job_id));
+            const latest = group.latest || {};
+            const groupState = group.running
+              ? "running"
+              : group.completed
+                ? "done"
+                : group.failed === group.versions.length
+                  ? "failed"
+                  : "";
+            const statusText = group.running
+              ? `${group.running} 个版本运行中`
+              : group.completed
+                ? `${group.completed} 个版本已交付`
+                : "尚未交付";
+            return `
+              <section class="nwt-project-group ${expanded ? "expanded" : ""} ${active ? "active" : ""}">
+                <button class="nwt-project-toggle" type="button" data-action="toggle-project" data-project-key="${escapeHtml(group.key)}" aria-expanded="${expanded ? "true" : "false"}">
+                  <span class="nwt-project-icon">${icon("folder-kanban", 16)}</span>
+                  <span class="nwt-project-copy">
+                    <span class="nwt-task-title">
+                      <strong>${escapeHtml(group.title || "未命名剧本")}</strong>
+                      <i class="nwt-task-state ${groupState}"></i>
+                    </span>
+                    <span class="nwt-project-meta">
+                      <span>${group.versions.length} 个版本</span>
+                      <span>${escapeHtml(formatHistoryTime(latest.updated_at || latest.created_at))}</span>
+                    </span>
+                    <span class="nwt-task-status">${escapeHtml(statusText)}</span>
+                  </span>
+                  <span class="nwt-project-chevron">${icon("chevron-down", 15)}</span>
+                </button>
+                <div class="nwt-version-list" ${expanded ? "" : "hidden"}>
+                  ${group.versions.map((item, index) => {
+                    const itemActive = Boolean(state.job && state.job.job_id === item.job_id);
+                    const itemRunning = ACTIVE_JOB_STATUSES.has(String(item.status || "").toLowerCase());
+                    const versionNumber = group.versions.length - index;
+                    return `
+                      <article class="nwt-version-item ${itemActive ? "active" : ""}">
+                        <button class="nwt-version-open" type="button" data-action="open-history" data-job-id="${escapeHtml(item.job_id)}">
+                          <span class="nwt-version-line">
+                            <strong>版本 ${versionNumber}</strong>
+                            <time>${escapeHtml(formatHistoryTime(item.updated_at || item.created_at))}</time>
+                          </span>
+                          <span class="nwt-version-detail">${escapeHtml(item.production_type || "剧本")} · ${item.mode === "续写" ? `续写第${escapeHtml(item.episode_start || "?")}-${escapeHtml(item.episode_end || "?")}集` : `${escapeHtml(item.episodes || 0)}集`}</span>
+                          <span class="nwt-version-status"><i class="nwt-task-state ${itemRunning ? "running" : item.has_final_script ? "done" : String(item.status || "").toLowerCase() === "failed" ? "failed" : ""}"></i>${escapeHtml(item.status_text || item.status || "")}</span>
+                          <span class="nwt-task-progress"><i style="width:${Math.max(0, Math.min(100, Number(item.progress) || 0))}%"></i></span>
+                        </button>
+                        <button class="nwt-icon-btn danger nwt-version-delete" type="button" title="${itemRunning ? "运行中的版本不能删除" : "删除这个版本"}" data-action="delete-history" data-job-id="${escapeHtml(item.job_id)}" ${itemRunning ? "disabled" : ""}>${icon("trash-2", 14)}</button>
+                      </article>
+                    `;
+                  }).join("")}
+                </div>
+              </section>
+            `;
+          }).join("") : '<div class="nwt-task-empty"><span>暂无任务</span><small>创建后会在这里持续显示进度</small></div>'}
         </div>
       </aside>
     `;
@@ -1007,6 +1127,19 @@
                 <small>支持 Word、PDF、TXT、Markdown、JSON，可多选；单文件最大20MB</small>
               </div>
             </label>
+            ${state.form.mode === "续写" ? `
+              <label class="nwt-field wide nwt-continuation-bible">
+                <span class="nwt-lock-label">${icon("lock-keyhole", 14)}续写创作圣经（锁定项）</span>
+                <textarea data-form-key="continuation_bible" placeholder="填写或上传必须延续的人设、世界观、人物关系、主线与支线规划、未来剧情节点、语言风格和你喜欢的剧情方向。已有正文事实优先，不会反向改写旧集。" ${active ? "disabled" : ""}>${escapeHtml(state.form.continuation_bible)}</textarea>
+                <div class="nwt-upload-row">
+                  <label class="nwt-upload-button">
+                    ${icon("file-lock-2", 14)}<span>上传故事大纲 / 人设文件</span>
+                    <input type="file" data-upload-target="continuation_bible" accept=".docx,.pdf,.txt,.md,.json" multiple ${active ? "disabled" : ""} />
+                  </label>
+                  <small>作为后续集数的长期正典约束，可多文件追加；支持 Word、PDF、TXT、Markdown、JSON</small>
+                </div>
+              </label>
+            ` : ""}
             <label class="nwt-field wide">
               <span>${state.form.mode === "续写" ? "续写方向" : "补充方向"}</span>
               <textarea data-form-key="adaptation_direction" placeholder="例如：前五秒一句话爆点；每集承接上一集动作；人物细腻但不堆形容词；所有道具和证据根据剧情需要自然出现。" ${active ? "disabled" : ""}>${escapeHtml(state.form.adaptation_direction)}</textarea>
@@ -1120,8 +1253,13 @@
       const latestTime = Date.parse(latest.updated_at || "") || 0;
       if (!state.job || latestTime >= currentTime) {
         state.job = latest;
+        expandProjectForJob(state.job);
         if (latest.request && typeof latest.request === "object") {
-          state.form = { ...state.form, ...latest.request };
+          state.form = {
+            ...state.form,
+            ...latest.request,
+            continuation_bible: String(latest.request.continuation_bible || ""),
+          };
         }
         saveState();
       }
@@ -1158,9 +1296,14 @@
     try {
       const data = await request(`/api/new-workflow-test/npc/jobs/${encodeURIComponent(jobId)}`);
       state.job = data.job || null;
+      expandProjectForJob(state.job);
       state.activeView = state.job && state.job.final_script ? "delivery" : "team";
       if (state.job && state.job.request) {
-        state.form = { ...state.form, ...state.job.request };
+        state.form = {
+          ...state.form,
+          ...state.job.request,
+          continuation_bible: String(state.job.request.continuation_bible || ""),
+        };
       }
       state.selectedArtifact = "";
       saveState();
@@ -1195,6 +1338,7 @@
     try {
       const data = await request("/api/new-workflow-test/npc/jobs", state.form);
       state.job = data.job || null;
+      expandProjectForJob(state.job);
       if (state.job && state.job.request && typeof state.job.request === "object") {
         state.form = { ...state.form, ...state.job.request };
       }
@@ -1219,6 +1363,7 @@
       source_text: script,
       source_last_episode: lastEpisode,
       continuation_target_episode: Math.max(2, lastEpisode + 5),
+      continuation_bible: String((((state.job || {}).request || {}).continuation_bible) || ""),
       adaptation_direction: "",
     };
     state.job = null;
@@ -1574,6 +1719,7 @@
     if (action === "save-editor") saveEditor();
     if (action === "rewrite-editor") rewriteEditor();
     if (action === "refresh-history") loadHistory();
+    if (action === "toggle-project") toggleProjectGroup(String(button.dataset.projectKey || ""));
     if (action === "open-history") openHistory(String(button.dataset.jobId || ""));
     if (action === "delete-history") deleteHistory(String(button.dataset.jobId || ""));
     if (action === "download-artifact") {

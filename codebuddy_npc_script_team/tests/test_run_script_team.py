@@ -52,6 +52,7 @@ def test_continuation_contract_uses_actual_episode_range(monkeypatch) -> None:
                 "source_last_episode": 5,
                 "episode_start": 6,
                 "episode_end": 10,
+                "continuation_bible": "女主不能失去左眼；第9集关系彻底决裂。",
             },
             ensure_ascii=False,
         ),
@@ -65,6 +66,9 @@ def test_continuation_contract_uses_actual_episode_range(monkeypatch) -> None:
     assert "第6集至第10集" in request["episode_contract"]
     assert "已有第5集结尾" in instruction
     assert "只输出第6集至第10集" in instruction
+    assert "续写创作圣经" in instruction
+    assert "已有正文明确事实 > 续写创作圣经" in instruction
+    assert "第9集关系彻底决裂" in instruction
 
 
 def test_single_scene_contract_rejects_three_scene_headers() -> None:
