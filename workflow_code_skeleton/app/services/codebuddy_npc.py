@@ -164,18 +164,18 @@ _EPISODE_CONTRACT_STAGES = {
     "script_writer",
     "final_editor",
 }
-_EPISODE_CARD_FIELDS = (
-    "承接事实",
-    "开场钩子",
-    "最短因果锚",
-    "主角目标",
-    "主角主动动作",
-    "阻力",
-    "选择与代价",
-    "本集主线推进",
-    "结尾状态",
-    "下一集第一有效动作",
-)
+_EPISODE_CARD_FIELD_ALIASES = {
+    "承接事实": ("承接事实", "上集承接", "承接点"),
+    "开场钩子": ("开场钩子", "五秒钩子", "黄金五秒钩子"),
+    "最短因果锚": ("最短因果锚", "因果锚", "开场因果锚"),
+    "主角目标": ("主角目标", "主角当集目标", "当集目标"),
+    "主角主动动作": ("主角主动动作", "主角行动", "主动行动"),
+    "阻力": ("阻力", "核心阻力", "当集阻力"),
+    "选择与代价": ("选择与代价", "关键选择与代价", "选择/代价"),
+    "本集主线推进": ("本集主线推进", "主线推进"),
+    "结尾状态": ("结尾状态", "集尾状态", "尾钩状态"),
+    "下一集第一有效动作": ("下一集第一有效动作", "下一集开场动作", "下一集首个有效动作"),
+}
 
 
 def _episode_sections(content: str) -> list[tuple[int, str]]:
@@ -188,13 +188,20 @@ def _episode_sections(content: str) -> list[tuple[int, str]]:
     return sections
 
 
+def episode_card_missing_fields(section: str) -> list[str]:
+    return [
+        canonical
+        for canonical, aliases in _EPISODE_CARD_FIELD_ALIASES.items()
+        if not any(
+            re.search(rf"(?:\*\*)?{re.escape(alias)}(?:\*\*)?\s*[:：]\s*\S", section)
+            for alias in aliases
+        )
+    ]
+
+
 def _episode_card_error(content: str) -> str:
     for episode, section in _episode_sections(content):
-        missing = [
-            field
-            for field in _EPISODE_CARD_FIELDS
-            if not re.search(rf"(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*[:：]\s*\S", section)
-        ]
+        missing = episode_card_missing_fields(section)
         if missing:
             return f"第{episode}集逐集卡为空或字段不完整：{','.join(missing)}"
     return ""

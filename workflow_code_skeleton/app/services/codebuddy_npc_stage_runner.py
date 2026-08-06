@@ -14,6 +14,7 @@ from .codebuddy_npc import (
     CodeBuddyNpcError,
     CodeBuddyNpcJobStore,
     finish_stage_timing,
+    episode_card_missing_fields,
     stage_episode_range_error,
     start_stage_timing,
 )
@@ -199,17 +200,10 @@ def _valid_episode_parts(stage: str, text: str) -> dict[int, str]:
             for episode, content in parts.items()
             if len(content) >= 120 and re.search(r"(?m)^\s*场景\s*\d+\s*[：:]", content)
         }
-    required = (
-        "承接事实", "开场钩子", "最短因果锚", "主角目标", "主角主动动作",
-        "阻力", "选择与代价", "本集主线推进", "结尾状态", "下一集第一有效动作",
-    )
     return {
         episode: content
         for episode, content in parts.items()
-        if all(
-            re.search(rf"(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*[:：]\s*\S", content)
-            for field in required
-        )
+        if not episode_card_missing_fields(content)
     }
 
 
