@@ -1259,7 +1259,7 @@
             </div>
             <div class="nwt-run-actions">
               ${canRecover ? '<button class="nwt-btn" type="button" data-action="recover">恢复中断产物</button>' : ""}
-              ${active && job.execution_target === "local_fallback" ? '<button class="nwt-btn danger" type="button" data-action="cancel">停止本地兜底</button>' : ""}
+              ${active ? `<button class="nwt-btn danger" type="button" data-action="cancel">${icon("square", 15)}<span>停止任务</span></button>` : ""}
               ${String(job.status || "").toLowerCase() === "failed" ? '<button class="nwt-btn danger" type="button" data-action="fallback">本地兜底继续</button>' : ""}
               <button class="nwt-btn primary" type="button" data-action="start" ${state.loading || active || !(state.configStatus || {}).ready || !continuationReady ? "disabled" : ""}>
                 ${state.loading ? `${icon("loader-circle", 16)}<span>正在提交</span>` : active ? `${icon("activity", 16)}<span>团队创作中</span>` : finalScript ? `${icon("refresh-cw", 16)}<span>重新生成</span>` : `${icon("sparkles", 16)}<span>开始创作</span>`}
@@ -1722,6 +1722,7 @@
 
   async function cancelRun() {
     if (!state.job || !state.job.job_id) return;
+    if (!window.confirm("确认停止当前任务吗？云端或本地执行都会终止，并且不会自动重试；已保存的断点会保留。")) return;
     try {
       const data = await request(
         `/api/new-workflow-test/npc/jobs/${encodeURIComponent(state.job.job_id)}/cancel`,

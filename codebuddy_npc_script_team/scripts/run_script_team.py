@@ -116,6 +116,10 @@ DISTILLED_STAGE_CHAR_LIMIT = 12_000
 DISTILLED_MODULE_CHAR_LIMIT = 3_500
 BATCH_SIZE = 5
 BATCHED_EPISODE_STAGES = {"episode_continuity", "script_writer", "final_editor"}
+EPISODE_CARD_FIELDS = (
+    "承接事实", "开场钩子", "最短因果锚", "主角目标", "主角主动动作",
+    "阻力", "选择与代价", "本集主线推进", "结尾状态", "下一集第一有效动作",
+)
 
 PROMPTS = {
     "showrunner": """
@@ -176,6 +180,7 @@ scenes_per_episode 是逐集场景数量硬合同。1表示每一大集只能有
 每集至少一个真正改变局势的情绪高点，每30至60秒出现一次局势变化或情绪释放。
 前五集必须完成基础立剧，后续只升级、变奏和兑现，不得再补基础人设。
 以创作合同确定的主角为行动锚，不按男女频机械判断；配角不能替主角完成关键选择。
+每个字段只写1至3句可执行内容，单集卡控制在350至700字；禁止复述人物小传、世界观和前集全文。
 """,
     "script_writer": """
 你是唯一的正文与对白编剧。只把锁定材料转化为完整可拍剧本，不重新策划故事。
@@ -408,15 +413,36 @@ def _episode_parts(text: str) -> tuple[str, dict[int, str]]:
     return prefix, parts
 
 
+def _valid_episode_parts(stage: str, text: str) -> dict[int, str]:
+    _prefix, parts = _episode_parts(text)
+    if stage != "episode_continuity":
+        return {
+            episode: content
+            for episode, content in parts.items()
+            if len(content) >= 120 and SCENE_HEADER_RE.search(content)
+        }
+    return {
+        episode: content
+        for episode, content in parts.items()
+        if all(
+            re.search(rf"(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*[:：]\s*\S", content)
+            for field in EPISODE_CARD_FIELDS
+        )
+    }
+
+
 def _merge_episode_outputs(
     current: str,
     incoming: str,
     *,
     episode_start: int,
     episode_end: int,
+    stage: str = "",
 ) -> str:
     current_prefix, current_parts = _episode_parts(current)
     incoming_prefix, incoming_parts = _episode_parts(incoming)
+    if stage:
+        incoming_parts = _valid_episode_parts(stage, incoming)
     for episode, content in incoming_parts.items():
         if episode_start <= episode <= episode_end:
             current_parts.setdefault(episode, content)
@@ -530,6 +556,22 @@ def hydrate_remote_state() -> None:
         role = ARTIFACT_ROLE_MAP.get(str(artifact))
         if role and str(content or "").strip():
             (ROOT / ROLE_FILES[role]).write_text(str(content), encoding="utf-8")
+    resume_stage = str(payload.get("resume_stage") or "") if isinstance(payload, dict) else ""
+    resume_text = str(payload.get("stage_resume_text") or "") if isinstance(payload, dict) else ""
+    if resume_stage in BATCHED_EPISODE_STAGES and resume_text.strip():
+        (ROOT / "stage_resume.json").write_text(
+            json.dumps({"stage": resume_stage, "content": resume_text}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+
+def emit_stage_checkpoint(stage: str, result: str) -> None:
+    payload = f"{stage}\n{result}".encode("utf-8")
+    encoded = base64.b64encode(gzip.compress(payload, compresslevel=6)).decode("ascii")
+    print("__SCRIPT_TEAM_STAGE_GZIP_BEGIN__", flush=True)
+    for index in range(0, len(encoded), 160):
+        print(encoded[index : index + 160], flush=True)
+    print("__SCRIPT_TEAM_STAGE_GZIP_END__", flush=True)
 
 
 def previous_context(
@@ -625,12 +667,33 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
             stage=stage,
         )
         if stage in BATCHED_EPISODE_STAGES:
+            result = _merge_episode_outputs(
+                "",
+                result,
+                episode_start=episode_start,
+                episode_end=episode_end,
+                stage=stage,
+            )
             violations = episode_range_violations(result, request_payload)
             if violations:
                 raise SystemExit(f"{stage}集数合同未满足：" + "；".join(violations))
         return result
 
     result = ""
+    resume_path = ROOT / "stage_resume.json"
+    if resume_path.is_file():
+        try:
+            resume_payload = json.loads(resume_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            resume_payload = {}
+        if str(resume_payload.get("stage") or "") == stage:
+            result = _merge_episode_outputs(
+                "",
+                str(resume_payload.get("content") or ""),
+                episode_start=episode_start,
+                episode_end=episode_end,
+                stage=stage,
+            )
     no_progress_attempts: dict[tuple[int, int], int] = {}
     while True:
         missing_ranges = _missing_episode_ranges(
@@ -674,6 +737,7 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
             batch,
             episode_start=episode_start,
             episode_end=episode_end,
+            stage=stage,
         )
         expected = set(range(batch_start, batch_end + 1))
         added = set(episode_numbers(result)) - before
@@ -687,6 +751,7 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
                 f"{stage}连续3次未能补齐第{batch_start}-{batch_end}集；"
                 f"已生成集号为{episode_numbers(result)}"
             )
+        emit_stage_checkpoint(stage, result)
 
     violations = episode_range_violations(result, request_payload)
     if violations:
@@ -793,6 +858,17 @@ def call_model(system_prompt: str, user_prompt: str, *, stage: str = "unknown") 
     url = os.getenv("DEEPSEEK_BASE_URL", "").strip()
     api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
     model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro").strip()
+    stage_name = stage.split(":", 1)[0]
+    max_tokens = {
+        "showrunner": 8_000,
+        "story_architect": 12_000,
+        "character_emotion": 12_000,
+        "episode_continuity": 12_000,
+        "script_writer": 16_000,
+        "state_recorder": 24_000,
+        "final_editor": 16_000,
+    }.get(stage_name, 16_000)
+    temperature = 0.45 if stage_name in {"script_writer", "final_editor"} else 0.25
     if not url or not api_key:
         raise SystemExit("缺少 DEEPSEEK_BASE_URL 或 DEEPSEEK_API_KEY")
     normalized_url = url.rstrip("/")
@@ -824,24 +900,42 @@ def call_model(system_prompt: str, user_prompt: str, *, stage: str = "unknown") 
     )
     heartbeat.start()
     started_at = time.monotonic()
+    response = None
     try:
-        response = requests.post(
-            normalized_url,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt.strip()},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": 0.55,
-                "stream": False,
-            },
-            timeout=timeout_seconds,
-        )
+        for attempt in range(1, 3):
+            try:
+                response = requests.post(
+                    normalized_url,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt.strip()},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        "stream": False,
+                    },
+                    timeout=timeout_seconds,
+                )
+            except requests.RequestException as exc:
+                if attempt == 2:
+                    raise SystemExit(f"DeepSeek 请求失败：{exc}") from exc
+                print(f"__SCRIPT_TEAM_MODEL_RETRY__ stage={stage} attempt={attempt + 1}", flush=True)
+                time.sleep(2)
+                continue
+            if response.status_code not in {408, 429, 500, 502, 503, 504} or attempt == 2:
+                break
+            print(
+                f"__SCRIPT_TEAM_MODEL_RETRY__ stage={stage} attempt={attempt + 1} "
+                f"http_status={response.status_code}",
+                flush=True,
+            )
+            time.sleep(2)
     finally:
         stop_event.set()
         heartbeat.join(timeout=1)
@@ -850,6 +944,8 @@ def call_model(system_prompt: str, user_prompt: str, *, stage: str = "unknown") 
             f"elapsed_seconds={max(0, int(time.monotonic() - started_at))}",
             flush=True,
         )
+    if response is None:
+        raise SystemExit("DeepSeek 未返回 HTTP 响应")
     if response.status_code >= 400:
         raise SystemExit(f"DeepSeek HTTP {response.status_code}: {response.text[:1000]}")
     payload = response.json()
@@ -881,12 +977,7 @@ def run(stage: str) -> None:
         )
     else:
         output_path.write_text(result, encoding="utf-8")
-    payload = f"{stage}\n{output_path.read_text(encoding='utf-8')}".encode("utf-8")
-    encoded = base64.b64encode(gzip.compress(payload, compresslevel=9)).decode("ascii")
-    print("__SCRIPT_TEAM_STAGE_GZIP_BEGIN__", flush=True)
-    for index in range(0, len(encoded), 160):
-        print(encoded[index : index + 160], flush=True)
-    print("__SCRIPT_TEAM_STAGE_GZIP_END__", flush=True)
+    emit_stage_checkpoint(stage, output_path.read_text(encoding="utf-8"))
     print(f"{stage} completed: {output_path}", flush=True)
 
 

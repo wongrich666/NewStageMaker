@@ -164,6 +164,40 @@ _EPISODE_CONTRACT_STAGES = {
     "script_writer",
     "final_editor",
 }
+_EPISODE_CARD_FIELDS = (
+    "承接事实",
+    "开场钩子",
+    "最短因果锚",
+    "主角目标",
+    "主角主动动作",
+    "阻力",
+    "选择与代价",
+    "本集主线推进",
+    "结尾状态",
+    "下一集第一有效动作",
+)
+
+
+def _episode_sections(content: str) -> list[tuple[int, str]]:
+    value = str(content or "")
+    matches = list(_STAGE_EPISODE_HEADER.finditer(value))
+    sections: list[tuple[int, str]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(value)
+        sections.append((int(match.group(1) or match.group(2)), value[match.start() : end].strip()))
+    return sections
+
+
+def _episode_card_error(content: str) -> str:
+    for episode, section in _episode_sections(content):
+        missing = [
+            field
+            for field in _EPISODE_CARD_FIELDS
+            if not re.search(rf"(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*[:：]\s*\S", section)
+        ]
+        if missing:
+            return f"第{episode}集逐集卡为空或字段不完整：{','.join(missing)}"
+    return ""
 
 
 def stage_episode_range_error(
@@ -185,6 +219,8 @@ def stage_episode_range_error(
         for match in _STAGE_EPISODE_HEADER.finditer(str(content or ""))
     ]
     if actual == expected:
+        if stage == "episode_continuity":
+            return _episode_card_error(content)
         return ""
     return (
         f"{STAGE_NAMES[stage]}集数不完整：要求第{episode_start}-{episode_end}集，"
@@ -778,7 +814,9 @@ class CodeBuddyNpcClient:
                 key: recovered_files[key]
                 for key in required_artifacts
                 if str(recovered_files.get(key) or "").strip()
-            }
+            },
+            "resume_stage": stage,
+            "stage_resume_text": _clean_text(job.get("stage_resume_text"), limit=1_500_000),
         }
         compressed = gzip.compress(
             json.dumps(artifact_bundle, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -946,6 +984,20 @@ class CodeBuddyNpcClient:
                     job.get("request") or {},
                 )
                 if range_error:
+                    if build_status in TERMINAL_FAILURE and remote_stage in _EPISODE_CONTRACT_STAGES:
+                        completed = [episode for episode, _section in _episode_sections(stage_result)]
+                        refreshed["stage_resume_text"] = stage_result
+                        refreshed["remote_checkpoint"] = {
+                            "stage": remote_stage,
+                            "completed_episodes": completed,
+                        }
+                        refreshed["status"] = "failed"
+                        refreshed["status_text"] = (
+                            f"{STAGE_NAMES[remote_stage]}云端中断，已保存{len(completed)}集断点"
+                        )
+                        refreshed["error"] = f"CNB 构建状态：{build_status}；可从云端断点补齐"
+                        refreshed["active_stage"] = ""
+                        return refreshed
                     refreshed["status"] = "failed"
                     refreshed["status_text"] = f"{STAGE_NAMES[remote_stage]}返回集数不完整"
                     refreshed["error"] = range_error

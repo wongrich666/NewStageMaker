@@ -73,6 +73,7 @@ episode_start、episode_end 与 episodes 共同构成交付范围，必须只交
 scenes_per_episode 是前端动态传入的逐集场景合同，必须执行；只有设置为 flexible
 时才可按剧情灵活决定。每个场景必须注明地点、日夜、内外、在场人物、关键道具和戏剧任务。
 以创作合同确定的主角为行动锚；配角不能替主角完成关键选择。
+每个字段只写1至3句可执行内容，单集卡控制在350至700字；禁止复述人物小传、世界观和前集全文。
 """,
     "script_writer": """
 你是唯一的正文与对白编剧。只把锁定材料转化为完整可拍剧本，不重新策划故事。
@@ -190,6 +191,28 @@ def _episode_numbers(text: str) -> list[int]:
     return [int(match.group(1)) for match in EPISODE_HEADER.finditer(str(text or ""))]
 
 
+def _valid_episode_parts(stage: str, text: str) -> dict[int, str]:
+    _prefix, parts = _episode_parts(text)
+    if stage != "episode_continuity":
+        return {
+            episode: content
+            for episode, content in parts.items()
+            if len(content) >= 120 and re.search(r"(?m)^\s*场景\s*\d+\s*[：:]", content)
+        }
+    required = (
+        "承接事实", "开场钩子", "最短因果锚", "主角目标", "主角主动动作",
+        "阻力", "选择与代价", "本集主线推进", "结尾状态", "下一集第一有效动作",
+    )
+    return {
+        episode: content
+        for episode, content in parts.items()
+        if all(
+            re.search(rf"(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*[:：]\s*\S", content)
+            for field in required
+        )
+    }
+
+
 def _episode_slice(text: str, start_episode: int, end_episode: int) -> str:
     value = str(text or "")
     matches = list(EPISODE_HEADER.finditer(value))
@@ -230,9 +253,12 @@ def _merge_episode_outputs(
     *,
     episode_start: int,
     episode_end: int,
+    stage: str = "",
 ) -> str:
     current_prefix, current_parts = _episode_parts(current)
     incoming_prefix, incoming_parts = _episode_parts(incoming)
+    if stage:
+        incoming_parts = _valid_episode_parts(stage, incoming)
     for episode, content in incoming_parts.items():
         if episode_start <= episode <= episode_end:
             current_parts.setdefault(episode, content)
@@ -670,6 +696,18 @@ class CodeBuddyNpcStageRunner:
             and str(batch_progress.get("stage") or "") == stage
         ):
             resume_text = str(job.get("stage_resume_text") or "").strip()
+            pending = job.get("pending_batch") if isinstance(job.get("pending_batch"), dict) else {}
+            if str(pending.get("stage") or "") == stage:
+                request_data = job.get("request") or {}
+                episode_start = max(1, int(request_data.get("episode_start") or 1))
+                episode_end = max(episode_start, int(request_data.get("episode_end") or episode_start))
+                resume_text = _merge_episode_outputs(
+                    resume_text,
+                    str(pending.get("content") or ""),
+                    episode_start=episode_start,
+                    episode_end=episode_end,
+                    stage=stage,
+                )
         if stage == "final_editor" and not resume_text:
             resume_text = str(job.get("final_script") or "").strip()
         self._invalidate_from(job, stage)
@@ -792,8 +830,15 @@ class CodeBuddyNpcStageRunner:
         job["final_script"] = ""
         job["quality_gate"] = {}
         job["error"] = ""
+        outputs = copy.deepcopy(job.get("stage_outputs") or {})
+        for invalid_stage in STAGE_ORDER[index:]:
+            outputs.pop(STAGE_NAMES[invalid_stage], None)
+        job["stage_outputs"] = outputs
         job.pop("batch_progress", None)
         job.pop("stage_resume_text", None)
+        pending = job.get("pending_batch") if isinstance(job.get("pending_batch"), dict) else {}
+        if str(pending.get("stage") or "") in STAGE_ORDER[index:]:
+            job.pop("pending_batch", None)
 
     def _run(
         self,
@@ -1053,11 +1098,21 @@ class CodeBuddyNpcStageRunner:
         )
         artifacts = job.get("recovered_files") or {}
         result = str(job.get("stage_resume_text") or "").strip()
+        pending_batch = job.get("pending_batch") if isinstance(job.get("pending_batch"), dict) else {}
+        if str(pending_batch.get("stage") or "") == stage:
+            result = _merge_episode_outputs(
+                result,
+                str(pending_batch.get("content") or ""),
+                episode_start=episode_start,
+                episode_end=episode_end,
+                stage=stage,
+            )
         result = _merge_episode_outputs(
             "",
             result,
             episode_start=episode_start,
             episode_end=episode_end,
+            stage=stage,
         )
         if not _missing_episode_ranges(
             result,
@@ -1171,6 +1226,15 @@ class CodeBuddyNpcStageRunner:
                 max_tokens=32768,
             )
             batch = _strip_fence(str((response.get("message") or {}).get("content") or ""))
+            pending = self.store.load(str(job["job_id"]), user_id=int(job["user_id"]))
+            if pending:
+                pending["pending_batch"] = {
+                    "stage": stage,
+                    "start": batch_start,
+                    "end": batch_end,
+                    "content": batch,
+                }
+                self.store.save(pending)
             self._record_usage(
                 job=job,
                 stage=stage,
@@ -1186,6 +1250,7 @@ class CodeBuddyNpcStageRunner:
                 batch,
                 episode_start=episode_start,
                 episode_end=episode_end,
+                stage=stage,
             )
             added = set(_episode_numbers(result)) - before
             if not added.intersection(expected):
@@ -1202,6 +1267,7 @@ class CodeBuddyNpcStageRunner:
             checkpoint = self.store.load(str(job["job_id"]), user_id=int(job["user_id"]))
             if checkpoint:
                 checkpoint["stage_resume_text"] = result
+                checkpoint.pop("pending_batch", None)
                 remaining = _missing_episode_ranges(
                     result,
                     episode_start=episode_start,
