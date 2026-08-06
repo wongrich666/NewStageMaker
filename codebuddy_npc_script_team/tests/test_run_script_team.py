@@ -23,6 +23,41 @@ def _episode_card(episode: int) -> str:
     )
 
 
+def _episode_card_json(start: int, end: int) -> str:
+    return json.dumps(
+        {
+            "episodes": [
+                {
+                    "episode": episode,
+                    "title": f"测试{episode}",
+                    "carryover_fact": "旧动作尚未结束",
+                    "opening_hook": "警报突然响起",
+                    "causal_anchor": "追兵已经靠近",
+                    "protagonist_goal": "逃出封锁",
+                    "protagonist_action": "主动拆除门锁",
+                    "obstacle": "出口被封死",
+                    "choice_and_cost": "以受伤换取时间",
+                    "mainline_advance": "主角取得关键线索",
+                    "ending_state": "暗门打开",
+                    "next_opening_action": "主角冲进暗门",
+                    "scenes": [
+                        {
+                            "location": "工作室",
+                            "time": "夜",
+                            "interior_exterior": "内",
+                            "characters": ["主角"],
+                            "props": ["门锁"],
+                            "dramatic_task": "突破封锁",
+                        }
+                    ],
+                }
+                for episode in range(start, end + 1)
+            ]
+        },
+        ensure_ascii=False,
+    )
+
+
 def test_single_scene_contract_means_one_scene_per_whole_episode() -> None:
     instruction = MODULE.scene_contract_instruction({"scenes_per_episode": "1"})
 
@@ -195,7 +230,7 @@ def test_cloud_stage_batches_long_episode_ranges(monkeypatch) -> None:
         start = int(re.search(r'"episode_start":\s*(\d+)', user_prompt).group(1))
         end = int(re.search(r'"episode_end":\s*(\d+)', user_prompt).group(1))
         calls.append((start, end))
-        return "\n\n".join(_episode_card(episode) for episode in range(start, end + 1))
+        return _episode_card_json(start, end)
 
     monkeypatch.setattr(MODULE, "call_model", fake_call_model)
 
@@ -221,8 +256,8 @@ def test_cloud_stage_repairs_only_missing_episodes(monkeypatch) -> None:
         start = int(re.search(r'"episode_start":\s*(\d+)', user_prompt).group(1))
         end = int(re.search(r'"episode_end":\s*(\d+)', user_prompt).group(1))
         calls.append((start, end))
-        actual_end = 4 if (start, end) == (1, 5) else end
-        return "\n\n".join(_episode_card(episode) for episode in range(start, actual_end + 1))
+        actual_end = 4 if len(calls) == 1 else end
+        return _episode_card_json(start, actual_end)
 
     monkeypatch.setattr(MODULE, "call_model", fake_call_model)
 
@@ -237,7 +272,7 @@ def test_cloud_stage_repairs_only_missing_episodes(monkeypatch) -> None:
         modules="",
     )
 
-    assert calls == [(1, 5), (5, 9), (10, 10)]
+    assert calls == [(1, 5), (1, 5), (6, 10)]
     assert MODULE.episode_numbers(result) == list(range(1, 11))
 
 

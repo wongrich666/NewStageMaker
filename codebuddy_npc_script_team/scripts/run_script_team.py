@@ -120,6 +120,18 @@ EPISODE_CARD_FIELDS = (
     "承接事实", "开场钩子", "最短因果锚", "主角目标", "主角主动动作",
     "阻力", "选择与代价", "本集主线推进", "结尾状态", "下一集第一有效动作",
 )
+EPISODE_CARD_JSON_FIELDS = {
+    "carryover_fact": "承接事实",
+    "opening_hook": "开场钩子",
+    "causal_anchor": "最短因果锚",
+    "protagonist_goal": "主角目标",
+    "protagonist_action": "主角主动动作",
+    "obstacle": "阻力",
+    "choice_and_cost": "选择与代价",
+    "mainline_advance": "本集主线推进",
+    "ending_state": "结尾状态",
+    "next_opening_action": "下一集第一有效动作",
+}
 
 PROMPTS = {
     "showrunner": """
@@ -431,6 +443,135 @@ def _valid_episode_parts(stage: str, text: str) -> dict[int, str]:
     }
 
 
+def _episode_card_json_contract(start: int, end: int) -> str:
+    return f"""
+本节点禁止输出 Markdown。只输出一个合法 JSON 对象，不得使用代码围栏或附加解释：
+{{"episodes":[{{
+  "episode": {start},
+  "title": "本集独有短标题",
+  "carryover_fact": "与上一集结尾完全一致的事实",
+  "opening_hook": "本集第一有效拍",
+  "causal_anchor": "观众理解钩子所需的最短原因",
+  "protagonist_goal": "主角本集可执行目标",
+  "protagonist_action": "主角主动采取的动作",
+  "obstacle": "直接阻碍动作的人或局势",
+  "choice_and_cost": "主角选择及立刻付出的代价",
+  "mainline_advance": "本集对主线造成的不可撤销变化",
+  "ending_state": "本集最后一个已发生状态",
+  "next_opening_action": "下一集承接该状态的第一动作",
+  "scenes": [{{
+    "location": "地点",
+    "time": "日或夜",
+    "interior_exterior": "内或外",
+    "characters": ["在场人物"],
+    "props": ["实际使用的关键道具"],
+    "dramatic_task": "本场必须完成的戏剧任务"
+  }}]
+}}]}}
+episodes 数组必须按顺序且只能包含第{start}集至第{end}集。所有字符串字段必须有具体内容；
+不得用“待定”“同上”“承接前文”或空字符串占位。
+""".strip()
+
+
+def _json_object_from_text(text: str) -> dict:
+    value = str(text or "").strip()
+    value = re.sub(r"^```(?:json)?\s*", "", value, count=1, flags=re.IGNORECASE)
+    value = re.sub(r"\s*```$", "", value, count=1)
+    candidates = [value]
+    if "{" in value and "}" in value:
+        candidates.append(value[value.find("{") : value.rfind("}") + 1])
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    raise ValueError("没有返回合法 JSON 对象")
+
+
+def render_episode_card_json(text: str, *, episode_start: int, episode_end: int) -> str:
+    payload = _json_object_from_text(text)
+    items = payload.get("episodes")
+    if not isinstance(items, list):
+        raise ValueError("episodes 必须是数组")
+    expected = list(range(episode_start, episode_end + 1))
+    actual: list[int] = []
+    rendered: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("episodes 中存在非对象内容")
+        try:
+            episode = int(item.get("episode"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("episode 必须是数字") from exc
+        actual.append(episode)
+        title = str(item.get("title") or "").strip()
+        missing = [key for key in EPISODE_CARD_JSON_FIELDS if not str(item.get(key) or "").strip()]
+        scenes = item.get("scenes")
+        if not title:
+            missing.append("title")
+        if not isinstance(scenes, list) or not scenes:
+            missing.append("scenes")
+        if missing:
+            raise ValueError(f"第{episode}集缺少字段：{','.join(missing)}")
+        lines = [f"第{episode}集：《{title}》"]
+        lines.extend(
+            f"{label}：{str(item[key]).strip()}"
+            for key, label in EPISODE_CARD_JSON_FIELDS.items()
+        )
+        for scene_index, scene in enumerate(scenes, start=1):
+            if not isinstance(scene, dict):
+                raise ValueError(f"第{episode}集场景{scene_index}不是对象")
+            location = str(scene.get("location") or "").strip()
+            time_value = str(scene.get("time") or "").strip()
+            interior = str(scene.get("interior_exterior") or "").strip()
+            task = str(scene.get("dramatic_task") or "").strip()
+            if not all((location, time_value, interior, task)):
+                raise ValueError(f"第{episode}集场景{scene_index}信息不完整")
+            characters = "、".join(str(value).strip() for value in scene.get("characters") or [] if str(value).strip())
+            props = "、".join(str(value).strip() for value in scene.get("props") or [] if str(value).strip()) or "无"
+            lines.append(
+                f"场景{scene_index}：{location}｜{time_value}｜{interior}；"
+                f"人物：{characters or '未明确'}；关键道具：{props}；戏剧任务：{task}"
+            )
+        rendered.append("\n".join(lines))
+    if actual != expected:
+        raise ValueError(f"要求集号{expected}，实际集号{actual}")
+    return "\n\n".join(rendered)
+
+
+def generate_episode_card_batch(
+    request_payload: dict,
+    user_prompt: str,
+    *,
+    stage_label: str,
+) -> str:
+    start = max(1, int(request_payload.get("episode_start") or 1))
+    end = max(start, int(request_payload.get("episode_end") or start))
+    correction = ""
+    last_error = ""
+    for attempt in range(1, 3):
+        raw = call_model(
+            PROMPTS["episode_continuity"] + "\n\n" + _episode_card_json_contract(start, end),
+            user_prompt + correction,
+            stage=stage_label,
+        )
+        try:
+            return render_episode_card_json(raw, episode_start=start, episode_end=end)
+        except ValueError as exc:
+            last_error = str(exc)
+            print(
+                f"__SCRIPT_TEAM_CARD_REPAIR__ stage={stage_label} attempt={attempt} error={last_error}",
+                flush=True,
+            )
+            correction = (
+                "\n\n上一次 JSON 未通过代码校验：" + last_error
+                + "。只修复这些缺项，仍只输出完整 JSON 对象。"
+            )
+    raise SystemExit(f"episode_continuity结构化分集卡连续2次校验失败：{last_error}")
+
+
 def _merge_episode_outputs(
     current: str,
     incoming: str,
@@ -661,11 +802,15 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
         int(request_payload.get("episode_end") or (episode_start + total - 1)),
     )
     if stage not in BATCHED_EPISODE_STAGES or total <= BATCH_SIZE:
-        result = call_model(
-            PROMPTS[stage],
-            _stage_user_prompt(stage, request_payload, modules),
-            stage=stage,
-        )
+        user_prompt = _stage_user_prompt(stage, request_payload, modules)
+        if stage == "episode_continuity":
+            result = generate_episode_card_batch(
+                request_payload,
+                user_prompt,
+                stage_label=stage,
+            )
+        else:
+            result = call_model(PROMPTS[stage], user_prompt, stage=stage)
         if stage in BATCHED_EPISODE_STAGES:
             result = _merge_episode_outputs(
                 "",
@@ -719,18 +864,26 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
                 ),
             }
         )
-        batch = call_model(
-            PROMPTS[stage],
-            _stage_user_prompt(
-                stage,
-                batch_request,
-                modules,
-                episode_start=batch_start,
-                episode_end=batch_end,
-                previous_tail=result[-1800:],
-            ),
-            stage=f"{stage}:{batch_start}-{batch_end}",
+        batch_user_prompt = _stage_user_prompt(
+            stage,
+            batch_request,
+            modules,
+            episode_start=batch_start,
+            episode_end=batch_end,
+            previous_tail=result[-1800:],
         )
+        if stage == "episode_continuity":
+            batch = generate_episode_card_batch(
+                batch_request,
+                batch_user_prompt,
+                stage_label=f"{stage}:{batch_start}-{batch_end}",
+            )
+        else:
+            batch = call_model(
+                PROMPTS[stage],
+                batch_user_prompt,
+                stage=f"{stage}:{batch_start}-{batch_end}",
+            )
         before = set(episode_numbers(result))
         result = _merge_episode_outputs(
             result,
