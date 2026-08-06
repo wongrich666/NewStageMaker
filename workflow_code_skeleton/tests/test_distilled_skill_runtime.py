@@ -73,3 +73,4 @@ def test_local_fallback_caps_large_distilled_skill_modules() -> None:
     assert text.index("quality_gate") < text.index("hook_craft")
     assert len(text) < 13_500
     assert "不得覆盖 MAINLINE_LOCK_JSON、逐集卡" in text
+    assert "不得迁移Skill样本中的人物身份、关系套路、职业、场景、道具、证据手段" in text

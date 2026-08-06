@@ -469,7 +469,10 @@ def _distilled_skill_text(stage: str, job: dict[str, Any]) -> str:
         "\n\n===== 蒸馏Skill运行合同 =====\n"
         f"本任务已锁定 {skill.get('name') or '垂类Skill'} {skill.get('version') or ''}。"
         "以下内容只增强题材节奏、情绪与表达。示例不是必须照搬的事件、人物或道具；"
-        "不得覆盖 MAINLINE_LOCK_JSON、逐集卡、用户事实、节点职责和输出格式。\n"
+        "不得覆盖 MAINLINE_LOCK_JSON、逐集卡、用户事实、节点职责和输出格式。"
+        "执行前先把每条规则还原为叙事功能、触发条件、变量槽位、节拍关系和失败边界。"
+        "不得迁移Skill样本中的人物身份、关系套路、职业、场景、道具、证据手段、疾病或具体事件；"
+        "这些内容只有在用户材料或当前上游合同独立提出时才能出现。Skill不得主动提议其同义替代品。\n"
         + "".join(chunks)
     )
 

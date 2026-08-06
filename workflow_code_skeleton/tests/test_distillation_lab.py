@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import time
 import zipfile
 
 from workflow_code_skeleton.app.services.distillation_lab import (
+    EVIDENCE_SCHEMA_VERSION,
     SKILL_MODULE_KEYS,
     SKILL_SCHEMA_VERSION,
     DistillationLabStore,
@@ -50,6 +52,10 @@ def test_distillation_lab_builds_versions_and_keeps_workflow_detached(tmp_path, 
         return {
             "structured_output": {
                 "summary": "主角在逆风中推进目标",
+                "structure_map": {
+                    "mainline_engine": "主角的选择触发阻力升级",
+                    "hook_mechanics": "先展示异常结果，再补最短原因",
+                },
                 "genre_signals": ["狼人"],
                 "audience_emotions": ["压抑", "反转"],
                 "story_architecture": [],
@@ -60,6 +66,15 @@ def test_distillation_lab_builds_versions_and_keeps_workflow_detached(tmp_path, 
                 "dialogue_style": [],
                 "effective_patterns": [],
                 "failure_patterns": [],
+                "surface_elements": {
+                    "character_names": [],
+                    "relationship_gimmicks": [],
+                    "identity_jobs": [],
+                    "props_and_evidence": [],
+                    "locations_and_world_rules": [],
+                    "concrete_incidents": [],
+                    "medical_or_biological_elements": [],
+                },
             }
         }
 
@@ -97,6 +112,28 @@ def test_distillation_lab_builds_versions_and_keeps_workflow_detached(tmp_path, 
     assert cards[0]["skill_id"] == project["id"]
     assert cards[0]["version_id"] == version["id"]
     assert cards[0]["module_count"] == len(SKILL_MODULE_KEYS)
+
+    with store._connect() as db:
+        db.execute(
+            "UPDATE skill_versions SET evidence_json=? WHERE id=?",
+            ('[{"schema_version":"script-team-evidence/v2","source_id":"legacy"}]', version["id"]),
+        )
+    assert store.list_published_skills(7) == []
+    try:
+        store.resolve_runtime_skill(7, project["id"], version["id"])
+    except ValueError as exc:
+        assert "旧版剧情复刻型蒸馏" in str(exc)
+    else:
+        raise AssertionError("legacy plot-copying Skill must not enter the new workflow")
+
+    with store._connect() as db:
+        db.execute(
+            "UPDATE skill_versions SET evidence_json=? WHERE id=?",
+            (
+                json.dumps(version["evidence"], ensure_ascii=False),
+                version["id"],
+            ),
+        )
 
     runtime = store.resolve_runtime_skill(7, project["id"], version["id"])
     assert runtime["schema_version"] == SKILL_SCHEMA_VERSION
@@ -139,3 +176,56 @@ def test_distillation_lab_rejects_unsupported_sources(tmp_path) -> None:
         assert "Word、PDF、TXT" in str(exc)
     else:
         raise AssertionError("unsupported source must be rejected")
+
+
+def test_quality_gate_rejects_skill_that_copies_sample_surface_elements(tmp_path) -> None:
+    store = DistillationLabStore(tmp_path / "distillation")
+    modules = {key: f"{key}：按叙事功能组织冲突。" for key in SKILL_MODULE_KEYS}
+    modules["hook_craft"] = "开篇必须让女主拿着验孕棒撞见自己的替身。"
+    evidence = [
+        {
+            "schema_version": EVIDENCE_SCHEMA_VERSION,
+            "source_id": "source-a",
+            "surface_elements": {
+                "character_names": [],
+                "relationship_gimmicks": ["替身"],
+                "identity_jobs": [],
+                "props_and_evidence": ["验孕棒"],
+                "locations_and_world_rules": [],
+                "concrete_incidents": [],
+                "medical_or_biological_elements": [],
+            },
+        },
+        {
+            "schema_version": EVIDENCE_SCHEMA_VERSION,
+            "source_id": "source-b",
+            "surface_elements": {
+                "character_names": [],
+                "relationship_gimmicks": ["替身"],
+                "identity_jobs": [],
+                "props_and_evidence": ["验孕棒"],
+                "locations_and_world_rules": [],
+                "concrete_incidents": [],
+                "medical_or_biological_elements": [],
+            },
+        },
+    ]
+    version = {
+        "skill_md": "---\nname: structure-only\n---\n# 边界与失效条件",
+        "modules": modules,
+        "assets": {
+            "manifest": {"schema_version": SKILL_SCHEMA_VERSION},
+            "verified_rules": [
+                {
+                    "rule": "强钩子先制造关系认知破位",
+                    "source_ids": ["source-a", "source-b"],
+                }
+            ],
+        },
+    }
+
+    score = store._evaluate(version, evidence)
+
+    assert score["checks"]["structural_purity"] == 0
+    assert score["surface_leaks"]["hook_craft"] == ["替身", "验孕棒"]
+    assert score["ready_to_publish"] is False

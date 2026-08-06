@@ -255,3 +255,4 @@ def test_distilled_skill_is_prioritized_and_capped_per_stage() -> None:
     assert text.index("quality_gate") < text.index("hook_craft")
     assert len(text) < 13_500
     assert "示例是方法，不是必须照搬的事件、人物或道具" in text
+    assert "不得迁移Skill样本中的人物身份、关系套路、职业、场景、道具、证据手段" in text
