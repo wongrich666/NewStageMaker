@@ -114,6 +114,8 @@ DISTILLED_STAGE_PRIORITY = {
 }
 DISTILLED_STAGE_CHAR_LIMIT = 12_000
 DISTILLED_MODULE_CHAR_LIMIT = 3_500
+BATCH_SIZE = 5
+BATCHED_EPISODE_STAGES = {"episode_continuity", "script_writer", "final_editor"}
 
 PROMPTS = {
     "showrunner": """
@@ -346,6 +348,52 @@ def scene_contract_violations(script: str, request_payload: dict) -> list[str]:
     return violations
 
 
+def episode_numbers(text: str) -> list[int]:
+    return [
+        int(match.group("zh") or match.group("en"))
+        for match in EPISODE_HEADER_RE.finditer(str(text or ""))
+    ]
+
+
+def episode_range_violations(text: str, request_payload: dict) -> list[str]:
+    episode_start = max(1, int(request_payload.get("episode_start") or 1))
+    total = max(1, int(request_payload.get("episodes") or 1))
+    episode_end = max(
+        episode_start,
+        int(request_payload.get("episode_end") or (episode_start + total - 1)),
+    )
+    expected = list(range(episode_start, episode_end + 1))
+    actual = episode_numbers(text)
+    if actual == expected:
+        return []
+    return [
+        f"要求完整交付第{episode_start}-{episode_end}集，实际集号为{actual}"
+    ]
+
+
+def _episode_slice(text: str, episode_start: int, episode_end: int) -> str:
+    value = str(text or "")
+    matches = list(EPISODE_HEADER_RE.finditer(value))
+    selected: list[str] = []
+    for index, match in enumerate(matches):
+        episode = int(match.group("zh") or match.group("en"))
+        if episode_start <= episode <= episode_end:
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(value)
+            selected.append(value[match.start() : end].strip())
+    return "\n\n".join(selected)
+
+
+def _append_episode_batch(prefix: str, batch: str) -> str:
+    value = str(batch or "").strip()
+    if str(prefix or "").strip():
+        match = EPISODE_HEADER_RE.search(value)
+        if match:
+            value = value[match.start() :].strip()
+    return "\n\n".join(
+        item for item in (str(prefix or "").strip(), value) if item
+    )
+
+
 def prepare_final_editor_gate(request_payload: dict) -> None:
     draft_path = ROOT / ROLE_FILES["script_writer"]
     state_path = ROOT / ROLE_FILES["state_recorder"]
@@ -427,12 +475,23 @@ def hydrate_remote_state() -> None:
             (ROOT / ROLE_FILES[role]).write_text(str(content), encoding="utf-8")
 
 
-def previous_context(stage: str) -> str:
+def previous_context(
+    stage: str,
+    episode_start: int | None = None,
+    episode_end: int | None = None,
+) -> str:
     chunks: list[str] = []
     for previous in CONTEXT_FILES.get(stage, ()):
         path = ROOT / ROLE_FILES[previous]
         if path.is_file():
-            chunks.append(f"\n\n===== {previous} =====\n{path.read_text(encoding='utf-8')}")
+            content = path.read_text(encoding="utf-8")
+            if (
+                episode_start is not None
+                and episode_end is not None
+                and previous in {"episode_continuity", "script_writer"}
+            ):
+                content = _episode_slice(content, episode_start, episode_end)
+            chunks.append(f"\n\n===== {previous} =====\n{content}")
     if stage == "final_editor":
         gate_path = ROOT / "gate_pre.json"
         if gate_path.is_file():
@@ -463,6 +522,96 @@ def skill_modules(stage: str) -> str:
         if path.is_file():
             chunks.append(f"\n\n===== skill:{module} =====\n{path.read_text(encoding='utf-8')}")
     return "".join(chunks)
+
+
+def _stage_user_prompt(
+    stage: str,
+    request_payload: dict,
+    modules: str,
+    *,
+    episode_start: int | None = None,
+    episode_end: int | None = None,
+    previous_tail: str = "",
+) -> str:
+    context = previous_context(stage, episode_start, episode_end)
+    tail = (
+        "\n\n===== 上一批结尾，仅用于连续承接 =====\n" + previous_tail
+        if previous_tail
+        else ""
+    )
+    return (
+        "用户创作任务：\n"
+        f"{json.dumps(request_payload, ensure_ascii=False, indent=2)}"
+        f"{context}\n\n"
+        f"{modules}"
+        f"{tail}\n\n"
+        "episode_start、episode_end 与 episodes 是本次交付范围硬合同；"
+        "episode_word_count 是每集目标下限，episode_word_count_max 是最多上浮10%的"
+        "硬上限；每集必须处于闭区间内，补充要求不得与该字数合同冲突。\n"
+        f"{continuation_contract_instruction(request_payload)}\n"
+        f"{scene_contract_instruction(request_payload)}\n"
+        f"{duration_contract_instruction(request_payload)}"
+    )
+
+
+def generate_stage_result(stage: str, request_payload: dict, *, modules: str) -> str:
+    episode_start = max(1, int(request_payload.get("episode_start") or 1))
+    total = max(1, int(request_payload.get("episodes") or 1))
+    episode_end = max(
+        episode_start,
+        int(request_payload.get("episode_end") or (episode_start + total - 1)),
+    )
+    if stage not in BATCHED_EPISODE_STAGES or total <= BATCH_SIZE:
+        result = call_model(
+            PROMPTS[stage],
+            _stage_user_prompt(stage, request_payload, modules),
+            stage=stage,
+        )
+        if stage in BATCHED_EPISODE_STAGES:
+            violations = episode_range_violations(result, request_payload)
+            if violations:
+                raise SystemExit(f"{stage}集数合同未满足：" + "；".join(violations))
+        return result
+
+    result = ""
+    for batch_start in range(episode_start, episode_end + 1, BATCH_SIZE):
+        batch_end = min(episode_end, batch_start + BATCH_SIZE - 1)
+        batch_request = dict(request_payload)
+        batch_request.update(
+            {
+                "episodes": batch_end - batch_start + 1,
+                "episode_start": batch_start,
+                "episode_end": batch_end,
+                "series_episode_start": episode_start,
+                "series_episode_end": episode_end,
+                "series_episode_count": total,
+                "episode_contract": (
+                    f"当前批次必须且只能交付第{batch_start}集至第{batch_end}集；"
+                    f"全剧范围为第{episode_start}集至第{episode_end}集。"
+                ),
+            }
+        )
+        batch = call_model(
+            PROMPTS[stage],
+            _stage_user_prompt(
+                stage,
+                batch_request,
+                modules,
+                episode_start=batch_start,
+                episode_end=batch_end,
+                previous_tail=result[-1800:],
+            ),
+            stage=f"{stage}:{batch_start}-{batch_end}",
+        )
+        violations = episode_range_violations(batch, batch_request)
+        if violations:
+            raise SystemExit(f"{stage}批次集数合同未满足：" + "；".join(violations))
+        result = _append_episode_batch(result, batch)
+
+    violations = episode_range_violations(result, request_payload)
+    if violations:
+        raise SystemExit(f"{stage}合并集数合同未满足：" + "；".join(violations))
+    return result
 
 
 def distilled_skill_modules(stage: str, request_payload: dict) -> str:
@@ -638,22 +787,8 @@ def run(stage: str) -> None:
     request_payload = read_request()
     if stage == "final_editor":
         prepare_final_editor_gate(request_payload)
-    request_text = json.dumps(request_payload, ensure_ascii=False, indent=2)
-    context = previous_context(stage)
     modules = skill_modules(stage) + distilled_skill_modules(stage, request_payload)
-    user_prompt = (
-        "用户创作任务：\n"
-        f"{request_text}"
-        f"{context}\n\n"
-        f"{modules}\n\n"
-        "episode_start、episode_end 与 episodes 是本次交付范围硬合同；"
-        "episode_word_count 是每集目标下限，episode_word_count_max 是最多上浮10%的"
-        "硬上限；每集必须处于闭区间内，补充要求不得与该字数合同冲突。\n"
-        f"{continuation_contract_instruction(request_payload)}\n"
-        f"{scene_contract_instruction(request_payload)}\n"
-        f"{duration_contract_instruction(request_payload)}"
-    )
-    result = call_model(PROMPTS[stage], user_prompt, stage=stage)
+    result = generate_stage_result(stage, request_payload, modules=modules)
     if stage in {"script_writer", "final_editor"}:
         violations = scene_contract_violations(result, request_payload)
         if violations:

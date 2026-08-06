@@ -14,6 +14,7 @@ from .codebuddy_npc import (
     CodeBuddyNpcError,
     CodeBuddyNpcJobStore,
     finish_stage_timing,
+    stage_episode_range_error,
     start_stage_timing,
 )
 from .deepseek_agent import DeepSeekAgentError, deepseek_agent_client
@@ -841,7 +842,7 @@ class CodeBuddyNpcStageRunner:
             "硬上限，每集必须处于闭区间内；scenes_per_episode 是前端动态"
             "场景合同，必须逐集执行；不得改变上游已锁定事实。"
         )
-        if stage in {"script_writer", "final_editor"} and int((job.get("request") or {}).get("episodes") or 1) > BATCH_SIZE:
+        if stage in {"episode_continuity", "script_writer", "final_editor"} and int((job.get("request") or {}).get("episodes") or 1) > BATCH_SIZE:
             result = self._complete_script_batches(job, stage, feedback)
         else:
             response = deepseek_agent_client.complete(
@@ -862,6 +863,9 @@ class CodeBuddyNpcStageRunner:
             )
         if not result:
             raise CodeBuddyNpcError(f"{STAGE_NAMES[stage]}返回空内容。", status_code=502)
+        range_error = stage_episode_range_error(stage, result, request_data)
+        if range_error:
+            raise CodeBuddyNpcError(range_error, status_code=502)
         if stage == "state_recorder":
             result = _parse_state(result)
 
@@ -1024,6 +1028,21 @@ class CodeBuddyNpcStageRunner:
             episode_cards = _episode_slice(str(artifacts.get("episodes") or ""), batch_start, batch_end)
             draft = _episode_slice(str(artifacts.get("draft") or ""), batch_start, batch_end)
             previous_tail = result[-1800:] if result else "无，这是第一批。"
+            if stage == "episode_continuity":
+                batch_material = "本批逐集卡尚未生成。请依据锁定故事为本批新建逐集连续性卡。"
+                batch_draft = "不适用。本节点只设计逐集卡，不写剧本正文。"
+                length_contract = (
+                    "每集卡必须完整包含承接事实、开场钩子、最短因果锚、主角目标与动作、"
+                    "阻力、选择与代价、主线推进、结尾状态和下一集第一有效动作。"
+                )
+            else:
+                batch_material = episode_cards
+                batch_draft = draft if stage == "final_editor" else "正文编剧根据逐集卡新写本批。"
+                length_contract = (
+                    f"每集必须在 {minimum} 至 {maximum} 字之间（含边界），不得少写，也不得超过。\n"
+                    "超上限时只压缩重复解释、冗余动作、同义对白和无效铺垫；不得删除钩子、关键转折、\n"
+                    "人物选择、情绪爆点、结尾钩子与集间承接。"
+                )
             batch_prompt = f"""
 ===== 用户创作任务 =====
 {json.dumps(request_data, ensure_ascii=False, indent=2)}
@@ -1031,18 +1050,17 @@ class CodeBuddyNpcStageRunner:
 {fixed_context}
 
 ===== 本批逐集卡：第{batch_start}-{batch_end}集 =====
-{episode_cards}
+{batch_material}
 
 ===== 本批待修初稿 =====
-{draft if stage == "final_editor" else "正文编剧根据逐集卡新写本批。"}
+{batch_draft}
 
 ===== 上一批结尾，仅用于连续承接 =====
 {previous_tail}
 
 只输出第{batch_start}集至第{batch_end}集，共{len(expected)}集，不得输出其他集。
-每集必须在 {minimum} 至 {maximum} 字之间（含边界），不得少写，也不得超过。
-超上限时只压缩重复解释、冗余动作、同义对白和无效铺垫；不得删除钩子、关键转折、
-人物选择、情绪爆点、结尾钩子与集间承接。保持统一场景格式、人物署名对白和人物名OS。
+{length_contract}
+保持统一集号格式；正文节点还必须保持场景格式、人物署名对白和人物名OS。
 普通停顿使用逗号、句号、问号或感叹号；迟疑和未尽使用省略号。
 破折号只用于突然打断、猛然改口或强制语义跳转，禁止把它当成通用节奏符号。
 {("本次修改意见：" + feedback) if feedback else ""}

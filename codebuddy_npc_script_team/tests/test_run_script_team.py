@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 
@@ -163,6 +164,47 @@ def test_scene_contract_accepts_standard_scene_number_header() -> None:
         script,
         {"scenes_per_episode": "1"},
     ) == []
+
+
+def test_episode_range_contract_rejects_partial_stage_output() -> None:
+    output = "\n".join(
+        f"第{episode}集：《测试{episode}》\n场景1：工作室｜夜｜内"
+        for episode in range(1, 6)
+    )
+
+    assert MODULE.episode_range_violations(
+        output,
+        {"episode_start": 1, "episode_end": 10, "episodes": 10},
+    ) == ["要求完整交付第1-10集，实际集号为[1, 2, 3, 4, 5]"]
+
+
+def test_cloud_stage_batches_long_episode_ranges(monkeypatch) -> None:
+    calls: list[tuple[int, int]] = []
+
+    def fake_call_model(_system_prompt, user_prompt, **_kwargs):
+        start = int(re.search(r'"episode_start":\s*(\d+)', user_prompt).group(1))
+        end = int(re.search(r'"episode_end":\s*(\d+)', user_prompt).group(1))
+        calls.append((start, end))
+        return "\n\n".join(
+            f"第{episode}集：《测试{episode}》\n场景1：工作室｜夜｜内"
+            for episode in range(start, end + 1)
+        )
+
+    monkeypatch.setattr(MODULE, "call_model", fake_call_model)
+
+    result = MODULE.generate_stage_result(
+        "episode_continuity",
+        {
+            "episodes": 10,
+            "episode_start": 1,
+            "episode_end": 10,
+            "scenes_per_episode": "1",
+        },
+        modules="",
+    )
+
+    assert calls == [(1, 5), (6, 10)]
+    assert MODULE.episode_numbers(result) == list(range(1, 11))
 
 
 def test_model_timeout_defaults_to_twenty_minutes(monkeypatch) -> None:
