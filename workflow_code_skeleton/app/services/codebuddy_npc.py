@@ -68,7 +68,7 @@ STAGE_REQUIRED_ARTIFACTS = {
     "episode_continuity": ("contract", "story", "characters"),
     "script_writer": ("contract", "story", "characters", "episodes"),
     "state_recorder": ("contract", "characters", "episodes", "draft"),
-    "final_editor": ("contract", "draft", "story_state"),
+    "final_editor": ("contract", "episodes", "draft", "story_state"),
 }
 STAGE_NAMES = {
     "showrunner": "总编剧",

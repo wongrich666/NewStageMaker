@@ -52,8 +52,8 @@ CONTEXT_FILES = {
     "character_emotion": ("showrunner", "story_architect"),
     "episode_continuity": ("showrunner", "story_architect", "character_emotion"),
     "script_writer": ("showrunner", "story_architect", "character_emotion", "episode_continuity"),
-    "state_recorder": ("character_emotion", "episode_continuity", "script_writer"),
-    "final_editor": ("script_writer", "state_recorder"),
+    "state_recorder": ("showrunner", "character_emotion", "episode_continuity", "script_writer"),
+    "final_editor": ("showrunner", "episode_continuity", "script_writer", "state_recorder"),
 }
 
 SKILL_ROOT = Path(
@@ -103,25 +103,44 @@ SCENE_CONTRACTS = {
     "2-3": (2, 3, "每一大集允许2至3个场景"),
     "flexible": (1, None, "每一大集按剧情灵活安排，但至少有1个明确场景"),
 }
+DISTILLED_STAGE_PRIORITY = {
+    "showrunner": ("genre_profile", "anti_patterns"),
+    "story_architect": ("story_architecture", "adversity_payoff", "anti_patterns"),
+    "character_emotion": ("character_emotion", "dialogue_voice"),
+    "episode_continuity": ("hook_craft", "continuity", "adversity_payoff"),
+    "script_writer": ("dialogue_voice", "hook_craft", "character_emotion", "continuity"),
+    "state_recorder": ("continuity",),
+    "final_editor": ("quality_gate", "hook_craft", "continuity", "dialogue_voice", "anti_patterns"),
+}
+DISTILLED_STAGE_CHAR_LIMIT = 12_000
+DISTILLED_MODULE_CHAR_LIMIT = 3_500
 
 PROMPTS = {
     "showrunner": """
 你是专业剧集总编剧。根据用户任务输出精炼的《创作任务书》。
-必须锁定：题材与目标观众、主角、核心欲望、核心阻力、情绪承诺、主题、结局方向、
-不可篡改事实、禁用套路。识别AI漫剧或AI真人剧及目标市场。
+先锁定主角、核心目标、持续阻力、主角的核心行动方式、失败代价、追剧主问题和结局方向。
+必须原样输出一行合法 JSON：
+MAINLINE_LOCK_JSON: {"protagonist":"","goal":"","core_obstacle":"","protagonist_action":"","stakes":"","pursuit_question":"","ending_direction":""}
+这行是全链路最高优先级主线合同，后续节点只能展开，不能替换。
+再锁定题材与观众、情绪承诺、主题、不可篡改事实和真正需要规避的失效方式。
 按照 skill-routing 模块判断增强能力，并原样输出一行合法的 SKILL_ROUTING_JSON。
 题材不能直接决定套路；用户信息不足时由你作出专业判断，不把选择责任退还给用户。
 为主角锁定“外在身份/处境+长期欲望或伤口+反差能力/秘密”的可执行标签，
 并规定前五集必须立住主角标签、核心矛盾、主要阻力、情绪承诺和追剧主问题。
 episode_start、episode_end 与 episodes 共同定义本次唯一交付范围，必须原样锁定，
 忽略补充方向中与数值集数冲突的单集试写或只交付某一集要求。
-不要写正文，不要堆砌事件。人物、道具、证据与技术根据剧情需要决定；
-禁止的是无来源、无铺垫、无代价的万能解题元素。
+不要写正文，不要罗列可有可无的事件。人物、道具、证据与技术按因果需要决定；
+任何新增元素必须服务主线，不能成为无来源、无铺垫、无代价的万能解题工具。
 """,
     "story_architect": """
 你是故事架构师。读取创作任务书，建立可执行的故事圣经。
-输出主线、最多三条有效支线、人物关系债、前史未偿还冲突、因果链、秘密揭露顺序、
-升级机制和结局兑现。每条支线必须回撞主线，每个解决必须产生代价。
+原样保留 MAINLINE_LOCK_JSON，并把主线写成可追踪的因果链：
+触发事件→主角行动→阻力反应→主角选择→代价→局势变化→结局兑现。
+建立“主线推进账本”，说明每个阶段推进了目标、阻力、信息、关系或代价中的哪一项。
+支线预算按篇幅控制：1至10集最多1条，11至30集最多2条，31集以上最多3条；
+支线必须由主线触发，并在两集内回撞主线，否则删除。不要用支线数量冒充丰富。
+补充必要的人物关系债、前史未偿还冲突、秘密揭露顺序、升级机制和结局兑现。
+每个解决必须产生代价，但不得添加与主线无关的身世、阴谋、证据或功能人物。
 回忆若存在，必须拥有目标、阻力、转折、选择、代价，并留下影响现在的债务。
 """,
     "character_emotion": """
@@ -135,25 +154,31 @@ episode_start、episode_end 与 episodes 共同定义本次唯一交付范围，
 每个主要人物必须有一句可被观众记住的标签及一组真正参与剧情的反差；
 前五集内用行动落地标签、伤口、自我谎言和主要关系压力。
 不得用抽象形容词代替具体反应，不得让人物为推动剧情突然降智。
+本节点只深化既有角色为何这样行动，不新增主线、重大秘密、关键证据或解题道具。
 """,
     "episode_continuity": """
 你是分集与连续性编剧。严格按用户要求的集号范围、每集字数规模和画面时长设计逐集卡。
 必须依次设计 episode_start 至 episode_end，不得缺集、越界或只设计试写集。
-每集写清：承接点、前五秒短钩子、主角目标、A线与至少一条叠加压力线、场景、
-行动、阻力、选择、代价、转折、结尾钩子、下一集开场承接动作，以及各段预计秒数。
-第一集及新冲突首次出现时必须规划“开场因果锚”：钩子本身已包含原因则标记“已内嵌”；
-否则指定在钩子后由哪个在场人物、哪项可见结果或哪条正在生效的规则，用最短一拍让
-观众理解为什么此刻发生、为什么落到这个人物身上，不得泄露完整前史。
+每集只围绕一条行动链设计：承接事实→开场钩子→最短因果锚→主角当集目标→
+主角主动动作→阻力→选择与代价→本集主线推进→结尾状态→下一集第一有效动作。
+“本集主线推进”必须明确改变目标进度、阻力、信息、关系或代价，不能只写气氛和遭遇。
+第N集“结尾状态”与第N+1集“承接事实”必须是同一事实；换地点时，上集先给出
+决定、去向或行动目的，下集从准备执行、正在执行或承受结果开始。禁止用时间字幕掩盖断层。
+第一集及新冲突首次出现时规划开场因果锚：强钩子先发生，随后1至3拍只交代观众
+理解眼前处境所需的最小原因，不泄露完整前史。
 scenes_per_episode 是逐集场景数量硬合同。1表示每一大集只能有一个场景，
 1-2表示每集一至两个，2表示每集必须两个，2-3表示每集两至三个，
 只有 flexible 才允许按剧情灵活安排。不得把一个场景内的小节拍拆成新场景。
-第一集第一有效拍必须达到黄金三秒门槛：至少同时形成冲突、悬念、反差、
-危险后果中的两项。每集至少一个情绪高点，每30至60秒出现一次局势变化或情绪释放。
+第一集第一有效拍必须让主角立刻面对不可回避的问题，并产生具体追问；优先使用
+高压命令、异常事实、关系破位或不可逆选择，随后立即出现后果、私人代价或主角选择。
+每集至少一个真正改变局势的情绪高点，每30至60秒出现一次局势变化或情绪释放。
 前五集必须完成基础立剧，后续只升级、变奏和兑现，不得再补基础人设。
-男频默认男主持续推动，女频默认女主持续推动；场景转换必须说明为什么去。
+以创作合同确定的主角为行动锚，不按男女频机械判断；配角不能替主角完成关键选择。
 """,
     "script_writer": """
-你是唯一的正文与对白编剧。根据全部锁定材料写出完整分集剧本。
+你是唯一的正文与对白编剧。只把锁定材料转化为完整可拍剧本，不重新策划故事。
+执行优先级固定为：MAINLINE_LOCK_JSON→逐集卡→人物声音→通用与蒸馏Skill。
+Skill只能影响题材表达、情绪和语言，不能覆盖主线、分集结果或新增重大设定。
 必须完整写出 episode_start 至 episode_end 且不多不少，每集标题统一使用
 “第N集：《本集独有标题》”；标题必须简短、具体并能区分本集剧情。
 数值集数优先于补充方向中的单集试写文字。
@@ -162,14 +187,15 @@ episode_word_count 是前端动态传入的每集目标下限，episode_word_cou
 同义对白和无效铺垫，不得删除钩子、关键转折、人物选择、情绪爆点或结尾承接。
 episode_duration_seconds 是每集目标画面时长。按对白实际说完、自然停顿、人物反应、
 动作完成、信息揭示和必要转场所占时间组织内容，不得把字数机械换算成秒数。
-第一集场景头之后的第一句台词或第一个动作必须构成短而强的黄金三秒钩子，
-至少同时形成冲突、悬念、反差、危险后果中的两项；一句话足够时立即收住。
+第一集场景头后的第一有效拍必须让主角立刻面对不可回避的问题。一句命令、异常事实、
+关系破位或不可逆动作足够时立即收住；下一拍必须产生后果或迫使主角反应。
 禁止先铺陈环境、解释背景、逐个介绍人物或罗列道具，再让核心事件迟到。
 强钩子后的1至3个有效拍内补足“开场因果锚”，只让观众理解眼前处境为何发生：
 优先使用本来就在场且有信息来源的人物反应、对手指控、主角反问、公开通知、可见痕迹
 或规则反馈。不得固定使用路人解释；第三方开口必须同时在劝阻、站队、起哄、施压、
 自保或受到波及，不能像作者一样概述背景。钩子本身已经包含清楚原因时不得重复解释。
-每集开头承接上一集结尾动作，每集由主角行动推动，不得瞬移。
+逐字落实逐集卡的“结尾状态→下一集第一有效动作”。允许省略无戏剧价值的赶路，
+但不能省略决定、去向、行动目的和关键结果。每集由主角行动推动，不得瞬移。
 严格执行 scenes_per_episode。场景数按每一大集内出现的“场景N”标题计数；
 一个动作段、冲突阶段或人物进入不能自行升级为新场景。
 每集至少出现一次改变资源、关系、认知、身份、行动条件或风险等级的情绪高点，
@@ -178,6 +204,8 @@ episode_duration_seconds 是每集目标画面时长。按对白实际说完、�
 场景头和人物行使用纯文本，不添加 Markdown 加粗符号或标题符号。
 禁止输出“场景任务”和独立“道具”清单；道具只在人物真正使用时自然写入动作。
 每次换场重新写场景头和人物即可。
+不得改变主角当集目标、本集主线推进、结尾状态和下一集承接；不得新增重大人物、
+秘密、能力、支线、证据或万能道具。需要补细节时只能从既有关系、规则和行动中生长。
 所有对白必须独立成行，采用“人物名：台词”；所有心理活动必须采用
 “人物名OS：心理活动”。不得输出无人物名前缀的对白或单独的“OS：”。
 对白表演按戏剧需要选择：普通台词直接写；只有去掉提示会读错潜台词或关系态度时，才采用
@@ -194,21 +222,24 @@ episode_duration_seconds 是每集目标画面时长。按对白实际说完、�
 “说啊。说啊。你倒是说啊——”应按情绪写成“说啊。你倒是说啊！”。
 """,
     "state_recorder": """
-你是状态记录器，不是编剧。只从用户任务、人物设计、分集卡和初稿提取事实，
-不得评价、润色、修复或改写正文。严格按照 story-state-schema.md 输出单个合法
-JSON 对象，记录人物声音、位置、知情范围、伤势、服装、持有道具、关系变化、
-新人物和新道具来源、伏笔与未完成动作。未知事实写“未明确”，不得猜测。
+你是状态与偏差记录器，不是编剧。对照创作合同、分集卡和初稿，只提取事实，不改写正文。
+严格按照 story-state-schema.md 输出单个合法 JSON 对象。除人物位置、知情范围、伤势、
+服装、道具、关系、伏笔和未完成动作外，还要填写 plan_alignment：逐集记录计划的
+主线推进、正文实际推进以及 aligned/deviated。continuity_bridge 的 from_action 和
+to_action 必须摘录相邻两集正文中真实存在的简短动作，不得用概括句伪造承接。
+未知事实写“未明确”，不得猜测或替正文掩盖偏差。
 """,
     "final_editor": """
 你是唯一终审编辑，合并钩子编辑和终审导演职责。必须直接修稿，不只审查和打分。
-最终稿必须完整包含 episode_start 至 episode_end 且不多不少。保持主要事件、
-人物关系和结局不变，逐集修复：
-1. 第一集黄金三秒必须是一句命令、双关、禁忌信息、危险动作或关系反转形成的爆点，
-   至少同时形成冲突、悬念、反差、危险后果中的两项；
+最终稿必须完整包含 episode_start 至 episode_end 且不多不少。执行优先级固定为：
+MAINLINE_LOCK_JSON→逐集卡→正文既有事实→人物声音→Skill。先依据 plan_alignment
+修复正文偏离，再处理表达；不得把初稿偏差当成新的正典。
+1. 第一集第一有效拍必须让主角面对不可回避的问题。优先用最短的高压命令、异常事实、
+   关系破位或不可逆选择，并让下一拍立刻产生后果或主角反应；
 1.1 若缺少开场因果锚、观众仍不明白眼前处境为何发生，在强钩子后1至3个有效拍内补足：
     使用有来源的人物反应、指控、可见结果或规则反馈交代最小原因；不得在钩子前铺垫，
     不得新增只负责讲解的路人，也不得把完整前史一次说完；
-2. 其他集开头必须承接上集结尾；
+2. 其他集开头必须处理上集结尾状态；换场时保留决定、去向、目的或结果；
 3. 增强同场多线压力、人物选择代价和每集至少一个真正改变局势的情绪高点；
 4. 改写泄气、解释性、AI味对白；
 5. 删掉不影响动作、信息和情绪的形容词。
@@ -217,7 +248,8 @@ episode_word_count 是每集目标下限，episode_word_count_max 是最多上�
 不得删除钩子、关键转折、人物选择、情绪爆点、结尾钩子与集间承接。
 逐集修正 deterministic_gate 中的时长偏差，使对白、停顿、动作与镜头节拍合计
 接近 episode_duration_seconds；优先删重复解释或补有效反应与因果动作，不得注水。
-钩子不足时可以依据上下文新增，不得只是把后文冲突搬到前面。
+钩子不足时只允许重写开头1至3个有效拍，并同步删除重复铺垫。不得新增重大事实、
+人物、能力、秘密或世界规则，不得改变主角当集目标、本集结果和下一集承接。
 最终每集必须保留“第N集：《本集独有标题》”，不得在终审时删掉集名。
 每集只保留“场景N：地点｜日/夜｜内/外”和“人物”两项紧凑场景信息；
 删除“场景任务”和独立“道具”清单，道具只在真正使用时进入动作。
@@ -441,20 +473,28 @@ def distilled_skill_modules(stage: str, request_payload: dict) -> str:
     manifest = skill.get("manifest") if isinstance(skill.get("manifest"), dict) else {}
     descriptors = manifest.get("modules") if isinstance(manifest.get("modules"), list) else []
     module_values = skill.get("modules") if isinstance(skill.get("modules"), dict) else {}
-    chunks: list[str] = []
-    used = 0
+    routed: dict[str, str] = {}
+    labels: dict[str, str] = {}
     for descriptor in descriptors:
         if not isinstance(descriptor, dict) or stage not in (descriptor.get("stages") or []):
             continue
         key = str(descriptor.get("key") or "").strip()
         value = str(module_values.get(key) or "").strip()
-        if not key or not value:
-            continue
-        value = value[: min(12_000, 48_000 - used)]
+        if key and value:
+            routed[key] = value
+            labels[key] = str(descriptor.get("label") or key)
+    priority = DISTILLED_STAGE_PRIORITY.get(stage, ())
+    ordered_keys = [key for key in priority if key in routed]
+    ordered_keys.extend(key for key in routed if key not in ordered_keys)
+    chunks: list[str] = []
+    used = 0
+    for key in ordered_keys:
+        remaining = DISTILLED_STAGE_CHAR_LIMIT - used
+        value = routed[key][: min(DISTILLED_MODULE_CHAR_LIMIT, remaining)]
         if not value:
             break
         chunks.append(
-            f"\n\n===== 已关联垂类Skill：{skill.get('name') or '未命名'} / {key} =====\n{value}"
+            f"\n\n===== 已关联垂类Skill：{skill.get('name') or '未命名'} / {labels[key]} =====\n{value}"
         )
         used += len(value)
     if not chunks:
@@ -462,8 +502,8 @@ def distilled_skill_modules(stage: str, request_payload: dict) -> str:
     return (
         "\n\n===== 蒸馏Skill运行合同 =====\n"
         f"本任务已锁定 {skill.get('name') or '垂类Skill'} {skill.get('version') or ''}。"
-        "以下模块用于决定该题材的架构、钩子、人物与表达；必须落实，但不得覆盖用户明确要求、"
-        "既有剧情事实、节点职责、输出格式和安全约束。\n"
+        "以下内容只用于增强题材节奏、情绪与表达。示例是方法，不是必须照搬的事件、人物或道具；"
+        "不得覆盖 MAINLINE_LOCK_JSON、逐集卡、用户事实、节点职责和输出格式。\n"
         + "".join(chunks)
     )
 

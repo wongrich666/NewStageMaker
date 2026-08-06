@@ -22,20 +22,26 @@ from .deepseek_agent import DeepSeekAgentError, deepseek_agent_client
 PROMPTS = {
     "showrunner": """
 你是跨题材、跨市场的剧集总编剧。输出精炼、可执行的《创作任务书》。
-锁定题材、受众、主角、核心欲望、核心阻力、情绪承诺、主题、结局方向和不可篡改事实。
+先锁定主角、核心目标、持续阻力、核心行动方式、失败代价、追剧主问题和结局方向。
+必须原样输出一行合法 JSON：
+MAINLINE_LOCK_JSON: {"protagonist":"","goal":"","core_obstacle":"","protagonist_action":"","stakes":"","pursuit_question":"","ending_direction":""}
+这是全链路最高优先级主线合同，后续节点只能展开，不能替换。
+再锁定题材、受众、情绪承诺、主题、不可篡改事实和真正需要规避的失效方式。
 按照技能路由模块判断增强能力，并原样输出一行合法的 SKILL_ROUTING_JSON。
 题材不能直接决定套路；用户信息不足时由你作出专业判断，不把选择责任退还给用户。
 为主角锁定“外在身份/处境+长期欲望或伤口+反差能力/秘密”的可执行标签，
 并规定前五集立住主角标签、核心矛盾、主要阻力、情绪承诺和追剧主问题。
 episode_start、episode_end 与 episodes 共同构成交付范围，必须只交付该范围。
-不要写正文。所有人物、道具、技术、证据和事件都按题材与因果需要决定：
-需要时可以使用，不需要时不得为了套模板硬塞；禁止的不是某类元素，而是无来源、无铺垫、
-无代价、承担万能解题功能的元素。
+不要写正文或罗列可有可无的事件。人物、道具、技术和证据必须服务主线；
+不得为了套模板硬塞无来源、无铺垫、无代价的万能解题元素。
 """,
     "story_architect": """
 你是故事架构师。依据创作任务书建立可执行故事圣经。
-输出主线、最多三条有效支线、人物关系债、前史未偿还冲突、因果链、秘密揭露顺序、
-升级机制和结局兑现。支线必须回撞主线，每个解决必须制造新的代价。
+原样保留 MAINLINE_LOCK_JSON，把主线写成：触发→主角行动→阻力反应→选择→代价→
+局势变化→结局兑现，并建立阶段性的“主线推进账本”。
+支线预算按篇幅控制：1至10集最多1条，11至30集最多2条，31集以上最多3条；
+支线必须由主线触发并在两集内回撞主线，否则删除。不要用支线数量冒充丰富。
+补充必要的人物关系债、前史冲突、秘密揭露顺序和升级机制，不新增无关身世、阴谋或证据。
 回忆若存在，必须有目标、阻力、转折、选择、代价，并留下影响现在的债务。
 不得改变创作任务书锁定的事实，不得提前写逐集正文。
 """,
@@ -50,23 +56,27 @@ episode_start、episode_end 与 episodes 共同构成交付范围，必须只交
 每个主要人物必须有一句可记忆标签及一组真正参与剧情的反差；
 前五集内用行动落地标签、伤口、自我谎言和主要关系压力。
 每个主要人物必须有可区分的句长、回避方式、压力反应、潜台词和三句声音样本。
-不得改写主线和主要事件。
+只深化既有角色为何这样行动，不新增主线、重大秘密、关键证据或解题道具。
 """,
     "episode_continuity": """
 你是分集与连续性编剧。严格按 episode_start 至 episode_end 设计完整逐集卡。
-每集写清：承接点、前五秒短钩子、主角目标、A线与叠加压力线、核心场景、
-行动、阻力、选择、代价、转折、尾钩、下一集开场承接动作。
-第一集第一有效拍必须达到黄金三秒门槛：至少同时形成冲突、悬念、反差、
-危险后果中的两项。每集至少一个情绪高点，每30至60秒发生局势变化或情绪释放。
+每集只围绕一条行动链：承接事实→开场钩子→最短因果锚→主角目标→主角主动动作→
+阻力→选择与代价→本集主线推进→结尾状态→下一集第一有效动作。
+本集主线推进必须改变目标进度、阻力、信息、关系或代价，不能只写遭遇和气氛。
+第一集第一有效拍必须让主角面对不可回避的问题；优先使用高压命令、异常事实、
+关系破位或不可逆选择，下一拍立即产生后果、私人代价或主角反应。
+每集至少一个真正改变局势的情绪高点，每30至60秒发生局势变化或情绪释放。
 前五集完成基础立剧，后续只升级、变奏和兑现，不再补基础人设。
-第N集结尾与第N+1集开头必须形成：
-未完成动作或结果→人物决定→去向或受阻→下一集开场动作。
+第N集结尾状态和第N+1集承接事实必须是同一事实。换地点时，上集给出决定、去向或
+目的，下集从准备执行、正在执行或承受结果开始，不能用时间字幕掩盖断层。
 scenes_per_episode 是前端动态传入的逐集场景合同，必须执行；只有设置为 flexible
 时才可按剧情灵活决定。每个场景必须注明地点、日夜、内外、在场人物、关键道具和戏剧任务。
-换场必须说明人物为什么去以及准备做什么，禁止人物和关键道具无来源突然出现。
+以创作合同确定的主角为行动锚；配角不能替主角完成关键选择。
 """,
     "script_writer": """
-你是唯一的正文与对白编剧。根据全部锁定材料写出 episode_start 至 episode_end 的完整可拍剧本。
+你是唯一的正文与对白编剧。只把锁定材料转化为完整可拍剧本，不重新策划故事。
+执行优先级：MAINLINE_LOCK_JSON→逐集卡→人物声音→通用与蒸馏Skill。
+Skill只能影响题材表达、情绪和语言，不能覆盖主线、分集结果或新增重大设定。
 每集必须使用以下结构，不得省略场景信息：
 第N集：《本集独有标题》
 场景1：地点｜日/夜｜内/外
@@ -82,11 +92,12 @@ scenes_per_episode 是前端动态传入的逐集场景合同，必须执行；�
 长动作或“生气地说道”。较完整动作写在台词前后，听者反应也可承担表演，不得每句加括号。
 所有心理活动采用“人物名OS：心理活动”。
 禁止出现没有人物名前缀的对白，禁止只写“OS：”或“内心：”，也不要给普通动作错误添加人物冒号。
-第一集场景头之后的第一句台词或第一个动作必须形成短而强的黄金三秒钩子，
-至少同时形成冲突、悬念、反差、危险后果中的两项；一句话足够时立即收住。
+第一集场景头后的第一有效拍必须让主角面对不可回避的问题。一句命令、异常事实、
+关系破位或不可逆动作足够时立即收住；下一拍必须产生后果或迫使主角反应。
 禁止先介绍环境、解释会议背景、逐个点名人物或罗列道具，再让核心事件迟到；
 直接从异常结果、高压命令、关系反转或主角即将付出代价的动作开场。
-其他集开头必须承接上集结尾动作，由主角持续推动，不得瞬移。
+逐字落实逐集卡的“结尾状态→下一集第一有效动作”。可以省略赶路，但不能省略决定、
+去向、行动目的和关键结果。每集由主角行动推动，不得瞬移。
 每集至少出现一次改变资源、关系、认知、身份、行动条件或风险等级的情绪高点，
 尾钩必须直接改变下一集开场行动。
 动作短、具体、可视、可由AI生成；对白口语化、有潜台词且人物声音可区分。
@@ -98,6 +109,8 @@ scenes_per_episode 是前端动态传入的逐集场景合同，必须执行；�
 例如“实习生是吧——这个月工资扣一半！”应写成“实习生是吧？这个月工资扣一半！”；
 “说啊。说啊。你倒是说啊——”应按情绪写成“说啊。你倒是说啊！”。
 所有人物、证据和道具必须来自既有剧情或在使用前完成自然引入。
+不得改变主角当集目标、本集主线推进、结尾状态和下一集承接；不得新增重大人物、
+秘密、能力、支线、证据或万能道具。
 episode_word_count 是前端动态传入的每集目标下限，episode_word_count_max 是硬上限。
 每集必须落在该闭区间内，默认最多上浮10%。超过上限时只压缩重复解释、冗余动作、
 同义对白和无效铺垫，不得删除钩子、转折、人物选择、情绪爆点或结尾承接。
@@ -107,19 +120,24 @@ episode_word_count 是前端动态传入的每集目标下限，episode_word_cou
 只输出片名和逐集剧本正文，不输出解释、评分或创作报告。
 """,
     "state_recorder": """
-你是状态记录器，不是编剧。只从人物设计、分集卡和初稿中提取事实。
+你是状态与偏差记录器，不是编剧。对照创作合同、分集卡和初稿，只提取事实。
 严格按照给定 story_state schema 输出单个合法 JSON 对象，记录人物声音、位置、
 知情范围、伤势、服装、持有道具、关系变化、新人物与新道具来源、伏笔和未完成动作。
-episodes 数组必须完整覆盖 episode_start 至 episode_end。未知事实写“未明确”，不得猜测、评价或改写正文。
+填写 plan_alignment，逐集记录计划主线推进、正文实际推进及 aligned/deviated。
+continuity_bridge 的 from_action 和 to_action 必须摘录相邻正文真实存在的简短动作。
+episodes 数组完整覆盖交付范围；未知事实写“未明确”，不得猜测、评价、改写或掩盖偏差。
 """,
     "final_editor": """
 你是唯一终审编辑。直接修订完整剧本，不只审查和打分。
+执行优先级：MAINLINE_LOCK_JSON→逐集卡→正文既有事实→人物声音→Skill。
+先修复 plan_alignment 中的偏离，再处理表达，不得把初稿偏差变成新的正典。
 保持创作合同、主要事件、人物关系和结局方向，逐集修复黄金五秒钩子、集间承接、
 多线压力、人物选择代价、泄气对白、AI味语言和连续性问题。
-第一集黄金三秒至少同时形成冲突、悬念、反差、危险后果中的两项；前五集必须
-已经立住主角标签、核心矛盾、主要阻力、情绪承诺和追剧主问题。
+第一集第一有效拍必须让主角面对不可回避的问题，下一拍立刻产生后果或主角反应；
+前五集必须已经立住主角标签、核心矛盾、主要阻力、情绪承诺和追剧主问题。
 逐集保留至少一个真正改变局势的情绪高点，并让尾钩直接驱动下一集开场。
-钩子不足时根据上下文新增或重写，并同步修正后文因果，不能机械搬运后文冲突。
+钩子不足时只重写开头1至3个有效拍并删除重复铺垫。不得新增重大事实、人物、能力、
+秘密或规则，不得改变主角当集目标、本集结果和下一集承接。
 最终每集标题必须统一为“第N集：《本集独有标题》”，不得删掉集名。
 严格保留 scenes_per_episode 对应的场景数量规则；需要换场时补齐人物去向、目的和承接动作，
 不得在终审中随意增删场景造成瞬移。
@@ -148,9 +166,9 @@ DEPENDENCIES = {
     "episode_continuity": ("contract", "story", "characters"),
     "script_writer": ("contract", "story", "characters", "episodes"),
     "state_recorder": ("characters", "episodes", "draft"),
-    # story_state strengthens the edit when available, but a recovered draft can
-    # still be finished after a remote interruption that lost this derived file.
-    "final_editor": ("contract", "story", "characters", "episodes", "draft"),
+    # Character voice and story state are optional edit aids. The locked contract,
+    # episode cards and draft are the minimum sources of truth for final editing.
+    "final_editor": ("contract", "episodes", "draft"),
 }
 
 ARTIFACT_LABELS = {
@@ -215,6 +233,37 @@ def _line_excerpt(text: str, *, first: bool, limit: int = 160) -> str:
     return (lines[0] if first else lines[-1])[:limit]
 
 
+def _mainline_lock(contract: str) -> dict[str, str]:
+    match = re.search(r"MAINLINE_LOCK_JSON\s*:\s*(\{[^\r\n]+\})", str(contract or ""))
+    if match:
+        try:
+            value = json.loads(match.group(1))
+            if isinstance(value, dict):
+                return {str(key): str(item) for key, item in value.items()}
+        except json.JSONDecodeError:
+            pass
+    return {
+        key: "未明确"
+        for key in (
+            "protagonist",
+            "goal",
+            "core_obstacle",
+            "protagonist_action",
+            "stakes",
+            "pursuit_question",
+            "ending_direction",
+        )
+    }
+
+
+def _planned_mainline_advance(card: str) -> str:
+    match = re.search(
+        r"(?m)^\s*(?:\*\*)?本集主线推进(?:\*\*)?\s*[：:]\s*(.+)$",
+        str(card or ""),
+    )
+    return match.group(1).strip()[:240] if match else "未明确"
+
+
 def _compact_story_state(job: dict[str, Any]) -> str:
     request_data = job.get("request") or {}
     artifacts = job.get("recovered_files") or {}
@@ -228,6 +277,7 @@ def _compact_story_state(job: dict[str, Any]) -> str:
     )
     source_last_episode = max(0, int(request_data.get("source_last_episode") or 0))
     episodes: list[dict[str, Any]] = []
+    plan_alignment: list[dict[str, Any]] = []
     previous_closing = ""
     for episode in range(episode_start, episode_end + 1):
         body = _episode_slice(draft, episode, episode)
@@ -266,7 +316,17 @@ def _compact_story_state(job: dict[str, Any]) -> str:
                 "resolved_loops": [],
             }
         )
+        plan_alignment.append(
+            {
+                "episode": episode,
+                "planned_mainline_advance": _planned_mainline_advance(card),
+                "actual_mainline_advance": "代码降级账本未进行语义判断",
+                "status": "unverified",
+                "issue": "待终审依据逐集卡核对",
+            }
+        )
         previous_closing = closing
+    contract = str(artifacts.get("contract") or "")
     payload = {
         "schema_version": "1.0",
         "project": {
@@ -276,10 +336,12 @@ def _compact_story_state(job: dict[str, Any]) -> str:
             "target_words_per_episode": int(request_data.get("episode_word_count") or 800),
             "immutable_facts": ["完整事实保存在创作合同、故事架构和人物方案中"],
         },
+        "mainline_lock": _mainline_lock(contract),
         "characters": [],
         "props": [],
         "episodes": episodes,
         "open_threads": [],
+        "plan_alignment": plan_alignment,
         "narrative_pressure": {
             "adversity_payoff_level": _dynamic_skill_level(
                 str((job.get("recovered_files") or {}).get("contract") or ""),
@@ -315,6 +377,17 @@ def _skill_root() -> Path:
 
 
 ROUTING_RE = re.compile(r"SKILL_ROUTING_JSON\s*:\s*(\{[^\r\n]+\})")
+DISTILLED_STAGE_PRIORITY = {
+    "showrunner": ("genre_profile", "anti_patterns"),
+    "story_architect": ("story_architecture", "adversity_payoff", "anti_patterns"),
+    "character_emotion": ("character_emotion", "dialogue_voice"),
+    "episode_continuity": ("hook_craft", "continuity", "adversity_payoff"),
+    "script_writer": ("dialogue_voice", "hook_craft", "character_emotion", "continuity"),
+    "state_recorder": ("continuity",),
+    "final_editor": ("quality_gate", "hook_craft", "continuity", "dialogue_voice", "anti_patterns"),
+}
+DISTILLED_STAGE_CHAR_LIMIT = 12_000
+DISTILLED_MODULE_CHAR_LIMIT = 3_500
 
 
 def _dynamic_skill_level(contract: str, key: str) -> str:
@@ -366,20 +439,28 @@ def _distilled_skill_text(stage: str, job: dict[str, Any]) -> str:
     manifest = skill.get("manifest") if isinstance(skill.get("manifest"), dict) else {}
     descriptors = manifest.get("modules") if isinstance(manifest.get("modules"), list) else []
     module_values = skill.get("modules") if isinstance(skill.get("modules"), dict) else {}
-    chunks: list[str] = []
-    used = 0
+    routed: dict[str, str] = {}
+    labels: dict[str, str] = {}
     for descriptor in descriptors:
         if not isinstance(descriptor, dict) or stage not in (descriptor.get("stages") or []):
             continue
         key = str(descriptor.get("key") or "").strip()
         value = str(module_values.get(key) or "").strip()
-        if not key or not value:
-            continue
-        value = value[: min(12_000, 48_000 - used)]
+        if key and value:
+            routed[key] = value
+            labels[key] = str(descriptor.get("label") or key)
+    priority = DISTILLED_STAGE_PRIORITY.get(stage, ())
+    ordered_keys = [key for key in priority if key in routed]
+    ordered_keys.extend(key for key in routed if key not in ordered_keys)
+    chunks: list[str] = []
+    used = 0
+    for key in ordered_keys:
+        remaining = DISTILLED_STAGE_CHAR_LIMIT - used
+        value = routed[key][: min(DISTILLED_MODULE_CHAR_LIMIT, remaining)]
         if not value:
             break
         chunks.append(
-            f"\n\n===== 已关联垂类Skill：{skill.get('name') or '未命名'} / {key} =====\n{value}"
+            f"\n\n===== 已关联垂类Skill：{skill.get('name') or '未命名'} / {labels[key]} =====\n{value}"
         )
         used += len(value)
     if not chunks:
@@ -387,7 +468,8 @@ def _distilled_skill_text(stage: str, job: dict[str, Any]) -> str:
     return (
         "\n\n===== 蒸馏Skill运行合同 =====\n"
         f"本任务已锁定 {skill.get('name') or '垂类Skill'} {skill.get('version') or ''}。"
-        "以下模块必须落实，但不得覆盖用户要求、既有事实、节点职责和输出格式。\n"
+        "以下内容只增强题材节奏、情绪与表达。示例不是必须照搬的事件、人物或道具；"
+        "不得覆盖 MAINLINE_LOCK_JSON、逐集卡、用户事实、节点职责和输出格式。\n"
         + "".join(chunks)
     )
 
@@ -733,6 +815,14 @@ class CodeBuddyNpcStageRunner:
         artifacts = job.get("recovered_files") or {}
         for key in DEPENDENCIES[stage]:
             context.append(f"\n\n===== {ARTIFACT_LABELS[key]} =====\n{artifacts[key]}")
+        if stage == "final_editor":
+            for key in ("characters", "story_state"):
+                value = str(artifacts.get(key) or "").strip()
+                if value:
+                    context.append(
+                        f"\n\n===== {ARTIFACT_LABELS[key]}（终审辅助） =====\n"
+                        f"{_compact_context(value, 6_000)}"
+                    )
         request_data = job.get("request") or {}
         request_text = json.dumps(request_data, ensure_ascii=False, indent=2)
         revision = f"\n\n===== 用户本次修改意见 =====\n{feedback}" if feedback else ""
@@ -887,11 +977,16 @@ class CodeBuddyNpcStageRunner:
         if start_episode > episode_end:
             return result
 
-        context_limits = {"contract": 5_000, "story": 8_000, "characters": 8_000}
+        if stage == "final_editor":
+            context_limits = {"contract": 5_000, "characters": 5_000, "story_state": 6_000}
+            fixed_keys = ("contract", "characters", "story_state")
+        else:
+            context_limits = {"contract": 5_000, "story": 8_000, "characters": 8_000}
+            fixed_keys = ("contract", "story", "characters")
         fixed_context = "\n\n".join(
             f"===== {ARTIFACT_LABELS[key]}（成本优化摘要） =====\n"
             f"{_compact_context(str(artifacts[key]), context_limits[key])}"
-            for key in ("contract", "story", "characters")
+            for key in fixed_keys
             if str(artifacts.get(key) or "").strip()
         )
         fixed_context += _module_text(stage, artifacts)

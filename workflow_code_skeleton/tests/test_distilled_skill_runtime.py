@@ -53,3 +53,23 @@ def test_local_fallback_routes_the_same_distilled_modules() -> None:
     assert "题材规则" not in writer
     assert "题材规则" in showrunner
     assert "对白规则" not in showrunner
+
+
+def test_local_fallback_caps_large_distilled_skill_modules() -> None:
+    snapshot = _snapshot()
+    snapshot["manifest"]["modules"] = [
+        {"key": key, "stages": ["final_editor"]}
+        for key in ("anti_patterns", "hook_craft", "quality_gate", "dialogue_voice")
+    ]
+    snapshot["modules"] = {key: key + "规" * 8_000 for key in (
+        "anti_patterns",
+        "hook_craft",
+        "quality_gate",
+        "dialogue_voice",
+    )}
+
+    text = _distilled_skill_text("final_editor", {"skill_snapshot": snapshot})
+
+    assert text.index("quality_gate") < text.index("hook_craft")
+    assert len(text) < 13_500
+    assert "不得覆盖 MAINLINE_LOCK_JSON、逐集卡" in text

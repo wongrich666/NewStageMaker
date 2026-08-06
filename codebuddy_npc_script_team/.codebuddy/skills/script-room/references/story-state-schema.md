@@ -17,6 +17,15 @@
     "target_words_per_episode": 800,
     "immutable_facts": ["string"]
   },
+  "mainline_lock": {
+    "protagonist": "string",
+    "goal": "string",
+    "core_obstacle": "string",
+    "protagonist_action": "string",
+    "stakes": "string",
+    "pursuit_question": "string",
+    "ending_direction": "string"
+  },
   "characters": [
     {
       "name": "string",
@@ -94,6 +103,15 @@
       "resolved_episode": null
     }
   ],
+  "plan_alignment": [
+    {
+      "episode": 1,
+      "planned_mainline_advance": "分集卡中的本集主线推进",
+      "actual_mainline_advance": "正文实际完成的推进",
+      "status": "aligned|deviated|unverified",
+      "issue": "无偏差时为空字符串"
+    }
+  ],
   "narrative_pressure": {
     "adversity_payoff_level": "core|support|off",
     "pressure_lines": [
@@ -124,6 +142,12 @@
   }
 }
 ```
+
+`continuity_bridge.from_action` 与 `to_action` 必须分别摘录上一集结尾和本集开头中真实存在的
+简短动作或结果，不得写“承接上一集”“继续处理”等无法回查正文的概括。
+`plan_alignment` 必须覆盖本次全部集数；发现正文改变主角目标、本集主线推进、结尾状态或
+下一集承接时标记 `deviated`，如实写明偏差，不得替正文圆场。仅代码降级提取无法判断语义时
+允许标记 `unverified`，模型状态记录器不得用它逃避比对。
 
 数组没有事实时使用空数组。未知事实用明确字符串“未明确”，不得猜测。
 `continuity_bridge` 仅第一集允许为 `null`；其他集必须填写上一集动作和本集承接动作。

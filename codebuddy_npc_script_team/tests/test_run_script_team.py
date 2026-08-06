@@ -42,6 +42,24 @@ def test_opening_hook_keeps_a_short_causal_anchor_after_the_first_beat() -> None
     assert "缺少开场因果锚" in editor_prompt
 
 
+def test_mainline_and_continuity_contracts_survive_every_writing_stage() -> None:
+    assert "MAINLINE_LOCK_JSON" in MODULE.PROMPTS["showrunner"]
+    assert "主线推进账本" in MODULE.PROMPTS["story_architect"]
+    assert "本集主线推进" in MODULE.PROMPTS["episode_continuity"]
+    assert "结尾状态" in MODULE.PROMPTS["episode_continuity"]
+    assert "MAINLINE_LOCK_JSON→逐集卡" in MODULE.PROMPTS["script_writer"]
+    assert "不得新增重大人物" in MODULE.PROMPTS["script_writer"]
+    assert "plan_alignment" in MODULE.PROMPTS["state_recorder"]
+    assert "只允许重写开头1至3个有效拍" in MODULE.PROMPTS["final_editor"]
+    assert MODULE.CONTEXT_FILES["final_editor"] == (
+        "showrunner",
+        "episode_continuity",
+        "script_writer",
+        "state_recorder",
+    )
+    assert "showrunner" in MODULE.CONTEXT_FILES["state_recorder"]
+
+
 def test_original_os_format_and_performance_rules_reach_writer_and_editor() -> None:
     character_prompt = MODULE.PROMPTS["character_emotion"]
     writer_prompt = MODULE.PROMPTS["script_writer"]
@@ -207,3 +225,33 @@ def test_distilled_skill_loads_only_modules_routed_to_current_stage() -> None:
     assert "题材情绪承诺" in showrunner
     assert "开篇钩子规则" not in showrunner
     assert "v1.2" in writer
+
+
+def test_distilled_skill_is_prioritized_and_capped_per_stage() -> None:
+    huge = "钩" * 8_000
+    request = {
+        "distilled_skill": {
+            "schema_version": "script-team-skill/v1",
+            "name": "混合题材",
+            "manifest": {
+                "modules": [
+                    {"key": "anti_patterns", "stages": ["final_editor"]},
+                    {"key": "hook_craft", "stages": ["final_editor"]},
+                    {"key": "quality_gate", "stages": ["final_editor"]},
+                    {"key": "dialogue_voice", "stages": ["final_editor"]},
+                ]
+            },
+            "modules": {
+                "anti_patterns": huge,
+                "hook_craft": huge,
+                "quality_gate": huge,
+                "dialogue_voice": huge,
+            },
+        }
+    }
+
+    text = MODULE.distilled_skill_modules("final_editor", request)
+
+    assert text.index("quality_gate") < text.index("hook_craft")
+    assert len(text) < 13_500
+    assert "示例是方法，不是必须照搬的事件、人物或道具" in text

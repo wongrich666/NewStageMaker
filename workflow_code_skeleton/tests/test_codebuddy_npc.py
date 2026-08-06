@@ -515,7 +515,7 @@ def test_trigger_final_editor_sends_only_required_checkpoint_artifacts(tmp_path:
         "contract": "创作合同",
         "story": "不应发送的故事圣经" * 10_000,
         "characters": "不应发送的人物方案" * 10_000,
-        "episodes": "不应发送的分集卡" * 10_000,
+        "episodes": "终审需要的分集卡" * 10_000,
         "draft": "完整正文",
         "story_state": '{"continuity":"状态"}',
     }
@@ -531,11 +531,12 @@ def test_trigger_final_editor_sends_only_required_checkpoint_artifacts(tmp_path:
     assert checkpoint == {
         "recovered_files": {
             "contract": "创作合同",
+            "episodes": "终审需要的分集卡" * 10_000,
             "draft": "完整正文",
             "story_state": '{"continuity":"状态"}',
         }
     }
-    assert len(encoded) < 2_000
+    assert len(encoded) < 4_000
 
 
 def test_refresh_remote_stage_recovers_artifact(tmp_path: Path) -> None:
