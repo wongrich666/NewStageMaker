@@ -13,6 +13,16 @@ assert SPEC and SPEC.loader
 SPEC.loader.exec_module(MODULE)
 
 
+def _episode_card(episode: int) -> str:
+    fields = (
+        "承接事实", "开场钩子", "最短因果锚", "主角目标", "主角主动动作",
+        "阻力", "选择与代价", "本集主线推进", "结尾状态", "下一集第一有效动作",
+    )
+    return f"第{episode}集：《测试{episode}》\n" + "\n".join(
+        f"**{field}**：第{episode}集{field}的有效内容" for field in fields
+    )
+
+
 def test_single_scene_contract_means_one_scene_per_whole_episode() -> None:
     instruction = MODULE.scene_contract_instruction({"scenes_per_episode": "1"})
 
@@ -185,10 +195,7 @@ def test_cloud_stage_batches_long_episode_ranges(monkeypatch) -> None:
         start = int(re.search(r'"episode_start":\s*(\d+)', user_prompt).group(1))
         end = int(re.search(r'"episode_end":\s*(\d+)', user_prompt).group(1))
         calls.append((start, end))
-        return "\n\n".join(
-            f"第{episode}集：《测试{episode}》\n场景1：工作室｜夜｜内"
-            for episode in range(start, end + 1)
-        )
+        return "\n\n".join(_episode_card(episode) for episode in range(start, end + 1))
 
     monkeypatch.setattr(MODULE, "call_model", fake_call_model)
 
@@ -215,10 +222,7 @@ def test_cloud_stage_repairs_only_missing_episodes(monkeypatch) -> None:
         end = int(re.search(r'"episode_end":\s*(\d+)', user_prompt).group(1))
         calls.append((start, end))
         actual_end = 4 if (start, end) == (1, 5) else end
-        return "\n\n".join(
-            f"第{episode}集：《测试{episode}》\n场景1：工作室｜夜｜内"
-            for episode in range(start, actual_end + 1)
-        )
+        return "\n\n".join(_episode_card(episode) for episode in range(start, actual_end + 1))
 
     monkeypatch.setattr(MODULE, "call_model", fake_call_model)
 
@@ -235,6 +239,24 @@ def test_cloud_stage_repairs_only_missing_episodes(monkeypatch) -> None:
 
     assert calls == [(1, 5), (5, 9), (10, 10)]
     assert MODULE.episode_numbers(result) == list(range(1, 11))
+
+
+def test_cloud_episode_cards_reject_placeholder_sections() -> None:
+    content = "\n\n".join(
+        [_episode_card(episode) for episode in range(1, 5)]
+        + ["第5集：《占位》\n**承接事实**："]
+    )
+
+    merged = MODULE._merge_episode_outputs(
+        "",
+        content,
+        episode_start=1,
+        episode_end=5,
+        stage="episode_continuity",
+    )
+
+    assert MODULE.episode_numbers(merged) == [1, 2, 3, 4]
+    assert MODULE._missing_episode_ranges(merged, episode_start=1, episode_end=5) == [(5, 5)]
 
 
 def test_model_timeout_defaults_to_twenty_minutes(monkeypatch) -> None:

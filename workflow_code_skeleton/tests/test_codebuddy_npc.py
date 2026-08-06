@@ -111,6 +111,25 @@ def test_remote_stage_result_rejects_missing_episode_range() -> None:
     ) == "分集连续性编剧集数不完整：要求第1-10集，实际集号为[1, 2, 3, 4, 5]"
 
 
+def test_remote_stage_result_rejects_placeholder_episode_card() -> None:
+    content = "\n\n".join(
+        [
+            "第1集：《有效》\n承接事实：旧动作\n开场钩子：异变\n最短因果锚：旧债\n"
+            "主角目标：脱困\n主角主动动作：反击\n阻力：封锁\n选择与代价：受伤\n"
+            "本集主线推进：获得线索\n结尾状态：门被锁死\n下一集第一有效动作：砸门"
+        ]
+        + [f"第{episode}集：《占位》\n承接事实：" for episode in range(2, 6)]
+    )
+
+    error = stage_episode_range_error(
+        "episode_continuity",
+        content,
+        {"episode_start": 1, "episode_end": 5, "episodes": 5},
+    )
+
+    assert error.startswith("第2集逐集卡为空或字段不完整")
+
+
 def test_episode_batches_merge_valid_parts_and_only_report_missing_ranges() -> None:
     current = "\n\n".join(
         f"第{episode}集：《旧{episode}》\n场景1：工作室｜夜｜内"
@@ -566,6 +585,7 @@ def test_trigger_stage_uses_remote_event_and_compressed_checkpoint(tmp_path: Pat
         request_payload={"project_title": "远程分步", "source_text": "父子诀别。"},
     )
     job["recovered_files"] = {"contract": "创作合同"}
+    job["stage_resume_text"] = "第1集\n已完成断点"
 
     result = client.trigger_stage(job, stage="story_architect", feedback="保留结局")
 
@@ -577,6 +597,8 @@ def test_trigger_stage_uses_remote_event_and_compressed_checkpoint(tmp_path: Pat
         gzip.decompress(base64.b64decode(payload["env"]["scriptStateBundle"])).decode("utf-8")
     )
     assert checkpoint["recovered_files"]["contract"] == "创作合同"
+    assert checkpoint["resume_stage"] == "story_architect"
+    assert checkpoint["stage_resume_text"] == "第1集\n已完成断点"
     assert json.loads(payload["env"]["scriptRequest"])["stage_feedback"] == "保留结局"
 
 
@@ -611,7 +633,9 @@ def test_trigger_final_editor_sends_only_required_checkpoint_artifacts(tmp_path:
             "episodes": "终审需要的分集卡" * 10_000,
             "draft": "完整正文",
             "story_state": '{"continuity":"状态"}',
-        }
+        },
+        "resume_stage": "final_editor",
+        "stage_resume_text": "",
     }
     assert len(encoded) < 4_000
 
@@ -658,7 +682,13 @@ def test_refresh_remote_stage_recovers_artifact(tmp_path: Path) -> None:
 def test_refresh_remote_stage_recovers_compressed_artifact_after_log_truncation(
     tmp_path: Path,
 ) -> None:
-    result = "第1集：囚笼裂缝\n" + ("主角承担代价并推动下一步。\n" * 4_000)
+    result = (
+        "第1集：囚笼裂缝\n承接事实：旧锁链断裂\n开场钩子：牢门自动打开\n"
+        "最短因果锚：守卫撤离\n主角目标：逃出囚笼\n主角主动动作：拆下锁链\n"
+        "阻力：出口封死\n选择与代价：以伤换路\n本集主线推进：取得钥匙\n"
+        "结尾状态：警报响起\n下一集第一有效动作：冲向暗门\n"
+        + ("主角承担代价并推动下一步。\n" * 4_000)
+    )
     encoded = base64.b64encode(
         gzip.compress(f"episode_continuity\n{result}".encode("utf-8"))
     ).decode("ascii")
@@ -702,6 +732,58 @@ def test_refresh_remote_stage_recovers_compressed_artifact_after_log_truncation(
 
     assert refreshed["status"] == "stage_ready"
     assert refreshed["recovered_files"]["episodes"] == result.strip()
+
+
+def test_failed_remote_stage_preserves_partial_episode_checkpoint(tmp_path: Path) -> None:
+    fields = (
+        "承接事实", "开场钩子", "最短因果锚", "主角目标", "主角主动动作",
+        "阻力", "选择与代价", "本集主线推进", "结尾状态", "下一集第一有效动作",
+    )
+    partial = "\n\n".join(
+        f"第{episode}集：《断点{episode}》\n"
+        + "\n".join(f"{field}：第{episode}集有效内容" for field in fields)
+        for episode in range(1, 6)
+    )
+    encoded = base64.b64encode(
+        gzip.compress(f"episode_continuity\n{partial}".encode("utf-8"))
+    ).decode("ascii")
+    status = {
+        "status": "error",
+        "pipelinesStatus": {
+            "pipeline-1": {
+                "id": "pipeline-1",
+                "stages": [{"id": "stage-1", "name": "远程单节点编剧", "status": "failed"}],
+            }
+        },
+    }
+    log = {
+        "content": [
+            "__SCRIPT_TEAM_STAGE_GZIP_BEGIN__",
+            *[encoded[index : index + 160] for index in range(0, len(encoded), 160)],
+            "__SCRIPT_TEAM_STAGE_GZIP_END__",
+        ]
+    }
+    session = _Session([_Response(status), _Response(log)])
+    config = _config(tmp_path)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "30集断点", "source_text": "测试", "episodes": 30},
+    )
+    job.update(
+        {
+            "build": {"sn": "failed-stage-build"},
+            "remote_kind": "stage",
+            "remote_stage": "episode_continuity",
+            "status": "running",
+        }
+    )
+
+    refreshed = CodeBuddyNpcClient(config, session=session).refresh(job)
+
+    assert refreshed["status"] == "failed"
+    assert refreshed["stage_resume_text"] == partial
+    assert refreshed["remote_checkpoint"]["completed_episodes"] == [1, 2, 3, 4, 5]
+    assert "可从云端断点补齐" in refreshed["error"]
 
 
 def test_authorization_header_preserves_existing_bearer_prefix(tmp_path: Path) -> None:

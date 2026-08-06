@@ -219,6 +219,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
     def _refresh_remote_npc_job_unlocked(job: dict[str, Any]) -> dict[str, Any]:
         job_id = str(job.get("job_id") or "")
+        if bool(job.get("cancel_requested")):
+            return job
         if (
             str(job.get("execution_target") or "") != "remote_cnb"
             or str(job.get("status") or "") not in {"running", "result_pending"}
@@ -8919,17 +8921,17 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def codebuddy_npc_cancel_stage_api(job_id: str):
         try:
             current = codebuddy_npc_jobs.load(job_id, user_id=_require_user_id())
+            build_sn = str(((current or {}).get("build") or {}).get("sn") or "")
+            job = codebuddy_npc_stage_runner.request_cancel(
+                job_id=job_id,
+                user_id=_require_user_id(),
+            )
             if current and str(current.get("execution_target") or "") == "remote_cnb":
-                build_sn = str((current.get("build") or {}).get("sn") or "")
                 if build_sn:
                     try:
                         codebuddy_npc_client.stop_build(build_sn)
                     except CodeBuddyNpcError:
                         logger.warning("failed to stop remote CNB build: %s", build_sn)
-            job = codebuddy_npc_stage_runner.request_cancel(
-                job_id=job_id,
-                user_id=_require_user_id(),
-            )
         except CodeBuddyNpcError as exc:
             return _json_error(str(exc), status=exc.status_code)
         return _json_ok(job=public_job(job))
