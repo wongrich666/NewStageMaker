@@ -22,6 +22,8 @@ from workflow_code_skeleton.app.services.codebuddy_npc_stage_runner import (
     CodeBuddyNpcStageRunner,
     _compact_story_state,
     _continuation_instruction,
+    _merge_episode_outputs,
+    _missing_episode_ranges,
     _episode_slice,
 )
 
@@ -107,6 +109,67 @@ def test_remote_stage_result_rejects_missing_episode_range() -> None:
         result,
         {"episode_start": 1, "episode_end": 10, "episodes": 10},
     ) == "分集连续性编剧集数不完整：要求第1-10集，实际集号为[1, 2, 3, 4, 5]"
+
+
+def test_episode_batches_merge_valid_parts_and_only_report_missing_ranges() -> None:
+    current = "\n\n".join(
+        f"第{episode}集：《旧{episode}》\n场景1：工作室｜夜｜内"
+        for episode in (1, 2, 4)
+    )
+    incoming = "\n\n".join(
+        f"第{episode}集：《新{episode}》\n场景1：工作室｜夜｜内"
+        for episode in (3, 4, 5, 12)
+    )
+
+    merged = _merge_episode_outputs(
+        current,
+        incoming,
+        episode_start=1,
+        episode_end=10,
+    )
+
+    assert "第4集：《旧4》" in merged
+    assert "第4集：《新4》" not in merged
+    assert "第12集" not in merged
+    assert _missing_episode_ranges(
+        merged,
+        episode_start=1,
+        episode_end=10,
+    ) == [(6, 10)]
+
+
+def test_cancel_stale_job_pauses_immediately_and_keeps_checkpoint(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={
+            "project_title": "断点任务",
+            "episodes": 10,
+            "source_text": "测试断点恢复。",
+        },
+    )
+    job.update(
+        {
+            "status": "stage_running",
+            "active_stage": "episode_continuity",
+            "stage_resume_text": "第1集\n保留内容",
+            "batch_progress": {
+                "stage": "episode_continuity",
+                "completed_episodes": [1],
+            },
+        }
+    )
+    store.save(job)
+
+    paused = CodeBuddyNpcStageRunner(store).request_cancel(
+        job_id=job["job_id"],
+        user_id=7,
+    )
+
+    assert paused["status"] == "stage_paused"
+    assert paused["active_stage"] == ""
+    assert paused["stage_resume_text"] == "第1集\n保留内容"
+    assert paused["batch_progress"]["completed_episodes"] == [1]
 
 
 def test_stage_timing_is_live_then_persists_completed_duration() -> None:

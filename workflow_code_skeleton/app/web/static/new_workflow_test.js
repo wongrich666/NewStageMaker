@@ -59,6 +59,7 @@
     job: null,
     history: [],
     expandedProjects: [],
+    taskFilter: "all",
     error: "",
     loading: false,
     selectedArtifact: "",
@@ -111,6 +112,7 @@
         form: state.form,
         activeView: state.activeView,
         expandedProjects: Array.isArray(state.expandedProjects) ? state.expandedProjects : [],
+        taskFilter: state.taskFilter || "all",
         job: state.job ? {
           job_id: state.job.job_id,
           status: state.job.status,
@@ -878,25 +880,50 @@
 
   function renderTaskCenter() {
     const items = Array.isArray(state.history) ? state.history : [];
-    const groups = groupHistory(items);
+    const allGroups = groupHistory(items);
+    const filter = ["all", "running", "delivered", "attention"].includes(state.taskFilter)
+      ? state.taskFilter
+      : "all";
+    const groups = allGroups.filter((group) => {
+      if (filter === "running") return group.running > 0;
+      if (filter === "delivered") return group.completed > 0;
+      if (filter === "attention") return group.failed > 0 || (!group.running && !group.completed);
+      return true;
+    });
     const running = items.filter((item) => ACTIVE_JOB_STATUSES.has(String(item.status || "").toLowerCase())).length;
+    const delivered = items.filter((item) => Boolean(item.has_final_script)).length;
+    const attention = allGroups.filter((group) => group.failed > 0 || (!group.running && !group.completed)).length;
     return `
       <aside class="nwt-task-center">
         <div class="nwt-task-head">
           <div>
-            <span class="nwt-eyebrow">TASK CENTER</span>
-            <h2>任务中心</h2>
+            <span class="nwt-eyebrow">PROJECTS</span>
+            <h2>剧本项目</h2>
+            <p>按项目归档，展开查看每个生成版本</p>
           </div>
           <button class="nwt-icon-btn" type="button" title="刷新任务" data-action="refresh-history">${icon("refresh-cw")}</button>
         </div>
         <div class="nwt-task-summary">
-          <div><strong>${running}</strong><span>运行中</span></div>
-          <div><strong>${groups.length}</strong><span>剧本项目</span></div>
-          <div><strong>${items.length}</strong><span>生成版本</span></div>
+          <div class="running"><strong>${running}</strong><span>运行中</span></div>
+          <div class="project"><strong>${allGroups.length}</strong><span>项目</span></div>
+          <div class="delivered"><strong>${delivered}</strong><span>已交付</span></div>
         </div>
         <button class="nwt-btn primary nwt-new-task" type="button" data-action="new-job">
           ${icon("plus", 17)}<span>新建剧本任务</span>
         </button>
+        <div class="nwt-task-toolbar" role="tablist" aria-label="项目筛选">
+          ${[
+            ["all", "全部", allGroups.length],
+            ["running", "运行中", running],
+            ["delivered", "已交付", delivered],
+            ["attention", "需处理", attention],
+          ].map(([key, label, count]) => `
+            <button type="button" class="${filter === key ? "active" : ""}" data-action="task-filter" data-task-filter="${key}" role="tab" aria-selected="${filter === key ? "true" : "false"}">
+              <span>${label}</span><b>${count}</b>
+            </button>
+          `).join("")}
+        </div>
+        <div class="nwt-task-list-caption"><span>${filter === "all" ? "全部项目" : ["", "运行中的项目", "已交付的项目", "需要处理的项目"][ ["all", "running", "delivered", "attention"].indexOf(filter) ]}</span><small>${groups.length} 个</small></div>
         <div class="nwt-task-list">
           ${groups.length ? groups.map((group) => {
             const expanded = isProjectExpanded(group);
@@ -904,16 +931,19 @@
             const latest = group.latest || {};
             const groupState = group.running
               ? "running"
-              : group.completed
-                ? "done"
-                : group.failed === group.versions.length
-                  ? "failed"
+              : group.failed
+                ? "failed"
+                : group.completed
+                  ? "done"
                   : "";
             const statusText = group.running
               ? `${group.running} 个版本运行中`
-              : group.completed
-                ? `${group.completed} 个版本已交付`
-                : "尚未交付";
+              : group.failed
+                ? `${group.failed} 个版本需处理`
+                : group.completed
+                  ? `${group.completed} 个版本已交付`
+                  : "待生成";
+            const statusLabel = group.running ? "运行中" : group.failed ? "需处理" : group.completed ? "已交付" : "待生成";
             return `
               <section class="nwt-project-group ${expanded ? "expanded" : ""} ${active ? "active" : ""}">
                 <button class="nwt-project-toggle" type="button" data-action="toggle-project" data-project-key="${escapeHtml(group.key)}" aria-expanded="${expanded ? "true" : "false"}">
@@ -921,15 +951,15 @@
                   <span class="nwt-project-copy">
                     <span class="nwt-task-title">
                       <strong>${escapeHtml(group.title || "未命名剧本")}</strong>
-                      <i class="nwt-task-state ${groupState}"></i>
+                      <span class="nwt-project-badge ${groupState}">${statusLabel}</span>
                     </span>
                     <span class="nwt-project-meta">
                       <span>${group.versions.length} 个版本</span>
                       <span>${escapeHtml(formatHistoryTime(latest.updated_at || latest.created_at))}</span>
                     </span>
-                    <span class="nwt-task-status">${escapeHtml(statusText)}</span>
+                    <span class="nwt-task-status"><i class="nwt-task-state ${groupState}"></i>${escapeHtml(statusText)}</span>
                   </span>
-                  <span class="nwt-project-chevron">${icon("chevron-down", 15)}</span>
+                  <span class="nwt-project-chevron" aria-hidden="true">${icon("chevron-down", 15)}</span>
                 </button>
                 <div class="nwt-version-list" ${expanded ? "" : "hidden"}>
                   ${group.versions.map((item, index) => {
@@ -944,7 +974,7 @@
                             <time>${escapeHtml(formatHistoryTime(item.updated_at || item.created_at))}</time>
                           </span>
                           <span class="nwt-version-detail">${escapeHtml(item.production_type || "剧本")} · ${item.mode === "续写" ? `续写第${escapeHtml(item.episode_start || "?")}-${escapeHtml(item.episode_end || "?")}集` : `${escapeHtml(item.episodes || 0)}集`}</span>
-                          <span class="nwt-version-status"><i class="nwt-task-state ${itemRunning ? "running" : item.has_final_script ? "done" : String(item.status || "").toLowerCase() === "failed" ? "failed" : ""}"></i>${escapeHtml(item.status_text || item.status || "")}</span>
+                          <span class="nwt-version-status"><i class="nwt-task-state ${itemRunning ? "running" : item.has_final_script ? "done" : String(item.status || "").toLowerCase() === "failed" ? "failed" : ""}"></i>${escapeHtml(item.has_final_script ? "已交付" : item.status_text || item.status || "待生成")}</span>
                           <span class="nwt-task-progress"><i style="width:${Math.max(0, Math.min(100, Number(item.progress) || 0))}%"></i></span>
                         </button>
                         <button class="nwt-icon-btn danger nwt-version-delete" type="button" title="${itemRunning ? "运行中的版本不能删除" : "删除这个版本"}" data-action="delete-history" data-job-id="${escapeHtml(item.job_id)}" ${itemRunning ? "disabled" : ""}>${icon("trash-2", 14)}</button>
@@ -954,7 +984,7 @@
                 </div>
               </section>
             `;
-          }).join("") : '<div class="nwt-task-empty"><span>暂无任务</span><small>创建后会在这里持续显示进度</small></div>'}
+          }).join("") : `<div class="nwt-task-empty"><span>${filter === "all" ? "暂无项目" : "没有符合条件的项目"}</span><small>${filter === "all" ? "创建一个剧本任务后，会在这里持续显示版本进度" : "可以切换筛选条件查看其他项目"}</small></div>`}
         </div>
       </aside>
     `;
@@ -1837,6 +1867,13 @@
     if (action === "save-editor") saveEditor();
     if (action === "rewrite-editor") rewriteEditor();
     if (action === "refresh-history") loadHistory();
+    if (action === "task-filter") {
+      state.taskFilter = ["all", "running", "delivered", "attention"].includes(button.dataset.taskFilter)
+        ? button.dataset.taskFilter
+        : "all";
+      saveState();
+      render();
+    }
     if (action === "toggle-project") toggleProjectGroup(String(button.dataset.projectKey || ""));
     if (action === "open-history") openHistory(String(button.dataset.jobId || ""));
     if (action === "delete-history") deleteHistory(String(button.dataset.jobId || ""));

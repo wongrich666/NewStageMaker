@@ -9,7 +9,9 @@ from workflow_code_skeleton.app.services.distillation_lab import (
     SKILL_MODULE_KEYS,
     SKILL_SCHEMA_VERSION,
     DistillationLabStore,
+    _complete_json_with_repair,
 )
+from workflow_code_skeleton.app.services.deepseek_agent import DeepSeekJSONError
 
 
 def test_distillation_lab_builds_versions_and_keeps_workflow_detached(tmp_path, monkeypatch) -> None:
@@ -158,6 +160,10 @@ def test_distillation_lab_builds_versions_and_keeps_workflow_detached(tmp_path, 
         time.sleep(0.05)
     assert rerun["status"] == "completed", rerun.get("error")
     assert len(call_prompts) == 3, "cached source evidence should not be charged twice"
+    assert all(
+        source["status"] == "analyzed"
+        for source in store.get_project(7, project["id"])["sources"]
+    )
 
     unpublished = store.unpublish_version(7, project["id"], version["id"])
     assert unpublished["status"] == "candidate"
@@ -176,6 +182,120 @@ def test_distillation_lab_rejects_unsupported_sources(tmp_path) -> None:
         assert "Word、PDF、TXT" in str(exc)
     else:
         raise AssertionError("unsupported source must be rejected")
+
+
+def test_distillation_json_repair_uses_the_actual_malformed_response(monkeypatch) -> None:
+    prompts: list[str] = []
+
+    def fake_complete_json(prompt: str, **_kwargs):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            raise DeepSeekJSONError(
+                "剧本 Agent 没有返回合法JSON。",
+                content='{"summary":"已有证据",}',
+                finish_reason="stop",
+            )
+        return {"structured_output": {"summary": "已有证据"}}
+
+    monkeypatch.setattr(
+        "workflow_code_skeleton.app.services.distillation_lab.deepseek_agent_client.complete_json",
+        fake_complete_json,
+    )
+
+    result = _complete_json_with_repair(
+        "analyse source",
+        system_prompt="json only",
+        max_tokens=100,
+        timeout_seconds=30,
+    )
+
+    assert result == {"summary": "已有证据"}
+    assert '待修复内容：\n{"summary":"已有证据",}' in prompts[1]
+    assert "analyse source" not in prompts[1]
+
+
+def test_distillation_json_repair_compactly_regenerates_after_repair_failure(monkeypatch) -> None:
+    prompts: list[str] = []
+
+    def fake_complete_json(prompt: str, **_kwargs):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            raise DeepSeekJSONError(
+                "剧本 Agent 没有返回合法JSON。",
+                content='{"summary":"未闭合"',
+                finish_reason="stop",
+            )
+        if len(prompts) == 2:
+            raise DeepSeekJSONError(
+                "剧本 Agent 没有返回合法JSON。",
+                content='{"summary":"仍未闭合"',
+                finish_reason="stop",
+            )
+        return {"structured_output": {"summary": "紧凑证据"}}
+
+    monkeypatch.setattr(
+        "workflow_code_skeleton.app.services.distillation_lab.deepseek_agent_client.complete_json",
+        fake_complete_json,
+    )
+
+    result = _complete_json_with_repair(
+        "analyse source",
+        system_prompt="json only",
+        max_tokens=100,
+        timeout_seconds=30,
+    )
+
+    assert result == {"summary": "紧凑证据"}
+    assert "待修复内容" in prompts[1]
+    assert "紧凑重生成" in prompts[2]
+    assert "analyse source" in prompts[2]
+
+
+def test_distillation_skips_one_failed_source_and_keeps_other_evidence(
+    tmp_path, monkeypatch
+) -> None:
+    store = DistillationLabStore(tmp_path / "distillation")
+    project = store.create_project(7, {"name": "容错蒸馏"})
+    repeated = "主角作出选择，阻力随之升级，下一场承接未完成行动。" * 8
+    bad = store.add_source(7, project["id"], "bad.txt", repeated.encode("utf-8"))
+    good = store.add_source(7, project["id"], "good.txt", repeated.encode("utf-8"))
+    corpus = store._parse_sources(7, project["id"])
+
+    def fake_extract(prompt: str, **_kwargs):
+        if "bad.txt" in prompt:
+            raise DeepSeekJSONError("剧本 Agent 没有返回合法JSON。")
+        return {
+            "summary": "可迁移结构",
+            "structure_map": {"mainline_engine": "选择推动阻力升级"},
+            "surface_elements": {
+                key: []
+                for key in (
+                    "character_names",
+                    "relationship_gimmicks",
+                    "identity_jobs",
+                    "props_and_evidence",
+                    "locations_and_world_rules",
+                    "concrete_incidents",
+                    "medical_or_biological_elements",
+                )
+            },
+        }
+
+    monkeypatch.setattr(
+        "workflow_code_skeleton.app.services.distillation_lab._complete_json_with_repair",
+        fake_extract,
+    )
+
+    evidence = store._extract_evidence(7, project["id"], corpus)
+
+    assert len(evidence) == 1
+    assert evidence[0]["source_id"] == good["id"]
+    with store._connect() as db:
+        bad_row = db.execute("SELECT status,error FROM sources WHERE id=?", (bad["id"],)).fetchone()
+        good_row = db.execute("SELECT status,error FROM sources WHERE id=?", (good["id"],)).fetchone()
+    assert bad_row["status"] == "failed"
+    assert "合法JSON" in bad_row["error"]
+    assert good_row["status"] == "analyzed"
 
 
 def test_quality_gate_rejects_skill_that_copies_sample_surface_elements(tmp_path) -> None:

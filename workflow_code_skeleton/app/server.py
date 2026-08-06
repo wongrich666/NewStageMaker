@@ -292,7 +292,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         else codebuddy_npc_remote_retry_limit
                     ),
                 )
-                if retry_count < retry_limit:
+                retryable_remote_failure = not any(
+                    marker in remote_error.lower()
+                    for marker in ("cancel", "取消", "集数不完整", "实际集号")
+                )
+                if retryable_remote_failure and retry_count < retry_limit:
                     try:
                         job = _submit_remote_npc_stage(
                             job,
@@ -8914,6 +8918,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     @_login_required
     def codebuddy_npc_cancel_stage_api(job_id: str):
         try:
+            current = codebuddy_npc_jobs.load(job_id, user_id=_require_user_id())
+            if current and str(current.get("execution_target") or "") == "remote_cnb":
+                build_sn = str((current.get("build") or {}).get("sn") or "")
+                if build_sn:
+                    try:
+                        codebuddy_npc_client.stop_build(build_sn)
+                    except CodeBuddyNpcError:
+                        logger.warning("failed to stop remote CNB build: %s", build_sn)
             job = codebuddy_npc_stage_runner.request_cancel(
                 job_id=job_id,
                 user_id=_require_user_id(),

@@ -210,6 +210,63 @@ def _append_episode_batch(prefix: str, batch: str) -> str:
     return "\n\n".join(item for item in (str(prefix or "").strip(), value) if item)
 
 
+def _episode_parts(text: str) -> tuple[str, dict[int, str]]:
+    value = str(text or "").strip()
+    matches = list(EPISODE_HEADER.finditer(value))
+    if not matches:
+        return value, {}
+    prefix = value[: matches[0].start()].strip()
+    parts: dict[int, str] = {}
+    for index, match in enumerate(matches):
+        episode = int(match.group(1))
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(value)
+        parts.setdefault(episode, value[match.start() : end].strip())
+    return prefix, parts
+
+
+def _merge_episode_outputs(
+    current: str,
+    incoming: str,
+    *,
+    episode_start: int,
+    episode_end: int,
+) -> str:
+    current_prefix, current_parts = _episode_parts(current)
+    incoming_prefix, incoming_parts = _episode_parts(incoming)
+    for episode, content in incoming_parts.items():
+        if episode_start <= episode <= episode_end:
+            current_parts.setdefault(episode, content)
+    prefix = current_prefix or incoming_prefix
+    ordered = [
+        current_parts[episode]
+        for episode in range(episode_start, episode_end + 1)
+        if episode in current_parts
+    ]
+    return "\n\n".join(item for item in ([prefix] if prefix else []) + ordered)
+
+
+def _missing_episode_ranges(
+    text: str,
+    *,
+    episode_start: int,
+    episode_end: int,
+    batch_size: int = BATCH_SIZE,
+) -> list[tuple[int, int]]:
+    present = set(_episode_numbers(text))
+    missing = [
+        episode
+        for episode in range(episode_start, episode_end + 1)
+        if episode not in present
+    ]
+    ranges: list[tuple[int, int]] = []
+    for episode in missing:
+        if not ranges or episode != ranges[-1][1] + 1 or episode - ranges[-1][0] >= batch_size:
+            ranges.append((episode, episode))
+        else:
+            ranges[-1] = (ranges[-1][0], episode)
+    return ranges
+
+
 def _compact_context(text: str, limit: int) -> str:
     value = str(text or "").strip()
     if len(value) <= limit:
@@ -600,23 +657,23 @@ class CodeBuddyNpcStageRunner:
                 f"{STAGE_NAMES[stage]}缺少上游内容：" + "、".join(missing),
                 status_code=409,
             )
-        if stage == "final_editor":
-            current_final = str(job.get("final_script") or "").strip()
-            numbers = _episode_numbers(current_final)
-            request_data = job.get("request") or {}
-            episode_start = max(1, int(request_data.get("episode_start") or 1))
-            episode_end = max(
-                episode_start,
-                int(request_data.get("episode_end") or episode_start),
-            )
-            job["stage_resume_text"] = (
-                current_final
-                if numbers == list(range(episode_start, episode_start + len(numbers)))
-                and numbers
-                and numbers[-1] < episode_end
-                else ""
-            )
+        resume_text = ""
+        batch_progress = job.get("batch_progress") or {}
+        resumable_status = str(job.get("status") or "") in {
+            "failed",
+            "stage_paused",
+            "stage_running",
+        }
+        if (
+            stage in {"episode_continuity", "script_writer", "final_editor"}
+            and resumable_status
+            and str(batch_progress.get("stage") or "") == stage
+        ):
+            resume_text = str(job.get("stage_resume_text") or "").strip()
+        if stage == "final_editor" and not resume_text:
+            resume_text = str(job.get("final_script") or "").strip()
         self._invalidate_from(job, stage)
+        job["stage_resume_text"] = resume_text
         # A failed CNB auto job can be taken over locally from any recovered checkpoint.
         timing = (job.get("stage_timings") or {}).get(stage) or {}
         continuing_remote_attempt = (
@@ -663,7 +720,15 @@ class CodeBuddyNpcStageRunner:
         if not job:
             raise CodeBuddyNpcError("NPC 剧本任务不存在。", status_code=404)
         job["cancel_requested"] = True
-        job["status_text"] = "将在当前节点返回后停止"
+        if self.is_running(job_id):
+            job["status_text"] = "将在当前模型请求返回后停止"
+        else:
+            active_stage = str(job.get("active_stage") or "")
+            if active_stage in STAGE_ORDER:
+                finish_stage_timing(job, active_stage, status="paused")
+            job["status"] = "stage_paused"
+            job["status_text"] = "流程已停止，已完成批次和中间产物均已保留"
+            job["active_stage"] = ""
         return self.store.save(job)
 
     def edit_artifact(
@@ -727,6 +792,8 @@ class CodeBuddyNpcStageRunner:
         job["final_script"] = ""
         job["quality_gate"] = {}
         job["error"] = ""
+        job.pop("batch_progress", None)
+        job.pop("stage_resume_text", None)
 
     def _run(
         self,
@@ -783,11 +850,23 @@ class CodeBuddyNpcStageRunner:
             job = self.store.load(job_id, user_id=user_id)
             if job:
                 failed_stage = str(job.get("active_stage") or "")
+                cancelled = bool(job.get("cancel_requested"))
                 if failed_stage in STAGE_ORDER:
-                    finish_stage_timing(job, failed_stage, status="failed")
-                job["status"] = "failed"
-                job["status_text"] = f"{STAGE_NAMES.get(job.get('active_stage'), '节点')}运行失败"
-                job["error"] = str(exc)
+                    finish_stage_timing(
+                        job,
+                        failed_stage,
+                        status="paused" if cancelled else "failed",
+                    )
+                if cancelled:
+                    job["status"] = "stage_paused"
+                    job["status_text"] = "流程已停止，已完成批次和中间产物均已保留"
+                    job["error"] = ""
+                else:
+                    job["status"] = "failed"
+                    job["status_text"] = (
+                        f"{STAGE_NAMES.get(job.get('active_stage'), '节点')}运行失败"
+                    )
+                    job["error"] = str(exc)
                 job["active_stage"] = ""
                 self.store.save(job)
         finally:
@@ -973,15 +1052,18 @@ class CodeBuddyNpcStageRunner:
             or ((minimum * 110 + 99) // 100)
         )
         artifacts = job.get("recovered_files") or {}
-        result = str(job.get("stage_resume_text") or "").strip() if stage == "final_editor" else ""
-        existing = _episode_numbers(result)
-        expected_prefix = list(range(episode_start, episode_start + len(existing)))
-        start_episode = (
-            episode_start + len(existing)
-            if existing == expected_prefix
-            else episode_start
+        result = str(job.get("stage_resume_text") or "").strip()
+        result = _merge_episode_outputs(
+            "",
+            result,
+            episode_start=episode_start,
+            episode_end=episode_end,
         )
-        if start_episode > episode_end:
+        if not _missing_episode_ranges(
+            result,
+            episode_start=episode_start,
+            episode_end=episode_end,
+        ):
             return result
 
         if stage == "final_editor":
@@ -999,21 +1081,35 @@ class CodeBuddyNpcStageRunner:
         fixed_context += _module_text(stage, artifacts)
         fixed_context += _distilled_skill_text(stage, job)
         fixed_context += _continuation_instruction(request_data)
-        batch_total = (episode_end - start_episode + BATCH_SIZE) // BATCH_SIZE
-        completed_ranges: list[list[int]] = []
-        for batch_start in range(start_episode, episode_end + 1, BATCH_SIZE):
+        batch_total = (episode_end - episode_start + BATCH_SIZE) // BATCH_SIZE
+        no_progress_attempts: dict[tuple[int, int], int] = {}
+        while True:
+            missing_ranges = _missing_episode_ranges(
+                result,
+                episode_start=episode_start,
+                episode_end=episode_end,
+            )
+            if not missing_ranges:
+                break
+            batch_start, batch_end = missing_ranges[0]
             fresh = self.store.load(str(job["job_id"]), user_id=int(job["user_id"]))
             if not fresh or fresh.get("cancel_requested"):
                 raise CodeBuddyNpcError("流程已停止，已完成批次将作为断点保留。", status_code=409)
-            batch_end = min(episode_end, batch_start + BATCH_SIZE - 1)
             expected = list(range(batch_start, batch_end + 1))
+            completed_episodes = sorted(
+                set(_episode_numbers(result))
+                & set(range(episode_start, episode_end + 1))
+            )
             fresh["batch_progress"] = {
                 "stage": stage,
                 "stage_name": STAGE_NAMES[stage],
                 "current_start": batch_start,
                 "current_end": batch_end,
-                "completed_ranges": completed_ranges,
-                "completed_batches": len(completed_ranges),
+                "completed_episodes": completed_episodes,
+                "missing_ranges": [list(item) for item in missing_ranges],
+                "completed_batches": (
+                    len(completed_episodes) + BATCH_SIZE - 1
+                ) // BATCH_SIZE,
                 "total_batches": batch_total,
                 "episode_total": total,
                 "episode_start": episode_start,
@@ -1027,7 +1123,8 @@ class CodeBuddyNpcStageRunner:
             self.store.save(fresh)
             episode_cards = _episode_slice(str(artifacts.get("episodes") or ""), batch_start, batch_end)
             draft = _episode_slice(str(artifacts.get("draft") or ""), batch_start, batch_end)
-            previous_tail = result[-1800:] if result else "无，这是第一批。"
+            previous_text = _episode_slice(result, batch_start - 1, batch_start - 1)
+            previous_tail = previous_text[-1800:] if previous_text else "无，这是第一批。"
             if stage == "episode_continuity":
                 batch_material = "本批逐集卡尚未生成。请依据锁定故事为本批新建逐集连续性卡。"
                 batch_draft = "不适用。本节点只设计逐集卡，不写剧本正文。"
@@ -1058,7 +1155,7 @@ class CodeBuddyNpcStageRunner:
 ===== 上一批结尾，仅用于连续承接 =====
 {previous_tail}
 
-只输出第{batch_start}集至第{batch_end}集，共{len(expected)}集，不得输出其他集。
+本次是缺失集定向补齐。只输出第{batch_start}集至第{batch_end}集，共{len(expected)}集，不得重写已完成集。
 {length_contract}
 保持统一集号格式；正文节点还必须保持场景格式、人物署名对白和人物名OS。
 普通停顿使用逗号、句号、问号或感叹号；迟疑和未尽使用省略号。
@@ -1083,24 +1180,47 @@ class CodeBuddyNpcStageRunner:
                 batch_start=batch_start,
                 batch_end=batch_end,
             )
-            numbers = _episode_numbers(batch)
-            if numbers != expected:
+            before = set(_episode_numbers(result))
+            result = _merge_episode_outputs(
+                result,
+                batch,
+                episode_start=episode_start,
+                episode_end=episode_end,
+            )
+            added = set(_episode_numbers(result)) - before
+            if not added.intersection(expected):
+                key = (batch_start, batch_end)
+                no_progress_attempts[key] = no_progress_attempts.get(key, 0) + 1
+            else:
+                no_progress_attempts.pop((batch_start, batch_end), None)
+            if no_progress_attempts.get((batch_start, batch_end), 0) >= 3:
                 raise CodeBuddyNpcError(
-                    f"{STAGE_NAMES[stage]}第{batch_start}-{batch_end}集批次集号异常：{numbers}",
+                    f"{STAGE_NAMES[stage]}连续3次未能补齐第{batch_start}-{batch_end}集，"
+                    f"已保留集号{_episode_numbers(result)}作为断点。",
                     status_code=502,
                 )
-            result = _append_episode_batch(result, batch)
-            completed_ranges.append([batch_start, batch_end])
             checkpoint = self.store.load(str(job["job_id"]), user_id=int(job["user_id"]))
             if checkpoint:
                 checkpoint["stage_resume_text"] = result
+                remaining = _missing_episode_ranges(
+                    result,
+                    episode_start=episode_start,
+                    episode_end=episode_end,
+                )
+                completed_episodes = sorted(
+                    set(_episode_numbers(result))
+                    & set(range(episode_start, episode_end + 1))
+                )
                 checkpoint["batch_progress"] = {
                     "stage": stage,
                     "stage_name": STAGE_NAMES[stage],
                     "current_start": batch_start,
                     "current_end": batch_end,
-                    "completed_ranges": completed_ranges,
-                    "completed_batches": len(completed_ranges),
+                    "completed_episodes": completed_episodes,
+                    "missing_ranges": [list(item) for item in remaining],
+                    "completed_batches": (
+                        len(completed_episodes) + BATCH_SIZE - 1
+                    ) // BATCH_SIZE,
                     "total_batches": batch_total,
                     "episode_total": total,
                     "episode_start": episode_start,
@@ -1108,13 +1228,13 @@ class CodeBuddyNpcStageRunner:
                     "batch_size": BATCH_SIZE,
                 }
                 checkpoint["status_text"] = (
-                    f"{STAGE_NAMES[stage]}已完成第{batch_start}-{batch_end}集，"
-                    f"继续处理至第{episode_end}集"
+                    f"{STAGE_NAMES[stage]}已保存{len(completed_episodes)}/{total}集，"
+                    + (f"正在补齐缺失集{remaining[0][0]}-{remaining[0][1]}" if remaining else "集数已齐全")
                 )
                 checkpoint["progress"] = round(
                     (
                         STAGE_ORDER.index(stage)
-                        + (batch_end - episode_start + 1) / total
+                        + len(completed_episodes) / total
                     )
                     / len(STAGE_ORDER)
                     * 100
