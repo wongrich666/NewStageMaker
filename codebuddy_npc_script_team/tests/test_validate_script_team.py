@@ -96,6 +96,15 @@ def _state(episodes: int = 1) -> dict:
             "target_words_per_episode": 100,
             "immutable_facts": ["工作室隔壁是电梯井"],
         },
+        "mainline_lock": {
+            "protagonist": "林深",
+            "goal": "找出文档自行改写的原因",
+            "core_obstacle": "异常会反向篡改他的记忆",
+            "protagonist_action": "验证每次改写留下的痕迹",
+            "stakes": "失去对现实的判断",
+            "pursuit_question": "墙后的人是否由他写出来",
+            "ending_direction": "林深主动面对被写出的另一个自己",
+        },
         "characters": [_character()],
         "props": [{"name": "键盘", "first_appearance": 1, "source": "工作室原有物品"}],
         "episodes": items,
@@ -107,6 +116,16 @@ def _state(episodes: int = 1) -> dict:
                 "status": "open",
                 "resolved_episode": None,
             }
+        ],
+        "plan_alignment": [
+            {
+                "episode": number,
+                "planned_mainline_advance": "确认异常来源",
+                "actual_mainline_advance": "确认异常与小说人物有关",
+                "status": "aligned",
+                "issue": "",
+            }
+            for number in range(1, episodes + 1)
         ],
     }
 
@@ -160,6 +179,60 @@ def test_state_requires_voice_recipe_and_episode_bridge() -> None:
     codes = {item["code"] for item in report.errors}
     assert "state.voice.missing" in codes
     assert "state.bridge.missing" in codes
+
+
+def test_bridge_evidence_must_exist_in_adjacent_episode_text() -> None:
+    state = _state(episodes=2)
+    state["episodes"][1]["continuity_bridge"] = {
+        "previous_episode": 1,
+        "from_action": "墙后再次传来三声敲击。",
+        "to_action": "林深贴近墙面听声音。",
+        "reason": "继续确认上一集未完成动作",
+    }
+    script = (
+        "第1集：《三声》\n场景1：工作室｜夜｜内\n人物：林深\n"
+        + "林深盯着门。" * 30
+        + "\n墙后再次传来三声敲击。\n"
+        + "第2集：《贴墙》\n场景1：工作室｜夜｜内\n人物：林深\n"
+        + "林深贴近墙面听声音。" * 25
+    )
+
+    report = gate.validate(
+        script,
+        state,
+        {"episodes": 2, "episode_word_count": 100},
+        mode="strict",
+    )
+
+    codes = {item["code"] for item in report.warnings}
+    assert "state.bridge.from_evidence" not in codes
+    assert "state.bridge.to_evidence" not in codes
+
+    state["episodes"][1]["continuity_bridge"]["to_action"] = "林深突然去了天台。"
+    report = gate.validate(
+        script,
+        state,
+        {"episodes": 2, "episode_word_count": 100},
+        mode="strict",
+    )
+    assert any(item["code"] == "state.bridge.to_evidence" for item in report.warnings)
+
+
+def test_plan_alignment_deviation_is_exposed_to_final_editor() -> None:
+    state = _state()
+    state["plan_alignment"][0].update(
+        {"status": "deviated", "issue": "计划要求主角查墙，正文却让配角代劳"}
+    )
+    script = f"第1集：《墙后三响》\n{_body('别回头。')}"
+
+    report = gate.validate(
+        script,
+        state,
+        {"episodes": 1, "episode_word_count": 100},
+        mode="strict",
+    )
+
+    assert any(item["code"] == "state.plan_alignment.deviated" for item in report.warnings)
 
 
 def test_supporting_voice_sample_gap_is_warning_not_release_blocker() -> None:
@@ -479,7 +552,7 @@ def test_dialogue_only_scene_gets_non_blocking_performance_warning() -> None:
     assert not any(item["code"] == "script.performance.beat_sparse" for item in report.errors)
 
 
-def test_os_quality_metrics_warn_without_blocking_release() -> None:
+def test_os_quality_metrics_do_not_block_original_os_style() -> None:
     script = (
         "片名：墙后的人\n第1集：《墙后三响》\n"
         "场景1：工作室｜夜｜内\n人物：林深\n"
@@ -497,10 +570,10 @@ def test_os_quality_metrics_warn_without_blocking_release() -> None:
     )
     warning_codes = {item["code"] for item in report.warnings}
 
-    assert "script.os.consecutive" in warning_codes
-    assert "script.os.density" in warning_codes
-    assert "script.os.generic_voice" in warning_codes
-    assert "script.os.visual_reaction_missing" in warning_codes
+    assert "script.os.consecutive" not in warning_codes
+    assert "script.os.density" not in warning_codes
+    assert "script.os.generic_voice" not in warning_codes
+    assert "script.os.visual_reaction_missing" not in warning_codes
     assert not any(item["code"].startswith("script.os.") for item in report.errors)
 
 

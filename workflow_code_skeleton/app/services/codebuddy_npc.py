@@ -68,7 +68,7 @@ STAGE_REQUIRED_ARTIFACTS = {
     "episode_continuity": ("contract", "story", "characters"),
     "script_writer": ("contract", "story", "characters", "episodes"),
     "state_recorder": ("contract", "characters", "episodes", "draft"),
-    "final_editor": ("contract", "draft", "story_state"),
+    "final_editor": ("contract", "episodes", "draft", "story_state"),
 }
 STAGE_NAMES = {
     "showrunner": "总编剧",
@@ -155,6 +155,41 @@ _SOURCE_EPISODE_HEADER = re.compile(
     r"(?im)^\s*(?:#{1,6}\s*)?(?:《[^》\r\n]+》\s*[·\-—]?\s*)?"
     r"(?:第\s*(\d{1,3})\s*集|Episode\s*(\d{1,3})\b)"
 )
+_STAGE_EPISODE_HEADER = re.compile(
+    r"(?im)^\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*"
+    r"(?:(?:第\s*(\d{1,3})\s*集)|(?:Episode\s*(\d{1,3})))"
+)
+_EPISODE_CONTRACT_STAGES = {
+    "episode_continuity",
+    "script_writer",
+    "final_editor",
+}
+
+
+def stage_episode_range_error(
+    stage: str,
+    content: str,
+    request_data: dict[str, Any],
+) -> str:
+    if stage not in _EPISODE_CONTRACT_STAGES:
+        return ""
+    episode_start = max(1, int(request_data.get("episode_start") or 1))
+    total = max(1, int(request_data.get("episodes") or 1))
+    episode_end = max(
+        episode_start,
+        int(request_data.get("episode_end") or (episode_start + total - 1)),
+    )
+    expected = list(range(episode_start, episode_end + 1))
+    actual = [
+        int(match.group(1) or match.group(2))
+        for match in _STAGE_EPISODE_HEADER.finditer(str(content or ""))
+    ]
+    if actual == expected:
+        return ""
+    return (
+        f"{STAGE_NAMES[stage]}集数不完整：要求第{episode_start}-{episode_end}集，"
+        f"实际集号为{actual}"
+    )
 _CREATION_MODES = {"原创", "改编", "续写"}
 _CONTINUATION_POLICIES = {"strict", "light"}
 
@@ -905,6 +940,18 @@ class CodeBuddyNpcClient:
 
         if str(job.get("remote_kind") or "") == "stage":
             if stage_result and remote_stage in STAGE_ARTIFACTS:
+                range_error = stage_episode_range_error(
+                    remote_stage,
+                    stage_result,
+                    job.get("request") or {},
+                )
+                if range_error:
+                    refreshed["status"] = "failed"
+                    refreshed["status_text"] = f"{STAGE_NAMES[remote_stage]}返回集数不完整"
+                    refreshed["error"] = range_error
+                    refreshed["active_stage"] = ""
+                    finish_stage_timing(refreshed, remote_stage, status="failed")
+                    return refreshed
                 artifact_key = STAGE_ARTIFACTS[remote_stage]
                 if artifact_key == "final_script":
                     refreshed["final_script"] = stage_result

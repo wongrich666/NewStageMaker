@@ -15,6 +15,7 @@ from workflow_code_skeleton.app.services.codebuddy_npc import (
     CodeBuddyNpcJobStore,
     finish_stage_timing,
     public_job,
+    stage_episode_range_error,
     start_stage_timing,
 )
 from workflow_code_skeleton.app.services.codebuddy_npc_stage_runner import (
@@ -93,6 +94,19 @@ def test_job_store_preserves_request_and_user_boundary(tmp_path: Path) -> None:
     assert job["request"]["episode_word_count_tolerance_percent"] == 10
     assert store.load(job["job_id"], user_id=7)["user_id"] == 7
     assert store.load(job["job_id"], user_id=8) is None
+
+
+def test_remote_stage_result_rejects_missing_episode_range() -> None:
+    result = "\n\n".join(
+        f"第{episode}集：《测试》\n场景1：工作室｜夜｜内"
+        for episode in range(1, 6)
+    )
+
+    assert stage_episode_range_error(
+        "episode_continuity",
+        result,
+        {"episode_start": 1, "episode_end": 10, "episodes": 10},
+    ) == "分集连续性编剧集数不完整：要求第1-10集，实际集号为[1, 2, 3, 4, 5]"
 
 
 def test_stage_timing_is_live_then_persists_completed_duration() -> None:
@@ -515,7 +529,7 @@ def test_trigger_final_editor_sends_only_required_checkpoint_artifacts(tmp_path:
         "contract": "创作合同",
         "story": "不应发送的故事圣经" * 10_000,
         "characters": "不应发送的人物方案" * 10_000,
-        "episodes": "不应发送的分集卡" * 10_000,
+        "episodes": "终审需要的分集卡" * 10_000,
         "draft": "完整正文",
         "story_state": '{"continuity":"状态"}',
     }
@@ -531,11 +545,12 @@ def test_trigger_final_editor_sends_only_required_checkpoint_artifacts(tmp_path:
     assert checkpoint == {
         "recovered_files": {
             "contract": "创作合同",
+            "episodes": "终审需要的分集卡" * 10_000,
             "draft": "完整正文",
             "story_state": '{"continuity":"状态"}',
         }
     }
-    assert len(encoded) < 2_000
+    assert len(encoded) < 4_000
 
 
 def test_refresh_remote_stage_recovers_artifact(tmp_path: Path) -> None:
@@ -605,7 +620,11 @@ def test_refresh_remote_stage_recovers_compressed_artifact_after_log_truncation(
     config = _config(tmp_path)
     job = CodeBuddyNpcJobStore(config).create(
         user_id=1,
-        request_payload={"project_title": "长分集卡", "source_text": "百年囚笼。"},
+        request_payload={
+            "project_title": "长分集卡",
+            "source_text": "百年囚笼。",
+            "episodes": 1,
+        },
     )
     job.update(
         {

@@ -141,6 +141,16 @@ def _text_size(text: str) -> int:
     return len(re.sub(r"\s+", "", text))
 
 
+def _normalized_evidence(text: str) -> str:
+    return re.sub(r"[^\u3400-\u4dbf\u4e00-\u9fffA-Za-z0-9]+", "", str(text or "")).lower()
+
+
+def _evidence_present(evidence: str, body: str) -> bool:
+    needle = _normalized_evidence(evidence)
+    haystack = _normalized_evidence(body)
+    return len(needle) >= 4 and needle in haystack
+
+
 def _word_units(text: str) -> int:
     """Count CJK characters and Latin words using the user's writing unit."""
     return len(
@@ -321,6 +331,7 @@ def _validate_state_episodes(
     minimum_scenes: int,
     maximum_scenes: int | None,
     strict: bool,
+    episode_bodies: dict[int, str],
 ) -> None:
     if not isinstance(state_episodes, list):
         report.issue("state.episodes.invalid", "story_state.episodes 必须是数组")
@@ -390,6 +401,74 @@ def _validate_state_episodes(
                     report.issue("state.bridge.previous", "承接桥上一集编号错误", episode=episode_no)
                 for key in ("from_action", "to_action", "reason"):
                     _require_text(report, bridge, key, code="state.bridge.field", episode=episode_no)
+                previous_body = episode_bodies.get(episode_no - 1)
+                current_body = episode_bodies.get(episode_no)
+                if previous_body is not None and not _evidence_present(
+                    str(bridge.get("from_action") or ""), previous_body
+                ):
+                    report.issue(
+                        "state.bridge.from_evidence",
+                        "承接桥 from_action 不是上一集正文中的真实摘录",
+                        episode=episode_no,
+                        error=False,
+                    )
+                if current_body is not None and not _evidence_present(
+                    str(bridge.get("to_action") or ""), current_body
+                ):
+                    report.issue(
+                        "state.bridge.to_evidence",
+                        "承接桥 to_action 不是本集开头正文中的真实摘录",
+                        episode=episode_no,
+                        error=False,
+                    )
+
+
+def _validate_plan_alignment(
+    report: GateReport,
+    alignment: Any,
+    expected_numbers: list[int],
+) -> None:
+    if not isinstance(alignment, list):
+        report.issue(
+            "state.plan_alignment.missing",
+            "状态记录缺少逐集主线计划与正文实际推进的比对",
+            error=False,
+        )
+        return
+    numbers = [item.get("episode") for item in alignment if isinstance(item, dict)]
+    if numbers != expected_numbers:
+        report.issue(
+            "state.plan_alignment.sequence",
+            f"主线比对集号应为 {expected_numbers}，实际为 {numbers}",
+            error=False,
+        )
+    for item in alignment:
+        if not isinstance(item, dict):
+            continue
+        episode = item.get("episode")
+        episode_no = episode if isinstance(episode, int) else None
+        status = str(item.get("status") or "").strip().lower()
+        if status == "deviated":
+            report.issue(
+                "state.plan_alignment.deviated",
+                str(item.get("issue") or "正文偏离逐集卡的主线推进"),
+                episode=episode_no,
+                error=False,
+            )
+        elif status == "unverified":
+            report.issue(
+                "state.plan_alignment.unverified",
+                "代码降级账本未完成语义比对，终审必须依据逐集卡核对",
+                episode=episode_no,
+                error=False,
+            )
+        elif status != "aligned":
+            report.issue(
+                "state.plan_alignment.status",
+                "plan_alignment.status 必须为 aligned、deviated 或 unverified",
+                episode=episode_no,
+                error=False,
+            )
 
 
 def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mode: str) -> GateReport:
@@ -405,6 +484,7 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
     target_seconds = max(15, int(request.get("episode_duration_seconds") or 90))
     scene_policy, minimum_scenes, maximum_scenes = _scene_contract(request)
     episodes = _split_episodes(script)
+    episode_bodies = dict(episodes)
     numbers = [number for number, _ in episodes]
     report.metrics.update(
         {
@@ -500,37 +580,6 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
                 episode=episode_no,
                 error=False,
             )
-        if performance["longest_consecutive_os"] >= 2:
-            report.issue(
-                "script.os.consecutive",
-                "检测到连续OS；请合并为一个人物化判断，并让下一拍转为台词、选择或可见动作",
-                episode=episode_no,
-                error=False,
-            )
-        if performance["os_lines"] >= 3 and performance["os_dialogue_ratio"] > 0.35:
-            report.issue(
-                "script.os.density",
-                "OS相对对白偏密；请删除可由动作、表情或潜台词表达的心理复述",
-                episode=episode_no,
-                error=False,
-            )
-        if performance["generic_os_lines"]:
-            report.issue(
-                "script.os.generic_voice",
-                "检测到可互换的通用OS；请改成人物基于身份、经历和关系作出的私人判断",
-                episode=episode_no,
-                error=False,
-            )
-        if (
-            performance["os_lines"] >= 2
-            and performance["os_with_adjacent_visible_reaction"] < 1
-        ):
-            report.issue(
-                "script.os.visual_reaction_missing",
-                "多处OS均缺少相邻可见反应；需要镜头承载掩饰或破绽时，请补人物专属微动作",
-                episode=episode_no,
-                error=False,
-            )
         if performance["maximum_repeated_performance_cue"] >= 3:
             report.issue(
                 "script.performance.cue_repeated",
@@ -599,7 +648,23 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
         minimum_scenes=minimum_scenes,
         maximum_scenes=maximum_scenes,
         strict=mode == "strict",
+        episode_bodies=episode_bodies,
     )
+    mainline_lock = state.get("mainline_lock")
+    if not isinstance(mainline_lock, dict):
+        report.issue("state.mainline_lock.missing", "story_state 缺少主线锁", error=False)
+    else:
+        for key in (
+            "protagonist",
+            "goal",
+            "core_obstacle",
+            "protagonist_action",
+            "stakes",
+            "pursuit_question",
+            "ending_direction",
+        ):
+            _require_text(report, mainline_lock, key, code="state.mainline_lock.field")
+    _validate_plan_alignment(report, state.get("plan_alignment"), expected_numbers)
     if not isinstance(state.get("props"), list):
         report.issue("state.props.invalid", "story_state.props 必须是数组")
     if not isinstance(state.get("open_threads"), list):

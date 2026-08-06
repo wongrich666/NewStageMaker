@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 
@@ -42,17 +43,36 @@ def test_opening_hook_keeps_a_short_causal_anchor_after_the_first_beat() -> None
     assert "缺少开场因果锚" in editor_prompt
 
 
-def test_character_specific_os_and_performance_rules_reach_writer_and_editor() -> None:
+def test_mainline_and_continuity_contracts_survive_every_writing_stage() -> None:
+    assert "MAINLINE_LOCK_JSON" in MODULE.PROMPTS["showrunner"]
+    assert "主线推进账本" in MODULE.PROMPTS["story_architect"]
+    assert "本集主线推进" in MODULE.PROMPTS["episode_continuity"]
+    assert "结尾状态" in MODULE.PROMPTS["episode_continuity"]
+    assert "MAINLINE_LOCK_JSON→逐集卡" in MODULE.PROMPTS["script_writer"]
+    assert "不得新增重大人物" in MODULE.PROMPTS["script_writer"]
+    assert "plan_alignment" in MODULE.PROMPTS["state_recorder"]
+    assert "只允许重写开头1至3个有效拍" in MODULE.PROMPTS["final_editor"]
+    assert MODULE.CONTEXT_FILES["final_editor"] == (
+        "showrunner",
+        "episode_continuity",
+        "script_writer",
+        "state_recorder",
+    )
+    assert "showrunner" in MODULE.CONTEXT_FILES["state_recorder"]
+
+
+def test_original_os_format_and_performance_rules_reach_writer_and_editor() -> None:
     character_prompt = MODULE.PROMPTS["character_emotion"]
     writer_prompt = MODULE.PROMPTS["script_writer"]
     editor_prompt = MODULE.PROMPTS["final_editor"]
 
     assert "表演指纹" in character_prompt
-    assert "OS的用词、句长、判断习惯" in character_prompt
-    assert "动作、表情和潜台词已经能表达" in writer_prompt
-    assert "微反应与OS各自提供新信息" in writer_prompt
+    assert "心理活动采用假设、验证、被推翻" in character_prompt
+    assert "所有心理活动必须采用" in writer_prompt
+    assert "人物名OS：心理活动" in writer_prompt
     assert "不得为了满足数量给每句加括号" in editor_prompt
-    assert "删除复述动作、台词或已知情绪的OS" in editor_prompt
+    assert "所有心理活动保持" in editor_prompt
+    assert "发现无人物归属的对白或心理活动时补齐人物名" in editor_prompt
 
 
 def test_continuation_contract_uses_actual_episode_range(monkeypatch) -> None:
@@ -146,6 +166,47 @@ def test_scene_contract_accepts_standard_scene_number_header() -> None:
     ) == []
 
 
+def test_episode_range_contract_rejects_partial_stage_output() -> None:
+    output = "\n".join(
+        f"第{episode}集：《测试{episode}》\n场景1：工作室｜夜｜内"
+        for episode in range(1, 6)
+    )
+
+    assert MODULE.episode_range_violations(
+        output,
+        {"episode_start": 1, "episode_end": 10, "episodes": 10},
+    ) == ["要求完整交付第1-10集，实际集号为[1, 2, 3, 4, 5]"]
+
+
+def test_cloud_stage_batches_long_episode_ranges(monkeypatch) -> None:
+    calls: list[tuple[int, int]] = []
+
+    def fake_call_model(_system_prompt, user_prompt, **_kwargs):
+        start = int(re.search(r'"episode_start":\s*(\d+)', user_prompt).group(1))
+        end = int(re.search(r'"episode_end":\s*(\d+)', user_prompt).group(1))
+        calls.append((start, end))
+        return "\n\n".join(
+            f"第{episode}集：《测试{episode}》\n场景1：工作室｜夜｜内"
+            for episode in range(start, end + 1)
+        )
+
+    monkeypatch.setattr(MODULE, "call_model", fake_call_model)
+
+    result = MODULE.generate_stage_result(
+        "episode_continuity",
+        {
+            "episodes": 10,
+            "episode_start": 1,
+            "episode_end": 10,
+            "scenes_per_episode": "1",
+        },
+        modules="",
+    )
+
+    assert calls == [(1, 5), (6, 10)]
+    assert MODULE.episode_numbers(result) == list(range(1, 11))
+
+
 def test_model_timeout_defaults_to_twenty_minutes(monkeypatch) -> None:
     monkeypatch.delenv("DEEPSEEK_TIMEOUT", raising=False)
 
@@ -206,3 +267,34 @@ def test_distilled_skill_loads_only_modules_routed_to_current_stage() -> None:
     assert "题材情绪承诺" in showrunner
     assert "开篇钩子规则" not in showrunner
     assert "v1.2" in writer
+
+
+def test_distilled_skill_is_prioritized_and_capped_per_stage() -> None:
+    huge = "钩" * 8_000
+    request = {
+        "distilled_skill": {
+            "schema_version": "script-team-skill/v1",
+            "name": "混合题材",
+            "manifest": {
+                "modules": [
+                    {"key": "anti_patterns", "stages": ["final_editor"]},
+                    {"key": "hook_craft", "stages": ["final_editor"]},
+                    {"key": "quality_gate", "stages": ["final_editor"]},
+                    {"key": "dialogue_voice", "stages": ["final_editor"]},
+                ]
+            },
+            "modules": {
+                "anti_patterns": huge,
+                "hook_craft": huge,
+                "quality_gate": huge,
+                "dialogue_voice": huge,
+            },
+        }
+    }
+
+    text = MODULE.distilled_skill_modules("final_editor", request)
+
+    assert text.index("quality_gate") < text.index("hook_craft")
+    assert len(text) < 13_500
+    assert "示例是方法，不是必须照搬的事件、人物或道具" in text
+    assert "不得迁移Skill样本中的人物身份、关系套路、职业、场景、道具、证据手段" in text

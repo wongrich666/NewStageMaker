@@ -68,8 +68,18 @@ SKILL_MODULE_SPECS = {
 SKILL_MODULE_KEYS = tuple(SKILL_MODULE_SPECS)
 # Backward-compatible import name for older callers. Values now represent new-workflow modules.
 STAGE_PROMPT_KEYS = SKILL_MODULE_KEYS
-EVIDENCE_SCHEMA_VERSION = "script-team-evidence/v2"
+EVIDENCE_SCHEMA_VERSION = "script-team-evidence/v3"
 SKILL_SCHEMA_VERSION = "script-team-skill/v1"
+
+SURFACE_ELEMENT_KEYS = (
+    "character_names",
+    "relationship_gimmicks",
+    "identity_jobs",
+    "props_and_evidence",
+    "locations_and_world_rules",
+    "concrete_incidents",
+    "medical_or_biological_elements",
+)
 
 RUN_STAGES = (
     ("parse", "素材解析"),
@@ -160,6 +170,56 @@ def _distillation_sample(text: str, max_chars: int = 32000) -> str:
         + "\n\n[结尾样本]\n"
         + value[-tail_size:]
     )
+
+
+def _surface_terms(evidence: list[dict[str, Any]]) -> list[str]:
+    terms: set[str] = set()
+    for card in evidence:
+        if str(card.get("schema_version") or "") != EVIDENCE_SCHEMA_VERSION:
+            continue
+        surface = card.get("surface_elements")
+        if not isinstance(surface, dict):
+            continue
+        for key in SURFACE_ELEMENT_KEYS:
+            values = surface.get(key)
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                term = re.sub(r"\s+", "", str(value or "").strip(" `*#：:，,。.;；"))
+                if 2 <= len(term) <= 80:
+                    terms.add(term)
+    return sorted(terms)
+
+
+def _surface_leaks(
+    modules: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    *,
+    skill_md: str = "",
+) -> dict[str, list[str]]:
+    terms = _surface_terms(evidence)
+    contents = {key: str(value or "") for key, value in modules.items()}
+    if skill_md:
+        contents["skill_md"] = str(skill_md)
+    leaks: dict[str, list[str]] = {}
+    for key, content in contents.items():
+        matched = [term for term in terms if term in re.sub(r"\s+", "", content)]
+        if matched:
+            leaks[str(key)] = matched
+    return leaks
+
+
+def _evidence_abstraction_errors(card: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(card.get("structure_map"), dict):
+        errors.append("structure_map")
+    surface = card.get("surface_elements")
+    if not isinstance(surface, dict):
+        return errors + ["surface_elements"]
+    for key in SURFACE_ELEMENT_KEYS:
+        if not isinstance(surface.get(key), list):
+            errors.append(f"surface_elements.{key}")
+    return errors
 
 
 def _skill_manifest(project: sqlite3.Row | dict[str, Any], version: str) -> dict[str, Any]:
@@ -700,24 +760,44 @@ class DistillationLabStore:
                 evidence.append(cached)
                 continue
             sample = _distillation_sample(item["text"])
-            prompt = f"""分析以下剧本或文章抽样，生成可追溯的垂类剧本证据卡。不要续写，不要评价作者。
+            prompt = f"""分析以下剧本或文章抽样，生成可追溯的“写法结构证据卡”。不要续写，不要评价作者。
 素材名：{item['name']}
 样本属性：{'反面样本' if item['polarity'] == 'negative' else '正面样本'}
 权重：{item['weight']}
 
 输出JSON字段：
-summary、genre_signals、audience_emotions、story_architecture、character_patterns、hook_patterns、emotion_curve、continuity_patterns、dialogue_style、adversity_payoff、effective_patterns、failure_patterns。
-所有patterns必须是数组；每项包含rule、evidence（概述并标注集数或位置）、conditions、failure_conditions。
-只提取该素材真实证明的内容；普通编剧常识不作为题材证据。不要大段复制原文。
+summary、genre_signals、audience_emotions、structure_map、story_architecture、character_patterns、hook_patterns、emotion_curve、continuity_patterns、dialogue_style、adversity_payoff、effective_patterns、failure_patterns、surface_elements。
+structure_map必须描述写法机制：主线驱动函数、升级阶梯、支线功能、钩子信息结构、情绪释放顺序、场景交接方式和描写技法。
+所有patterns必须是数组；每项包含rule、evidence（概述并标注集数或位置）、conditions、failure_conditions、abstract_slots、transfer_test。
+rule只能写可迁移的叙事功能、信息顺序、节拍关系、人物选择机制和描写手法，不能写原作人物、身份、职业、地点、道具、证据方式、疾病、具体事件或固定男女角色分工。
+evidence只负责证明rule，可以提到原作内容；abstract_slots说明新故事需要自行填充的功能槽位；transfer_test说明换掉人物、时代、题材和道具后规则是否仍成立。
+surface_elements必须是对象，完整包含：character_names、relationship_gimmicks、identity_jobs、props_and_evidence、locations_and_world_rules、concrete_incidents、medical_or_biological_elements；每项都是数组，只登记本素材的表层内容，作为“禁止迁移清单”，不得把它们写进rule。
+只提取该素材真实证明的内容；普通编剧常识不作为题材证据。不要大段复制原文，不要把剧情摘要冒充结构。
 
 素材正文：
 {sample}"""
             result = _complete_json_with_repair(
                 prompt,
-                system_prompt="你是剧本研究员。只输出合法JSON，所有结论必须能由给定素材支持。",
+                system_prompt="你是剧本结构研究员。只输出合法JSON；严格分离可迁移写法与不可迁移的故事表层。",
                 max_tokens=7000,
                 timeout_seconds=900,
             )
+            abstraction_errors = _evidence_abstraction_errors(result)
+            if abstraction_errors:
+                result = _complete_json_with_repair(
+                    f"""修复以下证据卡的结构蒸馏字段，保留已有证据，不得续写剧情。
+缺失或错误字段：{_json(abstraction_errors)}
+structure_map必须是写法机制对象；surface_elements必须完整包含{', '.join(SURFACE_ELEMENT_KEYS)}七个数组，并只登记不可迁移的样本表层元素。
+所有pattern的rule只能写可迁移结构，原作内容只能留在evidence或surface_elements。
+原JSON：
+{_json(result)}""",
+                    system_prompt="你是证据卡结构修复器。只输出一个合法JSON对象。",
+                    max_tokens=7000,
+                    timeout_seconds=900,
+                )
+                abstraction_errors = _evidence_abstraction_errors(result)
+            if abstraction_errors:
+                raise ValueError("证据卡未完成结构/表层分离：" + "、".join(abstraction_errors))
             result.update(
                 {
                     "schema_version": EVIDENCE_SCHEMA_VERSION,
@@ -794,7 +874,7 @@ summary、genre_signals、audience_emotions、story_architecture、character_pat
         if len(evidence_payload) > 120000:
             evidence_payload = evidence_payload[:120000]
         manifest = _skill_manifest(project, version)
-        prompt = f"""把证据卡直接编译成一个供新剧本团队选择加载的垂类编剧Skill。不要写具体剧本。
+        prompt = f"""把证据卡编译成一个供新剧本团队选择加载的“结构与写法Skill”。不要写具体剧本。
 项目：{project['name']}；题材：{project['genre']}；版本：{version}
 市场：{project['market']}；受众：{project['audience']}；边界：{project['description']}
 
@@ -810,8 +890,12 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
 3. 规则必须能指导新剧情，并具有题材或受众区分度；删除“加强冲突”等空泛常识。
 4. 反面样本提炼anti_patterns，不可当成正向范式。
 5. 模块只放对应节点真正需要的规则，禁止九份模块重复同一内容。
-6. 写戏剧功能和判断标准，不写死人物名、道具和具体事件；证据中的表现形式不能变成万能套路。
-7. skill_md只负责触发条件、使用顺序、模块导航和边界，详细规则放modules，节约运行上下文。
+6. 只迁移结构，不迁移故事：规则写“叙事功能+触发条件+变量槽位+节拍关系+失败边界”。
+7. surface_elements是隔离区，其中的人物名、固定关系套路、身份职业、场景世界观、道具、证据手段、疾病和具体事件不得出现在skill_md或modules；即使多篇样本重复出现，也只能说明样本同质，不能升级为结构规律。
+8. 不得规定“男主必须如何、女主必须如何”等固定性别分工；除非项目边界明确要求，否则统一改写为主角、关系对手、权力方、受压方、盟友等功能角色。
+9. 关键物品只能抽象为“承载某段关系/信息/代价且会递进变化的媒介”，不能沿用样本的物品类别；支线只能规定功能、进入条件、回撞主线方式和退出条件，不能沿用样本支线事件。
+10. 每条模块规则必须通过迁移测试：把原作人物、时代、关系、地点、道具全部替换后仍能指导一个不同故事，否则删除或降为hypotheses。
+11. skill_md只负责触发条件、使用顺序、模块导航和边界，详细规则放modules，节约运行上下文。
 
 新工作流路由清单：
 {_json(manifest)}
@@ -827,6 +911,32 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
             max_tokens=16000,
             timeout_seconds=1200,
         )
+        first_modules = (
+            compiled.get("modules") if isinstance(compiled.get("modules"), dict) else {}
+        )
+        first_leaks = _surface_leaks(
+            first_modules,
+            evidence,
+            skill_md=str(compiled.get("skill_md") or ""),
+        )
+        if first_leaks:
+            repair_prompt = f"""上一版Skill误把样本表层内容写进了创作规则，必须做结构抽象修复。
+检测到的污染位置与词项：{_json(first_leaks)}
+
+请在不减少模块、不改变JSON字段的前提下重写上一版：
+1. 删除这些样本专属名词及其同义改写，不得简单换成另一种具体人物、道具或事件。
+2. 将其改为叙事功能、变量槽位、信息顺序、节拍关系和失败边界。
+3. 保留证据支持的写法机制；不续写故事，不新增剧情模板。
+4. 输出仍须包含skill_md、modules、verified_rules、hypotheses、source_conflicts、confidence_notes。
+
+上一版JSON：
+{_json(compiled)}"""
+            compiled = _complete_json_with_repair(
+                repair_prompt,
+                system_prompt="你是Skill结构纯化器。只输出合法JSON，只迁移写法，不迁移故事表层。",
+                max_tokens=16000,
+                timeout_seconds=1200,
+            )
         raw_modules = compiled.get("modules") if isinstance(compiled.get("modules"), dict) else {}
         modules = {key: str(raw_modules.get(key) or "").strip() for key in SKILL_MODULE_KEYS}
         skill_md = str(compiled.get("skill_md") or "").strip()
@@ -886,6 +996,18 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
             if len(cited) >= required_sources and cited.issubset(valid_source_ids):
                 validated_rules += 1
         validation_ratio = validated_rules / len(verified_rules) if verified_rules else 0
+        abstracted_cards = sum(
+            1
+            for item in evidence
+            if str(item.get("schema_version") or "") == EVIDENCE_SCHEMA_VERSION
+            and not _evidence_abstraction_errors(item)
+        )
+        abstraction_ratio = abstracted_cards / source_count if source_count else 0
+        surface_leaks = _surface_leaks(
+            modules,
+            evidence,
+            skill_md=str(version.get("skill_md") or ""),
+        )
         checks = {
             "skill_structure": 100 if "---" in version.get("skill_md", "") else 60,
             "module_coverage": round(filled / len(SKILL_MODULE_KEYS) * 100),
@@ -893,6 +1015,8 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
             "evidence_traceability": round(validation_ratio * 100),
             "boundary_clarity": 100 if any(word in version.get("skill_md", "") for word in ("边界", "失效", "不适用")) else 65,
             "new_workflow_manifest": 100 if assets.get("manifest", {}).get("schema_version") == SKILL_SCHEMA_VERSION else 40,
+            "structural_purity": 100 if not surface_leaks else 0,
+            "structure_surface_separation": round(abstraction_ratio * 100),
         }
         total = round(sum(checks.values()) / len(checks))
         return {
@@ -905,11 +1029,15 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
                 and filled == len(SKILL_MODULE_KEYS)
                 and bool(verified_rules)
                 and validated_rules == len(verified_rules)
+                and not surface_leaks
+                and abstracted_cards == source_count
             ),
             "validation_mode": "deterministic_evidence_gate",
             "deep_blind_test": "not_run",
             "verified_rule_count": len(verified_rules),
             "validated_rule_count": validated_rules,
+            "surface_leaks": surface_leaks,
+            "abstracted_source_count": abstracted_cards,
         }
 
     def update_version(
@@ -950,7 +1078,8 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
 
     def publish_version(self, user_id: int, project_id: str, version_id: str) -> dict[str, Any]:
         version = self.get_version(user_id, project_id, version_id)
-        if not version.get("score", {}).get("ready_to_publish"):
+        score = self._evaluate(version, version.get("evidence") or [])
+        if not score.get("ready_to_publish"):
             raise ValueError("该版本尚未通过完整性评测，不能发布。")
         now = _now()
         with self._write_lock, self._connect() as db:
@@ -959,8 +1088,8 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
                 (now, project_id),
             )
             db.execute(
-                "UPDATE skill_versions SET status='published',published_at=?,updated_at=? WHERE id=?",
-                (now, now, version_id),
+                "UPDATE skill_versions SET status='published',score_json=?,published_at=?,updated_at=? WHERE id=?",
+                (_json(score), now, now, version_id),
             )
             db.execute(
                 "UPDATE projects SET status='published',active_version_id=?,updated_at=? WHERE id=? AND user_id=?",
@@ -994,7 +1123,8 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
             rows = db.execute(
                 """
                 SELECT p.id AS project_id,p.name,p.genre,p.market,p.audience,p.description,
-                       p.active_version_id,v.version,v.score_json,v.updated_at,v.published_at
+                       p.active_version_id,v.version,v.skill_md,v.stage_prompts_json,
+                       v.assets_json,v.evidence_json,v.score_json,v.updated_at,v.published_at
                 FROM projects p
                 JOIN skill_versions v ON v.id=p.active_version_id
                 WHERE p.user_id=? AND p.status='published' AND v.status='published'
@@ -1005,7 +1135,16 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
         cards: list[dict[str, Any]] = []
         for row in rows:
             item = dict(row)
-            score = _loads(item.pop("score_json", "{}"), {})
+            item.pop("score_json", None)
+            version = {
+                "skill_md": str(item.pop("skill_md", "") or ""),
+                "modules": _loads(item.pop("stage_prompts_json", "{}"), {}),
+                "assets": _loads(item.pop("assets_json", "{}"), {}),
+            }
+            evidence = _loads(item.pop("evidence_json", "[]"), [])
+            score = self._evaluate(version, evidence)
+            if not score.get("ready_to_publish"):
+                continue
             identity = f"{item.get('name', '')} {item.get('genre', '')}"
             cover_name = (
                 "romance-angst.png"
@@ -1045,6 +1184,9 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
         missing = [key for key in SKILL_MODULE_KEYS if not str(modules.get(key) or "").strip()]
         if missing:
             raise ValueError("所选 Skill 缺少运行模块：" + "、".join(missing))
+        runtime_score = self._evaluate(version, version.get("evidence") or [])
+        if not runtime_score.get("ready_to_publish"):
+            raise ValueError("所选 Skill 属于旧版剧情复刻型蒸馏，请重新蒸馏并发布结构版。")
         return {
             "schema_version": SKILL_SCHEMA_VERSION,
             "skill_id": skill_id,
@@ -1055,7 +1197,7 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
             "audience": str(project.get("audience") or ""),
             "version_id": selected_version_id,
             "version": str(version.get("version") or ""),
-            "score": int((version.get("score") or {}).get("total") or 0),
+            "score": int(runtime_score.get("total") or 0),
             "skill_md": str(version.get("skill_md") or ""),
             "manifest": manifest,
             "modules": {key: str(modules.get(key) or "") for key in SKILL_MODULE_KEYS},
