@@ -207,6 +207,36 @@ def test_cloud_stage_batches_long_episode_ranges(monkeypatch) -> None:
     assert MODULE.episode_numbers(result) == list(range(1, 11))
 
 
+def test_cloud_stage_repairs_only_missing_episodes(monkeypatch) -> None:
+    calls: list[tuple[int, int]] = []
+
+    def fake_call_model(_system_prompt, user_prompt, **_kwargs):
+        start = int(re.search(r'"episode_start":\s*(\d+)', user_prompt).group(1))
+        end = int(re.search(r'"episode_end":\s*(\d+)', user_prompt).group(1))
+        calls.append((start, end))
+        actual_end = 4 if (start, end) == (1, 5) else end
+        return "\n\n".join(
+            f"第{episode}集：《测试{episode}》\n场景1：工作室｜夜｜内"
+            for episode in range(start, actual_end + 1)
+        )
+
+    monkeypatch.setattr(MODULE, "call_model", fake_call_model)
+
+    result = MODULE.generate_stage_result(
+        "episode_continuity",
+        {
+            "episodes": 10,
+            "episode_start": 1,
+            "episode_end": 10,
+            "scenes_per_episode": "1",
+        },
+        modules="",
+    )
+
+    assert calls == [(1, 5), (5, 9), (10, 10)]
+    assert MODULE.episode_numbers(result) == list(range(1, 11))
+
+
 def test_model_timeout_defaults_to_twenty_minutes(monkeypatch) -> None:
     monkeypatch.delenv("DEEPSEEK_TIMEOUT", raising=False)
 

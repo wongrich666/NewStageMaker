@@ -14,7 +14,12 @@ from typing import Any, Callable
 from docx import Document
 from pypdf import PdfReader
 
-from .deepseek_agent import DeepSeekAgentError, deepseek_agent_client, deepseek_agent_status
+from .deepseek_agent import (
+    DeepSeekAgentError,
+    DeepSeekJSONError,
+    deepseek_agent_client,
+    deepseek_agent_status,
+)
 from .runtime_paths import get_runtime_data_dir
 
 
@@ -252,26 +257,41 @@ def _complete_json_with_repair(
     max_tokens: int,
     timeout_seconds: int,
 ) -> dict[str, Any]:
-    try:
-        return deepseek_agent_client.complete_json(
-            prompt,
-            system_prompt=system_prompt,
-            max_tokens=max_tokens,
-            timeout_seconds=timeout_seconds,
-        )["structured_output"]
-    except DeepSeekAgentError as exc:
-        if "合法JSON" not in str(exc) and "数据格式" not in str(exc):
-            raise
-        repair_system = (
-            system_prompt
-            + " 严格只返回一个可被json.loads解析的JSON对象；不得使用Markdown代码围栏、注释、尾随逗号或正文说明。"
-        )
-        return deepseek_agent_client.complete_json(
-            prompt,
-            system_prompt=repair_system,
-            max_tokens=max_tokens,
-            timeout_seconds=timeout_seconds,
-        )["structured_output"]
+    next_prompt = prompt
+    next_system = system_prompt
+    last_error: DeepSeekAgentError | None = None
+    for attempt in range(3):
+        try:
+            return deepseek_agent_client.complete_json(
+                next_prompt,
+                system_prompt=next_system,
+                max_tokens=max_tokens,
+                timeout_seconds=timeout_seconds,
+            )["structured_output"]
+        except DeepSeekAgentError as exc:
+            if "合法JSON" not in str(exc) and "数据格式" not in str(exc):
+                raise
+            last_error = exc
+            malformed = exc.content if isinstance(exc, DeepSeekJSONError) else ""
+            if attempt == 0 and malformed and getattr(exc, "finish_reason", "") != "length":
+                next_prompt = f"""修复下面这份已生成的JSON。只修正语法，不扩写、不改变字段和内容。
+必须返回一个可被 json.loads 直接解析的JSON对象。
+
+待修复内容：
+{malformed}"""
+            else:
+                next_prompt = (
+                    prompt
+                    + "\n\n【紧凑重生成】此前输出过长、不完整或语法修复失败。"
+                    "重新生成完整JSON；每个数组最多2项，每项只保留一条规则和一条证据，"
+                    "所有文本使用短句，不得重复，不得输出Markdown。"
+                )
+            next_system = (
+                "你是JSON结构修复器。严格只返回一个完整、合法的JSON对象，"
+                "不得输出Markdown、注释或解释。"
+            )
+    assert last_error is not None
+    raise last_error
 
 
 class DistillationLabStore:
@@ -395,6 +415,13 @@ class DistillationLabStore:
     def _source(row: sqlite3.Row) -> dict[str, Any]:
         item = dict(row)
         item["analysis"] = _loads(item.pop("analysis_json", "{}"), {})
+        if (
+            isinstance(item["analysis"], dict)
+            and item["analysis"].get("source_id")
+            and item["analysis"].get("schema_version") == EVIDENCE_SCHEMA_VERSION
+        ):
+            item["status"] = "analyzed"
+            item["error"] = ""
         item.pop("stored_path", None)
         item.pop("extracted_path", None)
         return item
@@ -757,6 +784,11 @@ class DistillationLabStore:
         for item in corpus:
             cached = self._source_analysis(item["id"])
             if cached:
+                with self._write_lock, self._connect() as db:
+                    db.execute(
+                        "UPDATE sources SET status='analyzed',error='',updated_at=? WHERE id=?",
+                        (_now(), item["id"]),
+                    )
                 evidence.append(cached)
                 continue
             sample = _distillation_sample(item["text"])
@@ -769,6 +801,7 @@ class DistillationLabStore:
 summary、genre_signals、audience_emotions、structure_map、story_architecture、character_patterns、hook_patterns、emotion_curve、continuity_patterns、dialogue_style、adversity_payoff、effective_patterns、failure_patterns、surface_elements。
 structure_map必须描述写法机制：主线驱动函数、升级阶梯、支线功能、钩子信息结构、情绪释放顺序、场景交接方式和描写技法。
 所有patterns必须是数组；每项包含rule、evidence（概述并标注集数或位置）、conditions、failure_conditions、abstract_slots、transfer_test。
+每个patterns数组最多3项；每个字段用1至2句短句表达，去掉同义反复，整张证据卡优先保留有原文依据的高价值规则。
 rule只能写可迁移的叙事功能、信息顺序、节拍关系、人物选择机制和描写手法，不能写原作人物、身份、职业、地点、道具、证据方式、疾病、具体事件或固定男女角色分工。
 evidence只负责证明rule，可以提到原作内容；abstract_slots说明新故事需要自行填充的功能槽位；transfer_test说明换掉人物、时代、题材和道具后规则是否仍成立。
 surface_elements必须是对象，完整包含：character_names、relationship_gimmicks、identity_jobs、props_and_evidence、locations_and_world_rules、concrete_incidents、medical_or_biological_elements；每项都是数组，只登记本素材的表层内容，作为“禁止迁移清单”，不得把它们写进rule。
@@ -776,28 +809,41 @@ surface_elements必须是对象，完整包含：character_names、relationship_
 
 素材正文：
 {sample}"""
-            result = _complete_json_with_repair(
-                prompt,
-                system_prompt="你是剧本结构研究员。只输出合法JSON；严格分离可迁移写法与不可迁移的故事表层。",
-                max_tokens=7000,
-                timeout_seconds=900,
-            )
+            try:
+                result = _complete_json_with_repair(
+                    prompt,
+                    system_prompt="你是剧本结构研究员。只输出合法JSON；严格分离可迁移写法与不可迁移的故事表层。",
+                    max_tokens=7000,
+                    timeout_seconds=900,
+                )
+            except DeepSeekAgentError as exc:
+                self._mark_source_analysis_failed(item["id"], exc)
+                continue
+
             abstraction_errors = _evidence_abstraction_errors(result)
             if abstraction_errors:
-                result = _complete_json_with_repair(
-                    f"""修复以下证据卡的结构蒸馏字段，保留已有证据，不得续写剧情。
+                try:
+                    result = _complete_json_with_repair(
+                        f"""修复以下证据卡的结构蒸馏字段，保留已有证据，不得续写剧情。
 缺失或错误字段：{_json(abstraction_errors)}
 structure_map必须是写法机制对象；surface_elements必须完整包含{', '.join(SURFACE_ELEMENT_KEYS)}七个数组，并只登记不可迁移的样本表层元素。
 所有pattern的rule只能写可迁移结构，原作内容只能留在evidence或surface_elements。
 原JSON：
 {_json(result)}""",
-                    system_prompt="你是证据卡结构修复器。只输出一个合法JSON对象。",
-                    max_tokens=7000,
-                    timeout_seconds=900,
-                )
+                        system_prompt="你是证据卡结构修复器。只输出一个合法JSON对象。",
+                        max_tokens=7000,
+                        timeout_seconds=900,
+                    )
+                except DeepSeekAgentError as exc:
+                    self._mark_source_analysis_failed(item["id"], exc)
+                    continue
                 abstraction_errors = _evidence_abstraction_errors(result)
             if abstraction_errors:
-                raise ValueError("证据卡未完成结构/表层分离：" + "、".join(abstraction_errors))
+                self._mark_source_analysis_failed(
+                    item["id"],
+                    ValueError("证据卡未完成结构/表层分离：" + "、".join(abstraction_errors)),
+                )
+                continue
             result.update(
                 {
                     "schema_version": EVIDENCE_SCHEMA_VERSION,
@@ -813,7 +859,16 @@ structure_map必须是写法机制对象；surface_elements必须完整包含{',
                     (_json(result), _now(), item["id"]),
                 )
             evidence.append(result)
+        if not evidence:
+            raise ValueError("全部样本的证据提取均失败；失败样本已保留，可直接重新生成重试。")
         return evidence
+
+    def _mark_source_analysis_failed(self, source_id: str, exc: Exception) -> None:
+        with self._write_lock, self._connect() as db:
+            db.execute(
+                "UPDATE sources SET status='failed',error=?,updated_at=? WHERE id=?",
+                (str(exc)[:1000], _now(), source_id),
+            )
 
     def _source_analysis(self, source_id: str) -> dict[str, Any] | None:
         with self._connect() as db:

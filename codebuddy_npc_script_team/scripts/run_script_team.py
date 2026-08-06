@@ -394,6 +394,63 @@ def _append_episode_batch(prefix: str, batch: str) -> str:
     )
 
 
+def _episode_parts(text: str) -> tuple[str, dict[int, str]]:
+    value = str(text or "").strip()
+    matches = list(EPISODE_HEADER_RE.finditer(value))
+    if not matches:
+        return value, {}
+    prefix = value[: matches[0].start()].strip()
+    parts: dict[int, str] = {}
+    for index, match in enumerate(matches):
+        episode = int(match.group("zh") or match.group("en"))
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(value)
+        parts.setdefault(episode, value[match.start() : end].strip())
+    return prefix, parts
+
+
+def _merge_episode_outputs(
+    current: str,
+    incoming: str,
+    *,
+    episode_start: int,
+    episode_end: int,
+) -> str:
+    current_prefix, current_parts = _episode_parts(current)
+    incoming_prefix, incoming_parts = _episode_parts(incoming)
+    for episode, content in incoming_parts.items():
+        if episode_start <= episode <= episode_end:
+            current_parts.setdefault(episode, content)
+    prefix = current_prefix or incoming_prefix
+    ordered = [
+        current_parts[episode]
+        for episode in range(episode_start, episode_end + 1)
+        if episode in current_parts
+    ]
+    return "\n\n".join(item for item in ([prefix] if prefix else []) + ordered)
+
+
+def _missing_episode_ranges(
+    text: str,
+    *,
+    episode_start: int,
+    episode_end: int,
+    batch_size: int = BATCH_SIZE,
+) -> list[tuple[int, int]]:
+    present = set(episode_numbers(text))
+    missing = [
+        episode
+        for episode in range(episode_start, episode_end + 1)
+        if episode not in present
+    ]
+    ranges: list[tuple[int, int]] = []
+    for episode in missing:
+        if not ranges or episode != ranges[-1][1] + 1 or episode - ranges[-1][0] >= batch_size:
+            ranges.append((episode, episode))
+        else:
+            ranges[-1] = (ranges[-1][0], episode)
+    return ranges
+
+
 def prepare_final_editor_gate(request_payload: dict) -> None:
     draft_path = ROOT / ROLE_FILES["script_writer"]
     state_path = ROOT / ROLE_FILES["state_recorder"]
@@ -574,8 +631,16 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
         return result
 
     result = ""
-    for batch_start in range(episode_start, episode_end + 1, BATCH_SIZE):
-        batch_end = min(episode_end, batch_start + BATCH_SIZE - 1)
+    no_progress_attempts: dict[tuple[int, int], int] = {}
+    while True:
+        missing_ranges = _missing_episode_ranges(
+            result,
+            episode_start=episode_start,
+            episode_end=episode_end,
+        )
+        if not missing_ranges:
+            break
+        batch_start, batch_end = missing_ranges[0]
         batch_request = dict(request_payload)
         batch_request.update(
             {
@@ -586,7 +651,7 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
                 "series_episode_end": episode_end,
                 "series_episode_count": total,
                 "episode_contract": (
-                    f"当前批次必须且只能交付第{batch_start}集至第{batch_end}集；"
+                    f"当前为缺失集定向补齐，必须且只能交付第{batch_start}集至第{batch_end}集；"
                     f"全剧范围为第{episode_start}集至第{episode_end}集。"
                 ),
             }
@@ -603,10 +668,25 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
             ),
             stage=f"{stage}:{batch_start}-{batch_end}",
         )
-        violations = episode_range_violations(batch, batch_request)
-        if violations:
-            raise SystemExit(f"{stage}批次集数合同未满足：" + "；".join(violations))
-        result = _append_episode_batch(result, batch)
+        before = set(episode_numbers(result))
+        result = _merge_episode_outputs(
+            result,
+            batch,
+            episode_start=episode_start,
+            episode_end=episode_end,
+        )
+        expected = set(range(batch_start, batch_end + 1))
+        added = set(episode_numbers(result)) - before
+        if not added.intersection(expected):
+            key = (batch_start, batch_end)
+            no_progress_attempts[key] = no_progress_attempts.get(key, 0) + 1
+        else:
+            no_progress_attempts.pop((batch_start, batch_end), None)
+        if no_progress_attempts.get((batch_start, batch_end), 0) >= 3:
+            raise SystemExit(
+                f"{stage}连续3次未能补齐第{batch_start}-{batch_end}集；"
+                f"已生成集号为{episode_numbers(result)}"
+            )
 
     violations = episode_range_violations(result, request_payload)
     if violations:

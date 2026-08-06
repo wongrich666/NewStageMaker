@@ -39,3 +39,22 @@ def test_complete_json_extracts_object_from_short_explanation(monkeypatch) -> No
     )
 
     assert client.complete_json("return json")["structured_output"]["status"] == "ready"
+
+
+def test_complete_json_repairs_common_model_json_defects(monkeypatch) -> None:
+    client = DeepSeekAgentClient()
+    monkeypatch.setattr(
+        client,
+        "complete",
+        lambda *_args, **_kwargs: {
+            "message": {"content": '{"summary":"第一行\n第二行","items":["a",],}'},
+            "usage": {},
+            "model": "test",
+            "request_id": "request",
+            "finish_reason": "stop",
+        },
+    )
+
+    result = client.complete_json("return json")
+
+    assert result["structured_output"] == {"summary": "第一行\n第二行", "items": ["a"]}

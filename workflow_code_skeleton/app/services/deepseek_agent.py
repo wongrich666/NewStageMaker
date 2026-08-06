@@ -13,6 +13,13 @@ class DeepSeekAgentError(RuntimeError):
     pass
 
 
+class DeepSeekJSONError(DeepSeekAgentError):
+    def __init__(self, message: str, *, content: str = "", finish_reason: str = "") -> None:
+        super().__init__(message)
+        self.content = content
+        self.finish_reason = finish_reason
+
+
 def _env(*keys: str, default: str = "") -> str:
     for key in keys:
         value = str(os.getenv(key) or "").strip()
@@ -108,6 +115,97 @@ def _safe_upstream_error(response: requests.Response) -> str:
     return f"上游返回 HTTP {response.status_code}"
 
 
+def _json_object_candidates(content: str) -> list[str]:
+    value = str(content or "").strip().lstrip("\ufeff")
+    if value.startswith("```"):
+        value = re.sub(r"^```(?:json)?\s*", "", value, count=1, flags=re.IGNORECASE)
+        value = re.sub(r"\s*```$", "", value, count=1)
+    candidates = [value]
+    start = value.find("{")
+    if start < 0:
+        return candidates
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(value)):
+        char = value[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                candidates.append(value[start : index + 1])
+                break
+    if value.rfind("}") > start:
+        candidates.append(value[start : value.rfind("}") + 1])
+    return list(dict.fromkeys(candidate for candidate in candidates if candidate))
+
+
+def _escape_control_chars_in_strings(value: str) -> str:
+    output: list[str] = []
+    in_string = False
+    escaped = False
+    for char in value:
+        if in_string:
+            if escaped:
+                output.append(char)
+                escaped = False
+            elif char == "\\":
+                output.append(char)
+                escaped = True
+            elif char == '"':
+                output.append(char)
+                in_string = False
+            elif char == "\n":
+                output.append("\\n")
+            elif char == "\r":
+                output.append("\\r")
+            elif char == "\t":
+                output.append("\\t")
+            elif ord(char) < 0x20:
+                output.append(f"\\u{ord(char):04x}")
+            else:
+                output.append(char)
+        else:
+            output.append(char)
+            if char == '"':
+                in_string = True
+    return "".join(output)
+
+
+def _parse_json_object(content: str) -> dict[str, Any]:
+    for candidate in _json_object_candidates(content):
+        variants = (
+            candidate,
+            re.sub(r",\s*([}\]])", r"\1", candidate),
+            _escape_control_chars_in_strings(candidate),
+            re.sub(
+                r",\s*([}\]])",
+                r"\1",
+                _escape_control_chars_in_strings(candidate),
+            ),
+        )
+        for variant in dict.fromkeys(variants):
+            try:
+                structured = json.loads(variant)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(structured, dict):
+                return structured
+            raise DeepSeekJSONError("剧本 Agent 返回的数据格式不正确。", content=content)
+    raise DeepSeekJSONError("剧本 Agent 没有返回合法JSON。", content=content)
+
+
 class DeepSeekAgentClient:
     def complete(
         self,
@@ -169,6 +267,7 @@ class DeepSeekAgentClient:
             "usage": data.get("usage") if isinstance(data, dict) else None,
             "model": str(data.get("model") or model or config.model),
             "request_id": str(data.get("id") or ""),
+            "finish_reason": str((data.get("choices") or [{}])[0].get("finish_reason") or ""),
         }
 
     def complete_json(
@@ -194,29 +293,18 @@ class DeepSeekAgentClient:
         content = str((result.get("message") or {}).get("content") or "").strip()
         if not content:
             raise DeepSeekAgentError("剧本 Agent 没有返回内容。")
-        candidate = content
-        if candidate.startswith("```"):
-            candidate = re.sub(r"^```(?:json)?\s*", "", candidate, count=1, flags=re.IGNORECASE)
-            candidate = re.sub(r"\s*```$", "", candidate, count=1)
         try:
-            structured = json.loads(candidate)
-        except json.JSONDecodeError:
-            start = candidate.find("{")
-            end = candidate.rfind("}")
-            if start < 0 or end <= start:
-                raise DeepSeekAgentError("剧本 Agent 没有返回合法JSON。")
-            try:
-                structured = json.loads(candidate[start : end + 1])
-            except json.JSONDecodeError as exc:
-                raise DeepSeekAgentError("剧本 Agent 没有返回合法JSON。") from exc
-        if not isinstance(structured, dict):
-            raise DeepSeekAgentError("剧本 Agent 返回的数据格式不正确。")
+            structured = _parse_json_object(content)
+        except DeepSeekJSONError as exc:
+            exc.finish_reason = str(result.get("finish_reason") or "")
+            raise
         return {
             "content": content,
             "structured_output": structured,
             "usage": result.get("usage"),
             "model": result.get("model"),
             "session_id": result.get("request_id"),
+            "finish_reason": result.get("finish_reason"),
         }
 
 
