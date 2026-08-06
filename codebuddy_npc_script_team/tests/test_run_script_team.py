@@ -42,17 +42,18 @@ def test_opening_hook_keeps_a_short_causal_anchor_after_the_first_beat() -> None
     assert "缺少开场因果锚" in editor_prompt
 
 
-def test_character_specific_os_and_performance_rules_reach_writer_and_editor() -> None:
+def test_original_os_format_and_performance_rules_reach_writer_and_editor() -> None:
     character_prompt = MODULE.PROMPTS["character_emotion"]
     writer_prompt = MODULE.PROMPTS["script_writer"]
     editor_prompt = MODULE.PROMPTS["final_editor"]
 
     assert "表演指纹" in character_prompt
-    assert "OS的用词、句长、判断习惯" in character_prompt
-    assert "动作、表情和潜台词已经能表达" in writer_prompt
-    assert "微反应与OS各自提供新信息" in writer_prompt
+    assert "心理活动采用假设、验证、被推翻" in character_prompt
+    assert "所有心理活动必须采用" in writer_prompt
+    assert "人物名OS：心理活动" in writer_prompt
     assert "不得为了满足数量给每句加括号" in editor_prompt
-    assert "删除复述动作、台词或已知情绪的OS" in editor_prompt
+    assert "所有心理活动保持" in editor_prompt
+    assert "发现无人物归属的对白或心理活动时补齐人物名" in editor_prompt
 
 
 def test_continuation_contract_uses_actual_episode_range(monkeypatch) -> None:

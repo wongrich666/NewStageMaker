@@ -500,37 +500,6 @@ def validate(script: str, state: dict[str, Any], request: dict[str, Any], *, mod
                 episode=episode_no,
                 error=False,
             )
-        if performance["longest_consecutive_os"] >= 2:
-            report.issue(
-                "script.os.consecutive",
-                "检测到连续OS；请合并为一个人物化判断，并让下一拍转为台词、选择或可见动作",
-                episode=episode_no,
-                error=False,
-            )
-        if performance["os_lines"] >= 3 and performance["os_dialogue_ratio"] > 0.35:
-            report.issue(
-                "script.os.density",
-                "OS相对对白偏密；请删除可由动作、表情或潜台词表达的心理复述",
-                episode=episode_no,
-                error=False,
-            )
-        if performance["generic_os_lines"]:
-            report.issue(
-                "script.os.generic_voice",
-                "检测到可互换的通用OS；请改成人物基于身份、经历和关系作出的私人判断",
-                episode=episode_no,
-                error=False,
-            )
-        if (
-            performance["os_lines"] >= 2
-            and performance["os_with_adjacent_visible_reaction"] < 1
-        ):
-            report.issue(
-                "script.os.visual_reaction_missing",
-                "多处OS均缺少相邻可见反应；需要镜头承载掩饰或破绽时，请补人物专属微动作",
-                episode=episode_no,
-                error=False,
-            )
         if performance["maximum_repeated_performance_cue"] >= 3:
             report.issue(
                 "script.performance.cue_repeated",

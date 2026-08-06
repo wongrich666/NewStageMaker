@@ -479,7 +479,7 @@ def test_dialogue_only_scene_gets_non_blocking_performance_warning() -> None:
     assert not any(item["code"] == "script.performance.beat_sparse" for item in report.errors)
 
 
-def test_os_quality_metrics_warn_without_blocking_release() -> None:
+def test_os_quality_metrics_do_not_block_original_os_style() -> None:
     script = (
         "片名：墙后的人\n第1集：《墙后三响》\n"
         "场景1：工作室｜夜｜内\n人物：林深\n"
@@ -497,10 +497,10 @@ def test_os_quality_metrics_warn_without_blocking_release() -> None:
     )
     warning_codes = {item["code"] for item in report.warnings}
 
-    assert "script.os.consecutive" in warning_codes
-    assert "script.os.density" in warning_codes
-    assert "script.os.generic_voice" in warning_codes
-    assert "script.os.visual_reaction_missing" in warning_codes
+    assert "script.os.consecutive" not in warning_codes
+    assert "script.os.density" not in warning_codes
+    assert "script.os.generic_voice" not in warning_codes
+    assert "script.os.visual_reaction_missing" not in warning_codes
     assert not any(item["code"].startswith("script.os.") for item in report.errors)
 
 
