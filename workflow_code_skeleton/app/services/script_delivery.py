@@ -6,6 +6,15 @@ from typing import Any
 
 HEADING_RE = re.compile(r"^\s*(#{1,6})\s*(.+?)\s*$")
 MARKDOWN_RE = re.compile(r"[*_`]+")
+INTERNAL_OVERVIEW_MARKERS = (
+    "以已锁定世界观与创作合同为准",
+    "详见剧本正文",
+    "主线推进逻辑",
+    "触发事件→主角行动→阻力反应",
+    "技术合规性检查",
+    "创作执行指令",
+    "终审门禁",
+)
 
 
 def _plain(value: Any) -> str:
@@ -51,6 +60,141 @@ def _section(value: str, names: tuple[str, ...], limit: int) -> str:
             break
         selected.append(line)
     return _trim_lines("\n".join(selected), limit)
+
+
+def _heading_name(value: str) -> str:
+    heading = _plain(value)
+    return re.sub(
+        r"^[一二三四五六七八九十百\d]+[、.．]\s*",
+        "",
+        heading,
+    ).strip()
+
+
+def _named_section(value: str, names: tuple[str, ...], limit: int) -> str:
+    """Read a semantic section without matching internal headings by substring."""
+    lines = str(value or "").splitlines()
+    start = None
+    level = 7
+    for index, line in enumerate(lines):
+        match = HEADING_RE.match(line)
+        if not match:
+            continue
+        heading = _heading_name(match.group(2))
+        if any(
+            heading == name
+            or heading.startswith(f"{name}（")
+            or heading.startswith(f"{name}(")
+            for name in names
+        ):
+            start = index + 1
+            level = len(match.group(1))
+            break
+    if start is None:
+        return ""
+    selected: list[str] = []
+    for line in lines[start:]:
+        match = HEADING_RE.match(line)
+        if match and len(match.group(1)) <= level:
+            break
+        selected.append(line)
+    return _trim_lines("\n".join(selected), limit)
+
+
+def _reader_facing(value: str) -> bool:
+    text = _plain(value)
+    return bool(text) and not any(marker in text for marker in INTERNAL_OVERVIEW_MARKERS)
+
+
+def _first_reader_facing(candidates: list[str]) -> str:
+    for candidate in candidates:
+        if _reader_facing(candidate):
+            return candidate
+    return ""
+
+
+def _bold_field(value: str, names: tuple[str, ...], limit: int = 360) -> str:
+    name_pattern = "|".join(re.escape(name) for name in names)
+    match = re.search(
+        rf"(?m)^\s*(?:[-+]\s*)?\*\*(?:{name_pattern})\*\*\s*[：:]\s*(.+)$",
+        str(value or ""),
+    )
+    return _trim_lines(match.group(1), limit) if match else ""
+
+
+def _episode_blocks(value: str) -> list[tuple[str, str]]:
+    lines = str(value or "").splitlines()
+    starts: list[tuple[int, str]] = []
+    for index, line in enumerate(lines):
+        match = re.match(r"^\s*#{2,6}\s*第\s*\d+\s*集\s*[：:]\s*(.+?)\s*$", line)
+        if match:
+            starts.append((index, _plain(match.group(1))))
+    blocks: list[tuple[str, str]] = []
+    for position, (start, title) in enumerate(starts):
+        end = starts[position + 1][0] if position + 1 < len(starts) else len(lines)
+        blocks.append((title, "\n".join(lines[start + 1 : end])))
+    return blocks
+
+
+def _sample_middle(values: list[str], maximum: int = 4) -> list[str]:
+    if len(values) <= maximum:
+        return values
+    indexes = {
+        round(index * (len(values) - 1) / (maximum - 1))
+        for index in range(maximum)
+    }
+    return [value for index, value in enumerate(values) if index in indexes]
+
+
+def _synthesized_synopsis(story: str, contract: str, title: str) -> str:
+    blocks = _episode_blocks(story)
+    protagonist = ""
+    protagonist_section = _named_section(story, ("主角锁定", "主角"), 1_200)
+    match = re.search(r"(?m)^\s*\*\*([^*\n（(]+)(?:[（(][^*\n]+)?\*\*\s*$", protagonist_section)
+    if match:
+        protagonist = match.group(1).strip()
+
+    goal = _first_reader_facing(
+        [
+            _bold_field(protagonist_section, ("核心欲望", "外在目标")),
+            _named_section(contract, ("核心欲望", "主角目标"), 360),
+        ]
+    )
+    first_event = ""
+    ending = ""
+    if blocks:
+        first_event = _bold_field(blocks[0][1], ("触发事件", "开局事件"), 360)
+        ending = _bold_field(
+            blocks[-1][1],
+            ("结局兑现", "最终兑现", "局势变化", "本集结局"),
+            420,
+        )
+
+    subject = f"{protagonist}的故事" if protagonist else f"《{title.strip('《》')}》"
+    sentences = [f"故事围绕{subject}展开。"]
+    if first_event:
+        sentences.append(first_event.rstrip("。") + "。")
+    if goal:
+        sentences.append(f"为实现{goal.rstrip('。')}，主角必须持续行动并承担选择带来的代价。")
+    if blocks:
+        middle_titles = _sample_middle([item[0] for item in blocks[1:-1]])
+        if middle_titles:
+            sentences.append("剧情将经过" + "、".join(middle_titles) + "等关键转折。")
+        final_direction = ending or blocks[-1][0]
+        sentences.append(f"最终推进至{final_direction.rstrip('。')}。")
+    synopsis = _trim_lines("".join(sentences), 1_100)
+    return synopsis if len(synopsis) >= 20 else ""
+
+
+def _story_background(story: str, contract: str) -> str:
+    return _first_reader_facing(
+        [
+            _named_section(story, ("故事背景", "世界背景", "背景设定"), 900),
+            _named_section(story, ("世界观设定", "世界观", "立意与主题"), 900),
+            _named_section(contract, ("故事背景", "世界背景", "背景设定"), 900),
+            _named_section(contract, ("世界观设定", "世界观", "不可篡改事实"), 900),
+        ]
+    )
 
 
 def _character_summaries(value: str, *, maximum: int = 6) -> list[str]:
@@ -126,13 +270,15 @@ def build_script_overview(job: dict[str, Any]) -> str:
         if str(value or "").strip()
     )
 
-    background = _section(contract, ("不可篡改事实", "世界观", "故事背景"), 900)
-    if not background:
-        background = _section(contract, ("题材与目标观众", "题材定位"), 700)
-
-    synopsis = _section(story, ("主线", "故事梗概"), 1_100)
-    if not synopsis:
-        synopsis = _section(contract, ("核心欲望",), 800)
+    background = _story_background(story, contract)
+    synopsis = _first_reader_facing(
+        [
+            _named_section(story, ("故事梗概", "剧情梗概", "故事概述", "核心故事"), 1_100),
+            _named_section(contract, ("故事梗概", "剧情梗概", "故事概述", "核心故事"), 1_100),
+            _named_section(story, ("剧情主线", "核心主线", "主线"), 1_100),
+            _synthesized_synopsis(story, contract, title),
+        ]
+    )
 
     mainline_parts: list[str] = []
     for label, names in (
@@ -149,8 +295,8 @@ def build_script_overview(job: dict[str, Any]) -> str:
     sections = [
         "# 剧本大纲",
         "## 基本信息\n" + (basic or f"- **作品名称**：{title}"),
-        "## 故事背景\n" + (background or "以已锁定世界观与创作合同为准。"),
-        "## 故事梗概\n" + (synopsis or "详见剧本正文。"),
+        "## 故事背景\n" + (background or "故事发生在剧本正文所呈现的核心环境中，人物关系与规则随剧情逐步展开。"),
+        "## 故事梗概\n" + (synopsis or f"《{title.strip('《》')}》围绕主角的核心目标、阻力与选择展开，并在连续升级的冲突中完成结局兑现。"),
         "## 核心主线\n" + ("\n".join(mainline_parts) or synopsis or "详见剧本正文。"),
         "## 主要人物\n" + (
             "\n".join(character_items)
