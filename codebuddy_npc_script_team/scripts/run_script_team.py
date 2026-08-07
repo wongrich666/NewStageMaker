@@ -123,6 +123,7 @@ DISTILLED_STAGE_CHAR_LIMIT = 12_000
 DISTILLED_MODULE_CHAR_LIMIT = 3_500
 BATCH_SIZE = 5
 STATE_BATCH_SIZE = 5
+STATE_AUDIT_BATCH_SIZE = 10
 STAGE_BATCH_SIZES = {
     "episode_continuity": 10,
     "script_writer": 10,
@@ -1101,6 +1102,108 @@ def _fallback_state_batch(
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def _state_audit_reasons(request_payload: dict) -> list[str]:
+    policy = str(request_payload.get("state_audit_policy") or "auto").strip().lower()
+    if policy == "never":
+        return []
+    if policy == "always":
+        return ["用户或平台要求连续性模型抽查"]
+    reasons: list[str] = []
+    total = max(1, int(request_payload.get("episodes") or 1))
+    if str(request_payload.get("mode") or "").strip() == "续写":
+        reasons.append("续写任务需要核对旧集与新集承接")
+    if total >= 40:
+        reasons.append("长篇任务达到40集")
+    draft_path = ROOT / ROLE_FILES["script_writer"]
+    draft = draft_path.read_text(encoding="utf-8") if draft_path.is_file() else ""
+    if draft:
+        if episode_range_violations(draft, request_payload):
+            reasons.append("正文集数范围异常")
+        if scene_contract_violations(draft, request_payload):
+            reasons.append("正文场景合同异常")
+    return reasons
+
+
+def _state_audit_ranges(episode_start: int, episode_end: int) -> list[tuple[int, int]]:
+    return [
+        (start, min(episode_end, start + STATE_AUDIT_BATCH_SIZE - 1))
+        for start in range(episode_start, episode_end + 1, STATE_AUDIT_BATCH_SIZE)
+    ]
+
+
+def _audit_deterministic_state(
+    deterministic: str,
+    request_payload: dict,
+    *,
+    modules: str,
+    reasons: list[str],
+) -> str:
+    result = deterministic
+    episode_start = max(1, int(request_payload.get("episode_start") or 1))
+    episode_end = max(
+        episode_start,
+        int(request_payload.get("episode_end") or episode_start),
+    )
+    warnings: list[str] = []
+    successful = 0
+    for batch_start, batch_end in _state_audit_ranges(episode_start, episode_end):
+        batch_request = dict(request_payload)
+        batch_request.update(
+            {
+                "episodes": batch_end - batch_start + 1,
+                "episode_start": batch_start,
+                "episode_end": batch_end,
+                "series_episode_start": episode_start,
+                "series_episode_end": episode_end,
+                "series_episode_count": int(request_payload.get("episodes") or 1),
+            }
+        )
+        prompt = _stage_user_prompt(
+            "state_recorder",
+            batch_request,
+            modules,
+            episode_start=batch_start,
+            episode_end=batch_end,
+        )
+        try:
+            raw = call_model(
+                PROMPTS["state_recorder"] + "\n\n" + _state_batch_contract(batch_start, batch_end),
+                prompt,
+                stage=f"state_audit:{batch_start}-{batch_end}",
+            )
+            audited = _merge_state_outputs(
+                "",
+                raw,
+                episode_start=batch_start,
+                episode_end=batch_end,
+            )
+            result = _merge_state_outputs(
+                result,
+                audited,
+                episode_start=batch_start,
+                episode_end=batch_end,
+            )
+            successful += 1
+        except (SystemExit, OSError, TypeError, ValueError) as exc:
+            warnings.append(f"第{batch_start}-{batch_end}集模型抽查失败：{exc}")
+            print(
+                f"__SCRIPT_TEAM_STATE_AUDIT_WARNING__ range={batch_start}-{batch_end}",
+                flush=True,
+            )
+        result = _ensure_state_globals(result, request_payload)
+        emit_stage_checkpoint("state_recorder", result)
+    payload = parse_json_result(_ensure_state_globals(result, request_payload))
+    payload["state_status"] = "audited" if not warnings else "audit_partial"
+    payload["state_audit"] = {
+        "reasons": reasons,
+        "batch_count": len(_state_audit_ranges(episode_start, episode_end)),
+        "successful_batches": successful,
+        "warnings": warnings,
+    }
+    payload["state_warnings"] = list(payload.get("state_warnings") or []) + warnings
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
 def generate_state_result(
     request_payload: dict,
     *,
@@ -1112,115 +1215,33 @@ def generate_state_result(
         episode_start,
         int(request_payload.get("episode_end") or (episode_start + total - 1)),
     )
-    if os.getenv("SCRIPT_TEAM_STATE_MODEL", "0").strip().lower() not in {"1", "true", "yes"}:
-        return _ensure_state_globals(
-            _fallback_state_batch(
-                request_payload,
-                episode_start=episode_start,
-                episode_end=episode_end,
-                reason="默认使用代码状态提取，未调用状态模型",
-            ),
+    state_model_forced = os.getenv("SCRIPT_TEAM_STATE_MODEL", "").strip().lower()
+    if state_model_forced in {"0", "false", "no"}:
+        audit_reasons: list[str] = []
+    elif state_model_forced in {"1", "true", "yes"}:
+        audit_reasons = ["环境变量要求连续性模型抽查"]
+    else:
+        audit_reasons = _state_audit_reasons(request_payload)
+    deterministic_payload = parse_json_result(_ensure_state_globals(
+        _fallback_state_batch(
             request_payload,
-        ).replace('"state_status": "degraded"', '"state_status": "deterministic"', 1)
-    result = ""
-    resume_path = ROOT / "stage_resume.json"
-    if resume_path.is_file():
-        try:
-            resume_payload = json.loads(resume_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            resume_payload = {}
-        if str(resume_payload.get("stage") or "") == "state_recorder":
-            try:
-                result = _merge_state_outputs(
-                    "",
-                    str(resume_payload.get("content") or ""),
-                    episode_start=episode_start,
-                    episode_end=episode_end,
-                )
-            except (TypeError, ValueError, SystemExit):
-                result = ""
-
-    while True:
-        missing = _missing_state_ranges(
-            result,
             episode_start=episode_start,
             episode_end=episode_end,
-        )
-        if not missing:
-            return _ensure_state_globals(result, request_payload)
-        batch_start, batch_end = missing[0]
-        batch_request = dict(request_payload)
-        batch_request.update(
-            {
-                "episodes": batch_end - batch_start + 1,
-                "episode_start": batch_start,
-                "episode_end": batch_end,
-                "series_episode_start": episode_start,
-                "series_episode_end": episode_end,
-                "series_episode_count": total,
-                "episode_contract": (
-                    f"状态提取批次：只处理第{batch_start}集至第{batch_end}集；"
-                    f"全剧范围为第{episode_start}集至第{episode_end}集。"
-                ),
-            }
-        )
-        user_prompt = _stage_user_prompt(
-            "state_recorder",
-            batch_request,
-            modules,
-            episode_start=batch_start,
-            episode_end=batch_end,
-            previous_tail=result[-1800:],
-        )
-        try:
-            raw = call_model(
-                PROMPTS["state_recorder"] + "\n\n" + _state_batch_contract(batch_start, batch_end),
-                user_prompt,
-                stage=f"state_recorder:{batch_start}-{batch_end}",
-            )
-        except (SystemExit, OSError, ValueError) as exc:
-            raw = _fallback_state_batch(
-                batch_request,
-                episode_start=batch_start,
-                episode_end=batch_end,
-                reason=f"状态提取请求失败：{exc}",
-            )
-            print(
-                f"__SCRIPT_TEAM_STATE_DEGRADED__ stage=state_recorder:{batch_start}-{batch_end}",
-                flush=True,
-            )
-        try:
-            batch_result = _merge_state_outputs(
-                "",
-                raw,
-                episode_start=batch_start,
-                episode_end=batch_end,
-            )
-            result = _merge_state_outputs(
-                result,
-                batch_result,
-                episode_start=batch_start,
-                episode_end=batch_end,
-            )
-        except (TypeError, ValueError, SystemExit) as exc:
-            raw = _fallback_state_batch(
-                batch_request,
-                episode_start=batch_start,
-                episode_end=batch_end,
-                reason=f"状态提取 JSON 无法解析：{exc}",
-            )
-            result = _merge_state_outputs(
-                result,
-                raw,
-                episode_start=batch_start,
-                episode_end=batch_end,
-            )
-            result = _ensure_state_globals(result, request_payload)
-            print(
-                f"__SCRIPT_TEAM_STATE_DEGRADED__ stage=state_recorder:{batch_start}-{batch_end}",
-                flush=True,
-            )
-        emit_stage_checkpoint("state_recorder", result)
+            reason="默认使用代码状态提取，未调用状态模型",
+        ),
+        request_payload,
+    ))
+    deterministic_payload["state_status"] = "deterministic"
+    deterministic_payload["state_warnings"] = []
+    deterministic = json.dumps(deterministic_payload, ensure_ascii=False, indent=2)
+    if not audit_reasons:
+        return deterministic
+    return _audit_deterministic_state(
+        deterministic,
+        request_payload,
+        modules=modules,
+        reasons=audit_reasons,
+    )
 
 
 def generate_stage_result(stage: str, request_payload: dict, *, modules: str) -> str:
