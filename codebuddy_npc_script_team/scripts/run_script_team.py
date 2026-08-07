@@ -123,6 +123,11 @@ DISTILLED_STAGE_CHAR_LIMIT = 12_000
 DISTILLED_MODULE_CHAR_LIMIT = 3_500
 BATCH_SIZE = 5
 STATE_BATCH_SIZE = 5
+STAGE_BATCH_SIZES = {
+    "episode_continuity": 10,
+    "script_writer": 10,
+    "final_editor": 10,
+}
 BATCHED_EPISODE_STAGES = {
     "episode_continuity",
     "script_writer",
@@ -1107,6 +1112,16 @@ def generate_state_result(
         episode_start,
         int(request_payload.get("episode_end") or (episode_start + total - 1)),
     )
+    if os.getenv("SCRIPT_TEAM_STATE_MODEL", "0").strip().lower() not in {"1", "true", "yes"}:
+        return _ensure_state_globals(
+            _fallback_state_batch(
+                request_payload,
+                episode_start=episode_start,
+                episode_end=episode_end,
+                reason="默认使用代码状态提取，未调用状态模型",
+            ),
+            request_payload,
+        ).replace('"state_status": "degraded"', '"state_status": "deterministic"', 1)
     result = ""
     resume_path = ROOT / "stage_resume.json"
     if resume_path.is_file():
@@ -1217,7 +1232,8 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
     )
     if stage == "state_recorder":
         return generate_state_result(request_payload, modules=modules)
-    if stage not in BATCHED_EPISODE_STAGES or total <= BATCH_SIZE:
+    stage_batch_size = STAGE_BATCH_SIZES.get(stage, BATCH_SIZE)
+    if stage not in BATCHED_EPISODE_STAGES or total <= stage_batch_size:
         user_prompt = _stage_user_prompt(stage, request_payload, modules)
         if stage == "episode_continuity":
             result = generate_episode_card_batch(
@@ -1261,6 +1277,7 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
             result,
             episode_start=episode_start,
             episode_end=episode_end,
+            batch_size=stage_batch_size,
         )
         if not missing_ranges:
             break
