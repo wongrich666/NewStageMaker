@@ -246,7 +246,7 @@ def test_cloud_stage_batches_long_episode_ranges(monkeypatch) -> None:
         modules="",
     )
 
-    assert calls == [(1, 5), (6, 10)]
+    assert calls == [(1, 10)]
     assert MODULE.episode_numbers(result) == list(range(1, 11))
 
 
@@ -273,7 +273,7 @@ def test_cloud_stage_repairs_only_missing_episodes(monkeypatch) -> None:
         modules="",
     )
 
-    assert calls == [(1, 5), (1, 5), (6, 10)]
+    assert calls == [(1, 10), (1, 10)]
     assert MODULE.episode_numbers(result) == list(range(1, 11))
 
 
@@ -329,6 +329,7 @@ def _state_batch_json(start: int, end: int) -> str:
 
 
 def test_state_recorder_batches_30_episodes_and_resumes_from_checkpoint(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SCRIPT_TEAM_STATE_MODEL", "1")
     calls: list[tuple[int, int]] = []
     monkeypatch.setattr(MODULE, "ROOT", tmp_path)
 
@@ -354,6 +355,7 @@ def test_state_recorder_batches_30_episodes_and_resumes_from_checkpoint(monkeypa
 
 
 def test_state_recorder_degrades_without_breaking_30_episode_flow(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SCRIPT_TEAM_STATE_MODEL", "1")
     monkeypatch.setattr(MODULE, "ROOT", tmp_path)
     lock = {
         "protagonist": "林夏",
@@ -403,6 +405,27 @@ def test_state_recorder_degrades_without_breaking_30_episode_flow(monkeypatch, t
     assert payload["mainline_lock"] == lock
     assert MODULE._state_episode_numbers(result) == list(range(1, 31))
     assert len(payload["plan_alignment"]) == 30
+
+
+def test_batch_upper_bound_respects_frontend_episode_count(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_call_model(_system_prompt, user_prompt, *, stage="unknown"):
+        calls.append(stage)
+        match = re.search(r'"episode_start":\s*(\d+).*?"episode_end":\s*(\d+)', user_prompt, re.S)
+        assert match
+        return _episode_card_json(int(match.group(1)), int(match.group(2)))
+
+    monkeypatch.setattr(MODULE, "call_model", fake_call_model)
+    for count, expected in ((5, ["episode_continuity"]), (11, ["episode_continuity:1-10", "episode_continuity:11-11"])):
+        calls.clear()
+        result = MODULE.generate_stage_result(
+            "episode_continuity",
+            {"episodes": count, "episode_start": 1, "episode_end": count},
+            modules="",
+        )
+        assert MODULE.episode_numbers(result) == list(range(1, count + 1))
+        assert calls == expected
 
 
 def test_json_parser_uses_first_complete_object() -> None:
@@ -478,11 +501,11 @@ def test_full_chain_runs_30_episodes_when_state_model_degrades(monkeypatch, tmp_
     state = json.loads((tmp_path / MODULE.ROLE_FILES["state_recorder"]).read_text(encoding="utf-8"))
     assert MODULE.episode_numbers(final_script) == list(range(1, 31))
     assert [number for number in MODULE._state_episode_numbers(json.dumps(state))] == list(range(1, 31))
-    assert state["state_status"] == "degraded"
-    assert len([stage for stage in calls if stage.startswith("episode_continuity")]) == 6
-    assert len([stage for stage in calls if stage.startswith("script_writer")]) == 6
-    assert len([stage for stage in calls if stage.startswith("state_recorder")]) == 6
-    assert len([stage for stage in calls if stage.startswith("final_editor")]) == 6
+    assert state["state_status"] == "deterministic"
+    assert len([stage for stage in calls if stage.startswith("episode_continuity")]) == 3
+    assert len([stage for stage in calls if stage.startswith("script_writer")]) == 3
+    assert len([stage for stage in calls if stage.startswith("state_recorder")]) == 0
+    assert len([stage for stage in calls if stage.startswith("final_editor")]) == 3
 
 
 def test_cloud_episode_cards_reject_placeholder_sections() -> None:
