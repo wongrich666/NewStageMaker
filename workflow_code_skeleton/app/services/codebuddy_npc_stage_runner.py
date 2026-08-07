@@ -169,9 +169,8 @@ DEPENDENCIES = {
     "episode_continuity": ("contract", "story", "characters"),
     "script_writer": ("contract", "story", "characters", "episodes"),
     "state_recorder": ("characters", "episodes", "draft"),
-    # Character voice and story state are optional edit aids. The locked contract,
-    # episode cards and draft are the minimum sources of truth for final editing.
-    "final_editor": ("contract", "episodes", "draft"),
+    # Story state is an optional edit aid. Character voice remains a source of truth.
+    "final_editor": ("contract", "characters", "episodes", "draft"),
 }
 
 ARTIFACT_LABELS = {
@@ -938,7 +937,7 @@ class CodeBuddyNpcStageRunner:
         for key in DEPENDENCIES[stage]:
             context.append(f"\n\n===== {ARTIFACT_LABELS[key]} =====\n{artifacts[key]}")
         if stage == "final_editor":
-            for key in ("characters", "story_state"):
+            for key in ("story_state",):
                 value = str(artifacts.get(key) or "").strip()
                 if value:
                     context.append(

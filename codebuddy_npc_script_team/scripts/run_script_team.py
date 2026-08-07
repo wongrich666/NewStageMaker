@@ -53,7 +53,13 @@ CONTEXT_FILES = {
     "episode_continuity": ("showrunner", "story_architect", "character_emotion"),
     "script_writer": ("showrunner", "story_architect", "character_emotion", "episode_continuity"),
     "state_recorder": ("showrunner", "character_emotion", "episode_continuity", "script_writer"),
-    "final_editor": ("showrunner", "episode_continuity", "script_writer", "state_recorder"),
+    "final_editor": (
+        "showrunner",
+        "character_emotion",
+        "episode_continuity",
+        "script_writer",
+        "state_recorder",
+    ),
 }
 
 SKILL_ROOT = Path(
@@ -248,12 +254,13 @@ episode_duration_seconds 是每集目标画面时长。按对白实际说完、�
 “说啊。说啊。你倒是说啊——”应按情绪写成“说啊。你倒是说啊！”。
 """,
     "state_recorder": """
-你是状态与偏差记录器，不是编剧。对照创作合同、分集卡和初稿，只提取事实，不改写正文。
-严格按照 story-state-schema.md 输出单个合法 JSON 对象。除人物位置、知情范围、伤势、
-服装、道具、关系、伏笔和未完成动作外，还要填写 plan_alignment：逐集记录计划的
-主线推进、正文实际推进以及 aligned/deviated。continuity_bridge 的 from_action 和
-to_action 必须摘录相邻两集正文中真实存在的简短动作，不得用概括句伪造承接。
-未知事实写“未明确”，不得猜测或替正文掩盖偏差。
+你是状态与偏差记录器，不是编剧。对照分集卡和初稿，只提取本批事实，不改写正文。
+只输出 episodes、plan_alignment，以及本批确实发生变化的 open_threads、narrative_pressure。
+project、mainline_lock、characters、props 等全局字段由代码从上游合同和人物圣经补齐，
+不要重复生成。除人物位置、知情范围、伤势、服装、道具、关系、伏笔和未完成动作外，
+还要填写 plan_alignment：记录计划主线推进、正文实际推进以及 aligned/deviated。
+continuity_bridge 的 from_action 和 to_action 必须摘录相邻正文中真实存在的简短动作，
+不得用概括句伪造承接。未知事实写“未明确”，不得猜测或替正文掩盖偏差。
 """,
     "final_editor": """
 你是唯一终审编辑，合并钩子编辑和终审导演职责。必须直接修稿，不只审查和打分。
@@ -931,13 +938,162 @@ def _stage_user_prompt(
 def _state_batch_contract(start: int, end: int) -> str:
     return f"""
 状态记录器采用分批协议。本次只处理第{start}集至第{end}集，不能输出其他集。
-只输出一个合法 JSON 对象，不要 Markdown 围栏、解释或校验报告。顶层必须包含：
-schema_version、project、mainline_lock、characters、props、episodes、open_threads、
-plan_alignment、narrative_pressure。episodes 和 plan_alignment 只填写本批集数；
-project、mainline_lock、characters、props、open_threads、narrative_pressure 在本批有事实
-时填写，不能凭空新增；若不适用使用空数组或“未明确”。每个 episode 必须有完整 schema
-字段。JSON 必须在写入前自行保证可解析，字符串中的 ASCII 双引号必须转义。
+只输出一个合法 JSON 对象，不要 Markdown 围栏、解释或校验报告。顶层至少包含 episodes
+和 plan_alignment，可选填写本批确实变化的 open_threads、narrative_pressure。
+episodes 和 plan_alignment 只填写本批集数；每个 episode 必须有完整 schema 字段。
+project、mainline_lock、characters、props 等全局字段不要重复生成，由代码补齐。
+JSON 必须在写入前自行保证可解析，字符串中的 ASCII 双引号必须转义。
 """.strip()
+
+
+def _ensure_state_globals(text: str, request_payload: dict) -> str:
+    payload = parse_json_result(text)
+    contract_path = ROOT / ROLE_FILES["showrunner"]
+    contract = contract_path.read_text(encoding="utf-8") if contract_path.is_file() else ""
+    lock = _mainline_lock_from_text(contract)
+    if not lock:
+        lock = {
+            "protagonist": str(request_payload.get("protagonist") or "未明确"),
+            "goal": "未明确",
+            "core_obstacle": "未明确",
+            "protagonist_action": "未明确",
+            "stakes": "未明确",
+            "pursuit_question": "未明确",
+            "ending_direction": "未明确",
+        }
+    payload.setdefault("schema_version", "1.0")
+    payload.setdefault("project", {
+        "title": str(request_payload.get("title") or request_payload.get("project_name") or "未命名项目"),
+        "protagonist": str(lock.get("protagonist") or "未明确"),
+        "episode_count": int(request_payload.get("series_episode_count") or request_payload.get("episodes") or 1),
+        "target_words_per_episode": int(request_payload.get("episode_word_count") or 0),
+        "immutable_facts": [],
+    })
+    payload["project"]["episode_count"] = int(
+        request_payload.get("series_episode_count") or request_payload.get("episodes") or 1
+    )
+    payload["mainline_lock"] = lock
+    payload.setdefault("characters", [])
+    payload.setdefault("props", [])
+    payload.setdefault("open_threads", [])
+    payload.setdefault("narrative_pressure", {
+        "adversity_payoff_level": "off",
+        "pressure_lines": [],
+        "emotional_debts": [],
+        "reversal_assets": [],
+    })
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _state_text_action(text: str, *, first: bool) -> str:
+    lines = []
+    for line in str(text or "").splitlines():
+        value = line.strip()
+        if not value or EPISODE_HEADER_RE.match(value) or SCENE_HEADER_RE.match(value):
+            continue
+        if value.startswith(("人物", "场景", "承接事实", "开场钩子", "最短因果锚")):
+            continue
+        lines.append(value)
+    if not lines:
+        return "未明确"
+    return lines[0] if first else lines[-1]
+
+
+def _fallback_state_batch(
+    request_payload: dict,
+    *,
+    episode_start: int,
+    episode_end: int,
+    reason: str,
+) -> str:
+    """Build a publishable minimum state without another model request."""
+    contract_path = ROOT / ROLE_FILES["showrunner"]
+    contract = contract_path.read_text(encoding="utf-8") if contract_path.is_file() else ""
+    mainline_lock = _mainline_lock_from_text(contract)
+    if not mainline_lock:
+        mainline_lock = {
+            "protagonist": str(request_payload.get("protagonist") or "未明确"),
+            "goal": "未明确",
+            "core_obstacle": "未明确",
+            "protagonist_action": "未明确",
+            "stakes": "未明确",
+            "pursuit_question": "未明确",
+            "ending_direction": "未明确",
+        }
+    episode_file = ROOT / ROLE_FILES["episode_continuity"]
+    draft_file = ROOT / ROLE_FILES["script_writer"]
+    episode_text = episode_file.read_text(encoding="utf-8") if episode_file.is_file() else ""
+    draft_text = draft_file.read_text(encoding="utf-8") if draft_file.is_file() else ""
+    episodes = []
+    alignment = []
+    for number in range(episode_start, episode_end + 1):
+        card = _episode_slice(episode_text, number, number)
+        draft = _episode_slice(draft_text, number, number)
+        opening = _state_text_action(draft or card, first=True)
+        closing = _state_text_action(draft or card, first=False)
+        previous = episodes[-1]["closing_action"] if episodes else "未明确"
+        episodes.append(
+            {
+                "episode": number,
+                "opening_action": opening,
+                "closing_action": closing,
+                "core_scenes": [
+                    match.group(0).strip()
+                    for match in SCENE_HEADER_RE.finditer(draft)
+                ][:3] or ["未明确"],
+                "scene_exception_reason": "",
+                "continuity_bridge": (
+                    None
+                    if number == episode_start and episode_start == 1
+                    else {
+                        "previous_episode": number - 1,
+                        "from_action": previous,
+                        "to_action": opening,
+                        "reason": "代码兜底提取，待补充核验",
+                    }
+                ),
+                "character_states": [],
+                "introduced_characters": [],
+                "introduced_props": [],
+                "information_changes": [],
+                "open_loops": [],
+                "resolved_loops": [],
+            }
+        )
+        alignment.append(
+            {
+                "episode": number,
+                "planned_mainline_advance": "未由模型核验",
+                "actual_mainline_advance": closing,
+                "status": "unverified",
+                "issue": reason[:500],
+            }
+        )
+    payload = {
+        "schema_version": "1.0",
+        "state_status": "degraded",
+        "state_warnings": [reason[:500]],
+        "project": {
+            "title": str(request_payload.get("title") or request_payload.get("project_name") or "未命名项目"),
+            "protagonist": str(mainline_lock.get("protagonist") or "未明确"),
+            "episode_count": int(request_payload.get("series_episode_count") or request_payload.get("episodes") or 1),
+            "target_words_per_episode": int(request_payload.get("episode_word_count") or 0),
+            "immutable_facts": [],
+        },
+        "mainline_lock": mainline_lock,
+        "characters": [],
+        "props": [],
+        "episodes": episodes,
+        "open_threads": [],
+        "plan_alignment": alignment,
+        "narrative_pressure": {
+            "adversity_payoff_level": "off",
+            "pressure_lines": [],
+            "emotional_debts": [],
+            "reversal_assets": [],
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def generate_state_result(
@@ -976,7 +1132,7 @@ def generate_state_result(
             episode_end=episode_end,
         )
         if not missing:
-            return result
+            return _ensure_state_globals(result, request_payload)
         batch_start, batch_end = missing[0]
         batch_request = dict(request_payload)
         batch_request.update(
@@ -1001,11 +1157,23 @@ def generate_state_result(
             episode_end=batch_end,
             previous_tail=result[-1800:],
         )
-        raw = call_model(
-            PROMPTS["state_recorder"] + "\n\n" + _state_batch_contract(batch_start, batch_end),
-            user_prompt,
-            stage=f"state_recorder:{batch_start}-{batch_end}",
-        )
+        try:
+            raw = call_model(
+                PROMPTS["state_recorder"] + "\n\n" + _state_batch_contract(batch_start, batch_end),
+                user_prompt,
+                stage=f"state_recorder:{batch_start}-{batch_end}",
+            )
+        except (SystemExit, OSError, ValueError) as exc:
+            raw = _fallback_state_batch(
+                batch_request,
+                episode_start=batch_start,
+                episode_end=batch_end,
+                reason=f"状态提取请求失败：{exc}",
+            )
+            print(
+                f"__SCRIPT_TEAM_STATE_DEGRADED__ stage=state_recorder:{batch_start}-{batch_end}",
+                flush=True,
+            )
         try:
             batch_result = _merge_state_outputs(
                 "",
@@ -1020,9 +1188,23 @@ def generate_state_result(
                 episode_end=batch_end,
             )
         except (TypeError, ValueError, SystemExit) as exc:
-            raise SystemExit(
-                f"状态记录器第{batch_start}-{batch_end}集批次校验失败：{exc}"
-            ) from exc
+            raw = _fallback_state_batch(
+                batch_request,
+                episode_start=batch_start,
+                episode_end=batch_end,
+                reason=f"状态提取 JSON 无法解析：{exc}",
+            )
+            result = _merge_state_outputs(
+                result,
+                raw,
+                episode_start=batch_start,
+                episode_end=batch_end,
+            )
+            result = _ensure_state_globals(result, request_payload)
+            print(
+                f"__SCRIPT_TEAM_STATE_DEGRADED__ stage=state_recorder:{batch_start}-{batch_end}",
+                flush=True,
+            )
         emit_stage_checkpoint("state_recorder", result)
 
 
@@ -1226,15 +1408,15 @@ def _mainline_lock_from_text(text: str) -> dict:
 def inter_stage_contract_errors(stage: str, result: str) -> list[str]:
     """Check only invariants that can be proven without asking the model to grade itself."""
     errors: list[str] = []
-    contract_path = ROOT / ROLE_FILES["showrunner"]
-    contract = contract_path.read_text(encoding="utf-8") if contract_path.is_file() else ""
-    locked = _mainline_lock_from_text(contract)
     if stage == "showrunner":
-        if not locked:
+        if not _mainline_lock_from_text(result):
             errors.append("创作任务书缺少合法 MAINLINE_LOCK_JSON")
         if not ROUTING_RE.search(result):
             errors.append("创作任务书缺少合法 SKILL_ROUTING_JSON")
         return errors
+    contract_path = ROOT / ROLE_FILES["showrunner"]
+    contract = contract_path.read_text(encoding="utf-8") if contract_path.is_file() else ""
+    locked = _mainline_lock_from_text(contract)
     if not locked:
         errors.append("上游创作任务书缺少可解析主线锁")
         return errors
@@ -1292,7 +1474,7 @@ def call_model(system_prompt: str, user_prompt: str, *, stage: str = "unknown") 
         "character_emotion": 12_000,
         "episode_continuity": 12_000,
         "script_writer": 16_000,
-        "state_recorder": 24_000,
+        "state_recorder": 10_000,
         "final_editor": 16_000,
     }.get(stage_name, 16_000)
     temperature = 0.45 if stage_name in {"script_writer", "final_editor"} else 0.25
