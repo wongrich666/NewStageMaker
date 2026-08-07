@@ -184,6 +184,32 @@ def test_flexible_scene_contract_accepts_three_scene_headers() -> None:
     ) == []
 
 
+def test_draft_scene_contract_drift_is_nonblocking_until_final_editor() -> None:
+    script = """第1集：《测试》
+
+场景1：办公室｜日｜内
+
+人物：甲
+
+甲：开始。
+"""
+    request_payload = {"scenes_per_episode": "2-3"}
+
+    assert MODULE.scene_contract_violations(script, request_payload) == [
+        "第1集要求2至3个场景，实际检测到1个"
+    ]
+    assert MODULE.blocking_scene_contract_message(
+        "script_writer",
+        script,
+        request_payload,
+    ) == ""
+    assert MODULE.blocking_scene_contract_message(
+        "final_editor",
+        script,
+        request_payload,
+    ) == "逐集场景合同未满足：第1集要求2至3个场景，实际检测到1个"
+
+
 def test_scene_contract_accepts_markdown_bold_scene_header() -> None:
     script = """
 第1集：《第98次死亡》
