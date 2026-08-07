@@ -385,6 +385,18 @@ def scene_contract_violations(script: str, request_payload: dict) -> list[str]:
     return violations
 
 
+def blocking_scene_contract_message(
+    stage: str,
+    script: str,
+    request_payload: dict,
+) -> str:
+    """Keep draft scene drift recoverable; enforce the contract on final delivery."""
+    violations = scene_contract_violations(script, request_payload)
+    if not violations or stage == "script_writer":
+        return ""
+    return "逐集场景合同未满足：" + "；".join(violations[:20])
+
+
 def episode_numbers(text: str) -> list[int]:
     return [
         int(match.group("zh") or match.group("en"))
@@ -1618,7 +1630,19 @@ def run(stage: str) -> None:
     if stage in {"script_writer", "final_editor"}:
         violations = scene_contract_violations(result, request_payload)
         if violations:
-            raise SystemExit("逐集场景合同未满足：" + "；".join(violations[:20]))
+            blocking_message = blocking_scene_contract_message(
+                stage,
+                result,
+                request_payload,
+            )
+            if blocking_message:
+                raise SystemExit(blocking_message)
+            print(
+                "__SCRIPT_TEAM_NONBLOCKING_AUDIT__ "
+                f"stage={stage} issue=scene_contract detail="
+                + "；".join(violations[:20]),
+                flush=True,
+            )
     output_path = ROOT / ROLE_FILES[stage]
     if stage == "state_recorder":
         output_path.write_text(
