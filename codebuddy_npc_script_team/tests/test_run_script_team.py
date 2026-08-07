@@ -276,6 +276,87 @@ def test_cloud_stage_repairs_only_missing_episodes(monkeypatch) -> None:
     assert MODULE.episode_numbers(result) == list(range(1, 11))
 
 
+def _state_batch_json(start: int, end: int) -> str:
+    return json.dumps(
+        {
+            "schema_version": "1.0",
+            "project": {"episode_count": 30, "protagonist": "主角"},
+            "mainline_lock": {"protagonist": "主角", "goal": "完成目标"},
+            "characters": [],
+            "props": [],
+            "episodes": [
+                {
+                    "episode": number,
+                    "opening_action": f"开场动作{number}",
+                    "closing_action": f"结尾动作{number}",
+                    "core_scenes": ["工作室"],
+                    "continuity_bridge": None if number == 1 else {
+                        "previous_episode": number - 1,
+                        "from_action": f"结尾动作{number - 1}",
+                        "to_action": f"开场动作{number}",
+                        "reason": "动作承接",
+                    },
+                    "character_states": [],
+                    "introduced_characters": [],
+                    "introduced_props": [],
+                    "information_changes": [],
+                    "open_loops": [],
+                    "resolved_loops": [],
+                }
+                for number in range(start, end + 1)
+            ],
+            "open_threads": [],
+            "plan_alignment": [
+                {
+                    "episode": number,
+                    "planned_mainline_advance": "推进",
+                    "actual_mainline_advance": "推进",
+                    "status": "aligned",
+                    "issue": "",
+                }
+                for number in range(start, end + 1)
+            ],
+            "narrative_pressure": {
+                "adversity_payoff_level": "off",
+                "pressure_lines": [],
+                "emotional_debts": [],
+                "reversal_assets": [],
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+def test_state_recorder_batches_30_episodes_and_resumes_from_checkpoint(monkeypatch, tmp_path) -> None:
+    calls: list[tuple[int, int]] = []
+    monkeypatch.setattr(MODULE, "ROOT", tmp_path)
+
+    def fake_call_model(_system_prompt, user_prompt, **_kwargs):
+        start = int(re.search(r'"episode_start":\s*(\d+)', user_prompt).group(1))
+        end = int(re.search(r'"episode_end":\s*(\d+)', user_prompt).group(1))
+        calls.append((start, end))
+        return _state_batch_json(start, end)
+
+    monkeypatch.setattr(MODULE, "call_model", fake_call_model)
+    request = {"episodes": 30, "episode_start": 1, "episode_end": 30}
+    result = MODULE.generate_stage_result("state_recorder", request, modules="")
+
+    assert calls == [(1, 5), (6, 10), (11, 15), (16, 20), (21, 25), (26, 30)]
+    assert MODULE._state_episode_numbers(result) == list(range(1, 31))
+
+    checkpoint = json.dumps({"stage": "state_recorder", "content": result}, ensure_ascii=False)
+    (tmp_path / "stage_resume.json").write_text(checkpoint, encoding="utf-8")
+    calls.clear()
+    resumed = MODULE.generate_stage_result("state_recorder", request, modules="")
+    assert calls == []
+    assert MODULE._state_episode_numbers(resumed) == list(range(1, 31))
+
+
+def test_json_parser_uses_first_complete_object() -> None:
+    payload = MODULE.parse_json_result('{"episodes": []}\n附加说明')
+    assert payload == {"episodes": []}
+
+
 def test_cloud_episode_cards_reject_placeholder_sections() -> None:
     content = "\n\n".join(
         [_episode_card(episode) for episode in range(1, 5)]

@@ -85,6 +85,7 @@ DYNAMIC_STAGE_MODULES = {
     "final_editor": ("adversity_payoff",),
 }
 ROUTING_RE = re.compile(r"SKILL_ROUTING_JSON\s*:\s*(\{[^\r\n]+\})")
+MAINLINE_RE = re.compile(r"MAINLINE_LOCK_JSON\s*:\s*(\{[^\r\n]+\})")
 EPISODE_HEADER_RE = re.compile(
     r"(?im)^\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*"
     r"(?:(?:第\s*(?P<zh>\d{1,3})\s*集)|(?:Episode\s*(?P<en>\d{1,3})))"
@@ -115,7 +116,13 @@ DISTILLED_STAGE_PRIORITY = {
 DISTILLED_STAGE_CHAR_LIMIT = 12_000
 DISTILLED_MODULE_CHAR_LIMIT = 3_500
 BATCH_SIZE = 5
-BATCHED_EPISODE_STAGES = {"episode_continuity", "script_writer", "final_editor"}
+STATE_BATCH_SIZE = 5
+BATCHED_EPISODE_STAGES = {
+    "episode_continuity",
+    "script_writer",
+    "state_recorder",
+    "final_editor",
+}
 EPISODE_CARD_FIELDS = (
     "承接事实", "开场钩子", "最短因果锚", "主角目标", "主角主动动作",
     "阻力", "选择与代价", "本集主线推进", "结尾状态", "下一集第一有效动作",
@@ -398,6 +405,129 @@ def _episode_slice(text: str, episode_start: int, episode_end: int) -> str:
             end = matches[index + 1].start() if index + 1 < len(matches) else len(value)
             selected.append(value[match.start() : end].strip())
     return "\n\n".join(selected)
+
+
+def _state_episode_numbers(text: str) -> list[int]:
+    try:
+        payload = json.loads(str(text or ""))
+    except (TypeError, json.JSONDecodeError):
+        return []
+    items = payload.get("episodes") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return []
+    numbers: list[int] = []
+    for item in items:
+        if isinstance(item, dict):
+            try:
+                numbers.append(int(item.get("episode")))
+            except (TypeError, ValueError):
+                continue
+    return numbers
+
+
+def _state_slice(text: str, episode_start: int, episode_end: int) -> str:
+    try:
+        payload = json.loads(str(text or ""))
+    except (TypeError, json.JSONDecodeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    sliced = dict(payload)
+    sliced["episodes"] = [
+        item
+        for item in payload.get("episodes") or []
+        if isinstance(item, dict)
+        and episode_start <= int(item.get("episode") or 0) <= episode_end
+    ]
+    sliced["plan_alignment"] = [
+        item
+        for item in payload.get("plan_alignment") or []
+        if isinstance(item, dict)
+        and episode_start <= int(item.get("episode") or 0) <= episode_end
+    ]
+    return json.dumps(sliced, ensure_ascii=False, indent=2)
+
+
+def _missing_state_ranges(
+    text: str,
+    *,
+    episode_start: int,
+    episode_end: int,
+    batch_size: int = STATE_BATCH_SIZE,
+) -> list[tuple[int, int]]:
+    present = set(_state_episode_numbers(text))
+    missing = [
+        episode
+        for episode in range(episode_start, episode_end + 1)
+        if episode not in present
+    ]
+    ranges: list[tuple[int, int]] = []
+    for episode in missing:
+        if not ranges or episode != ranges[-1][1] + 1 or episode - ranges[-1][0] >= batch_size:
+            ranges.append((episode, episode))
+        else:
+            ranges[-1] = (ranges[-1][0], episode)
+    return ranges
+
+
+def _merge_state_outputs(current: str, incoming: str, *, episode_start: int, episode_end: int) -> str:
+    base = parse_json_result(current) if str(current or "").strip() else {}
+    batch = parse_json_result(incoming)
+    items = batch.get("episodes")
+    if not isinstance(items, list):
+        raise ValueError("状态批次 episodes 必须是数组")
+    expected = list(range(episode_start, episode_end + 1))
+    actual = [int(item.get("episode")) for item in items if isinstance(item, dict)]
+    if actual != expected:
+        raise ValueError(f"状态批次要求集号{expected}，实际集号{actual}")
+
+    merged = dict(base)
+    for key, value in batch.items():
+        if key in {"episodes", "plan_alignment"}:
+            continue
+        if key == "narrative_pressure" and isinstance(value, dict):
+            target = merged.setdefault("narrative_pressure", {})
+            if not isinstance(target, dict):
+                target = {}
+                merged["narrative_pressure"] = target
+            for nested_key, nested_value in value.items():
+                if isinstance(nested_value, list):
+                    existing = target.setdefault(nested_key, [])
+                    if not isinstance(existing, list):
+                        existing = []
+                        target[nested_key] = existing
+                    for item in nested_value:
+                        if item not in existing:
+                            existing.append(item)
+                elif not target.get(nested_key):
+                    target[nested_key] = nested_value
+        elif isinstance(value, list):
+            existing = merged.setdefault(key, [])
+            if not isinstance(existing, list):
+                existing = []
+                merged[key] = existing
+            for item in value:
+                if item not in existing:
+                    existing.append(item)
+        elif not merged.get(key):
+            merged[key] = value
+    episode_map = {
+        int(item.get("episode")): item
+        for item in (merged.get("episodes") or [])
+        if isinstance(item, dict) and str(item.get("episode") or "").isdigit()
+    }
+    episode_map.update({int(item["episode"]): item for item in items})
+    merged["episodes"] = [episode_map[number] for number in sorted(episode_map)]
+    alignment_map = {
+        int(item.get("episode")): item
+        for item in (merged.get("plan_alignment") or [])
+        if isinstance(item, dict) and str(item.get("episode") or "").isdigit()
+    }
+    for item in batch.get("plan_alignment") or []:
+        if isinstance(item, dict) and str(item.get("episode") or "").isdigit():
+            alignment_map[int(item["episode"])] = item
+    merged["plan_alignment"] = [alignment_map[number] for number in sorted(alignment_map)]
+    return json.dumps(merged, ensure_ascii=False, indent=2)
 
 
 def _append_episode_batch(prefix: str, batch: str) -> str:
@@ -728,9 +858,13 @@ def previous_context(
             if (
                 episode_start is not None
                 and episode_end is not None
-                and previous in {"episode_continuity", "script_writer"}
+                and previous in {"episode_continuity", "script_writer", "state_recorder"}
             ):
-                content = _episode_slice(content, episode_start, episode_end)
+                content = (
+                    _state_slice(content, episode_start, episode_end)
+                    if previous == "state_recorder"
+                    else _episode_slice(content, episode_start, episode_end)
+                )
             chunks.append(f"\n\n===== {previous} =====\n{content}")
     if stage == "final_editor":
         gate_path = ROOT / "gate_pre.json"
@@ -794,6 +928,104 @@ def _stage_user_prompt(
     )
 
 
+def _state_batch_contract(start: int, end: int) -> str:
+    return f"""
+状态记录器采用分批协议。本次只处理第{start}集至第{end}集，不能输出其他集。
+只输出一个合法 JSON 对象，不要 Markdown 围栏、解释或校验报告。顶层必须包含：
+schema_version、project、mainline_lock、characters、props、episodes、open_threads、
+plan_alignment、narrative_pressure。episodes 和 plan_alignment 只填写本批集数；
+project、mainline_lock、characters、props、open_threads、narrative_pressure 在本批有事实
+时填写，不能凭空新增；若不适用使用空数组或“未明确”。每个 episode 必须有完整 schema
+字段。JSON 必须在写入前自行保证可解析，字符串中的 ASCII 双引号必须转义。
+""".strip()
+
+
+def generate_state_result(
+    request_payload: dict,
+    *,
+    modules: str,
+) -> str:
+    episode_start = max(1, int(request_payload.get("episode_start") or 1))
+    total = max(1, int(request_payload.get("episodes") or 1))
+    episode_end = max(
+        episode_start,
+        int(request_payload.get("episode_end") or (episode_start + total - 1)),
+    )
+    result = ""
+    resume_path = ROOT / "stage_resume.json"
+    if resume_path.is_file():
+        try:
+            resume_payload = json.loads(resume_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            resume_payload = {}
+        if str(resume_payload.get("stage") or "") == "state_recorder":
+            try:
+                result = _merge_state_outputs(
+                    "",
+                    str(resume_payload.get("content") or ""),
+                    episode_start=episode_start,
+                    episode_end=episode_end,
+                )
+            except (TypeError, ValueError, SystemExit):
+                result = ""
+
+    while True:
+        missing = _missing_state_ranges(
+            result,
+            episode_start=episode_start,
+            episode_end=episode_end,
+        )
+        if not missing:
+            return result
+        batch_start, batch_end = missing[0]
+        batch_request = dict(request_payload)
+        batch_request.update(
+            {
+                "episodes": batch_end - batch_start + 1,
+                "episode_start": batch_start,
+                "episode_end": batch_end,
+                "series_episode_start": episode_start,
+                "series_episode_end": episode_end,
+                "series_episode_count": total,
+                "episode_contract": (
+                    f"状态提取批次：只处理第{batch_start}集至第{batch_end}集；"
+                    f"全剧范围为第{episode_start}集至第{episode_end}集。"
+                ),
+            }
+        )
+        user_prompt = _stage_user_prompt(
+            "state_recorder",
+            batch_request,
+            modules,
+            episode_start=batch_start,
+            episode_end=batch_end,
+            previous_tail=result[-1800:],
+        )
+        raw = call_model(
+            PROMPTS["state_recorder"] + "\n\n" + _state_batch_contract(batch_start, batch_end),
+            user_prompt,
+            stage=f"state_recorder:{batch_start}-{batch_end}",
+        )
+        try:
+            batch_result = _merge_state_outputs(
+                "",
+                raw,
+                episode_start=batch_start,
+                episode_end=batch_end,
+            )
+            result = _merge_state_outputs(
+                result,
+                batch_result,
+                episode_start=batch_start,
+                episode_end=batch_end,
+            )
+        except (TypeError, ValueError, SystemExit) as exc:
+            raise SystemExit(
+                f"状态记录器第{batch_start}-{batch_end}集批次校验失败：{exc}"
+            ) from exc
+        emit_stage_checkpoint("state_recorder", result)
+
+
 def generate_stage_result(stage: str, request_payload: dict, *, modules: str) -> str:
     episode_start = max(1, int(request_payload.get("episode_start") or 1))
     total = max(1, int(request_payload.get("episodes") or 1))
@@ -801,6 +1033,8 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
         episode_start,
         int(request_payload.get("episode_end") or (episode_start + total - 1)),
     )
+    if stage == "state_recorder":
+        return generate_state_result(request_payload, modules=modules)
     if stage not in BATCHED_EPISODE_STAGES or total <= BATCH_SIZE:
         user_prompt = _stage_user_prompt(stage, request_payload, modules)
         if stage == "episode_continuity":
@@ -967,16 +1201,56 @@ def parse_json_result(text: str) -> dict:
         payload = json.loads(value)
     except json.JSONDecodeError:
         start = value.find("{")
-        end = value.rfind("}")
-        if start < 0 or end <= start:
+        if start < 0:
             raise SystemExit("状态记录器未返回 JSON 对象")
         try:
-            payload = json.loads(value[start : end + 1])
+            payload, _end = json.JSONDecoder().raw_decode(value[start:])
         except json.JSONDecodeError as exc:
             raise SystemExit(f"story_state.json 解析失败：{exc}") from exc
     if not isinstance(payload, dict):
         raise SystemExit("story_state.json 顶层必须是对象")
     return payload
+
+
+def _mainline_lock_from_text(text: str) -> dict:
+    match = MAINLINE_RE.search(str(text or ""))
+    if not match:
+        return {}
+    try:
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def inter_stage_contract_errors(stage: str, result: str) -> list[str]:
+    """Check only invariants that can be proven without asking the model to grade itself."""
+    errors: list[str] = []
+    contract_path = ROOT / ROLE_FILES["showrunner"]
+    contract = contract_path.read_text(encoding="utf-8") if contract_path.is_file() else ""
+    locked = _mainline_lock_from_text(contract)
+    if stage == "showrunner":
+        if not locked:
+            errors.append("创作任务书缺少合法 MAINLINE_LOCK_JSON")
+        if not ROUTING_RE.search(result):
+            errors.append("创作任务书缺少合法 SKILL_ROUTING_JSON")
+        return errors
+    if not locked:
+        errors.append("上游创作任务书缺少可解析主线锁")
+        return errors
+    if stage == "state_recorder":
+        try:
+            state = parse_json_result(result)
+        except SystemExit as exc:
+            return [str(exc)]
+        state_lock = state.get("mainline_lock")
+        if not isinstance(state_lock, dict) or state_lock != locked:
+            errors.append("状态记录器的 mainline_lock 与创作任务书不一致")
+        return errors
+    output_lock = _mainline_lock_from_text(result)
+    if output_lock and output_lock != locked:
+        errors.append(f"{stage} 改写了 MAINLINE_LOCK_JSON")
+    return errors
 
 
 def _positive_env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
@@ -1118,6 +1392,9 @@ def run(stage: str) -> None:
         prepare_final_editor_gate(request_payload)
     modules = skill_modules(stage) + distilled_skill_modules(stage, request_payload)
     result = generate_stage_result(stage, request_payload, modules=modules)
+    contract_errors = inter_stage_contract_errors(stage, result)
+    if contract_errors:
+        raise SystemExit(f"{stage}上游承接合同未满足：" + "；".join(contract_errors))
     if stage in {"script_writer", "final_editor"}:
         violations = scene_contract_violations(result, request_payload)
         if violations:
