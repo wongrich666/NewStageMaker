@@ -25,6 +25,15 @@ def test_job_polling_does_not_rebuild_the_page_for_telemetry_only_updates():
     assert "if (previousSignature !== renderSignature(state.job))" in polling
 
 
+def test_job_polling_rerenders_when_checkpoint_or_status_changes():
+    source = SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "status_text: value.status_text" in source
+    assert "remote_checkpoint: value.remote_checkpoint" in source
+    assert "remote_retry_count: value.remote_retry_count" in source
+    assert 'stage_resume_text_length: String(value.stage_resume_text || "").length' in source
+
+
 def test_silent_history_polling_only_replaces_sidebar_when_items_changed():
     source = SCRIPT_PATH.read_text(encoding="utf-8")
     history = _function_source(source, "loadHistory", "openHistory")

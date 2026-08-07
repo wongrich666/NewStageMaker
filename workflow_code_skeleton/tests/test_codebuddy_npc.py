@@ -839,7 +839,95 @@ def test_failed_remote_stage_preserves_partial_episode_checkpoint(tmp_path: Path
     assert refreshed["status"] == "failed"
     assert refreshed["stage_resume_text"] == partial
     assert refreshed["remote_checkpoint"]["completed_episodes"] == [1, 2, 3, 4, 5]
+    assert refreshed["batch_progress"]["completed_ranges"] == [[1, 5]]
+    assert refreshed["batch_progress"]["current_start"] == 6
+    assert refreshed["batch_progress"]["current_end"] == 10
     assert "可从云端断点补齐" in refreshed["error"]
+
+
+def test_successful_stage_without_marker_uses_complete_saved_checkpoint(tmp_path: Path) -> None:
+    complete = "\n\n".join(
+        f"第{episode}集：《断点{episode}》\n场景1：办公室｜日｜内\n人物：主角\n"
+        "主角：继续。\n主角把文件放到桌上。"
+        for episode in range(1, 6)
+    )
+    status = {
+        "status": "success",
+        "pipelinesStatus": {
+            "pipeline-1": {
+                "id": "pipeline-1",
+                "stages": [{"id": "stage-1", "name": "远程单节点编剧", "status": "success"}],
+            }
+        },
+    }
+    session = _Session([_Response(status), _Response({"content": ["Finished, code: 0"]})])
+    config = _config(tmp_path)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "断点恢复", "source_text": "测试", "episodes": 5},
+    )
+    job.update(
+        {
+            "build": {"sn": "completed-without-marker"},
+            "remote_kind": "stage",
+            "remote_stage": "script_writer",
+            "stage_resume_text": complete,
+            "status": "running",
+        }
+    )
+
+    refreshed = CodeBuddyNpcClient(config, session=session).refresh(job)
+
+    assert refreshed["status"] == "stage_ready"
+    assert refreshed["recovered_files"]["draft"] == complete
+    assert refreshed["stage_resume_text"] == ""
+
+
+def test_successful_stage_without_marker_pauses_on_partial_checkpoint(tmp_path: Path) -> None:
+    partial = "\n\n".join(
+        f"第{episode}集：《断点{episode}》\n场景1：办公室｜日｜内\n人物：主角\n"
+        "主角：继续。\n主角把文件放到桌上。"
+        for episode in range(1, 21)
+    )
+    status = {
+        "status": "success",
+        "pipelinesStatus": {
+            "pipeline-1": {
+                "id": "pipeline-1",
+                "stages": [{"id": "stage-1", "name": "远程单节点编剧", "status": "success"}],
+            }
+        },
+    }
+    session = _Session([_Response(status), _Response({"content": ["Finished, code: 0"]})])
+    config = _config(tmp_path)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "断点恢复", "source_text": "测试", "episodes": 30},
+    )
+    job.update(
+        {
+            "build": {"sn": "partial-without-marker"},
+            "remote_kind": "stage",
+            "remote_stage": "episode_continuity",
+            "stage_resume_text": partial,
+            "status": "running",
+        }
+    )
+
+    refreshed = CodeBuddyNpcClient(config, session=session).refresh(job)
+
+    assert refreshed["status"] == "stage_paused"
+    assert refreshed["active_stage"] == ""
+    assert refreshed["remote_checkpoint"]["completed_episodes"] == list(range(1, 21))
+    assert refreshed["batch_progress"]["completed_ranges"] == [
+        [1, 5],
+        [6, 10],
+        [11, 15],
+        [16, 20],
+    ]
+    assert refreshed["batch_progress"]["current_start"] == 21
+    assert refreshed["batch_progress"]["current_end"] == 25
+    assert "继续补齐" in refreshed["error"]
 
 
 def test_authorization_header_preserves_existing_bearer_prefix(tmp_path: Path) -> None:
