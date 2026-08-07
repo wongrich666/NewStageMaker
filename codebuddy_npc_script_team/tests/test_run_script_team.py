@@ -294,7 +294,7 @@ def test_cloud_stage_batches_long_episode_ranges(monkeypatch) -> None:
         modules="",
     )
 
-    assert calls == [(1, 10)]
+    assert calls == [(1, 5), (6, 10)]
     assert MODULE.episode_numbers(result) == list(range(1, 11))
 
 
@@ -321,7 +321,31 @@ def test_cloud_stage_repairs_only_missing_episodes(monkeypatch) -> None:
         modules="",
     )
 
-    assert calls == [(1, 10), (1, 10)]
+    assert calls == [(1, 5), (5, 9), (10, 10)]
+    assert MODULE.episode_numbers(result) == list(range(1, 11))
+
+
+def test_cloud_stage_keeps_valid_siblings_and_repairs_only_bad_episode(monkeypatch) -> None:
+    calls: list[tuple[int, int]] = []
+
+    def fake_call_model(_system_prompt, user_prompt, **_kwargs):
+        start = int(re.search(r'"episode_start":\s*(\d+)', user_prompt).group(1))
+        end = int(re.search(r'"episode_end":\s*(\d+)', user_prompt).group(1))
+        calls.append((start, end))
+        payload = json.loads(_episode_card_json(start, end))
+        if len(calls) == 1:
+            payload["episodes"][1].pop("causal_anchor")
+        return json.dumps(payload, ensure_ascii=False)
+
+    monkeypatch.setattr(MODULE, "call_model", fake_call_model)
+
+    result = MODULE.generate_stage_result(
+        "episode_continuity",
+        {"episodes": 10, "episode_start": 1, "episode_end": 10},
+        modules="",
+    )
+
+    assert calls == [(1, 5), (2, 2), (6, 10)]
     assert MODULE.episode_numbers(result) == list(range(1, 11))
 
 
@@ -490,7 +514,10 @@ def test_batch_upper_bound_respects_frontend_episode_count(monkeypatch) -> None:
         return _episode_card_json(int(match.group(1)), int(match.group(2)))
 
     monkeypatch.setattr(MODULE, "call_model", fake_call_model)
-    for count, expected in ((5, ["episode_continuity"]), (11, ["episode_continuity:1-10", "episode_continuity:11-11"])):
+    for count, expected in (
+        (5, ["episode_continuity:1-5"]),
+        (11, ["episode_continuity:1-5", "episode_continuity:6-10", "episode_continuity:11-11"]),
+    ):
         calls.clear()
         result = MODULE.generate_stage_result(
             "episode_continuity",
@@ -575,10 +602,10 @@ def test_full_chain_runs_30_episodes_when_state_model_degrades(monkeypatch, tmp_
     assert MODULE.episode_numbers(final_script) == list(range(1, 31))
     assert [number for number in MODULE._state_episode_numbers(json.dumps(state))] == list(range(1, 31))
     assert state["state_status"] == "deterministic"
-    assert len([stage for stage in calls if stage.startswith("episode_continuity")]) == 3
-    assert len([stage for stage in calls if stage.startswith("script_writer")]) == 3
+    assert len([stage for stage in calls if stage.startswith("episode_continuity")]) == 6
+    assert len([stage for stage in calls if stage.startswith("script_writer")]) == 6
     assert len([stage for stage in calls if stage.startswith("state_recorder")]) == 0
-    assert len([stage for stage in calls if stage.startswith("final_editor")]) == 3
+    assert len([stage for stage in calls if stage.startswith("final_editor")]) == 6
 
 
 def test_cloud_episode_cards_reject_placeholder_sections() -> None:

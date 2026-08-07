@@ -264,6 +264,47 @@ def stage_episode_range_error(
         f"{STAGE_NAMES[stage]}集数不完整：要求第{episode_start}-{episode_end}集，"
         f"实际集号为{actual}"
     )
+
+
+def _episode_batch_progress(
+    *,
+    stage: str,
+    completed: list[int],
+    request_data: dict[str, Any],
+    batch_size: int = 5,
+) -> dict[str, Any]:
+    episode_start = max(1, int(request_data.get("episode_start") or 1))
+    episode_end = max(
+        episode_start,
+        int(
+            request_data.get("episode_end")
+            or (episode_start + max(1, int(request_data.get("episodes") or 1)) - 1)
+        ),
+    )
+    completed_set = {
+        number
+        for number in completed
+        if episode_start <= number <= episode_end
+    }
+    completed_ranges: list[list[int]] = []
+    missing_ranges: list[list[int]] = []
+    for start in range(episode_start, episode_end + 1, batch_size):
+        end = min(episode_end, start + batch_size - 1)
+        if all(number in completed_set for number in range(start, end + 1)):
+            completed_ranges.append([start, end])
+        else:
+            missing_ranges.append([start, end])
+    current = missing_ranges[0] if missing_ranges else [0, 0]
+    return {
+        "stage": stage,
+        "batch_size": batch_size,
+        "completed_episodes": sorted(completed_set),
+        "completed_ranges": completed_ranges,
+        "current_start": current[0],
+        "current_end": current[1],
+    }
+
+
 _CREATION_MODES = {"原创", "改编", "续写"}
 _CONTINUATION_POLICIES = {"strict", "light"}
 
@@ -1022,6 +1063,18 @@ class CodeBuddyNpcClient:
                     recovered_files[logical_name] = recovered
 
         if str(job.get("remote_kind") or "") == "stage":
+            checkpoint = str(job.get("stage_resume_text") or "").strip()
+            if (
+                not stage_result
+                and build_status in TERMINAL_SUCCESS
+                and remote_stage in _EPISODE_CONTRACT_STAGES
+            ):
+                if checkpoint and not stage_episode_range_error(
+                    remote_stage,
+                    checkpoint,
+                    job.get("request") or {},
+                ):
+                    stage_result = checkpoint
             if stage_result and remote_stage in STAGE_ARTIFACTS:
                 range_error = stage_episode_range_error(
                     remote_stage,
@@ -1041,6 +1094,12 @@ class CodeBuddyNpcClient:
                             "stage": remote_stage,
                             "completed_episodes": completed,
                         }
+                        request_payload = job.get("request") or {}
+                        refreshed["batch_progress"] = _episode_batch_progress(
+                            stage=remote_stage,
+                            completed=completed,
+                            request_data=request_payload,
+                        )
                         refreshed["status"] = "failed"
                         refreshed["status_text"] = (
                             f"{STAGE_NAMES[remote_stage]}云端中断，已保存{len(completed)}集断点"
@@ -1078,7 +1137,40 @@ class CodeBuddyNpcClient:
                     (STAGE_ORDER.index(remote_stage) + 1) / len(STAGE_ORDER) * 100
                 )
                 refreshed["error"] = ""
+                refreshed.pop("batch_progress", None)
+                refreshed.pop("remote_checkpoint", None)
+                refreshed["stage_resume_text"] = ""
                 return refreshed
+            if (
+                not stage_result
+                and checkpoint
+                and build_status in TERMINAL_SUCCESS
+                and remote_stage in _EPISODE_CONTRACT_STAGES
+            ):
+                sections = (
+                    _state_episode_sections(checkpoint)
+                    if remote_stage == "state_recorder"
+                    else _episode_sections(checkpoint)
+                )
+                completed = [episode for episode, _section in sections]
+                if completed:
+                    refreshed["remote_checkpoint"] = {
+                        "stage": remote_stage,
+                        "completed_episodes": completed,
+                    }
+                    refreshed["batch_progress"] = _episode_batch_progress(
+                        stage=remote_stage,
+                        completed=completed,
+                        request_data=job.get("request") or {},
+                    )
+                    refreshed["status"] = "stage_paused"
+                    refreshed["status_text"] = (
+                        f"{STAGE_NAMES[remote_stage]}云端已结束，已保留{len(completed)}集断点"
+                    )
+                    refreshed["error"] = "CNB 未返回本轮产物标记，可从已保存断点继续补齐"
+                    refreshed["active_stage"] = ""
+                    finish_stage_timing(refreshed, remote_stage, status="paused")
+                    return refreshed
             if build_status in TERMINAL_FAILURE:
                 refreshed["status"] = "failed"
                 refreshed["status_text"] = f"{STAGE_NAMES.get(remote_stage, '远程节点')}运行失败"

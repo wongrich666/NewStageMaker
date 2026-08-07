@@ -125,9 +125,9 @@ BATCH_SIZE = 5
 STATE_BATCH_SIZE = 5
 STATE_AUDIT_BATCH_SIZE = 10
 STAGE_BATCH_SIZES = {
-    "episode_continuity": 10,
-    "script_writer": 10,
-    "final_editor": 10,
+    "episode_continuity": 5,
+    "script_writer": 5,
+    "final_editor": 5,
 }
 BATCHED_EPISODE_STAGES = {
     "episode_continuity",
@@ -639,28 +639,46 @@ def _json_object_from_text(text: str) -> dict:
         try:
             payload = json.loads(candidate)
         except json.JSONDecodeError:
-            continue
+            try:
+                start = candidate.find("{")
+                if start < 0:
+                    continue
+                payload, _end = json.JSONDecoder().raw_decode(candidate[start:])
+            except json.JSONDecodeError:
+                continue
         if isinstance(payload, dict):
             return payload
     raise ValueError("没有返回合法 JSON 对象")
 
 
-def render_episode_card_json(text: str, *, episode_start: int, episode_end: int) -> str:
+def render_episode_card_json(
+    text: str,
+    *,
+    episode_start: int,
+    episode_end: int,
+    allow_partial: bool = False,
+) -> str:
     payload = _json_object_from_text(text)
     items = payload.get("episodes")
     if not isinstance(items, list):
         raise ValueError("episodes 必须是数组")
     expected = list(range(episode_start, episode_end + 1))
     actual: list[int] = []
-    rendered: list[str] = []
+    rendered: dict[int, str] = {}
+    errors: list[str] = []
     for item in items:
         if not isinstance(item, dict):
+            if allow_partial:
+                errors.append("episodes 中存在非对象内容")
+                continue
             raise ValueError("episodes 中存在非对象内容")
         try:
             episode = int(item.get("episode"))
         except (TypeError, ValueError) as exc:
+            if allow_partial:
+                errors.append("episode 必须是数字")
+                continue
             raise ValueError("episode 必须是数字") from exc
-        actual.append(episode)
         title = str(item.get("title") or "").strip()
         missing = [key for key in EPISODE_CARD_JSON_FIELDS if not str(item.get(key) or "").strip()]
         scenes = item.get("scenes")
@@ -669,31 +687,47 @@ def render_episode_card_json(text: str, *, episode_start: int, episode_end: int)
         if not isinstance(scenes, list) or not scenes:
             missing.append("scenes")
         if missing:
+            if allow_partial:
+                errors.append(f"第{episode}集缺少字段：{','.join(missing)}")
+                continue
             raise ValueError(f"第{episode}集缺少字段：{','.join(missing)}")
         lines = [f"第{episode}集：《{title}》"]
         lines.extend(
             f"{label}：{str(item[key]).strip()}"
             for key, label in EPISODE_CARD_JSON_FIELDS.items()
         )
+        scene_error = ""
         for scene_index, scene in enumerate(scenes, start=1):
             if not isinstance(scene, dict):
-                raise ValueError(f"第{episode}集场景{scene_index}不是对象")
+                scene_error = f"第{episode}集场景{scene_index}不是对象"
+                break
             location = str(scene.get("location") or "").strip()
             time_value = str(scene.get("time") or "").strip()
             interior = str(scene.get("interior_exterior") or "").strip()
             task = str(scene.get("dramatic_task") or "").strip()
             if not all((location, time_value, interior, task)):
-                raise ValueError(f"第{episode}集场景{scene_index}信息不完整")
+                scene_error = f"第{episode}集场景{scene_index}信息不完整"
+                break
             characters = "、".join(str(value).strip() for value in scene.get("characters") or [] if str(value).strip())
             props = "、".join(str(value).strip() for value in scene.get("props") or [] if str(value).strip()) or "无"
             lines.append(
                 f"场景{scene_index}：{location}｜{time_value}｜{interior}；"
                 f"人物：{characters or '未明确'}；关键道具：{props}；戏剧任务：{task}"
             )
-        rendered.append("\n".join(lines))
+        if scene_error:
+            if allow_partial:
+                errors.append(scene_error)
+                continue
+            raise ValueError(scene_error)
+        actual.append(episode)
+        rendered.setdefault(episode, "\n".join(lines))
+    if allow_partial:
+        if not rendered:
+            raise ValueError(errors[0] if errors else "没有可保留的合法分集卡")
+        return "\n\n".join(rendered[number] for number in sorted(rendered))
     if actual != expected:
         raise ValueError(f"要求集号{expected}，实际集号{actual}")
-    return "\n\n".join(rendered)
+    return "\n\n".join(rendered[number] for number in expected)
 
 
 def generate_episode_card_batch(
@@ -704,27 +738,26 @@ def generate_episode_card_batch(
 ) -> str:
     start = max(1, int(request_payload.get("episode_start") or 1))
     end = max(start, int(request_payload.get("episode_end") or start))
-    correction = ""
-    last_error = ""
-    for attempt in range(1, 3):
-        raw = call_model(
-            PROMPTS["episode_continuity"] + "\n\n" + _episode_card_json_contract(start, end),
-            user_prompt + correction,
-            stage=stage_label,
+    raw = call_model(
+        PROMPTS["episode_continuity"] + "\n\n" + _episode_card_json_contract(start, end),
+        user_prompt,
+        stage=stage_label,
+    )
+    try:
+        return render_episode_card_json(
+            raw,
+            episode_start=start,
+            episode_end=end,
+            allow_partial=True,
         )
-        try:
-            return render_episode_card_json(raw, episode_start=start, episode_end=end)
-        except ValueError as exc:
-            last_error = str(exc)
-            print(
-                f"__SCRIPT_TEAM_CARD_REPAIR__ stage={stage_label} attempt={attempt} error={last_error}",
-                flush=True,
-            )
-            correction = (
-                "\n\n上一次 JSON 未通过代码校验：" + last_error
-                + "。只修复这些缺项，仍只输出完整 JSON 对象。"
-            )
-    raise SystemExit(f"episode_continuity结构化分集卡连续2次校验失败：{last_error}")
+    except ValueError as exc:
+        print(
+            f"__SCRIPT_TEAM_CARD_REPAIR__ stage={stage_label} error={exc}",
+            flush=True,
+        )
+        # A model may return the requested card labels as Markdown instead of JSON.
+        # The outer batch loop validates and preserves any usable episode sections.
+        return raw
 
 
 def _merge_episode_outputs(
@@ -1277,7 +1310,7 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
     if stage == "state_recorder":
         return generate_state_result(request_payload, modules=modules)
     stage_batch_size = STAGE_BATCH_SIZES.get(stage, BATCH_SIZE)
-    if stage not in BATCHED_EPISODE_STAGES or total <= stage_batch_size:
+    if stage not in BATCHED_EPISODE_STAGES:
         user_prompt = _stage_user_prompt(stage, request_payload, modules)
         if stage == "episode_continuity":
             result = generate_episode_card_batch(

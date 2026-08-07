@@ -354,11 +354,15 @@
       : [];
     return JSON.stringify({
       status: value.status,
+      status_text: value.status_text,
       progress: value.progress,
       active_stage: value.active_stage,
       execution_target: value.execution_target,
       stages,
       batch_progress: value.batch_progress,
+      remote_checkpoint: value.remote_checkpoint,
+      remote_retry_count: value.remote_retry_count,
+      stage_resume_text_length: String(value.stage_resume_text || "").length,
       recovered_files: Object.fromEntries(
         Object.entries(files).map(([key, content]) => [key, String(content || "").length]),
       ),
