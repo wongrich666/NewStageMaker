@@ -195,6 +195,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         job["remote_retry_count"] = max(0, int(retry_count))
         job["remote_retry_limit"] = codebuddy_npc_remote_retry_limit
         job["active_stage"] = stage
+        job["cancel_requested"] = False
         start_stage_timing(
             job,
             stage,

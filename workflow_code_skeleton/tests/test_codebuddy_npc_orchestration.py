@@ -124,6 +124,11 @@ def _install_fakes(
         def is_running(_job_id):
             return False
 
+        def prepare_remote(self, *, job_id, user_id, stage):
+            job = state["job"]
+            assert job and job_id == job["job_id"] and user_id == job["user_id"]
+            return dict(job)
+
         def start(self, *, job_id, user_id, stage, continue_after):
             state["fallback_calls"].append(
                 {
@@ -169,6 +174,37 @@ def test_auto_job_starts_remote_stage_chain_instead_of_full_build(monkeypatch):
     ]
     assert state["job"]["remote_kind"] == "stage"
     assert state["job"]["remote_retry_count"] == 0
+
+
+def test_remote_submission_clears_stale_cancel_request(monkeypatch):
+    server, state = _install_fakes(monkeypatch)
+    app = server.create_app()
+    app.config.update(TESTING=True)
+    client = app.test_client()
+    headers = {"Authorization": "Bearer writer-token"}
+
+    created = client.post(
+        "/api/new-workflow-test/npc/jobs",
+        headers=headers,
+        json={
+            "project_title": "取消后重跑",
+            "source_text": "重新运行必须继续轮询。",
+            "execution_mode": "step",
+        },
+    )
+    assert created.status_code == 200
+    state["job"]["cancel_requested"] = True
+    state["job"]["status"] = "stage_paused"
+
+    rerun = client.post(
+        "/api/new-workflow-test/npc/jobs/npc-orchestration-test/stages/showrunner/run",
+        headers=headers,
+        json={"continue_after": False},
+    )
+
+    assert rerun.status_code == 200
+    assert state["job"]["status"] == "running"
+    assert state["job"]["cancel_requested"] is False
 
 
 def test_failed_remote_stage_retries_twice_then_uses_local_checkpoint(monkeypatch):

@@ -642,7 +642,28 @@ class CodeBuddyNpcStageRunner:
                 f"{STAGE_NAMES[stage]}缺少上游内容：" + "、".join(missing),
                 status_code=409,
             )
+        resume_text = ""
+        resume_progress: dict[str, Any] = {}
+        batch_progress = job.get("batch_progress")
+        batch_progress = batch_progress if isinstance(batch_progress, dict) else {}
+        remote_checkpoint = job.get("remote_checkpoint")
+        remote_checkpoint = remote_checkpoint if isinstance(remote_checkpoint, dict) else {}
+        if (
+            stage in {"episode_continuity", "script_writer", "final_editor"}
+            and str(job.get("status") or "") in {"failed", "stage_paused", "stage_running"}
+            and (
+                str(batch_progress.get("stage") or "") == stage
+                or str(remote_checkpoint.get("stage") or "") == stage
+            )
+        ):
+            resume_text = str(job.get("stage_resume_text") or "").strip()
+            if resume_text and str(batch_progress.get("stage") or "") == stage:
+                resume_progress = copy.deepcopy(batch_progress)
         self._invalidate_from(job, stage)
+        if resume_text:
+            job["stage_resume_text"] = resume_text
+            if resume_progress:
+                job["batch_progress"] = resume_progress
         return self.store.save(job)
 
     def start(

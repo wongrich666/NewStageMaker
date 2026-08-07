@@ -191,6 +191,49 @@ def test_cancel_stale_job_pauses_immediately_and_keeps_checkpoint(tmp_path: Path
     assert paused["batch_progress"]["completed_episodes"] == [1]
 
 
+def test_prepare_remote_keeps_same_stage_episode_checkpoint(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={
+            "project_title": "断点重跑",
+            "episodes": 10,
+            "source_text": "测试断点恢复。",
+        },
+    )
+    partial = "第1集：《保留》\n场景1：办公室｜日｜内\n人物：主角\n主角：继续。"
+    job.update(
+        {
+            "status": "stage_paused",
+            "remote_stage": "episode_continuity",
+            "stage_resume_text": partial,
+            "batch_progress": {
+                "stage": "episode_continuity",
+                "batch_size": 5,
+                "completed_episodes": [1],
+                "completed_ranges": [],
+                "current_start": 1,
+                "current_end": 5,
+            },
+            "recovered_files": {
+                "contract": "创作合同",
+                "story": "故事架构",
+                "characters": "人物设定",
+            },
+        }
+    )
+    store.save(job)
+
+    prepared = CodeBuddyNpcStageRunner(store).prepare_remote(
+        job_id=job["job_id"],
+        user_id=7,
+        stage="episode_continuity",
+    )
+
+    assert prepared["stage_resume_text"] == partial
+    assert prepared["batch_progress"]["stage"] == "episode_continuity"
+
+
 def test_stage_timing_is_live_then_persists_completed_duration() -> None:
     job = {"stage_timings": {}, "active_stage": "story_architect"}
 
