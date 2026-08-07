@@ -351,7 +351,7 @@ main:
     - docker:
         image: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
         env:
-          SCRIPT_REQUEST: $scriptRequest
+          SCRIPT_REQUEST_BUNDLE: $scriptRequestBundle
           SCRIPT_STAGE: $scriptStage
           SCRIPT_STATE_BUNDLE: $scriptStateBundle
           DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL}

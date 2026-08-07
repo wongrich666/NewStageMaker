@@ -599,7 +599,32 @@ def test_trigger_stage_uses_remote_event_and_compressed_checkpoint(tmp_path: Pat
     assert checkpoint["recovered_files"]["contract"] == "创作合同"
     assert checkpoint["resume_stage"] == "story_architect"
     assert checkpoint["stage_resume_text"] == "第1集\n已完成断点"
-    assert json.loads(payload["env"]["scriptRequest"])["stage_feedback"] == "保留结局"
+    request_payload = json.loads(
+        gzip.decompress(base64.b64decode(payload["env"]["scriptRequestBundle"])).decode("utf-8")
+    )
+    assert request_payload["stage_feedback"] == "保留结局"
+
+
+def test_trigger_stage_compresses_large_request_below_linux_single_argument_limit(
+    tmp_path: Path,
+) -> None:
+    session = _Session([_Response({"success": True, "sn": "stage-build"})])
+    config = _config(tmp_path)
+    client = CodeBuddyNpcClient(config, session=session)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "长材料", "source_text": "人物冲突与选择。" * 30_000},
+    )
+
+    client.trigger_stage(job, stage="showrunner")
+
+    env = session.calls[0][2]["json"]["env"]
+    assert "scriptRequest" not in env
+    assert len(env["scriptRequestBundle"].encode("ascii")) < 128 * 1024
+    request_payload = json.loads(
+        gzip.decompress(base64.b64decode(env["scriptRequestBundle"])).decode("utf-8")
+    )
+    assert request_payload["source_text"] == job["request"]["source_text"]
 
 
 def test_trigger_final_editor_sends_only_required_checkpoint_artifacts(tmp_path: Path) -> None:

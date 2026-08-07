@@ -867,6 +867,15 @@ class CodeBuddyNpcClient:
             request_data["distilled_skill"] = copy.deepcopy(job["skill_snapshot"])
         if feedback:
             request_data["stage_feedback"] = _clean_text(feedback, limit=20_000)
+        request_bundle = base64.b64encode(
+            gzip.compress(
+                json.dumps(
+                    request_data,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+        ).decode("ascii")
         payload = {
             "event": self.config.stage_event,
             "branch": self.config.branch,
@@ -875,11 +884,7 @@ class CodeBuddyNpcClient:
             "npc": {"name": "CodeBuddy", "workMode": False},
             "env": {
                 "jobId": str(job["job_id"]),
-                "scriptRequest": json.dumps(
-                    request_data,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
+                "scriptRequestBundle": request_bundle,
                 "scriptStage": stage,
                 "scriptStateBundle": state_bundle,
                 "model": self.config.model,

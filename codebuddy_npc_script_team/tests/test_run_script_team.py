@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import base64
+import gzip
 import json
 import re
 from pathlib import Path
@@ -148,6 +150,26 @@ def test_continuation_contract_uses_actual_episode_range(monkeypatch) -> None:
     assert "续写创作圣经" in instruction
     assert "已有正文明确事实 > 续写创作圣经" in instruction
     assert "第9集关系彻底决裂" in instruction
+
+
+def test_read_request_accepts_compressed_bundle(monkeypatch) -> None:
+    expected = {
+        "project_title": "长材料",
+        "episodes": 30,
+        "source_text": "人物冲突与选择。" * 30_000,
+    }
+    encoded = base64.b64encode(
+        gzip.compress(json.dumps(expected, ensure_ascii=False).encode("utf-8"))
+    ).decode("ascii")
+    monkeypatch.setenv("SCRIPT_REQUEST_BUNDLE", encoded)
+    monkeypatch.delenv("scriptRequest", raising=False)
+    monkeypatch.delenv("SCRIPT_REQUEST", raising=False)
+
+    request = MODULE.read_request()
+
+    assert request["project_title"] == "长材料"
+    assert request["episodes"] == 30
+    assert request["source_text"] == expected["source_text"]
 
 
 def test_single_scene_contract_rejects_three_scene_headers() -> None:

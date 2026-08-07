@@ -797,7 +797,18 @@ def prepare_final_editor_gate(request_payload: dict) -> None:
 
 
 def read_request() -> dict:
-    raw = os.getenv("scriptRequest") or os.getenv("SCRIPT_REQUEST") or "{}"
+    encoded = (
+        os.getenv("scriptRequestBundle")
+        or os.getenv("SCRIPT_REQUEST_BUNDLE")
+        or ""
+    ).strip()
+    if encoded:
+        try:
+            raw = gzip.decompress(base64.b64decode(encoded)).decode("utf-8")
+        except (ValueError, OSError) as exc:
+            raise SystemExit(f"scriptRequest 压缩包解析失败：{exc}") from exc
+    else:
+        raw = os.getenv("scriptRequest") or os.getenv("SCRIPT_REQUEST") or "{}"
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
