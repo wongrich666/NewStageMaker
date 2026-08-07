@@ -68,7 +68,7 @@ STAGE_REQUIRED_ARTIFACTS = {
     "episode_continuity": ("contract", "story", "characters"),
     "script_writer": ("contract", "story", "characters", "episodes"),
     "state_recorder": ("contract", "characters", "episodes", "draft"),
-    "final_editor": ("contract", "episodes", "draft", "story_state"),
+    "final_editor": ("contract", "characters", "episodes", "draft"),
 }
 STAGE_NAMES = {
     "showrunner": "总编剧",
@@ -856,6 +856,8 @@ class CodeBuddyNpcClient:
             "resume_stage": stage,
             "stage_resume_text": _clean_text(job.get("stage_resume_text"), limit=1_500_000),
         }
+        if stage == "final_editor" and str(recovered_files.get("story_state") or "").strip():
+            artifact_bundle["recovered_files"]["story_state"] = recovered_files["story_state"]
         compressed = gzip.compress(
             json.dumps(artifact_bundle, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         )

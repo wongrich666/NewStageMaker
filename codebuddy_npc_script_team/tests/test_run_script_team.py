@@ -99,6 +99,7 @@ def test_mainline_and_continuity_contracts_survive_every_writing_stage() -> None
     assert "只允许重写开头1至3个有效拍" in MODULE.PROMPTS["final_editor"]
     assert MODULE.CONTEXT_FILES["final_editor"] == (
         "showrunner",
+        "character_emotion",
         "episode_continuity",
         "script_writer",
         "state_recorder",
@@ -352,9 +353,136 @@ def test_state_recorder_batches_30_episodes_and_resumes_from_checkpoint(monkeypa
     assert MODULE._state_episode_numbers(resumed) == list(range(1, 31))
 
 
+def test_state_recorder_degrades_without_breaking_30_episode_flow(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(MODULE, "ROOT", tmp_path)
+    lock = {
+        "protagonist": "林夏",
+        "goal": "保住餐厅",
+        "core_obstacle": "资金链断裂",
+        "protagonist_action": "重建菜单和客源",
+        "stakes": "失去家业",
+        "pursuit_question": "她能否在期限前救回餐厅",
+        "ending_direction": "餐厅重开",
+    }
+    (tmp_path / MODULE.ROLE_FILES["showrunner"]).write_text(
+        "MAINLINE_LOCK_JSON: " + json.dumps(lock, ensure_ascii=False) + "\n"
+        'SKILL_ROUTING_JSON: {"adversity_payoff":"off"}',
+        encoding="utf-8",
+    )
+    cards = "\n\n".join(_episode_card(number) for number in range(1, 31))
+    draft = "\n\n".join(
+        f"第{number}集：《测试{number}》\n场景1：餐厅｜日｜内\n人物：林夏\n"
+        f"林夏：先解决第{number}个问题。\n林夏把第{number}张订单放进抽屉。"
+        for number in range(1, 31)
+    )
+    (tmp_path / MODULE.ROLE_FILES["episode_continuity"]).write_text(cards, encoding="utf-8")
+    (tmp_path / MODULE.ROLE_FILES["script_writer"]).write_text(draft, encoding="utf-8")
+    calls = 0
+
+    def malformed_state(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return '{"episodes": [{"episode": 1}'
+
+    monkeypatch.setattr(MODULE, "call_model", malformed_state)
+    result = MODULE.generate_stage_result(
+        "state_recorder",
+        {
+            "title": "重启小馆",
+            "episodes": 30,
+            "episode_start": 1,
+            "episode_end": 30,
+            "episode_word_count": 400,
+        },
+        modules="",
+    )
+    payload = json.loads(result)
+
+    assert calls == 6
+    assert payload["state_status"] == "degraded"
+    assert payload["mainline_lock"] == lock
+    assert MODULE._state_episode_numbers(result) == list(range(1, 31))
+    assert len(payload["plan_alignment"]) == 30
+
+
 def test_json_parser_uses_first_complete_object() -> None:
     payload = MODULE.parse_json_result('{"episodes": []}\n附加说明')
     assert payload == {"episodes": []}
+
+
+def _episode_script_batch(start: int, end: int) -> str:
+    body = "主角必须立刻做出选择并承担代价。" * 22
+    return "\n\n".join(
+        f"第{number}集：《测试{number}》\n场景1：餐厅｜日｜内\n人物：主角\n"
+        f"主角：我现在就做。\n主角把关键文件收进抽屉。\n{body}"
+        for number in range(start, end + 1)
+    )
+
+
+def test_full_chain_runs_30_episodes_when_state_model_degrades(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(MODULE, "ROOT", tmp_path)
+    monkeypatch.setattr(MODULE, "prepare_final_editor_gate", lambda _request: None)
+    monkeypatch.setenv(
+        "scriptRequest",
+        json.dumps(
+            {
+                "title": "30集链路测试",
+                "episodes": 30,
+                "episode_start": 1,
+                "episode_end": 30,
+                "episode_word_count": 400,
+                "episode_word_count_max": 440,
+                "scenes_per_episode": "1",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    lock = {
+        "protagonist": "主角",
+        "goal": "完成任务",
+        "core_obstacle": "时间不足",
+        "protagonist_action": "主动解决问题",
+        "stakes": "任务失败",
+        "pursuit_question": "主角能否完成任务",
+        "ending_direction": "完成任务并付出代价",
+    }
+    calls: list[str] = []
+
+    def fake_call_model(system_prompt, user_prompt, *, stage="unknown"):
+        calls.append(stage)
+        if stage == "showrunner":
+            return (
+                "MAINLINE_LOCK_JSON: " + json.dumps(lock, ensure_ascii=False) + "\n"
+                'SKILL_ROUTING_JSON: {"adversity_payoff":"off"}'
+            )
+        if stage == "story_architect":
+            return "MAINLINE_LOCK_JSON: " + json.dumps(lock, ensure_ascii=False) + "\n主线推进账本"
+        if stage == "character_emotion":
+            return "人物声音圣经：主角短句、主动行动、承担代价。"
+        if stage.startswith("episode_continuity"):
+            start = int(re.search(r"(\d+)-(\d+)$", stage).group(1))
+            end = int(re.search(r"(\d+)-(\d+)$", stage).group(2))
+            return _episode_card_json(start, end)
+        if stage.startswith("state_recorder"):
+            return '{"episodes": [{"episode": 1}'
+        if stage.startswith("script_writer") or stage.startswith("final_editor"):
+            match = re.search(r"(\d+)-(\d+)$", stage)
+            return _episode_script_batch(int(match.group(1)), int(match.group(2)))
+        raise AssertionError(f"unexpected stage {stage}")
+
+    monkeypatch.setattr(MODULE, "call_model", fake_call_model)
+    for stage in MODULE.ROLE_ORDER:
+        MODULE.run(stage)
+
+    final_script = (tmp_path / MODULE.ROLE_FILES["final_editor"]).read_text(encoding="utf-8")
+    state = json.loads((tmp_path / MODULE.ROLE_FILES["state_recorder"]).read_text(encoding="utf-8"))
+    assert MODULE.episode_numbers(final_script) == list(range(1, 31))
+    assert [number for number in MODULE._state_episode_numbers(json.dumps(state))] == list(range(1, 31))
+    assert state["state_status"] == "degraded"
+    assert len([stage for stage in calls if stage.startswith("episode_continuity")]) == 6
+    assert len([stage for stage in calls if stage.startswith("script_writer")]) == 6
+    assert len([stage for stage in calls if stage.startswith("state_recorder")]) == 6
+    assert len([stage for stage in calls if stage.startswith("final_editor")]) == 6
 
 
 def test_cloud_episode_cards_reject_placeholder_sections() -> None:

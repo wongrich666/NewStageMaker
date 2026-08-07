@@ -613,7 +613,7 @@ def test_trigger_final_editor_sends_only_required_checkpoint_artifacts(tmp_path:
     job["recovered_files"] = {
         "contract": "创作合同",
         "story": "不应发送的故事圣经" * 10_000,
-        "characters": "不应发送的人物方案" * 10_000,
+        "characters": "终审需要的人物方案" * 10_000,
         "episodes": "终审需要的分集卡" * 10_000,
         "draft": "完整正文",
         "story_state": '{"continuity":"状态"}',
@@ -630,6 +630,7 @@ def test_trigger_final_editor_sends_only_required_checkpoint_artifacts(tmp_path:
     assert checkpoint == {
         "recovered_files": {
             "contract": "创作合同",
+            "characters": "终审需要的人物方案" * 10_000,
             "episodes": "终审需要的分集卡" * 10_000,
             "draft": "完整正文",
             "story_state": '{"continuity":"状态"}',
@@ -638,6 +639,36 @@ def test_trigger_final_editor_sends_only_required_checkpoint_artifacts(tmp_path:
         "stage_resume_text": "",
     }
     assert len(encoded) < 4_000
+
+
+def test_trigger_final_editor_allows_missing_optional_story_state(tmp_path: Path) -> None:
+    session = _Session([_Response({"success": True, "sn": "stage-build"})])
+    config = _config(tmp_path)
+    client = CodeBuddyNpcClient(config, session=session)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={
+            "project_title": "状态降级终审",
+            "adaptation_direction": "保留人物关系并完成终审",
+        },
+    )
+    job["recovered_files"] = {
+        "contract": "创作合同",
+        "characters": "人物声音圣经",
+        "episodes": "完整分集卡",
+        "draft": "完整正文",
+    }
+
+    result = client.trigger_stage(job, stage="final_editor")
+
+    assert result["remote_stage"] == "final_editor"
+    payload = session.calls[0][2]["json"]
+    checkpoint = json.loads(
+        gzip.decompress(
+            base64.b64decode(payload["env"]["scriptStateBundle"])
+        ).decode("utf-8")
+    )
+    assert "story_state" not in checkpoint["recovered_files"]
 
 
 def test_refresh_remote_stage_recovers_artifact(tmp_path: Path) -> None:
