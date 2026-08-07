@@ -91,3 +91,52 @@ def test_continuation_overview_shows_new_range_and_series_target() -> None:
     assert "**创作模式**：续写" in overview
     assert "**本次续写范围**：第18集至第30集（13集）" in overview
     assert "**全剧当前目标**：写至第30集" in overview
+
+
+def test_overview_rejects_internal_mainline_formula_and_builds_readable_copy() -> None:
+    job = _job()
+    job["recovered_files"]["contract"] = """
+## 创作边界
+以已锁定世界观与创作合同为准。
+"""
+    job["recovered_files"]["story"] = """
+# 故事圣经：《替身上位》
+## 一、立意与主题
+**核心主题**：身份可以被夺走，但人的选择无法被替代。
+**不可篡改事实**：沈清辞被迫成为相府嫡女的替身。
+## 二、主角锁定
+**沈清辞（替身/复仇者）**
+**核心欲望**：夺回姓名与人生。
+## 三、主线因果链
+**主线推进逻辑**：触发事件→主角行动→阻力反应→主角选择→代价→局势变化→结局兑现
+### 第1集：替身的绝境
+**触发事件**：沈清辞被迫代替苏锦瑶参加危险宫宴。
+### 第2集：宫宴反击
+**触发事件**：沈清辞借危机埋下反击伏笔。
+### 第10集：成为唯一的自己
+**结局兑现**：沈清辞揭穿骗局，夺回自己的姓名与人生。
+"""
+
+    overview = build_script_overview(job)
+
+    assert "身份可以被夺走" in overview
+    assert "沈清辞被迫代替苏锦瑶参加危险宫宴" in overview
+    assert "夺回自己的姓名与人生" in overview
+    assert "以已锁定世界观与创作合同为准" not in overview
+    assert "主线推进逻辑" not in overview
+    assert "触发事件→主角行动→阻力反应" not in overview
+
+
+def test_explicit_reader_facing_synopsis_takes_priority() -> None:
+    job = _job()
+    job["recovered_files"]["story"] = """
+## 主线推进逻辑
+触发事件→主角行动→阻力反应→结局兑现
+## 故事梗概
+林烬在一次次死亡中积累力量，也逐渐发现每次复活都在牺牲重要记忆。
+"""
+
+    overview = build_script_overview(job)
+
+    assert "逐渐发现每次复活都在牺牲重要记忆" in overview
+    assert "触发事件→主角行动" not in overview
