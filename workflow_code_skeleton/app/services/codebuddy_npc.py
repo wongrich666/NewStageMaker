@@ -162,6 +162,7 @@ _STAGE_EPISODE_HEADER = re.compile(
 _EPISODE_CONTRACT_STAGES = {
     "episode_continuity",
     "script_writer",
+    "state_recorder",
     "final_editor",
 }
 _EPISODE_CARD_FIELD_ALIASES = {
@@ -186,6 +187,21 @@ def _episode_sections(content: str) -> list[tuple[int, str]]:
         end = matches[index + 1].start() if index + 1 < len(matches) else len(value)
         sections.append((int(match.group(1) or match.group(2)), value[match.start() : end].strip()))
     return sections
+
+
+def _state_episode_sections(content: str) -> list[tuple[int, str]]:
+    try:
+        payload = json.loads(str(content or ""))
+    except (TypeError, json.JSONDecodeError):
+        return []
+    items = payload.get("episodes") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return []
+    return [
+        (int(item["episode"]), json.dumps(item, ensure_ascii=False))
+        for item in items
+        if isinstance(item, dict) and str(item.get("episode") or "").isdigit()
+    ]
 
 
 def episode_card_missing_fields(section: str) -> list[str]:
@@ -221,6 +237,21 @@ def stage_episode_range_error(
         int(request_data.get("episode_end") or (episode_start + total - 1)),
     )
     expected = list(range(episode_start, episode_end + 1))
+    if stage == "state_recorder":
+        try:
+            payload = json.loads(str(content or ""))
+        except (TypeError, json.JSONDecodeError) as exc:
+            return f"状态记录器输出不是合法 JSON：{exc}"
+        if not isinstance(payload, dict) or not isinstance(payload.get("episodes"), list):
+            return "状态记录器输出缺少 episodes 数组"
+        actual = [
+            int(item.get("episode"))
+            for item in payload["episodes"]
+            if isinstance(item, dict) and str(item.get("episode") or "").isdigit()
+        ]
+        if actual != expected:
+            return f"要求完整交付第{episode_start}-{episode_end}集，实际状态集号为{actual}"
+        return ""
     actual = [
         int(match.group(1) or match.group(2))
         for match in _STAGE_EPISODE_HEADER.finditer(str(content or ""))
@@ -992,7 +1023,12 @@ class CodeBuddyNpcClient:
                 )
                 if range_error:
                     if build_status in TERMINAL_FAILURE and remote_stage in _EPISODE_CONTRACT_STAGES:
-                        completed = [episode for episode, _section in _episode_sections(stage_result)]
+                        sections = (
+                            _state_episode_sections(stage_result)
+                            if remote_stage == "state_recorder"
+                            else _episode_sections(stage_result)
+                        )
+                        completed = [episode for episode, _section in sections]
                         refreshed["stage_resume_text"] = stage_result
                         refreshed["remote_checkpoint"] = {
                             "stage": remote_stage,
