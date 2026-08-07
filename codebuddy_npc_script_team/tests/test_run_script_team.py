@@ -328,7 +328,7 @@ def _state_batch_json(start: int, end: int) -> str:
     )
 
 
-def test_state_recorder_batches_30_episodes_and_resumes_from_checkpoint(monkeypatch, tmp_path) -> None:
+def test_state_audit_batches_30_episodes_in_tens(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SCRIPT_TEAM_STATE_MODEL", "1")
     calls: list[tuple[int, int]] = []
     monkeypatch.setattr(MODULE, "ROOT", tmp_path)
@@ -343,15 +343,39 @@ def test_state_recorder_batches_30_episodes_and_resumes_from_checkpoint(monkeypa
     request = {"episodes": 30, "episode_start": 1, "episode_end": 30}
     result = MODULE.generate_stage_result("state_recorder", request, modules="")
 
-    assert calls == [(1, 5), (6, 10), (11, 15), (16, 20), (21, 25), (26, 30)]
+    assert calls == [(1, 10), (11, 20), (21, 30)]
     assert MODULE._state_episode_numbers(result) == list(range(1, 31))
+    assert json.loads(result)["state_status"] == "audited"
 
-    checkpoint = json.dumps({"stage": "state_recorder", "content": result}, ensure_ascii=False)
-    (tmp_path / "stage_resume.json").write_text(checkpoint, encoding="utf-8")
-    calls.clear()
-    resumed = MODULE.generate_stage_result("state_recorder", request, modules="")
-    assert calls == []
-    assert MODULE._state_episode_numbers(resumed) == list(range(1, 31))
+
+def test_continuation_automatically_enables_nonblocking_state_audit(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("SCRIPT_TEAM_STATE_MODEL", raising=False)
+    monkeypatch.setattr(MODULE, "ROOT", tmp_path)
+    calls: list[tuple[int, int]] = []
+
+    def fake_call_model(_system_prompt, user_prompt, **_kwargs):
+        start = int(re.search(r'"episode_start":\s*(\d+)', user_prompt).group(1))
+        end = int(re.search(r'"episode_end":\s*(\d+)', user_prompt).group(1))
+        calls.append((start, end))
+        return _state_batch_json(start, end)
+
+    monkeypatch.setattr(MODULE, "call_model", fake_call_model)
+    result = MODULE.generate_stage_result(
+        "state_recorder",
+        {
+            "mode": "续写",
+            "episodes": 12,
+            "episode_start": 6,
+            "episode_end": 17,
+            "series_total_episodes": 17,
+        },
+        modules="",
+    )
+    payload = json.loads(result)
+
+    assert calls == [(6, 15), (16, 17)]
+    assert payload["state_status"] == "audited"
+    assert payload["state_audit"]["batch_count"] == 2
 
 
 def test_state_recorder_degrades_without_breaking_30_episode_flow(monkeypatch, tmp_path) -> None:
@@ -400,11 +424,12 @@ def test_state_recorder_degrades_without_breaking_30_episode_flow(monkeypatch, t
     )
     payload = json.loads(result)
 
-    assert calls == 6
-    assert payload["state_status"] == "degraded"
+    assert calls == 3
+    assert payload["state_status"] == "audit_partial"
     assert payload["mainline_lock"] == lock
     assert MODULE._state_episode_numbers(result) == list(range(1, 31))
     assert len(payload["plan_alignment"]) == 30
+    assert payload["state_audit"]["successful_batches"] == 0
 
 
 def test_batch_upper_bound_respects_frontend_episode_count(monkeypatch) -> None:
