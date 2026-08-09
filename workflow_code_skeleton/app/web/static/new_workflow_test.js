@@ -474,9 +474,7 @@
   function liveRuntimeText(job) {
     const activeDuration = formatDuration(job.active_stage_elapsed_ms);
     if (!isActive(job)) return "";
-    return job.execution_target === "local_fallback"
-      ? `本地兜底正在生成${activeDuration ? ` · 已运行 ${activeDuration}` : ""}`
-      : `CNB Runner 已连接 · 30秒心跳${activeDuration ? ` · 已运行 ${activeDuration}` : ""}`;
+    return `CNB Runner 已连接 · 30秒心跳${activeDuration ? ` · 已运行 ${activeDuration}` : ""}`;
   }
 
   function patchLiveTelemetry(job) {
@@ -738,7 +736,7 @@
       <aside class="nwt-monitor">
         <div class="nwt-monitor-head">
           <div>
-            <span class="nwt-eyebrow">${job.execution_target === "local_fallback" ? "本地兜底" : "CNB 远程运行"}</span>
+            <span class="nwt-eyebrow">CNB 远程运行</span>
             <h2>${escapeHtml(activeStage ? activeStage.name : (job.status_text || "等待任务"))}</h2>
           </div>
           <span class="nwt-live-state ${isActive(job) ? "active" : ""}">${isActive(job) ? "运行中" : progress === 100 ? "已完成" : "待命"}</span>
@@ -751,7 +749,7 @@
         ${renderUsage(job)}
         <div class="nwt-cost-note">
           <strong>动态成本控制</strong>
-          <span>${job.execution_target === "local_fallback" ? "远程失败后由本地节点从已有产物继续。" : "自动与分步模式均提交 CNB；本机不消耗模型，失败时才启用兜底。"}</span>
+          <span>自动与分步模式均提交 CNB；云端失败时保留断点并等待重新提交。</span>
         </div>
       </aside>
     `;
@@ -1264,7 +1262,6 @@
             <div class="nwt-run-actions">
               ${canRecover ? '<button class="nwt-btn" type="button" data-action="recover">恢复中断产物</button>' : ""}
               ${active ? `<button class="nwt-btn danger" type="button" data-action="cancel">${icon("square", 15)}<span>停止任务</span></button>` : ""}
-              ${String(job.status || "").toLowerCase() === "failed" ? '<button class="nwt-btn danger" type="button" data-action="fallback">本地兜底继续</button>' : ""}
               <button class="nwt-btn primary" type="button" data-action="start" ${state.loading || active || !(state.configStatus || {}).ready || !continuationReady ? "disabled" : ""}>
                 ${state.loading ? `${icon("loader-circle", 16)}<span>正在提交</span>` : active ? `${icon("activity", 16)}<span>团队创作中</span>` : finalScript ? `${icon("refresh-cw", 16)}<span>重新生成</span>` : `${icon("sparkles", 16)}<span>开始创作</span>`}
               </button>
@@ -1276,7 +1273,7 @@
         <div class="nwt-view-panel nwt-team-view ${activeView === "team" ? "active" : ""}">
         ${state.error ? `<div class="nwt-error">${escapeHtml(state.error)}</div>` : ""}
         ${job.poll_warning ? `<div class="nwt-warning">${escapeHtml(job.poll_warning)}</div>` : ""}
-        ${job.fallback_reason ? `<div class="nwt-warning">远程 CNB 未能接管，本次已启用本地兜底：${escapeHtml(job.fallback_reason)}</div>` : ""}
+        ${job.fallback_reason ? `<div class="nwt-warning">远程 CNB 节点失败，已保留断点：${escapeHtml(job.fallback_reason)}</div>` : ""}
         ${requestWarnings.map((item) => `<div class="nwt-warning">${escapeHtml(item)}</div>`).join("")}
         ${gateErrors.length ? `
           <div class="nwt-warning">
@@ -1593,7 +1590,7 @@
     }
   }
 
-  async function runStage(stage, localFallback = false, options = {}) {
+  async function runStage(stage, options = {}) {
     if (!state.job || !state.job.job_id) return;
     const feedback = String(options.feedback || "");
     const continueAfter = Boolean(options.continueAfter);
@@ -1603,7 +1600,7 @@
     try {
       const data = await request(
         `/api/new-workflow-test/npc/jobs/${encodeURIComponent(state.job.job_id)}/stages/${encodeURIComponent(stage)}/run`,
-        { feedback, continue_after: continueAfter, local_fallback: localFallback },
+        { feedback, continue_after: continueAfter },
       );
       state.job = data.job || state.job;
       saveState();
@@ -1709,19 +1706,7 @@
     const continueAfter = Boolean((document.getElementById("nwt-editor-continue") || {}).checked || editor.continueAfter);
     const stageId = editor.stageId;
     state.editor = clone(initialState.editor);
-    runStage(stageId, false, { feedback: scopedFeedback, continueAfter });
-  }
-
-  function fallbackStage() {
-    const job = state.job || {};
-    if (job.remote_stage && TEAM.some((item) => item.id === job.remote_stage)) {
-      return String(job.remote_stage);
-    }
-    const files = job.recovered_files || {};
-    const missing = TEAM.find((item) => item.key === "final_script"
-      ? !String(job.final_script || "").trim()
-      : !String(files[item.key] || "").trim());
-    return missing ? missing.id : "final_editor";
+    runStage(stageId, { feedback: scopedFeedback, continueAfter });
   }
 
   async function cancelRun() {
@@ -1848,7 +1833,6 @@
     if (action === "recover") recoverJob();
     if (action === "cancel") cancelRun();
     if (action === "run-stage") runStage(String(button.dataset.stage || ""));
-    if (action === "fallback") runStage(fallbackStage(), true);
     if (action === "open-editor") {
       openEditor(String(button.dataset.stage || ""), String(button.dataset.artifact || ""));
     }

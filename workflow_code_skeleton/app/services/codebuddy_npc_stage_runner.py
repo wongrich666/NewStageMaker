@@ -676,6 +676,10 @@ class CodeBuddyNpcStageRunner:
         continue_after: bool = False,
         stop_after_stage: str = "",
     ) -> dict[str, Any]:
+        raise CodeBuddyNpcError(
+            "本地兜底已禁用，请通过 CNB 远程节点运行。",
+            status_code=410,
+        )
         if stage not in STAGE_ORDER:
             raise CodeBuddyNpcError("未知的剧本团队节点。", status_code=400)
         if self.is_running(job_id):

@@ -14,6 +14,7 @@ from workflow_code_skeleton.app.services.codebuddy_npc import (
     CodeBuddyNpcConfig,
     CodeBuddyNpcError,
     CodeBuddyNpcJobStore,
+    _episode_sections,
     finish_stage_timing,
     public_job,
     stage_episode_range_error,
@@ -740,16 +741,18 @@ def test_trigger_final_editor_chunks_large_checkpoint_below_linux_argument_limit
     assert "config" in request_json
     config = json.loads(request_json["config"])
     pipeline = config["main"]["api_trigger_script_team_stage_custom_api"][0]
+    assert pipeline["docker"]["env"]["SCRIPT_REQUEST_BUNDLE_FILE"] == ".script-team-transport/request.b64"
+    assert pipeline["docker"]["env"]["SCRIPT_STATE_BUNDLE_FILE"] == ".script-team-transport/state.b64"
     scripts = [stage["script"] for stage in pipeline["stages"]]
-    assert scripts[-1] == "python3 scripts/run_script_team.py"
+    assert len(scripts) == 1
+    assert scripts[0].endswith("python3 scripts/run_script_team.py")
     assert max(len(script.encode("utf-8")) for script in scripts) < 64 * 1024
-    state_writes = [
-        script
-        for script in scripts
-        if script.endswith(">> /tmp/script-team-transport/state.b64")
-    ]
-    assert len(state_writes) > 1
-    encoded = "".join(script.split("'", 2)[1] for script in state_writes)
+    chunk_env = pipeline["docker"]["env"]
+    state_chunk_names = sorted(
+        key for key in chunk_env if key.startswith("SCRIPT_STATE_BUNDLE_CHUNK_")
+    )
+    assert len(state_chunk_names) > 1
+    encoded = "".join(chunk_env[key] for key in state_chunk_names)
     checkpoint = json.loads(
         gzip.decompress(base64.b64decode(encoded)).decode("utf-8")
     )
@@ -785,6 +788,90 @@ def test_trigger_final_editor_allows_missing_optional_story_state(tmp_path: Path
         ).decode("utf-8")
     )
     assert "story_state" not in checkpoint["recovered_files"]
+
+
+def test_trigger_large_final_editor_sends_only_next_cloud_batch(tmp_path: Path) -> None:
+    session = _Session([_Response({"success": True, "sn": "batch-build"})])
+    config = _config(tmp_path)
+    client = CodeBuddyNpcClient(config, session=session)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "三十集终审", "source_text": "测试", "episodes": 30},
+    )
+    episodes = "\n\n".join(f"第{number}集：分集卡{number}" for number in range(1, 31))
+    draft = "\n\n".join(f"第{number}集：《正文{number}》\n场景1：室内" for number in range(1, 31))
+    job["recovered_files"] = {
+        "contract": "MAINLINE_LOCK_JSON: {}",
+        "characters": "人物圣经",
+        "episodes": episodes,
+        "draft": draft,
+    }
+
+    result = client.trigger_stage(job, stage="final_editor")
+
+    assert result["remote_batch_start"] == 1
+    assert result["remote_batch_end"] == 5
+    payload = session.calls[0][2]["json"]
+    request_payload = json.loads(
+        gzip.decompress(base64.b64decode(payload["env"]["scriptRequestBundle"])).decode("utf-8")
+    )
+    checkpoint = json.loads(
+        gzip.decompress(base64.b64decode(payload["env"]["scriptStateBundle"])).decode("utf-8")
+    )
+    assert request_payload["episodes"] == 5
+    assert request_payload["episode_start"] == 1
+    assert request_payload["episode_end"] == 5
+    assert "第5集" in checkpoint["recovered_files"]["draft"]
+    assert "第6集" not in checkpoint["recovered_files"]["draft"]
+
+
+def test_refresh_cloud_batch_merges_checkpoint_and_requests_next_batch(tmp_path: Path) -> None:
+    batch = "\n\n".join(
+        f"第{number}集：《终审{number}》\n场景1：室内｜日｜内\n人物：主角\n主角：继续。"
+        for number in range(1, 6)
+    )
+    encoded = base64.b64encode(
+        gzip.compress(f"final_editor\n{batch}".encode("utf-8"))
+    ).decode("ascii")
+    status = {
+        "status": "success",
+        "pipelinesStatus": {
+            "pipeline-1": {
+                "id": "pipeline-1",
+                "stages": [{"id": "stage-1", "name": "远程单节点编剧", "status": "success"}],
+            }
+        },
+    }
+    log = {
+        "content": [
+            "__SCRIPT_TEAM_STAGE_GZIP_BEGIN__",
+            *[encoded[index : index + 160] for index in range(0, len(encoded), 160)],
+            "__SCRIPT_TEAM_STAGE_GZIP_END__",
+        ]
+    }
+    session = _Session([_Response(status), _Response(log)])
+    config = _config(tmp_path)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "三十集终审", "source_text": "测试", "episodes": 30},
+    )
+    job.update(
+        {
+            "build": {"sn": "batch-build"},
+            "remote_kind": "stage",
+            "remote_stage": "final_editor",
+            "remote_batch_start": 1,
+            "remote_batch_end": 5,
+            "status": "running",
+        }
+    )
+
+    refreshed = CodeBuddyNpcClient(config, session=session).refresh(job)
+
+    assert refreshed["status"] == "remote_batch_ready"
+    assert [number for number, _section in _episode_sections(refreshed["stage_resume_text"])] == [1, 2, 3, 4, 5]
+    assert refreshed["batch_progress"]["current_start"] == 6
+    assert refreshed["batch_progress"]["current_end"] == 10
 
 
 def test_refresh_remote_stage_recovers_artifact(tmp_path: Path) -> None:

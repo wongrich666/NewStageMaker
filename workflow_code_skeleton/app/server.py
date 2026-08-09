@@ -191,6 +191,8 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         job["execution_target"] = "remote_cnb"
         job["remote_kind"] = "stage"
         job["remote_stage"] = stage
+        job["remote_batch_start"] = max(0, int(trigger_result.get("remote_batch_start") or 0))
+        job["remote_batch_end"] = max(0, int(trigger_result.get("remote_batch_end") or 0))
         job["remote_continue_after"] = bool(continue_after)
         job["remote_retry_count"] = max(0, int(retry_count))
         job["remote_retry_limit"] = codebuddy_npc_remote_retry_limit
@@ -216,6 +218,27 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         )
         job["error"] = ""
         job["progress"] = round(STAGE_ORDER.index(stage) / len(STAGE_ORDER) * 100)
+        return codebuddy_npc_jobs.save(job)
+
+    def _mark_remote_stage_failure(
+        job: dict[str, Any],
+        *,
+        stage: str,
+        error: str,
+    ) -> dict[str, Any]:
+        """Keep a cloud failure resumable without silently switching providers."""
+        job["execution_target"] = "remote_cnb"
+        job["remote_kind"] = "stage"
+        job["remote_stage"] = stage
+        job["active_stage"] = ""
+        job["cancel_requested"] = False
+        job["status"] = "failed"
+        job["status_text"] = f"{STAGE_NAMES.get(stage, '远程节点')}云端运行失败，可重新提交"
+        job["error"] = str(error or "CNB远程节点执行失败")
+        job.pop("fallback_reason", None)
+        timing = (job.get("stage_timings") or {}).get(stage) or {}
+        if str(timing.get("status") or "") == "running":
+            finish_stage_timing(job, stage, status="failed")
         return codebuddy_npc_jobs.save(job)
 
     def _refresh_remote_npc_job_unlocked(job: dict[str, Any]) -> dict[str, Any]:
@@ -280,6 +303,16 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 job.pop("result_pending_polls", None)
             job = codebuddy_npc_jobs.save(job)
             if (
+                str(job.get("status") or "") == "remote_batch_ready"
+                and str(job.get("remote_stage") or "") in STAGE_ORDER
+            ):
+                return _submit_remote_npc_stage(
+                    job,
+                    stage=str(job["remote_stage"]),
+                    continue_after=bool(job.get("remote_continue_after")),
+                    retry_count=0,
+                )
+            if (
                 str(job.get("status") or "") == "failed"
                 and str(job.get("remote_kind") or "") == "stage"
                 and str(job.get("remote_stage") or "") in STAGE_ORDER
@@ -313,17 +346,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         remote_error = (
                             f"{remote_error}；自动重试提交失败：{retry_exc}"
                         )
-                job = codebuddy_npc_stage_runner.start(
-                    job_id=job_id,
-                    user_id=int(job["user_id"]),
+                return _mark_remote_stage_failure(
+                    job,
                     stage=failed_stage,
-                    continue_after=bool(job.get("remote_continue_after")),
+                    error=remote_error,
                 )
-                job["fallback_reason"] = remote_error
-                job["status_text"] = (
-                    f"CNB远程节点失败，已从断点切换本地兜底运行{STAGE_NAMES[failed_stage]}"
-                )
-                return codebuddy_npc_jobs.save(job)
             if (
                 str(job.get("status") or "") == "stage_ready"
                 and bool(job.get("remote_continue_after"))
@@ -340,17 +367,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             retry_count=0,
                         )
                     except CodeBuddyNpcError as remote_exc:
-                        job = codebuddy_npc_stage_runner.start(
-                            job_id=job_id,
-                            user_id=int(job["user_id"]),
+                        job = _mark_remote_stage_failure(
+                            job,
                             stage=next_stage,
-                            continue_after=True,
+                            error=str(remote_exc),
                         )
-                        job["fallback_reason"] = str(remote_exc)
-                        job["status_text"] = (
-                            f"CNB 暂不可用，已切换本地兜底运行{STAGE_NAMES[next_stage]}"
-                        )
-                        job = codebuddy_npc_jobs.save(job)
         except CodeBuddyNpcError as exc:
             job["status_text"] = "暂时无法读取 CNB 进度"
             job["poll_warning"] = str(exc)
@@ -8754,15 +8775,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     retry_count=0,
                 )
             except CodeBuddyNpcError as remote_exc:
-                job = codebuddy_npc_stage_runner.start(
-                    job_id=str(job["job_id"]),
-                    user_id=_require_user_id(),
+                job = _mark_remote_stage_failure(
+                    job,
                     stage="showrunner",
-                    continue_after=continue_after,
+                    error=str(remote_exc),
                 )
-                job["fallback_reason"] = str(remote_exc)
-                job["status_text"] = "CNB 暂不可用，已切换本地兜底运行总编剧"
-                job = codebuddy_npc_jobs.save(job)
         except (ValueError, KeyError) as exc:
             return _json_error(str(exc).strip("'"), status=400)
         except CodeBuddyNpcError as exc:
@@ -8880,39 +8897,25 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         payload = request.get_json(silent=True) or {}
         try:
             if bool(payload.get("local_fallback")):
-                job = codebuddy_npc_stage_runner.start(
-                    job_id=job_id,
-                    user_id=_require_user_id(),
+                return _json_error("本地兜底已禁用，请修复或重新提交 CNB 云端节点。", status=410)
+            job = codebuddy_npc_stage_runner.prepare_remote(
+                job_id=job_id,
+                user_id=_require_user_id(),
+                stage=stage,
+            )
+            try:
+                job = _submit_remote_npc_stage(
+                    job,
                     stage=stage,
                     feedback=str(payload.get("feedback") or ""),
                     continue_after=bool(payload.get("continue_after")),
                 )
-            else:
-                job = codebuddy_npc_stage_runner.prepare_remote(
-                    job_id=job_id,
-                    user_id=_require_user_id(),
+            except CodeBuddyNpcError as remote_exc:
+                job = _mark_remote_stage_failure(
+                    job,
                     stage=stage,
+                    error=str(remote_exc),
                 )
-                try:
-                    job = _submit_remote_npc_stage(
-                        job,
-                        stage=stage,
-                        feedback=str(payload.get("feedback") or ""),
-                        continue_after=bool(payload.get("continue_after")),
-                    )
-                except CodeBuddyNpcError as remote_exc:
-                    job = codebuddy_npc_stage_runner.start(
-                        job_id=job_id,
-                        user_id=_require_user_id(),
-                        stage=stage,
-                        feedback=str(payload.get("feedback") or ""),
-                        continue_after=bool(payload.get("continue_after")),
-                    )
-                    job["fallback_reason"] = str(remote_exc)
-                    job["status_text"] = (
-                        f"CNB 暂不可用，已切换本地兜底运行{STAGE_NAMES[stage]}"
-                    )
-                    job = codebuddy_npc_jobs.save(job)
         except CodeBuddyNpcError as exc:
             return _json_error(str(exc), status=exc.status_code)
         return _json_ok(job=public_job(job))

@@ -37,7 +37,9 @@ _DNS_FALLBACK_LOCK = threading.Lock()
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 _CNB_SAFE_ENV_BYTES = 80 * 1024
 _CNB_BUNDLE_CHUNK_BYTES = 48 * 1024
-_CNB_TRANSPORT_DIR = "/tmp/script-team-transport"
+# CNB file-writing stages and the Docker runner do not share container /tmp.
+# Keep the compressed bundles in the repository workspace shared by both.
+_CNB_TRANSPORT_DIR = ".script-team-transport"
 _CNB_SECRET_IMPORT = "https://cnb.cool/xdsyjbpt/miyao/-/blob/main/deepseek.yml"
 _ARTIFACT_FILENAMES = {
     "contract": "01_contract.md",
@@ -85,39 +87,47 @@ STAGE_NAMES = {
 }
 
 
-def _bundle_file_stages(label: str, filename: str, encoded: str) -> list[dict[str, str]]:
-    path = f"{_CNB_TRANSPORT_DIR}/{filename}"
+def _bundle_chunk_env(prefix: str, encoded: str) -> dict[str, str]:
     chunks = [
         encoded[index : index + _CNB_BUNDLE_CHUNK_BYTES]
         for index in range(0, len(encoded), _CNB_BUNDLE_CHUNK_BYTES)
     ] or [""]
-    stages = [
-        {
-            "name": f"初始化{label}",
-            "script": f"mkdir -p {_CNB_TRANSPORT_DIR} && : > {path}",
-        }
-    ]
-    stages.extend(
-        {
-            "name": f"写入{label} {index}/{len(chunks)}",
-            "script": f"printf '{chunk}' >> {path}",
-        }
+    return {
+        f"{prefix}_{index:03d}": chunk
         for index, chunk in enumerate(chunks, start=1)
+    }
+
+
+def _bundle_restore_commands(path: str, prefix: str, chunk_count: int) -> list[str]:
+    commands = [f": > {path}"]
+    commands.extend(
+        f'printf \'%s\' "${prefix}_{index:03d}" >> {path}'
+        for index in range(1, chunk_count + 1)
     )
-    return stages
+    return commands
 
 
 def _large_stage_config(event: str, request_bundle: str, state_bundle: str) -> str:
     request_path = f"{_CNB_TRANSPORT_DIR}/request.b64"
     state_path = f"{_CNB_TRANSPORT_DIR}/state.b64"
-    stages = [
-        *_bundle_file_stages("任务包", "request.b64", request_bundle),
-        *_bundle_file_stages("断点包", "state.b64", state_bundle),
-        {
-            "name": "远程单节点编剧",
-            "script": "python3 scripts/run_script_team.py",
-        },
-    ]
+    request_env = _bundle_chunk_env("SCRIPT_REQUEST_BUNDLE_CHUNK", request_bundle)
+    state_env = _bundle_chunk_env("SCRIPT_STATE_BUNDLE_CHUNK", state_bundle)
+    restore_commands = [f"mkdir -p {_CNB_TRANSPORT_DIR}"]
+    restore_commands.extend(
+        _bundle_restore_commands(
+            request_path,
+            "SCRIPT_REQUEST_BUNDLE_CHUNK",
+            len(request_env),
+        )
+    )
+    restore_commands.extend(
+        _bundle_restore_commands(
+            state_path,
+            "SCRIPT_STATE_BUNDLE_CHUNK",
+            len(state_env),
+        )
+    )
+    restore_commands.append("python3 scripts/run_script_team.py")
     config = {
         "main": {
             event: [
@@ -133,11 +143,18 @@ def _large_stage_config(event: str, request_bundle: str, state_bundle: str) -> s
                             "DEEPSEEK_MODEL": "${DEEPSEEK_MODEL}",
                             "DEEPSEEK_TIMEOUT": "1200",
                             "SCRIPT_TEAM_HEARTBEAT_SECONDS": "30",
+                            **request_env,
+                            **state_env,
                         },
                     },
                     "imports": [_CNB_SECRET_IMPORT],
                     "sandbox": True,
-                    "stages": stages,
+                    "stages": [
+                        {
+                            "name": "远程单节点编剧",
+                            "script": " && ".join(restore_commands),
+                        }
+                    ],
                 }
             ]
         }
@@ -229,6 +246,8 @@ _EPISODE_CONTRACT_STAGES = {
     "state_recorder",
     "final_editor",
 }
+_REMOTE_BATCH_STAGES = {"episode_continuity", "script_writer", "final_editor"}
+_REMOTE_BATCH_SIZE = 5
 _EPISODE_CARD_FIELD_ALIASES = {
     "承接事实": ("承接事实", "上集承接", "承接点"),
     "开场钩子": ("开场钩子", "五秒钩子", "黄金五秒钩子"),
@@ -251,6 +270,36 @@ def _episode_sections(content: str) -> list[tuple[int, str]]:
         end = matches[index + 1].start() if index + 1 < len(matches) else len(value)
         sections.append((int(match.group(1) or match.group(2)), value[match.start() : end].strip()))
     return sections
+
+
+def _episode_slice(content: str, episode_start: int, episode_end: int) -> str:
+    return "\n\n".join(
+        section
+        for episode, section in _episode_sections(content)
+        if episode_start <= episode <= episode_end
+    ).strip()
+
+
+def _merge_episode_stage_outputs(
+    current: str,
+    incoming: str,
+    *,
+    episode_start: int,
+    episode_end: int,
+) -> str:
+    merged = {
+        episode: section
+        for episode, section in _episode_sections(current)
+        if episode_start <= episode <= episode_end
+    }
+    merged.update(
+        {
+            episode: section
+            for episode, section in _episode_sections(incoming)
+            if episode_start <= episode <= episode_end
+        }
+    )
+    return "\n\n".join(merged[episode] for episode in sorted(merged)).strip()
 
 
 def _state_episode_sections(content: str) -> list[tuple[int, str]]:
@@ -951,23 +1000,59 @@ class CodeBuddyNpcClient:
             raise CodeBuddyNpcError("未知的剧本团队节点。", status_code=400)
         recovered_files = job.get("recovered_files")
         recovered_files = recovered_files if isinstance(recovered_files, dict) else {}
+        request_data = copy.deepcopy(job.get("request") or {})
+        resume_text = _clean_text(job.get("stage_resume_text"), limit=1_500_000)
+        remote_batch: tuple[int, int] | None = None
+        total_episodes = max(1, int(request_data.get("episodes") or 1))
+        if stage in _REMOTE_BATCH_STAGES and total_episodes > _REMOTE_BATCH_SIZE:
+            completed = [episode for episode, _section in _episode_sections(resume_text)]
+            progress = _episode_batch_progress(
+                stage=stage,
+                completed=completed,
+                request_data=request_data,
+                batch_size=_REMOTE_BATCH_SIZE,
+            )
+            batch_start = int(progress.get("current_start") or 0)
+            batch_end = int(progress.get("current_end") or 0)
+            if not batch_start or not batch_end:
+                batch_start = max(1, int(request_data.get("episode_start") or 1))
+                batch_end = min(
+                    int(request_data.get("episode_end") or total_episodes),
+                    batch_start + _REMOTE_BATCH_SIZE - 1,
+                )
+            remote_batch = (batch_start, batch_end)
+            request_data["episode_start"] = batch_start
+            request_data["episode_end"] = batch_end
+            request_data["episodes"] = batch_end - batch_start + 1
+            request_data["episode_contract"] = (
+                f"云端分批合同：本轮只交付第{batch_start}集至第{batch_end}集，"
+                f"共{batch_end - batch_start + 1}集；平台将在云端批次完成后合并全剧。"
+            )
+            resume_text = _episode_slice(resume_text, batch_start, batch_end)
         required_artifacts = STAGE_REQUIRED_ARTIFACTS[stage]
+        batch_files: dict[str, str] = {}
+        for key in required_artifacts:
+            value = str(recovered_files.get(key) or "").strip()
+            if not value:
+                continue
+            if remote_batch and key in {"episodes", "draft"}:
+                value = _episode_slice(value, remote_batch[0], remote_batch[1])
+            batch_files[key] = value
         artifact_bundle = {
-            "recovered_files": {
-                key: recovered_files[key]
-                for key in required_artifacts
-                if str(recovered_files.get(key) or "").strip()
-            },
+            "recovered_files": batch_files,
             "resume_stage": stage,
-            "stage_resume_text": _clean_text(job.get("stage_resume_text"), limit=1_500_000),
+            "stage_resume_text": resume_text,
         }
-        if stage == "final_editor" and str(recovered_files.get("story_state") or "").strip():
+        if (
+            stage == "final_editor"
+            and not remote_batch
+            and str(recovered_files.get("story_state") or "").strip()
+        ):
             artifact_bundle["recovered_files"]["story_state"] = recovered_files["story_state"]
         compressed = gzip.compress(
             json.dumps(artifact_bundle, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         )
         state_bundle = base64.b64encode(compressed).decode("ascii")
-        request_data = copy.deepcopy(job.get("request") or {})
         if isinstance(job.get("skill_snapshot"), dict) and job.get("skill_snapshot"):
             request_data["distilled_skill"] = copy.deepcopy(job["skill_snapshot"])
         if feedback:
@@ -1010,6 +1095,9 @@ class CodeBuddyNpcClient:
             raise CodeBuddyNpcError("CNB 没有返回有效构建号。", detail=result)
         result["remote_stage"] = stage
         result["continue_after"] = bool(continue_after)
+        if remote_batch:
+            result["remote_batch_start"] = remote_batch[0]
+            result["remote_batch_end"] = remote_batch[1]
         return result
 
     def build_status(self, sn: str) -> dict[str, Any]:
@@ -1148,11 +1236,65 @@ class CodeBuddyNpcClient:
                 ):
                     stage_result = checkpoint
             if stage_result and remote_stage in STAGE_ARTIFACTS:
+                batch_start = max(0, int(job.get("remote_batch_start") or 0))
+                batch_end = max(0, int(job.get("remote_batch_end") or 0))
+                validation_request = job.get("request") or {}
+                if batch_start and batch_end and remote_stage in _REMOTE_BATCH_STAGES:
+                    validation_request = copy.deepcopy(validation_request)
+                    validation_request["episode_start"] = batch_start
+                    validation_request["episode_end"] = batch_end
+                    validation_request["episodes"] = batch_end - batch_start + 1
                 range_error = stage_episode_range_error(
                     remote_stage,
                     stage_result,
-                    job.get("request") or {},
+                    validation_request,
                 )
+                if not range_error and batch_start and batch_end:
+                    original_request = job.get("request") or {}
+                    original_start = max(1, int(original_request.get("episode_start") or 1))
+                    original_end = max(
+                        original_start,
+                        int(
+                            original_request.get("episode_end")
+                            or (
+                                original_start
+                                + max(1, int(original_request.get("episodes") or 1))
+                                - 1
+                            )
+                        ),
+                    )
+                    stage_result = _merge_episode_stage_outputs(
+                        checkpoint,
+                        stage_result,
+                        episode_start=original_start,
+                        episode_end=original_end,
+                    )
+                    full_error = stage_episode_range_error(
+                        remote_stage,
+                        stage_result,
+                        original_request,
+                    )
+                    if full_error:
+                        completed = [episode for episode, _section in _episode_sections(stage_result)]
+                        refreshed["stage_resume_text"] = stage_result
+                        refreshed["remote_checkpoint"] = {
+                            "stage": remote_stage,
+                            "completed_episodes": completed,
+                        }
+                        refreshed["batch_progress"] = _episode_batch_progress(
+                            stage=remote_stage,
+                            completed=completed,
+                            request_data=original_request,
+                            batch_size=_REMOTE_BATCH_SIZE,
+                        )
+                        refreshed["status"] = "remote_batch_ready"
+                        refreshed["status_text"] = (
+                            f"{STAGE_NAMES[remote_stage]}云端已完成第{batch_start}-{batch_end}集，"
+                            "正在提交下一批"
+                        )
+                        refreshed["active_stage"] = ""
+                        refreshed["error"] = ""
+                        return refreshed
                 if range_error:
                     if build_status in TERMINAL_FAILURE and remote_stage in _EPISODE_CONTRACT_STAGES:
                         sections = (
