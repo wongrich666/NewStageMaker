@@ -1530,7 +1530,8 @@ def inter_stage_contract_errors(stage: str, result: str) -> list[str]:
     contract = contract_path.read_text(encoding="utf-8") if contract_path.is_file() else ""
     locked = _mainline_lock_from_text(contract)
     if not locked:
-        errors.append("上游创作任务书缺少可解析主线锁")
+        if not contract.strip():
+            errors.append("上游创作任务书缺失")
         return errors
     if stage == "state_recorder":
         try:

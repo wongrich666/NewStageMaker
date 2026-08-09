@@ -741,6 +741,7 @@ def test_trigger_final_editor_chunks_large_checkpoint_below_linux_argument_limit
     config = json.loads(request_json["config"])
     pipeline = config["main"]["api_trigger_script_team_stage_custom_api"][0]
     scripts = [stage["script"] for stage in pipeline["stages"]]
+    assert scripts[-1] == "python3 scripts/run_script_team.py"
     assert max(len(script.encode("utf-8")) for script in scripts) < 64 * 1024
     state_writes = [
         script
