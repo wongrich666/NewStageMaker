@@ -115,7 +115,7 @@ def _large_stage_config(event: str, request_bundle: str, state_bundle: str) -> s
         *_bundle_file_stages("断点包", "state.b64", state_bundle),
         {
             "name": "远程单节点编剧",
-            "script": "python3 /opt/script-team/run_script_team.py",
+            "script": "python3 scripts/run_script_team.py",
         },
     ]
     config = {

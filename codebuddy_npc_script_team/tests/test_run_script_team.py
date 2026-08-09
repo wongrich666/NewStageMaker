@@ -631,6 +631,27 @@ def test_full_chain_runs_30_episodes_when_state_model_degrades(monkeypatch, tmp_
     assert len([stage for stage in calls if stage.startswith("final_editor")]) == 6
 
 
+def test_legacy_nonempty_contract_can_resume_downstream_without_mainline_lock(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(MODULE, "ROOT", tmp_path)
+    (tmp_path / MODULE.ROLE_FILES["showrunner"]).write_text(
+        "旧版创作任务书：保留人物关系、主线冲突与结局。",
+        encoding="utf-8",
+    )
+
+    assert MODULE.inter_stage_contract_errors("final_editor", "第21集：《继续》") == []
+
+
+def test_missing_contract_still_blocks_downstream_stage(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(MODULE, "ROOT", tmp_path)
+
+    assert MODULE.inter_stage_contract_errors("final_editor", "第1集：《无上游》") == [
+        "上游创作任务书缺失"
+    ]
+
+
 def test_cloud_episode_cards_reject_placeholder_sections() -> None:
     content = "\n\n".join(
         [_episode_card(episode) for episode in range(1, 5)]
