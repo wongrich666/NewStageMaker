@@ -172,6 +172,29 @@ def test_read_request_accepts_compressed_bundle(monkeypatch) -> None:
     assert request["source_text"] == expected["source_text"]
 
 
+def test_remote_state_accepts_compressed_bundle_file(monkeypatch, tmp_path: Path) -> None:
+    expected = {
+        "recovered_files": {"draft": "第1集\n主角：继续。"},
+        "resume_stage": "final_editor",
+        "stage_resume_text": "第1集\n终审断点",
+    }
+    encoded = base64.b64encode(
+        gzip.compress(json.dumps(expected, ensure_ascii=False).encode("utf-8"))
+    ).decode("ascii")
+    bundle_path = tmp_path / "state.b64"
+    bundle_path.write_text(encoded, encoding="ascii")
+    monkeypatch.setattr(MODULE, "ROOT", tmp_path)
+    monkeypatch.setenv("SCRIPT_STATE_BUNDLE_FILE", str(bundle_path))
+    monkeypatch.delenv("scriptStateBundle", raising=False)
+    monkeypatch.delenv("SCRIPT_STATE_BUNDLE", raising=False)
+
+    MODULE.hydrate_remote_state()
+
+    assert (tmp_path / MODULE.ROLE_FILES["script_writer"]).read_text(encoding="utf-8") == expected["recovered_files"]["draft"]
+    resume = json.loads((tmp_path / "stage_resume.json").read_text(encoding="utf-8"))
+    assert resume == {"stage": "final_editor", "content": "第1集\n终审断点"}
+
+
 def test_single_scene_contract_rejects_three_scene_headers() -> None:
     script = """
 第1集：《第98次死亡》
