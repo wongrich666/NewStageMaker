@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import gzip
+import hashlib
 import json
 from pathlib import Path
 
@@ -707,6 +708,52 @@ def test_trigger_final_editor_sends_only_required_checkpoint_artifacts(tmp_path:
         "stage_resume_text": "",
     }
     assert len(encoded) < 4_000
+
+
+def test_trigger_final_editor_chunks_large_checkpoint_below_linux_argument_limit(
+    tmp_path: Path,
+) -> None:
+    session = _Session([_Response({"success": True, "sn": "stage-build"})])
+    config = _config(tmp_path)
+    client = CodeBuddyNpcClient(config, session=session)
+    job = CodeBuddyNpcJobStore(config).create(
+        user_id=1,
+        request_payload={"project_title": "长篇终审", "source_text": "三十集连续剧。"},
+    )
+    hard_to_compress = "\n".join(
+        hashlib.sha256(str(index).encode("ascii")).hexdigest()
+        for index in range(8_000)
+    )
+    job["recovered_files"] = {
+        "contract": "创作合同",
+        "characters": hard_to_compress,
+        "episodes": hard_to_compress,
+        "draft": hard_to_compress,
+    }
+    job["stage_resume_text"] = hard_to_compress
+
+    client.trigger_stage(job, stage="final_editor")
+
+    request_json = session.calls[0][2]["json"]
+    env = request_json["env"]
+    assert "scriptStateBundle" not in env
+    assert "config" in request_json
+    config = json.loads(request_json["config"])
+    pipeline = config["main"]["api_trigger_script_team_stage_custom_api"][0]
+    scripts = [stage["script"] for stage in pipeline["stages"]]
+    assert max(len(script.encode("utf-8")) for script in scripts) < 64 * 1024
+    state_writes = [
+        script
+        for script in scripts
+        if script.endswith(">> /tmp/script-team-transport/state.b64")
+    ]
+    assert len(state_writes) > 1
+    encoded = "".join(script.split("'", 2)[1] for script in state_writes)
+    checkpoint = json.loads(
+        gzip.decompress(base64.b64decode(encoded)).decode("utf-8")
+    )
+    assert checkpoint["stage_resume_text"] == hard_to_compress
+    assert checkpoint["recovered_files"]["draft"] == hard_to_compress
 
 
 def test_trigger_final_editor_allows_missing_optional_story_state(tmp_path: Path) -> None:

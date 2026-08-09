@@ -829,12 +829,27 @@ def prepare_final_editor_gate(request_payload: dict) -> None:
         raise SystemExit(f"终审前连续性门禁生成失败：{exc}") from exc
 
 
+def read_bundle_text(direct_names: tuple[str, ...], file_names: tuple[str, ...]) -> str:
+    for name in direct_names:
+        value = (os.getenv(name) or "").strip()
+        if value:
+            return value
+    for name in file_names:
+        path_text = (os.getenv(name) or "").strip()
+        if not path_text:
+            continue
+        try:
+            return Path(path_text).read_text(encoding="ascii").strip()
+        except OSError as exc:
+            raise SystemExit(f"无法读取远程上下文文件 {path_text}：{exc}") from exc
+    return ""
+
+
 def read_request() -> dict:
-    encoded = (
-        os.getenv("scriptRequestBundle")
-        or os.getenv("SCRIPT_REQUEST_BUNDLE")
-        or ""
-    ).strip()
+    encoded = read_bundle_text(
+        ("scriptRequestBundle", "SCRIPT_REQUEST_BUNDLE"),
+        ("scriptRequestBundleFile", "SCRIPT_REQUEST_BUNDLE_FILE"),
+    )
     if encoded:
         try:
             raw = gzip.decompress(base64.b64decode(encoded)).decode("utf-8")
@@ -879,7 +894,10 @@ def read_request() -> dict:
 
 
 def hydrate_remote_state() -> None:
-    encoded = (os.getenv("scriptStateBundle") or os.getenv("SCRIPT_STATE_BUNDLE") or "").strip()
+    encoded = read_bundle_text(
+        ("scriptStateBundle", "SCRIPT_STATE_BUNDLE"),
+        ("scriptStateBundleFile", "SCRIPT_STATE_BUNDLE_FILE"),
+    )
     if not encoded:
         return
     try:

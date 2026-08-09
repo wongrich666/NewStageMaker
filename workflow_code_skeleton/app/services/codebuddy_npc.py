@@ -35,6 +35,10 @@ TERMINAL_FAILURE = {"error", "failed", "failure", "cancel", "canceled", "cancell
 ACTIVE_STATUSES = {"pending", "queued", "waiting", "start", "running", "in_progress"}
 _DNS_FALLBACK_LOCK = threading.Lock()
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+_CNB_SAFE_ENV_BYTES = 80 * 1024
+_CNB_BUNDLE_CHUNK_BYTES = 48 * 1024
+_CNB_TRANSPORT_DIR = "/tmp/script-team-transport"
+_CNB_SECRET_IMPORT = "https://cnb.cool/xdsyjbpt/miyao/-/blob/main/deepseek.yml"
 _ARTIFACT_FILENAMES = {
     "contract": "01_contract.md",
     "story": "02_story.md",
@@ -79,6 +83,66 @@ STAGE_NAMES = {
     "state_recorder": "状态记录器",
     "final_editor": "终审与钩子编辑",
 }
+
+
+def _bundle_file_stages(label: str, filename: str, encoded: str) -> list[dict[str, str]]:
+    path = f"{_CNB_TRANSPORT_DIR}/{filename}"
+    chunks = [
+        encoded[index : index + _CNB_BUNDLE_CHUNK_BYTES]
+        for index in range(0, len(encoded), _CNB_BUNDLE_CHUNK_BYTES)
+    ] or [""]
+    stages = [
+        {
+            "name": f"初始化{label}",
+            "script": f"mkdir -p {_CNB_TRANSPORT_DIR} && : > {path}",
+        }
+    ]
+    stages.extend(
+        {
+            "name": f"写入{label} {index}/{len(chunks)}",
+            "script": f"printf '{chunk}' >> {path}",
+        }
+        for index, chunk in enumerate(chunks, start=1)
+    )
+    return stages
+
+
+def _large_stage_config(event: str, request_bundle: str, state_bundle: str) -> str:
+    request_path = f"{_CNB_TRANSPORT_DIR}/request.b64"
+    state_path = f"{_CNB_TRANSPORT_DIR}/state.b64"
+    stages = [
+        *_bundle_file_stages("任务包", "request.b64", request_bundle),
+        *_bundle_file_stages("断点包", "state.b64", state_bundle),
+        {
+            "name": "远程单节点编剧",
+            "script": "python3 /opt/script-team/run_script_team.py",
+        },
+    ]
+    config = {
+        "main": {
+            event: [
+                {
+                    "docker": {
+                        "image": "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest",
+                        "env": {
+                            "SCRIPT_REQUEST_BUNDLE_FILE": request_path,
+                            "SCRIPT_STATE_BUNDLE_FILE": state_path,
+                            "SCRIPT_STAGE": "$scriptStage",
+                            "DEEPSEEK_BASE_URL": "${DEEPSEEK_BASE_URL}",
+                            "DEEPSEEK_API_KEY": "${DEEPSEEK_API_KEY}",
+                            "DEEPSEEK_MODEL": "${DEEPSEEK_MODEL}",
+                            "DEEPSEEK_TIMEOUT": "1200",
+                            "SCRIPT_TEAM_HEARTBEAT_SECONDS": "30",
+                        },
+                    },
+                    "imports": [_CNB_SECRET_IMPORT],
+                    "sandbox": True,
+                    "stages": stages,
+                }
+            ]
+        }
+    }
+    return json.dumps(config, ensure_ascii=False, separators=(",", ":"))
 
 
 def _now_iso() -> str:
@@ -932,6 +996,14 @@ class CodeBuddyNpcClient:
                 "contextWindow": self.config.context_window,
             },
         }
+        if max(len(request_bundle.encode("ascii")), len(state_bundle.encode("ascii"))) >= _CNB_SAFE_ENV_BYTES:
+            payload["env"].pop("scriptRequestBundle", None)
+            payload["env"].pop("scriptStateBundle", None)
+            payload["config"] = _large_stage_config(
+                self.config.stage_event,
+                request_bundle,
+                state_bundle,
+            )
         repo = quote(self.config.repository, safe="/")
         result = self._request("POST", f"/{repo}/-/build/start", json=payload)
         if not isinstance(result, dict) or result.get("success") is False or not result.get("sn"):
