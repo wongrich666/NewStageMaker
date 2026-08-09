@@ -8897,25 +8897,44 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         payload = request.get_json(silent=True) or {}
         try:
             if bool(payload.get("local_fallback")):
-                return _json_error("本地兜底已禁用，请修复或重新提交 CNB 云端节点。", status=410)
-            job = codebuddy_npc_stage_runner.prepare_remote(
-                job_id=job_id,
-                user_id=_require_user_id(),
-                stage=stage,
-            )
-            try:
-                job = _submit_remote_npc_stage(
-                    job,
+                current = codebuddy_npc_jobs.load(job_id, user_id=_require_user_id())
+                if not current:
+                    return _json_error("NPC 剧本任务不存在。", status=404)
+                if str(current.get("status") or "") != "failed":
+                    return _json_error("只有云端重试耗尽并失败后，才能启动本地兜底。", status=409)
+                retry_count = max(0, int(current.get("remote_retry_count") or 0))
+                retry_limit = max(0, int(current.get("remote_retry_limit") or 0))
+                if retry_count < retry_limit:
+                    return _json_error("云端自动重试尚未耗尽，请等待云端结果。", status=409)
+                job = codebuddy_npc_stage_runner.start(
+                    job_id=job_id,
+                    user_id=_require_user_id(),
                     stage=stage,
                     feedback=str(payload.get("feedback") or ""),
                     continue_after=bool(payload.get("continue_after")),
                 )
-            except CodeBuddyNpcError as remote_exc:
-                job = _mark_remote_stage_failure(
-                    job,
+                job["fallback_reason"] = str(current.get("error") or "云端重试耗尽")
+                job["status_text"] = f"已手动启动本地兜底运行{STAGE_NAMES[stage]}"
+                job = codebuddy_npc_jobs.save(job)
+            else:
+                job = codebuddy_npc_stage_runner.prepare_remote(
+                    job_id=job_id,
+                    user_id=_require_user_id(),
                     stage=stage,
-                    error=str(remote_exc),
                 )
+                try:
+                    job = _submit_remote_npc_stage(
+                        job,
+                        stage=stage,
+                        feedback=str(payload.get("feedback") or ""),
+                        continue_after=bool(payload.get("continue_after")),
+                    )
+                except CodeBuddyNpcError as remote_exc:
+                    job = _mark_remote_stage_failure(
+                        job,
+                        stage=stage,
+                        error=str(remote_exc),
+                    )
         except CodeBuddyNpcError as exc:
             return _json_error(str(exc), status=exc.status_code)
         return _json_ok(job=public_job(job))

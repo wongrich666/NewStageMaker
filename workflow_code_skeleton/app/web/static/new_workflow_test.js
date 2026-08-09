@@ -999,6 +999,12 @@
     const finalScript = String(job.final_script || "");
     const deliveryScript = String(job.delivery_script || finalScript);
     const canRecover = Boolean(job.job_id && String(job.status || "").toLowerCase() === "failed" && !finalScript);
+    const canLocalFallback = Boolean(
+      job.job_id
+      && String(job.status || "").toLowerCase() === "failed"
+      && String(job.execution_target || "") === "remote_cnb"
+      && Number(job.remote_retry_count || 0) >= Number(job.remote_retry_limit || 0)
+    );
     const qualityGate = job.quality_gate && typeof job.quality_gate === "object" ? job.quality_gate : {};
     const gateErrors = Array.isArray(qualityGate.errors) ? qualityGate.errors : [];
     const gateWarnings = Array.isArray(qualityGate.warnings) ? qualityGate.warnings : [];
@@ -1262,6 +1268,7 @@
             <div class="nwt-run-actions">
               ${canRecover ? '<button class="nwt-btn" type="button" data-action="recover">恢复中断产物</button>' : ""}
               ${active ? `<button class="nwt-btn danger" type="button" data-action="cancel">${icon("square", 15)}<span>停止任务</span></button>` : ""}
+              ${canLocalFallback ? '<button class="nwt-btn danger" type="button" data-action="fallback">本地兜底</button>' : ""}
               <button class="nwt-btn primary" type="button" data-action="start" ${state.loading || active || !(state.configStatus || {}).ready || !continuationReady ? "disabled" : ""}>
                 ${state.loading ? `${icon("loader-circle", 16)}<span>正在提交</span>` : active ? `${icon("activity", 16)}<span>团队创作中</span>` : finalScript ? `${icon("refresh-cw", 16)}<span>重新生成</span>` : `${icon("sparkles", 16)}<span>开始创作</span>`}
               </button>
@@ -1600,7 +1607,7 @@
     try {
       const data = await request(
         `/api/new-workflow-test/npc/jobs/${encodeURIComponent(state.job.job_id)}/stages/${encodeURIComponent(stage)}/run`,
-        { feedback, continue_after: continueAfter },
+        { feedback, continue_after: continueAfter, local_fallback: Boolean(options.localFallback) },
       );
       state.job = data.job || state.job;
       saveState();
@@ -1707,6 +1714,18 @@
     const stageId = editor.stageId;
     state.editor = clone(initialState.editor);
     runStage(stageId, { feedback: scopedFeedback, continueAfter });
+  }
+
+  function fallbackStage() {
+    const job = state.job || {};
+    if (job.remote_stage && TEAM.some((item) => item.id === job.remote_stage)) {
+      return String(job.remote_stage);
+    }
+    const files = job.recovered_files || {};
+    const missing = TEAM.find((item) => item.key === "final_script"
+      ? !String(job.final_script || "").trim()
+      : !String(files[item.key] || "").trim());
+    return missing ? missing.id : "final_editor";
   }
 
   async function cancelRun() {
@@ -1833,6 +1852,7 @@
     if (action === "recover") recoverJob();
     if (action === "cancel") cancelRun();
     if (action === "run-stage") runStage(String(button.dataset.stage || ""));
+    if (action === "fallback") runStage(fallbackStage(), { localFallback: true });
     if (action === "open-editor") {
       openEditor(String(button.dataset.stage || ""), String(button.dataset.artifact || ""));
     }
