@@ -207,7 +207,7 @@ def test_remote_submission_clears_stale_cancel_request(monkeypatch):
     assert state["job"]["cancel_requested"] is False
 
 
-def test_failed_remote_stage_retries_twice_then_stays_remote_failed(monkeypatch):
+def test_failed_remote_stage_retries_twice_then_uses_local_checkpoint(monkeypatch):
     monkeypatch.setenv("CODEBUDDY_NPC_REMOTE_STAGE_RETRIES", "2")
     server, state = _install_fakes(monkeypatch, refresh_fails=True)
     app = server.create_app()
@@ -241,10 +241,15 @@ def test_failed_remote_stage_retries_twice_then_stays_remote_failed(monkeypatch)
     )
     assert response.status_code == 200
     assert len(state["stage_calls"]) == 3
-    assert state["fallback_calls"] == []
-    assert state["job"]["execution_target"] == "remote_cnb"
-    assert state["job"]["status"] == "failed"
-    assert "重新提交" in state["job"]["status_text"]
+    assert state["fallback_calls"] == [
+        {
+            "job_id": "npc-orchestration-test",
+            "user_id": 7,
+            "stage": "showrunner",
+            "continue_after": True,
+        }
+    ]
+    assert state["job"]["execution_target"] == "local_fallback"
 
 
 def test_stale_poll_cannot_overwrite_a_newer_remote_build(monkeypatch):
