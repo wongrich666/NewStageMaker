@@ -24,6 +24,7 @@ from workflow_code_skeleton.app.services.codebuddy_npc_stage_runner import (
     CodeBuddyNpcStageRunner,
     _compact_story_state,
     _continuation_instruction,
+    _ip_anthology_instruction,
     _merge_episode_outputs,
     _missing_episode_ranges,
     _normalize_episode_card_handoffs,
@@ -148,8 +149,27 @@ def test_job_store_preserves_request_and_user_boundary(tmp_path: Path) -> None:
     assert job["request"]["total_duration_seconds"] == 375
     assert job["request"]["episode_word_count_max"] == 880
     assert job["request"]["episode_word_count_tolerance_percent"] == 10
+    assert job["request"]["ip_anthology_mode"] is False
     assert store.load(job["job_id"], user_id=7)["user_id"] == 7
     assert store.load(job["job_id"], user_id=8) is None
+
+
+def test_job_store_only_enables_ip_anthology_when_explicitly_selected(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={
+            "project_title": "城市异闻录",
+            "episodes": 12,
+            "source_text": "固定调查员每集处理一个独立事件。",
+            "ip_anthology_mode": True,
+        },
+    )
+
+    assert job["request"]["ip_anthology_mode"] is True
+    instruction = _ip_anthology_instruction(job["request"])
+    assert "每集独立完成" in instruction
+    assert "不强制下一集延续上一集事件" in instruction
 
 
 def test_remote_stage_result_rejects_missing_episode_range() -> None:

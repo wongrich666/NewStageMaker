@@ -161,6 +161,36 @@ def test_episode_card_contract_exposes_machine_checkable_handoff() -> None:
     assert "不得复用完全相同的obstacle或mainline_advance" in contract
 
 
+def test_ip_anthology_contract_closes_each_episode_without_direct_handoff() -> None:
+    instruction = MODULE.ip_anthology_contract_instruction({"ip_anthology_mode": True})
+    contract = MODULE._episode_card_json_contract(1, 5, anthology=True)
+
+    assert "每一集必须完成一个独立故事闭环" in instruction
+    assert "跨集只锁定IP正典" in instruction
+    assert "不逐字复制上一集ending_state" in contract
+    assert "新触发动作" in contract
+
+
+def test_ip_anthology_skips_serial_handoff_rewrite(monkeypatch, tmp_path: Path) -> None:
+    cards = "\n\n".join(_episode_card(episode) for episode in range(1, 3))
+    monkeypatch.setattr(MODULE, "ROOT", tmp_path)
+    monkeypatch.setattr(MODULE, "generate_episode_card_batch", lambda *_args, **_kwargs: cards)
+
+    result = MODULE.generate_stage_result(
+        "episode_continuity",
+        {
+            "episodes": 2,
+            "episode_start": 1,
+            "episode_end": 2,
+            "ip_anthology_mode": True,
+        },
+        modules="",
+    )
+
+    assert "**承接事实**：第2集承接事实的有效内容" in result
+    assert "**承接事实**：第1集结尾状态的有效内容" not in result
+
+
 def test_writer_uses_character_specific_voice_and_micro_expression_cues() -> None:
     prompt = MODULE.PROMPTS["script_writer"]
 

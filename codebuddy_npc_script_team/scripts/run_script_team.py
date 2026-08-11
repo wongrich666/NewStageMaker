@@ -209,6 +209,9 @@ episode_start、episode_end 与 episodes 共同定义本次唯一交付范围，
 必须出现一次阶段性兑现、失败、暴露、对手反制或主角策略改变，不得把所有兑现拖到结局。
 第N集“结尾状态”与第N+1集“承接事实”必须是同一事实；换地点时，上集先给出
 决定、去向或行动目的，下集从准备执行、正在执行或承受结果开始。禁止用时间字幕掩盖断层。
+仅当用户明确启用 ip_anthology_mode 时切换为IP单元剧：每集独立完成触发、目标、
+冲突、选择、代价与单元结局，不要求下一集直接延续上一集事件；但固定主角、人物关系、
+世界规则、人物认知、能力边界和累积成长必须连续，不能把人物重置。
 第一集及新冲突首次出现时规划开场因果锚：强钩子先发生，随后1至3拍只交代观众
 理解眼前处境所需的最小原因，不泄露完整前史。
 scenes_per_episode 是逐集场景数量硬合同。1表示每一大集只能有一个场景，
@@ -330,6 +333,27 @@ def scene_contract_instruction(request_payload: dict) -> str:
     )
 
 
+def ip_anthology_enabled(request_payload: dict) -> bool:
+    raw = request_payload.get("ip_anthology_mode")
+    return raw is True or str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def ip_anthology_contract_instruction(request_payload: dict) -> str:
+    if not ip_anthology_enabled(request_payload):
+        return (
+            "剧集结构合同：IP单元剧未启用，执行连续叙事。相邻集事件、未完成动作、"
+            "地点去向和因果后果必须直接承接。"
+        )
+    return (
+        "剧集结构合同：用户已明确启用IP单元剧。每一集必须完成一个独立故事闭环："
+        "单元触发→当集目标→冲突升级→人物选择→现实代价→单元结局。不得为了制造连续性"
+        "把已闭环事件拖到下一集，也不得强制下一集复刻上一集最后动作。跨集只锁定IP正典："
+        "固定主角与核心关系、世界规则、人物已知事实、能力边界、长期伤口和累积成长；"
+        "每集可有全新的事件、地点和单元人物。主线改为IP长期命题或人物成长轴，每3至5集"
+        "通过关系、认知或能力代价推进一次，不能要求每集都推进同一个案件。"
+    )
+
+
 def duration_contract_instruction(request_payload: dict) -> str:
     episodes = max(1, int(request_payload.get("episodes") or 1))
     seconds = max(15, int(request_payload.get("episode_duration_seconds") or 90))
@@ -385,6 +409,14 @@ def continuation_contract_instruction(request_payload: dict) -> str:
         if policy == "light"
         else "严格保留既有事实、人物声音、关系温度、伤势、位置、道具与未完成动作"
     )
+    if ip_anthology_enabled(request_payload):
+        return (
+            f"IP单元剧续写硬合同：已有剧本写至第{source_last}集，本次只输出"
+            f"第{episode_start}集至第{episode_end}集。新一集可以启动独立单元，不必直接延续"
+            "旧单元最后动作；但已有固定人物、核心关系、世界规则、已知事实、能力边界和"
+            "累积成长必须保留，不能重置人物或复用已经解决的单元冲突。"
+            + story_bible_contract
+        )
     return (
         f"续写硬合同：已有剧本写至第{source_last}集，已有第{source_last}集结尾是"
         f"第{episode_start}集唯一开场起点；本次只输出第{episode_start}集至第{episode_end}集。"
@@ -700,7 +732,17 @@ def _valid_episode_parts(stage: str, text: str) -> dict[int, str]:
     }
 
 
-def _episode_card_json_contract(start: int, end: int) -> str:
+def _episode_card_json_contract(start: int, end: int, *, anthology: bool = False) -> str:
+    handoff_contract = (
+        "IP单元剧已启用：carryover_fact填写本集开始前必须保持的IP正典状态，不逐字复制上一集ending_state；"
+        "opening_hook使用本集全新的单元触发；ending_state写本单元闭环后留下的人物、关系或认知变化；"
+        "next_opening_action填写下一单元可独立启动的新触发动作，不得把本单元未写完当作钩子。"
+        if anthology
+        else
+        "相邻两集实行机器可校验交接：第N+1集carryover_fact必须逐字复制第N集ending_state；"
+        "第N+1集opening_hook必须从第N集next_opening_action所承诺的动作开始，再叠加本集新钩子。"
+        "相邻两集不得复用完全相同的obstacle或mainline_advance；阻力必须形成反应或升级，主线推进必须产生新的前后状态差。"
+    )
     return f"""
 本节点禁止输出 Markdown。只输出一个合法 JSON 对象，不得使用代码围栏或附加解释：
 {{"episodes":[{{
@@ -727,9 +769,7 @@ def _episode_card_json_contract(start: int, end: int) -> str:
 }}]}}
 episodes 数组必须按顺序且只能包含第{start}集至第{end}集。所有字符串字段必须有具体内容；
 不得用“待定”“同上”“承接前文”或空字符串占位。
-相邻两集实行机器可校验交接：第N+1集carryover_fact必须逐字复制第N集ending_state；
-第N+1集opening_hook必须从第N集next_opening_action所承诺的动作开始，再叠加本集新钩子。
-相邻两集不得复用完全相同的obstacle或mainline_advance；阻力必须形成反应或升级，主线推进必须产生新的前后状态差。
+{handoff_contract}
 """.strip()
 
 
@@ -844,7 +884,11 @@ def generate_episode_card_batch(
     start = max(1, int(request_payload.get("episode_start") or 1))
     end = max(start, int(request_payload.get("episode_end") or start))
     raw = call_model(
-        PROMPTS["episode_continuity"] + "\n\n" + _episode_card_json_contract(start, end),
+        PROMPTS["episode_continuity"] + "\n\n" + _episode_card_json_contract(
+            start,
+            end,
+            anthology=ip_anthology_enabled(request_payload),
+        ),
         user_prompt,
         stage=stage_label,
     )
@@ -1100,8 +1144,13 @@ def _stage_user_prompt(
     previous_tail: str = "",
 ) -> str:
     context = previous_context(stage, episode_start, episode_end)
+    tail_label = (
+        "上一批IP正典状态，仅用于避免人物与规则重置"
+        if ip_anthology_enabled(request_payload)
+        else "上一批结尾，仅用于连续承接"
+    )
     tail = (
-        "\n\n===== 上一批结尾，仅用于连续承接 =====\n" + previous_tail
+        f"\n\n===== {tail_label} =====\n" + previous_tail
         if previous_tail
         else ""
     )
@@ -1115,6 +1164,7 @@ def _stage_user_prompt(
         "episode_word_count 是每集目标下限，episode_word_count_max 是最多上浮10%的"
         "硬上限；每集必须处于闭区间内，补充要求不得与该字数合同冲突。\n"
         f"{continuation_contract_instruction(request_payload)}\n"
+        f"{ip_anthology_contract_instruction(request_payload)}\n"
         f"{scene_contract_instruction(request_payload)}\n"
         f"{duration_contract_instruction(request_payload)}"
     )
@@ -1516,7 +1566,7 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
             episode_end=episode_end,
             stage=stage,
         )
-        if stage == "episode_continuity":
+        if stage == "episode_continuity" and not ip_anthology_enabled(request_payload):
             result, handoff_warnings = normalize_episode_card_handoffs(result)
             for warning in handoff_warnings:
                 print(f"__SCRIPT_TEAM_CONTINUITY__ {warning}", flush=True)
