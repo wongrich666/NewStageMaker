@@ -150,11 +150,63 @@ def _version_number(existing: list[str]) -> str:
     return f"v1.{max(numbers, default=-1) + 1}"
 
 
+EPISODE_BOUNDARY_RE = re.compile(
+    r"(?m)^\s*(?:#{1,6}\s*)?第\s*(?:[0-9]+|[一二三四五六七八九十百零〇两]+)\s*集(?:\s*[：:·《]|\s*$)"
+)
+
+
+def _episode_blocks(text: str) -> list[str]:
+    value = str(text or "").strip()
+    matches = list(EPISODE_BOUNDARY_RE.finditer(value))
+    if len(matches) < 2:
+        return []
+    prefix = value[: matches[0].start()].strip()
+    blocks: list[str] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(value)
+        block = value[match.start() : end].strip()
+        if index == 0 and prefix:
+            block = prefix + "\n\n" + block
+        blocks.append(block)
+    return blocks
+
+
+def _episode_pair_sample(blocks: list[str], max_chars: int) -> str:
+    """Sample adjacent complete episodes so handoffs remain observable."""
+    pair_starts = [0, max(0, len(blocks) - 2), max(0, len(blocks) // 3 - 1), max(0, len(blocks) * 2 // 3 - 1)]
+    selected: list[int] = []
+    for start in pair_starts:
+        for index in (start, min(start + 1, len(blocks) - 1)):
+            if index not in selected:
+                selected.append(index)
+    mandatory = {0, min(1, len(blocks) - 1), max(0, len(blocks) - 2), len(blocks) - 1}
+    accepted: list[tuple[int, str]] = []
+    used = 0
+    for index in selected:
+        block = blocks[index]
+        # A single unusually long episode is capped, but all ordinary samples keep
+        # their complete episode boundary and adjacent handoff.
+        if len(block) > max_chars // 4:
+            block = block[: max_chars // 4] + "\n[本集超长，后文省略]"
+        if accepted and used + len(block) > max_chars and index not in mandatory:
+            continue
+        accepted.append((index, block))
+        used += len(block)
+    accepted.sort(key=lambda item: item[0])
+    chunks = [block for _index, block in accepted]
+    if len(chunks) < 2:
+        return "\n\n".join(blocks[:2])[:max_chars]
+    return "[按完整集与相邻集交接抽样]\n\n" + "\n\n---\n\n".join(chunks)
+
+
 def _distillation_sample(text: str, max_chars: int = 32000) -> str:
-    """Keep opening, distributed middle evidence, and ending without sending a whole long script."""
+    """Keep complete episode handoffs when possible, otherwise use distributed evidence."""
     value = str(text or "").strip()
     if len(value) <= max_chars:
         return value
+    blocks = _episode_blocks(value)
+    if blocks:
+        return _episode_pair_sample(blocks, max_chars)
     head_size = int(max_chars * 0.42)
     tail_size = int(max_chars * 0.23)
     middle_budget = max_chars - head_size - tail_size
@@ -175,6 +227,42 @@ def _distillation_sample(text: str, max_chars: int = 32000) -> str:
         + "\n\n[结尾样本]\n"
         + value[-tail_size:]
     )
+
+
+def _contains_each(text: str, groups: tuple[tuple[str, ...], ...]) -> int:
+    value = str(text or "")
+    return round(sum(1 for group in groups if any(term in value for term in group)) / len(groups) * 100)
+
+
+def _narrative_quality_checks(modules: dict[str, Any]) -> dict[str, int]:
+    architecture = str(modules.get("story_architecture") or "")
+    continuity = str(modules.get("continuity") or "")
+    character = str(modules.get("character_emotion") or "")
+    adversity = str(modules.get("adversity_payoff") or "")
+    profile = str(modules.get("genre_profile") or "")
+    anti_patterns = str(modules.get("anti_patterns") or "")
+    return {
+        "mainline_clarity": _contains_each(
+            architecture,
+            (("主线", "长期目标"), ("目标", "欲望"), ("阻力", "对手"), ("代价", "局势变化"), ("结局", "兑现")),
+        ),
+        "conflict_escalation": _contains_each(
+            architecture + "\n" + adversity,
+            (("冲突", "阻力"), ("升级", "递进"), ("反制", "反应"), ("选择", "抉择"), ("代价", "兑现", "处境变化")),
+        ),
+        "character_choice": _contains_each(
+            character,
+            (("人物", "角色"), ("目标", "欲望"), ("选择", "行动"), ("关系", "关系债"), ("恐惧", "伤口", "自我谎言", "代价")),
+        ),
+        "episode_handoff": _contains_each(
+            continuity,
+            (("承接", "交接"), ("上一集", "上集", "结尾状态"), ("下一集", "下集", "开场动作"), ("因果", "未完成动作"), ("换场", "地点", "场景")),
+        ),
+        "differentiation": _contains_each(
+            profile + "\n" + anti_patterns,
+            (("题材", "类型"), ("受众", "观众"), ("情绪", "情绪承诺"), ("不适用", "失效", "边界"), ("差异", "反模式", "避免")),
+        ),
+    }
 
 
 def _surface_terms(evidence: list[dict[str, Any]]) -> list[str]:
@@ -951,6 +1039,9 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
 9. 关键物品只能抽象为“承载某段关系/信息/代价且会递进变化的媒介”，不能沿用样本的物品类别；支线只能规定功能、进入条件、回撞主线方式和退出条件，不能沿用样本支线事件。
 10. 每条模块规则必须通过迁移测试：把原作人物、时代、关系、地点、道具全部替换后仍能指导一个不同故事，否则删除或降为hypotheses。
 11. skill_md只负责触发条件、使用顺序、模块导航和边界，详细规则放modules，节约运行上下文。
+12. story_architecture必须明确主线目标、持续阻力、升级阶梯、选择代价和结局兑现；continuity必须明确上集结尾状态、未完成动作、下集承接动作及换场理由。
+13. character_emotion必须把人物目标或伤口落实为压力下的选择与关系后果；adversity_payoff必须说明冲突如何反制、升级并改变处境，不能只罗列刺激事件。
+14. genre_profile与anti_patterns必须共同说明该题材、受众和情绪承诺下的差异化机制、适用条件与失效边界，不能只写所有故事都适用的编剧常识。
 
 新工作流路由清单：
 {_json(manifest)}
@@ -1073,7 +1164,10 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
             "structural_purity": 100 if not surface_leaks else 0,
             "structure_surface_separation": round(abstraction_ratio * 100),
         }
+        narrative_checks = _narrative_quality_checks(modules)
+        checks.update(narrative_checks)
         total = round(sum(checks.values()) / len(checks))
+        narrative_ready = all(score >= 80 for score in narrative_checks.values())
         return {
             "total": total,
             "grade": "A" if total >= 85 else "B" if total >= 75 else "C",
@@ -1086,6 +1180,7 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
                 and validated_rules == len(verified_rules)
                 and not surface_leaks
                 and abstracted_cards == source_count
+                and narrative_ready
             ),
             "validation_mode": "deterministic_evidence_gate",
             "deep_blind_test": "not_run",
@@ -1093,6 +1188,7 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
             "validated_rule_count": validated_rules,
             "surface_leaks": surface_leaks,
             "abstracted_source_count": abstracted_cards,
+            "narrative_quality_ready": narrative_ready,
         }
 
     def update_version(

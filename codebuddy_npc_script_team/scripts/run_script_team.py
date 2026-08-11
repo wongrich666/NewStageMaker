@@ -611,6 +611,77 @@ def _episode_parts(text: str) -> tuple[str, dict[int, str]]:
     return prefix, parts
 
 
+def _episode_card_field(content: str, field: str) -> str:
+    match = re.search(
+        rf"(?m)^\s*(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*[:：]\s*(.+?)\s*$",
+        str(content or ""),
+    )
+    return str(match.group(1) if match else "").strip()
+
+
+def _replace_episode_card_field(content: str, field: str, value: str) -> str:
+    pattern = re.compile(
+        rf"(?m)^(\s*(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*[:：]\s*).+?$"
+    )
+    return pattern.sub(lambda match: match.group(1) + str(value).strip(), content, count=1)
+
+
+def _compact_semantic_text(value: str) -> str:
+    return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]", "", str(value or "")).lower()
+
+
+def _semantic_overlap(left: str, right: str) -> float:
+    def grams(value: str) -> set[str]:
+        compact = _compact_semantic_text(value)
+        if len(compact) < 2:
+            return {compact} if compact else set()
+        return {compact[index : index + 2] for index in range(len(compact) - 1)}
+
+    left_grams, right_grams = grams(left), grams(right)
+    if not left_grams or not right_grams:
+        return 0.0
+    return len(left_grams & right_grams) / min(len(left_grams), len(right_grams))
+
+
+def normalize_episode_card_handoffs(text: str) -> tuple[str, list[str]]:
+    """Lock adjacent cards together without changing their public field structure."""
+    prefix, parts = _episode_parts(text)
+    warnings: list[str] = []
+    ordered = sorted(parts)
+    for previous_number, current_number in zip(ordered, ordered[1:]):
+        if current_number != previous_number + 1:
+            continue
+        previous = parts[previous_number]
+        current = parts[current_number]
+        ending_state = _episode_card_field(previous, "结尾状态")
+        carryover = _episode_card_field(current, "承接事实")
+        if ending_state and _compact_semantic_text(ending_state) != _compact_semantic_text(carryover):
+            current = _replace_episode_card_field(current, "承接事实", ending_state)
+            warnings.append(f"第{current_number}集承接事实已对齐第{previous_number}集结尾状态")
+        next_action = _episode_card_field(previous, "下一集第一有效动作")
+        opening_hook = _episode_card_field(current, "开场钩子")
+        if next_action and opening_hook and _semantic_overlap(next_action, opening_hook) < 0.12:
+            current = _replace_episode_card_field(
+                current,
+                "开场钩子",
+                f"{next_action}；{opening_hook}",
+            )
+            warnings.append(f"第{current_number}集开场已补入上一集承诺动作")
+        previous_obstacle = _compact_semantic_text(_episode_card_field(previous, "阻力"))
+        current_obstacle = _compact_semantic_text(_episode_card_field(current, "阻力"))
+        if previous_obstacle and previous_obstacle == current_obstacle:
+            warnings.append(f"第{previous_number}-{current_number}集阻力完全重复，建议升级反制")
+        previous_advance = _compact_semantic_text(_episode_card_field(previous, "本集主线推进"))
+        current_advance = _compact_semantic_text(_episode_card_field(current, "本集主线推进"))
+        if previous_advance and previous_advance == current_advance:
+            warnings.append(f"第{previous_number}-{current_number}集主线推进完全重复")
+        parts[current_number] = current
+    output = "\n\n".join(
+        item for item in ([prefix] if prefix else []) + [parts[number] for number in ordered]
+    )
+    return output, warnings
+
+
 def _valid_episode_parts(stage: str, text: str) -> dict[int, str]:
     _prefix, parts = _episode_parts(text)
     if stage != "episode_continuity":
@@ -656,6 +727,9 @@ def _episode_card_json_contract(start: int, end: int) -> str:
 }}]}}
 episodes 数组必须按顺序且只能包含第{start}集至第{end}集。所有字符串字段必须有具体内容；
 不得用“待定”“同上”“承接前文”或空字符串占位。
+相邻两集实行机器可校验交接：第N+1集carryover_fact必须逐字复制第N集ending_state；
+第N+1集opening_hook必须从第N集next_opening_action所承诺的动作开始，再叠加本集新钩子。
+相邻两集不得复用完全相同的obstacle或mainline_advance；阻力必须形成反应或升级，主线推进必须产生新的前后状态差。
 """.strip()
 
 
@@ -1442,6 +1516,10 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
             episode_end=episode_end,
             stage=stage,
         )
+        if stage == "episode_continuity":
+            result, handoff_warnings = normalize_episode_card_handoffs(result)
+            for warning in handoff_warnings:
+                print(f"__SCRIPT_TEAM_CONTINUITY__ {warning}", flush=True)
         expected = set(range(batch_start, batch_end + 1))
         added = set(episode_numbers(result)) - before
         if not added.intersection(expected):
