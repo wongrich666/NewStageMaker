@@ -65,6 +65,13 @@ episode_start、episode_end 与 episodes 共同构成交付范围，必须只交
 每集只围绕一条行动链：承接事实→开场钩子→最短因果锚→主角目标→主角主动动作→
 阻力→选择与代价→本集主线推进→结尾状态→下一集第一有效动作。
 本集主线推进必须改变目标进度、阻力、信息、关系或代价，不能只写遭遇和气氛。
+主线不能只存在于后台摘要。每集必须通过主角的明确决定、进度变化、关系站队、对手反制、
+可见结果或持续事物的状态变化，让观众明白主角长期在做什么、到了哪一步和为什么继续。
+这个“观众可见的主线载体”必须从本剧因果生长，不固定为证据、文档、道具或倒计时。
+前1至3集内用行动或自然对白立住长期目标与行动方法，不用旁白概述主线。
+不得只用“记录、发现、关系加深、积累证据”宣称主线已推进；必须同时写明谁因此采取新动作，
+局势或下一步方法如何改变。连续两集不得只积累而无处境变化；每3至5集必须出现阶段性兑现、
+失败、暴露、对手反制或主角策略改变，不得把所有兑现拖到结局。
 第一集第一有效拍必须让主角面对不可回避的问题；优先使用高压命令、异常事实、
 关系破位或不可逆选择，下一拍立即产生后果、私人代价或主角反应。
 每集至少一个真正改变局势的情绪高点，每30至60秒发生局势变化或情绪释放。
@@ -89,10 +96,13 @@ Skill只能影响题材表达、情绪和语言，不能覆盖主线、分集结
 每集必须有简短、具体、能区分剧情的标题，禁止只写“第N集”或使用“新的开始”等空泛标题。
 所有对白必须独立成行并采用“人物名：说了什么”的格式，例如：
 埃里克：别回头。
-只有去掉提示会读错潜台词或关系态度时，才采用
-“人物名：（简短语气或可见微反应）台词”。括号必须紧跟冒号并使用中文全角括号；
-内容从人物表演指纹与当下关系压力产生，不要求同时罗列语气、情绪和眉眼，不写心理解释、
-长动作或“生气地说道”。较完整动作写在台词前后，听者反应也可承担表演，不得每句加括号。
+只有去掉提示会读错潜台词、真实意图或关系态度时，才采用
+“人物名：（发声方式＋当下可见的眉眼、视线或嘴角反应）台词”。例如
+“人物名：（压低声音，视线越过对方肩头）台词。”示例只说明组合格式，不得照抄具体反应。
+括号必须紧跟冒号并使用中文全角括号。
+括号内不写“生气、严肃、无奈”等抽象结论，不写心理解释或长动作；语气、视线和表情必须来自人物表演指纹、说话目的和当下关系压力。
+同一场内同一人物不得连续复制同一表情；不得批量使用“指节发白、瞳孔骤缩、呼吸一滞、攥紧拳头、嘴角勾起、眼底闪过”等人人通用的套式反应。
+较完整动作写在台词前后，听者反应也可承担表演，不得每句加括号。
 所有心理活动采用“人物名OS：心理活动”。
 禁止出现没有人物名前缀的对白，禁止只写“OS：”或“内心：”，也不要给普通动作错误添加人物冒号。
 第一集场景头后的第一有效拍必须让主角面对不可回避的问题。一句命令、异常事实、
@@ -617,6 +627,59 @@ class CodeBuddyNpcStageRunner:
         with self._lock:
             thread = self._threads.get(job_id)
             return bool(thread and thread.is_alive())
+
+    def complete_state_recorder(
+        self,
+        *,
+        job_id: str,
+        user_id: int,
+    ) -> dict[str, Any]:
+        """Build the continuity ledger deterministically without a model call."""
+        if self.is_running(job_id):
+            raise CodeBuddyNpcError("当前已有节点正在运行，请先等待或停止。", status_code=409)
+        job = self.store.load(job_id, user_id=user_id)
+        if not job:
+            raise CodeBuddyNpcError("NPC 剧本任务不存在。", status_code=404)
+        missing = [
+            ARTIFACT_LABELS[key]
+            for key in DEPENDENCIES["state_recorder"]
+            if not str((job.get("recovered_files") or {}).get(key) or "").strip()
+        ]
+        if missing:
+            raise CodeBuddyNpcError(
+                f"{STAGE_NAMES['state_recorder']}缺少上游内容：" + "、".join(missing),
+                status_code=409,
+            )
+
+        self._invalidate_from(job, "state_recorder")
+        job["execution_target"] = "local_code"
+        job["remote_kind"] = ""
+        job["remote_stage"] = ""
+        job["remote_continue_after"] = False
+        job["active_stage"] = "state_recorder"
+        job["status"] = "stage_running"
+        job["status_text"] = "状态记录器正在由代码整理连续性账本"
+        job["error"] = ""
+        start_stage_timing(
+            job,
+            "state_recorder",
+            reset=True,
+            execution_target="local_code",
+        )
+        self.store.save(job)
+
+        result = _compact_story_state(job)
+        self._save_stage_result(job, "state_recorder", result)
+        completed = self.store.load(job_id, user_id=user_id)
+        if not completed:
+            raise CodeBuddyNpcError("状态记录器产物保存失败。", status_code=500)
+        completed["active_stage"] = ""
+        completed["status"] = "stage_ready"
+        completed["status_text"] = "状态记录器已完成，等待运行终审与钩子编辑"
+        completed["progress"] = round(
+            (STAGE_ORDER.index("state_recorder") + 1) / len(STAGE_ORDER) * 100
+        )
+        return self.store.save(completed)
 
     def prepare_remote(
         self,
