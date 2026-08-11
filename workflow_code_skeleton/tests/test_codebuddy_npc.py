@@ -20,6 +20,7 @@ from workflow_code_skeleton.app.services.codebuddy_npc import (
     start_stage_timing,
 )
 from workflow_code_skeleton.app.services.codebuddy_npc_stage_runner import (
+    PROMPTS,
     CodeBuddyNpcStageRunner,
     _compact_story_state,
     _continuation_instruction,
@@ -27,6 +28,24 @@ from workflow_code_skeleton.app.services.codebuddy_npc_stage_runner import (
     _missing_episode_ranges,
     _episode_slice,
 )
+
+
+def test_local_episode_continuity_prompt_makes_mainline_visible() -> None:
+    prompt = PROMPTS["episode_continuity"]
+
+    assert "观众可见的主线载体" in prompt
+    assert "连续两集不得只积累而无处境变化" in prompt
+    assert "每3至5集" in prompt
+    assert "不固定为证据、文档、道具或倒计时" in prompt
+
+
+def test_local_writer_prompt_uses_specific_non_template_performance_cues() -> None:
+    prompt = PROMPTS["script_writer"]
+
+    assert "发声方式＋当下可见的眉眼、视线或嘴角反应" in prompt
+    assert "示例只说明组合格式，不得照抄具体反应" in prompt
+    assert "同一场内同一人物不得连续复制同一表情" in prompt
+    assert "指节发白、瞳孔骤缩" in prompt
 
 
 class _Response:
@@ -256,6 +275,36 @@ def test_stage_timing_is_live_then_persists_completed_duration() -> None:
     assert finished["stage_timings"]["story_architect"]["status"] == "success"
     assert finished["stage_timings"]["story_architect"]["completed_at"]
     assert finished["stage_timings"]["story_architect"]["duration_ms"] >= 0
+
+
+def test_complete_state_recorder_starts_and_finishes_local_code_timing(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={
+            "project_title": "代码状态记录器",
+            "episodes": 5,
+            "source_text": "主角必须守住承诺。",
+        },
+    )
+    job["recovered_files"] = {
+        "characters": "主角：林夏",
+        "episodes": "第1集：《开端》\n承接事实：林夏收到最后通牒",
+        "draft": "第1集：《开端》\n场景1：办公室｜日｜内\n人物：林夏\n林夏：我来处理。",
+    }
+    store.save(job)
+
+    completed = CodeBuddyNpcStageRunner(store).complete_state_recorder(
+        job_id=job["job_id"],
+        user_id=7,
+    )
+
+    timing = completed["stage_timings"]["state_recorder"]
+    assert completed["status"] == "stage_ready"
+    assert completed["execution_target"] == "local_code"
+    assert completed["recovered_files"]["story_state"]
+    assert timing["status"] == "success"
+    assert timing["execution_target"] == "local_code"
 
 
 def test_job_store_preserves_dynamic_scene_contract(tmp_path: Path) -> None:
@@ -737,6 +786,8 @@ def test_trigger_final_editor_chunks_large_checkpoint_below_linux_argument_limit
     request_json = session.calls[0][2]["json"]
     env = request_json["env"]
     assert "scriptStateBundle" not in env
+    assert env["scriptRequestBundleFile"] == ".script-team-transport/request.b64"
+    assert env["scriptStateBundleFile"] == ".script-team-transport/state.b64"
     assert "config" in request_json
     config = json.loads(request_json["config"])
     pipeline = config["main"]["api_trigger_script_team_stage_custom_api"][0]
@@ -746,9 +797,13 @@ def test_trigger_final_editor_chunks_large_checkpoint_below_linux_argument_limit
     state_writes = [
         script
         for script in scripts
-        if script.endswith(">> /tmp/script-team-transport/state.b64")
+        if script.endswith(">> .script-team-transport/state.b64")
     ]
     assert len(state_writes) > 1
+    assert pipeline["docker"]["env"]["SCRIPT_STATE_BUNDLE_FILE"] == (
+        ".script-team-transport/state.b64"
+    )
+    assert all("/tmp/script-team-transport" not in script for script in scripts)
     encoded = "".join(script.split("'", 2)[1] for script in state_writes)
     checkpoint = json.loads(
         gzip.decompress(base64.b64decode(encoded)).decode("utf-8")

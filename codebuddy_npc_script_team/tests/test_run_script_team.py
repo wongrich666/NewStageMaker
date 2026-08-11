@@ -109,6 +109,24 @@ def test_mainline_and_continuity_contracts_survive_every_writing_stage() -> None
     assert "showrunner" in MODULE.CONTEXT_FILES["state_recorder"]
 
 
+def test_episode_cards_make_the_mainline_visible_to_the_audience() -> None:
+    prompt = MODULE.PROMPTS["episode_continuity"]
+
+    assert "观众可见的主线载体" in prompt
+    assert "连续两集不得只积累而无处境变化" in prompt
+    assert "每3至5集" in prompt
+    assert "不固定为证据、文档、道具或倒计时" in prompt
+
+
+def test_writer_uses_character_specific_voice_and_micro_expression_cues() -> None:
+    prompt = MODULE.PROMPTS["script_writer"]
+
+    assert "发声方式＋当下可见的眉眼、视线或嘴角反应" in prompt
+    assert "示例只说明组合格式，不得照抄具体反应" in prompt
+    assert "同一场内同一人物不得连续复制同一表情" in prompt
+    assert "指节发白、瞳孔骤缩" in prompt
+
+
 def test_original_os_format_and_performance_rules_reach_writer_and_editor() -> None:
     character_prompt = MODULE.PROMPTS["character_emotion"]
     writer_prompt = MODULE.PROMPTS["script_writer"]
@@ -443,7 +461,7 @@ def test_state_audit_batches_30_episodes_in_tens(monkeypatch, tmp_path) -> None:
     assert json.loads(result)["state_status"] == "audited"
 
 
-def test_continuation_automatically_enables_nonblocking_state_audit(monkeypatch, tmp_path) -> None:
+def test_continuation_under_forty_episodes_uses_deterministic_state(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("SCRIPT_TEAM_STATE_MODEL", raising=False)
     monkeypatch.setattr(MODULE, "ROOT", tmp_path)
     calls: list[tuple[int, int]] = []
@@ -468,9 +486,33 @@ def test_continuation_automatically_enables_nonblocking_state_audit(monkeypatch,
     )
     payload = json.loads(result)
 
-    assert calls == [(6, 15), (16, 17)]
+    assert calls == []
+    assert payload["state_status"] == "deterministic"
+    assert "state_audit" not in payload
+
+
+def test_forty_episode_state_automatically_enables_model_audit(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("SCRIPT_TEAM_STATE_MODEL", raising=False)
+    monkeypatch.setattr(MODULE, "ROOT", tmp_path)
+    calls: list[tuple[int, int]] = []
+
+    def fake_call_model(_system_prompt, user_prompt, **_kwargs):
+        start = int(re.search(r'"episode_start":\s*(\d+)', user_prompt).group(1))
+        end = int(re.search(r'"episode_end":\s*(\d+)', user_prompt).group(1))
+        calls.append((start, end))
+        return _state_batch_json(start, end)
+
+    monkeypatch.setattr(MODULE, "call_model", fake_call_model)
+    result = MODULE.generate_stage_result(
+        "state_recorder",
+        {"episodes": 40, "episode_start": 1, "episode_end": 40},
+        modules="",
+    )
+    payload = json.loads(result)
+
+    assert calls == [(1, 10), (11, 20), (21, 30), (31, 40)]
     assert payload["state_status"] == "audited"
-    assert payload["state_audit"]["batch_count"] == 2
+    assert payload["state_audit"]["reasons"] == ["长篇任务达到40集"]
 
 
 def test_state_recorder_degrades_without_breaking_30_episode_flow(monkeypatch, tmp_path) -> None:

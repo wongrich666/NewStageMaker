@@ -29,7 +29,13 @@ def _install_fakes(
 ):
     from workflow_code_skeleton.app import server
 
-    state = {"job": None, "stage_calls": [], "full_calls": 0, "fallback_calls": []}
+    state = {
+        "job": None,
+        "stage_calls": [],
+        "full_calls": 0,
+        "fallback_calls": [],
+        "code_state_calls": [],
+    }
 
     class FakeStore:
         def __init__(self, _config):
@@ -128,6 +134,18 @@ def _install_fakes(
             job = state["job"]
             assert job and job_id == job["job_id"] and user_id == job["user_id"]
             return dict(job)
+
+        def complete_state_recorder(self, *, job_id, user_id):
+            state["code_state_calls"].append({"job_id": job_id, "user_id": user_id})
+            updated = dict(state["job"])
+            recovered = dict(updated.get("recovered_files") or {})
+            recovered["story_state"] = '{"episodes": []}'
+            updated["recovered_files"] = recovered
+            updated["status"] = "stage_ready"
+            updated["execution_target"] = "local_code"
+            updated["active_stage"] = ""
+            state["job"] = updated
+            return updated
 
         def start(self, *, job_id, user_id, stage, continue_after):
             state["fallback_calls"].append(
@@ -250,6 +268,130 @@ def test_failed_remote_stage_retries_twice_then_uses_local_checkpoint(monkeypatc
         }
     ]
     assert state["job"]["execution_target"] == "local_fallback"
+
+
+def test_state_recorder_runs_as_code_then_returns_to_remote_final_editor(monkeypatch):
+    server, state = _install_fakes(monkeypatch)
+    app = server.create_app()
+    app.config.update(TESTING=True)
+    client = app.test_client()
+    headers = {"Authorization": "Bearer writer-token"}
+
+    created = client.post(
+        "/api/new-workflow-test/npc/jobs",
+        headers=headers,
+        json={
+            "project_title": "代码状态账本测试",
+            "source_text": "状态记录器不得调用云端模型。",
+            "execution_mode": "step",
+            "episodes": 20,
+        },
+    )
+    assert created.status_code == 200
+    state["job"]["recovered_files"] = {
+        "contract": "contract",
+        "characters": "characters",
+        "episodes": "episodes",
+        "draft": "draft",
+    }
+
+    response = client.post(
+        "/api/new-workflow-test/npc/jobs/npc-orchestration-test/stages/state_recorder/run",
+        headers=headers,
+        json={"continue_after": True},
+    )
+
+    assert response.status_code == 200
+    assert state["code_state_calls"] == [
+        {"job_id": "npc-orchestration-test", "user_id": 7}
+    ]
+    assert [call["stage"] for call in state["stage_calls"]] == [
+        "showrunner",
+        "final_editor",
+    ]
+    assert state["job"]["remote_stage"] == "final_editor"
+
+
+def test_forty_episode_state_recorder_keeps_remote_model_audit(monkeypatch):
+    server, state = _install_fakes(monkeypatch)
+    app = server.create_app()
+    app.config.update(TESTING=True)
+    client = app.test_client()
+    headers = {"Authorization": "Bearer writer-token"}
+
+    created = client.post(
+        "/api/new-workflow-test/npc/jobs",
+        headers=headers,
+        json={
+            "project_title": "长篇状态抽查测试",
+            "source_text": "四十集及以上保留模型抽查。",
+            "execution_mode": "step",
+            "episodes": 40,
+        },
+    )
+    assert created.status_code == 200
+    state["job"]["recovered_files"] = {
+        "contract": "contract",
+        "characters": "characters",
+        "episodes": "episodes",
+        "draft": "draft",
+    }
+
+    response = client.post(
+        "/api/new-workflow-test/npc/jobs/npc-orchestration-test/stages/state_recorder/run",
+        headers=headers,
+        json={"continue_after": True},
+    )
+
+    assert response.status_code == 200
+    assert state["code_state_calls"] == []
+    assert [call["stage"] for call in state["stage_calls"]] == [
+        "showrunner",
+        "state_recorder",
+    ]
+    assert state["job"]["remote_stage"] == "state_recorder"
+
+
+def test_legacy_failed_remote_state_recorder_skips_retries(monkeypatch):
+    monkeypatch.setenv("CODEBUDDY_NPC_REMOTE_STAGE_RETRIES", "2")
+    server, state = _install_fakes(monkeypatch, refresh_fails=True)
+    app = server.create_app()
+    app.config.update(TESTING=True)
+    client = app.test_client()
+    headers = {"Authorization": "Bearer writer-token"}
+
+    created = client.post(
+        "/api/new-workflow-test/npc/jobs",
+        headers=headers,
+        json={
+            "project_title": "旧状态节点恢复测试",
+            "source_text": "旧任务失败后直接切代码。",
+            "execution_mode": "auto",
+            "episodes": 20,
+        },
+    )
+    assert created.status_code == 200
+    state["job"]["remote_stage"] = "state_recorder"
+    state["job"]["remote_continue_after"] = True
+    state["job"]["recovered_files"] = {
+        "contract": "contract",
+        "characters": "characters",
+        "episodes": "episodes",
+        "draft": "draft",
+    }
+
+    response = client.get(
+        "/api/new-workflow-test/npc/jobs/npc-orchestration-test",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert len(state["stage_calls"]) == 2
+    assert state["stage_calls"][-1]["stage"] == "final_editor"
+    assert state["code_state_calls"] == [
+        {"job_id": "npc-orchestration-test", "user_id": 7}
+    ]
+    assert state["job"]["remote_retry_count"] == 0
 
 
 def test_stale_poll_cannot_overwrite_a_newer_remote_build(monkeypatch):

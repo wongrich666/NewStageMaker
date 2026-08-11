@@ -218,6 +218,32 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         job["progress"] = round(STAGE_ORDER.index(stage) / len(STAGE_ORDER) * 100)
         return codebuddy_npc_jobs.save(job)
 
+    def _complete_code_state_recorder(
+        job: dict[str, Any],
+        *,
+        continue_after: bool,
+    ) -> dict[str, Any]:
+        completed = codebuddy_npc_stage_runner.complete_state_recorder(
+            job_id=str(job["job_id"]),
+            user_id=int(job["user_id"]),
+        )
+        if not continue_after:
+            return completed
+        return _submit_remote_npc_stage(
+            completed,
+            stage="final_editor",
+            continue_after=True,
+            retry_count=0,
+        )
+
+    def _state_recorder_uses_code(job: dict[str, Any]) -> bool:
+        request_data = job.get("request") if isinstance(job.get("request"), dict) else {}
+        try:
+            episodes = max(1, int(request_data.get("episodes") or 1))
+        except (TypeError, ValueError):
+            episodes = 1
+        return episodes < 40
+
     def _refresh_remote_npc_job_unlocked(job: dict[str, Any]) -> dict[str, Any]:
         job_id = str(job.get("job_id") or "")
         if bool(job.get("cancel_requested")):
@@ -286,6 +312,11 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             ):
                 failed_stage = str(job["remote_stage"])
                 remote_error = str(job.get("error") or "CNB远程节点执行失败")
+                if failed_stage == "state_recorder" and _state_recorder_uses_code(job):
+                    return _complete_code_state_recorder(
+                        job,
+                        continue_after=bool(job.get("remote_continue_after")),
+                    )
                 retry_count = max(0, int(job.get("remote_retry_count") or 0))
                 retry_limit = max(
                     0,
@@ -333,12 +364,18 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                 if current_index + 1 < len(STAGE_ORDER):
                     next_stage = STAGE_ORDER[current_index + 1]
                     try:
-                        job = _submit_remote_npc_stage(
-                            job,
-                            stage=next_stage,
-                            continue_after=True,
-                            retry_count=0,
-                        )
+                        if next_stage == "state_recorder" and _state_recorder_uses_code(job):
+                            job = _complete_code_state_recorder(
+                                job,
+                                continue_after=True,
+                            )
+                        else:
+                            job = _submit_remote_npc_stage(
+                                job,
+                                stage=next_stage,
+                                continue_after=True,
+                                retry_count=0,
+                            )
                     except CodeBuddyNpcError as remote_exc:
                         job = codebuddy_npc_stage_runner.start(
                             job_id=job_id,
@@ -8879,7 +8916,17 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def codebuddy_npc_run_stage_api(job_id: str, stage: str):
         payload = request.get_json(silent=True) or {}
         try:
-            if bool(payload.get("local_fallback")):
+            current_job = (
+                codebuddy_npc_jobs.load(job_id, user_id=_require_user_id())
+                if stage == "state_recorder"
+                else None
+            )
+            if stage == "state_recorder" and current_job and _state_recorder_uses_code(current_job):
+                job = _complete_code_state_recorder(
+                    current_job,
+                    continue_after=bool(payload.get("continue_after")),
+                )
+            elif bool(payload.get("local_fallback")):
                 job = codebuddy_npc_stage_runner.start(
                     job_id=job_id,
                     user_id=_require_user_id(),

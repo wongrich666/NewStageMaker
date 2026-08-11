@@ -37,7 +37,9 @@ _DNS_FALLBACK_LOCK = threading.Lock()
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 _CNB_SAFE_ENV_BYTES = 80 * 1024
 _CNB_BUNDLE_CHUNK_BYTES = 48 * 1024
-_CNB_TRANSPORT_DIR = "/tmp/script-team-transport"
+# CNB can isolate /tmp between pipeline stages. Keep chunked payloads in the
+# build workspace so the final runner sees files written by earlier stages.
+_CNB_TRANSPORT_DIR = ".script-team-transport"
 _CNB_SECRET_IMPORT = "https://cnb.cool/xdsyjbpt/miyao/-/blob/main/deepseek.yml"
 _ARTIFACT_FILENAMES = {
     "contract": "01_contract.md",
@@ -999,6 +1001,12 @@ class CodeBuddyNpcClient:
         if max(len(request_bundle.encode("ascii")), len(state_bundle.encode("ascii"))) >= _CNB_SAFE_ENV_BYTES:
             payload["env"].pop("scriptRequestBundle", None)
             payload["env"].pop("scriptStateBundle", None)
+            payload["env"]["scriptRequestBundleFile"] = (
+                f"{_CNB_TRANSPORT_DIR}/request.b64"
+            )
+            payload["env"]["scriptStateBundleFile"] = (
+                f"{_CNB_TRANSPORT_DIR}/state.b64"
+            )
             payload["config"] = _large_stage_config(
                 self.config.stage_event,
                 request_bundle,
