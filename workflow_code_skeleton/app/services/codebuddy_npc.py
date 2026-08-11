@@ -699,6 +699,11 @@ class CodeBuddyNpcJobStore:
         ) or "1"
         if scenes_per_episode not in {"1", "1-2", "2", "2-3", "flexible"}:
             scenes_per_episode = "1"
+        raw_ip_anthology_mode = request_payload.get("ip_anthology_mode")
+        ip_anthology_mode = (
+            raw_ip_anthology_mode is True
+            or str(raw_ip_anthology_mode).strip().lower() in {"1", "true", "yes", "on"}
+        )
 
         source_last_episode = 0
         episode_start = 1
@@ -798,6 +803,7 @@ class CodeBuddyNpcJobStore:
                 "episode_duration_seconds": episode_duration_seconds,
                 "total_duration_seconds": episodes * episode_duration_seconds,
                 "scenes_per_episode": scenes_per_episode,
+                "ip_anthology_mode": ip_anthology_mode,
                 "source_text": source_text,
                 "story_bible_enabled": story_bible_enabled,
                 "continuation_bible": continuation_bible,

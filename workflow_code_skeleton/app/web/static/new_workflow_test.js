@@ -46,6 +46,7 @@
       episode_word_count: 800,
       episode_duration_seconds: 90,
       scenes_per_episode: "1",
+      ip_anthology_mode: false,
       source_text: "",
       story_bible_enabled: false,
       continuation_bible: "",
@@ -1092,6 +1093,14 @@
               </div>
             </div>
             <div class="nwt-field">
+              <span>剧集结构</span>
+              <button class="nwt-anthology-toggle ${state.form.ip_anthology_mode ? "active" : ""}" type="button" data-action="toggle-ip-anthology" aria-pressed="${Boolean(state.form.ip_anthology_mode)}" ${active ? "disabled" : ""}>
+                <span class="nwt-anthology-icon">${icon("layout-grid", 15)}</span>
+                <span><strong>IP单元剧</strong><small>${state.form.ip_anthology_mode ? "已启用 · 每集独立闭环" : "可选 · 默认连续叙事"}</small></span>
+                <span class="nwt-anthology-state">${state.form.ip_anthology_mode ? icon("check", 14) : icon("plus", 14)}</span>
+              </button>
+            </div>
+            <div class="nwt-field">
               <span>成片类型</span>
               <div class="nwt-segmented" role="group" aria-label="成片类型">
                 <input type="hidden" data-form-key="production_type" value="${escapeHtml(state.form.production_type)}" />
@@ -1397,6 +1406,7 @@
           state.form = {
           ...state.form,
           ...latest.request,
+          ip_anthology_mode: latest.request.ip_anthology_mode === true,
           story_bible_enabled: Boolean(
             latest.request.story_bible_enabled || latest.request.continuation_bible,
           ),
@@ -1446,6 +1456,7 @@
         state.form = {
           ...state.form,
           ...state.job.request,
+          ip_anthology_mode: state.job.request.ip_anthology_mode === true,
           story_bible_enabled: Boolean(
             state.job.request.story_bible_enabled || state.job.request.continuation_bible,
           ),
@@ -1516,6 +1527,7 @@
       source_text: script,
       source_last_episode: lastEpisode,
       continuation_target_episode: Math.max(2, lastEpisode + 5),
+      ip_anthology_mode: (((state.job || {}).request || {}).ip_anthology_mode) === true,
       story_bible_enabled: Boolean((((state.job || {}).request || {}).continuation_bible)),
       continuation_bible: String((((state.job || {}).request || {}).continuation_bible) || ""),
       adaptation_direction: "",
@@ -1865,6 +1877,12 @@
       const enabled = !Boolean(state.form.story_bible_enabled);
       state.form.story_bible_enabled = enabled;
       if (!enabled) state.form.continuation_bible = "";
+      saveState();
+      render();
+      return;
+    }
+    if (action === "toggle-ip-anthology") {
+      state.form.ip_anthology_mode = !Boolean(state.form.ip_anthology_mode);
       saveState();
       render();
       return;

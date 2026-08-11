@@ -41,3 +41,12 @@ def test_all_creation_modes_expose_optional_uploadable_locked_story_bible():
     assert 'data-upload-target="continuation_bible"' in source
     assert "创作圣经（全链路锁定）" in source
     assert 'state.form.mode === "续写" ? `\n              <label class="nwt-field wide nwt-continuation-bible">' not in source
+
+
+def test_ip_anthology_is_an_explicit_opt_in_button():
+    source = SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "ip_anthology_mode: false" in source
+    assert 'data-action="toggle-ip-anthology"' in source
+    assert "IP单元剧" in source
+    assert "默认连续叙事" in source

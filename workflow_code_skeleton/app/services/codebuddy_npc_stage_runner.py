@@ -78,6 +78,9 @@ episode_start、episode_end 与 episodes 共同构成交付范围，必须只交
 前五集完成基础立剧，后续只升级、变奏和兑现，不再补基础人设。
 第N集结尾状态和第N+1集承接事实必须是同一事实。换地点时，上集给出决定、去向或
 目的，下集从准备执行、正在执行或承受结果开始，不能用时间字幕掩盖断层。
+仅当用户明确启用 ip_anthology_mode 时切换为IP单元剧：每集独立完成触发、目标、
+冲突、选择、代价与单元结局，不要求下一集直接延续上一集事件；但固定主角、人物关系、
+世界规则、人物认知、能力边界和累积成长必须连续，不能把人物重置。
 为便于后台校验，第N+1集“承接事实”必须逐字复制第N集“结尾状态”；第N+1集
 “开场钩子”必须从第N集“下一集第一有效动作”承诺的动作开始，再叠加本集新钩子。
 相邻两集不得复用完全相同的阻力或主线推进；阻力要形成反应或升级，主线推进要产生新的状态差。
@@ -657,6 +660,26 @@ def _story_bible_instruction(request_data: dict[str, Any]) -> str:
     )
 
 
+def _ip_anthology_enabled(request_data: dict[str, Any]) -> bool:
+    raw = request_data.get("ip_anthology_mode")
+    return raw is True or str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ip_anthology_instruction(request_data: dict[str, Any]) -> str:
+    if not _ip_anthology_enabled(request_data):
+        return (
+            "\n剧集结构合同：IP单元剧未启用，执行连续叙事。相邻集事件、未完成动作、"
+            "地点去向和因果后果必须直接承接。"
+        )
+    return (
+        "\n剧集结构合同：用户已明确启用IP单元剧。每集独立完成单元触发、当集目标、"
+        "冲突升级、人物选择、现实代价与单元结局，不强制下一集延续上一集事件。"
+        "跨集只锁定固定主角与核心关系、世界规则、人物认知、能力边界、长期伤口和累积成长；"
+        "每集允许新的事件、地点与单元人物。承接事实填写本集开始前的IP正典状态，"
+        "结尾状态记录本单元留下的长期变化，下一集第一有效动作是新单元触发。"
+    )
+
+
 def _continuation_instruction(request_data: dict[str, Any]) -> str:
     story_bible_contract = _story_bible_instruction(request_data)
     if str(request_data.get("mode") or "") != "续写":
@@ -665,6 +688,15 @@ def _continuation_instruction(request_data: dict[str, Any]) -> str:
     episode_start = max(source_last + 1, int(request_data.get("episode_start") or (source_last + 1)))
     episode_end = max(episode_start, int(request_data.get("episode_end") or episode_start))
     policy = str(request_data.get("continuation_policy") or "strict")
+    if _ip_anthology_enabled(request_data):
+        return (
+            "\n\n===== IP单元剧续写合同 =====\n"
+            f"已有剧本写至第{source_last}集，本次只能输出第{episode_start}集至第{episode_end}集，"
+            "不得重写已有集数。新一集可以启动独立单元，不必直接延续旧单元最后动作；"
+            "但已有固定人物、核心关系、世界规则、已知事实、能力边界和累积成长必须保留，"
+            "不能重置人物或复用已经解决的单元冲突。"
+            + story_bible_contract
+        )
     return (
         "\n\n===== 续写硬合同 =====\n"
         f"已有剧本写至第{source_last}集，本次只能输出第{episode_start}集至"
@@ -1297,6 +1329,7 @@ class CodeBuddyNpcStageRunner:
         fixed_context += _module_text(stage, artifacts)
         fixed_context += _distilled_skill_text(stage, job)
         fixed_context += _continuation_instruction(request_data)
+        fixed_context += _ip_anthology_instruction(request_data)
         batch_total = (episode_end - episode_start + BATCH_SIZE) // BATCH_SIZE
         no_progress_attempts: dict[tuple[int, int], int] = {}
         while True:
@@ -1368,7 +1401,7 @@ class CodeBuddyNpcStageRunner:
 ===== 本批待修初稿 =====
 {batch_draft}
 
-===== 上一批结尾，仅用于连续承接 =====
+===== {"上一批IP正典状态，仅用于避免人物与规则重置" if _ip_anthology_enabled(request_data) else "上一批结尾，仅用于连续承接"} =====
 {previous_tail}
 
 本次是缺失集定向补齐。只输出第{batch_start}集至第{batch_end}集，共{len(expected)}集，不得重写已完成集。
@@ -1413,7 +1446,7 @@ class CodeBuddyNpcStageRunner:
                 episode_end=episode_end,
                 stage=stage,
             )
-            if stage == "episode_continuity":
+            if stage == "episode_continuity" and not _ip_anthology_enabled(request_data):
                 result, handoff_warnings = _normalize_episode_card_handoffs(result)
                 if handoff_warnings:
                     fresh_warning = self.store.load(str(job["job_id"]), user_id=int(job["user_id"]))
