@@ -31,10 +31,13 @@ def test_continuation_duration_and_delivery_range_use_new_episode_count():
     assert "deliveryRange()" in source
 
 
-def test_continuation_ui_exposes_uploadable_locked_story_bible():
+def test_all_creation_modes_expose_optional_uploadable_locked_story_bible():
     source = SCRIPT_PATH.read_text(encoding="utf-8")
 
+    assert "story_bible_enabled: false" in source
+    assert 'data-action="toggle-story-bible"' in source
     assert 'continuation_bible: ""' in source
     assert 'data-form-key="continuation_bible"' in source
     assert 'data-upload-target="continuation_bible"' in source
-    assert "续写创作圣经（锁定项）" in source
+    assert "创作圣经（全链路锁定）" in source
+    assert 'state.form.mode === "续写" ? `\n              <label class="nwt-field wide nwt-continuation-bible">' not in source

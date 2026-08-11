@@ -47,6 +47,7 @@
       episode_duration_seconds: 90,
       scenes_per_episode: "1",
       source_text: "",
+      story_bible_enabled: false,
       continuation_bible: "",
       adaptation_direction: "",
       execution_mode: "step",
@@ -1230,16 +1231,25 @@
                 <small>支持 Word、PDF、TXT、Markdown、JSON，可多选；单文件最大20MB</small>
               </div>
             </label>
-            ${state.form.mode === "续写" ? `
+            <div class="nwt-story-bible-option wide ${state.form.story_bible_enabled ? "active" : ""}">
+              <div>
+                <strong>${icon("lock-keyhole", 15)}创作圣经锁定项</strong>
+                <small>可选。开启并填写后，人设、世界观、人物关系、主支线、未来节点与语言风格将作为全链路硬约束。</small>
+              </div>
+              <button class="nwt-story-bible-toggle" type="button" data-action="toggle-story-bible" aria-expanded="${Boolean(state.form.story_bible_enabled)}" ${active ? "disabled" : ""}>
+                ${icon(state.form.story_bible_enabled ? "lock" : "plus", 14)}<span>${state.form.story_bible_enabled ? "移除锁定项" : "添加锁定项"}</span>
+              </button>
+            </div>
+            ${state.form.story_bible_enabled ? `
               <label class="nwt-field wide nwt-continuation-bible">
-                <span class="nwt-lock-label">${icon("lock-keyhole", 14)}续写创作圣经（锁定项）</span>
-                <textarea data-form-key="continuation_bible" placeholder="填写或上传必须延续的人设、世界观、人物关系、主线与支线规划、未来剧情节点、语言风格和你喜欢的剧情方向。已有正文事实优先，不会反向改写旧集。" ${active ? "disabled" : ""}>${escapeHtml(state.form.continuation_bible)}</textarea>
+                <span class="nwt-lock-label">${icon("lock-keyhole", 14)}创作圣经（全链路锁定）</span>
+                <textarea data-form-key="continuation_bible" placeholder="填写或上传必须锁定的人设、世界观、人物关系、主线与支线规划、未来剧情节点、语言风格和剧情方向。${state.form.mode === "续写" ? "已有正文事实优先，不会反向改写旧集。" : "所有创作节点必须遵守，不得擅自替换或弱化。"}" ${active ? "disabled" : ""}>${escapeHtml(state.form.continuation_bible)}</textarea>
                 <div class="nwt-upload-row">
                   <label class="nwt-upload-button">
                     ${icon("file-lock-2", 14)}<span>上传故事大纲 / 人设文件</span>
                     <input type="file" data-upload-target="continuation_bible" accept=".docx,.pdf,.txt,.md,.json" multiple ${active ? "disabled" : ""} />
                   </label>
-                  <small>作为后续集数的长期正典约束，可多文件追加；支持 Word、PDF、TXT、Markdown、JSON</small>
+                  <small>作为本次任务所有节点共同遵守的创作正典，可多文件追加；支持 Word、PDF、TXT、Markdown、JSON</small>
                 </div>
               </label>
             ` : ""}
@@ -1385,9 +1395,12 @@
         if (latest.request && typeof latest.request === "object") {
           const selectedSkill = latest.request.distilled_skill || latest.selected_skill || {};
           state.form = {
-            ...state.form,
-            ...latest.request,
-            continuation_bible: String(latest.request.continuation_bible || ""),
+          ...state.form,
+          ...latest.request,
+          story_bible_enabled: Boolean(
+            latest.request.story_bible_enabled || latest.request.continuation_bible,
+          ),
+          continuation_bible: String(latest.request.continuation_bible || ""),
             distilled_skill_id: String(selectedSkill.skill_id || ""),
             distilled_skill_version_id: String(selectedSkill.version_id || ""),
           };
@@ -1433,6 +1446,9 @@
         state.form = {
           ...state.form,
           ...state.job.request,
+          story_bible_enabled: Boolean(
+            state.job.request.story_bible_enabled || state.job.request.continuation_bible,
+          ),
           continuation_bible: String(state.job.request.continuation_bible || ""),
         };
       }
@@ -1500,6 +1516,7 @@
       source_text: script,
       source_last_episode: lastEpisode,
       continuation_target_episode: Math.max(2, lastEpisode + 5),
+      story_bible_enabled: Boolean((((state.job || {}).request || {}).continuation_bible)),
       continuation_bible: String((((state.job || {}).request || {}).continuation_bible) || ""),
       adaptation_direction: "",
     };
@@ -1841,6 +1858,14 @@
     const action = button.dataset.action;
     if (action === "toggle-skill-picker") {
       state.skillPickerOpen = !state.skillPickerOpen;
+      render();
+      return;
+    }
+    if (action === "toggle-story-bible") {
+      const enabled = !Boolean(state.form.story_bible_enabled);
+      state.form.story_bible_enabled = enabled;
+      if (!enabled) state.form.continuation_bible = "";
+      saveState();
       render();
       return;
     }
