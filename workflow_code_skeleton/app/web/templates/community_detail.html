@@ -6,8 +6,9 @@
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>{% if asset %}{{ asset.title }}{% else %}社区好剧{% endif %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260430-01">
+  <title>{% if asset %}{{ asset.title }}{% else %}公开作品{% endif %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260627-global-theme-v1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='theme_slideshow.css') }}?v=20260628-global-theme-v8">
 </head>
 <body class="home-body community-page mono-page">
   <main class="home-shell">
@@ -15,7 +16,7 @@
       <div class="topbar-main">
         <a class="page-back-link page-back-link-light" href="{{ url_for('index', auth_token=current_auth_token) }}">返回首页</a>
         <a class="brand-mark" href="{{ url_for('index', auth_token=current_auth_token) }}">
-          <span>剧</span>
+          <span><img src="{{ url_for('static', filename='assets/logo.png') }}" alt="Logo"></span>
           <strong>社区共享好剧</strong>
         </a>
       </div>
@@ -34,8 +35,7 @@
               <span class="status-pill status-pill-public">公开成品</span>
             </div>
             <h1>{{ asset.title }}</h1>
-            <!-- 详情页摘要同样保留换行，避免故事摘要/人物说明在浏览器里被折叠。 -->
-            <p class="community-detail-summary">{{ asset.summary | e | replace('\r\n', '\n') | replace('\r', '\n') | replace('\n', '<br>\n') | safe }}</p>
+            <p class="community-detail-summary">{{ asset.summary }}</p>
           </div>
           <a class="btn btn-secondary" href="{{ url_for('index', auth_token=current_auth_token) }}#community">返回社区</a>
         </div>
@@ -56,10 +56,11 @@
       <section class="card community-detail-card">
         <div class="empty-card">
           <strong>这个公开作品不存在，或已经被取消公开。</strong>
-          <p>你可以返回首页，查看其他社区好剧。</p>
+          <p>你可以返回首页，查看其他公开作品。</p>
         </div>
       </section>
     {% endif %}
   </main>
+  <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260628-global-theme-v8"></script>
 </body>
 </html>

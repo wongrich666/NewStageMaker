@@ -1,0 +1,308 @@
+schema_version: 1.0.0
+name: script12_04
+id: 7645499779002220582
+description: "剧本正文记忆"
+mode: workflow
+icon: plugin_icon/workflow.png
+nodes:
+    - id: "100001"
+      type: start
+      title: 开始
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-Start-v2.jpg
+      description: "工作流的起始节点，用于设定启动工作流需要的信息"
+      position:
+        x: 0
+        y: 0
+      parameters:
+        node_outputs:
+            script:
+                type: string
+                required: true
+                value: null
+    - id: "900001"
+      type: end
+      title: 结束
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-End-v2.jpg
+      description: "工作流的最终节点，用于返回工作流运行后的结果信息"
+      position:
+        x: 1000
+        y: 0
+      parameters:
+        node_inputs:
+            - name: script
+              input:
+                type: string
+                value:
+                    path: memory
+                    ref_node: "153484"
+        terminatePlan: returnVariables
+    - id: "153484"
+      type: llm
+      title: 大模型
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-LLM-v2.jpg
+      description: "调用大语言模型,使用变量和提示词生成回复"
+      version: "3"
+      position:
+        x: 480
+        y: 0
+      parameters:
+        fcParamVar:
+            knowledgeFCParam: {}
+        llmParam:
+            - name: generationDiversity
+              input:
+                type: string
+                value: default_val
+            - name: apiMode
+              input:
+                type: integer
+                value: "0"
+            - name: maxTokens
+              input:
+                type: integer
+                value: "32768"
+            - name: spCurrentTime
+              input:
+                type: boolean
+                value: false
+            - name: spAntiLeak
+              input:
+                type: boolean
+                value: false
+            - name: thinkingType
+              input:
+                type: string
+                value: disabled
+            - name: responseFormat
+              input:
+                type: integer
+                value: "2"
+            - name: modelName
+              input:
+                type: string
+                value: DeepSeek-V3.2
+            - name: modelType
+              input:
+                type: integer
+                value: "1764929611"
+            - name: maxCompletionTokens
+              input:
+                type: string
+                value: "0"
+            - name: parameters
+              input:
+                type: object
+                value: null
+            - name: prompt
+              input:
+                type: string
+                value: 执行:框架转剧本正文记忆。读取输入，并只返回约定的输出字段。
+            - name: enableChatHistory
+              input:
+                type: boolean
+                value: false
+            - name: chatHistoryRound
+              input:
+                type: integer
+                value: "3"
+            - name: systemPrompt
+              input:
+                type: string
+                value: |-
+                    你是“剧本批次统一记忆整理器”。
+
+                    你的任务不是复述当前五集正文，而是整理一个能强制下一批正文写作承接剧情状态、人物关系、人物声音、潜台词、alias 命名和结尾钩子的统一记忆包。
+
+                    你要同时整理：剧情连续性、关系连续性、对白声音连续性、服装/alias 连续性、不要重复的冲突模式。
+                    这个记忆包必须短、准、可执行。下一批正文编写器应当能直接根据它开写，而不是重新开局、重定人物、重定声音、重定 alias。
+
+                    # 输入
+
+                    【当前批次剧本正文】
+                    {{script}}
+
+                    # 输出强约束
+
+                    只输出合法 JSON object。
+                    禁止输出 markdown、代码块、解释、标题、注释、自然语言报告。
+                    不得新增字段、删除字段、改字段名。
+                    所有 required 字段必须存在。
+                    数组没有内容时输出 []。
+                    字符串无法判断时输出 ""。
+                    不得杜撰正文里没有发生的内容。
+                    不得把映射中定义过但正文未实际使用的 alias 当成已启用。
+                    不得把可回退的普通换装写成不可回退。
+                    不得复述全文。
+
+                    # 记忆核心目标
+
+                    你要提炼的是下一批正文必须遵守的硬约束：
+                    本批最后一集最后留下的具体钩子；
+                    下一批第一场必须接住的具体动作、危机、发现或决定；
+                    当前故事状态；
+                    未解决问题；
+                    关系变化；
+                    信息差变化；
+                    人物声音已经形成的规则；
+                    仍未说破的潜台词；
+                    已启用 alias；
+                    尚未登场 alias；
+                    已发生且下一批不能回退的身份/造型/命名切换；
+                    下一批最容易写错的命名提醒；
+                    已经使用过、下一批不要重复的冲突套路、误会套路或对白套路。
+
+                    # 长度标准
+
+                    abstract_of_this_turn：不超过 180 字。
+                    final_hook_of_this_turn：不超过 120 字。
+                    current_story_state：最多 5 条，每条不超过 80 字。
+                    relationship_state：最多 6 条。
+                    unresolved_threads：最多 6 条，每条不超过 80 字。
+                    must_carry_into_next_turn：最多 6 条，每条不超过 80 字。
+                    next_turn_opening_guidance：不超过 120 字。
+                    dialogue_voice_summary：不超过 180 字。
+                    character_voice_continuity：最多 8 个角色。
+                    voice_traits_activated：每个角色 2-4 条，每条不超过 60 字，必须是可执行说话规则。
+                    unresolved_subtext：每个角色最多 3 条。
+                    do_not_repeat：最多 8 条，每条不超过 80 字。
+
+                    # 字段填写标准
+
+                    this_turn_episodes：根据当前批次起始集和实际正文范围填写，例如“6-10”。不得根据剧情自行跳集。
+                    abstract_of_this_turn：只写这批真正推进了什么局势、关系、关键事件和结果。
+                    final_hook_of_this_turn：必须写本批最后一集结尾留下的具体钩子，必须是事件、动作、发现、危机、揭露、决定或反转。
+                    current_story_state：写本批结束时已经成立的状态。
+                    relationship_state：写关键人物关系当前状态，必须给出正文里的证据和下一批注意点。
+                    unresolved_threads：写尚未解决、下一批必须继续推进的问题，必须具体。
+                    must_carry_into_next_turn：写下一批开头必须承接的具体内容，优先写 final_hook 直接引发的动作、危机或选择。
+                    next_turn_opening_guidance：一句话说明下一批第一场应该先接什么。
+
+                    dialogue_voice_summary：概括本批真正定下的人物声音、关系语气、对白冲突方式。不要复述剧情。
+                    character_voice_continuity：只写本批实际出场或下一批强相关的关键角色。voice_traits_activated 必须写成可执行规则。
+                    错误：“语气强硬。”
+                    正确：“越急越短句，先反问再下结论，不解释第二遍。”
+                    正确：“被质问时不正面回答，先挑对方用词漏洞。”
+                    正确：“关心别人时不说关心，只用命令句安排对方离开危险。”
+
+                    appearance_continuity_summary：服务下一批 speaker 命名和动作称呼。
+                    已启用 alias 必须满足：该 alias 在当前批次正文中实际出现；对应角色实际参与叙事；该 alias 被用于动作描写、说话人标签或场景称呼。
+                    只存在于服装映射中但正文没有使用，不算已启用。
+                    不可回退切换必须满足：正文里已经写出身份、造型或状态切换；该切换影响下一批剧情识别；下一批如果回退会造成连续性错误。
+                    普通场景换装、临时称呼变化，不要写成不可回退。
+
+                    do_not_repeat：写下一批不要重复的内容，例如已经用过的误会、同类型逼问、同样的争吵模式、同样的结尾钩子、同样的道具揭露方式。不要写空泛“不要重复剧情”。
+
+                    # 禁止事项
+
+                    禁止复述全文。
+                    禁止写成剧情大纲。
+                    禁止空泛写“主线推进”“危机升级”“关系变化”。
+                    禁止把没有发生的事情写进记忆。
+                    禁止把没有启用的 alias 写进 aliases_activated。
+                    禁止把“关系紧张”“声音鲜明”“冲突升级”当成声音记忆。
+                    禁止让 next_turn_opening_guidance 变成“继续推进剧情”。
+
+                    #  输出格式,用纯文本格式输出以下json，不要用```json开头
+
+                    {
+                     "this_turn_episodes": "例如 1-5 / 6-10 / 11-15",
+                     "abstract_of_this_turn": "用一段话概括这五集真正推进了什么。",
+                     "final_hook_of_this_turn": "本批最后一集结尾留下的具体钩子。",
+                     "current_story_state": ["当前批次结束后已经成立的状态"],
+                     "relationship_state": [
+                      {
+                       "relationship": "角色A-角色B",
+                       "current_state": "当前关系状态",
+                       "evidence_in_text": "正文中的证据",
+                       "next_turn_warning": "下一批不能写错的关系点"
+                      }
+                     ],
+                     "unresolved_threads": ["尚未解决、下一批必须继续推进的问题"],
+                     "must_carry_into_next_turn": ["下一批开头必须承接的信息"],
+                     "next_turn_opening_guidance": "下一批第一场应该先接什么。",
+                     "dialogue_voice_summary": "本批对白真正定下的人物声音和关系语气。",
+                     "character_voice_continuity": [
+                      {
+                       "character_name": "角色名",
+                       "last_used_alias": "本批最后一次实际使用的 alias",
+                       "voice_traits_activated": ["已经形成的可执行说话规则"],
+                       "relationship_tone_after_this_turn": "本批结束后的关系语气",
+                       "unresolved_subtext": ["下一批不能忘的潜台词"],
+                       "next_turn_voice_warning": "下一批最容易写错的声音规则"
+                      }
+                     ],
+                     "appearance_continuity_summary": {
+                      "global_summary": "本批结束后 alias 和造型命名连续性的总原则。",
+                      "character_alias_continuity": [
+                       {
+                        "character_name": "角色名",
+                        "last_used_alias": "本批最后一次实际使用的 alias",
+                        "aliases_activated": ["正文中实际使用过的 alias"],
+                        "aliases_not_yet_appeared": ["映射中有但正文未真正出现的 alias"],
+                        "switches_already_happened_and_cannot_revert_next_turn": ["已经发生且下一批必须延续的切换"],
+                        "next_turn_naming_warning": "下一批最容易写错的命名点"
+                       }
+                      ],
+                      "batch_level_naming_warnings": ["批次级命名提醒"]
+                     },
+                     "do_not_repeat": ["下一批不要重复的冲突/误会/对白/钩子套路"]
+                    }
+            - name: stableSystemPrompt
+              input:
+                type: string
+                value: ""
+            - name: canContinue
+              input:
+                type: boolean
+                value: false
+            - name: loopPromptVersion
+              input:
+                type: string
+                value: ""
+            - name: loopPromptName
+              input:
+                type: string
+                value: ""
+            - name: loopPromptId
+              input:
+                type: string
+                value: ""
+        node_inputs:
+            - name: script
+              input:
+                value:
+                    path: script
+                    ref_node: "100001"
+        node_outputs:
+            errorBody:
+                type: object
+                properties:
+                    errorCode:
+                        type: string
+                        value: null
+                    errorMessage:
+                        type: string
+                        value: null
+                value: null
+            isSuccess:
+                type: boolean
+                value: null
+            memory:
+                type: string
+                value: null
+        settingOnError:
+            dataOnErr: |-
+                {
+                    "memory": "failed because of internet"
+                }
+            ext:
+                backupLLmParam: '{"apiMode":0,"temperature":1,"topP":0.7,"frequencyPenalty":0,"maxTokens":32768,"spCurrentTime":false,"spAntiLeak":false,"thinkingType":"disabled","responseFormat":2,"modelName":"豆包·1.6·思考深度调节","modelType":1761535088,"generationDiversity":"default_val","parameters":{"max_completion_tokens":0,"reasoning_effort":"medium"}}'
+            processType: 2
+            retryTimes: 3
+            switch: true
+            timeoutMs: 300000
+edges:
+    - source_node: "100001"
+      target_node: "153484"
+    - source_node: "153484"
+      target_node: "900001"

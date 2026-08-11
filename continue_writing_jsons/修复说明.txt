@@ -1,4 +1,0 @@
-本修正版已批量修复所有工作流 JSON 的 chatConfig._id。
-修复原因：FastGPT 导入时 chatConfig._id 需要 MongoDB ObjectId 格式，即 24 位十六进制字符串。
-原版本使用了 continuation_01_续写输入规范化 这类可读字符串，会触发 Cast to ObjectId failed。
-本版本保留所有节点、变量、提示词和边结构，仅替换 chatConfig._id。

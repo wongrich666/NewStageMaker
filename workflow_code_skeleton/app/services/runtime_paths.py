@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,7 +28,15 @@ def _now_iso() -> str:
 
 
 def _normalize_base_root(base_root: Path | None = None) -> Path:
-    return Path(base_root).resolve() if base_root else _default_repo_root()
+    if base_root:
+        return Path(base_root).resolve()
+    env_root = os.environ.get("RUNTIME_DATA_DIR")
+    if env_root:
+        root = Path(env_root).resolve()
+        if root.name == "runtime_data":
+            return root.parent
+        return root
+    return _default_repo_root()
 
 
 def _coerce_path(path: str | Path, *, base_root: Path | None = None) -> Path:

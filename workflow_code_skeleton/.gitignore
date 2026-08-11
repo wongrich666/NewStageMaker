@@ -11,6 +11,7 @@ __pycache__/
 .coverage
 .coverage.*
 htmlcov/
+cache/
 
 # OS / editor noise
 .DS_Store
@@ -29,10 +30,10 @@ output/
 logs/
 tmp/
 temp/
-cache/
 generated/
 intermediate/
 .tmp_test_workspaces/
+_merge_audit/
 
 # Runtime-generated data and archives
 runtime_data/
@@ -48,3 +49,21 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+
+raw_fastgpt_debug_export/
+raw_fastgpt_debug_export.zip
+
+stage*_cache_dump.json
+stage*_output_only.json
+stage*_worldview_plan_only.json
+stage*_character_plan_only.json
+
+inspect_*.py
+inspect_*.txt
+patch_*.py
+
+*_verify.png
+*.bak
+*.bak_*
+*.bak-*

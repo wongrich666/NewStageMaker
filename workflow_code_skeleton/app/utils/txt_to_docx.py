@@ -180,26 +180,15 @@ def _section_is_code_fence(text: str) -> bool:
 
 
 def render_plain_section(doc: Document, title: str, text: Any):
-    content = (
-        str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-        if isinstance(text, str)
-        else normalize_text(text)
-    )
+    content = normalize_text(text)
     if not content:
         return
     add_heading(doc, title, level=1)
-    # 前置章节改为逐行写入段落，保证导出时保留原始换行，不把人物/服饰说明挤成一大段。
-    lines = str(content).replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    previous_blank = True
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not line:
-            if not previous_blank:
-                doc.add_paragraph()
-            previous_blank = True
-            continue
-        add_para(doc, line)
-        previous_blank = False
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", content) if part.strip()]
+    if not paragraphs:
+        paragraphs = [line.strip() for line in str(content).splitlines() if line.strip()]
+    for paragraph in paragraphs:
+        add_para(doc, paragraph)
     add_divider(doc)
 
 
@@ -582,154 +571,117 @@ def render_script(doc: Document, script_text: Any):
 
 # ─────────────────────── 主转换函数 ───────────────────────────
 
+# TXT_TO_DOCX_PLAIN_EXPORT_ALIGNED_V2
+# TXT_TO_DOCX_FIXED_ONLY_HEADINGS_V3
 def convert(input_path: str, output_path: str):
     """
-    主方法：将含 JSON 块的 txt 剧本文件转换为 Word 文档。
+    Plain TXT -> DOCX converter for framework-to-script export.
 
-    Args:
-        input_path: 输入 txt 文件路径
-        output_path: 输出 docx 文件路径
+    Heading policy:
+    - The first non-empty line is the document title.
+    - Only the four fixed export sections become headings:
+      1) story synopsis
+      2) character biographies
+      3) core scenes
+      4) script body
+    - Episode titles, scene numbers, dialogue, action lines and numbered lists stay as body text.
     """
-    # 1. 解析 txt
-    parsed = parse_txt(input_path)
+    raw_text = Path(input_path).read_text(encoding="utf-8", errors="replace")
+    text = str(raw_text or "").replace("\r\n", "\n").replace("\r", "\n")
 
-    # 2. 创建 Word 文档
     doc = Document()
 
-    # 页面设置（A4）
     section = doc.sections[0]
     section.page_height = Cm(29.7)
     section.page_width = Cm(21.0)
-    section.left_margin = Cm(2.5)
-    section.right_margin = Cm(2.5)
-    section.top_margin = Cm(2.5)
-    section.bottom_margin = Cm(2.5)
+    section.left_margin = Cm(2.4)
+    section.right_margin = Cm(2.4)
+    section.top_margin = Cm(2.2)
+    section.bottom_margin = Cm(2.2)
 
-    # 默认字体
-    doc.styles['Normal'].font.name = '微软雅黑'
+    font_name = "Microsoft YaHei"
 
-    # 2. 设置中文字体名称 (关键步骤)
-    doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+    def apply_font(run, size=11, bold=False):
+        run.font.name = font_name
+        run.font.size = Pt(size)
+        run.bold = bool(bold)
+        try:
+            run._element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
+        except Exception:
+            pass
 
+    try:
+        normal = doc.styles["Normal"]
+        normal.font.name = font_name
+        normal.font.size = Pt(11)
+        normal._element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
+    except Exception:
+        pass
 
-    doc.styles['Normal'].font.size = Pt(11)
+    fixed_headings = {
+        "\u4e00\u3001\u6545\u4e8b\u6897\u6982",
+        "\u4e8c\u3001\u4eba\u7269\u5c0f\u4f20",
+        "\u4e09\u3001\u6838\u5fc3\u573a\u666f",
+        "\u56db\u3001\u5267\u672c\u6b63\u6587",
+    }
 
-    # ── 封面标题 ──
-    title_para = doc.add_paragraph()
-    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_para.paragraph_format.space_before = Pt(40)
-    title_para.paragraph_format.space_after = Pt(20)
-    title_run = title_para.add_run(parsed["title"])
-    title_run.bold = True
-    title_run.font.size = Pt(20)
-    set_run_color(title_run, "1F4E79")
+    def normalize_heading(value):
+        return str(value or "").strip().lstrip("#> -").strip()
 
-    sections = parsed.get("sections") if isinstance(parsed.get("sections"), dict) else {}
+    def is_fixed_export_heading(value):
+        return normalize_heading(value) in fixed_headings
 
-    # ── 新版纯文本章节优先 ──
-    rendered_character_section = False
-    rendered_scene_section = False
-    for heading in ("故事梗概", "世界观设定", "人物小传", "人物服饰说明", "核心场景", "分集计划"):
-        section_text = sections.get(heading)
-        if not section_text:
+    def add_title(value):
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.space_before = Pt(24)
+        p.paragraph_format.space_after = Pt(16)
+        run = p.add_run(str(value or "").strip())
+        apply_font(run, size=18, bold=True)
+
+    def add_heading_plain(value):
+        p = doc.add_heading(normalize_heading(value), level=1)
+        p.paragraph_format.space_before = Pt(10)
+        p.paragraph_format.space_after = Pt(6)
+        for run in p.runs:
+            apply_font(run, size=14, bold=True)
+
+    def add_paragraph_plain(value):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(1)
+        p.paragraph_format.space_after = Pt(4)
+        run = p.add_run(str(value or ""))
+        apply_font(run, size=11)
+
+    lines = text.split("\n")
+    first_content_index = None
+    for idx, line in enumerate(lines):
+        if line.strip():
+            first_content_index = idx
+            break
+
+    if first_content_index is None:
+        add_paragraph_plain("")
+        doc.save(output_path)
+        return
+
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+
+        if idx == first_content_index:
+            add_title(stripped)
             continue
-        if heading == "人物小传" and _section_is_code_fence(section_text):
-            continue
-        if heading == "核心场景" and _section_is_code_fence(section_text):
-            continue
-        render_plain_section(doc, heading, section_text)
-        if heading == "人物小传":
-            rendered_character_section = True
-        if heading == "核心场景":
-            rendered_scene_section = True
 
-    # ── 兼容旧版故事梗概 ──
-    if not sections.get("故事梗概") and parsed["synopsis"]:
-        render_plain_section(doc, "故事梗概", parsed["synopsis"])
-
-    # ── JSON 块渲染 ──
-    for block in parsed["json_blocks"]:
-        label = block["label"]
-        data = block["data"]
-
-        if isinstance(data, dict) and "_parse_error" in data:
-            add_heading(doc, label or "数据块", level=1)
-            add_para(doc, f"⚠️ JSON 解析失败：{data['_parse_error']}", color="CC0000")
-            continue
-
-        # 人物小传
-        if isinstance(data, dict) and "character_setting" in data and not rendered_character_section:
-            add_heading(doc, "人物小传", level=1)
-            cs = data["character_setting"]
-            render_field(doc, "角色设计原则", safe_get(cs, "character_design_principle") if isinstance(cs, dict) else None)
-            render_field(doc, "核心关系逻辑", safe_get(cs, "core_relation_logic") if isinstance(cs, dict) else None)
+        if not stripped:
             doc.add_paragraph()
-            characters = safe_get(cs, "characters", []) if isinstance(cs, dict) else cs
-            if isinstance(characters, list):
-                for char in characters:
-                    try:
-                        render_character(doc, char)
-                    except Exception as exc:
-                        logger.warning("render_character failed, fallback to plain text: %s", exc)
-                        fallback_character = normalize_text(char)
-                        if fallback_character:
-                            render_character(doc, fallback_character)
-                    add_divider(doc)
-            else:
-                try:
-                    render_character(doc, characters)
-                except Exception as exc:
-                    logger.warning("render_character fallback block failed: %s", exc)
-                    fallback_characters = normalize_text(characters)
-                    if fallback_characters:
-                        render_field(doc, "人物信息", fallback_characters)
+            continue
 
-        # 场景设定
-        elif isinstance(data, dict) and "scene_setting" in data and not rendered_scene_section:
-            add_heading(doc, "核心场景", level=1)
-            ss = data["scene_setting"]
-            render_field(doc, "场景设计原则", safe_get(ss, "scene_design_principle") if isinstance(ss, dict) else None)
-            doc.add_paragraph()
-            scenes = safe_get(ss, "scenes", []) if isinstance(ss, dict) else ss
-            if isinstance(scenes, list):
-                for scene in scenes:
-                    try:
-                        render_scene(doc, scene)
-                    except Exception as exc:
-                        logger.warning("render_scene failed, fallback to plain text: %s", exc)
-                        fallback_scene = normalize_text(scene)
-                        if fallback_scene:
-                            render_scene(doc, fallback_scene)
-                    add_divider(doc)
-            else:
-                try:
-                    render_scene(doc, scenes)
-                except Exception as exc:
-                    logger.warning("render_scene fallback block failed: %s", exc)
-                    fallback_scenes = normalize_text(scenes)
-                    if fallback_scenes:
-                        render_field(doc, "场景说明", fallback_scenes)
-
-        # 通用 JSON（未知结构）
+        if is_fixed_export_heading(stripped):
+            add_heading_plain(stripped)
         else:
-            generic_text = normalize_text(data)
-            if not is_meaningful_text(generic_text):
-                generic_text = "该数据块未能整理为可直接阅读的章节内容。"
-            add_heading(doc, label or "附加数据", level=1)
-            add_para(doc, generic_text, size=9)
+            add_paragraph_plain(line.rstrip())
 
-    # ── 剧本正文 ──
-    if parsed["script"]:
-        doc.add_page_break()
-        render_script(doc, parsed["script"])
-
-    # 3. 保存
     doc.save(output_path)
-    print(f"已生成：{output_path}")
-    return output_path
-
-
-# ─────────────────────── 命令行入口 ───────────────────────────
 
 if __name__ == "__main__":
     convert(r'C:\Users\Administrator\Desktop\txt_script\txt\西幻：葬爱武神.txt',

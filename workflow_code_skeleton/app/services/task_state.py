@@ -153,7 +153,7 @@ class WorkflowRuntime:
         self.sync_from_state(state)
         self.checkpoint()
 
-    def fastgpt_stage_started(
+    def workflow_stage_started(
         self,
         stage_label: str,
         *,
@@ -166,10 +166,10 @@ class WorkflowRuntime:
             self.record,
             title=f"{stage_label}{batch_text}",
             message=f"第 {attempt} 次尝试",
-            node_id=f"fastgpt:{stage_label}",
+            node_id=f"workflow:{stage_label}",
         )
 
-    def fastgpt_stage_finished(
+    def workflow_stage_finished(
         self,
         stage_label: str,
         *,
@@ -180,8 +180,8 @@ class WorkflowRuntime:
         self.manager._append_log(
             self.record,
             title=f"{stage_label}{batch_text} 已完成",
-            message=_summarize_fastgpt_output(output),
-            node_id=f"fastgpt:{stage_label}",
+            message=_summarize_workflow_output(output),
+            node_id=f"workflow:{stage_label}",
         )
 
     def sync_from_state(self, state: WorkflowState) -> None:
@@ -193,7 +193,7 @@ class WorkflowRuntime:
             final_output_text=state.final_output_text,
         )
         if not final_script_text:
-            final_script_text = clean_multiline_user_visible_text(
+            final_script_text = clean_user_visible_text(
                 state.final_output_text
                 or state.get_var(FINAL_SCRIPT, "")
                 or state.get_var(SCRIPT_FINAL_VAR, "")
@@ -214,16 +214,7 @@ class WorkflowRuntime:
                 _truncate_log_text(raw_character_natural_language, max_chars=240),
             )
         structured_scenes = state.get_var(SCENE_VAR, "")
-        def _preserve_stage_paragraphs(value: Any) -> str:
-            # 阶段自然语言说明要原样保留段落，避免后续前端展示时被压成一整段。
-            return clean_multiline_user_visible_text(
-                value,
-                preserve_blank_lines=True,
-            ).strip()
-
-        framework_natural_language = _preserve_stage_paragraphs(
-            state.get_var(FRAMEWORK_NATURAL_LANGUAGE, "")
-        ) or build_user_visible_section(
+        framework_natural_language = build_user_visible_section(
             "剧本框架",
             {
                 "故事梗概": state.get_var(STORY_OUTLINE_VAR, ""),
@@ -233,23 +224,17 @@ class WorkflowRuntime:
             },
             state.get_var(FRAMEWORK_NATURAL_LANGUAGE, ""),
         )
-        worldview_natural_language = _preserve_stage_paragraphs(
-            state.get_var(WORLDVIEW_NATURAL_LANGUAGE, "")
-        ) or build_user_visible_section(
+        worldview_natural_language = build_user_visible_section(
             "世界观设定",
             state.get_var(WORLDVIEW_VAR, ""),
             state.get_var(WORLDVIEW_NATURAL_LANGUAGE, ""),
         )
-        appearance_natural_language = _preserve_stage_paragraphs(
-            state.get_var(APPEARANCE_NATURAL_LANGUAGE_VAR, "")
-        ) or build_user_visible_section(
+        appearance_natural_language = build_user_visible_section(
             "人物服饰说明",
             state.get_var(APPEARANCE_MAPPING, ""),
             state.get_var(APPEARANCE_NATURAL_LANGUAGE_VAR, ""),
         )
-        scene_natural_language = _preserve_stage_paragraphs(
-            state.get_var(SCENE_NATURAL_LANGUAGE_VAR, "")
-        ) or build_user_visible_section(
+        scene_natural_language = build_user_visible_section(
             "核心场景",
             structured_scenes,
             state.get_var(SCENE_NATURAL_LANGUAGE_VAR, ""),
@@ -280,7 +265,7 @@ class WorkflowRuntime:
             "character_appearance_requirements": state.get_var(CHARACTER_APPEARANCE_REQUIREMENTS, ""),
             "character_alias_naming_rules": state.get_var(CHARACTER_ALIAS_NAMING_RULES, ""),
             "outfit_switch_rules": state.get_var(OUTFIT_SWITCH_RULES, ""),
-            "appearance_mapping": state.get_var(APPEARANCE_MAPPING, ""),
+            "appearanceMapping": state.get_var(APPEARANCE_MAPPING, ""),
             APPEARANCE_NATURAL_LANGUAGE_ARTIFACT: appearance_natural_language,
             "character_registry": state.get_var(CHARACTER_REGISTRY, ""),
             "character_alias_registry": state.get_var(CHARACTER_ALIAS_REGISTRY, ""),

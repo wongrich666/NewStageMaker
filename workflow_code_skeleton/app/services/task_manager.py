@@ -32,6 +32,7 @@ class TaskManager(
         self._projects: dict[int, TaskRecord] = {}
         self._index = self._load_index()
         self._repair_persisted_snapshots()
+        self.migrate_asset_storage_v2()
 
 
 task_manager = TaskManager()

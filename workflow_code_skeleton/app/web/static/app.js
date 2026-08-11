@@ -8,10 +8,14 @@
     draft: `scriptmaker.web.${userKey}.draft`,
     selectedProjectId: `scriptmaker.web.${userKey}.selectedProjectId`,
     modelId: `scriptmaker.web.${userKey}.modelId`,
-    sidebarCollapsed: `scriptmaker.web.${userKey}.sidebarCollapsed`
+    sidebarCollapsed: `scriptmaker.web.${userKey}.sidebarCollapsed`,
+    userKnowledge: `scriptmaker.web.${userKey}.userKnowledge`
   };
 
   const POLL_INTERVAL = 1500;
+  const ASSET_SYNC_STORAGE_KEY = "ideaToScripts.assetSync.v2";
+  const ASSET_SYNC_CHANNEL_NAME = "idea-to-scripts-assets-v2";
+  const ASSET_SYNC_SOURCE = `main-workspace-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const MAX_EXPECTATION_LINES = 5;
   const RUNNING_STATUSES = new Set(["pending", "running", "pausing"]);
   const RESUMABLE_STATUSES = new Set(["paused", "pausing", "failed", "terminated"]);
@@ -23,17 +27,26 @@
     workspaceShell: document.querySelector(".chat-workspace-shell"),
     workspaceSidebar: $("workspaceCard"),
     sidebarToggleBtn: $("sidebarToggleBtn"),
-    assistantToolsFolder: $("assistantToolsFolder"),
-    waibaoScriptBtn: $("waibaoScriptBtn"),
     toolList: $("toolList"),
     toolPanel: $("toolPanel"),
     toolPanelTitle: $("toolPanelTitle"),
     closeToolPanelBtn: $("closeToolPanelBtn"),
-    openCommunityPanelLink: $("openCommunityPanelLink"),
     communityPanel: $("community"),
     closeCommunityPanelBtn: $("closeCommunityPanelBtn"),
     modelSelect: $("modelSelect"),
     expectationInput: $("expectationInput"),
+    userKnowledgePanel: $("userKnowledgePanel"),
+    knowledgeTagList: $("knowledgeTagList"),
+    knowledgeTagStatus: $("knowledgeTagStatus"),
+    selectedKnowledgeTags: $("selectedKnowledgeTags"),
+    applyKnowledgeTagsBtn: $("applyKnowledgeTagsBtn"),
+    userPreferenceInput: $("userPreferenceInput"),
+    knowledgePreferencePreview: $("knowledgePreferencePreview"),
+    knowledgeTagNameInput: $("knowledgeTagNameInput"),
+    knowledgeTagCategoryInput: $("knowledgeTagCategoryInput"),
+    knowledgeTagDescriptionInput: $("knowledgeTagDescriptionInput"),
+    knowledgeTagPromptInput: $("knowledgeTagPromptInput"),
+    createKnowledgeTagBtn: $("createKnowledgeTagBtn"),
     characterCountInput: $("characterCountInput"),
     episodeCountInput: $("episodeCountInput"),
     formHint: $("formHint"),
@@ -56,6 +69,8 @@
     completedWorkspaceFolder: $("completedWorkspaceFolder"),
     activeProjectList: $("activeProjectList"),
     completedProjectList: $("completedProjectList"),
+    newScriptProjectList: $("newScriptProjectList"),
+    characterReskinProjectList: $("characterReskinProjectList"),
     activeProjectCount: $("activeProjectCount"),
     completedProjectCount: $("completedProjectCount"),
 
@@ -63,6 +78,7 @@
     closeProfileBtn: $("closeProfileBtn"),
     closeProfileBackdrop: $("closeProfileBackdrop"),
     profilePanel: $("profilePanel"),
+    newAssetBtn: $("newAssetBtn"),
     newScriptBtn: $("newScriptBtn"),
     viewAssetsBtn: $("viewAssetsBtn"),
     refreshAssetsBtn: $("refreshAssetsBtn"),
@@ -114,9 +130,14 @@
     taskId: null,
     status: "idle",
     pollTimer: null,
+    debugPollTimer: null,
+    lastConsoleLogIndex: 0,
+    lastDebugTaskId: "",
+    lastDebugError: "",
     availableModels: [],
     latestSnapshot: null,
     projects: [],
+    workspaceItems: [],
     projectStatusMap: {},
     projectsInitialized: false,
     assets: [],
@@ -125,16 +146,23 @@
     editingProjectStatus: null,
     editingAssetKind: "",
     editingAssetLocked: false,
+    assetEditMode: "view",
+    assetDirty: false,
     assetDeleteConfirmResolver: null,
     assetDeleteHideTimer: null,
     toolDefinitions: {},
-    activeTool: "character_reskin",
+    activeTool: "hot_review",
     toolDrafts: {},
     toolResults: {},
+    knowledgeTags: [],
+    selectedKnowledgeTagIds: [],
+    userKnowledgeTagPrompt: "",
+    userKnowledgeError: "",
     loadingActions: {},
     assetsStatus: "idle",
     assetsError: "",
     assetsPage: 1,
+    assetsLastRefreshedAt: "",
     communityStatus: "idle",
     communityError: "",
     communityPage: 1,
@@ -151,23 +179,6 @@
       help: "提交待审核剧本，让工具返回完整审核意见，并支持下载 TXT。",
       fields: [
         { name: "review_text", label: "待审核剧本", type: "textarea", placeholder: "粘贴待审核的剧本、大纲或片段。", required: true }
-      ],
-      configured: false,
-      source: "fallback"
-    },
-    reskin: {
-      key: "reskin",
-      label: "换皮",
-      help: "保留原剧本骨架，按目标风格做整套换皮。",
-      fields: [
-        { name: "title", label: "剧本标题", type: "input", placeholder: "新剧本标题。", required: true },
-        { name: "source_outline", label: "源剧本梗概", type: "textarea", placeholder: "源故事梗概。", required: true },
-        { name: "core_scenes", label: "源剧本核心场景", type: "textarea", placeholder: "可选，源剧本核心场景。", required: false },
-        { name: "source_characters", label: "源剧本人设", type: "textarea", placeholder: "源人物小传。", required: true },
-        { name: "source_script", label: "源剧本正文", type: "textarea", placeholder: "源剧本正文。", required: true },
-        { name: "target_style", label: "目标风格", type: "textarea", placeholder: "希望换成的题材、风格、爽点方向。", required: true },
-        { name: "total_episodes", label: "总集数", type: "number", placeholder: "例如 60。", required: true },
-        { name: "episode_word_count", label: "每集字数", type: "number", placeholder: "例如 500。", required: true }
       ],
       configured: false,
       source: "fallback"
@@ -194,7 +205,7 @@
       fields: [
         { name: "title", label: "剧本标题", type: "input", placeholder: "新剧本标题。", required: true },
         { name: "story_outline", label: "故事大纲", type: "textarea", placeholder: "故事大纲。", required: true },
-        { name: "characters", label: "人物小传", type: "textarea", placeholder: "需要换皮的人物小传。", required: true },
+        { name: "characters", label: "人物小传", type: "textarea", placeholder: "需要替换的人物小传。", required: true },
         { name: "core_scenes", label: "核心场景", type: "textarea", placeholder: "核心场景。", required: true },
         { name: "source_script", label: "原剧本正文", type: "textarea", placeholder: "原剧本正文。", required: true },
         { name: "total_episodes", label: "总集数", type: "number", placeholder: "总集数。", required: true },
@@ -322,6 +333,8 @@
 
   function statusLabel(status) {
     const mapping = {
+      draft: "生成中",
+      in_progress: "生成中",
       idle: "待开始",
       pending: "准备中",
       running: "生成中",
@@ -332,6 +345,38 @@
       terminated: "已终止"
     };
     return mapping[status] || status || "待开始";
+  }
+
+  function assetCompleted(item) {
+    if (!item || typeof item !== "object") return false;
+    if (Object.prototype.hasOwnProperty.call(item, "asset_completed")) {
+      return item.asset_completed === true || item.asset_completed === "true";
+    }
+    if (String(item.asset_status || "").trim() === "completed") return true;
+    return String(item.status || "").trim() === "completed";
+  }
+
+  function assetStatusLabel(item) {
+    if (item && (item.asset_locked || item.script_locked)) return "已锁定";
+    return String((item || {}).asset_status_label || "").trim() || (assetCompleted(item) ? "已完成" : "生成中");
+  }
+
+  function assetLocked(item) {
+    return Boolean(item && (item.asset_locked || item.script_locked));
+  }
+
+  function assetStatusClass(item) {
+    return assetCompleted(item) ? " completed" : " pending";
+  }
+
+  function setBrandMotionState(isRunning, statusText) {
+    const panel = document.querySelector("[data-brand-motion]");
+    if (!panel) return;
+    panel.classList.toggle("is-running", Boolean(isRunning));
+    const statusEl = panel.querySelector("[data-brand-motion-status]");
+    if (statusEl && statusText) {
+      statusEl.textContent = statusText;
+    }
   }
 
   function formatDuration(ms) {
@@ -417,8 +462,7 @@
   }
 
   function normalizeScriptFormatMode(value) {
-    const normalized = String(value || "").trim().toLowerCase();
-    return normalized === "waibao" ? "waibao" : "";
+    return "";
   }
 
   function selectedScriptFormatMode() {
@@ -428,7 +472,7 @@
   }
 
   function scriptFormatModeLabel(value) {
-    return normalizeScriptFormatMode(value) === "waibao" ? "外包专属格式" : "标准格式";
+    return "标准格式";
   }
 
   function syncScriptFormatModeUi(snapshot = null) {
@@ -479,9 +523,17 @@
       user_expectation: els.expectationInput.value.trim(),
       character_count: Number(els.characterCountInput.value || 0),
       total_episodes: Number(els.episodeCountInput.value || 0),
+      selected_preference_tag_ids: [...state.selectedKnowledgeTagIds],
+      user_preference_prompt: String(els.userPreferenceInput?.value || ""),
+      user_knowledge_tag_prompt: String(state.userKnowledgeTagPrompt || "")
     };
     draftStorage.setItem(STORAGE.draft, JSON.stringify(draft));
     draftStorage.setItem(STORAGE.modelId, els.modelSelect.value || "");
+    draftStorage.setItem(STORAGE.userKnowledge, JSON.stringify({
+      selected_preference_tag_ids: draft.selected_preference_tag_ids,
+      user_preference_prompt: draft.user_preference_prompt,
+      user_knowledge_tag_prompt: draft.user_knowledge_tag_prompt
+    }));
   }
 
   function restoreDraft() {
@@ -492,12 +544,32 @@
       els.expectationInput.value = draft.user_expectation || "";
       els.characterCountInput.value = draft.character_count || 5;
       els.episodeCountInput.value = draft.total_episodes || 10;
+      restoreKnowledgeDraft(draft);
       syncExpectationInputHeight();
     } catch (_) {}
   }
 
+  function restoreKnowledgeDraft(draft = null) {
+    let data = draft;
+    if (!data) {
+      try {
+        data = JSON.parse(draftStorage.getItem(STORAGE.userKnowledge) || "{}");
+      } catch (_) {
+        data = {};
+      }
+    }
+    state.selectedKnowledgeTagIds = Array.isArray(data?.selected_preference_tag_ids)
+      ? data.selected_preference_tag_ids.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    state.userKnowledgeTagPrompt = String(data?.user_knowledge_tag_prompt || "");
+    if (els.userPreferenceInput) {
+      els.userPreferenceInput.value = String(data?.user_preference_prompt || "");
+    }
+  }
+
   function clearDraft() {
     draftStorage.removeItem(STORAGE.draft);
+    draftStorage.removeItem(STORAGE.userKnowledge);
   }
 
   // 记住侧边栏折叠状态，让用户切页面回来后仍保持同一工作台布局。
@@ -505,6 +577,7 @@
     if (!els.workspaceSidebar) return;
     els.workspaceSidebar.classList.toggle("is-collapsed", Boolean(collapsed));
     els.workspaceShell?.classList.toggle("sidebar-collapsed", Boolean(collapsed));
+    els.sidebarToggleBtn?.setAttribute("aria-expanded", collapsed ? "false" : "true");
     draftStorage.setItem(STORAGE.sidebarCollapsed, collapsed ? "1" : "0");
   }
 
@@ -588,6 +661,14 @@
     els.expectationInput.value = "";
     els.characterCountInput.value = inputPayload.character_count || 5;
     els.episodeCountInput.value = inputPayload.total_episodes || 10;
+    state.selectedKnowledgeTagIds = Array.isArray(inputPayload.selected_preference_tag_ids)
+      ? inputPayload.selected_preference_tag_ids.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    state.userKnowledgeTagPrompt = String(inputPayload.user_knowledge_tag_prompt || "");
+    if (els.userPreferenceInput) {
+      els.userPreferenceInput.value = String(inputPayload.user_preference_prompt || "");
+    }
+    renderUserKnowledgePanel();
     syncExpectationInputHeight();
     saveDraft();
   }
@@ -602,7 +683,7 @@
     if (!value) return false;
     if (value.length > 120) return true;
     return [
-      "fastgpt",
+      "workflow",
       "traceback",
       "http ",
       "response.text",
@@ -642,6 +723,219 @@
     if (!els.toolOutputBox) return;
     els.toolOutputBox.textContent = friendlyErrorText(error, fallback);
   }
+
+  function runtimeDebugUrl(taskId) {
+  const base = `/api/tasks/${encodeURIComponent(taskId)}/debug`;
+  const token = currentAuthToken();
+  if (!token) {
+    return base;
+  }
+  return `${base}?auth_token=${encodeURIComponent(token)}`;
+}
+
+function ensureRuntimeDebugPanel() {
+  if (window.scriptMakerConfig?.enableRuntimeDebugPanel !== true) {
+    return null;
+  }
+  let panel = document.getElementById("runtime-version-panel") || document.getElementById("runtime-debug-panel");
+  if (panel) {
+    return panel;
+  }
+
+  panel = document.createElement("section");
+  panel.id = "runtime-version-panel";
+  panel.style.cssText = [
+    "position:fixed",
+    "right:16px",
+    "bottom:16px",
+    "z-index:9999",
+    "width:min(520px, calc(100vw - 32px))",
+    "max-height:70vh",
+    "overflow:auto",
+    "background:#111827",
+    "color:#e5e7eb",
+    "border:1px solid rgba(255,255,255,0.16)",
+    "border-radius:12px",
+    "box-shadow:0 18px 45px rgba(0,0,0,0.35)",
+    "padding:12px",
+    "font-size:12px",
+    "line-height:1.5",
+  ].join(";");
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+      <strong>运行状态 / 版本历史</strong>
+      <button type="button" data-role="close-version-panel" style="border:0;border-radius:8px;padding:4px 8px;cursor:pointer;">删除</button>
+    </div>
+    <div data-role="summary" style="margin-bottom:8px;color:#cbd5e1;"></div>
+    <details open style="margin-bottom:8px;">
+      <summary style="cursor:pointer;color:#f9fafb;">当前版本</summary>
+      <div data-role="version" style="display:flex;flex-direction:column;gap:6px;background:#020617;border-radius:8px;padding:8px;margin:8px 0 0;max-height:260px;overflow:auto;"></div>
+    </details>
+    <details open>
+      <summary style="cursor:pointer;color:#f9fafb;">版本历史</summary>
+      <div data-role="versions" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
+    </details>
+  `;
+
+  const closeButton = panel.querySelector("[data-role='close-version-panel']");
+  closeButton?.addEventListener("click", () => {
+    panel.style.display = "none";
+  });
+
+  document.body.appendChild(panel);
+  return panel;
+}
+
+function renderRuntimeDebug(debug) {
+  if (window.scriptMakerConfig?.enableRuntimeDebugPanel !== true) {
+    return;
+  }
+  if (!debug || typeof debug !== "object") {
+    return;
+  }
+  const debugTaskId = String(debug.task_id || "").trim();
+  if (debugTaskId && debugTaskId !== state.lastDebugTaskId) {
+    state.lastDebugTaskId = debugTaskId;
+    state.lastConsoleLogIndex = 0;
+    state.lastDebugError = "";
+  }
+
+  const panel = ensureRuntimeDebugPanel();
+  if (!panel) return;
+  panel.style.display = "";
+
+  const summary = panel.querySelector("[data-role='summary']");
+  const versionBox = panel.querySelector("[data-role='version']");
+  const versionsBox = panel.querySelector("[data-role='versions']");
+
+  const logs = Array.isArray(debug.logs) ? debug.logs : [];
+  const versionRows = [
+    ["项目编号", debug.project_id],
+    ["任务状态", debug.status],
+    ["当前阶段", debug.current_stage_label || debug.current_stage],
+    ["当前批次", debug.current_batch],
+    ["完成进度", debug.progress_percent ? `${debug.progress_percent}%` : ""],
+    ["已生成集数", debug.generated_episodes],
+    ["等待确认", debug.awaiting_user_confirmation ? "是" : "否"],
+  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
+
+  if (summary) {
+    summary.textContent = [
+      `status=${debug.status || "-"}`,
+      `stage=${debug.current_stage || "-"}`,
+      `node=${debug.current_node_name || debug.current_node_id || "-"}`,
+      `运行记录=${logs.length}`,
+      `checkpoint=${debug.resume_checkpoint_exists ? "yes" : "no"}`,
+    ].join(" | ");
+  }
+
+  if (versionBox) {
+    versionBox.innerHTML = versionRows.map(([label, value]) => `
+      <div style="display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:4px;">
+        <span style="color:#94a3b8;">${escapeHtml(label)}</span>
+        <strong style="color:#e5e7eb;text-align:right;">${escapeHtml(String(value))}</strong>
+      </div>
+    `).join("");
+  }
+
+  if (versionsBox) {
+    if (!logs.length) {
+      versionsBox.innerHTML = `<div style="color:#94a3b8;">暂无版本历史。</div>`;
+    } else {
+      versionsBox.innerHTML = logs
+        .slice(-80)
+        .map((item) => {
+          const level = escapeHtml(String(item.level || "info"));
+          const time = escapeHtml(String(item.time || ""));
+          const title = escapeHtml(String(item.title || ""));
+          const message = escapeHtml(String(item.message || ""));
+          const nodeId = item.node_id ? ` <span style="color:#94a3b8;">${escapeHtml(String(item.node_id))}</span>` : "";
+          return `
+            <div style="border:1px solid rgba(255,255,255,0.10);border-radius:8px;padding:6px;background:rgba(255,255,255,0.04);">
+              <div style="color:#93c5fd;">[${level}] ${time}${nodeId}</div>
+              <div style="font-weight:600;color:#f9fafb;">${title}</div>
+              <div style="color:#d1d5db;">${message}</div>
+            </div>
+          `;
+        })
+        .join("");
+    }
+  }
+
+  for (const item of logs) {
+    const index = Number(item.index || 0);
+    if (!index || index <= state.lastConsoleLogIndex) {
+      continue;
+    }
+
+    const line = [
+      "[runtime-log]",
+      item.time || "",
+      item.level || "info",
+      item.title || "",
+      item.message || "",
+    ].join(" ");
+
+    if (String(item.level || "").toLowerCase() === "error") {
+      console.error(line, item);
+    } else {
+      console.log(line, item);
+    }
+
+    state.lastConsoleLogIndex = Math.max(state.lastConsoleLogIndex, index);
+  }
+
+  if (debug.error && debug.error !== state.lastDebugError) {
+    console.error("[runtime-error]", debug.error);
+    state.lastDebugError = debug.error;
+  }
+}
+
+async function fetchRuntimeDebug() {
+  const taskId = String(state.taskId || state.latestSnapshot?.task_id || "").trim();
+  if (!taskId) {
+    return;
+  }
+
+  state.taskId = taskId;
+
+  const response = await fetch(runtimeDebugUrl(taskId), {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload || payload.ok === false) {
+    const message = payload?.error || payload?.message || `debug 请求失败：${response.status}`;
+    throw new Error(message);
+  }
+
+  renderRuntimeDebug(payload.debug || {});
+}
+
+function startRuntimeDebugPolling() {
+  if (window.scriptMakerConfig?.enableRuntimeDebugPanel !== true) {
+    return;
+  }
+  if (state.debugPollTimer) {
+    return;
+  }
+
+  state.debugPollTimer = window.setInterval(() => {
+    fetchRuntimeDebug().catch((error) => {
+      if (error?.message && error.message !== state.lastDebugError) {
+        console.error("[runtime-debug-fetch-error]", error);
+        state.lastDebugError = error.message;
+      }
+    });
+  }, 2000);
+
+  fetchRuntimeDebug().catch(() => {});
+}
+
+startRuntimeDebugPolling();
 
   function compactMessageText(value) {
     return String(value || "").trim();
@@ -684,6 +978,13 @@
         natural: ""
       };
     }
+    if (isFrameworkToScriptSnapshot(snapshot) && normalizeStageKey(snapshot.current_stage) === "final") {
+      return {
+        title: "基于框架生成的剧本正文",
+        output: snapshot.display_stage_output || finalOutputFrom(snapshot) || "",
+        natural: snapshot.display_stage_output_natural || ""
+      };
+    }
     return {
       title: snapshot.display_stage_title || "当前阶段输出",
       output: snapshot.display_stage_output || "",
@@ -722,6 +1023,19 @@
       appearance_alias_review: "正在审核服装版本映射",
       appearance_alias_rewrite: "正在修订服装版本映射",
       appearance_alias_unstructured: "正在整理服装版本映射自然语言说明",
+      framework_scene_dictionary: "正在生成框架转剧本：核心场景提炼",
+      framework_appearanceMapping: "正在生成框架转剧本：人设服装 alias 映射",
+      framework_enriched_episode_plan: "正在生成框架转剧本：丰富分集计划",
+      framework_causal_conflict: "正在生成框架转剧本因果冲突推进计划",
+      framework_causal_conflict_write: "正在编写框架转剧本：因果冲突推进计划",
+      framework_causal_conflict_review: "正在审核框架转剧本：因果冲突推进计划",
+      framework_causal_conflict_rewrite: "正在修订框架转剧本：因果冲突推进计划",
+      framework_causal_conflict_memory: "正在写入框架转剧本：因果冲突记忆",
+      framework_script: "正在生成框架转剧本正文对白融合稿",
+      framework_script_write: "正在编写框架转剧本：正文对白融合",
+      framework_script_review: "正在审核框架转剧本：正文对白融合",
+      framework_script_rewrite: "正在修订框架转剧本：正文对白融合",
+      framework_script_memory: "正在写入框架转剧本：正文记忆",
       hooks: "正在生成开头冲突钩子",
       hooks_writing: "正在生成开头冲突钩子",
       hook: "正在生成开头冲突钩子",
@@ -789,6 +1103,68 @@
     return "创作中";
   }
 
+  function isFrameworkToScriptSnapshot(snapshot) {
+    const inputPayload = snapshot?.input_payload || {};
+    return Boolean(
+      inputPayload.framework_to_script === true
+      || String(inputPayload.generation_chain || "").trim() === "framework_to_script"
+      || String(inputPayload.workflow_mode || "").trim() === "framework_to_script"
+      || inputPayload.framework_planner_source === true
+    );
+  }
+
+  function frameworkStageLabel(stageKey) {
+    const mapping = {
+      framework_scene_dictionary: "框架转剧本：核心场景提炼",
+      framework_appearancemapping: "框架转剧本：人设服装 alias 映射",
+      framework_appearance_mapping: "框架转剧本：人设服装 alias 映射",
+      framework_enriched_episode_plan: "框架转剧本：丰富分集计划",
+      framework_causal_conflict: "框架转剧本：因果冲突推进计划",
+      framework_causal_conflict_write: "框架转剧本：因果冲突推进计划",
+      framework_causal_conflict_review: "框架转剧本：因果冲突推进计划",
+      framework_causal_conflict_rewrite: "框架转剧本：因果冲突推进计划",
+      framework_causal_conflict_memory: "框架转剧本：因果冲突推进计划",
+      framework_script: "框架转剧本：正文对白融合",
+      framework_script_write: "框架转剧本：正文对白融合",
+      framework_script_review: "框架转剧本：正文对白融合",
+      framework_script_rewrite: "框架转剧本：正文对白融合",
+      framework_script_memory: "框架转剧本：正文对白融合",
+      final: "基于框架生成的剧本正文",
+      finalize: "基于框架生成的剧本正文",
+      finished: "基于框架生成的剧本正文",
+    };
+    return mapping[String(stageKey || "").trim().toLowerCase()] || "";
+  }
+
+  function displayStageLabel(snapshot) {
+    const backendLabel = String(snapshot?.current_stage_label || "").trim();
+    if (backendLabel) return backendLabel;
+    if (isFrameworkToScriptSnapshot(snapshot)) {
+      return frameworkStageLabel(snapshot.current_stage) || "正在处理";
+    }
+    return snapshot?.display_stage_title || "正在处理";
+  }
+
+  function fallbackProgressPercent(snapshot) {
+    const stageKey = String(snapshot?.current_stage || "").trim().toLowerCase();
+    if (!isFrameworkToScriptSnapshot(snapshot)) return 0;
+    if (stageKey === "framework_scene_dictionary") return 8;
+    if (stageKey === "framework_appearancemapping" || stageKey === "framework_appearance_mapping") return 14;
+    if (stageKey === "framework_enriched_episode_plan") return 22;
+    if (stageKey.startsWith("framework_causal_conflict")) return 45;
+    if (stageKey.startsWith("framework_script")) return 78;
+    if (["final", "finalize", "finished"].includes(stageKey) || snapshot?.status === "completed") return 100;
+    return 0;
+  }
+
+  function displayProgressPercent(snapshot) {
+    const backendProgress = Number(snapshot?.progress_percent || 0);
+    if (backendProgress > 0 || snapshot?.status === "completed") {
+      return Math.max(0, Math.min(100, backendProgress || 100));
+    }
+    return fallbackProgressPercent(snapshot);
+  }
+
   // 把后端阶段名统一折叠成前端可识别的正式阶段键。
   function normalizeStageKey(stageKey) {
     const mapping = {
@@ -810,6 +1186,20 @@
       appearance_alias_review: "internal",
       appearance_alias_rewrite: "internal",
       appearance_alias_unstructured: "internal",
+      framework_scene_dictionary: "framework_to_script",
+      framework_appearancemapping: "framework_to_script",
+      framework_appearance_mapping: "framework_to_script",
+      framework_enriched_episode_plan: "framework_to_script",
+      framework_causal_conflict: "framework_to_script",
+      framework_causal_conflict_write: "framework_to_script",
+      framework_causal_conflict_review: "framework_to_script",
+      framework_causal_conflict_rewrite: "framework_to_script",
+      framework_causal_conflict_memory: "framework_to_script",
+      framework_script: "framework_to_script",
+      framework_script_write: "framework_to_script",
+      framework_script_review: "framework_to_script",
+      framework_script_rewrite: "framework_to_script",
+      framework_script_memory: "framework_to_script",
       hook: "internal",
       hooks: "internal",
       hooks_writing: "internal",
@@ -843,48 +1233,22 @@
     return mapping[String(stageKey || "").trim().toLowerCase()] || "";
   }
 
-  function extractWrappedDisplayText(value, depth = 0) {
-    if (depth > 6 || value === null || value === undefined || value === "") return "";
-    if (typeof value === "string") return value.trim();
-    if (Array.isArray(value)) {
-      const parts = value.map((item) => extractWrappedDisplayText(item, depth + 1)).filter(Boolean);
-      return parts.length ? parts.join("\n\n").trim() : "";
-    }
-    if (typeof value === "object") {
-      const preferredKeys = [
-        "final_output_text",
-        "final_script",
-        "partial_script",
-        "content",
-        "text",
-        "body",
-        "message",
-        "output",
-        "answer",
-        "summary",
-        "description",
-        "value",
-      ];
-      // 老快照里的正文有时会包在 content/text 等外壳里，先拆壳再显示，避免正文换行被一起丢掉。
-      for (const key of preferredKeys) {
-        if (!(key in value)) continue;
-        const text = extractWrappedDisplayText(value[key], depth + 1);
-        if (text) return text;
-      }
-      const values = Object.values(value);
-      if (values.length === 1) {
-        return extractWrappedDisplayText(values[0], depth + 1);
-      }
-    }
-    return "";
-  }
-
   function formatDisplayValue(value) {
     if (value === null || value === undefined || value === "") return "";
-    if (typeof value === "string") return value.trim();
+    if (typeof value === "string") {
+      const text = value.trim();
+      if (window.fieldLabelsCn && typeof window.fieldLabelsCn.readableText === "function" && /^[\[{]/.test(text)) {
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed && typeof parsed === "object") return window.fieldLabelsCn.readableText(parsed);
+        } catch (_) {}
+      }
+      return text;
+    }
     if (Array.isArray(value) || typeof value === "object") {
-      const extracted = extractWrappedDisplayText(value);
-      if (extracted) return extracted;
+      if (window.fieldLabelsCn && typeof window.fieldLabelsCn.readableText === "function") {
+        return window.fieldLabelsCn.readableText(value);
+      }
       try {
         return JSON.stringify(value, null, 2).trim();
       } catch (_) {
@@ -969,7 +1333,7 @@
     const artifacts = snapshot?.artifacts || {};
     const currentDisplayKey = normalizeStageKey(snapshot.display_stage_key);
     const currentNatural = String(snapshot.display_stage_output_natural || "").trim();
-    const messages = [
+    const messages = isFrameworkToScriptSnapshot(snapshot) ? [] : [
       {
         key: "framework",
         title: "剧本框架",
@@ -987,9 +1351,25 @@
       }
     ].filter((item) => isMeaningfulStageOutput(item.output));
 
+    if (isFrameworkToScriptSnapshot(snapshot)) {
+      const displayPayload = stageDisplayPayload(snapshot);
+      const displayOutput = formatDisplayValue(displayPayload.output);
+      const displayKey = String(snapshot.display_stage_key || snapshot.current_stage || "framework_to_script").trim();
+      const normalizedDisplayKey = normalizeStageKey(displayKey);
+      const isFinal = normalizeStageKey(snapshot.current_stage) === "final" || snapshot.status === "completed";
+      if (isMeaningfulStageOutput(displayOutput)) {
+        messages.push({
+          key: isFinal ? "framework_to_script_final" : (normalizedDisplayKey || "framework_to_script"),
+          title: isFinal ? "基于框架生成的剧本正文" : (displayPayload.title || displayStageLabel(snapshot)),
+          output: displayOutput,
+          natural: displayPayload.natural || "",
+        });
+      }
+    }
+
     return messages.map((item) => ({
       ...item,
-      natural: currentDisplayKey === item.key ? currentNatural : ""
+      natural: item.natural || (currentDisplayKey === item.key ? currentNatural : "")
     }));
   }
 
@@ -998,13 +1378,13 @@
     if (!snapshot) return null;
     const normalizedCurrentStage = normalizeStageKey(snapshot.current_stage);
     const isRunning = RUNNING_STATUSES.has(snapshot.status) || snapshot.status === "pausing";
-    if (!isRunning && normalizedCurrentStage !== "internal") return null;
+    if (!isRunning && !["internal", "framework_to_script"].includes(normalizedCurrentStage)) return null;
     const runtimeMessage = String(statusNoteFrom(snapshot) || "").trim();
     return {
-      stageLabel: snapshot.current_stage_label || snapshot.display_stage_title || "正在处理",
+      stageLabel: displayStageLabel(snapshot),
       stateLabel: creationStatusLabel(snapshot),
       content: runtimeMessage,
-      note: "",
+      note: isFrameworkToScriptSnapshot(snapshot) ? "来源：三幕十五节拍框架策划包" : "",
     };
   }
 
@@ -1013,7 +1393,9 @@
     return {
       expectation: String(inputPayload.user_expectation || "").trim(),
       characterCount: Number(inputPayload.character_count || 0),
-      totalEpisodes: Number(inputPayload.total_episodes || 0)
+      totalEpisodes: Number(inputPayload.total_episodes || 0),
+      frameworkToScript: isFrameworkToScriptSnapshot(snapshot),
+      sourceFrameworkProjectId: String(inputPayload.source_framework_project_id || "").trim()
     };
   }
 
@@ -1057,6 +1439,8 @@
     const toggleKey = promptToggleKey(snapshot);
     const collapsed = lineCount > MAX_EXPECTATION_LINES && !state.expandedUserPrompts[toggleKey];
     const chips = [
+      prompt.frameworkToScript ? "来源：三幕十五节拍框架策划包" : "",
+      prompt.sourceFrameworkProjectId ? `框架资产：${prompt.sourceFrameworkProjectId}` : "",
       prompt.characterCount > 0 ? `角色数量 ${prompt.characterCount}` : "",
       prompt.totalEpisodes > 0 ? `总集数 ${prompt.totalEpisodes}` : ""
     ].filter(Boolean);
@@ -1102,7 +1486,7 @@
             ${message.natural ? `
               <div class="chat-bubble-preview">
                 <span class="chat-bubble-preview-label">阶段说明</span>
-                <p class="chat-bubble-preview-text">${renderTextWithLineBreaks(message.natural)}</p>
+                <p class="chat-bubble-preview-text">${escapeHtml(message.natural)}</p>
               </div>
             ` : ""}
             <div class="chat-bubble-foot">
@@ -1139,7 +1523,7 @@
             ${thinkingState.note ? `
               <div class="chat-bubble-preview">
                 <span class="chat-bubble-preview-label">状态说明</span>
-                <p class="chat-bubble-preview-text">${renderTextWithLineBreaks(thinkingState.note)}</p>
+                <p class="chat-bubble-preview-text">${escapeHtml(thinkingState.note)}</p>
               </div>
             ` : ""}
             <div class="chat-bubble-foot">
@@ -1195,16 +1579,10 @@
     const previousScrollTop = els.chatTranscript.scrollTop;
     const nextSignature = transcriptSignature(snapshot);
     if (!snapshot) {
-      const suggestions = Object.values(toolDefinitions()).slice(0, 4).map((tool) => `
-        <button class="chat-suggestion-btn" type="button" data-suggestion-tool="${escapeHtml(tool.key)}">
-          ${escapeHtml(tool.label)}
-        </button>
-      `).join("");
       els.chatTranscript.innerHTML = `
         <section class="chat-empty-state">
           <strong>剧本创作工作台</strong>
           <p>直接输入你的创作需求，平台会把剧本框架和剧本正文按对话流展示，中间过程统一显示创作状态。</p>
-          <div class="chat-empty-tools">${suggestions}</div>
         </section>
       `;
       state.lastTranscriptSignature = nextSignature;
@@ -1326,8 +1704,9 @@
       }
       renderRollbackOptions([]);
       renderRollbackScriptStartOptions([]);
-      renderProjectList(state.projects);
+      renderProjectList(state.workspaceItems.length ? state.workspaceItems : state.projects);
       syncButtons();
+      setBrandMotionState(false, "把创意转成可执行剧本");
       return;
     }
 
@@ -1335,16 +1714,28 @@
     state.taskId = snapshot.task_id || null;
     state.status = snapshot.status || "idle";
 
-    const progress = Number(snapshot.progress_percent || 0);
+    if (window.scriptMakerConfig?.enableRuntimeDebugPanel === true && state.taskId && String(state.taskId) !== state.lastDebugTaskId) {
+      state.lastConsoleLogIndex = 0;
+      state.lastDebugError = "";
+      fetchRuntimeDebug().catch((error) => {
+        if (error?.message && error.message !== state.lastDebugError) {
+          console.error("[runtime-debug-fetch-error]", error);
+          state.lastDebugError = error.message;
+        }
+      });
+    }
+
+    const progress = displayProgressPercent(snapshot);
     const displayPayload = stageDisplayPayload(snapshot);
     const finalOutput = displayPayload.output || (RUNNING_STATUSES.has(snapshot.status) ? "" : "暂无内容");
     const projectTitle = runtimeProjectDisplayTitle(snapshot);
     const statusMessage = statusNoteFrom(snapshot);
+    const snapshotRunning = RUNNING_STATUSES.has(snapshot.status);
 
     els.statusText.textContent = statusLabel(snapshot.status);
     els.messageText.textContent = statusMessage;
     els.messageText.classList.toggle("hidden", !statusMessage);
-    els.stageText.textContent = snapshot.current_stage_label || snapshot.display_stage_title || "正在处理";
+    els.stageText.textContent = displayStageLabel(snapshot);
     els.progressFill.style.width = `${progress}%`;
     els.progressText.textContent = `${progress}%`;
     els.projectText.textContent = `当前剧本：${projectTitle}`;
@@ -1363,6 +1754,16 @@
     if (els.cacheNoticeText) {
       els.cacheNoticeText.textContent = snapshot.cache_notice || "系统会保留必要缓存，方便暂停、继续、失败恢复和阶段回退。";
     }
+    setBrandMotionState(
+      snapshotRunning,
+      snapshotRunning
+        ? (statusMessage || displayStageLabel(snapshot) || "正在生成...")
+        : snapshot.status === "failed"
+          ? "生成失败，请查看错误信息"
+          : snapshot.status === "completed"
+            ? "生成完成，可查看或继续编辑"
+            : "把创意转成可执行剧本"
+    );
     const snapshotChanged = (
       Number(previousProjectId || 0) !== Number(state.projectId || 0)
       || String(previousTaskId || "") !== String(state.taskId || "")
@@ -1396,7 +1797,7 @@
       els.rollbackScriptStartSelect.value = "";
     }
     persistSelectedProjectId(snapshot.project_id);
-    renderProjectList(state.projects);
+    renderProjectList(state.workspaceItems.length ? state.workspaceItems : state.projects);
     syncButtons();
   }
 
@@ -1420,7 +1821,7 @@
     els.pauseBtn.disabled = isActionLoading("pause") || !(state.taskId && ["running", "pending"].includes(state.status));
     els.resumeBtn.disabled = isActionLoading("resume") || !(state.taskId && RESUMABLE_STATUSES.has(state.status));
     els.terminateBtn.disabled = isActionLoading("terminate") || !(state.taskId && TERMINATABLE_STATUSES.has(state.status));
-    els.clearBtn.disabled = !isAuthenticated();
+    els.clearBtn.disabled = !isAuthenticated() || !canClearCurrentInput();
     els.saveBtn.disabled = isActionLoading("download") || !isAuthenticated() || !hasProject || !hasFinal;
     if (els.confirmCompletionBtn) {
       els.confirmCompletionBtn.disabled = isActionLoading("confirmCompletion") || !isAuthenticated() || !canConfirmCompletion;
@@ -1449,12 +1850,13 @@
       els.downloadToolBtn.disabled = isActionLoading("runTool") || !downloadToolButtonEnabled();
     }
     if (els.saveAssetEditBtn && state.editingProjectId) {
-      els.saveAssetEditBtn.disabled = isActionLoading("saveAsset") || !assetValidation.valid;
+      const needsAppliedChange = state.assetEditMode === "edit" && !state.assetDirty;
+      els.saveAssetEditBtn.disabled = isActionLoading("saveAsset") || !assetValidation.valid || needsAppliedChange;
     }
     if (!hasProject && !state.taskId && !hasConfiguredModel && els.formHint) {
       els.formHint.textContent = "当前没有可用模型。";
     } else if (!formValidation.valid && !hasProject && !RUNNING_STATUSES.has(state.status) && els.formHint) {
-      els.formHint.textContent = formValidation.message || "请先完善输入。";
+      els.formHint.textContent = formValidation.message || "当前流程：写剧本正文。请先填写故事期待、角色数量和总集数。";
     }
   }
 
@@ -1484,13 +1886,7 @@
       .replace(/'/g, "&#39;");
   }
 
-  function renderTextWithLineBreaks(text) {
-    // 这些内容之前直接放进 <p>，浏览器会把换行折叠掉；显式转成 <br> 后就能保留原格式。
-    const normalized = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    return escapeHtml(normalized).replace(/\n/g, "<br>");
-  }
-
-  // 优先使用后端返回的辅助工具定义，拿不到时退回本地默认配置，保证主页面不会被工具区拖垮。
+  // 优先使用后端返回的工具定义，拿不到时退回本地默认配置，保证主页面不会被工具区拖垮。
   function toolDefinitions() {
     return Object.keys(state.toolDefinitions || {}).length
       ? state.toolDefinitions
@@ -1499,7 +1895,7 @@
 
   function toolConfig(toolKey) {
     const definitions = toolDefinitions();
-    return definitions[toolKey] || definitions.character_reskin || Object.values(definitions)[0];
+    return definitions[toolKey] || definitions.hot_review || Object.values(definitions)[0];
   }
 
   function isActionLoading(actionKey) {
@@ -1634,6 +2030,7 @@
   function normalizeToolDefinition(tool) {
     const key = tool?.key || tool?.tool_id || "";
     if (!key) return null;
+    if (key === "reskin") return null;
     const fallback = DEFAULT_TOOL_DEFINITIONS[key] || {};
     return {
       key,
@@ -1754,7 +2151,7 @@
   }
 
   function assetTypeLabel(assetLike) {
-    return isToolAsset(assetLike) ? "辅助工具" : "剧本资产";
+    return isToolAsset(assetLike) ? "工具结果" : "剧本资产";
   }
 
   function assetWorkflowLabel(assetLike) {
@@ -1772,15 +2169,17 @@
       els.toolOutputBox.textContent = result?.text
         || fallbackText
         || (isAuthenticated()
-          ? "这里会显示辅助工具结果。"
-          : "登录后可使用辅助工具。");
+          ? "这里会显示工具结果。"
+          : "登录后可使用工具。");
     }
     if (els.downloadToolBtn) {
       const shouldShow = Boolean(result?.text && result?.filename);
       els.downloadToolBtn.classList.toggle("hidden", !shouldShow);
       els.downloadToolBtn.disabled = !shouldShow || isActionLoading("runTool");
       if (shouldShow) {
-        els.downloadToolBtn.textContent = "下载 TXT";
+        els.downloadToolBtn.textContent = toolKey === "character_reskin" && result?.savedAsset?.project_id
+          ? "下载 DOCX"
+          : "下载 TXT";
       }
     }
   }
@@ -1799,7 +2198,7 @@
 
   function renderToolList() {
     if (!els.toolList) return;
-    const definitions = Object.values(toolDefinitions());
+    const definitions = Object.values(toolDefinitions()).filter((tool) => tool.key !== "new_framework");
     els.toolList.innerHTML = definitions.map((tool) => `
       <button
         class="tool-shortcut${tool.key === state.activeTool ? " active" : ""}"
@@ -1843,17 +2242,15 @@
   }
 
   function openToolPanel(toolKey) {
+    if (!els.toolPanel) return;
     const tool = toolConfig(toolKey);
     state.activeTool = tool.key;
     closeCommunityPanel();
-    if (els.assistantToolsFolder) {
-      els.assistantToolsFolder.open = true;
-    }
     renderToolList();
     renderToolForm(tool.key);
-    els.toolPanel?.classList.remove("hidden");
+    els.toolPanel.classList.remove("hidden");
     window.requestAnimationFrame(() => {
-      els.toolPanel?.classList.add("panel-open");
+      els.toolPanel.classList.add("panel-open");
     });
     updateUrlParams((params) => params.set("section", "tools"));
   }
@@ -1886,7 +2283,7 @@
       state.toolDefinitions = { ...DEFAULT_TOOL_DEFINITIONS };
     }
     if (!toolConfig(state.activeTool)) {
-      state.activeTool = Object.keys(toolDefinitions())[0] || "character_reskin";
+      state.activeTool = Object.keys(toolDefinitions())[0] || "hot_review";
     }
     renderToolList();
     renderToolForm(state.activeTool);
@@ -1904,6 +2301,12 @@
       <div class="tool-form-head">
         <p>${escapeHtml(tool.help)}</p>
         ${tool.jsonFile ? `<small class="tool-form-meta">工作流：${escapeHtml(tool.jsonFile)}</small>` : ""}
+        ${tool.key === "character_reskin" ? `
+          <div class="tool-linked-actions" aria-label="只换人设后续工具">
+            <button class="btn btn-secondary" type="button" disabled>爆款文审核（暂未接入）</button>
+            <button class="btn btn-secondary" type="button" disabled>增加爽感（暂未接入）</button>
+          </div>
+        ` : ""}
       </div>
         <div class="tool-field-grid">
         ${tool.fields.map((field) => {
@@ -1934,9 +2337,9 @@
     renderToolOutput(
       tool.key,
       !isAuthenticated()
-        ? "登录后可使用辅助工具。"
+        ? "登录后可使用工具。"
         : (tool.configured
-          ? "这里会显示辅助工具结果。"
+          ? "这里会显示工具结果。"
           : "当前工具还未配置 API Key，配置后即可运行。")
     );
     syncButtons();
@@ -1977,13 +2380,15 @@
 
   async function requestJson(url, options = {}) {
     const authToken = currentAuthToken();
+    const { headers: optionHeaders = {}, ...fetchOptions } = options;
     const response = await fetch(url, {
+      cache: "no-store",
+      ...fetchOptions,
       headers: {
         "Content-Type": "application/json",
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        ...(options.headers || {})
-      },
-      ...options
+        ...optionHeaders
+      }
     });
     const data = await response.json().catch(() => null);
     if (response.status === 401) {
@@ -1993,7 +2398,317 @@
     if (!response.ok || !data?.success) {
       throw new Error(data?.message || `请求失败：${response.status}`);
     }
+    const method = String(fetchOptions.method || "GET").toUpperCase();
+    if (!["GET", "HEAD"].includes(method) && /\/api\/(projects|tasks|tools|workflows|user-knowledge)(?:\/|\?|$)/.test(String(url || ""))) {
+      announceAssetChange("workspace-mutated", { method, path: String(url || "").split("?")[0] });
+    }
     return data;
+  }
+
+  let assetSyncChannel = null;
+  let assetRefreshTimer = null;
+  let assetRefreshInFlight = null;
+
+  function announceAssetChange(reason, detail = {}) {
+    const payload = {
+      source: ASSET_SYNC_SOURCE,
+      reason: String(reason || "asset-updated"),
+      detail,
+      at: Date.now(),
+    };
+    try {
+      window.localStorage.setItem(ASSET_SYNC_STORAGE_KEY, JSON.stringify(payload));
+    } catch (_) {}
+    try {
+      assetSyncChannel?.postMessage(payload);
+    } catch (_) {}
+  }
+
+  async function refreshAssetCollections() {
+    await Promise.all([
+      loadProjects({ restoreSelection: true, restoreInputs: false }),
+      loadAssets({ silent: true }),
+      loadUserKnowledgeTags(),
+    ]);
+  }
+
+  function scheduleAssetRefresh() {
+    window.clearTimeout(assetRefreshTimer);
+    assetRefreshTimer = window.setTimeout(() => {
+      if (assetRefreshInFlight || !isAuthenticated()) return;
+      assetRefreshInFlight = refreshAssetCollections()
+        .catch(() => {})
+        .finally(() => {
+          assetRefreshInFlight = null;
+        });
+    }, 180);
+  }
+
+  function bindAssetRefreshEvents() {
+    if (typeof window.BroadcastChannel === "function") {
+      assetSyncChannel = new window.BroadcastChannel(ASSET_SYNC_CHANNEL_NAME);
+      assetSyncChannel.addEventListener("message", (event) => {
+        if (event.data?.source !== ASSET_SYNC_SOURCE) scheduleAssetRefresh();
+      });
+    }
+    window.addEventListener("storage", (event) => {
+      if (event.key === ASSET_SYNC_STORAGE_KEY) scheduleAssetRefresh();
+    });
+    window.addEventListener("focus", scheduleAssetRefresh);
+    window.addEventListener("pageshow", scheduleAssetRefresh);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") scheduleAssetRefresh();
+    });
+  }
+
+  function selectedKnowledgeTags() {
+    const selected = new Set(state.selectedKnowledgeTagIds);
+    return state.knowledgeTags.filter((tag) => selected.has(String(tag.id || "")));
+  }
+
+  function userKnowledgePayload() {
+    const tags = selectedKnowledgeTags().map((tag) => ({
+      id: String(tag.id || ""),
+      name: String(tag.name || ""),
+      category: String(tag.category || ""),
+      builtin: Boolean(tag.builtin),
+      group: String(tag.group || ""),
+      group_label: String(tag.group_label || ""),
+      source: String(tag.source || ""),
+      type: String(tag.type || ""),
+      is_default: Boolean(tag.is_default),
+      is_user_editable: tag.is_user_editable !== false,
+      pinned: Boolean(tag.pinned),
+      description: String(tag.description || ""),
+      prompt_text: String(tag.prompt_text || ""),
+      stage_prompts: normalizeKnowledgeStagePrompts(tag.stage_prompts || {})
+    }));
+    const stagePrompts = mergeSelectedKnowledgeStagePrompts(tags);
+    return {
+      selected_preference_tag_ids: [...state.selectedKnowledgeTagIds],
+      selected_preference_tags: tags,
+      user_preference_prompt: String(els.userPreferenceInput?.value || ""),
+      user_knowledge_tag_prompt: String(state.userKnowledgeTagPrompt || ""),
+      user_knowledge_stage_prompts: stagePrompts,
+      prompt_preferences: {
+        stage_prompts: stagePrompts
+      }
+    };
+  }
+
+  function normalizeKnowledgeStagePrompts(value) {
+    const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    return {
+      basic: String(source.basic || ""),
+      worldview: String(source.worldview || ""),
+      character: String(source.character || ""),
+      beat: String(source.beat || ""),
+      storylines: String(source.storylines || ""),
+      guide: String(source.guide || ""),
+      package: String(source.package || ""),
+      scene: String(source.scene || ""),
+      appearance: String(source.appearance || ""),
+      episode: String(source.episode || ""),
+      conflict: String(source.conflict || ""),
+      script_text: String(source.script_text || "")
+    };
+  }
+
+  function mergeSelectedKnowledgeStagePrompts(tags) {
+    const result = normalizeKnowledgeStagePrompts({});
+    (tags || []).forEach((tag) => {
+      const name = String(tag.name || tag.id || "").trim();
+      const prompts = normalizeKnowledgeStagePrompts(tag.stage_prompts || {});
+      Object.keys(result).forEach((stageKey) => {
+        const text = String(prompts[stageKey] || "").trim();
+        if (!text) return;
+        const section = `【智慧库标签偏好：${name}】\n${text}`;
+        result[stageKey] = result[stageKey] ? `${result[stageKey]}\n\n${section}` : section;
+      });
+    });
+    return result;
+  }
+
+  function knowledgeTagGroup(tag) {
+    const group = String((tag && tag.group) || "").trim();
+    if (group) return group;
+    if (String((tag && tag.id) || "").startsWith("excellent_film_beat_") || String((tag && tag.source) || "") === "save_the_cat_film_beat") return "excellent_film_beat";
+    return tag && tag.builtin ? "default_style" : "user_custom";
+  }
+
+  function groupedKnowledgeTags(tags) {
+    return [
+      { id: "default_style", label: "默认风格分类" },
+      { id: "user_custom", label: "用户自定义标签" },
+      { id: "excellent_film_beat", label: "优秀电影节拍表标签" }
+    ].map((group) => Object.assign({}, group, {
+      tags: (tags || []).filter((tag) => knowledgeTagGroup(tag) === group.id)
+    }));
+  }
+
+  function attachUserKnowledgePayload(payload) {
+    Object.assign(payload, userKnowledgePayload());
+    console.debug(`[user-knowledge] selected tags count=${state.selectedKnowledgeTagIds.length}`);
+    return payload;
+  }
+
+  function renderUserKnowledgePanel() {
+    if (!els.userKnowledgePanel) return;
+    const selected = new Set(state.selectedKnowledgeTagIds);
+    const tags = Array.isArray(state.knowledgeTags) ? state.knowledgeTags : [];
+    if (els.knowledgeTagStatus) {
+      els.knowledgeTagStatus.textContent = state.userKnowledgeError
+        ? state.userKnowledgeError
+        : (tags.length ? `已加载 ${tags.length} 个标签，可不选择。` : "暂无可用标签，可直接创作。");
+    }
+    if (els.knowledgeTagList) {
+      const renderTag = (tag) => {
+        const id = String(tag.id || "");
+        const checked = selected.has(id);
+        const customActions = tag.is_user_editable === false ? `<span class="status-pill status-pill-private">只读</span>` : `
+          <button class="knowledge-pin-btn" type="button" data-action="pin-knowledge-tag" data-tag-id="${escapeHtml(id)}" title="${tag.pinned ? "取消置顶" : "置顶自定义标签"}">${tag.pinned ? "已置顶" : "置顶"}</button>
+          <button class="knowledge-delete-btn" type="button" data-action="delete-knowledge-tag" data-tag-id="${escapeHtml(id)}" title="删除自定义标签">×</button>
+        `;
+        return `
+          <label class="knowledge-tag-pill${checked ? " is-selected" : ""}" title="${escapeHtml(tag.description || tag.prompt_text || "")}">
+            <input type="checkbox" data-knowledge-tag-id="${escapeHtml(id)}" ${checked ? "checked" : ""}>
+            <span>${escapeHtml(tag.name || id)}</span>
+            <small>${escapeHtml(tag.category || "")}</small>
+            ${customActions}
+          </label>
+        `;
+      };
+      els.knowledgeTagList.innerHTML = groupedKnowledgeTags(tags).map((group) => `
+        <details class="knowledge-tag-group" open>
+          <summary>${escapeHtml(group.label)}（${group.tags.length}）</summary>
+          ${group.tags.length ? group.tags.map(renderTag).join("") : `<div class="empty-hint">暂无标签</div>`}
+        </details>
+      `).join("");
+    }
+    const selectedNames = selectedKnowledgeTags().map((tag) => tag.name || tag.id).filter(Boolean);
+    if (els.selectedKnowledgeTags) {
+      els.selectedKnowledgeTags.textContent = selectedNames.length
+        ? `当前已选择：${selectedNames.join("、")}`
+        : "当前未选择标签";
+    }
+    if (els.knowledgePreferencePreview) {
+      const preview = String(els.userPreferenceInput?.value || "").trim();
+      els.knowledgePreferencePreview.textContent = preview;
+      els.knowledgePreferencePreview.classList.toggle("hidden", !preview);
+    }
+  }
+
+  async function loadUserKnowledgeTags() {
+    if (!isAuthenticated()) {
+      state.knowledgeTags = [];
+      renderUserKnowledgePanel();
+      return;
+    }
+    try {
+      const data = await requestJson("/api/user-knowledge/tags");
+      state.knowledgeTags = Array.isArray(data.tags) ? data.tags : [];
+      state.userKnowledgeError = "";
+    } catch (error) {
+      state.knowledgeTags = [];
+      state.userKnowledgeError = "智慧库标签加载失败，不影响本次创作。";
+      showStatusError(error, "智慧库标签加载失败，不影响本次创作。");
+    }
+    renderUserKnowledgePanel();
+  }
+
+  async function applyUserKnowledgeTags() {
+    const existingPreference = String(els.userPreferenceInput?.value || "");
+    try {
+      const data = await requestJson("/api/user-knowledge/apply-tags", {
+        method: "POST",
+        body: JSON.stringify({
+          selected_tag_ids: [...state.selectedKnowledgeTagIds],
+          existing_user_preference: existingPreference
+        })
+      });
+      if (els.userPreferenceInput) {
+        els.userPreferenceInput.value = String(data.merged_preference_prompt || "");
+      }
+      state.userKnowledgeTagPrompt = String(data.tag_prompt_text || "");
+      saveDraft();
+      renderUserKnowledgePanel();
+      showToast("智慧库标签已应用", "本次用户偏好已更新。");
+    } catch (error) {
+      if (els.userPreferenceInput) {
+        els.userPreferenceInput.value = existingPreference;
+      }
+      showToast("智慧库标签应用失败", friendlyErrorText(error, "已保留原用户偏好。"));
+      showStatusError(error, "智慧库标签应用失败，已保留原用户偏好。");
+    }
+  }
+
+  async function createUserKnowledgeTag() {
+    const payload = {
+      name: els.knowledgeTagNameInput?.value || "",
+      category: els.knowledgeTagCategoryInput?.value || "",
+      description: els.knowledgeTagDescriptionInput?.value || "",
+      prompt_text: els.knowledgeTagPromptInput?.value || ""
+    };
+    if (!String(payload.name || "").trim()) {
+      showToast("无法新增标签", "请填写标签名称。");
+      return;
+    }
+    try {
+      const data = await requestJson("/api/user-knowledge/tags", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      const tag = data.tag;
+      if (tag?.id) {
+        state.knowledgeTags.push(tag);
+        state.selectedKnowledgeTagIds = [...new Set([...state.selectedKnowledgeTagIds, String(tag.id)])];
+      }
+      [els.knowledgeTagNameInput, els.knowledgeTagCategoryInput, els.knowledgeTagDescriptionInput, els.knowledgeTagPromptInput]
+        .filter(Boolean)
+        .forEach((input) => {
+          input.value = "";
+        });
+      saveDraft();
+      renderUserKnowledgePanel();
+      showToast("标签已新增", "自定义标签已保存。");
+    } catch (error) {
+      showToast("新增标签失败", friendlyErrorText(error, "请稍后重试。"));
+      showStatusError(error, "新增标签失败，请稍后重试。");
+    }
+  }
+
+  async function deleteUserKnowledgeTag(tagId) {
+    if (!tagId) return;
+    try {
+      await requestJson(`/api/user-knowledge/tags/${encodeURIComponent(tagId)}`, { method: "DELETE" });
+      state.knowledgeTags = state.knowledgeTags.filter((tag) => String(tag.id || "") !== String(tagId));
+      state.selectedKnowledgeTagIds = state.selectedKnowledgeTagIds.filter((id) => id !== String(tagId));
+      saveDraft();
+      renderUserKnowledgePanel();
+      showToast("标签已删除", "自定义标签已移除。");
+    } catch (error) {
+      showToast("删除标签失败", friendlyErrorText(error, "请稍后重试。"));
+      showStatusError(error, "删除标签失败，请稍后重试。");
+    }
+  }
+
+  async function toggleUserKnowledgeTagPinned(tagId) {
+    if (!tagId) return;
+    const tag = state.knowledgeTags.find((item) => String(item.id || "") === String(tagId));
+    if (!tag || tag.is_user_editable === false) return;
+    try {
+      const data = await requestJson(`/api/user-knowledge/tags/${encodeURIComponent(tagId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ pinned: !Boolean(tag.pinned) })
+      });
+      state.knowledgeTags = state.knowledgeTags
+        .map((item) => String(item.id || "") === String(tagId) ? data.tag : item)
+        .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
+      renderUserKnowledgePanel();
+    } catch (error) {
+      showToast("置顶标签失败", friendlyErrorText(error, "请稍后重试。"));
+      showStatusError(error, "置顶标签失败，请稍后重试。");
+    }
   }
 
   async function loadModels() {
@@ -2048,6 +2763,7 @@
     if (scriptFormatMode) {
       payload.script_format_mode = scriptFormatMode;
     }
+    attachUserKnowledgePayload(payload);
     return payload;
   }
 
@@ -2060,44 +2776,54 @@
 
   // 把后台项目压成简洁任务列表，方便在同一账号下快速切换工作台。
   function renderProjectList(projects) {
-    if (!els.activeProjectList || !els.completedProjectList) return;
+    if (!els.completedProjectList && !els.newScriptProjectList) return;
     if (!isAuthenticated()) {
-      const message = emptyCard("登录后查看任务");
-      els.activeProjectList.innerHTML = message;
-      els.completedProjectList.innerHTML = message;
+      const message = emptyCard("登录后查看资产");
+      if (els.completedProjectList) els.completedProjectList.innerHTML = message;
+      if (els.newScriptProjectList) els.newScriptProjectList.innerHTML = message;
       if (els.activeProjectCount) els.activeProjectCount.textContent = "0";
       if (els.completedProjectCount) els.completedProjectCount.textContent = "0";
       return;
     }
 
-    const completedProjects = projects.filter((item) => item.status === "completed");
-    const activeProjects = projects.filter((item) => item.status !== "completed");
+    const workspaceItems = mergeWorkspaceItems(projects, state.assets);
+    const frameworkProjects = workspaceItems.filter((item) => assetCategory(item) === "framework");
+    const newScriptProjects = workspaceItems.filter((item) => assetCategory(item) === "new_script");
 
     const renderCompactItems = (items, emptyMessage) => {
       if (!items.length) {
         return `<div class="workspace-empty">${escapeHtml(emptyMessage)}</div>`;
       }
-      return items.map((item) => {
+      return items.map((rawItem) => {
+        const item = {
+          ...rawItem,
+          status: assetCompleted(rawItem) ? "completed" : "in_progress",
+          current_stage_label: assetStatusLabel(rawItem),
+        };
         const activeClass = Number(item.project_id) === Number(state.projectId) ? " active" : "";
-        const statusClass = item.status === "failed"
-          ? " failed"
-          : item.status === "completed"
-            ? " completed"
-            : "";
+        const statusClass = assetStatusClass(item);
+        const sourceFrameworkId = String(item.source_framework_project_id || (item.input_payload || {}).source_framework_project_id || (item.input_payload || {}).framework_asset_id || "").trim();
+        const category = assetCategory(item);
+        const pickAction = category === "new_script" && sourceFrameworkId
+          ? "open-framework-script"
+          : category === "framework"
+            ? "open-framework-planner"
+            : "select-project";
         return `
           <div class="workspace-pick-row">
             <button
               class="workspace-pick${activeClass}${statusClass}"
               type="button"
-              data-action="select-project"
+              data-action="${escapeHtml(pickAction)}"
               data-project-id="${escapeHtml(item.project_id)}"
+              data-framework-asset-id="${escapeHtml(sourceFrameworkId)}"
               title="${escapeHtml(projectTooltip(item))}"
             >
               <span class="workspace-pick-main">
                 <span class="workspace-pick-title">${escapeHtml(projectDisplayTitle(item))}</span>
-                <span class="workspace-pick-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${item.current_stage_label || statusLabel(item.status)}`)}</span>
+                <span class="workspace-pick-meta">${escapeHtml(`${Number(item.progress_percent || 0)}% · ${assetStatusLabel(item)}`)}</span>
               </span>
-              <span class="workspace-pick-state">${escapeHtml(statusLabel(item.status))}</span>
+              <span class="workspace-pick-state">${escapeHtml(assetStatusLabel(item))}</span>
             </button>
             <button
               class="btn btn-danger workspace-pick-delete"
@@ -2106,24 +2832,57 @@
               data-project-id="${escapeHtml(item.project_id)}"
               aria-label="${escapeHtml(`删除 ${projectDisplayTitle(item)}`)}"
               title="${escapeHtml(`删除 ${projectDisplayTitle(item)}`)}"
-            >删除</button>
+            >删</button>
           </div>
         `;
       }).join("");
     };
 
-    els.activeProjectList.innerHTML = renderCompactItems(activeProjects, "当前没有未完成剧本。");
-    els.completedProjectList.innerHTML = renderCompactItems(completedProjects, "当前还没有自然完成的剧本。");
+    if (els.completedProjectList) {
+      els.completedProjectList.innerHTML = renderCompactItems(frameworkProjects, "暂无框架资产");
+    }
+    if (els.newScriptProjectList) {
+      els.newScriptProjectList.innerHTML = renderCompactItems(newScriptProjects, "暂无剧本资产");
+    }
     if (els.activeProjectCount) {
-      els.activeProjectCount.textContent = String(activeProjects.length);
+      els.activeProjectCount.textContent = String(frameworkProjects.length + newScriptProjects.length);
     }
     if (els.completedProjectCount) {
-      els.completedProjectCount.textContent = String(completedProjects.length);
+      els.completedProjectCount.textContent = String(frameworkProjects.length);
     }
   }
 
+  function mergeWorkspaceItems(projects = state.projects, assets = state.assets) {
+    const byId = new Map();
+    const append = (item) => {
+      if (!item || typeof item !== "object") return;
+      const projectId = String(item.project_id || item.asset_id || "").trim();
+      if (!projectId) return;
+      const category = assetCategory(item);
+      if (!["framework", "new_script"].includes(category)) return;
+      const current = byId.get(projectId) || {};
+      const normalizedProjectId = Number(item.project_id || current.project_id || projectId) || projectId;
+      byId.set(projectId, { ...current, ...item, project_id: normalizedProjectId });
+    };
+    (Array.isArray(projects) ? projects : []).forEach(append);
+    (Array.isArray(assets) ? assets : []).forEach(append);
+    return Array.from(byId.values()).sort((a, b) => {
+      const left = String(a.updated_at || a.created_at || "");
+      const right = String(b.updated_at || b.created_at || "");
+      return right.localeCompare(left);
+    });
+  }
+
+  function refreshWorkspaceItems() {
+    state.workspaceItems = mergeWorkspaceItems(state.projects, state.assets);
+    return state.workspaceItems;
+  }
+
   function workspaceFolders() {
-    return [els.activeWorkspaceFolder, els.completedWorkspaceFolder].filter(Boolean);
+    return [
+      els.completedWorkspaceFolder,
+      els.newScriptProjectList?.closest("details")
+    ].filter(Boolean);
   }
 
   function cancelWorkspaceAutoCollapse() {
@@ -2173,6 +2932,7 @@
   async function loadProjects({ restoreSelection = true, restoreInputs = false } = {}) {
     if (!isAuthenticated()) {
       state.projects = [];
+      state.workspaceItems = [];
       renderProjectList([]);
       renderSnapshot(null);
       return [];
@@ -2180,16 +2940,17 @@
 
     const data = await requestJson(window.scriptMakerConfig.projectsUrl);
     state.projects = data.projects || [];
-    summarizeProjectStatusChanges(state.projects);
-    renderProjectList(state.projects);
+    const workspaceItems = refreshWorkspaceItems();
+    summarizeProjectStatusChanges(workspaceItems);
+    renderProjectList(workspaceItems);
 
     const freshWorkspace = isFreshWorkspaceMode();
     let targetProjectId = restoreSelection
-      ? (state.projectId || readSelectedProjectId() || (freshWorkspace ? null : pickPreferredProjectId(state.projects)))
+      ? (state.projectId || readSelectedProjectId() || (freshWorkspace ? null : pickPreferredProjectId(workspaceItems)))
       : state.projectId;
 
-    if (targetProjectId && !state.projects.some((item) => Number(item.project_id) === Number(targetProjectId))) {
-      targetProjectId = pickPreferredProjectId(state.projects);
+    if (targetProjectId && !workspaceItems.some((item) => Number(item.project_id) === Number(targetProjectId))) {
+      targetProjectId = pickPreferredProjectId(workspaceItems);
     }
 
     if (targetProjectId) {
@@ -2201,11 +2962,11 @@
       }
       renderSnapshot(null);
     }
-    return state.projects;
+    return workspaceItems;
   }
 
   function shouldContinuePolling() {
-    return state.projects.some((item) => RUNNING_STATUSES.has(item.status));
+    return (state.workspaceItems.length ? state.workspaceItems : state.projects).some((item) => RUNNING_STATUSES.has(item.status));
   }
 
   // 新建任务或在原资产 ID 上重新启动失败任务。
@@ -2219,7 +2980,7 @@
     );
     els.formHint.textContent = restartingCurrentProject
       ? "正在基于当前资产重新开始生成。"
-      : "正在创建任务。";
+      : "当前流程：写剧本正文。正在创建任务，结果会保存到项目列表。";
     const endpoint = restartingCurrentProject
       ? `/api/projects/${state.projectId}/restart`
       : window.scriptMakerConfig.startUrl;
@@ -2338,13 +3099,40 @@
 
   function clearCurrentInput() {
     if (!requireLogin()) return;
+    if (!canClearCurrentInput()) {
+      showToast("不能清空输入", "当前策划已开始，不能清空输入；如需新建，请点击新建剧本。");
+      return;
+    }
     clearDraft();
     els.expectationInput.value = "";
     els.characterCountInput.value = 5;
     els.episodeCountInput.value = 10;
+    state.selectedKnowledgeTagIds = [];
+    state.userKnowledgeTagPrompt = "";
+    if (els.userPreferenceInput) {
+      els.userPreferenceInput.value = "";
+    }
+    renderUserKnowledgePanel();
     syncExpectationInputHeight();
     syncButtons();
     els.formHint.textContent = "输入已清空。";
+  }
+
+  function canClearCurrentInput() {
+    const status = String(state.status || "idle");
+    const hasProject = Boolean(state.projectId);
+    const hasTask = Boolean(state.taskId);
+    if (!hasProject && !hasTask) return true;
+    const snapshot = state.latestSnapshot || {};
+    const hasGenerated = Boolean(
+      snapshot.has_final
+      || snapshot.final_output
+      || snapshot.output
+      || snapshot.generated_episodes
+      || snapshot.current_stage
+      || snapshot.current_node_id
+    );
+    return ["idle", "draft"].includes(status) && !hasGenerated;
   }
 
   function saveFinalScript() {
@@ -2408,8 +3196,9 @@
   function assetDeletePromptMessage(projectId) {
     const item = findOwnedAsset(projectId);
     const title = projectDisplayTitle(item);
+    const cascadeNotice = assetCategory(item || {}) === "framework" ? "关联的 08-12 剧本资产也会一并删除。" : "";
     if (title && title !== "未选中") {
-      return `确定要删除“${title}”吗？此操作不可恢复。`;
+      return `确定要删除“${title}”吗？${cascadeNotice}此操作不可恢复。`;
     }
     return "确定要删除这个资产吗？此操作不可恢复。";
   }
@@ -2486,11 +3275,12 @@
   }
 
   function projectTooltip(item) {
-      return [
+    const displayStatus = assetStatusLabel(item);
+    return [
       `剧本：${projectDisplayTitle(item)}`,
       `进度：${Number(item.progress_percent || 0)}%`,
-      `当前阶段：${item.current_stage_label || statusLabel(item.status)}`,
-      `当前状态：${statusLabel(item.status)}`
+      `当前阶段：${displayStatus}`,
+      `当前状态：${displayStatus}`
     ].join("\n");
   }
 
@@ -2526,7 +3316,7 @@
     state.projectStatusMap = nextMap;
   }
 
-  async function loadAssets({ resetPage = false } = {}) {
+  async function loadAssets({ resetPage = false, silent = false } = {}) {
     if (!isAuthenticated()) {
       state.assetsStatus = "empty";
       state.assetsError = "";
@@ -2540,13 +3330,16 @@
     if (resetPage) {
       state.assetsPage = 1;
     }
-    state.assetsStatus = "loading";
+    if (!silent) state.assetsStatus = "loading";
     state.assetsError = "";
-    renderAssets(state.assets);
+    if (!silent) renderAssets(state.assets);
     try {
       const data = await requestJson(window.scriptMakerConfig.assetsUrl);
       state.assets = data.assets || [];
       state.assetsStatus = state.assets.length ? "success" : "empty";
+      state.assetsLastRefreshedAt = new Date().toISOString();
+      refreshWorkspaceItems();
+      renderProjectList(state.workspaceItems);
       renderAssets(state.assets);
     } catch (error) {
       state.assetsStatus = "error";
@@ -2591,38 +3384,136 @@
       els.assetsList.innerHTML = emptyCard("还没有用户资产");
       return;
     }
-    const { visibleItems, hasMore } = paginateItems(assets, state.assetsPage, 6);
-    els.assetsList.innerHTML = visibleItems.map((item) => `
+    const categories = [
+      ["框架资产", assets.filter((item) => assetCategory(item) === "framework")],
+      ["剧本资产", assets.filter((item) => assetCategory(item) === "new_script")],
+    ];
+    els.assetsList.innerHTML = categories.map(([title, items]) => `
+      <section class="asset-category">
+        <div class="asset-category-head">${escapeHtml(title)}</div>
+        ${items.length ? items.map((item) => `
       <article class="asset-tile">
         <div class="asset-topline">
-          <span class="status-pill ${item.status === "completed" ? "status-pill-completed" : ""}">${escapeHtml(statusLabel(item.status))}</span>
+          <span class="status-pill ${assetCompleted(item) ? "status-pill-completed" : ""}">${escapeHtml(assetStatusLabel(item))}</span>
+          ${assetLocked(item)
+            ? `<span class="status-pill status-pill-completed">锁定成品</span>`
+            : ""}
           ${isToolAsset(item)
             ? `<span class="status-pill status-pill-pending">${escapeHtml(assetTypeLabel(item))}</span>`
-            : (item.completion_confirmed ? '<span class="status-pill status-pill-locked">已锁定</span>' : item.awaiting_user_confirmation ? '<span class="status-pill status-pill-pending">待确认</span>' : "")}
+            : ""}
           <span class="status-pill ${item.visibility === "public" ? "status-pill-public" : "status-pill-private"}">${escapeHtml(visibilityLabel(item.visibility))}</span>
         </div>
         <h3>${escapeHtml(projectDisplayTitle(item))}</h3>
-        <p>${renderTextWithLineBreaks(item.summary)}</p>
+        <p>${escapeHtml(item.summary)}</p>
         <div class="asset-meta">
           <span>项目 ${escapeHtml(item.project_id)}</span>
-          <span>${escapeHtml(isToolAsset(item) ? assetWorkflowLabel(item) : (item.current_stage_label || "待开始"))}</span>
+          <span>${escapeHtml(isToolAsset(item) ? assetWorkflowLabel(item) : assetStatusLabel(item))}</span>
           <span>${escapeHtml(isToolAsset(item)
             ? (item.tool_filename || "已保存结果")
             : `${item.generated_episodes || 0} / ${item.total_episodes || 0}`)}</span>
         </div>
         <div class="asset-actions">
-          <!-- 资产切换直接复用当前工作台，避免为每个项目额外打开一个新页面。 -->
-          ${isToolAsset(item) ? "" : `<button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>`}
-          ${item.completion_confirmed && !isToolAsset(item) ? "" : `<button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">${isToolAsset(item) ? "查看结果" : "修改"}</button>`}
-          <button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : (isToolAsset(item) ? "公开结果" : "公开成品")}</button>
-          <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除</button>
+          <div class="asset-action-group">
+            <span class="asset-action-label">资产操作</span>
+            ${renderAssetOpenActions(item)}
+            ${renderAssetPrivacyAction(item)}
+            <button class="btn btn-danger" data-action="delete-asset" data-project-id="${escapeHtml(item.project_id)}">删除资产</button>
+          </div>
+          ${renderAssetTaskActions(item)}
         </div>
       </article>
-    `).join("") + (hasMore ? `
-      <div class="list-more-row">
-        <button class="btn btn-secondary" type="button" data-action="load-more-assets">加载更多资产</button>
+    `).join("") : emptyCard(`暂无${title}`)}
+      </section>
+    `).join("");
+  }
+
+  function authenticatedAssetUrl(path, params = {}) {
+    const url = new URL(path, window.location.origin);
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && String(value).trim()) {
+        url.searchParams.set(key, String(value));
+      }
+    });
+    if (currentAuthToken()) url.searchParams.set("auth_token", currentAuthToken());
+    return url.pathname + url.search;
+  }
+
+  function renderAssetOpenActions(item) {
+    const category = assetCategory(item);
+    if (category === "framework") {
+      return `
+        <a class="btn btn-edit" href="${escapeHtml(authenticatedAssetUrl("/framework-planner", { project_id: item.project_id, resume: 1 }))}">打开框架工作台</a>
+        <a class="btn btn-secondary" href="${escapeHtml(authenticatedAssetUrl("/framework-to-script", { framework_asset_id: item.project_id }))}">进入框架到剧本</a>
+      `;
+    }
+    if (category === "new_script" && String(item.asset_kind || "") === "framework_to_script") {
+      const sourceId = item.source_framework_project_id || (item.input_payload || {}).source_framework_project_id || (item.input_payload || {}).framework_asset_id;
+      return sourceId
+        ? `<a class="btn btn-edit" href="${escapeHtml(authenticatedAssetUrl("/framework-to-script", { framework_asset_id: sourceId, script_asset_id: item.project_id }))}">打开剧本工作台</a>`
+        : `<button class="btn btn-edit" disabled>缺少来源框架</button>`;
+    }
+    if (isToolAsset(item)) {
+      return `<button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">查看结果</button>`;
+    }
+    return `
+      <button class="btn btn-secondary" data-action="open-project" data-project-id="${escapeHtml(item.project_id)}">载入工作台</button>
+      <button class="btn btn-edit" data-action="edit-asset" data-project-id="${escapeHtml(item.project_id)}">查看成品</button>
+    `;
+  }
+
+  function renderAssetPrivacyAction(item) {
+    const category = assetCategory(item);
+    if (category === "framework") return "";
+    if (String(item.asset_kind || "") === "framework_to_script" && !assetCompleted(item)) {
+      return `<button class="btn btn-ghost" disabled title="剧本完整生成后才可公开">生成完成后可公开</button>`;
+    }
+    return `<button class="btn ${item.visibility === "public" ? "btn-public" : "btn-ghost"}" data-action="toggle-privacy" data-project-id="${escapeHtml(item.project_id)}" data-visibility="${escapeHtml(item.visibility)}">${item.visibility === "public" ? "设为不公开" : (isToolAsset(item) ? "公开结果" : "公开成品")}</button>`;
+  }
+
+  function assetCategory(item) {
+    const assetKind = String(item.asset_kind || "").trim();
+    const input = item.input_payload && typeof item.input_payload === "object" ? item.input_payload : {};
+    const scriptMode = String(item.script_format_mode || input.script_format_mode || "").trim();
+    if (assetKind === "tool_result") return "tool_result";
+    if (assetKind === "framework_planner") return "framework";
+    if (assetKind === "framework_to_script" || scriptMode === "framework_to_script" || input.framework_to_script === true) return "new_script";
+    const explicit = String(item.asset_type || item.type || "").trim();
+    if (explicit === "framework") return "framework";
+    if (["legacy_script", "old_script", "new_script", "waibao"].includes(explicit)) return "new_script";
+    if (explicit === "character_reskin") return "tool_result";
+    return "new_script";
+  }
+
+  function frameworkHasScriptOutput(item) {
+    if (!item || typeof item !== "object") return false;
+    if (item.has_framework_script_output || item.framework_to_script_ready || item.framework_script_ready) return true;
+    if (assetCategory(item) === "new_script") return true;
+    const artifacts = item.artifacts && typeof item.artifacts === "object" ? item.artifacts : {};
+    const workspace = item.framework_to_script_state || artifacts.framework_to_script_state || {};
+    const stages = workspace && typeof workspace === "object" ? (workspace.scriptStages || workspace.script_stages || {}) : {};
+    const stage12 = stages && typeof stages === "object" ? (stages.stage12 || {}) : {};
+    if (stage12.batchScriptText || stage12.batch_script_text) return true;
+    const batches = stage12.batches && typeof stage12.batches === "object" && !Array.isArray(stage12.batches)
+      ? stage12.batches
+      : {};
+    return Object.values(batches).some((batch) => batch && typeof batch === "object" && (batch.batchScriptText || batch.batch_script_text));
+  }
+
+  function renderAssetTaskActions(item) {
+    if (isToolAsset(item)) return "";
+    const taskId = String(item.task_id || "").trim();
+    if (!taskId) return "";
+    const status = String(item.status || "");
+    const canContinue = RESUMABLE_STATUSES.has(status);
+    const canStop = TERMINATABLE_STATUSES.has(status);
+    return `
+      <div class="asset-action-group task-action-group">
+        <span class="asset-action-label">任务操作</span>
+        ${canContinue ? `<button class="btn btn-secondary" data-action="continue-task" data-task-id="${escapeHtml(taskId)}" data-project-id="${escapeHtml(item.project_id)}">继续任务</button>` : ""}
+        ${canStop ? `<button class="btn btn-danger" data-action="stop-task" data-task-id="${escapeHtml(taskId)}" data-project-id="${escapeHtml(item.project_id)}">停止任务</button>` : ""}
+        <button class="btn btn-ghost" data-action="delete-task" data-task-id="${escapeHtml(taskId)}" data-project-id="${escapeHtml(item.project_id)}">删除任务</button>
       </div>
-    ` : "");
+    `;
   }
 
   function renderCommunity(assets) {
@@ -2644,7 +3535,7 @@
       <article class="community-tile">
         <span class="community-tag status-pill-public">公开成品</span>
         <h3>${escapeHtml(item.title)}</h3>
-        <p>${renderTextWithLineBreaks(item.summary)}</p>
+        <p>${escapeHtml(item.summary)}</p>
         <div class="community-actions">
           <a class="btn btn-secondary" href="${escapeHtml(communityDetailUrl(item.project_id))}" target="_blank" rel="noopener">查看全文</a>
         </div>
@@ -2662,31 +3553,57 @@
     const project = data.project || {};
     const input = project.input_payload || {};
     const artifacts = project.artifacts || {};
+    const toolRequest = project.tool_request_payload && typeof project.tool_request_payload === "object"
+      ? project.tool_request_payload
+      : null;
     state.editingProjectId = Number(projectId);
     state.editingProjectStatus = String(project.status || "");
     state.editingAssetKind = String(project.asset_kind || "").trim();
-    state.editingAssetLocked = Boolean(project.completion_confirmed && state.editingAssetKind !== "tool_result");
-    const locked = state.editingAssetLocked;
+    state.editingAssetLocked = Boolean(
+      project.completion_confirmed
+      && !["tool_result", "framework_planner", "framework_to_script"].includes(state.editingAssetKind)
+    );
+    state.assetEditMode = "view";
+    state.assetDirty = false;
+    const viewModeLocked = true;
     els.editAssetTitle.value = project.title || input.title || "";
-    els.editAssetSummary.value = input.story_outline || artifacts.story_outline || "";
+    els.editAssetSummary.value = formatDisplayValue(
+      toolRequest
+        ? JSON.stringify(toolRequest, null, 2)
+        : (input.story_outline || artifacts.story_outline || "")
+    );
     els.editAssetPrivacy.value = project.visibility || "private";
     els.editAssetFinal.value = state.editingProjectStatus === "completed"
-      ? (artifacts.final_output_text || artifacts.final_script || "")
+      ? formatDisplayValue(artifacts.final_output_text || artifacts.final_script || "")
       : "";
-    if (els.editAssetTitle) els.editAssetTitle.disabled = locked;
-    if (els.editAssetSummary) els.editAssetSummary.disabled = locked;
-    if (els.editAssetFinal) els.editAssetFinal.disabled = locked;
-    if (els.editAssetPrivacy) els.editAssetPrivacy.disabled = false;
+    if (els.editAssetTitle) els.editAssetTitle.disabled = viewModeLocked;
+    if (els.editAssetSummary) els.editAssetSummary.disabled = viewModeLocked;
+    if (els.editAssetFinal) els.editAssetFinal.disabled = viewModeLocked;
+    if (els.editAssetPrivacy) els.editAssetPrivacy.disabled = true;
     if (els.saveAssetEditBtn) {
       els.saveAssetEditBtn.disabled = false;
-      els.saveAssetEditBtn.textContent = locked ? "仅保存公开设置" : "保存修改";
+      els.saveAssetEditBtn.textContent = "修改";
     }
+    if (els.cancelAssetEditBtn) els.cancelAssetEditBtn.textContent = "取消";
     els.assetEditor.classList.remove("hidden");
     els.assetEditor.scrollIntoView({ behavior: "smooth", block: "center" });
+    syncButtons();
   }
 
   async function saveAssetEdit() {
     if (!requireLogin() || !state.editingProjectId) return;
+    if (state.assetEditMode !== "edit") {
+      state.assetEditMode = "edit";
+      state.assetDirty = false;
+      if (els.editAssetTitle) els.editAssetTitle.disabled = state.editingAssetLocked;
+      if (els.editAssetSummary) els.editAssetSummary.disabled = state.editingAssetLocked;
+      if (els.editAssetFinal) els.editAssetFinal.disabled = state.editingAssetLocked;
+      if (els.editAssetPrivacy) els.editAssetPrivacy.disabled = false;
+      if (els.saveAssetEditBtn) els.saveAssetEditBtn.textContent = "应用修改";
+      if (els.cancelAssetEditBtn) els.cancelAssetEditBtn.textContent = "取消修改";
+      syncButtons();
+      return;
+    }
     const payload = {
       visibility: els.editAssetPrivacy.value
     };
@@ -2713,10 +3630,21 @@
   }
 
   function closeAssetEditor() {
+    if (state.assetEditMode === "edit" && state.assetDirty) {
+      const action = window.prompt("当前资产有未应用修改。请输入：保存 / 不保存 / 取消", "取消");
+      const normalized = String(action || "取消").trim();
+      if (normalized === "保存") {
+        saveAssetEdit().catch((error) => showToast("资产保存失败", friendlyErrorText(error, "请稍后重试。")));
+        return;
+      }
+      if (normalized !== "不保存") return;
+    }
     state.editingProjectId = null;
     state.editingProjectStatus = null;
     state.editingAssetKind = "";
     state.editingAssetLocked = false;
+    state.assetEditMode = "view";
+    state.assetDirty = false;
     [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].forEach((field) => {
       if (field) field.disabled = false;
     });
@@ -2726,8 +3654,9 @@
     if (els.editAssetFinal) els.editAssetFinal.value = "";
     if (els.saveAssetEditBtn) {
       els.saveAssetEditBtn.disabled = false;
-      els.saveAssetEditBtn.textContent = "保存修改";
+      els.saveAssetEditBtn.textContent = "修改";
     }
+    if (els.cancelAssetEditBtn) els.cancelAssetEditBtn.textContent = "取消";
     els.assetEditor.classList.add("hidden");
     syncButtons();
   }
@@ -2769,6 +3698,55 @@
     });
   }
 
+  async function continueAssetTask(taskId, projectId, button = null) {
+    if (!requireLogin() || !taskId) return;
+    await withActionLoading(`continueTask:${taskId}`, button, "继续中...", async () => {
+      const item = state.assets.find((asset) => String(asset.task_id || "") === String(taskId));
+      const endpoint = item && ["failed", "terminated"].includes(String(item.status || ""))
+        ? `/api/tasks/${taskId}/retry`
+        : `/api/tasks/${taskId}/resume`;
+      const data = await requestJson(endpoint, { method: "POST" });
+      if (Number(projectId) === Number(state.projectId) || Number(data.task?.project_id) === Number(state.projectId)) {
+        renderSnapshot(data.task);
+        startPolling();
+      }
+      await loadProjects({ restoreSelection: true, restoreInputs: false });
+      await loadAssets();
+      showToast("任务已继续", "已从保留进度继续推进。");
+    });
+  }
+
+  async function stopAssetTask(taskId, projectId, button = null) {
+    if (!requireLogin() || !taskId) return;
+    const ok = window.confirm("确认停止这个任务吗？已生成的阶段和资产内容会保留。");
+    if (!ok) return;
+    await withActionLoading(`stopTask:${taskId}`, button, "停止中...", async () => {
+      const data = await requestJson(`/api/tasks/${taskId}/terminate`, { method: "POST" });
+      if (Number(projectId) === Number(state.projectId) || Number(data.task?.project_id) === Number(state.projectId)) {
+        renderSnapshot(data.task);
+      }
+      await loadProjects({ restoreSelection: true, restoreInputs: false });
+      await loadAssets();
+      showToast("任务已停止", "当前任务已停止，资产内容已保留。");
+    });
+  }
+
+  async function deleteTask(taskId, projectId, button = null) {
+    if (!requireLogin() || !taskId) return;
+    const ok = window.confirm("确认删除这个任务及其资产记录吗？此操作不可恢复。");
+    if (!ok) return;
+    await withActionLoading(`deleteTask:${taskId}`, button, "删除中...", async () => {
+      await requestJson(`/api/tasks/${taskId}`, { method: "DELETE" });
+      if (Number(projectId) === Number(state.projectId)) {
+        switchToFreshWorkspace();
+      }
+      await loadProjects({ restoreSelection: Number(projectId) !== Number(state.projectId), restoreInputs: false });
+      await loadAssets();
+      await loadCommunity();
+      showToast("任务已删除", "任务和对应资产记录已移除。");
+    });
+  }
+
   async function runActiveTool() {
     if (!requireLogin()) return;
     const payload = collectToolPayload();
@@ -2806,7 +3784,7 @@
       }
     }
     showToast(
-      "辅助工具运行完成",
+      "工具运行完成",
       assetSaveError
         ? `${result.title || toolConfig(state.activeTool)?.label || "当前工具"} 已返回结果，但写入用户资产失败了。`
         : (assetSaved
@@ -2818,9 +3796,16 @@
   function downloadActiveToolResult() {
     const result = currentToolResult();
     const tool = toolConfig(state.activeTool);
-    const toolLabel = tool?.label || "辅助工具结果";
+    const toolLabel = tool?.label || "工具结果";
     if (!result?.text || !result?.filename) {
       showToast("暂无可下载内容", `请先成功生成${toolLabel}。`);
+      return;
+    }
+    if (state.activeTool === "character_reskin" && result.savedAsset?.project_id) {
+      const authToken = currentAuthToken();
+      const suffix = authToken ? `?auth_token=${encodeURIComponent(authToken)}` : "";
+      window.location.href = `/api/projects/${encodeURIComponent(result.savedAsset.project_id)}/download${suffix}`;
+      showToast("DOCX 已开始下载", `${projectDisplayTitle(result.savedAsset)}.docx`);
       return;
     }
     downloadTextFile(result.text, result.filename);
@@ -2866,7 +3851,10 @@
 
   async function pollWorkspace() {
     try {
-      await loadProjects({ restoreSelection: true, restoreInputs: false });
+      await Promise.all([
+        loadProjects({ restoreSelection: true, restoreInputs: false }),
+        loadAssets({ silent: true }),
+      ]);
     } catch (error) {
       showStatusError(error, "后台状态同步失败，正在稍后重试。");
     }
@@ -2892,6 +3880,7 @@
   async function restoreWorkspace() {
     if (!isAuthenticated()) {
       state.projects = [];
+      state.workspaceItems = [];
       renderProjectList([]);
       renderSnapshot(null);
       return;
@@ -2906,20 +3895,8 @@
     if (panel === "profile" && isAuthenticated()) {
       openProfilePanel();
     }
-    if (section === "tools") {
-      window.setTimeout(() => {
-        if (els.assistantToolsFolder) {
-          els.assistantToolsFolder.open = true;
-        }
-        openToolPanel(state.activeTool);
-      }, 80);
-      return;
-    }
-    if (section === "community") {
-      window.setTimeout(() => {
-        openCommunityPanel();
-      }, 80);
-      return;
+    if (section === "tools" || section === "community") {
+      updateUrlParams((params) => params.delete("section"));
     }
     if (section) {
       window.setTimeout(() => {
@@ -2950,6 +3927,14 @@
         syncButtons();
       });
     });
+    els.userPreferenceInput?.addEventListener("input", () => {
+      saveDraft();
+      renderUserKnowledgePanel();
+    });
+    els.userPreferenceInput?.addEventListener("change", () => {
+      saveDraft();
+      renderUserKnowledgePanel();
+    });
     els.toolForms?.addEventListener("input", () => {
       rememberCurrentToolDraft();
       syncButtons();
@@ -2959,8 +3944,14 @@
       syncButtons();
     });
     [els.editAssetTitle, els.editAssetSummary, els.editAssetPrivacy, els.editAssetFinal].filter(Boolean).forEach((el) => {
-      el.addEventListener("input", syncButtons);
-      el.addEventListener("change", syncButtons);
+      el.addEventListener("input", () => {
+        if (state.assetEditMode === "edit") state.assetDirty = true;
+        syncButtons();
+      });
+      el.addEventListener("change", () => {
+        if (state.assetEditMode === "edit") state.assetDirty = true;
+        syncButtons();
+      });
     });
   }
 
@@ -2980,19 +3971,15 @@
       openWorkspaceInNewPage({ fresh: true });
     });
 
-    els.waibaoScriptBtn?.addEventListener("click", () => {
-      if (!requireLogin()) return;
-      openWorkspaceInNewPage({ fresh: true, scriptFormatMode: "waibao" });
-    });
-
-    els.openCommunityPanelLink?.addEventListener("click", (event) => {
-      event.preventDefault();
-      openCommunityPanel();
-    });
-
     els.viewAssetsBtn?.addEventListener("click", () => {
       if (!requireLogin()) return;
       openProfilePanel();
+    });
+
+    els.newAssetBtn?.addEventListener("click", () => {
+      if (!requireLogin()) return;
+      closeProfilePanel();
+      openWorkspaceInNewPage({ fresh: true });
     });
 
     els.workspaceCard?.addEventListener("mouseenter", cancelWorkspaceAutoCollapse);
@@ -3023,6 +4010,37 @@
       }
     });
 
+    els.knowledgeTagList?.addEventListener("change", (event) => {
+      const checkbox = event.target.closest("input[data-knowledge-tag-id]");
+      if (!checkbox) return;
+      const tagId = String(checkbox.dataset.knowledgeTagId || "").trim();
+      if (!tagId) return;
+      if (checkbox.checked) {
+        state.selectedKnowledgeTagIds = [...new Set([...state.selectedKnowledgeTagIds, tagId])];
+      } else {
+        state.selectedKnowledgeTagIds = state.selectedKnowledgeTagIds.filter((id) => id !== tagId);
+      }
+      saveDraft();
+      renderUserKnowledgePanel();
+    });
+
+    els.knowledgeTagList?.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-action]");
+      if (!button) return;
+      if (button.dataset.action === "delete-knowledge-tag") {
+        event.preventDefault();
+        event.stopPropagation();
+        await deleteUserKnowledgeTag(button.dataset.tagId || "");
+      } else if (button.dataset.action === "pin-knowledge-tag") {
+        event.preventDefault();
+        event.stopPropagation();
+        await toggleUserKnowledgeTagPinned(button.dataset.tagId || "");
+      }
+    });
+
+    els.applyKnowledgeTagsBtn?.addEventListener("click", applyUserKnowledgeTags);
+    els.createKnowledgeTagBtn?.addEventListener("click", createUserKnowledgeTag);
+
     els.refreshAssetsBtn?.addEventListener("click", async () => {
       try {
         await loadAssets({ resetPage: true });
@@ -3043,13 +4061,22 @@
       }
     });
 
-    [els.activeProjectList, els.completedProjectList].forEach((container) => container?.addEventListener("click", async (event) => {
+    [els.activeProjectList, els.completedProjectList, els.newScriptProjectList].forEach((container) => container?.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-action]");
       if (!button) return;
       const projectId = button.dataset.projectId;
       try {
         if (button.dataset.action === "select-project") {
           await loadProjectDetail(projectId, { restoreInputs: true, scroll: false });
+        } else if (button.dataset.action === "open-framework-planner") {
+          window.location.href = authenticatedAssetUrl("/framework-planner", { project_id: projectId, resume: 1 });
+        } else if (button.dataset.action === "open-framework-script") {
+          const sourceId = String(button.dataset.frameworkAssetId || "").trim();
+          if (!sourceId) throw new Error("剧本资产缺少来源框架 ID。");
+          const url = new URL("/framework-to-script", window.location.origin);
+          url.searchParams.set("framework_asset_id", sourceId);
+          if (currentAuthToken()) url.searchParams.set("auth_token", currentAuthToken());
+          window.location.href = url.pathname + url.search;
         } else if (button.dataset.action === "delete-asset") {
           await deleteAsset(projectId, button);
         }
@@ -3075,10 +4102,18 @@
         } else if (button.dataset.action === "open-project") {
           closeProfilePanel();
           await loadProjectDetail(projectId, { restoreInputs: true, scroll: false });
+        } else if (button.dataset.action === "open-project-page") {
+          openWorkspaceInNewPage({ projectId });
         } else if (button.dataset.action === "edit-asset") {
           await openAssetEditor(projectId);
         } else if (button.dataset.action === "toggle-privacy") {
           await toggleAssetPrivacy(projectId, button.dataset.visibility);
+        } else if (button.dataset.action === "continue-task") {
+          await continueAssetTask(button.dataset.taskId, projectId, button);
+        } else if (button.dataset.action === "stop-task") {
+          await stopAssetTask(button.dataset.taskId, projectId, button);
+        } else if (button.dataset.action === "delete-task") {
+          await deleteTask(button.dataset.taskId, projectId, button);
         } else if (button.dataset.action === "delete-asset") {
           await deleteAsset(projectId, button);
         }
@@ -3176,9 +4211,6 @@
           });
         return;
       }
-      const button = event.target.closest("[data-suggestion-tool]");
-      if (!button) return;
-      openToolPanel(button.dataset.suggestionTool || state.activeTool);
     });
 
     els.closeToolPanelBtn?.addEventListener("click", closeToolPanel);
@@ -3297,6 +4329,7 @@
 
   async function init() {
     restoreDraft();
+    restoreKnowledgeDraft();
     syncExpectationInputHeight();
     restoreSidebarCollapsed();
     state.toolDefinitions = { ...DEFAULT_TOOL_DEFINITIONS };
@@ -3309,11 +4342,13 @@
     try {
       await loadModels();
       await loadTools();
+      await loadUserKnowledgeTags();
       await restoreWorkspace();
       await loadAssets();
       await loadCommunity();
+      bindAssetRefreshEvents();
       if (hasConfiguredModel()) {
-        els.formHint.textContent = `已登录 ${window.scriptMakerConfig.username}。`;
+        els.formHint.textContent = `当前流程：写剧本正文。已登录 ${window.scriptMakerConfig.username}，请先填写故事期待、角色数量和总集数。`;
       } else if (!isAuthenticated()) {
         els.formHint.textContent = "登录后即可开始创作。";
       } else {

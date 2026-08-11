@@ -7,8 +7,11 @@ from typing import Iterable
 
 from dotenv import load_dotenv
 
+ENV_DIR = Path(__file__).resolve().parents[1]
+
 load_dotenv()
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+load_dotenv(ENV_DIR / ".env")
+load_dotenv(ENV_DIR / ".env.local", override=True)
 
 
 def _getenv(*keys: str, default: str | None = None) -> str | None:
@@ -67,68 +70,67 @@ class ModelOption:
 class Settings:
     def __init__(self) -> None:
         self.api_provider = _getenv("API", default="deepseek").lower()
-        self.workflow_backend = _getenv("WORKFLOW_BACKEND", default="fastgpt").lower()
+        # Runtime workflows are 腾讯工作流-only. Ignore legacy WORKFLOW_BACKEND values
+        # so no code path can fall back to 工作流 requests.
+        self.workflow_backend = "tencent"
         self.batch_size = int(_getenv("BATCH_SIZE", default="5"))
         self.max_retries_default = int(_getenv("MAX_RETRIES_DEFAULT", default="10"))
-        self.fastgpt_stage_retries = int(_getenv("FASTGPT_STAGE_RETRIES", default="0"))
-        self.fastgpt_output_repair_retries = int(
-            _getenv("FASTGPT_OUTPUT_REPAIR_RETRIES", default="1")
+        self.workflow_stage_retries = int(_getenv("WORKFLOW_STAGE_RETRIES", default="0"))
+        self.workflow_output_repair_retries = int(
+            _getenv("WORKFLOW_OUTPUT_REPAIR_RETRIES", default="1")
         )
-        self.fastgpt_stage_local_restart_retries = int(
+        self.workflow_stage_local_restart_retries = int(
             _getenv(
-                "FASTGPT_STAGE_LOCAL_RESTART_RETRIES",
-                "FASTGPT_STAGE_OUTPUT_RERUN_RETRIES",
+                "WORKFLOW_STAGE_LOCAL_RESTART_RETRIES",
+                "WORKFLOW_STAGE_OUTPUT_RERUN_RETRIES",
                 default="1",
             )
         )
         # 兼容旧配置名；代码内部统一按“阶段本地重跑”语义读取。
-        self.fastgpt_stage_output_rerun_retries = self.fastgpt_stage_local_restart_retries
-        self.fastgpt_appearance_local_review_retries = int(
+        self.workflow_stage_output_rerun_retries = self.workflow_stage_local_restart_retries
+        self.workflow_appearance_local_review_retries = int(
             _getenv(
-                "FASTGPT_APPEARANCE_LOCAL_REVIEW_RETRIES",
-                default=str(self.fastgpt_stage_local_restart_retries),
+                "WORKFLOW_APPEARANCE_LOCAL_REVIEW_RETRIES",
+                default=str(self.workflow_stage_local_restart_retries),
             )
         )
-        self.fastgpt_stage_review_revise_max_loops = int(
-            _getenv("FASTGPT_STAGE_REVIEW_REVISE_MAX_LOOPS", default="10")
+        self.workflow_stage_review_revise_max_loops = int(
+            _getenv("WORKFLOW_STAGE_REVIEW_REVISE_MAX_LOOPS", default="10")
         )
-        self.fastgpt_stage_format_retry_limit = int(
-            _getenv("FASTGPT_STAGE_FORMAT_RETRY_LIMIT", default="3")
+        self.workflow_stage_format_retry_limit = int(
+            _getenv("WORKFLOW_STAGE_FORMAT_RETRY_LIMIT", default="3")
         )
         self.workflow_json_dir = _getenv("WORKFLOW_JSON_DIR")
-        self.fastgpt_timeout = int(_getenv("FASTGPT_TIMEOUT", default="300"))
-        self.fastgpt_http_retries = int(_getenv("FASTGPT_HTTP_RETRIES", default="2"))
-        self.fastgpt_http_retry_delay = float(
-            _getenv("FASTGPT_HTTP_RETRY_DELAY", default="1.5")
+        self.workflow_timeout = int(_getenv("WORKFLOW_TIMEOUT", default="300"))
+        self.workflow_http_retries = int(_getenv("WORKFLOW_HTTP_RETRIES", default="2"))
+        self.workflow_http_retry_delay = float(
+            _getenv("WORKFLOW_HTTP_RETRY_DELAY", default="1.5")
         )
-        self.fastgpt_stage_payload_warn_chars = int(
-            _getenv("FASTGPT_STAGE_PAYLOAD_WARN_CHARS", default="120000")
+        self.workflow_stage_payload_warn_chars = int(
+            _getenv("WORKFLOW_STAGE_PAYLOAD_WARN_CHARS", default="120000")
         )
-        self.fastgpt_stage_payload_hard_chars = int(
-            _getenv("FASTGPT_STAGE_PAYLOAD_HARD_CHARS", default="240000")
+        self.workflow_stage_payload_hard_chars = int(
+            _getenv("WORKFLOW_STAGE_PAYLOAD_HARD_CHARS", default="240000")
         )
-        self.fastgpt_script_payload_soft_limit = int(
-            _getenv("FASTGPT_SCRIPT_PAYLOAD_SOFT_LIMIT", default="180000")
+        self.workflow_script_payload_soft_limit = int(
+            _getenv("WORKFLOW_SCRIPT_PAYLOAD_SOFT_LIMIT", default="180000")
         )
-        self.fastgpt_script_payload_hard_limit = int(
-            _getenv("FASTGPT_SCRIPT_PAYLOAD_HARD_LIMIT", default="240000")
+        self.workflow_script_payload_hard_limit = int(
+            _getenv("WORKFLOW_SCRIPT_PAYLOAD_HARD_LIMIT", default="240000")
         )
-        self.fastgpt_characters_detail = _getenv_bool(
-            "FASTGPT_CHARACTERS_DETAIL",
+        self.workflow_characters_detail = _getenv_bool(
+            "WORKFLOW_CHARACTERS_DETAIL",
             default=False,
         )
-        self.fastgpt_scenes_detail = _getenv_bool(
-            "FASTGPT_SCENES_DETAIL",
+        self.workflow_scenes_detail = _getenv_bool(
+            "WORKFLOW_SCENES_DETAIL",
             default=False,
         )
-        self.fastgpt_appearance_alias_generation_detail = _getenv_bool(
-            "FASTGPT_APPEARANCE_ALIAS_GENERATION_DETAIL",
+        self.workflow_appearance_alias_generation_detail = _getenv_bool(
+            "WORKFLOW_APPEARANCE_ALIAS_GENERATION_DETAIL",
             default=False,
         )
-        self.fastgpt_api_key = _getenv("FASTGPT_API_KEY")
-        self.fastgpt_unstructured_api_key = _getenv("FASTGPT_UNSTRUCTURED_API_KEY")
-        self.fastgpt_variable_mode = _getenv("FASTGPT_VARIABLE_MODE", default="legacy").lower()
-        self.fastgpt_batch_mode = _getenv("FASTGPT_BATCH_MODE", default="local").lower()
+        self.workflow_batch_mode = _getenv("WORKFLOW_BATCH_MODE", default="local").lower()
 
         self.ollama = ProviderConfig(
             name="ollama",
@@ -242,9 +244,9 @@ class Settings:
                 )
             )
 
-        if self.workflow_backend in {"fastgpt", "hybrid", "fastgpt_hybrid"}:
+        if self.workflow_backend in {"workflow", "hybrid", "workflow_hybrid"}:
             _add(
-                "fastgpt",
+                "workflow",
                 "workflow",
                 is_default=True,
                 configured=True,
@@ -294,13 +296,13 @@ class Settings:
         return options
 
     def resolve_model_selection(self, selection_id: str | None) -> ModelOption | None:
-        if self.workflow_backend in {"fastgpt", "hybrid", "fastgpt_hybrid"} and (
-            not selection_id or selection_id == "fastgpt::workflow"
+        if self.workflow_backend in {"workflow", "hybrid", "workflow_hybrid"} and (
+            not selection_id or selection_id == "workflow::workflow"
         ):
             return ModelOption(
-                id="fastgpt::workflow",
-                label="FastGPT 工作流",
-                provider="fastgpt",
+                id="workflow::workflow",
+                label="工作流 工作流",
+                provider="workflow",
                 model="workflow",
                 is_default=True,
                 configured=True,
@@ -321,11 +323,11 @@ class Settings:
             provider_name, model_name = selection_id.split("::", 1)
             provider_name = provider_name.strip().lower()
             model_name = model_name.strip()
-            if provider_name == "fastgpt":
+            if provider_name == "workflow":
                 return ModelOption(
                     id=f"{provider_name}::{model_name or 'workflow'}",
-                    label="FastGPT 工作流",
-                    provider="fastgpt",
+                    label="工作流 工作流",
+                    provider="workflow",
                     model=model_name or "workflow",
                     is_default=True,
                     configured=True,

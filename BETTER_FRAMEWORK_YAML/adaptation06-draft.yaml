@@ -1,0 +1,418 @@
+schema_version: 1.0.0
+name: adaptation06
+id: 7645227881429434394
+description: "改变指引"
+mode: workflow
+icon: plugin_icon/workflow.png
+nodes:
+    - id: "100001"
+      type: start
+      title: 开始
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-Start-v2.jpg
+      description: "工作流的起始节点，用于设定启动工作流需要的信息"
+      position:
+        x: 0
+        y: 0
+      parameters:
+        node_outputs:
+            adaptation_direction:
+                type: string
+                value: null
+            basic_config:
+                type: string
+                required: true
+                value: null
+            beat_checkpoint_time:
+                type: string
+                required: true
+                value: null
+            character_plan:
+                type: string
+                required: true
+                value: null
+            character_storylines:
+                type: string
+                required: true
+                value: null
+            mode:
+                type: string
+                value: null
+            previous_adaptation:
+                type: string
+                value: null
+            source_brief:
+                type: string
+                required: true
+                value: null
+            storyline_decisions:
+                type: string
+                value: null
+            user_feedback:
+                type: string
+                value: null
+            user_requirements:
+                type: string
+                required: true
+                value: null
+                default_value: 执行剧本框架策划阶段 06：整体改编指引生成更新。请只返回约定输出。
+            worldview_plan:
+                type: string
+                required: true
+                value: null
+    - id: "900001"
+      type: end
+      title: 结束
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-End-v2.jpg
+      description: "工作流的最终节点，用于返回工作流运行后的结果信息"
+      position:
+        x: 1000
+        y: 0
+      parameters:
+        node_inputs:
+            - name: adaptation
+              input:
+                type: string
+                value:
+                    path: adaptation
+                    ref_node: "188198"
+        terminatePlan: returnVariables
+    - id: "188198"
+      type: llm
+      title: 大模型
+      icon: https://lf3-static.bytednsdoc.com/obj/eden-cn/dvsmryvd_avi_dvsm/ljhwZthlaukjlkulzlp/icon/icon-LLM-v2.jpg
+      description: "调用大语言模型,使用变量和提示词生成回复"
+      version: "3"
+      position:
+        x: 480
+        y: 0
+      parameters:
+        fcParamVar:
+            knowledgeFCParam: {}
+        llmParam:
+            - name: generationDiversity
+              input:
+                type: string
+                value: default_val
+            - name: apiMode
+              input:
+                type: integer
+                value: "0"
+            - name: maxTokens
+              input:
+                type: integer
+                value: "32768"
+            - name: spCurrentTime
+              input:
+                type: boolean
+                value: false
+            - name: spAntiLeak
+              input:
+                type: boolean
+                value: false
+            - name: thinkingType
+              input:
+                type: string
+                value: enabled
+            - name: responseFormat
+              input:
+                type: integer
+                value: "2"
+            - name: modelName
+              input:
+                type: string
+                value: DeepSeek-V3.2
+            - name: modelType
+              input:
+                type: integer
+                value: "1764929611"
+            - name: parameters
+              input:
+                type: object
+                value: null
+            - name: prompt
+              input:
+                type: string
+                value: 执行剧本框架策划阶段 06：整体改编指引生成更新。请只返回约定输出。
+            - name: enableChatHistory
+              input:
+                type: boolean
+                value: false
+            - name: chatHistoryRound
+              input:
+                type: integer
+                value: "3"
+            - name: systemPrompt
+              input:
+                type: string
+                value: |-
+                    你是“整体改编指引生成更新器”。
+
+                    你的任务：
+                    基于已确认的 source_brief、basic_config、worldview_plan、character_plan、beat_checkpoint_timeline、character_storylines 和 storyline_decisions，生成四项整体改编指引，并把它们整理成后续剧本工作流必须遵守的硬约束。这个阶段不联网搜索，不引入外部资料，只做上游确认结果的统一约束化、风格化、执行化和风险收束。
+
+                    核心目标：
+                    整体改编指引不是泛泛建议，也不是宣传文案。它是后续正式剧本工作流的执行说明，必须明确哪些核心设定必须保留、叙事节奏如何推进、视觉化如何落地、角色情绪如何递进，以及哪些规则后续剧本生成绝对不能违反。
+
+                    输入变量：
+                    user_requirements={{user_requirements}}
+                    mode={{mode}}
+                    source_brief={{source_brief}}
+                    basic_config={{basic_config}}
+                    worldview_plan={{worldview_plan}}
+                    character_plan={{character_plan}}
+                    beat_checkpoint_timeline={{beat_checkpoint_timeline}}
+                    character_storylines={{character_storylines}}
+                    storyline_decisions={{storyline_decisions}}
+                    previous_adaptation_guide={{previous_adaptation_guide}}
+                    user_feedback={{user_feedback}}
+                    adaptation_direction={{adaptation_direction}}
+
+                    工作模式：
+                    mode=create 或“创作”：首次生成整体改编指引。
+                    mode=revise 或“改写”：根据 previous_adaptation_guide、storyline_decisions 和 user_feedback 更新整体改编指引。
+                    如果 mode 为空或无法识别，默认按 create 处理。
+                    revise 时必须尽量保留 previous_adaptation_guide 中仍然合理且未被反馈否定的约束，只修改用户反馈、故事线决策或上游变化影响到的部分。
+
+                    输入优先级：
+                    最高优先级：本提示词规定的输出格式、字段结构、JSON 规则。
+                    第二优先级：已确认上游事实 source_brief、basic_config、worldview_plan、character_plan、beat_checkpoint_timeline、character_storylines。
+                    第三优先级：storyline_decisions、previous_adaptation_guide、user_feedback。
+                    第四优先级：user_requirements 与 adaptation_direction。
+                    第五优先级：你的合理归纳。归纳必须来自上游已确认事实，不得凭空新增人物、世界规则、核心事件、人物关系或主线冲突。
+
+                    上游一致性规则：
+                    source_brief 是统一事实层，不能推翻其题材、主角、核心矛盾、必须保留元素和禁止偏离方向。
+                    basic_config 是目标格式、季数、每季集数、每集分钟数等基础目标，不能改写。
+                    worldview_plan 中的世界规则、核心资源、权力结构、空间逻辑和视觉风格必须被转化为后续剧本约束。
+                    character_plan 中的人物目标、弱点、成长弧、关系钩子和禁写方向必须被转化为后续剧本约束。
+                    beat_checkpoint_timeline 是三幕十五节拍卡点主结构，不能在本阶段重排节拍或集数，只能总结其节奏策略。
+                    character_storylines 是人物线拆解结果，必须把保留、精简、删除的影响写入整体指引。
+                    如果 user_feedback 或 storyline_decisions 要求推翻已确认上游事实，只能在 display_text 中提示需要回到上游重新确认，不能直接篡改上游。
+
+                    storyline_decisions 使用规则：
+                    如果某条人物线 decision=keep，整体指引要说明它在后续剧本中必须保留的功能和出现强度。
+                    如果某条人物线 decision=simplify，整体指引要说明它应该保留哪些核心节点、减少哪些分散篇幅、由哪些节拍承接功能。
+                    如果某条人物线 decision=delete，整体指引要说明其原本承担的叙事功能是否需要转移给主角线、反派线或其他强副线，避免后续剧本生成时仍然误用已删除线索。
+                    如果 storyline_decisions 为空，则根据 character_storylines 中的 decision 字段处理。
+
+                    四项指引生成规则：
+                    core_setting_adjustment
+                    写核心设定调整指引。
+                    必须明确哪些设定必须保留、哪些设定可以压缩或外化、哪些设定禁止改写。
+                    必须把 source_brief、worldview_plan 和 character_plan 中的核心事实转化为后续剧本可执行约束。
+                    不要写成空泛的“保留核心设定”。
+
+                    narrative_rhythm_structure
+                    写叙事节奏与结构指引。
+                    必须结合 basic_config 和 beat_checkpoint_timeline，说明前几集如何抓人、第一幕如何入局、第二幕如何升级、中点如何爆发、最低谷如何成立、第三幕如何收束。
+                    如果是短剧或微短剧，必须强调前3集留存、阶段性爽点、小高潮密度、结尾钩子和反转节奏。
+                    必须说明人物故事线如何与十五节拍同步推进。
+
+                    visualization
+                    写视觉化呈现指引。
+                    必须把 worldview_plan 的空间逻辑、视觉风格、核心资源、权力结构转化为可拍的场景、道具、动作、符号和画面冲突。
+                    必须说明哪些原本偏内心、设定、叙述的信息需要外化成行为、选择、道具、场景压力或视觉对比。
+                    不要只写“增强视觉冲击”。
+
+                    character_emotion_shaping
+                    写角色与情绪塑造指引。
+                    必须结合 character_plan 和 character_storylines，说明主角情绪曲线、反派压迫方式、B故事/强副线情感作用、弱线精简策略和被删除线索的处理方式。
+                    必须说明观众情绪如何被引导，例如代入、压迫、爽感、悬念、反转、共情、释放。
+                    不得新增与 character_plan 冲突的人物动机或关系。
+
+                    hard_constraints_for_script_workflow
+                    数组，至少 8 条，建议 8-15 条。
+                    每条必须是后续剧本工作流可以直接执行的硬约束。
+                    必须覆盖：核心设定、世界规则、人物关系、十五节拍、人物故事线决策、前3集钩子、视觉化外化、禁止偏离方向、删减线索处理、节奏与结局闭环。
+                    每条要具体，不能写空泛口号。
+
+                    改写模式特别规则：
+                    如果 mode=revise 或“改写”，必须优先读取 previous_adaptation_guide。
+                    只针对 user_feedback、storyline_decisions 或上游新增内容影响到的部分修改。
+                    未被反馈否定且仍然符合上游事实的指引应尽量保留。
+                    如果 user_feedback 为空，但 storyline_decisions 有变化，应主要根据人物线保留/精简/删除状态更新 hard_constraints_for_script_workflow。
+                    改写后仍然必须输出完整 adaptation_guide，而不是只输出变更部分。
+
+                    字段填写规则：
+                    core_setting_adjustment
+                    一段完整自然语言。
+                    必须说明必须保留、可调整、禁止改写三类内容。
+                    必须落到后续剧本生成动作，而不是只做概念说明。
+
+                    narrative_rhythm_structure
+                    一段完整自然语言。
+                    必须说明三幕推进、十五节拍功能、集数节奏和关键卡点。
+                    必须说明前3集、中点、最低谷、结局闭环这些关键位置的处理。
+
+                    visualization
+                    一段完整自然语言。
+                    必须说明场景、道具、动作、空间、符号、视觉对比和内心外化方式。
+                    必须服务可拍性。
+
+                    character_emotion_shaping
+                    一段完整自然语言。
+                    必须说明主角、反派、B故事/强副线、弱线/可删线的情绪与功能处理。
+                    必须说明观众情绪的递进路径。
+
+                    hard_constraints_for_script_workflow
+                    数组，至少 8 条。
+                    每条都是“后续剧本生成必须……”或“后续剧本生成不得……”这类可执行约束。
+                    必须体现上游锁定事实和人物故事线决策。
+
+                    display_text
+                    给前端展示的自然语言总结，400-800 字。
+                    应说明本次整体改编指引如何约束后续剧本生成、四项指引的核心重点、人物线决策如何被吸收、是否存在需要回到上游确认的风险。
+                    不要使用 Markdown 标题，不要输出代码块，不要逐项翻译字段名。
+
+                    输出格式：
+                    你必须只输出一个合法 JSON 对象，且必须完全符合以下结构：
+
+                    {
+                      "adaptation_guide": {
+                        "core_setting_adjustment": "string",
+                        "narrative_rhythm_structure": "string",
+                        "visualization": "string",
+                        "character_emotion_shaping": "string",
+                        "hard_constraints_for_script_workflow": ["string"]
+                      },
+                      "display_text": "string"
+                    }
+
+                    强制规则：
+                    最终回复只能是 JSON 对象。
+                    禁止输出 Markdown。
+                    禁止输出 ```json 代码块。
+                    禁止输出解释性前缀，例如“以下是结果”。
+                    禁止输出 JSON 之外的任何文本。
+                    禁止新增 schema 之外的字段。
+                    禁止删除任何字段。
+                    禁止把字段名翻译成中文。
+                    禁止输出空字符串。
+                    数组不得为空。
+                    hard_constraints_for_script_workflow 至少 8 条。
+                    如果信息缺失，必须用“未明确，需后续确认……”这类文本填充，而不是留空。
+                    输出必须能被 JSON.parse 直接解析。
+            - name: stableSystemPrompt
+              input:
+                type: string
+                value: ""
+            - name: canContinue
+              input:
+                type: boolean
+                value: false
+            - name: loopPromptVersion
+              input:
+                type: string
+                value: ""
+            - name: loopPromptName
+              input:
+                type: string
+                value: ""
+            - name: loopPromptId
+              input:
+                type: string
+                value: ""
+        node_inputs:
+            - name: user_requirements
+              input:
+                value:
+                    path: user_requirements
+                    ref_node: "100001"
+            - name: mode
+              input:
+                value:
+                    path: mode
+                    ref_node: "100001"
+            - name: source_brief
+              input:
+                value:
+                    path: source_brief
+                    ref_node: "100001"
+            - name: basic_config
+              input:
+                value:
+                    path: basic_config
+                    ref_node: "100001"
+            - name: worldview_plan
+              input:
+                value:
+                    path: worldview_plan
+                    ref_node: "100001"
+            - name: character_plan
+              input:
+                value:
+                    path: character_plan
+                    ref_node: "100001"
+            - name: beat_checkpoint_timeline
+              input:
+                value:
+                    path: beat_checkpoint_time
+                    ref_node: "100001"
+            - name: character_storylines
+              input:
+                value:
+                    path: character_storylines
+                    ref_node: "100001"
+            - name: storyline_decisions
+              input:
+                value:
+                    path: storyline_decisions
+                    ref_node: "100001"
+            - name: previous_adaptation_guide
+              input:
+                value:
+                    path: previous_adaptation
+                    ref_node: "100001"
+            - name: user_feedback
+              input:
+                value:
+                    path: user_feedback
+                    ref_node: "100001"
+            - name: adaptation_direction
+              input:
+                value:
+                    path: adaptation_direction
+                    ref_node: "100001"
+        node_outputs:
+            adaptation:
+                type: string
+                value: null
+            errorBody:
+                type: object
+                properties:
+                    errorCode:
+                        type: string
+                        value: null
+                    errorMessage:
+                        type: string
+                        value: null
+                value: null
+            isSuccess:
+                type: boolean
+                value: null
+        settingOnError:
+            dataOnErr: |-
+                {
+                    "adaptation_guide": {
+                        "core_setting_adjustment": "string",
+                        "narrative_rhythm_structure": "string",
+                        "visualization": "string",
+                        "character_emotion_shaping": "string",
+                        "hard_constraints_for_script_workflow": [
+                            "string"
+                        ]
+                    },
+                    "display_text": "string",
+                    "adaptation": ""
+                }
+            ext:
+                backupLLmParam: '{"apiMode":0,"temperature":1,"topP":0.7,"frequencyPenalty":0,"maxTokens":4096,"spCurrentTime":false,"spAntiLeak":false,"thinkingType":"enabled","responseFormat":2,"modelName":"豆包·1.6·思考深度调节","modelType":1761535088,"generationDiversity":"default_val","parameters":{"max_completion_tokens":"0","reasoning_effort":"medium"}}'
+            processType: 2
+            retryTimes: 3
+            switch: true
+            timeoutMs: 300000
+edges:
+    - source_node: "100001"
+      target_node: "188198"
+    - source_node: "188198"
+      target_node: "900001"

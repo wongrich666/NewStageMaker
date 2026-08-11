@@ -7,7 +7,8 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>IDEA TO SCRIPT 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260430-01">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260627-global-theme-v1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='theme_slideshow.css') }}?v=20260628-global-theme-v8">
 </head>
 <body class="workspace-body">
   <main class="chat-workspace-shell">
@@ -20,7 +21,7 @@
             <span></span>
           </button>
           <a class="sidebar-brand" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">
-            <span class="sidebar-brand-mark">I</span>
+            <span class="sidebar-brand-mark"><img src="{{ url_for('static', filename='assets/logo.png') }}" alt="Logo"></span>
             <span class="sidebar-brand-text">
               <strong>IDEA TO SCRIPT</strong>
               <em>剧本平台</em>
@@ -30,56 +31,39 @@
       </div>
 
       <div class="sidebar-primary">
-        <button id="newScriptBtn" class="sidebar-create-btn" type="button">＋ 新建剧本</button>
+        <a class="sidebar-create-btn" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">＋ 新建框架</a>
+        <a class="sidebar-create-btn" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">＋ 框架到剧本</a>
       </div>
 
       <div class="sidebar-nav">
         <section class="sidebar-group">
-          <div class="sidebar-group-label">我的剧本</div>
+          <div class="sidebar-group-label">我的资产</div>
           <div class="sidebar-section-head sidebar-section-head-compact">
             <span>资产会话</span>
             <button id="refreshProjectsBtn" class="sidebar-refresh-btn" type="button">刷新</button>
           </div>
           <div class="sidebar-folders">
-            <details id="activeWorkspaceFolder" class="workspace-folder" open>
-              <summary>
-                <span>生成中的剧本</span>
-              </summary>
-              <div id="activeProjectList" class="workspace-compact-list"></div>
-            </details>
             <details id="completedWorkspaceFolder" class="workspace-folder">
               <summary>
-                <span>已完成剧本</span>
+                <span>框架资产</span>
               </summary>
               <div id="completedProjectList" class="workspace-compact-list"></div>
             </details>
+            <details class="workspace-folder">
+              <summary>
+                <span>剧本资产</span>
+              </summary>
+              <div id="newScriptProjectList" class="workspace-compact-list"></div>
+            </details>
           </div>
         </section>
-
-        <section id="tools" class="sidebar-group sidebar-tools-section">
-          <details id="assistantToolsFolder" class="workspace-folder tools-folder">
-            <summary>
-              <span class="sidebar-folder-link">辅助工具</span>
-            </summary>
-            <div id="toolList" class="tool-shortcut-list"></div>
-          </details>
-          <button id="waibaoScriptBtn" class="sidebar-profile-btn" type="button">外包专属格式</button>
-        </section>
-
-        <div class="sidebar-group sidebar-links">
-          <a
-            id="openCommunityPanelLink"
-            class="sidebar-text-link"
-            href="{{ url_for('workspace_page', auth_token=current_auth_token, section='community') }}"
-          >社区好剧</a>
-        </div>
       </div>
 
       <div class="sidebar-footer">
         {% if current_user %}
           <div class="sidebar-footer-links">
             <button id="openProfileBtn" class="sidebar-profile-btn" type="button">
-              <span class="sidebar-profile-avatar">{{ current_user.username[:1] }}</span>
+              <span class="sidebar-profile-avatar"><img src="{{ url_for('static', filename='assets/logo.png') }}" alt="Logo"></span>
               <span class="sidebar-footer-text">个人中心</span>
             </button>
             <a class="sidebar-logout-link" href="{{ url_for('logout', auth_token=current_auth_token) }}">退出登录</a>
@@ -87,7 +71,7 @@
         {% else %}
           <div class="sidebar-footer-links">
             <a class="sidebar-profile-btn" href="{{ url_for('login_page') }}">
-              <span class="sidebar-profile-avatar">游</span>
+              <span class="sidebar-profile-avatar"><img src="{{ url_for('static', filename='assets/logo.png') }}" alt="Logo"></span>
               <span class="sidebar-footer-text">登录后创作</span>
             </a>
             <a class="sidebar-logout-link" href="{{ url_for('register_page') }}">注册</a>
@@ -96,7 +80,37 @@
       </div>
     </aside>
 
-    <section class="chat-main">
+    <section class="chat-main workspace-main-minimal">
+            <section class="workspace-landing">
+        <div class="workspace-landing__inner">
+          <div class="brand-motion-panel" data-brand-motion>
+            <img class="brand-motion-image brand-motion-id" src="{{ url_for('static', filename='assets/brand/ID.gif') }}" alt="Idea to Script" />
+            <img class="brand-motion-image brand-motion-loading" src="{{ url_for('static', filename='assets/brand/loading.gif') }}" alt="生成中" />
+            <div class="brand-motion-text">
+              <div class="brand-motion-title">Idea to Script</div>
+              <div class="brand-motion-subtitle" data-brand-motion-status>把创意转成可执行剧本</div>
+            </div>
+          </div>
+          <div class="workspace-landing__eyebrow">IDEA TO SCRIPT</div>
+          <h1 class="workspace-landing__title">剧本平台</h1>
+          <p class="workspace-landing__subtitle">
+            可选流程：从头开始搭建框架，或者导入框架生成剧本
+            剧本质量和提示词高度相关，如有需要可以在生成框架阶段的「智慧库」里选择基础提示词，或者存入自己的定制提示词哦~
+          </p>
+
+          <div class="workspace-landing__actions">
+            <a class="workspace-landing__card primary" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">
+              <span class="workspace-landing__card-title">新建框架</span>
+              <span class="workspace-landing__card-desc">进入 01-07 框架策划流程</span>
+            </a>
+
+            <a class="workspace-landing__card" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">
+              <span class="workspace-landing__card-title">框架到剧本</span>
+              <span class="workspace-landing__card-desc">进入 08-12 剧本生成流程</span>
+            </a>
+          </div>
+        </div>
+      </section>
       <header class="workspace-runtime runtime">
         <div class="progress-bar progress-bar-fixed runtime-progress-top">
           <div id="progressFill" class="progress-fill"></div>
@@ -104,7 +118,7 @@
         <div class="runtime-strip">
           <div class="runtime-brandline">
             <span class="runtime-app-label">IDEA TO SCRIPT 剧本平台</span>
-            <strong id="projectText">当前剧本：未选中</strong>
+            <strong id="projectText" class="hidden" aria-hidden="true">当前剧本：未选中</strong>
           </div>
           <div class="runtime-meta-strip">
             <div class="runtime-pill">
@@ -132,34 +146,11 @@
         </div>
       </header>
 
-      <section id="toolPanel" class="tool-panel hidden">
-        <div class="tool-panel-head">
-          <div>
-            <span class="tool-panel-kicker">辅助工具</span>
-            <h3 id="toolPanelTitle">选择工具</h3>
-          </div>
-          <button id="closeToolPanelBtn" class="btn btn-ghost" type="button">关闭</button>
+      <section class="platform-entry-grid platform-entry-grid-muted" aria-label="平台状态说明">
+        <div class="platform-flow-note">
+          <strong>当前工作台</strong>
+          <span>主流程入口已统一放在左侧栏。这里保留当前剧本状态、最近项目和生成进度，避免重复导航。</span>
         </div>
-        <div id="toolForms" class="tool-forms"></div>
-        <div class="tool-panel-actions">
-          <button id="runToolBtn" class="btn btn-primary" type="button">运行辅助工具</button>
-          <button id="downloadToolBtn" class="btn btn-secondary hidden" type="button">下载 TXT</button>
-        </div>
-        <pre id="toolOutputBox" class="output-box tool-panel-output">这里会显示辅助工具结果。</pre>
-      </section>
-
-      <section id="community" class="tool-panel community-panel hidden" aria-hidden="true">
-        <div class="tool-panel-head">
-          <div>
-            <span class="tool-panel-kicker">社区好剧</span>
-            <h3>公开成品</h3>
-          </div>
-          <div class="tool-panel-head-actions">
-            <button id="refreshCommunityBtn" class="btn btn-ghost" type="button">刷新</button>
-            <button id="closeCommunityPanelBtn" class="btn btn-ghost" type="button">关闭</button>
-          </div>
-        </div>
-        <div id="communityList" class="asset-grid"></div>
       </section>
 
       <section class="chat-view">
@@ -175,6 +166,7 @@
         </div>
 
         <div class="chat-composer-shell">
+          <div class="chat-composer-plus">＋</div>
           <div class="chat-composer-main">
             <label class="composer-field composer-field-wide">
               <span class="visually-hidden">想要的剧本</span>
@@ -200,8 +192,7 @@
           </div>
           <button id="startBtn" class="composer-send-btn" type="button" aria-label="开始生成">开始</button>
         </div>
-
-        <p id="formHint" class="composer-hint">只需要填写故事期待、角色数量和总集数。</p>
+        <p id="formHint" class="composer-hint">当前流程：写剧本正文。先填写故事期待、角色数量和总集数；生成结果会保存在你的项目列表。</p>
         <p class="composer-mode-note">当前创作模式：<strong id="composerModeText">标准格式</strong></p>
 
         <div id="completionPanel" class="completion-panel compact-completion">
@@ -277,13 +268,16 @@
         <div>
           <h3>我的资产</h3>
         </div>
-        <button id="refreshAssetsBtn" class="btn btn-secondary" type="button">刷新资产</button>
+        <div class="control-row tight-row">
+          <button id="newAssetBtn" class="btn btn-primary" type="button">新建资产</button>
+          <button id="refreshAssetsBtn" class="btn btn-secondary" type="button">刷新资产</button>
+        </div>
       </div>
       <div id="assetsList" class="asset-grid"></div>
 
       <div id="assetEditor" class="asset-editor hidden">
         <div class="card-head">
-          <h3>修改资产</h3>
+          <h3>资产详情</h3>
         </div>
         <div class="field-grid compact-grid">
           <label class="field">
@@ -307,7 +301,7 @@
           <textarea id="editAssetFinal" class="tall-textarea"></textarea>
         </label>
         <div class="control-row">
-          <button id="saveAssetEditBtn" class="btn btn-primary" type="button">保存修改</button>
+          <button id="saveAssetEditBtn" class="btn btn-primary" type="button">修改</button>
           <button id="cancelAssetEditBtn" class="btn btn-ghost" type="button">取消</button>
         </div>
       </div>
@@ -351,6 +345,8 @@
       loginUrl: "{{ url_for('login_page') }}"
     };
   </script>
-  <script src="{{ url_for('static', filename='app.js') }}?v=20260430-01"></script>
+  <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260628-global-theme-v8"></script>
+  <script src="{{ url_for('static', filename='field_labels_cn.js') }}?v=20260527-readable-labels"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=20260628-asset-status-v1"></script>
 </body>
 </html>

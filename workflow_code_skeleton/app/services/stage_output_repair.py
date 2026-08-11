@@ -5,7 +5,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..workflow_ids import APPEARANCE_MAPPING_VAR, CHARACTER_VAR, SCENE_VAR, WORLDVIEW_VAR
+from ..workflow_ids import (
+    APPEARANCE_ALIAS_MAPPING_VAR,
+    APPEARANCE_MAPPING_VAR,
+    CHARACTER_VAR,
+    SCENE_VAR,
+    WORLDVIEW_VAR,
+)
 from .json_utils import parse_json, strip_code_fence
 
 STAGE_WORLDVIEW = "worldview"
@@ -17,7 +23,8 @@ STAGE_APPEARANCE_ALIAS_REWRITE = "appearance_alias_rewrite"
 WORLDVIEW_FIELD = "worldview"
 CHARACTERS_FIELD = "characters"
 SCENES_FIELD = "scenes"
-APPEARANCE_MAPPING_FIELD = "appearance_mapping"
+APPEARANCE_MAPPING_FIELD = "appearanceMapping"
+APPEARANCE_MAPPING_FIELD_NAMES = {APPEARANCE_MAPPING_FIELD, "appearanceMapping"}
 WORLDVIEW_REQUIRED_STRING_FIELDS = (
     "worldview_summary",
     "era_background",
@@ -128,8 +135,9 @@ SCENE_WRAPPER_KEYS = (
 APPEARANCE_WRAPPER_KEYS = (
     APPEARANCE_MAPPING_FIELD,
     APPEARANCE_MAPPING_VAR,
+    APPEARANCE_ALIAS_MAPPING_VAR,
     "appearanceMapping",
-    "appearance_mapping_json",
+    "appearanceMapping_json",
     "appearanceMappingJson",
     "服装版本映射",
     "服装映射",
@@ -148,6 +156,7 @@ _NEW_ALIAS_NAME_RE = re.compile(
 )
 _OLD_ALIAS_NAME_RE = re.compile(r"^(?P<name>[^【】()（）\[\]\s]{1,40})【(?P<tag>[^【】()（）\[\]\s]{1,40})】$")
 _CN_PAREN_ALIAS_NAME_RE = re.compile(r"^(?P<name>[^【】()（）\[\]\s]{1,40})（(?P<tag>[^【】()（）\[\]\s]{1,40})）$")
+_CANONICAL_ALIAS_NAME_RE = re.compile(r"^(?P<name>[^【】()（）\[\]\s]{1,40})【(?P<tag>[^【】()（）\[\]\s]{1,40})】$")
 
 _GENERIC_ALIAS_NAMES = {"男主", "女主", "反派", "配角", "主角", "男二", "女二", "路人"}
 
@@ -159,18 +168,22 @@ def normalize_appearance_alias_name(value: object) -> str:
 
     old_match = _OLD_ALIAS_NAME_RE.match(text)
     if old_match:
-        return f"{old_match.group('name')}({old_match.group('tag')})"
+        return f"{old_match.group('name')}【{old_match.group('tag')}】"
 
     cn_paren_match = _CN_PAREN_ALIAS_NAME_RE.match(text)
     if cn_paren_match:
-        return f"{cn_paren_match.group('name')}({cn_paren_match.group('tag')})"
+        return f"{cn_paren_match.group('name')}【{cn_paren_match.group('tag')}】"
+
+    new_match = _NEW_ALIAS_NAME_RE.match(text)
+    if new_match:
+        return f"{new_match.group('name')}【{new_match.group('tag')}】"
 
     return text
 
 
 def _is_valid_new_alias_name(value: object) -> bool:
     text = normalize_appearance_alias_name(value)
-    match = _NEW_ALIAS_NAME_RE.match(text)
+    match = _CANONICAL_ALIAS_NAME_RE.match(text)
     if not match:
         return False
 
@@ -538,7 +551,7 @@ def repair_stage_output_candidate(
             allow_textual_relaxation=allow_textual_relaxation,
         )
     if stage_name in APPEARANCE_MAPPING_STAGE_NAMES:
-        return _repair_appearance_mapping_candidate(
+        return _repair_appearanceMapping_candidate(
             candidate,
             source=source,
             input_variables=input_variables,
@@ -587,36 +600,131 @@ def describe_repairable_stage_output_issue(
         return _describe_characters_output_issue(value)
     if stage_name == STAGE_SCENES and field_name == SCENES_FIELD:
         return _describe_scenes_output_issue(value)
-    if stage_name in APPEARANCE_MAPPING_STAGE_NAMES and field_name == APPEARANCE_MAPPING_FIELD:
-        return describe_appearance_mapping_output_issue(value)
+    if stage_name in APPEARANCE_MAPPING_STAGE_NAMES and field_name in APPEARANCE_MAPPING_FIELD_NAMES:
+        return describe_appearanceMapping_output_issue(value)
     return None
 
+def _try_parse_appearance_json_text(value: Any) -> Any:
+    """解析 appearanceMapping/alias 中可能嵌套的 JSON 字符串。"""
+    if not isinstance(value, str):
+        return value
 
-def normalize_appearance_mapping_candidate(value: Any) -> dict[str, Any] | None:
-    body = _normalize_appearance_mapping_body(value)
+    text = value.strip()
+    if not text:
+        return value
+
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    current: Any = text
+    for _ in range(5):
+        if not isinstance(current, str):
+            return current
+
+        candidate = current.strip()
+        if not candidate or not (candidate.startswith("{") or candidate.startswith("[")):
+            return value
+
+        try:
+            parsed = json.loads(candidate)
+        except Exception:
+            return value
+
+        if isinstance(parsed, str):
+            current = parsed
+            continue
+
+        return parsed
+
+    return value
+
+
+def _unwrap_appearance_mapping_alias(value: Any) -> Any:
+    """
+    兼容 09 工作流输出：
+    {
+      "alias": "{\"appearanceMapping\": {...}}"
+    }
+
+    alias 在这里是 腾讯工作流 工作流变量名，不是角色别名规则。
+    """
+    current = value
+
+    for _ in range(8):
+        if isinstance(current, str):
+            parsed = _try_parse_appearance_json_text(current)
+            if parsed is current or parsed == current:
+                return current
+            current = parsed
+            continue
+
+        if not isinstance(current, dict):
+            return current
+
+        if isinstance(current.get("characters"), list):
+            return current
+
+        wrapped = (
+            current.get("appearanceMapping")
+            or current.get("appearance_mapping")
+            or current.get("appearanceMappingResult")
+            or current.get("appearance_mapping_result")
+        )
+        if wrapped not in (None, "", [], {}):
+            current = wrapped
+            continue
+
+        alias_value = (
+            current.get("alias")
+            or current.get("Alias")
+            or current.get("appearanceAlias")
+            or current.get("appearance_alias")
+        )
+        if alias_value not in (None, "", [], {}):
+            current = alias_value
+            continue
+
+        return current
+
+    return current
+
+
+def normalize_appearanceMapping_candidate(value: Any) -> dict[str, Any] | None:
+    # 兼容 09 框架转剧本工作流：
+    # 1) { "appearanceMapping": {...} }
+    # 2) { "alias": "{\"appearanceMapping\": {...}}" }
+    # 3) alias 本身就是 JSON string
+    value = _unwrap_appearance_mapping_alias(value)
+
+    body = _normalize_appearanceMapping_body(value)
     if not isinstance(body, dict):
         return None
     return {APPEARANCE_MAPPING_FIELD: body}
 
 
-def describe_appearance_mapping_output_issue(value: Any) -> str | None:
-    issues = _validate_appearance_mapping_contract_shape(value)
+def describe_appearanceMapping_output_issue(value: Any) -> str | None:
+    issues = _validate_appearanceMapping_contract_shape(value)
     return issues[0] if issues else None
 
 
-def validate_appearance_mapping_output(value: Any) -> list[str]:
-    repaired_value = _appearance_mapping_object(value)
-    issues = _validate_appearance_mapping_contract_shape(
+def validate_appearanceMapping_output(value: Any) -> list[str]:
+    repaired_value = _appearanceMapping_object(value)
+    issues = _validate_appearanceMapping_contract_shape(
         repaired_value if repaired_value is not None else value
     )
     if issues:
         return issues
-    return _validate_appearance_mapping_local_review(
+    return _validate_appearanceMapping_local_review(
         repaired_value if repaired_value is not None else value
     )
 
 
-def _repair_appearance_mapping_candidate(
+def _repair_appearanceMapping_candidate(
     candidate: Any,
     *,
     source: str,
@@ -629,14 +737,14 @@ def _repair_appearance_mapping_candidate(
     body = _search_stage_body(
         candidate,
         wrapper_keys=APPEARANCE_WRAPPER_KEYS,
-        detector=_looks_like_appearance_mapping_body,
-        audit_detector=_looks_like_appearance_mapping_review_json,
+        detector=_looks_like_appearanceMapping_body,
+        audit_detector=_looks_like_appearanceMapping_review_json,
         relaxed=relaxed,
     )
     if body is None:
         return None
 
-    normalized_body = _normalize_appearance_mapping_body(
+    normalized_body = _normalize_appearanceMapping_body(
         body,
         warnings=warnings,
         alias_hits=alias_hits,
@@ -2045,7 +2153,7 @@ def _extract_character_raw(
     return raw.get(actual_key) if actual_key is not None else None
 
 
-def _normalize_appearance_mapping_body(
+def _normalize_appearanceMapping_body(
     value: Any,
     *,
     warnings: list[str] | None = None,
@@ -2063,7 +2171,7 @@ def _normalize_appearance_mapping_body(
                 continue
             if isinstance(nested, str) and _looks_like_core_scene_narrative_text(nested):
                 return None
-            normalized_nested = _normalize_appearance_mapping_body(
+            normalized_nested = _normalize_appearanceMapping_body(
                 nested,
                 warnings=warnings,
                 alias_hits=alias_hits,
@@ -2073,17 +2181,17 @@ def _normalize_appearance_mapping_body(
 
     if not isinstance(candidate, dict):
         return None
-    if not _looks_like_appearance_mapping_body(candidate):
+    if not _looks_like_appearanceMapping_body(candidate):
         return None
 
-    return _canonicalize_appearance_mapping_body(
+    return _canonicalize_appearanceMapping_body(
         candidate,
         warnings=warnings,
         alias_hits=alias_hits,
     )
 
 
-def _canonicalize_appearance_mapping_body(
+def _canonicalize_appearanceMapping_body(
     value: dict[str, Any],
     *,
     warnings: list[str],
@@ -2096,7 +2204,7 @@ def _canonicalize_appearance_mapping_body(
         if actual_key is None:
             continue
         if actual_key != field_name:
-            alias_hits[f"appearance_mapping.{field_name}"] = actual_key
+            alias_hits[f"appearanceMapping.{field_name}"] = actual_key
         raw = value.get(actual_key)
         if field_name == "characters":
             normalized[field_name] = _normalize_appearance_characters(raw, warnings, alias_hits)
@@ -2120,23 +2228,23 @@ def _canonicalize_appearance_mapping_body(
         normalized["mapping_principle"] = (
             "以角色身份、场景触发与状态变化为核心，保持同人同锚点、同触发条件同别名。"
         )
-        warnings.append("appearance_mapping.mapping_principle 缺失，已补默认映射原则")
+        warnings.append("appearanceMapping.mapping_principle 缺失，已补默认映射原则")
     if not str(normalized.get("global_naming_style") or "").strip():
         normalized["global_naming_style"] = (
-            "统一使用“角色中文全名(场景/状态/身份)”格式；常态默认使用 default_name。"
+            "统一使用“角色中文全名【场景/状态/身份】”格式；常态默认使用 default_name。"
         )
-        warnings.append("appearance_mapping.global_naming_style 缺失，已补默认命名风格")
+        warnings.append("appearanceMapping.global_naming_style 缺失，已补默认命名风格")
     if not isinstance(normalized.get("characters"), list):
         normalized["characters"] = []
     if not isinstance(normalized.get("episode_level_usage_plan"), list):
         normalized["episode_level_usage_plan"] = []
-        warnings.append("appearance_mapping.episode_level_usage_plan 缺失，已补空数组")
+        warnings.append("appearanceMapping.episode_level_usage_plan 缺失，已补空数组")
     if not isinstance(normalized.get("scene_level_usage_plan"), list):
         normalized["scene_level_usage_plan"] = []
-        warnings.append("appearance_mapping.scene_level_usage_plan 缺失，已补空数组")
+        warnings.append("appearanceMapping.scene_level_usage_plan 缺失，已补空数组")
     if not isinstance(normalized.get("special_naming_rules"), list):
         normalized["special_naming_rules"] = []
-        warnings.append("appearance_mapping.special_naming_rules 缺失，已补空数组")
+        warnings.append("appearanceMapping.special_naming_rules 缺失，已补空数组")
     return normalized
 
 
@@ -2162,7 +2270,7 @@ def _normalize_appearance_characters(
             if actual_key is None:
                 continue
             if actual_key != field_name:
-                alias_hits[f"appearance_mapping.characters[{index}].{field_name}"] = actual_key
+                alias_hits[f"appearanceMapping.characters[{index}].{field_name}"] = actual_key
             raw = item.get(actual_key)
             if field_name == "same_person_anchor":
                 character[field_name] = _normalize_same_person_anchor_for_appearance(
@@ -2181,7 +2289,7 @@ def _normalize_appearance_characters(
         if canonical_name and canonical_name != str(character.get("canonical_name") or "").strip():
             character["canonical_name"] = canonical_name
             warnings.append(
-                f"appearance_mapping.characters[{index}].canonical_name 缺失，已回退为 {canonical_name}"
+                f"appearanceMapping.characters[{index}].canonical_name 缺失，已回退为 {canonical_name}"
             )
         character_id = str(character.get("character_id") or "").strip()
         if not character_id:
@@ -2189,25 +2297,25 @@ def _normalize_appearance_characters(
             if character_id:
                 character["character_id"] = character_id
                 warnings.append(
-                    f"appearance_mapping.characters[{index}].character_id 缺失，已补为 {character_id}"
+                    f"appearanceMapping.characters[{index}].character_id 缺失，已补为 {character_id}"
                 )
         if not canonical_name and character_id:
             canonical_name = character_id
             character["canonical_name"] = character_id
             warnings.append(
-                f"appearance_mapping.characters[{index}].canonical_name 为空，已回退为 {character_id}"
+                f"appearanceMapping.characters[{index}].canonical_name 为空，已回退为 {character_id}"
             )
         if not str(character.get("story_role") or "").strip():
             character["story_role"] = "关键角色"
             warnings.append(
-                f"appearance_mapping.characters[{index}].story_role 缺失，已补默认值“关键角色”"
+                f"appearanceMapping.characters[{index}].story_role 缺失，已补默认值“关键角色”"
             )
         if not str(character.get("default_name") or "").strip():
             fallback_name = canonical_name or character_id
             if fallback_name:
                 character["default_name"] = fallback_name
                 warnings.append(
-                    f"appearance_mapping.characters[{index}].default_name 为空，已回退为 {fallback_name}"
+                    f"appearanceMapping.characters[{index}].default_name 为空，已回退为 {fallback_name}"
                 )
         same_person_anchor = _complete_same_person_anchor_for_appearance(
             anchor=character.get("same_person_anchor"),
@@ -2220,7 +2328,7 @@ def _normalize_appearance_characters(
         if not forbidden_names:
             forbidden_names = list(APPEARANCE_DEFAULT_FORBIDDEN_GENERIC_NAMES)
             warnings.append(
-                f"appearance_mapping.characters[{index}].forbidden_generic_names 缺失，已补默认泛称黑名单"
+                f"appearanceMapping.characters[{index}].forbidden_generic_names 缺失，已补默认泛称黑名单"
             )
         character["forbidden_generic_names"] = forbidden_names
         character["outfit_variants"] = _normalize_appearance_outfit_variants(
@@ -2252,7 +2360,7 @@ def _normalize_same_person_anchor_for_appearance(
             continue
         if actual_key != field_name:
             alias_hits[
-                f"appearance_mapping.characters[{index}].same_person_anchor.{field_name}"
+                f"appearanceMapping.characters[{index}].same_person_anchor.{field_name}"
             ] = actual_key
         value_at_key = raw.get(actual_key)
         if field_name == "unchanged_core_impression":
@@ -2286,7 +2394,7 @@ def _normalize_appearance_outfit_variants(
                 continue
             if actual_key != field_name:
                 alias_hits[
-                    f"appearance_mapping.characters[{index}].outfit_variants[{variant_index}].{field_name}"
+                    f"appearanceMapping.characters[{index}].outfit_variants[{variant_index}].{field_name}"
                 ] = actual_key
             raw = item.get(actual_key)
             if field_name == "visual_keypoints":
@@ -2309,14 +2417,14 @@ def _normalize_appearance_outfit_variants(
             alias_name = _default_variant_alias_name(character_name or default_name, variant_index)
             variant["alias_name"] = alias_name
             warnings.append(
-                "appearance_mapping.characters"
+                "appearanceMapping.characters"
                 f"[{index}].outfit_variants[{variant_index}].alias_name 缺失，已补为 {alias_name}"
             )
         else:
             normalized_alias_name = normalize_appearance_alias_name(alias_name)
             if normalized_alias_name != str(variant.get("alias_name") or "").strip():
                 warnings.append(
-                    "appearance_mapping.characters"
+                    "appearanceMapping.characters"
                     f"[{index}].outfit_variants[{variant_index}].alias_name 已从旧格式归一化为 {normalized_alias_name}"
                 )
             alias_name = normalized_alias_name
@@ -2325,7 +2433,7 @@ def _normalize_appearance_outfit_variants(
         if not _is_valid_new_alias_name(alias_name):
             fallback_alias_name = _default_variant_alias_name(character_name or default_name, variant_index)
             warnings.append(
-                "appearance_mapping.characters"
+                "appearanceMapping.characters"
                 f"[{index}].outfit_variants[{variant_index}].alias_name={alias_name} 不符合新格式，已回退为 {fallback_alias_name}"
             )
             alias_name = fallback_alias_name
@@ -2385,7 +2493,7 @@ def _normalize_appearance_scene_trigger_rules(
             continue
         if actual_key != field_name:
             alias_hits[
-                "appearance_mapping.characters"
+                "appearanceMapping.characters"
                 f"[{character_index}].outfit_variants[{variant_index}].scene_trigger_rules.{field_name}"
             ] = actual_key
         result[field_name] = _normalize_string_list(raw.get(actual_key))
@@ -2425,10 +2533,10 @@ def _normalize_appearance_episode_usage_plan(
             ),
         }
         if episode_range_key is not None and episode_range_key != "episode_range":
-            alias_hits[f"appearance_mapping.episode_level_usage_plan[{index}].episode_range"] = episode_range_key
+            alias_hits[f"appearanceMapping.episode_level_usage_plan[{index}].episode_range"] = episode_range_key
         if aliases_key is not None and aliases_key != "main_character_aliases":
             alias_hits[
-                f"appearance_mapping.episode_level_usage_plan[{index}].main_character_aliases"
+                f"appearanceMapping.episode_level_usage_plan[{index}].main_character_aliases"
             ] = aliases_key
         result.append(entry)
     return result
@@ -2463,10 +2571,10 @@ def _normalize_appearance_scene_usage_plan(
             ),
         }
         if scene_name_key is not None and scene_name_key != "scene_name":
-            alias_hits[f"appearance_mapping.scene_level_usage_plan[{index}].scene_name"] = scene_name_key
+            alias_hits[f"appearanceMapping.scene_level_usage_plan[{index}].scene_name"] = scene_name_key
         if usage_key is not None and usage_key != "expected_alias_usage":
             alias_hits[
-                f"appearance_mapping.scene_level_usage_plan[{index}].expected_alias_usage"
+                f"appearanceMapping.scene_level_usage_plan[{index}].expected_alias_usage"
             ] = usage_key
         result.append(entry)
     return result
@@ -2645,15 +2753,15 @@ def _stable_variant_id(alias_name: str, identity_state: str, variant_index: int)
     return normalized or f"variant_{variant_index}"
 
 
-def _looks_like_appearance_mapping_body(value: Any) -> bool:
+def _looks_like_appearanceMapping_body(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
     wrapped = value.get(APPEARANCE_MAPPING_FIELD)
     if wrapped is not None:
         if isinstance(wrapped, dict):
-            return _looks_like_appearance_mapping_body(wrapped)
+            return _looks_like_appearanceMapping_body(wrapped)
         return False
-    if any(_looks_like_appearance_mapping_review_json(value.get(key)) for key in (APPEARANCE_MAPPING_FIELD,)):
+    if any(_looks_like_appearanceMapping_review_json(value.get(key)) for key in (APPEARANCE_MAPPING_FIELD,)):
         return False
     if any(
         isinstance(item, list) and item
@@ -2692,7 +2800,7 @@ def _looks_like_core_scene_narrative_text(value: Any) -> bool:
     return False
 
 
-def _looks_like_appearance_mapping_review_json(value: Any) -> bool:
+def _looks_like_appearanceMapping_review_json(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
     keys = {str(key) for key in value.keys()}
@@ -2707,11 +2815,11 @@ def _looks_like_appearance_mapping_review_json(value: Any) -> bool:
         "issues",
         "patches",
     }
-    return bool(keys & review_keys) and not _looks_like_appearance_mapping_body(value)
+    return bool(keys & review_keys) and not _looks_like_appearanceMapping_body(value)
 
 
-def _appearance_mapping_object(value: Any) -> dict[str, Any] | None:
-    normalized_body = _normalize_appearance_mapping_body(value)
+def _appearanceMapping_object(value: Any) -> dict[str, Any] | None:
+    normalized_body = _normalize_appearanceMapping_body(value)
     if isinstance(normalized_body, dict):
         return normalized_body
     normalized = _parse_json_object_string(value)
@@ -2719,40 +2827,40 @@ def _appearance_mapping_object(value: Any) -> dict[str, Any] | None:
         return None
     if isinstance(normalized.get(APPEARANCE_MAPPING_FIELD), dict):
         return normalized.get(APPEARANCE_MAPPING_FIELD)
-    if _looks_like_appearance_mapping_body(normalized):
+    if _looks_like_appearanceMapping_body(normalized):
         return normalized
     return None
 
 
-def _validate_appearance_mapping_contract_shape(value: Any) -> list[str]:
-    mapping = _appearance_mapping_object(value)
+def _validate_appearanceMapping_contract_shape(value: Any) -> list[str]:
+    mapping = _appearanceMapping_object(value)
     if not isinstance(mapping, dict):
-        return ["必须是可归一化为 appearance_mapping 的 JSON object"]
+        return ["必须是可归一化为 appearanceMapping 的 JSON object"]
 
     issues: list[str] = []
     for key in ("mapping_principle", "global_naming_style"):
         if not str(mapping.get(key) or "").strip():
-            issues.append(f"appearance_mapping.{key} 不能为空")
+            issues.append(f"appearanceMapping.{key} 不能为空")
 
     characters = mapping.get("characters")
     if not isinstance(characters, list) or not characters:
-        issues.append("appearance_mapping.characters 必须是非空数组")
+        issues.append("appearanceMapping.characters 必须是非空数组")
     episode_usage_plan = mapping.get("episode_level_usage_plan")
     if not isinstance(episode_usage_plan, list):
-        issues.append("appearance_mapping.episode_level_usage_plan 必须是数组")
+        issues.append("appearanceMapping.episode_level_usage_plan 必须是数组")
     scene_usage_plan = mapping.get("scene_level_usage_plan")
     if not isinstance(scene_usage_plan, list):
-        issues.append("appearance_mapping.scene_level_usage_plan 必须是数组")
+        issues.append("appearanceMapping.scene_level_usage_plan 必须是数组")
     if "special_naming_rules" not in mapping:
-        issues.append("appearance_mapping.special_naming_rules 缺失")
+        issues.append("appearanceMapping.special_naming_rules 缺失")
     elif not isinstance(mapping.get("special_naming_rules"), list):
-        issues.append("appearance_mapping.special_naming_rules 必须是数组")
+        issues.append("appearanceMapping.special_naming_rules 必须是数组")
 
     if not isinstance(characters, list):
         return issues
 
     for index, item in enumerate(characters, start=1):
-        prefix = f"appearance_mapping.characters[{index}]"
+        prefix = f"appearanceMapping.characters[{index}]"
         if not isinstance(item, dict):
             issues.append(f"{prefix} 必须是 object")
             continue
@@ -2808,7 +2916,7 @@ def _validate_appearance_mapping_contract_shape(value: Any) -> list[str]:
 
             if not _is_valid_new_alias_name(alias_name):
                 issues.append(
-                    f"{variant_prefix}.alias_name 必须使用“角色中文全名(场景/状态/身份)”格式"
+                    f"{variant_prefix}.alias_name 必须使用“角色中文全名【场景/状态/身份】”格式"
                 )
             if not _normalize_string_list(variant.get("visual_keypoints")):
                 issues.append(f"{variant_prefix}.visual_keypoints 必须是非空数组")
@@ -2834,16 +2942,16 @@ def _validate_appearance_mapping_contract_shape(value: Any) -> list[str]:
     return issues
 
 
-def _validate_appearance_mapping_local_review(value: Any) -> list[str]:
-    mapping = _appearance_mapping_object(value)
+def _validate_appearanceMapping_local_review(value: Any) -> list[str]:
+    mapping = _appearanceMapping_object(value)
     if not isinstance(mapping, dict):
-        return ["必须是可归一化为 appearance_mapping 的 JSON object"]
+        return ["必须是可归一化为 appearanceMapping 的 JSON object"]
 
     issues: list[str] = []
     episode_usage_plan = mapping.get("episode_level_usage_plan")
     if isinstance(episode_usage_plan, list):
         for index, item in enumerate(episode_usage_plan, start=1):
-            prefix = f"appearance_mapping.episode_level_usage_plan[{index}]"
+            prefix = f"appearanceMapping.episode_level_usage_plan[{index}]"
             if not isinstance(item, dict):
                 issues.append(f"{prefix} 必须是 object")
                 continue
@@ -2865,7 +2973,7 @@ def _validate_appearance_mapping_local_review(value: Any) -> list[str]:
                     alias_item["recommended_alias_name"] = alias_name
                     if not _is_valid_new_alias_name(alias_name):
                         issues.append(
-                            f"{alias_prefix}.recommended_alias_name 必须使用“角色中文全名(场景/状态/身份)”格式"
+                            f"{alias_prefix}.recommended_alias_name 必须使用“角色中文全名【场景/状态/身份】”格式"
                         )
                 if not str(alias_item.get("reason") or "").strip():
                     issues.append(f"{alias_prefix}.reason 不能为空")
@@ -2873,7 +2981,7 @@ def _validate_appearance_mapping_local_review(value: Any) -> list[str]:
     scene_usage_plan = mapping.get("scene_level_usage_plan")
     if isinstance(scene_usage_plan, list):
         for index, item in enumerate(scene_usage_plan, start=1):
-            prefix = f"appearance_mapping.scene_level_usage_plan[{index}]"
+            prefix = f"appearanceMapping.scene_level_usage_plan[{index}]"
             if not isinstance(item, dict):
                 issues.append(f"{prefix} 必须是 object")
                 continue
@@ -2895,7 +3003,7 @@ def _validate_appearance_mapping_local_review(value: Any) -> list[str]:
                     alias_item["alias_name"] = alias_name
                     if not _is_valid_new_alias_name(alias_name):
                         issues.append(
-                            f"{alias_prefix}.alias_name 必须使用“角色中文全名(场景/状态/身份)”格式"
+                            f"{alias_prefix}.alias_name 必须使用“角色中文全名【场景/状态/身份】”格式"
                         )
                 if not str(alias_item.get("reason") or "").strip():
                     issues.append(f"{alias_prefix}.reason 不能为空")

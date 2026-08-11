@@ -15,21 +15,29 @@ from ..config import ModelOption, settings
 from ..models.inputs import WorkflowInput
 from ..models.state import WorkflowState
 from ..orchestrators.runner import run_configured_workflow
-from .fastgpt_contracts import (
+from .workflow_contracts import (
     ALL_DIALOGUES,
     ALL_HOOKS,
+    ALL_ENRICHED_EPISODE_PLAN,
     ALL_SCRIPT,
     APPEARANCE_CONTINUITY_MEMORY,
     APPEARANCE_MAPPING,
+    BATCH_CAUSAL_CONFLICT_PLAN,
+    BATCH_CAUSAL_CONFLICT_REVIEW,
     BATCH_DIALOGUES,
+    BATCH_ENRICHED_EPISODE_PLAN,
     BATCH_HOOKS,
     BATCH_SCRIPT,
+    BATCH_SCRIPT_REVIEW,
+    BATCH_SCRIPT_TEXT,
     BATCH_START_EPISODE,
     CHARACTERS,
     CHARACTER_ALIAS_NAMING_RULES,
     CHARACTER_ALIAS_REGISTRY,
     CHARACTER_APPEARANCE_REQUIREMENTS,
     CHARACTER_REGISTRY,
+    CONFLICT_MEMORY,
+    CONFLICT_START_EPISODE,
     EPISODE_ALIAS_PLAN,
     EPISODE_PLAN,
     FINAL_SCRIPT,
@@ -39,7 +47,11 @@ from .fastgpt_contracts import (
     NORMALIZED_EPISODE_PLAN,
     OUTFIT_SWITCH_RULES,
     SCENES,
+    SCENE_DICTIONARY,
     SCENE_APPEARANCE_REQUIREMENTS,
+    SCRIPT_MEMORY,
+    SCRIPT_START_EPISODE,
+    SCRIPT_WORLD_RULES_DIGEST,
     script_title_content,
     STORY_OUTLINE,
     TOTAL_EPISODES,
@@ -80,6 +92,7 @@ from ..utils.user_visible_text import (
 )
 from ..workflow_ids import (
     APPEARANCE_ALIAS_NAMING_RULES_VAR,
+    APPEARANCE_ALIAS_MAPPING_VAR,
     APPEARANCE_MAPPING_VAR,
     APPEARANCE_NATURAL_LANGUAGE_VAR,
     APPEARANCE_PRE_STRATEGY_REQUIREMENTS_VAR,
@@ -141,6 +154,19 @@ STAGE_LABELS = {
     "appearance_alias_review": "服装版本映射审核",
     "appearance_alias_rewrite": "服装版本映射修订",
     "appearance_alias_unstructured": "服装版本映射自然语言说明",
+    "framework_scene_dictionary": "框架转剧本：核心场景提炼",
+    "framework_appearanceMapping": "框架转剧本：人设服装 alias 映射",
+    "framework_enriched_episode_plan": "框架转剧本：丰富分集计划",
+    "framework_causal_conflict": "框架转剧本：因果冲突推进计划",
+    "framework_causal_conflict_write": "框架转剧本：因果冲突推进计划",
+    "framework_causal_conflict_review": "框架转剧本：因果冲突推进计划",
+    "framework_causal_conflict_rewrite": "框架转剧本：因果冲突推进计划",
+    "framework_causal_conflict_memory": "框架转剧本：因果冲突推进计划",
+    "framework_script": "框架转剧本：正文对白融合",
+    "framework_script_write": "框架转剧本：正文对白融合",
+    "framework_script_review": "框架转剧本：正文对白融合",
+    "framework_script_rewrite": "框架转剧本：正文对白融合",
+    "framework_script_memory": "框架转剧本：正文对白融合",
     "hook": "开头冲突钩子",
     "hooks": "开头冲突钩子",
     "hooks_writing": "开头冲突钩子编写",
@@ -193,6 +219,19 @@ RUNNING_STAGE_MESSAGE_FALLBACKS = {
     "appearance_alias_review": "正在审核服装版本映射",
     "appearance_alias_rewrite": "正在修订服装版本映射",
     "appearance_alias_unstructured": "正在整理服装版本映射自然语言说明",
+    "framework_scene_dictionary": "正在生成框架转剧本：核心场景提炼",
+    "framework_appearanceMapping": "正在生成框架转剧本：人设服装 alias 映射",
+    "framework_enriched_episode_plan": "正在生成框架转剧本：丰富分集计划",
+    "framework_causal_conflict": "正在生成框架转剧本因果冲突推进计划",
+    "framework_causal_conflict_write": "正在编写框架转剧本：因果冲突推进计划",
+    "framework_causal_conflict_review": "正在审核框架转剧本：因果冲突推进计划",
+    "framework_causal_conflict_rewrite": "正在修订框架转剧本：因果冲突推进计划",
+    "framework_causal_conflict_memory": "正在写入框架转剧本：因果冲突记忆",
+    "framework_script": "正在生成框架转剧本正文对白融合稿",
+    "framework_script_write": "正在编写框架转剧本：正文对白融合",
+    "framework_script_review": "正在审核框架转剧本：正文对白融合",
+    "framework_script_rewrite": "正在修订框架转剧本：正文对白融合",
+    "framework_script_memory": "正在写入框架转剧本：正文记忆",
     "hooks": "正在生成开头冲突钩子",
     "hooks_writing": "正在生成开头冲突钩子",
     "hook": "正在生成开头冲突钩子",
@@ -242,6 +281,11 @@ PUBLIC_INPUT_PAYLOAD_KEYS = (
     "character_count",
     "total_episodes",
     "script_format_mode",
+    "workflow_mode",
+    "generation_chain",
+    "framework_to_script",
+    "framework_planner_source",
+    "source_framework_project_id",
 )
 AUXILIARY_TOOL_ASSET_KIND = "tool_result"
 AUXILIARY_TOOL_CACHE_NOTICE = "辅助工具结果已保存到用户资产，可随时回来查看、修改或删除。"
@@ -276,10 +320,13 @@ COMPLETED_ARTIFACT_KEYS = (
     "core_scene_summary",
     "worldview_natural_language",
     APPEARANCE_NATURAL_LANGUAGE_ARTIFACT,
-    "appearance_mapping",
+    "appearanceMapping",
+    "character_profile",
+    "character_profile_json",
     "character_registry",
     "character_alias_registry",
     "episode_alias_plan",
+    "script_batches",
     "final_script",
     "final_output_text",
 )
@@ -319,16 +366,51 @@ ROLLBACK_STAGE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("characters", "人物设定生成"),
     ("scenes", "核心场景生成"),
     ("appearance", "服装版本映射"),
+    ("framework_scene_dictionary", "08 核心场景提炼"),
+    ("framework_appearance_mapping", "09 人设服装 alias 映射"),
+    ("framework_enriched_episode_plan", "10 丰富分集计划"),
+    ("framework_causal_conflict", "11 因果冲突推进计划"),
+    ("framework_script", "12 正文对白融合"),
     ("hooks", "开头冲突钩子"),
     ("dialogues", "角色对话"),
     ("script", "剧本正文"),
     ("final", "最终剧本拼接"),
 )
 ROLLBACK_STAGE_LABELS = {key: label for key, label in ROLLBACK_STAGE_OPTIONS}
+FRAMEWORK_TO_SCRIPT_ROLLBACK_KEYS = frozenset(
+    {
+        "framework_scene_dictionary",
+        "framework_appearance_mapping",
+        "framework_enriched_episode_plan",
+        "framework_causal_conflict",
+        "framework_script",
+    }
+)
+LEGACY_SCRIPT_ROLLBACK_KEYS = frozenset({"hooks", "dialogues", "script"})
 ROLLBACK_STAGE_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "hooks": ("hooks", "dialogues", "script"),
     "dialogues": ("dialogues", "script"),
     "script": ("script",),
+    "framework_scene_dictionary": (
+        "framework_scene_dictionary",
+        "framework_appearance_mapping",
+        "framework_enriched_episode_plan",
+        "framework_causal_conflict",
+        "framework_script",
+    ),
+    "framework_appearance_mapping": (
+        "framework_appearance_mapping",
+        "framework_enriched_episode_plan",
+        "framework_causal_conflict",
+        "framework_script",
+    ),
+    "framework_enriched_episode_plan": (
+        "framework_enriched_episode_plan",
+        "framework_causal_conflict",
+        "framework_script",
+    ),
+    "framework_causal_conflict": ("framework_causal_conflict", "framework_script"),
+    "framework_script": ("framework_script",),
 }
 ROLLBACK_RANGE_STAGE_KEYS = frozenset(ROLLBACK_STAGE_DEPENDENCIES)
 
@@ -383,7 +465,7 @@ DEBUG_VARIABLE_MIRRORS: dict[str, tuple[str, ...]] = {
     BATCH_SCRIPT: (SCRIPT_CURRENT_VAR,),
     ALL_SCRIPT: (ALL_SCRIPT, SCRIPT_FINAL_VAR),
     LAST_SUMMARY: (MEMORY_VAR,),
-    APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR,),
+    APPEARANCE_MAPPING: (APPEARANCE_MAPPING_VAR, APPEARANCE_ALIAS_MAPPING_VAR),
     FINAL_SCRIPT: (FINAL_SCRIPT,),
 }
 ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
@@ -628,6 +710,83 @@ ROLLBACK_DEBUG_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         LOCAL_SCRIPT_CHECKPOINT_START,
         LOCAL_REWRITE_FROM_STAGE,
     ),
+    "framework_scene_dictionary": (
+        SCENE_DICTIONARY,
+        SCRIPT_WORLD_RULES_DIGEST,
+        APPEARANCE_MAPPING,
+        ALL_ENRICHED_EPISODE_PLAN,
+        BATCH_ENRICHED_EPISODE_PLAN,
+        CONFLICT_START_EPISODE,
+        BATCH_CAUSAL_CONFLICT_PLAN,
+        BATCH_CAUSAL_CONFLICT_REVIEW,
+        CONFLICT_MEMORY,
+        SCRIPT_START_EPISODE,
+        BATCH_SCRIPT_TEXT,
+        BATCH_SCRIPT_REVIEW,
+        BATCH_SCRIPT,
+        ALL_SCRIPT,
+        SCRIPT_MEMORY,
+        FINAL_SCRIPT,
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "framework_appearance_mapping": (
+        APPEARANCE_MAPPING,
+        ALL_ENRICHED_EPISODE_PLAN,
+        BATCH_ENRICHED_EPISODE_PLAN,
+        CONFLICT_START_EPISODE,
+        BATCH_CAUSAL_CONFLICT_PLAN,
+        BATCH_CAUSAL_CONFLICT_REVIEW,
+        CONFLICT_MEMORY,
+        SCRIPT_START_EPISODE,
+        BATCH_SCRIPT_TEXT,
+        BATCH_SCRIPT_REVIEW,
+        BATCH_SCRIPT,
+        ALL_SCRIPT,
+        SCRIPT_MEMORY,
+        FINAL_SCRIPT,
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "framework_enriched_episode_plan": (
+        ALL_ENRICHED_EPISODE_PLAN,
+        BATCH_ENRICHED_EPISODE_PLAN,
+        CONFLICT_START_EPISODE,
+        BATCH_CAUSAL_CONFLICT_PLAN,
+        BATCH_CAUSAL_CONFLICT_REVIEW,
+        CONFLICT_MEMORY,
+        SCRIPT_START_EPISODE,
+        BATCH_SCRIPT_TEXT,
+        BATCH_SCRIPT_REVIEW,
+        BATCH_SCRIPT,
+        ALL_SCRIPT,
+        SCRIPT_MEMORY,
+        FINAL_SCRIPT,
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "framework_causal_conflict": (
+        BATCH_ENRICHED_EPISODE_PLAN,
+        CONFLICT_START_EPISODE,
+        BATCH_CAUSAL_CONFLICT_PLAN,
+        BATCH_CAUSAL_CONFLICT_REVIEW,
+        CONFLICT_MEMORY,
+        SCRIPT_START_EPISODE,
+        BATCH_SCRIPT_TEXT,
+        BATCH_SCRIPT_REVIEW,
+        BATCH_SCRIPT,
+        ALL_SCRIPT,
+        SCRIPT_MEMORY,
+        FINAL_SCRIPT,
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
+    "framework_script": (
+        SCRIPT_START_EPISODE,
+        BATCH_SCRIPT_TEXT,
+        BATCH_SCRIPT_REVIEW,
+        BATCH_SCRIPT,
+        ALL_SCRIPT,
+        SCRIPT_MEMORY,
+        FINAL_SCRIPT,
+        LOCAL_REWRITE_FROM_STAGE,
+    ),
     "hooks": (
         APPEARANCE_CONTINUITY_MEMORY,
         ALL_HOOKS,
@@ -690,6 +849,11 @@ for _stage_key in (
     "characters",
     "scenes",
     "appearance",
+    "framework_scene_dictionary",
+    "framework_appearance_mapping",
+    "framework_enriched_episode_plan",
+    "framework_causal_conflict",
+    "framework_script",
     "hooks",
     "dialogues",
 ):
@@ -717,7 +881,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "character_appearance_requirements",
         "character_alias_naming_rules",
         "outfit_switch_rules",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -741,7 +905,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "character_appearance_requirements",
         "character_alias_naming_rules",
         "outfit_switch_rules",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -762,7 +926,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "scene_natural_language",
         "scene_json",
         "core_scene_summary",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -783,7 +947,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "scene_natural_language",
         "scene_json",
         "core_scene_summary",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -803,7 +967,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "scene_natural_language",
         "scene_json",
         "core_scene_summary",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -822,7 +986,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "scene_natural_language",
         "scene_json",
         "core_scene_summary",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -839,7 +1003,7 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "scene_natural_language",
         "scene_json",
         "core_scene_summary",
-        "appearance_mapping",
+        "appearanceMapping",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
@@ -853,13 +1017,58 @@ ROLLBACK_ARTIFACT_CLEAR_RULES: dict[str, tuple[str, ...]] = {
         "halted_message",
     ),
     "appearance": (
-        "appearance_mapping",
+        "appearanceMapping",
+        "sceneDictionary",
+        "scriptWorldRulesDigest",
+        "allEnrichedEpisodePlan",
         "character_registry",
         "character_alias_registry",
         "episode_alias_plan",
         "appearance_continuity_memory",
         "hook_plan",
         "dialogue_plan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "framework_scene_dictionary": (
+        "appearanceMapping",
+        "sceneDictionary",
+        "scriptWorldRulesDigest",
+        "allEnrichedEpisodePlan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "framework_appearance_mapping": (
+        "appearanceMapping",
+        "allEnrichedEpisodePlan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "framework_enriched_episode_plan": (
+        "allEnrichedEpisodePlan",
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "framework_causal_conflict": (
+        "script_batch",
+        "final_script",
+        "continuity_memory",
+        "final_output_text",
+        "halted_message",
+    ),
+    "framework_script": (
         "script_batch",
         "final_script",
         "continuity_memory",
@@ -917,6 +1126,11 @@ for _stage_key in (
     "characters",
     "scenes",
     "appearance",
+    "framework_scene_dictionary",
+    "framework_appearance_mapping",
+    "framework_enriched_episode_plan",
+    "framework_causal_conflict",
+    "framework_script",
     "hooks",
     "dialogues",
     "script",
@@ -947,155 +1161,19 @@ def _display_text(value: Any) -> str:
     return normalize_user_visible_text(value).strip()
 
 
-MULTILINE_WRAPPER_KEYS = (
-    "final_output_text",
-    "final_script",
-    "partial_script",
-    "content",
-    "text",
-    "body",
-    "message",
-    "output",
-    "answer",
-    "summary",
-    "description",
-    "value",
-)
-
-
-def _extract_wrapped_multiline_text(
-    value: Any,
-    *,
-    _depth: int = 0,
-) -> str:
-    if _depth > 6 or value in (None, ""):
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, dict):
-        # 有些阶段结果会被包在 content/text/final_output_text 之类的外壳里，
-        # 这里优先拆壳拿到原始多行文本，避免后续被通用可见文本清洗压平成一段。
-        for key in MULTILINE_WRAPPER_KEYS:
-            if key not in value:
-                continue
-            text = _extract_wrapped_multiline_text(
-                value.get(key),
-                _depth=_depth + 1,
-            )
-            if text:
-                return text
-        if len(value) == 1:
-            only_value = next(iter(value.values()))
-            return _extract_wrapped_multiline_text(
-                only_value,
-                _depth=_depth + 1,
-            )
-        return ""
-    if isinstance(value, (list, tuple, set)):
-        parts = [
-            _extract_wrapped_multiline_text(item, _depth=_depth + 1).strip()
-            for item in value
-        ]
-        meaningful_parts = [part for part in parts if part]
-        if meaningful_parts:
-            return "\n\n".join(meaningful_parts).strip()
-    return ""
-
-
 def _meaningful_stage_output_text(value: Any) -> str:
-    return clean_multiline_user_visible_text(value, preserve_blank_lines=True).strip()
+    return clean_user_visible_text(value).strip()
 
 
-def clean_multiline_user_visible_text(
-    value: Any,
-    *,
-    banned_prefixes: tuple[str, ...] = (),
-    fallback_text: str = "",
-    preserve_blank_lines: bool = False,
-) -> str:
+def clean_multiline_user_visible_text(value: Any) -> str:
     if not isinstance(value, str):
-        extracted = _extract_wrapped_multiline_text(value).strip()
-        if extracted:
-            return clean_multiline_user_visible_text(
-                extracted,
-                banned_prefixes=banned_prefixes,
-                fallback_text=fallback_text,
-                preserve_blank_lines=preserve_blank_lines,
-            )
-        return clean_user_visible_text(
-            value,
-            banned_prefixes=banned_prefixes,
-            fallback_text=fallback_text,
-        ).strip()
+        return clean_user_visible_text(value).strip()
     raw = value.replace("\r\n", "\n").replace("\r", "\n")
-    lines: list[str] = []
-    previous_blank = True
-    for raw_line in raw.split("\n"):
-        cleaned_line = clean_user_visible_text(
-            raw_line,
-            banned_prefixes=banned_prefixes,
-        ).strip()
-        if cleaned_line:
-            lines.append(cleaned_line)
-            previous_blank = False
-            continue
-        if preserve_blank_lines and not previous_blank and lines:
-            # 展示类文本需要保留原始段落分隔，避免前端/导出时又黏成一整块。
-            lines.append("")
-            previous_blank = True
-    while preserve_blank_lines and lines and lines[-1] == "":
-        lines.pop()
-    if preserve_blank_lines:
-        text = "\n".join(lines).strip()
-        if text and not is_placeholder_text(text):
-            return text
-        return str(fallback_text or "").strip()
-    non_empty_lines = [line for line in lines if line]
-    if len(non_empty_lines) > 1:
-        text = "\n".join(non_empty_lines).strip()
-        if text and not is_placeholder_text(text):
-            return text
-        return str(fallback_text or "").strip()
-    return clean_user_visible_text(
-        value,
-        banned_prefixes=banned_prefixes,
-        fallback_text=fallback_text,
-    ).strip()
-
-
-def normalize_multiline_user_visible_text(
-    value: Any,
-    *,
-    preserve_blank_lines: bool = False,
-) -> str:
-    if not isinstance(value, str):
-        extracted = _extract_wrapped_multiline_text(value).strip()
-        if extracted:
-            return normalize_multiline_user_visible_text(
-                extracted,
-                preserve_blank_lines=preserve_blank_lines,
-            )
-        return normalize_user_visible_text(value).strip()
-    raw = str(value).replace("\r\n", "\n").replace("\r", "\n")
-    lines: list[str] = []
-    previous_blank = True
-    for raw_line in raw.split("\n"):
-        cleaned_line = normalize_user_visible_text(raw_line).strip()
-        if cleaned_line:
-            lines.append(cleaned_line)
-            previous_blank = False
-            continue
-        if preserve_blank_lines and not previous_blank and lines:
-            lines.append("")
-            previous_blank = True
-    while preserve_blank_lines and lines and lines[-1] == "":
-        lines.pop()
-    if preserve_blank_lines:
-        return "\n".join(lines).strip()
+    lines = [clean_user_visible_text(line).strip() for line in raw.split("\n")]
     non_empty_lines = [line for line in lines if line]
     if len(non_empty_lines) > 1:
         return "\n".join(non_empty_lines).strip()
-    return normalize_user_visible_text(value).strip()
+    return clean_user_visible_text(value).strip()
 
 
 EXPORT_TECHNICAL_KEY_PATTERN = re.compile(r'^\s*"?[A-Za-z_][A-Za-z0-9_]*"?\s*:\s*(.*)$')
@@ -1132,12 +1210,12 @@ def _clean_export_key_line(line: str) -> str:
 
 
 INLINE_STRUCTURED_DUMP_MARKERS = (
-    '{"appearance_mapping"',
+    '{"appearanceMapping"',
     '{"character_setting"',
     '{"scene_setting"',
     '{"characters"',
     '{"scenes"',
-    "{'appearance_mapping'",
+    "{'appearanceMapping'",
     "{'character_setting'",
     "{'scene_setting'",
     "{'characters'",
@@ -1181,16 +1259,7 @@ def clean_export_readable_text(value: Any) -> str:
     if isinstance(value, str):
         stripped = _strip_trailing_structured_dump_text(value)
         if stripped:
-            return normalize_multiline_user_visible_text(
-                stripped,
-                preserve_blank_lines=True,
-            ).strip()
-    extracted = _extract_wrapped_multiline_text(value).strip()
-    if extracted:
-        return normalize_multiline_user_visible_text(
-            extracted,
-            preserve_blank_lines=True,
-        ).strip()
+            return normalize_user_visible_text(stripped).strip()
     return normalize_user_visible_text(value).strip()
 
 
@@ -1228,7 +1297,7 @@ def _export_text_has_placeholder_leaks(value: Any) -> bool:
     return False
 
 
-def _summarize_fastgpt_output(output: dict[str, Any]) -> str:
+def _summarize_workflow_output(output: dict[str, Any]) -> str:
     parts: list[str] = []
     for key, value in (output or {}).items():
         if isinstance(value, dict):
@@ -1286,6 +1355,8 @@ def _completion_confirmed(snapshot: dict[str, Any] | None) -> bool:
 def _awaiting_completion_confirmation(snapshot: dict[str, Any] | None) -> bool:
     if not isinstance(snapshot, dict):
         return False
+    if str(snapshot.get("asset_kind") or "").strip() in {"framework_planner", "framework_to_script"}:
+        return False
     if str(snapshot.get("status") or "") != "completed":
         return False
     if _completion_confirmed(snapshot):
@@ -1300,6 +1371,8 @@ def _awaiting_completion_confirmation(snapshot: dict[str, Any] | None) -> bool:
 
 def _can_stage_rollback(snapshot: dict[str, Any] | None) -> bool:
     if not isinstance(snapshot, dict):
+        return False
+    if str(snapshot.get("asset_kind") or "").strip() in {"framework_planner", "framework_to_script"}:
         return False
     if _completion_confirmed(snapshot):
         return False
@@ -1387,6 +1460,16 @@ def _normalize_rollback_stage_key(value: Any) -> str:
         "dialogues": "dialogues",
         "script": "script",
         "final": "final",
+        "framework_appearancemapping": "framework_appearance_mapping",
+        "framework_appearance_mapping": "framework_appearance_mapping",
+        "framework_causal_conflict_write": "framework_causal_conflict",
+        "framework_causal_conflict_review": "framework_causal_conflict",
+        "framework_causal_conflict_rewrite": "framework_causal_conflict",
+        "framework_causal_conflict_memory": "framework_causal_conflict",
+        "framework_script_write": "framework_script",
+        "framework_script_review": "framework_script",
+        "framework_script_rewrite": "framework_script",
+        "framework_script_memory": "framework_script",
     }
     return mapping.get(stage, stage)
 
@@ -1652,7 +1735,7 @@ def _best_script_text_candidate(
     best_score = (-1, -1, -1)
     seen: set[str] = set()
     for candidate in candidates:
-        text = clean_multiline_user_visible_text(candidate).strip()
+        text = clean_user_visible_text(candidate).strip()
         if not text or text in seen:
             continue
         if not is_meaningful_text(text):
@@ -1860,7 +1943,7 @@ def _scene_items_from_value(value: Any) -> list[dict[str, Any]]:
 def _appearance_character_items_from_value(value: Any) -> list[dict[str, Any]]:
     candidate = _jsonish_value(value)
     if isinstance(candidate, dict):
-        nested = candidate.get("appearance_mapping")
+        nested = candidate.get("appearanceMapping")
         if isinstance(nested, dict) and isinstance(nested.get("characters"), list):
             return [item for item in nested.get("characters") or [] if isinstance(item, dict)]
         if isinstance(candidate.get("characters"), list):
@@ -2013,7 +2096,9 @@ def _preferred_character_display_text(natural_text: Any, structured_value: Any) 
     return _select_character_display_text(natural_text, structured_value)[0]
 
 
-def use_fastgpt_backend() -> bool:
-    return settings.workflow_backend in {"fastgpt", "hybrid", "fastgpt_hybrid"}
+def use_legacy_workflow_backend() -> bool:
+    return False
 
 
+def use_remote_workflow_backend() -> bool:
+    return True

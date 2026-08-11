@@ -3,6 +3,8 @@ from __future__ import annotations
 
 """Extracted TaskManager mixin for StageCacheMixin."""
 
+import json
+
 from . import task_manager_common as _task_manager_common
 from .task_manager_common import *
 globals().update(
@@ -12,17 +14,6 @@ from .task_state import TaskRecord
 
 
 class StageCacheMixin:
-    def _first_multiline_stage_text(self, *values: Any) -> str:
-        # 前端阶段输出和完成后快照都依赖这里的文本，统一保留段落空行避免黏连。
-        for value in values:
-            text = clean_multiline_user_visible_text(
-                value,
-                preserve_blank_lines=True,
-            ).strip()
-            if text:
-                return text
-        return ""
-
     def _is_auxiliary_tool_asset(self, snapshot: dict[str, Any] | None) -> bool:
         return str((snapshot or {}).get("asset_kind") or "").strip() == AUXILIARY_TOOL_ASSET_KIND
 
@@ -76,10 +67,7 @@ class StageCacheMixin:
                 artifacts.pop(key, None)
         if is_tool_asset:
             for key in ("final_output_text", "final_script"):
-                text = clean_multiline_user_visible_text(
-                    raw_artifacts.get(key),
-                    preserve_blank_lines=True,
-                )
+                text = clean_multiline_user_visible_text(raw_artifacts.get(key))
                 if text:
                     artifacts[key] = text
                 else:
@@ -214,7 +202,7 @@ class StageCacheMixin:
             EPISODE_PLAN_DISPLAY_ARTIFACT: display_text,
             EPISODE_PLAN_DISPLAY_SOURCE_HASH_ARTIFACT: text_hash,
         }
-        record = self._project_record_get(project_id)
+        record = self._projects.get(project_id)
         if record is not None:
             self._update_snapshot(record, artifacts=artifacts_update)
             snapshot.setdefault("artifacts", {}).update(artifacts_update)
@@ -233,7 +221,18 @@ class StageCacheMixin:
         max_index = self._max_reached_rollback_stage_index(snapshot)
         if max_index < 0:
             return []
-        return list(ROLLBACK_STAGE_OPTIONS[: max_index + 1])
+        options = list(ROLLBACK_STAGE_OPTIONS[: max_index + 1])
+        if self._is_framework_to_script_snapshot(snapshot):
+            return [
+                (key, label)
+                for key, label in options
+                if key not in LEGACY_SCRIPT_ROLLBACK_KEYS
+            ]
+        return [
+            (key, label)
+            for key, label in options
+            if key not in FRAMEWORK_TO_SCRIPT_ROLLBACK_KEYS
+        ]
 
     def _max_reached_rollback_stage_index(self, snapshot: dict[str, Any]) -> int:
         """根据正式产物、缓存变量和当前阶段，推断用户真正已经到达的最深阶段。"""
@@ -275,6 +274,16 @@ class StageCacheMixin:
             reached.add("scenes")
         if variables.get(APPEARANCE_MAPPING):
             reached.add("appearance")
+        if variables.get(SCENE_DICTIONARY) or variables.get(SCRIPT_WORLD_RULES_DIGEST):
+            reached.add("framework_scene_dictionary")
+        if variables.get(APPEARANCE_MAPPING) and self._is_framework_to_script_snapshot(snapshot):
+            reached.add("framework_appearance_mapping")
+        if variables.get(ALL_ENRICHED_EPISODE_PLAN):
+            reached.add("framework_enriched_episode_plan")
+        if variables.get(BATCH_CAUSAL_CONFLICT_PLAN) or variables.get(CONFLICT_MEMORY):
+            reached.add("framework_causal_conflict")
+        if variables.get(BATCH_SCRIPT_TEXT) or variables.get(BATCH_SCRIPT) or variables.get(ALL_SCRIPT):
+            reached.add("framework_script")
         if variables.get(ALL_HOOKS) or variables.get(BATCH_HOOKS):
             reached.add("hooks")
         if variables.get(ALL_DIALOGUES) or variables.get(BATCH_DIALOGUES):
@@ -300,10 +309,6 @@ class StageCacheMixin:
         variables: dict[str, Any],
     ) -> str:
         """把运行时阶段名映射成回退阶段名，保证前后端对阶段理解一致。"""
-        # 新任务刚创建时 debug_state 里可能还没有初始化 variables；
-        # 这里先兜底成空字典，避免启动响应在返回前被 None.get 打断。
-        if not isinstance(variables, dict):
-            variables = {}
         batch_stage = _normalize_rollback_stage_key(variables.get(LOCAL_CURRENT_BATCH_STAGE))
         rewrite_stage = _normalize_rollback_stage_key(variables.get(LOCAL_REWRITE_FROM_STAGE))
         for candidate in (batch_stage, rewrite_stage):
@@ -332,6 +337,20 @@ class StageCacheMixin:
             "appearance_alias_review": "appearance",
             "appearance_alias_rewrite": "appearance",
             "appearance_alias_unstructured": "appearance",
+            "framework_scene_dictionary": "framework_scene_dictionary",
+            "framework_appearancemapping": "framework_appearance_mapping",
+            "framework_appearance_mapping": "framework_appearance_mapping",
+            "framework_enriched_episode_plan": "framework_enriched_episode_plan",
+            "framework_causal_conflict": "framework_causal_conflict",
+            "framework_causal_conflict_write": "framework_causal_conflict",
+            "framework_causal_conflict_review": "framework_causal_conflict",
+            "framework_causal_conflict_rewrite": "framework_causal_conflict",
+            "framework_causal_conflict_memory": "framework_causal_conflict",
+            "framework_script": "framework_script",
+            "framework_script_write": "framework_script",
+            "framework_script_review": "framework_script",
+            "framework_script_rewrite": "framework_script",
+            "framework_script_memory": "framework_script",
             "hook": "hooks",
             "hooks": "hooks",
             "hooks_writing": "hooks",
@@ -377,10 +396,12 @@ class StageCacheMixin:
     ) -> dict[str, str]:
         """只挑用户需要看的正式阶段内容，并补一段自然语言版摘要减轻等待焦虑。"""
         raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
-        partial_script_output = clean_multiline_user_visible_text(
+        framework_payload = self._framework_to_script_display_payload(snapshot, raw_artifacts)
+        if framework_payload:
+            return framework_payload
+        partial_script_output = clean_user_visible_text(
             artifacts.get(PARTIAL_SCRIPT_ARTIFACT)
-            or raw_artifacts.get(PARTIAL_SCRIPT_ARTIFACT),
-            preserve_blank_lines=True,
+            or raw_artifacts.get(PARTIAL_SCRIPT_ARTIFACT)
         )
         if self._is_auxiliary_tool_asset(snapshot):
             final_stage_output = clean_multiline_user_visible_text(
@@ -388,11 +409,10 @@ class StageCacheMixin:
                 or artifacts.get("final_script")
                 or raw_artifacts.get("final_output_text")
                 or raw_artifacts.get("final_script")
-                or "",
-                preserve_blank_lines=True,
+                or ""
             )
         else:
-            final_stage_output = self._first_multiline_stage_text(
+            final_stage_output = pick_best_user_visible_value(
                 artifacts.get("final_output_text")
                 or artifacts.get("final_script")
                 or raw_artifacts.get("final_output_text")
@@ -417,7 +437,7 @@ class StageCacheMixin:
 
         current_stage = self._snapshot_stage_to_rollback_stage(
             snapshot,
-            (snapshot.get("debug_state") or {}).get("variables") if isinstance(snapshot.get("debug_state"), dict) else {},
+            ((snapshot.get("debug_state") or {}).get("variables") or {}) if isinstance(snapshot.get("debug_state"), dict) else {},
         )
         stage_ceiling_map = {
             "framework": "framework",
@@ -468,11 +488,177 @@ class StageCacheMixin:
             "natural_output": natural_output,
         }
 
+    def _is_framework_to_script_snapshot(self, snapshot: dict[str, Any]) -> bool:
+        input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+        return (
+            bool(input_payload.get("framework_to_script"))
+            or str(input_payload.get("generation_chain") or "").strip() == "framework_to_script"
+            or str(input_payload.get("workflow_mode") or "").strip() == "framework_to_script"
+            or bool(input_payload.get("framework_planner_source"))
+        )
+
+    def _framework_to_script_display_payload(
+        self,
+        snapshot: dict[str, Any],
+        raw_artifacts: dict[str, Any],
+    ) -> dict[str, str] | None:
+        if not self._is_framework_to_script_snapshot(snapshot):
+            return None
+        debug_state = snapshot.get("debug_state") if isinstance(snapshot.get("debug_state"), dict) else {}
+        variables = debug_state.get("variables") if isinstance(debug_state.get("variables"), dict) else {}
+        current_stage = str(snapshot.get("current_stage") or "").strip().lower()
+        final_text = pick_best_user_visible_value(
+            raw_artifacts.get("final_output_text")
+            or raw_artifacts.get("final_script")
+            or snapshot.get("final_output_text")
+            or variables.get("finalScript")
+            or variables.get("final_script")
+            or variables.get("all_script")
+            or variables.get(ALL_SCRIPT)
+        )
+        stage_specs = [
+            (
+                ("final", "finalize", "finished"),
+                "final",
+                "基于框架生成的剧本正文",
+                final_text,
+            ),
+            (
+                ("framework_script", "framework_script_write", "framework_script_review", "framework_script_rewrite", "framework_script_memory"),
+                "framework_script",
+                STAGE_LABELS.get(current_stage) or "框架转剧本：正文对白融合编写",
+                variables.get("batchScriptText") or variables.get("batch_script_text") or variables.get(BATCH_SCRIPT) or variables.get(ALL_SCRIPT) or final_text,
+            ),
+            (
+                ("framework_causal_conflict", "framework_causal_conflict_write", "framework_causal_conflict_review", "framework_causal_conflict_rewrite", "framework_causal_conflict_memory"),
+                "framework_causal_conflict",
+                STAGE_LABELS.get(current_stage) or "框架转剧本：因果冲突推进计划编写",
+                variables.get("batchCausalConflictPlan") or variables.get("batch_causal_conflict_plan"),
+            ),
+            (
+                ("framework_enriched_episode_plan",),
+                "framework_enriched_episode_plan",
+                "框架转剧本：丰富分集计划",
+                variables.get("allEnrichedEpisodePlanText")
+                or variables.get("all_enriched_episode_plan_text")
+                or self._framework_to_script_summary_value(
+                    "allEnrichedEpisodePlan",
+                    variables.get("allEnrichedEpisodePlan") or variables.get("all_enriched_episode_plan"),
+                ),
+            ),
+            (
+                ("framework_appearanceMapping",),
+                "framework_appearanceMapping",
+                "框架转剧本：人设服装 alias 映射",
+                self._framework_to_script_summary_value(
+                    "appearanceMapping",
+                    variables.get("appearanceMapping")
+                    or variables.get("appearance_mapping")
+                    or variables.get(APPEARANCE_MAPPING),
+                ),
+            ),
+            (
+                ("framework_scene_dictionary",),
+                "framework_scene_dictionary",
+                "框架转剧本：核心场景提炼",
+                self._framework_to_script_summary_value(
+                    "sceneDictionary",
+                    variables.get("sceneDictionary")
+                    or variables.get("scene_dictionary")
+                    or variables.get("scriptWorldRulesDigest"),
+                ),
+            ),
+        ]
+        chosen_key = "framework_to_script"
+        chosen_title = STAGE_LABELS.get(current_stage) or "框架转剧本"
+        chosen_output: Any = ""
+        for stage_names, key, title, output in stage_specs:
+            if current_stage in stage_names:
+                chosen_key = key
+                chosen_title = title
+                chosen_output = output
+                break
+        if not chosen_output:
+            for _stage_names, key, title, output in stage_specs:
+                if output not in (None, "", {}, []):
+                    chosen_key = key
+                    chosen_title = title
+                    chosen_output = output
+                    break
+        raw_output = pick_best_user_visible_value(chosen_output)
+        natural_output = self._stage_preview_text(
+            snapshot,
+            stage_key=chosen_key,
+            stage_title=chosen_title,
+            raw_output=raw_output,
+        ) if raw_output else ""
+        return {
+            "stage_key": chosen_key,
+            "stage_title": chosen_title,
+            "output": raw_output,
+            "natural_output": natural_output,
+        }
+
+    def _framework_to_script_summary_value(self, stage_key: str, value: Any) -> str:
+        payload = self._framework_to_script_parse_display_value(value)
+        if stage_key == "appearanceMapping":
+            mapping = payload.get("appearanceMapping") if isinstance(payload, dict) else None
+            if not isinstance(mapping, dict):
+                mapping = payload if isinstance(payload, dict) else {}
+            characters = mapping.get("characters") if isinstance(mapping, dict) else []
+            count = len(characters) if isinstance(characters, list) else 0
+            principle = (
+                mapping.get("mapping_principle")
+                or mapping.get("naming_principle")
+                or mapping.get("global_naming_style")
+                or mapping.get("global_alias_rules")
+                if isinstance(mapping, dict)
+                else ""
+            )
+            suffix = f"；{pick_best_user_visible_value(principle)[:160]}" if principle else ""
+            return f"外观映射已生成：{count} 个角色{suffix}" if count else ""
+        if stage_key == "allEnrichedEpisodePlan":
+            items = payload if isinstance(payload, list) else payload.get("allEnrichedEpisodePlan", [])
+            if not isinstance(items, list):
+                return ""
+            episodes = [
+                _safe_int(item.get("episode"), 0)
+                for item in items
+                if isinstance(item, dict) and _safe_int(item.get("episode"), 0) > 0
+            ]
+            if episodes:
+                return f"丰富分集计划已生成：第 {min(episodes)}-{max(episodes)} 集，共 {len(items)} 条"
+            return f"丰富分集计划已生成：共 {len(items)} 条" if items else ""
+        if stage_key == "sceneDictionary":
+            scene = payload.get("sceneDictionary") if isinstance(payload, dict) else None
+            if not isinstance(scene, dict):
+                scene = payload if isinstance(payload, dict) else {}
+            core_scenes = scene.get("core_scenes") if isinstance(scene, dict) else []
+            count = len(core_scenes) if isinstance(core_scenes, list) else _safe_int(scene.get("scene_count"), 0)
+            names = [
+                str(item.get("name") or item.get("scene_name") or item.get("scene_id") or "").strip()
+                for item in core_scenes
+                if isinstance(item, dict)
+            ][:3] if isinstance(core_scenes, list) else []
+            suffix = f"：{'、'.join(name for name in names if name)}" if any(names) else ""
+            return f"场景字典已生成：{count} 个核心场景{suffix}" if count else pick_best_user_visible_value(value)[:500]
+        return pick_best_user_visible_value(value)[:500]
+
+    def _framework_to_script_parse_display_value(self, value: Any) -> Any:
+        if isinstance(value, (dict, list)):
+            return value
+        if isinstance(value, str) and value.strip():
+            try:
+                return json.loads(value)
+            except Exception:
+                return {}
+        return {}
+
     def _framework_stage_output_text(self, artifacts: dict[str, Any]) -> str:
-        return self._first_multiline_stage_text(artifacts.get("framework_natural_language"))
+        return pick_best_user_visible_value(artifacts.get("framework_natural_language"))
 
     def _worldview_stage_output_text(self, artifacts: dict[str, Any]) -> str:
-        return self._first_multiline_stage_text(artifacts.get("worldview_natural_language"))
+        return pick_best_user_visible_value(artifacts.get("worldview_natural_language"))
 
     def _character_stage_output_text(
         self,
@@ -492,7 +678,7 @@ class StageCacheMixin:
             or raw_artifacts.get("character_summary"),
             structured,
         )
-        return self._first_multiline_stage_text(natural)
+        return pick_best_user_visible_value(natural)
 
     def _scene_stage_output_text(
         self,
@@ -500,7 +686,7 @@ class StageCacheMixin:
         artifacts: dict[str, Any],
     ) -> str:
         raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
-        natural = self._first_multiline_stage_text(
+        natural = pick_best_user_visible_value(
             artifacts.get("scene_natural_language")
             or artifacts.get("core_scene_summary")
             or raw_artifacts.get("scene_natural_language")
@@ -517,10 +703,7 @@ class StageCacheMixin:
         raw_output: str,
     ) -> str:
         """阶段展示只走本地格式化，不再额外触发展示摘要调用。"""
-        text = clean_multiline_user_visible_text(
-            raw_output,
-            preserve_blank_lines=True,
-        ).strip()
+        text = clean_user_visible_text(raw_output).strip()
         if not text:
             return ""
         return self._fallback_stage_preview(stage_title, text)
@@ -568,7 +751,7 @@ class StageCacheMixin:
             STAGE_PREVIEW_STAGE_ARTIFACT: stage_key,
             STAGE_PREVIEW_SOURCE_HASH_ARTIFACT: text_hash,
         }
-        record = self._project_record_get(project_id)
+        record = self._projects.get(project_id)
         if record is not None:
             self._update_snapshot(record, artifacts=artifacts_update)
             snapshot.setdefault("artifacts", {}).update(artifacts_update)
@@ -584,6 +767,22 @@ class StageCacheMixin:
     def _public_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         """把内部任务快照裁成安全、简洁、适合前端直接消费的公开视图。"""
         artifacts = self._public_artifacts(snapshot)
+        input_payload_for_type = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+        raw_asset_type = str(snapshot.get("asset_type") or input_payload_for_type.get("asset_type") or "").strip()
+        asset_kind_for_type = str(snapshot.get("asset_kind") or input_payload_for_type.get("asset_kind") or "").strip()
+        script_format_mode_for_type = str(input_payload_for_type.get("script_format_mode") or "").strip()
+        if asset_kind_for_type == "framework_planner":
+            asset_type = "framework"
+        elif (
+            asset_kind_for_type == "framework_to_script"
+            or script_format_mode_for_type == "framework_to_script"
+            or bool(input_payload_for_type.get("framework_to_script"))
+        ):
+            asset_type = "new_script"
+        elif raw_asset_type in {"old_script", "legacy_script", "framework", "new_script", "character_reskin"}:
+            asset_type = "old_script" if raw_asset_type == "legacy_script" else raw_asset_type
+        else:
+            asset_type = "old_script"
         completion_confirmed = _completion_confirmed(snapshot)
         awaiting_confirmation = _awaiting_completion_confirmation(snapshot)
         can_stage_rollback = _can_stage_rollback(snapshot)
@@ -595,6 +794,16 @@ class StageCacheMixin:
         )
         rollback_script_start_options = rollback_stage_start_options.get("script", [])
         rollback_stage_options = self._available_rollback_stage_options(snapshot) if can_stage_rollback else []
+        best_final_script = self._best_final_script_text(snapshot)
+        has_framework_script_output = bool(
+            str(snapshot.get("asset_kind") or "").strip() == "framework_planner"
+            and str(getattr(self, "_framework_to_script_final_text", lambda _snapshot: "")(snapshot) or "").strip()
+        )
+        asset_flags = self._asset_completion_flags(
+            snapshot,
+            asset_kind_for_type or str(snapshot.get("asset_kind") or "project").strip(),
+            asset_type,
+        )
         payload: dict[str, Any] = {
             "project_id": snapshot.get("project_id"),
             "task_id": snapshot.get("task_id"),
@@ -616,6 +825,9 @@ class StageCacheMixin:
             "current_stage_label": snapshot.get("current_stage_label") or "待开始",
             "current_batch": snapshot.get("current_batch"),
             "asset_kind": snapshot.get("asset_kind") or "project",
+            "asset_type": asset_type,
+            **asset_flags,
+            "script_format_mode": script_format_mode_for_type,
             "tool_key": str(snapshot.get("tool_key") or "").strip(),
             "tool_label": str(snapshot.get("tool_label") or "").strip(),
             "completion_confirmed": completion_confirmed,
@@ -639,10 +851,26 @@ class StageCacheMixin:
             "display_stage_title": display_payload["stage_title"],
             "display_stage_output": display_payload["output"],
             "display_stage_output_natural": display_payload["natural_output"],
-            "has_final": bool(
-                str(artifacts.get("final_output_text") or artifacts.get("final_script") or "").strip()
-            ),
+            "has_final": bool(best_final_script),
+            "has_framework_script_output": has_framework_script_output,
+            "framework_to_script_ready": has_framework_script_output,
         }
+        if str(snapshot.get("asset_kind") or "").strip() == "framework_planner":
+            input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+            raw_artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+            debug_state = snapshot.get("debug_state") if isinstance(snapshot.get("debug_state"), dict) else {}
+            variables = debug_state.get("variables") if isinstance(debug_state.get("variables"), dict) else {}
+            framework_state = (
+                raw_artifacts.get("framework_planner_state")
+                or input_payload.get("framework_planner_state")
+                or variables.get("framework_planner_state")
+                or {}
+            )
+            if isinstance(framework_state, dict):
+                payload["framework_planner_state"] = copy.deepcopy(framework_state)
+        if self._is_auxiliary_tool_asset(snapshot):
+            payload["tool_request_payload"] = copy.deepcopy(snapshot.get("tool_request_payload") or {})
+            payload["tool_output_type"] = str(snapshot.get("tool_output_type") or "").strip()
         # 有意不把 debug_state / logs / 内部控制位直接暴露给前端。
         # 前端只看正式字段，避免中间变量、节点回显和恢复指针泄漏到公开接口。
         return payload
@@ -1065,7 +1293,7 @@ class StageCacheMixin:
             or variables.get(SCENE_NATURAL_LANGUAGE_VAR)
         )
         appearance_done = self._progress_value_present(
-            variables.get(APPEARANCE_MAPPING) or artifacts.get("appearance_mapping")
+            variables.get(APPEARANCE_MAPPING) or artifacts.get("appearanceMapping")
         )
         return [
             framework_done,
@@ -1192,11 +1420,10 @@ class StageCacheMixin:
             or input_payload.get("title")
             or ""
         ).strip()
-        story_outline = clean_multiline_user_visible_text(
+        story_outline = clean_user_visible_text(
             artifacts.get("story_outline")
             or input_payload.get("story_outline")
-            or "",
-            preserve_blank_lines=True,
+            or ""
         ).strip()
         total_episodes = snapshot.get("total_episodes") or input_payload.get("total_episodes")
         if title:
@@ -1209,26 +1436,35 @@ class StageCacheMixin:
 
     def _compact_completed_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         compacted = copy.deepcopy(snapshot)
+        asset_kind = str(snapshot.get("asset_kind") or "").strip()
+        if asset_kind in {"framework_planner", "framework_to_script"}:
+            compacted["completion_confirmed"] = False
+            compacted["awaiting_user_confirmation"] = False
+            compacted.setdefault("cache_retained", True)
+            return compacted
         if self._is_auxiliary_tool_asset(snapshot):
             compacted["artifacts"] = _select_non_empty_fields(
                 compacted.get("artifacts") or {},
-                ("story_outline", "final_script", "final_output_text", "tool_filename", "tool_output_type"),
+                (
+                    "story_outline",
+                    "final_script",
+                    "final_output_text",
+                    "tool_filename",
+                    "tool_output_type",
+                    "character_profile",
+                    "character_profile_json",
+                    "script_batches",
+                ),
             )
             artifacts = compacted.get("artifacts") if isinstance(compacted.get("artifacts"), dict) else {}
             if isinstance(artifacts, dict):
-                story_outline = clean_multiline_user_visible_text(
-                    artifacts.get("story_outline"),
-                    preserve_blank_lines=True,
-                ).strip()
+                story_outline = clean_user_visible_text(artifacts.get("story_outline")).strip()
                 if story_outline:
                     artifacts["story_outline"] = story_outline
                 else:
                     artifacts.pop("story_outline", None)
                 for key in ("final_script", "final_output_text"):
-                    text = clean_multiline_user_visible_text(
-                        artifacts.get(key),
-                        preserve_blank_lines=True,
-                    )
+                    text = clean_multiline_user_visible_text(artifacts.get(key))
                     if text:
                         artifacts[key] = text
                     else:
@@ -1262,14 +1498,8 @@ class StageCacheMixin:
         )
         artifacts = compacted.get("artifacts") if isinstance(compacted.get("artifacts"), dict) else {}
         if isinstance(artifacts, dict):
-            single_line_keys = ("script_title_content",)
-            for key in single_line_keys:
-                text = clean_user_visible_text(artifacts.get(key))
-                if text:
-                    artifacts[key] = text
-                else:
-                    artifacts.pop(key, None)
             for key in (
+                "script_title_content",
                 "framework_natural_language",
                 "story_outline",
                 "character_natural_language",
@@ -1281,17 +1511,14 @@ class StageCacheMixin:
                 "final_script",
                 "final_output_text",
             ):
-                text = clean_multiline_user_visible_text(
-                    artifacts.get(key),
-                    preserve_blank_lines=True,
-                )
+                text = clean_user_visible_text(artifacts.get(key))
                 if text:
                     artifacts[key] = text
                 else:
                     artifacts.pop(key, None)
             if is_meaningful_text(artifacts.get(APPEARANCE_NATURAL_LANGUAGE_ARTIFACT)):
                 for key in (
-                    "appearance_mapping",
+                    "appearanceMapping",
                     "character_registry",
                     "character_alias_registry",
                     "episode_alias_plan",
@@ -1319,6 +1546,84 @@ class StageCacheMixin:
             record.snapshot = compacted
         self._persist_snapshot(record)
 
+    def _asset_value_present(self, value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            text = value.strip()
+            return bool(text) and text not in {"{}", "[]", "null", "None"}
+        if isinstance(value, list):
+            return any(self._asset_value_present(item) for item in value)
+        if isinstance(value, dict):
+            ignored = {
+                "asset_id",
+                "asset_kind",
+                "asset_type",
+                "created_at",
+                "current_stage",
+                "current_view",
+                "project_id",
+                "status",
+                "updated_at",
+            }
+            return any(self._asset_value_present(item) for key, item in value.items() if key not in ignored)
+        return bool(value)
+
+    def _framework_asset_completed(self, snapshot: dict[str, Any]) -> bool:
+        input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        framework_state = (
+            artifacts.get("framework_planner_state")
+            if isinstance(artifacts.get("framework_planner_state"), dict)
+            else input_payload.get("framework_planner_state")
+            if isinstance(input_payload.get("framework_planner_state"), dict)
+            else {}
+        )
+        candidates = [
+            artifacts.get("framework_plan_package"),
+            input_payload.get("framework_plan_package"),
+            framework_state.get("framework_plan_package") if isinstance(framework_state, dict) else None,
+        ]
+        return any(self._asset_value_present(candidate) for candidate in candidates)
+
+    def _framework_to_script_asset_completed(self, snapshot: dict[str, Any]) -> bool:
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        final_text = str(getattr(self, "_framework_to_script_final_text", lambda _snapshot: "")(snapshot) or "").strip()
+        if not final_text:
+            final_text = str(artifacts.get("final_script") or artifacts.get("final_output_text") or "").strip()
+        if not final_text:
+            return False
+        workspace_state = artifacts.get("framework_to_script_state") if isinstance(artifacts.get("framework_to_script_state"), dict) else {}
+        input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+        total_episodes = _safe_int(snapshot.get("total_episodes") or input_payload.get("total_episodes"), 0)
+        coverage = getattr(self, "_framework_to_script_batch_coverage", None)
+        if callable(coverage) and workspace_state:
+            _, all_batches_complete = coverage(workspace_state, total_episodes)
+            return bool(all_batches_complete)
+        return bool(final_text) and str(snapshot.get("status") or "").strip() == "completed"
+
+    def _asset_completion_flags(self, snapshot: dict[str, Any], asset_kind: str, asset_type: str) -> dict[str, Any]:
+        input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+        if asset_kind == "framework_planner" or asset_type == "framework":
+            completed = self._framework_asset_completed(snapshot)
+        elif asset_kind == "framework_to_script" or asset_type == "new_script" or bool(input_payload.get("framework_to_script")):
+            completed = self._framework_to_script_asset_completed(snapshot)
+            if not completed and asset_kind not in {"framework_to_script", "framework_planner"}:
+                completed = str(snapshot.get("status") or "").strip() == "completed" and bool(self._best_final_script_text(snapshot))
+        elif self._is_auxiliary_tool_asset(snapshot):
+            completed = str(snapshot.get("status") or "").strip() == "completed" or bool(self._best_final_script_text(snapshot))
+        else:
+            completed = str(snapshot.get("status") or "").strip() == "completed" and bool(self._best_final_script_text(snapshot))
+        return {
+            "asset_completed": bool(completed),
+            "asset_status": "completed" if completed else "in_progress",
+            "asset_status_label": "已完成" if completed else "生成中",
+        }
+
     def _asset_summary(
         self,
         snapshot: dict[str, Any],
@@ -1336,10 +1641,42 @@ class StageCacheMixin:
             or ""
         ).strip()
         final_script = self._best_final_script_text(snapshot)
+        asset_kind = str(snapshot.get("asset_kind") or "project").strip()
+        raw_asset_type = str(snapshot.get("asset_type") or input_payload.get("asset_type") or "").strip()
+        script_format_mode = str(input_payload.get("script_format_mode") or "").strip()
+        if asset_kind == "framework_planner":
+            raw_asset_type = "framework"
+        elif asset_kind == "framework_to_script" or script_format_mode == "framework_to_script" or bool(input_payload.get("framework_to_script")):
+            raw_asset_type = "new_script"
+        elif raw_asset_type == "legacy_script":
+            raw_asset_type = "old_script"
+        elif raw_asset_type not in {"old_script", "framework", "new_script", "character_reskin"}:
+            raw_asset_type = "new_script"
+        has_framework_script_output = bool(
+            asset_kind == "framework_planner"
+            and str(getattr(self, "_framework_to_script_final_text", lambda _snapshot: "")(snapshot) or "").strip()
+        )
+        workspace_state = artifacts.get("framework_to_script_state") if isinstance(artifacts.get("framework_to_script_state"), dict) else {}
+        asset_locked = bool(
+            snapshot.get("asset_locked")
+            or snapshot.get("script_locked")
+            or input_payload.get("asset_locked")
+            or input_payload.get("script_locked")
+            or artifacts.get("asset_locked")
+            or artifacts.get("script_locked")
+            or workspace_state.get("script_locked")
+            or workspace_state.get("scriptLocked")
+            or workspace_state.get("locked")
+        )
         summary_source = story_outline or (final_script if is_tool_asset else "")
         summary = self._fallback_story_teaser(summary_source) if use_teaser else ""
         if not summary:
             summary = summary_source or "这个作品还没有填写故事梗概。"
+        asset_flags = self._asset_completion_flags(snapshot, asset_kind, raw_asset_type)
+        if asset_locked:
+            asset_flags["asset_completed"] = True
+            asset_flags["asset_status"] = "completed"
+            asset_flags["asset_status_label"] = "已锁定"
         payload = {
             "project_id": snapshot.get("project_id"),
             "task_id": snapshot.get("task_id"),
@@ -1361,7 +1698,25 @@ class StageCacheMixin:
             "completion_confirmed": _completion_confirmed(snapshot),
             "awaiting_user_confirmation": _awaiting_completion_confirmation(snapshot),
             "cache_notice": _cache_notice(snapshot),
-            "asset_kind": snapshot.get("asset_kind") or "project",
+            "asset_locked": asset_locked,
+            "script_locked": asset_locked,
+            "script_locked_at": str(
+                snapshot.get("script_locked_at")
+                or snapshot.get("locked_at")
+                or input_payload.get("script_locked_at")
+                or artifacts.get("script_locked_at")
+                or workspace_state.get("script_locked_at")
+                or workspace_state.get("scriptLockedAt")
+                or ""
+            ).strip(),
+            "asset_kind": asset_kind,
+            "asset_type": raw_asset_type,
+            **asset_flags,
+            "source_framework_project_id": snapshot.get("source_framework_project_id")
+            or input_payload.get("source_framework_project_id")
+            or input_payload.get("framework_asset_id"),
+            "has_framework_script_output": has_framework_script_output,
+            "framework_to_script_ready": has_framework_script_output,
             "tool_key": str(snapshot.get("tool_key") or "").strip(),
             "tool_label": str(snapshot.get("tool_label") or "").strip(),
             "tool_filename": str(artifacts.get("tool_filename") or "").strip(),
@@ -1418,7 +1773,7 @@ class StageCacheMixin:
             STORY_TEASER_ARTIFACT: teaser,
             STORY_TEASER_SOURCE_ARTIFACT: story_outline,
         }
-        record = self._project_record_get(project_id)
+        record = self._projects.get(project_id)
         if record is not None:
             self._update_snapshot(record, artifacts=artifacts_update)
             snapshot.setdefault("artifacts", {}).update(artifacts_update)
@@ -1431,4 +1786,3 @@ class StageCacheMixin:
             encoding="utf-8",
         )
         snapshot.setdefault("artifacts", {}).update(artifacts_update)
-

@@ -150,7 +150,8 @@ def _clean_text_line(line: str) -> str:
             return ""
         if is_machine_key(key):
             return value.strip(' "')
-        return f"{key}：{value.strip(' \"')}"
+        stripped = value.strip(' \"')
+        return f"{key}：{stripped}"
     return text.strip(' "')
 
 

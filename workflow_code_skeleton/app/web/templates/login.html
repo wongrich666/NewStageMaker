@@ -7,7 +7,8 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>登录 - 剧本生成工作台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260430-01">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260627-global-theme-v1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='theme_slideshow.css') }}?v=20260628-global-theme-v8">
 </head>
 <body class="workspace-body mono-page auth-page">
   <main class="chat-workspace-shell prelogin-shell">
@@ -20,81 +21,52 @@
             <span></span>
           </button>
           <a class="sidebar-brand" href="{{ url_for('index') }}">
-            <span class="sidebar-brand-mark">I</span>
+            <span class="sidebar-brand-mark"><img src="{{ url_for('static', filename='assets/logo.png') }}" alt="Logo"></span>
             <span class="sidebar-brand-text">
               <strong>IDEA TO SCRIPT</strong>
-              <em>剧本平台</em>
+              <em>IDEA TO SCRIPTS 剧本平台</em>
             </span>
           </a>
         </div>
       </div>
 
       <div class="sidebar-primary">
-        <a class="sidebar-create-btn" href="{{ url_for('login_page') }}">＋ 新建剧本</a>
+        <a class="sidebar-create-btn" href="{{ url_for('login_page', next=url_for('framework_planner_page', new='1')) }}">＋ 新建框架</a>
+        <a class="sidebar-create-btn" href="{{ url_for('login_page', next='/framework-to-script') }}">＋ 框架到剧本</a>
       </div>
 
       <div class="sidebar-nav">
         <section class="sidebar-group">
-          <div class="sidebar-group-label">我的剧本</div>
+          <div class="sidebar-group-label">我的资产</div>
           <div class="sidebar-section-head sidebar-section-head-compact">
             <span>资产会话</span>
             <a class="sidebar-refresh-btn prelogin-inline-link" href="{{ url_for('login_page') }}">刷新</a>
           </div>
           <div class="sidebar-folders">
-            <details class="workspace-folder" open>
+            <details class="workspace-folder">
               <summary>
-                <span>生成中的剧本</span>
+                <span>框架资产</span>
               </summary>
               <div class="workspace-compact-list">
-                <div class="workspace-empty">登录后查看正在生成的剧本。</div>
+                <div class="workspace-empty">登录后查看 01-07 框架资产。</div>
               </div>
             </details>
             <details class="workspace-folder">
               <summary>
-                <span>已完成剧本</span>
+                <span>剧本资产</span>
               </summary>
               <div class="workspace-compact-list">
-                <div class="workspace-empty">登录后查看已完成成品。</div>
+                <div class="workspace-empty">登录后查看 08-12 剧本资产。</div>
               </div>
             </details>
           </div>
         </section>
-
-        <section class="sidebar-group sidebar-tools-section">
-          <details class="workspace-folder tools-folder" open>
-            <summary>
-              <span class="sidebar-folder-link">辅助工具</span>
-            </summary>
-            <div class="tool-shortcut-list">
-              <a class="tool-shortcut" href="{{ url_for('login_page') }}">
-                <span>爆款文审核</span>
-                <small>登录后可运行</small>
-              </a>
-              <a class="tool-shortcut" href="{{ url_for('login_page') }}">
-                <span>换皮</span>
-                <small>登录后可运行</small>
-              </a>
-              <a class="tool-shortcut" href="{{ url_for('login_page') }}">
-                <span>增加爽感</span>
-                <small>登录后可运行</small>
-              </a>
-              <a class="tool-shortcut" href="{{ url_for('login_page') }}">
-                <span>只换人设</span>
-                <small>登录后可运行</small>
-              </a>
-            </div>
-          </details>
-        </section>
-
-        <div class="sidebar-group sidebar-links">
-          <a class="sidebar-text-link" href="{{ url_for('index') }}#community">社区好剧</a>
-        </div>
       </div>
 
       <div class="sidebar-footer">
         <div class="sidebar-footer-links">
           <a class="sidebar-profile-btn" href="{{ url_for('login_page') }}">
-            <span class="sidebar-profile-avatar">登</span>
+            <span class="sidebar-profile-avatar"><img src="{{ url_for('static', filename='assets/logo.png') }}" alt="Logo"></span>
             <span class="sidebar-footer-text">登录账号</span>
           </a>
           <a class="sidebar-logout-link" href="{{ url_for('register_page') }}">注册账号</a>
@@ -110,7 +82,6 @@
         <div class="runtime-strip">
           <div class="runtime-brandline">
             <span class="runtime-app-label">IDEA TO SCRIPT 剧本平台</span>
-            <strong>当前剧本：未选中</strong>
           </div>
           <div class="runtime-meta-strip">
             <div class="runtime-pill">
@@ -136,25 +107,20 @@
       <section class="chat-view prelogin-chat-view">
         <div class="chat-transcript prelogin-transcript">
           <section class="chat-empty-state prelogin-chat-empty">
-            <strong>剧本创作工作台</strong>
-            <p>直接输入你的创作需求，平台会把剧本框架和剧本正文按对话流展示，中间过程统一显示创作状态。</p>
-            <div class="chat-empty-tools">
-              <a class="chat-suggestion-btn" href="{{ url_for('login_page') }}">爆款文审核</a>
-              <a class="chat-suggestion-btn" href="{{ url_for('login_page') }}">换皮</a>
-              <a class="chat-suggestion-btn" href="{{ url_for('login_page') }}">增加爽感</a>
-              <a class="chat-suggestion-btn" href="{{ url_for('login_page') }}">只换人设</a>
-            </div>
+            <strong>剧本创作工作台~</strong>
+            <p>登录后可新建框架、导入框架生成剧本，并在左侧管理资产。</p>
           </section>
         </div>
 
         <div class="prelogin-auth-overlay">
-          <section class="card auth-card prelogin-inline-auth">
+          <section id="login-form" class="card auth-card prelogin-inline-auth">
             <p class="eyebrow">Welcome Back</p>
             <h2>登录工作台</h2>
             {% if error %}
               <div class="auth-error">{{ error }}</div>
             {% endif %}
             <form method="post" class="auth-form">
+              <input name="next" type="hidden" value="{{ next_url or '' }}">
               <label class="field">
                 <span>用户名</span>
                 <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" required>
@@ -170,36 +136,9 @@
         </div>
       </section>
 
-      <section class="composer-card prelogin-composer-card">
-        <div class="chat-composer-shell">
-          <div class="chat-composer-main">
-            <label class="composer-field composer-field-wide">
-              <span class="visually-hidden">想要的剧本</span>
-              <textarea placeholder="剧本创作需求请写在这里~" readonly></textarea>
-            </label>
-            <div class="composer-grid composer-grid-inline composer-grid-toolbar">
-              <label class="composer-field composer-field-mini">
-                <span>角色</span>
-                <input type="number" min="1" max="50" value="15" readonly>
-              </label>
-              <label class="composer-field composer-field-mini">
-                <span>集数</span>
-                <input type="number" min="1" max="100" value="15" readonly>
-              </label>
-              <div class="composer-inline-tools">
-                <a class="btn btn-secondary composer-action-link" href="{{ url_for('login_page') }}">暂停生成</a>
-                <a class="btn btn-secondary composer-action-link" href="{{ url_for('login_page') }}">继续生成</a>
-                <a class="btn btn-danger composer-action-link" href="{{ url_for('login_page') }}">终止生成</a>
-                <a class="btn btn-secondary composer-action-link" href="{{ url_for('login_page') }}">下载成品</a>
-                <a class="btn btn-ghost composer-action-link" href="{{ url_for('login_page') }}">清空输入</a>
-              </div>
-            </div>
-          </div>
-          <a class="composer-send-btn prelogin-send-link" href="{{ url_for('login_page') }}">开始</a>
-        </div>
-        <p class="composer-hint prelogin-status-note">登录后即可开始生成、查看进度、运行辅助工具。</p>
-      </section>
     </section>
   </main>
+  <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260628-global-theme-v8"></script>
+  <script src="{{ url_for('static', filename='sidebar.js') }}?v=20260612-sidebar-collapse-v1" defer></script>
 </body>
 </html>

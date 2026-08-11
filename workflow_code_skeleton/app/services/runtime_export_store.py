@@ -8,16 +8,46 @@ globals().update(
     {name: getattr(_task_manager_common, name) for name in dir(_task_manager_common) if name.startswith("_")}
 )
 from .task_state import TaskRecord
-from .fastgpt_contracts import (
+from .workflow_contracts import (
     STAGE_CHARACTERS,
     STAGE_CHARACTERS_NATURALIZE,
 )
 from .unstructured_naturalize import (
     build_character_unstructured_source,
     build_unstructured_stage_variables,
-    extract_unstructured_stage_output_text,
 )
+from ..utils.readable_labels import readable_text
 class RuntimeExportStoreMixin:
+    def _framework_to_script_final_text(self, snapshot: dict[str, Any]) -> str:
+        artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+        workspace_state = artifacts.get("framework_to_script_state")
+        if not isinstance(workspace_state, dict):
+            workspace_state = snapshot.get("framework_to_script_state")
+        if not isinstance(workspace_state, dict):
+            return ""
+        script_stages = workspace_state.get("scriptStages") or workspace_state.get("script_stages")
+        if not isinstance(script_stages, dict):
+            return ""
+        stage12 = script_stages.get("stage12")
+        if not isinstance(stage12, dict):
+            return ""
+
+        direct_text = str(stage12.get("batchScriptText") or stage12.get("batch_script_text") or "").strip()
+        if direct_text:
+            return direct_text
+
+        batches = stage12.get("batches")
+        if not isinstance(batches, dict):
+            return ""
+        parts: list[str] = []
+        for key, batch in sorted(batches.items(), key=lambda item: _safe_int(item[0], 999999)):
+            if not isinstance(batch, dict):
+                continue
+            text = str(batch.get("batchScriptText") or batch.get("batch_script_text") or "").strip()
+            if text:
+                parts.append(text)
+        return "\n\n".join(parts).strip()
+
     def _best_final_script_text(self, snapshot: dict[str, Any]) -> str:
         artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
         if str(snapshot.get("asset_kind") or "").strip() == AUXILIARY_TOOL_ASSET_KIND:
@@ -26,6 +56,10 @@ class RuntimeExportStoreMixin:
                 or artifacts.get("final_script")
                 or ""
             )
+        if str(snapshot.get("asset_kind") or "").strip() == "framework_planner":
+            framework_script = self._framework_to_script_final_text(snapshot)
+            if framework_script:
+                return clean_multiline_user_visible_text(framework_script)
         debug_state = snapshot.get("debug_state") if isinstance(snapshot.get("debug_state"), dict) else {}
         variables = debug_state.get("variables") if isinstance(debug_state.get("variables"), dict) else {}
         input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
@@ -95,37 +129,10 @@ class RuntimeExportStoreMixin:
         *,
         banned_prefixes: tuple[str, ...] = (),
     ) -> str:
-        if isinstance(value, str) and not is_machine_structured_content(value):
-            # DOCX 前置章节需要保留用户原本的换行和空行，避免人物/服饰块在导出前被压成一大段。
-            raw = (_strip_trailing_structured_dump_text(value) or value).replace("\r\n", "\n").replace("\r", "\n")
-            cleaned_lines: list[str] = []
-            previous_blank = True
-            for raw_line in raw.split("\n"):
-                line = clean_user_visible_text(
-                    raw_line,
-                    banned_prefixes=banned_prefixes,
-                ).strip()
-                if line:
-                    cleaned_lines.append(line)
-                    previous_blank = False
-                    continue
-                if not previous_blank:
-                    cleaned_lines.append("")
-                previous_blank = True
-            while cleaned_lines and cleaned_lines[0] == "":
-                cleaned_lines.pop(0)
-            while cleaned_lines and cleaned_lines[-1] == "":
-                cleaned_lines.pop()
-            text = "\n".join(cleaned_lines).strip()
-            if not text or is_placeholder_text(text):
-                return ""
-            return text
+        if isinstance(value, (dict, list)):
+            return clean_user_visible_text(readable_text(value), banned_prefixes=banned_prefixes)
         readable = clean_export_readable_text(value)
-        return clean_multiline_user_visible_text(
-            readable,
-            banned_prefixes=banned_prefixes,
-            preserve_blank_lines=True,
-        )
+        return clean_user_visible_text(readable, banned_prefixes=banned_prefixes)
 
     def _validated_export_natural_text(
         self,
@@ -135,10 +142,9 @@ class RuntimeExportStoreMixin:
     ) -> str:
         if is_machine_structured_content(value):
             return ""
-        text = self._sanitize_export_section_text(
-            value,
-            banned_prefixes=banned_prefixes,
-        ).strip()
+        text = _meaningful_stage_output_text(
+            self._sanitize_export_section_text(value, banned_prefixes=banned_prefixes)
+        )
         if not text:
             return ""
         if _export_text_has_placeholder_leaks(text):
@@ -153,7 +159,7 @@ class RuntimeExportStoreMixin:
         project_id: int,
         snapshot: dict[str, Any],
     ) -> TaskRecord:
-        existing = self._project_record_get(project_id)
+        existing = self._projects.get(project_id)
         if existing is not None:
             return existing
         return TaskRecord(
@@ -352,85 +358,12 @@ class RuntimeExportStoreMixin:
         if not has_meaningful_content(structured):
             logger.info("character_natural_language_export status=skip_missing_characters project_id=%s", project_id)
             return ""
-        if not use_fastgpt_backend():
-            logger.info("character_natural_language_export status=skip_non_fastgpt_backend project_id=%s", project_id)
-            return self._persist_export_character_natural_language(
-                snapshot,
-                project_id=project_id,
-                natural_text=fallback_text,
-            )
-
-        stage_variables = self._build_export_character_naturalize_stage_variables(snapshot)
-        source_text = str(stage_variables.get(UNSTRUCTURED_SOURCE) or "").strip()
-        if not source_text:
-            logger.warning(
-                "character_natural_language_export status=skip_invalid_source project_id=%s",
-                project_id,
-            )
-            return self._persist_export_character_natural_language(
-                snapshot,
-                project_id=project_id,
-                natural_text=fallback_text,
-            )
-
-        try:
-            workflow_input = WorkflowInput.from_dict(self._snapshot_input_payload(snapshot))
-            from ..orchestrators.fastgpt_hybrid_workflow import run_stage_with_contract_guard
-            from .fastgpt_client import FastGPTClient
-            from .fastgpt_contracts import STAGE_CHARACTERS_NATURALIZE
-
-            state = WorkflowState(user_input=workflow_input, variables=dict(stage_variables))
-            runner = FastGPTClient()
-            output = run_stage_with_contract_guard(
-                state,
-                runner,
-                STAGE_CHARACTERS_NATURALIZE,
-                stage_variables,
-                stage_key="character",
-                message="正在整理人物小传自然语言说明。",
-                output_field=CHARACTER_NATURAL_LANGUAGE_VAR,
-                sync_output_to_state=False,
-            )
-            natural = extract_unstructured_stage_output_text(
-                output,
-                output_field=CHARACTER_NATURAL_LANGUAGE_VAR,
-            )
-            natural = _meaningful_stage_output_text(self._sanitize_export_section_text(natural))
-            issues = _character_natural_text_quality_issues(natural, structured) if natural else []
-            if not natural or issues:
-                logger.warning(
-                    "character_natural_language_export status=empty_or_rejected_after_stage project_id=%s issues=%s preview=%s",
-                    project_id,
-                    ",".join(issues),
-                    _truncate_log_text(natural, max_chars=240),
-                )
-                return self._persist_export_character_natural_language(
-                    snapshot,
-                    project_id=project_id,
-                    natural_text=fallback_text,
-                )
-            self._persist_export_character_natural_language(
-                snapshot,
-                project_id=project_id,
-                natural_text=natural,
-            )
-            logger.info(
-                "character_natural_language_export status=generated_and_persisted project_id=%s",
-                project_id,
-            )
-            return natural
-        except Exception as exc:
-            logger.warning(
-                "character_natural_language_export status=fallback_after_failure project_id=%s preview=%s",
-                project_id,
-                _truncate_log_text(str(exc), max_chars=320),
-            )
-            return self._persist_export_character_natural_language(
-                snapshot,
-                project_id=project_id,
-                natural_text=fallback_text,
-            )
-
+        logger.info("character_natural_language_export status=local_fallback project_id=%s", project_id)
+        return self._persist_export_character_natural_language(
+            snapshot,
+            project_id=project_id,
+            natural_text=fallback_text,
+        )
     def _build_export_appearance_stage_variables(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         artifacts = self._snapshot_artifacts_dict(snapshot)
         input_payload = self._snapshot_input_payload(snapshot)
@@ -463,7 +396,7 @@ class RuntimeExportStoreMixin:
             input_payload.get("character_alias_naming_rules"),
             input_payload.get("alias_naming_rules"),
         )
-        fill(APPEARANCE_MAPPING, artifacts.get("appearance_mapping"))
+        fill(APPEARANCE_MAPPING, artifacts.get("appearanceMapping"))
         return variables
 
     def _ensure_export_appearance_natural_language(
@@ -487,62 +420,14 @@ class RuntimeExportStoreMixin:
 
         structured = self._snapshot_export_value(
             snapshot,
-            artifact_keys=("appearance_mapping",),
-            variable_keys=(APPEARANCE_MAPPING, APPEARANCE_MAPPING_VAR),
+            artifact_keys=("appearanceMapping",),
+            variable_keys=(APPEARANCE_MAPPING, APPEARANCE_MAPPING_VAR, APPEARANCE_ALIAS_MAPPING_VAR),
         )
         if not has_meaningful_content(structured):
             logger.info("appearance_natural_language_export status=skip_missing_mapping project_id=%s", project_id)
             return ""
-        if not use_fastgpt_backend():
-            logger.info("appearance_natural_language_export status=skip_non_fastgpt_backend project_id=%s", project_id)
-            return ""
-
-        try:
-            workflow_input = WorkflowInput.from_dict(self._snapshot_input_payload(snapshot))
-            stage_variables = self._build_export_appearance_stage_variables(snapshot)
-            from ..orchestrators.fastgpt_hybrid_workflow import run_stage_with_contract_guard
-            from .fastgpt_client import FastGPTClient
-            from .fastgpt_contracts import STAGE_APPEARANCE_ALIAS_UNSTRUCTURED
-
-            state = WorkflowState(user_input=workflow_input, variables=dict(stage_variables))
-            runner = FastGPTClient()
-            output = run_stage_with_contract_guard(
-                state,
-                runner,
-                STAGE_APPEARANCE_ALIAS_UNSTRUCTURED,
-                stage_variables,
-                stage_key="appearance",
-                message="正在整理服装版本自然语言说明。",
-                output_field=APPEARANCE_NATURAL_LANGUAGE_VAR,
-                sync_output_to_state=False,
-            )
-            natural = str(output.get(APPEARANCE_NATURAL_LANGUAGE_VAR) or "").strip()
-            natural = _meaningful_stage_output_text(self._sanitize_export_section_text(natural))
-            if not natural:
-                logger.warning(
-                    "appearance_natural_language_export status=empty_after_stage project_id=%s",
-                    project_id,
-                )
-                return ""
-            self._apply_snapshot_variable_artifact_updates(
-                project_id,
-                snapshot,
-                artifact_updates={APPEARANCE_NATURAL_LANGUAGE_ARTIFACT: natural},
-                variable_updates={APPEARANCE_NATURAL_LANGUAGE_VAR: natural},
-            )
-            logger.info(
-                "appearance_natural_language_export status=generated_and_persisted project_id=%s",
-                project_id,
-            )
-            return natural
-        except Exception as exc:
-            logger.warning(
-                "appearance_natural_language_export status=fallback_after_failure project_id=%s preview=%s",
-                project_id,
-                _truncate_log_text(str(exc), max_chars=320),
-            )
-            return ""
-
+        logger.info("appearance_natural_language_export status=no_auxiliary_remote_stage project_id=%s", project_id)
+        return ""
     def _extract_labeled_export_segment(
         self,
         value: Any,
@@ -703,7 +588,7 @@ class RuntimeExportStoreMixin:
         ):
             raw_text = clean_export_readable_text(candidate).strip()
             sanitized = self._sanitize_export_section_text(raw_text, banned_prefixes=banned)
-            text = sanitized.strip()
+            text = _meaningful_stage_output_text(sanitized)
             issues = _character_natural_text_quality_issues(raw_text, structured) if raw_text else []
             if text and not issues:
                 return text
@@ -721,14 +606,14 @@ class RuntimeExportStoreMixin:
             self._snapshot_export_value(snapshot, variable_keys=(APPEARANCE_NATURAL_LANGUAGE_VAR, "c7VnQ4eX")),
             self._snapshot_export_value(snapshot, artifact_keys=(APPEARANCE_NATURAL_LANGUAGE_ARTIFACT,)),
         ):
-            text = self._sanitize_export_section_text(candidate).strip()
+            text = _meaningful_stage_output_text(self._sanitize_export_section_text(candidate))
             if text:
                 return text
 
         structured = self._snapshot_export_value(
             snapshot,
-            artifact_keys=("appearance_mapping",),
-            variable_keys=(APPEARANCE_MAPPING, APPEARANCE_MAPPING_VAR),
+            artifact_keys=("appearanceMapping",),
+            variable_keys=(APPEARANCE_MAPPING, APPEARANCE_MAPPING_VAR, APPEARANCE_ALIAS_MAPPING_VAR),
         )
         characters = _appearance_character_items_from_value(structured)
         if not characters:
@@ -783,7 +668,7 @@ class RuntimeExportStoreMixin:
         ):
             if is_machine_structured_content(candidate):
                 continue
-            text = self._sanitize_export_section_text(candidate).strip()
+            text = _meaningful_stage_output_text(self._sanitize_export_section_text(candidate))
             if text and _export_text_has_placeholder_leaks(text):
                 continue
             if text:
@@ -840,6 +725,7 @@ class RuntimeExportStoreMixin:
         final_script = self._best_final_script_text(snapshot)
         if not final_script:
             return ""
+        final_script = readable_text(final_script)
 
         parts: list[str] = [title or f"project_{snapshot.get('project_id')}"]
         for heading, section_text in (
@@ -1071,6 +957,10 @@ class RuntimeExportStoreMixin:
                 continue
             if current_heading:
                 current_lines.append(line)
+                continue
+            inline_block = self._parse_inline_character_block(line)
+            if inline_block:
+                blocks.append(inline_block)
         if current_heading:
             blocks.append({"heading": current_heading, "lines": current_lines[:]})
         return blocks
@@ -1084,6 +974,8 @@ class RuntimeExportStoreMixin:
         if text.startswith("【") and "】" in text and "人物小传" not in text and "主要角色设定" not in text:
             suffix = text.split("】", 1)[1].strip()
             return bool(suffix)
+        if re.match(r"^[\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9·]{1,12}[（(][^）)]{1,20}[）)]", text):
+            return True
         return False
 
     def _parse_character_heading(self, heading: str) -> tuple[str, str]:
@@ -1099,7 +991,25 @@ class RuntimeExportStoreMixin:
         if match:
             name = re.split(r"[（(]", match.group("name"), maxsplit=1)[0].strip()
             return name, match.group("label").strip()
+        match = re.match(r"^(?P<name>.+?)[（(](?P<role>[^）)]+)[）)]", text)
+        if match:
+            return match.group("name").strip(), match.group("role").strip()
         return text, ""
+
+    def _parse_inline_character_block(self, line: str) -> dict[str, Any] | None:
+        text = re.sub(r"^\s*(?:[-*•]\s*|\d+[.、]\s*)", "", str(line or "").strip()).strip()
+        match = re.match(
+            r"^(?P<name>[\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9·]{1,12})(?:[（(](?P<role>[^）)]{1,20})[）)])?[：:]\s*(?P<body>.+)$",
+            text,
+        )
+        if not match:
+            return None
+        role = str(match.group("role") or "角色").strip()
+        name = str(match.group("name") or "").strip()
+        body = str(match.group("body") or "").strip()
+        if not name or not body:
+            return None
+        return {"heading": f"【{role}】{name}", "lines": [f"人物小传：{body}"]}
 
     def _parse_inline_fields(self, lines: list[str]) -> dict[str, str]:
         fields: dict[str, str] = {}
@@ -1290,6 +1200,11 @@ class RuntimeExportStoreMixin:
             raise ValueError("项目不存在")
         artifacts = snapshot.get("artifacts", {})
         final_script = self._best_final_script_text(snapshot)
+        if (
+            str(snapshot.get("asset_kind") or "").strip() == AUXILIARY_TOOL_ASSET_KIND
+            and str(snapshot.get("tool_key") or "").strip() == "character_reskin"
+        ):
+            return self._save_character_reskin_docx(project_id, snapshot)
         total_episodes = _safe_int(
             snapshot.get("total_episodes")
             or (snapshot.get("input_payload") or {}).get("total_episodes"),
@@ -1327,7 +1242,7 @@ class RuntimeExportStoreMixin:
             self.exports_dir / f"{base_name}_character_registry.json",
             self.exports_dir / f"{base_name}_character_alias_registry.json",
             self.exports_dir / f"{base_name}_episode_alias_plan.json",
-            self.exports_dir / f"{base_name}_appearance_mapping.json",
+            self.exports_dir / f"{base_name}_appearanceMapping.json",
             self.exports_dir / f"{base_name}_appearance_continuity_memory.json",
             self.exports_dir / f"{base_name}_normalized_episode_plan.json",
         ]
@@ -1349,9 +1264,8 @@ class RuntimeExportStoreMixin:
             if stale_path.exists():
                 stale_path.unlink()
 
-        existing_record = self._project_record_get(project_id)
         self._update_snapshot(
-            existing_record or TaskRecord(
+            self._projects.get(project_id) or TaskRecord(
                 user_id=int(snapshot.get("user_id") or 0),
                 project_id=project_id,
                 task_id=str(snapshot.get("task_id", "")),
@@ -1371,3 +1285,44 @@ class RuntimeExportStoreMixin:
         )
         return docx_path
 
+    def _save_character_reskin_docx(self, project_id: int, snapshot: dict[str, Any]) -> Path:
+        artifacts = snapshot.get("artifacts", {}) if isinstance(snapshot.get("artifacts"), dict) else {}
+        final_script = self._best_final_script_text(snapshot)
+        if not final_script:
+            raise ValueError("当前只换人设资产还没有可下载的剧本正文")
+        title = str(
+            snapshot.get("title")
+            or (snapshot.get("input_payload") or {}).get("title")
+            or f"character_reskin_{project_id}"
+        ).strip() or f"character_reskin_{project_id}"
+        safe_title = "".join(ch if ch not in '<>:"/\\|?*' else "_" for ch in title)[:80]
+        docx_path = self.exports_dir / f"{safe_title}_{project_id}.docx"
+        try:
+            from ..utils.character_reskin_docx import build_character_reskin_docx
+
+            build_character_reskin_docx(
+                output_path=docx_path,
+                title=title,
+                profile_json=artifacts.get("character_profile_json"),
+                character_profile=artifacts.get("character_profile"),
+                script_batches=artifacts.get("script_batches"),
+                final_output_text=final_script,
+                core_scenes=(
+                    artifacts.get("core_scenes")
+                    or artifacts.get("coreScenes")
+                    or (snapshot.get("input_payload") or {}).get("core_scenes")
+                    or (snapshot.get("input_payload") or {}).get("hexin_changjing")
+                    or (snapshot.get("tool_request_payload") or {}).get("core_scenes")
+                    or (snapshot.get("tool_request_payload") or {}).get("hexin_changjing")
+                    or (snapshot.get("tool_request_payload") or {}).get("核心场景")
+                    or ""
+                ),
+            )
+        except ModuleNotFoundError as exc:
+            if exc.name == "docx":
+                raise ValueError("当前环境缺少 python-docx，暂时无法导出只换人设 DOCX。") from exc
+            raise ValueError(f"导出只换人设 DOCX 失败：{exc}") from exc
+        except Exception as exc:
+            logger.exception("导出只换人设 Word 失败: %s", project_id)
+            raise ValueError(f"导出只换人设 DOCX 失败：{exc}") from exc
+        return docx_path

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +11,50 @@ def _pick(data: dict[str, Any], *keys: str, default: Any = "") -> Any:
         if key in data and data[key] is not None:
             return data[key]
     return default
+
+
+def _jsonish_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _derive_total_episodes_from_package(value: Any) -> int:
+    package = _jsonish_dict(value)
+    if isinstance(package.get("framework_plan_package"), dict):
+        package = package["framework_plan_package"]
+    candidates = [
+        package.get("totalEpisodes"),
+        package.get("total_episodes"),
+        package.get("episode_count"),
+    ]
+    basic = package.get("basic_config")
+    if isinstance(basic, dict):
+        candidates.extend(
+            [
+                basic.get("totalEpisodes"),
+                basic.get("total_episodes"),
+                basic.get("episode_count"),
+                basic.get("episodes_per_season"),
+            ]
+        )
+    for candidate in candidates:
+        try:
+            if isinstance(candidate, bool):
+                continue
+            number = int(candidate)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            return number
+    return 0
 
 
 def derive_script_title_content(*candidates: Any) -> str:
@@ -37,6 +81,16 @@ class WorkflowInput:
     core_scene_input: str
     character_bios: str
     episode_plan: str
+    selected_preference_tags: list[dict[str, Any]] = field(default_factory=list)
+    selected_preference_tag_ids: list[str] = field(default_factory=list)
+    user_preference_prompt: str = ""
+    user_knowledge_tag_prompt: str = ""
+    script_format_mode: str = ""
+    framework_plan_package: Any = field(default_factory=dict)
+    worldview_plan: Any = field(default_factory=dict)
+    beat_checkpoint_timeline: Any = field(default_factory=list)
+    character_storylines: Any = field(default_factory=list)
+    character_plan: Any = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "WorkflowInput":
@@ -50,6 +104,12 @@ class WorkflowInput:
                 default="",
             )
         ).strip()
+        framework_plan_package = _pick(data, "framework_plan_package", "frameworkPlanPackage", default={})
+        total_episodes = int(
+            _pick(data, "total_episodes", "总集数", default=0)
+        )
+        if total_episodes <= 0:
+            total_episodes = _derive_total_episodes_from_package(framework_plan_package)
         return cls(
             title=str(
                 _pick(
@@ -70,9 +130,7 @@ class WorkflowInput:
                     default=600,
                 )
             ),
-            total_episodes=int(
-                _pick(data, "total_episodes", "总集数", default=0)
-            ),
+            total_episodes=total_episodes,
             user_expectation=user_expectation,
             character_count=int(
                 _pick(data, "character_count", "角色数量", default=0)
@@ -118,6 +176,36 @@ class WorkflowInput:
             episode_plan=str(
                 _pick(data, "episode_plan", "分集计划", default="")
             ).strip(),
+            selected_preference_tags=_coerce_tag_list(
+                _pick(data, "selected_preference_tags", default=[])
+            ),
+            selected_preference_tag_ids=_coerce_string_list(
+                _pick(data, "selected_preference_tag_ids", default=[])
+            ),
+            user_preference_prompt=str(
+                _pick(data, "user_preference_prompt", default="")
+            ).strip(),
+            user_knowledge_tag_prompt=str(
+                _pick(data, "user_knowledge_tag_prompt", default="")
+            ).strip(),
+            script_format_mode=str(
+                _pick(data, "script_format_mode", "scriptFormatMode", default="")
+            ).strip(),
+            framework_plan_package=framework_plan_package,
+            worldview_plan=_pick(data, "worldview_plan", "worldviewPlan", default={}),
+            beat_checkpoint_timeline=_pick(
+                data,
+                "beat_checkpoint_timeline",
+                "beatCheckpointTimeline",
+                default=[],
+            ),
+            character_storylines=_pick(
+                data,
+                "character_storylines",
+                "characterStorylines",
+                default=[],
+            ),
+            character_plan=_pick(data, "character_plan", "characterPlan", default={}),
         )
 
     @classmethod
@@ -140,9 +228,57 @@ class WorkflowInput:
         has_framework_prompt = bool(
             self.user_expectation and self.character_count > 0 and self.total_episodes > 0
         )
-        if not has_full_outline and not has_framework_prompt:
+        has_framework_to_script_package = bool(
+            self.script_format_mode in {"framework_to_script", "better_framework_script"}
+            and self.framework_plan_package
+            and self.total_episodes > 0
+        )
+        if not has_full_outline and not has_framework_prompt and not has_framework_to_script_package:
             raise ValueError(
                 "请提供完整的故事大纲/人物小传/分集计划，或至少提供 "
                 "user_expectation / 用户期待、character_count / 角色数量、"
-                "total_episodes / 总集数"
+                "total_episodes / 总集数，或提供 framework_to_script 专用的 "
+                "framework_plan_package / total_episodes"
             )
+
+
+def _coerce_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = str(item.get("id") if isinstance(item, dict) else item or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def _coerce_tag_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict):
+            tag_id = str(item.get("id") or "").strip()
+            name = str(item.get("name") or "").strip()
+            if not tag_id and not name:
+                continue
+            result.append(
+                {
+                    "id": tag_id,
+                    "name": name,
+                    "category": str(item.get("category") or "").strip(),
+                    "builtin": bool(item.get("builtin")),
+                    "description": str(item.get("description") or "").strip(),
+                    "prompt_text": str(item.get("prompt_text") or "").strip(),
+                }
+            )
+        else:
+            text = str(item or "").strip()
+            if text:
+                result.append({"id": text, "name": text, "category": "", "builtin": False, "description": "", "prompt_text": ""})
+    return result

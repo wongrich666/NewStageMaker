@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 """Extracted TaskManager mixin for ProjectSnapshotStoreMixin."""
@@ -9,6 +8,113 @@ globals().update(
     {name: getattr(_task_manager_common, name) for name in dir(_task_manager_common) if name.startswith("_")}
 )
 from .task_state import TaskRecord
+from .task_manager_common import (
+    _awaiting_completion_confirmation,
+    _completion_confirmed,
+    _safe_int,
+)
+
+SNAPSHOT_LOG_LIMIT = 200
+
+
+def _read_json_object(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        try:
+            _task_manager_common.logger.warning("读取项目快照失败：path=%s error=%s", path, exc)
+        except Exception:
+            pass
+        return None
+    if not isinstance(data, dict):
+        try:
+            _task_manager_common.logger.warning("项目快照不是 JSON object：path=%s type=%s", path, type(data).__name__)
+        except Exception:
+            pass
+        return None
+    return data
+
+
+def _write_json_object(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.tmp")
+    temp_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temp_path.replace(path)
+
+
+def _normalized_log_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    logs: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict):
+            logs.append(dict(item))
+    return logs[-SNAPSHOT_LOG_LIMIT:]
+
+
+def _next_log_index(logs: list[dict[str, Any]]) -> int:
+    if not logs:
+        return 1
+    last = logs[-1]
+    return max(1, _safe_int(last.get("index"), len(logs))) + 1
+
+
+def _sync_wait_tracking(
+    snapshot: dict[str, Any],
+    *,
+    previous_status: Any,
+    current_status: Any,
+    current_time_iso: str,
+) -> None:
+    """同步任务等待/运行耗时字段。
+
+    wait_started_at 表示当前 running/pending/pausing 区间的开始时间。
+    wait_elapsed_ms 表示已经累计完成的等待/运行毫秒数。
+    """
+
+    from datetime import datetime, timezone
+
+    running_statuses = set(WAITING_STATUSES)
+    previous = str(previous_status or "").strip().lower()
+    current = str(current_status or "").strip().lower()
+
+    def _parse_iso(value: Any) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            if text.endswith("Z"):
+                text = f"{text[:-1]}+00:00"
+            parsed = datetime.fromisoformat(text)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed
+        except Exception:
+            return None
+
+    current_dt = _parse_iso(current_time_iso) or datetime.now(timezone.utc)
+    elapsed_ms = max(0, _safe_int(snapshot.get("wait_elapsed_ms"), 0))
+
+    was_running = previous in running_statuses
+    is_running = current in running_statuses
+
+    if is_running:
+        if not was_running or not snapshot.get("wait_started_at"):
+            snapshot["wait_started_at"] = current_time_iso
+        snapshot["wait_elapsed_ms"] = max(0, elapsed_ms)
+        return
+
+    if was_running:
+        started_at = _parse_iso(snapshot.get("wait_started_at"))
+        if started_at is not None:
+            delta_ms = int(max(0, (current_dt - started_at).total_seconds() * 1000))
+            elapsed_ms += delta_ms
+
+    snapshot["wait_elapsed_ms"] = max(0, elapsed_ms)
+    snapshot["wait_started_at"] = None
 
 
 class ProjectSnapshotStoreMixin:
@@ -18,10 +124,6 @@ class ProjectSnapshotStoreMixin:
         *,
         runtime_archive_dir: Path | None = None,
     ) -> None:
-        if getattr(self, "_project_store_lock", None) is None:
-            # _projects 会被请求线程和后台任务并发访问；
-            # 这里单独维护一把锁，只保护字典浅拷贝和增删改，不把 I/O 放进锁里。
-            self._project_store_lock = threading.RLock()
         self.base_dir = Path(runtime_data_dir).resolve()
         self.runtime_root = (
             self.base_dir.parent
@@ -40,53 +142,77 @@ class ProjectSnapshotStoreMixin:
         self.projects_dir.mkdir(parents=True, exist_ok=True)
         self.exports_dir.mkdir(parents=True, exist_ok=True)
 
-    def _ensure_project_store_lock(self) -> threading.RLock:
-        lock = getattr(self, "_project_store_lock", None)
-        if lock is None:
-            lock = threading.RLock()
-            self._project_store_lock = lock
-        return lock
-
-    def _project_record_get(self, project_id: int) -> TaskRecord | None:
-        with self._ensure_project_store_lock():
-            return self._projects.get(project_id)
-
-    def _project_record_set(self, project_id: int, record: TaskRecord) -> None:
-        with self._ensure_project_store_lock():
-            self._projects[project_id] = record
-
-    def _project_record_pop(self, project_id: int) -> TaskRecord | None:
-        with self._ensure_project_store_lock():
-            return self._projects.pop(project_id, None)
-
-    def _project_record_items_snapshot(self) -> list[tuple[int, TaskRecord]]:
-        with self._ensure_project_store_lock():
-            return list(self._projects.items())
-
     def _load_index(self) -> dict[str, Any]:
         if self.index_path.exists():
-            try:
-                return json.loads(self.index_path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+            data = _read_json_object(self.index_path)
+            if data is not None:
+                changed = False
+                next_project_id = max(1, _safe_int(data.get("next_project_id"), 1))
+                if data.get("next_project_id") != next_project_id:
+                    data["next_project_id"] = next_project_id
+                    changed = True
+                latest_project_id = data.get("latest_project_id")
+                if latest_project_id is not None:
+                    normalized_latest = _safe_int(latest_project_id, 0)
+                    data["latest_project_id"] = normalized_latest or None
+                    changed = changed or data["latest_project_id"] != latest_project_id
+                latest_by_user = data.get("latest_project_by_user")
+                if not isinstance(latest_by_user, dict):
+                    data["latest_project_by_user"] = {}
+                    changed = True
+                if changed:
+                    self._save_index(data)
+                return data
         data = {"next_project_id": 1, "latest_project_id": None}
         self._save_index(data)
         return data
 
     def _save_index(self, data: dict[str, Any] | None = None) -> None:
         payload = data or self._index
-        self.index_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        _write_json_object(self.index_path, payload)
 
     def _repair_persisted_snapshots(self) -> None:
         for path in self.projects_dir.glob("*.json"):
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
+            data = _read_json_object(path)
+            if data is None:
                 continue
             changed = False
+            asset_kind = str(data.get("asset_kind") or "").strip()
+            if asset_kind in {"framework_planner", "framework_to_script"}:
+                input_payload = data.get("input_payload") if isinstance(data.get("input_payload"), dict) else {}
+                asset_type = str(data.get("asset_type") or input_payload.get("asset_type") or "").strip()
+                if asset_kind == "framework_planner":
+                    asset_type = "framework"
+                elif asset_kind == "framework_to_script":
+                    asset_type = "new_script"
+                try:
+                    asset_flags = self._asset_completion_flags(data, asset_kind, asset_type)
+                except Exception:
+                    _task_manager_common.logger.exception("asset status repair failed path=%s", path)
+                    asset_flags = {"asset_completed": False, "asset_status": "in_progress"}
+                desired_status = str(asset_flags.get("asset_status") or "in_progress")
+                if str(data.get("status") or "") != desired_status:
+                    data["status"] = desired_status
+                    data["updated_at"] = now_iso()
+                    changed = True
+                if data.get("completion_confirmed"):
+                    data["completion_confirmed"] = False
+                    changed = True
+                if "completion_confirmed" not in data:
+                    data["completion_confirmed"] = False
+                    changed = True
+                if data.get("awaiting_user_confirmation"):
+                    data["awaiting_user_confirmation"] = False
+                    changed = True
+                if data.get("cache_retained") is not True:
+                    data["cache_retained"] = True
+                    changed = True
+                if data.get("asset_type") != asset_type:
+                    data["asset_type"] = asset_type
+                    changed = True
+                if changed:
+                    _write_json_object(path, data)
+                continue
             if data.get("status") in PROJECT_RUNNING_STATUSES:
                 data["status"] = "terminated"
                 data["message"] = TERMINATED_PUBLIC_MESSAGE
@@ -124,13 +250,13 @@ class ProjectSnapshotStoreMixin:
                         data["message"] = COMPLETION_PENDING_MESSAGE
                         changed = True
             if changed:
-                path.write_text(
-                    json.dumps(data, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
+                _write_json_object(path, data)
 
     def _project_path(self, project_id: int) -> Path:
         return self.projects_dir / f"{project_id}.json"
+
+    def _write_project_snapshot(self, project_id: int, snapshot: dict[str, Any]) -> None:
+        _write_json_object(self._project_path(project_id), snapshot)
 
     def _runtime_relpath(self, path: Path) -> str:
         try:
@@ -176,17 +302,12 @@ class ProjectSnapshotStoreMixin:
         with record.lock:
             if bool(record.snapshot.get("_deleted")):
                 return
-            path.write_text(
-                json.dumps(record.snapshot, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            snapshot = copy.deepcopy(record.snapshot)
+        _write_json_object(path, snapshot)
 
     def _build_resume_checkpoint(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         checkpoint = copy.deepcopy(snapshot)
-        # 恢复快照只保留“可继续执行所需的稳定状态”；
-        # 错误文案、结束时间和滚动日志属于一次性运行痕迹，不应污染下一次继续生成。
         checkpoint.pop("_resume_checkpoint", None)
-        checkpoint.pop("logs", None)
         checkpoint.pop("error", None)
         checkpoint.pop("finished_at", None)
         return checkpoint
@@ -200,72 +321,133 @@ class ProjectSnapshotStoreMixin:
         checkpoint = record.clone_snapshot().get("_resume_checkpoint")
         if not isinstance(checkpoint, dict):
             return
+
         fields_to_restore = (
-            "title",
             "artifacts",
-            "debug_state",
-            "prompt_fixes",
-            "input_payload",
-            "workflow_spec_path",
-            "model_option",
-            "total_episodes",
-            "progress_percent",
-            "generated_episodes",
+            "display_stage",
+            "display_payload",
+            "display_history",
+            "stage_summaries",
+            "stage_inputs",
+            "stage_outputs",
+            "stage_errors",
+            "stage_statuses",
+            "stage_payloads",
+            "stage_artifacts",
+            "stage_cache",
+            "runtime_state",
+            "runtime_cache_notice",
+            "cache_retained",
             "current_stage",
             "current_stage_label",
             "current_node_id",
             "current_node_name",
             "current_batch",
+            "progress_percent",
+            "generated_episodes",
+            "approved_batches",
+            "latest_batch_preview",
+            "final_output_text",
+            "final_docx_path",
+            "final_txt_path",
+            "awaiting_user_confirmation",
+            "needs_user_intervention",
+            "intervention_reason",
+            "debug_state",
+            "prompt_fixes",
         )
+
         restored = self._build_resume_checkpoint(checkpoint)
+
         with record.lock:
+            existing_logs = copy.deepcopy(record.snapshot.get("logs", []))
+            existing_last_log = copy.deepcopy(record.snapshot.get("last_log"))
+
             for key in fields_to_restore:
                 if key in restored:
                     record.snapshot[key] = copy.deepcopy(restored[key])
+
+            if existing_logs:
+                record.snapshot["logs"] = existing_logs[-200:]
+            elif isinstance(restored.get("logs"), list):
+                record.snapshot["logs"] = copy.deepcopy(restored["logs"][-200:])
+            else:
+                record.snapshot.setdefault("logs", [])
+
+            if existing_last_log:
+                record.snapshot["last_log"] = existing_last_log
+            elif record.snapshot.get("logs"):
+                record.snapshot["last_log"] = record.snapshot["logs"][-1]
+            else:
+                record.snapshot.pop("last_log", None)
+
             record.snapshot["_resume_checkpoint"] = restored
             record.snapshot["updated_at"] = now_iso()
+
         self._persist_snapshot(record)
 
     def _append_log(
-        self,
-        record: TaskRecord,
-        *,
-        title: str,
-        message: str,
-        node_id: str | None = None,
+            self,
+            record: TaskRecord,
+            *,
+            title: str,
+            message: str,
+            node_id: str | None = None,
+            level: str = "info",
     ) -> None:
+        entry = {
+            "time": now_iso(),
+            "level": str(level or "info").lower(),
+            "title": str(title or "").strip(),
+            "message": str(message or "").strip(),
+            "node_id": node_id,
+        }
+
+        try:
+            _task_manager_common.logger.info(
+                "[task:%s project:%s] %s%s%s",
+                record.task_id,
+                record.project_id,
+                entry["title"],
+                f" node={node_id}" if node_id else "",
+                f" - {entry['message']}" if entry["message"] else "",
+            )
+        except Exception:
+            pass
+
         with record.lock:
             logs = list(record.snapshot.get("logs", []))
-            logs.append(
-                {
-                    "time": now_iso(),
-                    "title": title,
-                    "message": message,
-                    "node_id": node_id,
-                }
-            )
+            entry["index"] = len(logs) + 1
+            logs.append(entry)
             record.snapshot["logs"] = logs[-200:]
+            record.snapshot["last_log"] = entry
             record.snapshot["updated_at"] = now_iso()
+
         self._persist_snapshot(record)
 
     def _update_snapshot(self, record: TaskRecord, **changes: Any) -> None:
         with record.lock:
             previous_status = record.snapshot.get("status")
+
             if "artifacts" in changes and isinstance(changes["artifacts"], dict):
                 merged_artifacts = dict(record.snapshot.get("artifacts", {}))
                 merged_artifacts.update(changes.pop("artifacts"))
                 record.snapshot["artifacts"] = merged_artifacts
 
             record.snapshot.update(changes)
+
             current_time = now_iso()
             current_status = record.snapshot.get("status", previous_status)
+
             _sync_wait_tracking(
                 record.snapshot,
                 previous_status=previous_status,
                 current_status=current_status,
                 current_time_iso=current_time,
             )
+
             record.snapshot["updated_at"] = current_time
+
         self._persist_snapshot(record)
 
     def _next_project_id(self) -> int:
@@ -285,7 +467,7 @@ class ProjectSnapshotStoreMixin:
             self._save_index()
 
     def _load_project_snapshot_raw(self, project_id: int) -> dict[str, Any] | None:
-        record = self._project_record_get(project_id)
+        record = self._projects.get(project_id)
         if record:
             return record.clone_snapshot()
         path = resolve_project_snapshot_path(
@@ -320,7 +502,7 @@ class ProjectSnapshotStoreMixin:
             "claude": "C",
             "ollama": "O",
             "doubao": "D",
-            "fastgpt": "F",
+            "workflow": "F",
         }
         letter = initials.get(provider_name, (provider_name[:1] or "M").upper())
         base = f"XK{letter.upper()}"
@@ -328,7 +510,7 @@ class ProjectSnapshotStoreMixin:
 
     def list_model_options(self, workflow_spec_path: str) -> list[dict[str, Any]]:
         extra_models: list[str] = []
-        if not use_fastgpt_backend():
+        if not use_legacy_workflow_backend():
             spec = WorkflowSpec(workflow_spec_path)
             extra_models = spec.list_chat_models()
         options = settings.list_model_options(extra_models=extra_models)
@@ -445,18 +627,66 @@ class ProjectSnapshotStoreMixin:
             self._asset_summary(snapshot, include_private=True, use_teaser=False)
             for snapshot in self._all_project_snapshots()
             if self._snapshot_belongs_to_user(snapshot, user_id)
-            and str(snapshot.get("asset_kind") or "").strip() != AUXILIARY_TOOL_ASSET_KIND
+            and (
+                str(snapshot.get("asset_kind") or "").strip() != AUXILIARY_TOOL_ASSET_KIND
+                or str(snapshot.get("tool_key") or "").strip() == "character_reskin"
+            )
         ]
         projects.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return projects
 
+    def get_framework_to_script_asset_for_source(
+        self,
+        source_framework_project_id: int,
+        *,
+        user_id: int,
+        public_view: bool = False,
+    ) -> dict[str, Any] | None:
+        source_id = _safe_int(source_framework_project_id, 0)
+        if source_id <= 0:
+            return None
+        matches: list[dict[str, Any]] = []
+        for snapshot in self._all_project_snapshots():
+            if not self._snapshot_belongs_to_user(snapshot, user_id):
+                continue
+            if str(snapshot.get("asset_kind") or "").strip() != "framework_to_script":
+                continue
+            input_payload = snapshot.get("input_payload") if isinstance(snapshot.get("input_payload"), dict) else {}
+            candidate_source_id = _safe_int(
+                snapshot.get("source_framework_project_id")
+                or input_payload.get("source_framework_project_id")
+                or input_payload.get("framework_asset_id"),
+                0,
+            )
+            if candidate_source_id == source_id:
+                matches.append(snapshot)
+        if not matches:
+            return None
+        matches.sort(
+            key=lambda item: (
+                str(item.get("updated_at") or ""),
+                _safe_int(item.get("project_id"), 0),
+            ),
+            reverse=True,
+        )
+        snapshot = matches[0]
+        return self._public_snapshot(snapshot) if public_view else snapshot
+
     def list_public_assets(self) -> list[dict[str, Any]]:
+        def public_asset_ready(snapshot: dict[str, Any]) -> bool:
+            asset_kind = str(snapshot.get("asset_kind") or "").strip()
+            if asset_kind == "framework_planner":
+                return False
+            if asset_kind == "framework_to_script":
+                return bool(self._asset_completion_flags(snapshot, asset_kind, "new_script").get("asset_completed"))
+            return _completion_confirmed(snapshot)
+
         assets = [
             self._asset_summary(snapshot, include_private=False, use_teaser=True)
             for snapshot in self._all_project_snapshots()
             if str(snapshot.get("visibility") or "private") == "public"
             and str(snapshot.get("status") or "") == "completed"
-            and _completion_confirmed(snapshot)
+            and public_asset_ready(snapshot)
             and str(snapshot.get("asset_kind") or "").strip() != AUXILIARY_TOOL_ASSET_KIND
             and bool(self._best_final_script_text(snapshot))
         ]
@@ -471,9 +701,15 @@ class ProjectSnapshotStoreMixin:
             return None
         if str(snapshot.get("status") or "") != "completed":
             return None
-        if not _completion_confirmed(snapshot):
+        asset_kind = str(snapshot.get("asset_kind") or "").strip()
+        if asset_kind == "framework_planner":
             return None
-        if str(snapshot.get("asset_kind") or "").strip() == AUXILIARY_TOOL_ASSET_KIND:
+        if asset_kind == "framework_to_script":
+            if not self._asset_completion_flags(snapshot, asset_kind, "new_script").get("asset_completed"):
+                return None
+        elif not _completion_confirmed(snapshot):
+            return None
+        if asset_kind == AUXILIARY_TOOL_ASSET_KIND:
             return None
         artifacts = snapshot.get("artifacts") or {}
         final_script = self._best_final_script_text(snapshot)
@@ -491,9 +727,7 @@ class ProjectSnapshotStoreMixin:
 
     def _all_project_snapshots(self) -> list[dict[str, Any]]:
         snapshots: dict[int, dict[str, Any]] = {}
-        # 先在锁内复制当前项目记录引用，再在锁外逐个 clone snapshot，
-        # 避免 /api/projects 遍历时被并发增删项目打断。
-        for project_id, record in self._project_record_items_snapshot():
+        for project_id, record in self._projects.items():
             snapshots[int(project_id)] = record.clone_snapshot()
         for path in self._iter_project_snapshot_paths():
             try:
@@ -503,4 +737,3 @@ class ProjectSnapshotStoreMixin:
             project_id = int(data.get("project_id") or path.stem or 0)
             snapshots.setdefault(project_id, data)
         return list(snapshots.values())
-

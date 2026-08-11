@@ -22,7 +22,7 @@ def extract_json_candidate(text: str) -> str:
     if cleaned.startswith("[") and cleaned.endswith("]"):
         return cleaned
 
-    # TODO: 这里仍是贪婪正则；如果后续 FastGPT 更频繁返回“说明文字 + 多段 JSON”，
+    # TODO: 这里仍是贪婪正则；如果后续 工作流 更频繁返回“说明文字 + 多段 JSON”，
     # 需要改成按括号平衡扫描，避免一次吞掉相邻片段。
     obj_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
     if obj_match:

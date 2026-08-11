@@ -20,7 +20,7 @@ from ..workflow_ids import (
     UNSTRUCTURED_OUTPUT_VAR,
     UNSTRUCTURED_SOURCE_VAR,
 )
-from .fastgpt_contracts import (
+from .workflow_contracts import (
     CHARACTERS,
     STAGE_CHARACTERS,
     STAGE_CHARACTERS_NATURALIZE,
