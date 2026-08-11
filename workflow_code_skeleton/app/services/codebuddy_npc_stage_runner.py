@@ -78,6 +78,9 @@ episode_start、episode_end 与 episodes 共同构成交付范围，必须只交
 前五集完成基础立剧，后续只升级、变奏和兑现，不再补基础人设。
 第N集结尾状态和第N+1集承接事实必须是同一事实。换地点时，上集给出决定、去向或
 目的，下集从准备执行、正在执行或承受结果开始，不能用时间字幕掩盖断层。
+为便于后台校验，第N+1集“承接事实”必须逐字复制第N集“结尾状态”；第N+1集
+“开场钩子”必须从第N集“下一集第一有效动作”承诺的动作开始，再叠加本集新钩子。
+相邻两集不得复用完全相同的阻力或主线推进；阻力要形成反应或升级，主线推进要产生新的状态差。
 scenes_per_episode 是前端动态传入的逐集场景合同，必须执行；只有设置为 flexible
 时才可按剧情灵活决定。每个场景必须注明地点、日夜、内外、在场人物、关键道具和戏剧任务。
 以创作合同确定的主角为行动锚；配角不能替主角完成关键选择。
@@ -248,6 +251,66 @@ def _episode_parts(text: str) -> tuple[str, dict[int, str]]:
         end = matches[index + 1].start() if index + 1 < len(matches) else len(value)
         parts.setdefault(episode, value[match.start() : end].strip())
     return prefix, parts
+
+
+def _episode_card_field(content: str, field: str) -> str:
+    match = re.search(
+        rf"(?m)^\s*(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*[:：]\s*(.+?)\s*$",
+        str(content or ""),
+    )
+    return str(match.group(1) if match else "").strip()
+
+
+def _replace_episode_card_field(content: str, field: str, value: str) -> str:
+    pattern = re.compile(
+        rf"(?m)^(\s*(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*[:：]\s*).+?$"
+    )
+    return pattern.sub(lambda match: match.group(1) + str(value).strip(), content, count=1)
+
+
+def _compact_semantic_text(value: str) -> str:
+    return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]", "", str(value or "")).lower()
+
+
+def _semantic_overlap(left: str, right: str) -> float:
+    def grams(value: str) -> set[str]:
+        compact = _compact_semantic_text(value)
+        return (
+            {compact[index : index + 2] for index in range(len(compact) - 1)}
+            if len(compact) >= 2
+            else ({compact} if compact else set())
+        )
+
+    left_grams, right_grams = grams(left), grams(right)
+    if not left_grams or not right_grams:
+        return 0.0
+    return len(left_grams & right_grams) / min(len(left_grams), len(right_grams))
+
+
+def _normalize_episode_card_handoffs(text: str) -> tuple[str, list[str]]:
+    prefix, parts = _episode_parts(text)
+    warnings: list[str] = []
+    ordered = sorted(parts)
+    for previous_number, current_number in zip(ordered, ordered[1:]):
+        if current_number != previous_number + 1:
+            continue
+        previous = parts[previous_number]
+        current = parts[current_number]
+        ending_state = _episode_card_field(previous, "结尾状态")
+        carryover = _episode_card_field(current, "承接事实")
+        if ending_state and _compact_semantic_text(ending_state) != _compact_semantic_text(carryover):
+            current = _replace_episode_card_field(current, "承接事实", ending_state)
+            warnings.append(f"第{current_number}集承接事实已对齐上一集结尾")
+        next_action = _episode_card_field(previous, "下一集第一有效动作")
+        opening_hook = _episode_card_field(current, "开场钩子")
+        if next_action and opening_hook and _semantic_overlap(next_action, opening_hook) < 0.12:
+            current = _replace_episode_card_field(current, "开场钩子", f"{next_action}；{opening_hook}")
+            warnings.append(f"第{current_number}集开场已补入上一集承诺动作")
+        parts[current_number] = current
+    output = "\n\n".join(
+        item for item in ([prefix] if prefix else []) + [parts[number] for number in ordered]
+    )
+    return output, warnings
 
 
 def _merge_episode_outputs(
@@ -1350,6 +1413,13 @@ class CodeBuddyNpcStageRunner:
                 episode_end=episode_end,
                 stage=stage,
             )
+            if stage == "episode_continuity":
+                result, handoff_warnings = _normalize_episode_card_handoffs(result)
+                if handoff_warnings:
+                    fresh_warning = self.store.load(str(job["job_id"]), user_id=int(job["user_id"]))
+                    if fresh_warning:
+                        fresh_warning["continuity_repairs"] = handoff_warnings[-20:]
+                        self.store.save(fresh_warning)
             added = set(_episode_numbers(result)) - before
             if not added.intersection(expected):
                 key = (batch_start, batch_end)

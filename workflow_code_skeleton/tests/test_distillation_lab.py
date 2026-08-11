@@ -10,8 +10,52 @@ from workflow_code_skeleton.app.services.distillation_lab import (
     SKILL_SCHEMA_VERSION,
     DistillationLabStore,
     _complete_json_with_repair,
+    _distillation_sample,
+    _narrative_quality_checks,
 )
+
+
+def _quality_modules() -> dict[str, str]:
+    return {
+        "genre_profile": "题材类型与目标受众决定情绪承诺，并形成差异化表达。",
+        "story_architecture": "主线围绕长期目标展开；持续阻力与对手反应逐级升级，人物选择付出代价并造成局势变化，最终在结局兑现。",
+        "hook_craft": "开场钩子提出追剧问题，并用最短因果锚帮助观众理解。",
+        "character_emotion": "人物角色以目标和欲望行动；压力下的选择暴露恐惧与伤口，并改变关系债、行动和代价。",
+        "continuity": "上一集结尾状态与下一集承接事实保持因果连续；下集开场动作兑现未完成动作，换场地点需有交接理由。",
+        "dialogue_voice": "对白通过人物目的、关系与潜台词形成不同声音。",
+        "adversity_payoff": "冲突阻力通过对手反制递进升级，迫使主角抉择并承担代价，最终兑现处境变化。",
+        "anti_patterns": "说明题材受众边界、不适用条件、失效方式与应避免的反模式。",
+        "quality_gate": "检查主线、冲突、人物、连续性和差异化。",
+    }
+
+
 from workflow_code_skeleton.app.services.deepseek_agent import DeepSeekJSONError
+
+
+def test_long_script_sampling_keeps_complete_adjacent_episode_boundaries() -> None:
+    source = "\n\n".join(
+        f"第{episode}集：《测试》\n开场{episode}\n" + (f"剧情{episode}。" * 500)
+        for episode in range(1, 31)
+    )
+
+    sample = _distillation_sample(source, max_chars=9000)
+
+    assert sample.startswith("[按完整集与相邻集交接抽样]")
+    assert "第1集" in sample and "第2集" in sample
+    assert "第29集" in sample and "第30集" in sample
+    assert "[中段分布样本]" not in sample
+
+
+def test_narrative_quality_gate_checks_all_four_story_foundations() -> None:
+    checks = _narrative_quality_checks(_quality_modules())
+
+    assert checks == {
+        "mainline_clarity": 100,
+        "conflict_escalation": 100,
+        "character_choice": 100,
+        "episode_handoff": 100,
+        "differentiation": 100,
+    }
 
 
 def test_distillation_lab_builds_versions_and_keeps_workflow_detached(tmp_path, monkeypatch) -> None:
@@ -39,7 +83,7 @@ def test_distillation_lab_builds_versions_and_keeps_workflow_detached(tmp_path, 
             return {
                 "structured_output": {
                     "skill_md": "---\nname: 狼人逆袭\ndescription: 生成狼人逆袭题材\n---\n# 规则\n明确适用边界与失效条件。",
-                    "modules": {key: f"{key}模块规则" for key in SKILL_MODULE_KEYS},
+                    "modules": _quality_modules(),
                     "verified_rules": [
                         {
                             "rule": "逆风必须改变主角下一步选择",

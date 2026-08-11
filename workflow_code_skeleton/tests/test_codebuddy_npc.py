@@ -26,6 +26,7 @@ from workflow_code_skeleton.app.services.codebuddy_npc_stage_runner import (
     _continuation_instruction,
     _merge_episode_outputs,
     _missing_episode_ranges,
+    _normalize_episode_card_handoffs,
     _episode_slice,
 )
 
@@ -37,6 +38,39 @@ def test_local_episode_continuity_prompt_makes_mainline_visible() -> None:
     assert "连续两集不得只积累而无处境变化" in prompt
     assert "每3至5集" in prompt
     assert "不固定为证据、文档、道具或倒计时" in prompt
+    assert "承接事实”必须逐字复制" in prompt
+
+
+def test_local_handoff_normalizer_repairs_cross_batch_boundary() -> None:
+    cards = """第5集：《旧门》
+承接事实：主角赶到门前
+开场钩子：门内传来哭声
+最短因果锚：失踪者被关在里面
+主角目标：救人
+主角主动动作：撞门
+阻力：门被锁住
+选择与代价：放弃隐蔽
+本集主线推进：找到失踪者位置
+结尾状态：门开后，主角被人从背后按住
+下一集第一有效动作：主角反肘挣脱控制
+
+第6集：《伏击》
+承接事实：主角安全离开
+开场钩子：灯突然灭了
+最短因果锚：伏击者切断电源
+主角目标：摆脱伏击
+主角主动动作：寻找出口
+阻力：伏击者堵门
+选择与代价：暴露底牌
+本集主线推进：确认内鬼身份
+结尾状态：内鬼摘下面罩
+下一集第一有效动作：主角叫出内鬼名字"""
+
+    normalized, warnings = _normalize_episode_card_handoffs(cards)
+
+    assert "承接事实：门开后，主角被人从背后按住" in normalized
+    assert "开场钩子：主角反肘挣脱控制；灯突然灭了" in normalized
+    assert len(warnings) == 2
 
 
 def test_local_writer_prompt_uses_specific_non_template_performance_cues() -> None:

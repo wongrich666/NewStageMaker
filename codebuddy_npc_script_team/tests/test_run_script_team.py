@@ -120,6 +120,47 @@ def test_episode_cards_make_the_mainline_visible_to_the_audience() -> None:
     assert "不固定为证据、文档、道具或倒计时" in prompt
 
 
+def test_episode_handoff_normalizer_locks_adjacent_cards_without_new_fields() -> None:
+    cards = """第5集：《门开了》
+承接事实：旧追兵逼近
+开场钩子：主角撞开铁门
+最短因果锚：出口只剩一个
+主角目标：离开地库
+主角主动动作：撞门
+阻力：门锁死
+选择与代价：舍弃背包
+本集主线推进：取得出口
+结尾状态：主角跌进暗室，门在身后锁死
+下一集第一有效动作：主角摸黑寻找暗室出口
+
+第6集：《暗室》
+承接事实：几小时后主角已经回家
+开场钩子：警报突然响起
+最短因果锚：暗室有警报
+主角目标：找到出口
+主角主动动作：摸墙前进
+阻力：暗室断电
+选择与代价：暴露位置
+本集主线推进：发现地下通道
+结尾状态：通道另一端有人
+下一集第一有效动作：主角躲到门后"""
+
+    normalized, warnings = MODULE.normalize_episode_card_handoffs(cards)
+
+    assert "承接事实：主角跌进暗室，门在身后锁死" in normalized
+    assert "开场钩子：主角摸黑寻找暗室出口；警报突然响起" in normalized
+    assert "场景任务" not in normalized
+    assert len(warnings) == 2
+
+
+def test_episode_card_contract_exposes_machine_checkable_handoff() -> None:
+    contract = MODULE._episode_card_json_contract(1, 5)
+
+    assert "carryover_fact必须逐字复制" in contract
+    assert "opening_hook必须从" in contract
+    assert "不得复用完全相同的obstacle或mainline_advance" in contract
+
+
 def test_writer_uses_character_specific_voice_and_micro_expression_cues() -> None:
     prompt = MODULE.PROMPTS["script_writer"]
 
