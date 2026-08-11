@@ -664,6 +664,15 @@ class CodeBuddyNpcJobStore:
         continuation_bible = _clean_text(
             request_payload.get("continuation_bible"), limit=60_000
         )
+        raw_story_bible_enabled = request_payload.get("story_bible_enabled")
+        story_bible_enabled = (
+            bool(continuation_bible)
+            if raw_story_bible_enabled is None
+            else raw_story_bible_enabled is True
+            or str(raw_story_bible_enabled).strip().lower() in {"1", "true", "yes", "on"}
+        )
+        if not story_bible_enabled:
+            continuation_bible = ""
         direction = _clean_text(request_payload.get("adaptation_direction"), limit=20_000)
         mode = _clean_text(request_payload.get("mode"), limit=30) or "原创"
         if mode not in _CREATION_MODES:
@@ -790,7 +799,8 @@ class CodeBuddyNpcJobStore:
                 "total_duration_seconds": episodes * episode_duration_seconds,
                 "scenes_per_episode": scenes_per_episode,
                 "source_text": source_text,
-                "continuation_bible": continuation_bible if mode == "续写" else "",
+                "story_bible_enabled": story_bible_enabled,
+                "continuation_bible": continuation_bible,
                 "adaptation_direction": direction,
                 "episode_contract": _episode_contract(
                     episodes,

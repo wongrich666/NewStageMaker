@@ -3285,6 +3285,68 @@ body {
   background: #f5fbf9;
 }
 
+.nwt-story-bible-option {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 12px;
+  border: 1px solid #d5dde8;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.nwt-story-bible-option.active {
+  border-color: #9fd4ca;
+  background: #f4fbf9;
+}
+
+.nwt-story-bible-option strong,
+.nwt-story-bible-option small {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nwt-story-bible-option strong {
+  color: #213047;
+  font-size: 12px;
+}
+
+.nwt-story-bible-option small {
+  margin-top: 4px;
+  color: #718096;
+  font-size: 10px;
+}
+
+.nwt-story-bible-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #b8c6d8;
+  border-radius: 5px;
+  background: #fff;
+  color: #34445c;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nwt-story-bible-option.active .nwt-story-bible-toggle {
+  border-color: #80c6b9;
+  color: #126c61;
+}
+
+.nwt-story-bible-toggle:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
 .nwt-continuation-bible .nwt-lock-label {
   display: flex;
   align-items: center;

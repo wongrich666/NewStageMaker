@@ -7,6 +7,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_script_team.py"
 SPEC = importlib.util.spec_from_file_location("run_script_team", SCRIPT_PATH)
@@ -165,9 +167,39 @@ def test_continuation_contract_uses_actual_episode_range(monkeypatch) -> None:
     assert "第6集至第10集" in request["episode_contract"]
     assert "已有第5集结尾" in instruction
     assert "只输出第6集至第10集" in instruction
-    assert "续写创作圣经" in instruction
-    assert "已有正文明确事实 > 续写创作圣经" in instruction
+    assert "创作圣经锁定项" in instruction
+    assert "已有正文明确事实 > 创作圣经锁定项" in instruction
     assert "第9集关系彻底决裂" in instruction
+
+
+@pytest.mark.parametrize(
+    ("mode", "boundary"),
+    [("原创", "未锁定的空白处"), ("改编", "未锁定的部分")],
+)
+def test_story_bible_contract_applies_to_original_and_adaptation(mode, boundary) -> None:
+    instruction = MODULE.continuation_contract_instruction(
+        {
+            "mode": mode,
+            "story_bible_enabled": True,
+            "continuation_bible": "女主不能失去左眼；结局不得洗白反派。",
+        }
+    )
+
+    assert "创作圣经锁定项" in instruction
+    assert "女主不能失去左眼" in instruction
+    assert boundary in instruction
+
+
+def test_disabled_story_bible_does_not_change_remote_prompt() -> None:
+    instruction = MODULE.continuation_contract_instruction(
+        {
+            "mode": "原创",
+            "story_bible_enabled": False,
+            "continuation_bible": "隐藏草稿不得生效。",
+        }
+    )
+
+    assert instruction == ""
 
 
 def test_read_request_accepts_compressed_bundle(monkeypatch) -> None:

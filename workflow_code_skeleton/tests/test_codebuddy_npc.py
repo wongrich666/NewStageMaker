@@ -369,14 +369,55 @@ def test_job_store_builds_continuation_episode_range(tmp_path: Path) -> None:
     assert job["request"]["series_total_episodes"] == 10
     assert job["request"]["total_duration_seconds"] == 375
     assert job["request"]["continuation_policy"] == "strict"
+    assert job["request"]["story_bible_enabled"] is True
     assert job["request"]["continuation_bible"] == "林烬怕火；第8集必须揭开王室血契。"
     assert "第6集至第10集" in job["request"]["episode_contract"]
     assert "不得重写第1集至第5集" in job["request"]["episode_contract"]
 
     instruction = _continuation_instruction(job["request"])
-    assert "续写创作圣经" in instruction
-    assert "已有正文明确事实 > 续写创作圣经" in instruction
+    assert "创作圣经锁定项" in instruction
+    assert "已有正文明确事实 > 创作圣经锁定项" in instruction
     assert "第8集必须揭开王室血契" in instruction
+
+
+@pytest.mark.parametrize("mode", ["原创", "改编"])
+def test_story_bible_can_lock_original_and_adaptation_jobs(tmp_path: Path, mode: str) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={
+            "project_title": "锁定测试",
+            "mode": mode,
+            "source_text": "一名医生必须在天亮前找到失踪病人。",
+            "story_bible_enabled": True,
+            "continuation_bible": "主角不能辞职；故事必须发生在同一夜。",
+        },
+    )
+
+    assert job["request"]["story_bible_enabled"] is True
+    assert job["request"]["continuation_bible"] == "主角不能辞职；故事必须发生在同一夜。"
+    instruction = _continuation_instruction(job["request"])
+    assert "创作圣经锁定项" in instruction
+    assert "主角不能辞职" in instruction
+    assert ("未锁定的空白处" if mode == "原创" else "未锁定的部分") in instruction
+
+
+def test_disabled_story_bible_keeps_original_workflow_unchanged(tmp_path: Path) -> None:
+    store = CodeBuddyNpcJobStore(_config(tmp_path))
+    job = store.create(
+        user_id=7,
+        request_payload={
+            "project_title": "未启用锁定",
+            "mode": "原创",
+            "source_text": "写一个都市故事。",
+            "story_bible_enabled": False,
+            "continuation_bible": "这段隐藏草稿不得生效。",
+        },
+    )
+
+    assert job["request"]["story_bible_enabled"] is False
+    assert job["request"]["continuation_bible"] == ""
+    assert _continuation_instruction(job["request"]) == ""
 
 
 def test_continuation_requires_existing_script_material(tmp_path: Path) -> None:

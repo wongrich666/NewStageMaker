@@ -342,35 +342,56 @@ def duration_contract_instruction(request_payload: dict) -> str:
     )
 
 
-def continuation_contract_instruction(request_payload: dict) -> str:
-    if str(request_payload.get("mode") or "").strip() != "续写":
+def story_bible_contract_instruction(request_payload: dict) -> str:
+    bible = str(request_payload.get("continuation_bible") or "").strip()
+    raw_enabled = request_payload.get("story_bible_enabled")
+    enabled = (
+        bool(bible)
+        if raw_enabled is None
+        else raw_enabled is True
+        or str(raw_enabled).strip().lower() in {"1", "true", "yes", "on"}
+    )
+    if not enabled or not bible:
         return ""
+    mode = str(request_payload.get("mode") or "原创").strip()
+    if mode == "续写":
+        priority = "已有正文明确事实 > 创作圣经锁定项 > 本次临时续写方向 > 模型自由发挥"
+        boundary = "不得反向改写已经发生的事件"
+    elif mode == "改编":
+        priority = "创作圣经锁定项与用户明确要求 > 原始材料可改编部分 > 本次补充方向 > 模型自由发挥"
+        boundary = "只允许在用户未锁定的部分进行改编"
+    else:
+        priority = "创作圣经锁定项与用户明确要求 > 本次补充方向 > 模型自由发挥"
+        boundary = "只允许在用户未锁定的空白处进行原创"
+    return (
+        "\n《创作圣经锁定项》是本任务所有节点共同遵守的长期正典：\n"
+        f"{bible}\n"
+        f"执行优先级固定为：{priority}。{boundary}；其中明确的人设、世界规则、人物关系、"
+        "主支线方向、未来剧情节点、结局边界和语言风格不得无故遗忘、替换、弱化或反向解释。"
+        "锁定项没有规定的内容仍按原工作流自主创作，不得把锁定理解为停止推进剧情。"
+    )
+
+
+def continuation_contract_instruction(request_payload: dict) -> str:
+    story_bible_contract = story_bible_contract_instruction(request_payload)
+    if str(request_payload.get("mode") or "").strip() != "续写":
+        return story_bible_contract
     source_last = max(1, int(request_payload.get("source_last_episode") or 1))
     episode_start = max(source_last + 1, int(request_payload.get("episode_start") or source_last + 1))
     episode_end = max(episode_start, int(request_payload.get("episode_end") or episode_start))
     policy = str(request_payload.get("continuation_policy") or "strict").strip()
-    bible = str(request_payload.get("continuation_bible") or "").strip()
     policy_text = (
         "允许修复不改变既有事件结果的轻微连续性问题"
         if policy == "light"
         else "严格保留既有事实、人物声音、关系温度、伤势、位置、道具与未完成动作"
     )
-    bible_contract = ""
-    if bible:
-        bible_contract = (
-            "\n《续写创作圣经》是所有后续节点共同遵守的长期正典：\n"
-            f"{bible}\n"
-            "执行优先级固定为：已有正文明确事实 > 续写创作圣经 > 本次临时续写方向 > "
-            "模型自由发挥。圣经不得反向改写已发生事件；其人物设定、关系、世界规则、"
-            "主支线走向、未来节点与风格偏好必须落实到新集，不得无故遗忘、替换或弱化。"
-        )
     return (
         f"续写硬合同：已有剧本写至第{source_last}集，已有第{source_last}集结尾是"
         f"第{episode_start}集唯一开场起点；本次只输出第{episode_start}集至第{episode_end}集。"
         f"{policy_text}。先从已有全文提取续写基线，再规划新剧情；"
         "不得重写、摘要代替或重新解释已有各集，不得让人物失忆、瞬移、伤势复原，"
         "不得让旧道具和旧关系无因变化。第一集新稿必须直接处理旧稿最后的动作、决定或后果。"
-        + bible_contract
+        + story_bible_contract
     )
 
 
