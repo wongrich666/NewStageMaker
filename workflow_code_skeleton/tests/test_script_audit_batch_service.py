@@ -143,12 +143,13 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
             f"第{number}集：标题{number}\n场景{number}\n人物：本集有效剧本内容。" for number in range(1, count + 1)
         )
 
-    def test_export_text_is_split_into_five_episode_batches(self) -> None:
+    def test_export_text_is_split_into_single_episode_batches_to_avoid_output_truncation(self) -> None:
         episodes = parse_script_episodes(self.script(11))
         batches = split_episode_batches(episodes)
-        self.assertEqual([1, 2, 3, 4, 5], batches[0]["episode_numbers"])
-        self.assertEqual([6, 7, 8, 9, 10], batches[1]["episode_numbers"])
-        self.assertEqual([11], batches[2]["episode_numbers"])
+        self.assertEqual(11, len(batches))
+        self.assertEqual([1], batches[0]["episode_numbers"])
+        self.assertEqual([6], batches[5]["episode_numbers"])
+        self.assertEqual([11], batches[10]["episode_numbers"])
 
     def test_chinese_episode_numbers_and_missing_episode_are_handled(self) -> None:
         episodes = parse_script_episodes("第一集\n正文一\n\n第二集：继续\n正文二")
@@ -195,11 +196,14 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
         ):
             validate_batch_output(raw, [1, 2, 3, 4, 5], 48)
 
-    def test_batch_contract_rejects_total_episode_count_replaced_by_batch_size(self) -> None:
+    def test_batch_contract_repairs_total_episode_count_replaced_by_batch_size(self) -> None:
         value = batch_payload(1, 5, 5)
 
-        with self.assertRaisesRegex(ValueError, "期望全剧 48 集.*实际返回 5"):
-            validate_batch_output(value, [1, 2, 3, 4, 5], 48)
+        parsed, warnings = validate_batch_output(value, [1, 2, 3, 4, 5], 48)
+
+        self.assertEqual(48, parsed["batch_meta"]["total_episodes"])
+        self.assertFalse(parsed["batch_meta"]["is_final_batch"])
+        self.assertTrue(any("自动校正为 48" in warning for warning in warnings))
 
     def test_batch_contract_rejects_missing_emotion_and_incorrect_score_sum(self) -> None:
         missing_emotion = batch_payload(1, 1, 1)
@@ -230,7 +234,7 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
 
         self.assertEqual("issue_e01_001", audit["global_review"]["global_key_issues"][0]["issue_id"])
 
-    def test_runner_passes_replacement_memory_to_next_tail_batch(self) -> None:
+    def test_runner_passes_replacement_memory_to_each_next_episode(self) -> None:
         client = FakeClient()
         with tempfile.TemporaryDirectory() as directory:
             service = ScriptAuditBatchService(Path(directory), client=client)
@@ -241,18 +245,52 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
 
         self.assertEqual("succeeded", result["status"])
         self.assertEqual([1, 2, 3, 4, 5, 6], result["completed_episode_numbers"])
-        self.assertEqual(2, len(client.calls))
+        self.assertEqual(6, len(client.calls))
         self.assertEqual("{}", client.calls[0]["previous_audit_memory"])
         previous = json.loads(client.calls[1]["previous_audit_memory"])
-        self.assertEqual(5, previous["reviewed_through_episode"])
-        self.assertEqual(6, client.calls[1]["batch_start_episode"])
-        self.assertTrue(client.calls[1]["is_final_batch"])
+        self.assertEqual(1, previous["reviewed_through_episode"])
+        self.assertEqual(2, client.calls[1]["batch_start_episode"])
+        self.assertFalse(client.calls[1]["is_final_batch"])
+        self.assertEqual(6, client.calls[-1]["batch_start_episode"])
+        self.assertTrue(client.calls[-1]["is_final_batch"])
         event_names = [item["event"] for item in debug["events"]]
         self.assertIn("workflow_attempt_started", event_names)
         self.assertIn("workflow_attempt_succeeded", event_names)
         started_event = next(item for item in debug["events"] if item["event"] == "workflow_attempt_started")
         self.assertTrue(all(value == "str" for value in started_event["details"]["workflow_input_types"].values()))
         self.assertNotIn("本集有效剧本内容", json.dumps(debug, ensure_ascii=False))
+
+    def test_resume_of_legacy_five_episode_batch_continues_from_first_missing_episode(self) -> None:
+        client = FakeClient()
+        with tempfile.TemporaryDirectory() as directory:
+            service = ScriptAuditBatchService(Path(directory), client=client)
+            started = service.start_run(
+                user_id=7,
+                script_title="测试",
+                script_text=self.script(6),
+                launch=False,
+            )
+            private = service._read(started["run_id"])
+            legacy_batch = batch_payload(1, 5, 6)
+            private.update(
+                status="failed",
+                batches=[legacy_batch],
+                audit_memory=legacy_batch["next_audit_memory"],
+                completed_batches=1,
+                completed_episode_numbers=[1, 2, 3, 4, 5],
+            )
+            service._write(private)
+
+            service._run(started["run_id"])
+            result = service.get_run(started["run_id"], user_id=7)
+
+        self.assertEqual("succeeded", result["status"])
+        self.assertEqual([1, 2, 3, 4, 5, 6], result["completed_episode_numbers"])
+        self.assertEqual(1, len(client.calls))
+        self.assertEqual(6, client.calls[0]["batch_start_episode"])
+        self.assertEqual(6, client.calls[0]["batch_end_episode"])
+        self.assertTrue(client.calls[0]["is_final_batch"])
+        self.assertEqual(5, json.loads(client.calls[0]["previous_audit_memory"])["reviewed_through_episode"])
 
     @patch("workflow_code_skeleton.app.services.script_audit_batch_service.time.sleep", return_value=None)
     def test_failed_batch_writes_http_response_and_traceback_to_debug_file(self, _sleep) -> None:

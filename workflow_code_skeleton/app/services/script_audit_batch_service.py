@@ -24,7 +24,10 @@ from .tencent_workflow_registry import build_workflow_inputs
 
 
 BATCH_SCHEMA_VERSION = "script_audit_batch_v1"
-BATCH_SIZE = 5
+# 腾讯私有部署会把较长的模型输出截断并退化为六字段摘要。真实 5 集
+# script_audit_batch_v1 已超过 5 万字符，因此默认逐集调用，保证完整 JSON。
+# 前端仍然只需点击一次，服务会自动连续运行到全剧结束。
+BATCH_SIZE = 1
 MAX_MEMORY_CHARS = 30000
 MAX_DEBUG_EVENTS = 200
 
@@ -292,10 +295,17 @@ def validate_batch_output(
     if _int(meta.get("batch_start_episode")) != expected_numbers[0] or _int(meta.get("batch_end_episode")) != expected_numbers[-1]:
         raise ValueError("batch_meta 的起止集数与当前批次不一致。")
     if expected_total_episodes and _int(meta.get("total_episodes")) != expected_total_episodes:
-        raise ValueError(
-            f"batch_meta.total_episodes 值错误：期望全剧 {expected_total_episodes} 集，"
-            f"实际返回 {_int(meta.get('total_episodes'))}。"
+        reported_total = _int(meta.get("total_episodes"))
+        # total_episodes is deterministic local metadata derived from the strictly
+        # parsed script. Some Tencent flows mistakenly echo the current batch size;
+        # correcting that value is safe and does not alter any model judgement.
+        meta["total_episodes"] = int(expected_total_episodes)
+        warnings.append(
+            f"远端将 batch_meta.total_episodes 返回为 {reported_total}，"
+            f"本地已按完整剧本自动校正为 {expected_total_episodes}。"
         )
+    if expected_total_episodes:
+        meta["is_final_batch"] = expected_numbers[-1] == expected_total_episodes
     boundary = payload.get("boundary_review") if isinstance(payload.get("boundary_review"), dict) else {}
     expected_previous = expected_numbers[0] - 1 if expected_numbers[0] > 1 else 0
     if not boundary or _int(boundary.get("previous_episode_no"), -1) != expected_previous:
@@ -603,15 +613,41 @@ class ScriptAuditBatchService:
                 self._write(record)
             episodes = parse_script_episodes(record["script_text"])
             chunks = split_episode_batches(episodes)
-            completed = len(record.get("batches") or [])
+            stored_batches = record.get("batches") if isinstance(record.get("batches"), list) else []
+            completed_numbers = {
+                _int(item.get("episode_no"))
+                for batch in stored_batches
+                if isinstance(batch, dict)
+                for item in (batch.get("episode_reviews") or [])
+                if isinstance(item, dict)
+            }
+            # Resume by completed episode numbers, not by old batch count. This keeps
+            # runs created under the former 5-episode policy safe after switching to
+            # single-episode batches and prevents skipped episodes.
+            pending_chunks = [
+                chunk for chunk in chunks
+                if not set(chunk["episode_numbers"]).issubset(completed_numbers)
+            ]
+            completed = len(stored_batches)
             memory = compact_audit_memory(record.get("audit_memory"))
+            with self._lock:
+                record = self._read(run_id)
+                record.update(
+                    total_batches=completed + len(pending_chunks),
+                    completed_batches=completed,
+                    completed_episode_numbers=sorted(completed_numbers),
+                    updated_at=_now_iso(),
+                )
+                self._write(record)
             self._append_debug_event(
                 run_id,
                 "run_started",
                 resumed_from_batch=completed + 1,
                 completed_batches=completed,
+                resumed_from_episode=(pending_chunks[0]["start_episode"] if pending_chunks else 0),
+                batch_size=BATCH_SIZE,
             )
-            for chunk in chunks[completed:]:
+            for chunk in pending_chunks:
                 with self._lock:
                     record = self._read(run_id)
                     record.update(

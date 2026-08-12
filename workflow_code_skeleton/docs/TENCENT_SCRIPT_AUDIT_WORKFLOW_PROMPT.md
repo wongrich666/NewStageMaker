@@ -1,6 +1,6 @@
 # 腾讯工作流：分批剧本心电图检测
 
-本工作流对应本地阶段键 `hot_review`。本地先按“第 N 集”标题切分剧本，每批最多发送 5 集；工作流负责逐集审核，并返回供下一批使用的累计审核记忆。
+本工作流对应本地阶段键 `hot_review`。本地先按“第 N 集”标题切分剧本，默认每批只发送 1 集；后端会自动连续审核全剧，无需用户逐集点击。采用单集批次是因为完整 `script_audit_batch_v1` 字段较多，五集输出在腾讯私有部署中可能超过输出上限并被降级成摘要。工作流负责审核当前集，并返回供下一集使用的累计审核记忆。
 
 不要修改或复用现有 `12_04`。`12_04` 服务于剧本续写记忆，和审核记忆的目标、字段与证据要求不同。
 
@@ -15,9 +15,9 @@
 | `script_title` | `str` | `测试剧本` | 剧本名称 |
 | `total_episodes` | `int` | `30` | 全剧总集数，不是当前批次数量 |
 | `batch_start_episode` | `int` | `6` | 当前批次起始集数 |
-| `batch_end_episode` | `int` | `10` | 当前批次结束集数；尾批可能不足 5 集 |
+| `batch_end_episode` | `int` | `6` | 当前批次结束集数；当前默认与起始集数相同 |
 | `previous_audit_memory` | `str` | `{...}` | 上一批返回的累计审核记忆；首批为 `{}` |
-| `batch_script_text` | `str` | `第6集……第10集……` | 当前批次完整正文 |
+| `batch_script_text` | `str` | `第6集……` | 当前集完整正文 |
 | `is_final_batch` | `bool` | `false` | 当前批次是否为全剧最后一批 |
 
 本地发给腾讯 API 的字段名与这里完全一致，不能改为 `script_text`、`start_epi` 或其他别名。
@@ -76,9 +76,9 @@ Output.audit_batch = 大模型1.Output.Content
 1. 当前只审核 batch_script_text 中第 batch_start_episode 集至第 batch_end_episode 集，不得输出其他集的 episode_reviews。
 2. 必须逐集审核。当前范围内每一集都必须且只能出现一次，不得跳集、合并集、只分析代表集或只输出前几集。
 3. previous_audit_memory 是上一批审核完成后的累计状态，只用于判断跨批衔接、全剧情绪债、人物状态和全局趋势，不能把其中的旧集重复输出到 episode_reviews。
-4. next_audit_memory 必须是“截至当前批次的完整替换版本”，不是只写当前五集，也不是把旧记忆原文机械追加一遍。下一批只会收到你本次返回的 next_audit_memory。
+4. next_audit_memory 必须是“截至当前批次的完整替换版本”，不是只写当前一集，也不是把旧记忆原文机械追加一遍。下一批只会收到你本次返回的 next_audit_memory。
 5. 首批 previous_audit_memory 为 {}。首批 boundary_review.previous_episode_no 必须为 0，不得虚构上一集。
-6. 尾批可能只有 1、2、3 或 4 集，仍须逐集完整审核；不得为了凑满 5 集虚构不存在的集数。
+6. 当前本地默认单集调用；始终只输出 batch_start_episode 至 batch_end_episode 指定的真实集数，不得虚构其他集数。
 7. is_final_batch=true 时，next_audit_memory 必须形成全剧最终判断，补齐最强集、最弱集、全剧留存、爽点分布、人物弧线、未偿情绪债、最大问题和优先修改方案。
 
 【最高优先级输出规则】
@@ -179,7 +179,7 @@ ecg_value 必须是 -5 到 5 之间的整数：
 10. 整个 next_audit_memory 应尽量控制在 20000 个中文字符以内，绝不能超过 30000 字符。
 
 【必须返回的精确 JSON 结构】
-下面用“全剧只有第 1 集”的合法尾批展示单集对象的完整结构。真实调用时，episode_reviews 必须从 batch_start_episode 到 batch_end_episode 逐集复制这套完整对象；例如审核第 6—10 集时必须返回 5 个完整对象，集号依次为 6、7、8、9、10，绝不能只照抄一个对象。
+下面用“全剧只有第 1 集”的合法尾批展示单集对象的完整结构。当前本地默认逐集调用，因此正常情况下 `batch_start_episode` 与 `batch_end_episode` 相同，`episode_reviews` 只返回当前这一集的完整对象；不要附带旧集或下一集。
 {
   "schema_version": "script_audit_batch_v1",
   "batch_meta": {
@@ -435,6 +435,7 @@ TENCENT_WORKFLOW_HOT_REVIEW_API_KEY=填写修改后的分批审核工作流APIKe
 1. 按每批实际起止集数校验 `episode_reviews`，少集、重复、乱序或越界都会使当前批次失败。
 2. 每批成功后保存结果和 `next_audit_memory`，下一批只携带最新版记忆。
 3. 失败重试从失败批次继续，已经成功的批次不会重新调用。
+4. 若远端把 `batch_meta.total_episodes` 错写成当前批次数量，本地会使用从完整剧本严格解析出的真实总集数自动校正并记录 warning；评分、心电节点、问题与修改建议不会被本地改写。
 
 ## 七、本地调试记录
 
