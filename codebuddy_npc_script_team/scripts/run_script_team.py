@@ -492,6 +492,18 @@ def episode_range_violations(text: str, request_payload: dict) -> list[str]:
     ]
 
 
+def final_script_truncation_error(text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return "最终剧本为空"
+    if re.search(r"(?:^|[\s，。！？；：、])(?:他|她|它|我|你|我们|他们|她们|这|那|并|但|却|和|与|在|向|把|被|的|地|得)$", value):
+        return f"最终剧本疑似在半句处中断：{value[-20:]}"
+    for opening, closing in (("（", "）"), ("“", "”"), ("《", "》")):
+        if value.count(opening) != value.count(closing):
+            return f"最终剧本疑似截断：{opening}{closing}未闭合"
+    return ""
+
+
 def _episode_slice(text: str, episode_start: int, episode_end: int) -> str:
     value = str(text or "")
     matches = list(EPISODE_HEADER_RE.finditer(value))
@@ -1618,6 +1630,10 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
             violations = episode_range_violations(result, request_payload)
             if violations:
                 raise SystemExit(f"{stage}集数合同未满足：" + "；".join(violations))
+            if stage == "final_editor":
+                truncation_error = final_script_truncation_error(result)
+                if truncation_error:
+                    raise SystemExit(truncation_error)
         return result
 
     result = ""
@@ -1715,6 +1731,10 @@ def generate_stage_result(stage: str, request_payload: dict, *, modules: str) ->
     violations = episode_range_violations(result, request_payload)
     if violations:
         raise SystemExit(f"{stage}合并集数合同未满足：" + "；".join(violations))
+    if stage == "final_editor":
+        truncation_error = final_script_truncation_error(result)
+        if truncation_error:
+            raise SystemExit(truncation_error)
     return result
 
 
