@@ -9,6 +9,7 @@ from unittest.mock import patch
 from workflow_code_skeleton.app.services.script_audit_batch_service import (
     BATCH_SCHEMA_VERSION,
     ScriptAuditBatchService,
+    compact_audit_memory,
     merge_audit_batches,
     parse_script_episodes,
     split_episode_batches,
@@ -103,6 +104,21 @@ def batch_payload(start: int, end: int, total: int) -> dict:
             "best_retained_part": "开场危机", "priority_fix": "压缩说明台词",
             "final_judgement": "修改后可测试", "modification_cost": "中",
             "retention_curve_summary": "整体平稳", "fix_suggestion": "先改弱集",
+            "last_episode_handoff": {
+                "episode_no": end,
+                "ending_scene_summary": "结尾出现新危机",
+                "ending_time_space": "仓库·当夜",
+                "ending_emotion": "期待",
+                "active_action_or_crisis": "追兵逼近",
+                "ending_hook_promise": "下一集必须处理追兵",
+                "ending_text_excerpt": "门外响起脚步声",
+                "character_state_snapshot": [],
+                "information_state": [],
+                "prop_resource_state": [],
+                "relationship_state": [],
+                "unresolved_actions": ["处理追兵"],
+                "continuity_watch_points": ["下一集开场是否承接脚步声"],
+            },
         },
     }
 
@@ -216,6 +232,24 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "五维合计"):
             validate_batch_output(incorrect_sum, [1])
 
+    def test_legacy_memory_gets_a_handoff_snapshot_for_the_next_episode(self) -> None:
+        value = batch_payload(1, 1, 2)
+        value["next_audit_memory"].pop("last_episode_handoff")
+
+        parsed, warnings = validate_batch_output(value, [1], 2)
+
+        handoff = parsed["next_audit_memory"]["last_episode_handoff"]
+        self.assertEqual(1, handoff["episode_no"])
+        self.assertEqual("期待", handoff["ending_emotion"])
+        self.assertEqual("反转", handoff["ending_scene_summary"])
+        self.assertTrue(any("兼容交接快照" in warning for warning in warnings))
+
+    def test_compact_memory_preserves_structured_episode_handoff(self) -> None:
+        memory = compact_audit_memory(batch_payload(3, 3, 6)["next_audit_memory"])
+
+        self.assertEqual(3, memory["last_episode_handoff"]["episode_no"])
+        self.assertEqual("仓库·当夜", memory["last_episode_handoff"]["ending_time_space"])
+
     def test_final_merge_keeps_emotion_continuity_and_all_points(self) -> None:
         audit, warnings = merge_audit_batches("测试", 6, [batch_payload(1, 5, 6), batch_payload(6, 6, 6)])
         self.assertEqual([], warnings)
@@ -249,6 +283,8 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
         self.assertEqual("{}", client.calls[0]["previous_audit_memory"])
         previous = json.loads(client.calls[1]["previous_audit_memory"])
         self.assertEqual(1, previous["reviewed_through_episode"])
+        self.assertEqual(1, previous["last_episode_handoff"]["episode_no"])
+        self.assertEqual("下一集必须处理追兵", previous["last_episode_handoff"]["ending_hook_promise"])
         self.assertEqual(2, client.calls[1]["batch_start_episode"])
         self.assertFalse(client.calls[1]["is_final_batch"])
         self.assertEqual(6, client.calls[-1]["batch_start_episode"])

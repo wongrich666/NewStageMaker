@@ -317,6 +317,44 @@ def validate_batch_output(
         raise ValueError("批次缺少 next_audit_memory，无法继续下一批审核。")
     if _int(memory.get("reviewed_through_episode")) < expected_numbers[-1]:
         raise ValueError("next_audit_memory.reviewed_through_episode 未覆盖当前批次。")
+    handoff = memory.get("last_episode_handoff")
+    if not isinstance(handoff, dict) or _int(handoff.get("episode_no")) != expected_numbers[-1]:
+        # Backward compatibility for the already-published workflow. This snapshot
+        # is deterministic extraction from the accepted current-episode review; it
+        # keeps the next episode connected until the remote prompt is upgraded to
+        # return the richer handoff fields itself.
+        last_review = reviews[-1]
+        emotional = last_review.get("emotional_review") if isinstance(last_review.get("emotional_review"), dict) else {}
+        structure = last_review.get("episode_structure") if isinstance(last_review.get("episode_structure"), dict) else {}
+        ending_hook = last_review.get("ending_hook") if isinstance(last_review.get("ending_hook"), dict) else {}
+        memory["last_episode_handoff"] = {
+            "episode_no": expected_numbers[-1],
+            "ending_scene_summary": _text(structure.get("ending")),
+            "ending_time_space": "",
+            "ending_emotion": _text(emotional.get("ending_emotion")),
+            "active_action_or_crisis": _text(last_review.get("main_conflict")),
+            "ending_hook_promise": _text(ending_hook.get("description") or last_review.get("next_episode_pull")),
+            "ending_text_excerpt": _text(ending_hook.get("original_text_excerpt")),
+            "character_state_snapshot": copy.deepcopy(memory.get("current_character_states") or []),
+            "information_state": [],
+            "prop_resource_state": [],
+            "relationship_state": [],
+            "unresolved_actions": [
+                value for value in (_text(last_review.get("next_episode_pull")),) if value
+            ],
+            "continuity_watch_points": copy.deepcopy(memory.get("next_batch_watch_points") or []),
+        }
+        warnings.append(
+            f"远端第{expected_numbers[-1]}集记忆缺少 last_episode_handoff，"
+            "本地已从本集审核结果生成兼容交接快照；建议按最新提示词更新远端工作流。"
+        )
+    if expected_numbers[0] > 1:
+        evidence = boundary.get("continuity_evidence")
+        if not isinstance(evidence, dict) or not evidence:
+            warnings.append(
+                f"第{expected_numbers[0]}集 boundary_review 缺少 continuity_evidence，"
+                "当前承接分数可用，但建议按最新提示词补充逐项对照证据。"
+            )
     return payload, warnings
 
 
@@ -324,7 +362,7 @@ def compact_audit_memory(value: Any) -> dict[str, Any]:
     source = value if isinstance(value, dict) else {}
     allowed = (
         "reviewed_through_episode", "main_genre", "main_emotional_contract", "main_conflict_chain",
-        "protagonist_arc", "payoff_chain", "current_character_states", "unresolved_plot_threads",
+        "protagonist_arc", "payoff_chain", "last_episode_handoff", "current_character_states", "unresolved_plot_threads",
         "unpaid_emotional_debts", "resolved_payoffs", "continuity_risks", "episode_score_index",
         "weak_episode_numbers", "best_episode_no", "best_episode_reason", "weakest_episode_no",
         "weakest_episode_reason", "running_retention_judgement", "global_strength_summary",

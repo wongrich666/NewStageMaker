@@ -40,6 +40,9 @@
 <batch_script_text>
 {{batch_script_text}}
 </batch_script_text>
+
+注意：当前本地采用逐集调用，所以正常情况下 batch_start_episode 与 batch_end_episode 相等；
+这两个参数仍必须保留并原样使用，不要在工作流中自行改成 1 或当前批次数量。
 ```
 
 ## 三、结束节点
@@ -80,6 +83,7 @@ Output.audit_batch = 大模型1.Output.Content
 5. 首批 previous_audit_memory 为 {}。首批 boundary_review.previous_episode_no 必须为 0，不得虚构上一集。
 6. 当前本地默认单集调用；始终只输出 batch_start_episode 至 batch_end_episode 指定的真实集数，不得虚构其他集数。
 7. is_final_batch=true 时，next_audit_memory 必须形成全剧最终判断，补齐最强集、最弱集、全剧留存、爽点分布、人物弧线、未偿情绪债、最大问题和优先修改方案。
+8. 从第2集开始，previous_audit_memory.last_episode_handoff 是上一集结尾的强制交接基准。必须先逐项读取它，再审核当前集开场；不得仅凭 main_conflict_chain 等全局摘要猜测上一集发生了什么。
 
 【最高优先级输出规则】
 1. 最终回复必须且只能是一个合法 JSON object。禁止输出 Markdown、代码围栏、解释、前言、结语或 JSON 外文字。
@@ -121,8 +125,8 @@ ecg_value 必须是 -5 到 5 之间的整数：
 5. emotional_curve_score 范围 0-10。情绪变化需要触发、升级、峰值与余波；只有单一情绪喊叫或突然煽情不得高分。
 
 【前后集承接审核】
-1. 每一集 continuity_review 都要检查上一集结尾到本集开头的剧情、人物状态、时间空间、信息和情绪是否连续。
-2. boundary_review 专门审核“上一批最后一集 → 当前批第一集”。即使当前批只有一集，也必须执行。
+1. 每一集 continuity_review 都要检查上一集结尾到本集开头的剧情、人物状态、时间空间、信息、道具资源、关系、未完成动作和情绪是否连续。
+2. boundary_review 专门审核“上一集 → 当前集”。当前逐集调用下，它不是批次摘要，而是每一对相邻集都必须执行的连续性审计。
 3. handoff_smoothness_score 范围 0-10：
    9-10：上一集动作、危机或情绪在本集立即自然续接，并产生升级；
    7-8：衔接清楚，仅有轻微信息重复或节奏损失；
@@ -133,6 +137,10 @@ ecg_value 必须是 -5 到 5 之间的整数：
 5. 上一集强烈悲痛、危机或关系破裂，本集若无触发就恢复平静，必须标记情绪断裂。
 6. 角色伤势、服饰、道具、知识、立场、关系、资源和任务状态发生无解释变化，必须进入 break_points。
 7. 上一集结尾提出的问题若本集回避、延迟或换成另一条线，必须判断是否造成钩子落空。
+8. 从第2集开始，必须把 previous_audit_memory.last_episode_handoff 的下列字段与当前集开场逐项对照：ending_time_space、ending_emotion、active_action_or_crisis、ending_hook_promise、character_state_snapshot、information_state、prop_resource_state、relationship_state、unresolved_actions、continuity_watch_points。
+9. boundary_review.continuity_evidence 必须分别写明上一集快照、当前集开场证据和匹配结论。禁止只返回“承接自然”“基本一致”等无证据判断。
+10. 如果当前集合理跳时空，必须在正文中找到明确转场、时间标记或因果桥；有桥接才算合理跳转，没有桥接则属于断裂。
+11. 如果上一集钩子在当前集不是立即处理，也必须判断延迟是否制造了更强悬念；单纯回避不得判为顺滑。
 
 【犀利审核与证据约束】
 1. 禁止“整体不错但仍有提升空间”“节奏可以更紧凑”“人物可以更立体”“建议增强冲突”等可套用于任何剧本的空话。
@@ -169,25 +177,27 @@ ecg_value 必须是 -5 到 5 之间的整数：
 【累计审核记忆规则】
 1. next_audit_memory 必须保留截至当前批次仍影响后续判断的信息，不保存大段原文，不复述全部 episode_reviews。
 2. reviewed_through_episode 必须等于 batch_end_episode。
-3. current_character_states 记录核心人物在当前批次结束时的位置、目标、情绪、关系、伤势、持有信息、资源和未完成行动。
-4. unresolved_plot_threads 只保留尚未解决且会影响后续理解的线索、危机、任务和秘密。
-5. unpaid_emotional_debts 记录尚未兑现的羞辱、牺牲、背叛、误会、承诺、欲望和关系债。
-6. episode_score_index 必须累计保留第1集至当前集的 episode_no 和 score，用于最终比较最强/最弱集。
-7. weak_episode_numbers、best_episode_no、weakest_episode_no 必须根据已有全部批次动态更新。
-8. global_key_issues 与 global_rewrite_plan 只保留最重要且仍有效的全剧问题，合并同源问题，禁止无限重复增长。
-9. next_batch_watch_points 明确下一批需要验证的承接点、待回收情绪债和人物状态。
-10. 整个 next_audit_memory 应尽量控制在 20000 个中文字符以内，绝不能超过 30000 字符。
+3. last_episode_handoff 必须是当前集结尾的结构化交接快照，episode_no 必须等于 batch_end_episode；下一集会把它作为连续性审计基准。
+4. last_episode_handoff 只写当前集结尾仍成立的状态，不复述整集剧情。ending_text_excerpt 只摘录能证明结尾状态的真实短句。
+5. current_character_states 记录核心人物在当前集结束时的位置、目标、情绪、关系、伤势、持有信息、资源和未完成行动。
+6. unresolved_plot_threads 只保留尚未解决且会影响后续理解的线索、危机、任务和秘密。
+7. unpaid_emotional_debts 记录尚未兑现的羞辱、牺牲、背叛、误会、承诺、欲望和关系债。
+8. episode_score_index 必须累计保留第1集至当前集的 episode_no 和 score，用于最终比较最强/最弱集。
+9. weak_episode_numbers、best_episode_no、weakest_episode_no 必须根据已有全部批次动态更新。
+10. global_key_issues 与 global_rewrite_plan 只保留最重要且仍有效的全剧问题，合并同源问题，禁止无限重复增长。
+11. next_batch_watch_points 明确下一集需要验证的承接点、待回收情绪债和人物状态，并与 last_episode_handoff.continuity_watch_points 一致。
+12. 整个 next_audit_memory 应尽量控制在 20000 个中文字符以内，绝不能超过 30000 字符。
 
 【必须返回的精确 JSON 结构】
-下面用“全剧只有第 1 集”的合法尾批展示单集对象的完整结构。当前本地默认逐集调用，因此正常情况下 `batch_start_episode` 与 `batch_end_episode` 相同，`episode_reviews` 只返回当前这一集的完整对象；不要附带旧集或下一集。
+下面用“全剧共 48 集、当前只审核第 1 集”的非尾批展示单集对象的完整结构。当前本地默认逐集调用，因此正常情况下 `batch_start_episode` 与 `batch_end_episode` 相同，`episode_reviews` 只返回当前这一集的完整对象；不要附带旧集或下一集。特别注意：`total_episodes` 始终复制输入中的全剧总集数 48，绝不能写成当前批大小 1。
 {
   "schema_version": "script_audit_batch_v1",
   "batch_meta": {
     "batch_start_episode": 1,
     "batch_end_episode": 1,
-    "total_episodes": 1,
+    "total_episodes": 48,
     "reviewed_episode_numbers": [1],
-    "is_final_batch": true,
+    "is_final_batch": false,
     "batch_core_judgement": "当前批次最关键的商业判断"
   },
   "boundary_review": {
@@ -198,6 +208,18 @@ ecg_value 必须是 -5 到 5 之间的整数：
     "character_state_continuity": "人物状态是否一致",
     "information_continuity": "信息是否自然递进",
     "emotion_continuity": "情绪是否自然延续或转折",
+    "continuity_evidence": {
+      "previous_handoff_fact": "首集填写无上一集；其他集摘述 last_episode_handoff 中最关键事实",
+      "current_opening_fact": "当前集开场的真实剧情证据",
+      "plot_match": "剧情动作如何承接或为何断裂",
+      "character_state_match": "人物位置、目标、伤势、资源是否一致",
+      "time_space_match": "时空是否直接承接或具有明确桥接",
+      "information_match": "角色已知信息是否一致并合理递进",
+      "prop_resource_match": "关键道具和资源去向是否一致",
+      "relationship_match": "人物关系和立场是否连续",
+      "emotion_match": "上一集结尾情绪如何延续、转折或断裂",
+      "hook_promise_payoff": "上一集结尾承诺在当前集如何处理"
+    },
     "break_points": [],
     "fix_suggestion": "没有问题时为空字符串"
   },
@@ -365,6 +387,21 @@ ecg_value 必须是 -5 到 5 之间的整数：
   "batch_risk_scan": [],
   "next_audit_memory": {
     "reviewed_through_episode": 1,
+    "last_episode_handoff": {
+      "episode_no": 1,
+      "ending_scene_summary": "当前集最后一个有效剧情状态",
+      "ending_time_space": "结尾时间与地点",
+      "ending_emotion": "结尾主导情绪",
+      "active_action_or_crisis": "结尾仍在进行的动作、危机或对抗",
+      "ending_hook_promise": "结尾向下一集作出的具体叙事承诺",
+      "ending_text_excerpt": "正文结尾真实短句",
+      "character_state_snapshot": ["核心人物：位置/目标/情绪/伤势/资源/正在做什么"],
+      "information_state": ["谁已经知道或仍不知道什么关键信息"],
+      "prop_resource_state": ["关键道具、能力、金钱、证据或资源的持有与状态"],
+      "relationship_state": ["关键关系、信任、敌我与立场状态"],
+      "unresolved_actions": ["已经启动但尚未完成的具体行动"],
+      "continuity_watch_points": ["下一集开场必须验证的具体承接点"]
+    },
     "main_genre": "主类型",
     "main_emotional_contract": "全剧向观众承诺的主要情绪价值",
     "main_conflict_chain": "截至当前的核心冲突升级链",
@@ -414,6 +451,8 @@ ecg_value 必须是 -5 到 5 之间的整数：
 - 每集 ecg_points 非空，ID 带真实集号且不重复。
 - 情绪判断有剧情触发和兑现依据，承接判断覆盖剧情、人物、时空、信息与情绪。
 - boundary_review 正确审核上一批最后一集到本批第一集；首批 previous_episode_no 为 0。
+- 从第2集开始，boundary_review.continuity_evidence 已逐项对照 previous_audit_memory.last_episode_handoff 与当前集开场证据。
+- next_audit_memory.last_episode_handoff.episode_no 等于当前集号，且准确保存结尾时空、情绪、人物/信息/道具/关系状态、未完成动作与钩子承诺。
 - next_audit_memory.reviewed_through_episode 等于 batch_end_episode，并已合并而不是机械追加旧记忆。
 - 所有意见通过反泛化检查，负向判断有证据、后果和具体修改动作。
 ```
