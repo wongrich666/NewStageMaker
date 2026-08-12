@@ -325,11 +325,27 @@ def stage_episode_range_error(
     if actual == expected:
         if stage == "episode_continuity":
             return _episode_card_error(content)
+        if stage == "final_editor":
+            return final_script_truncation_error(content)
         return ""
     return (
         f"{STAGE_NAMES[stage]}集数不完整：要求第{episode_start}-{episode_end}集，"
         f"实际集号为{actual}"
     )
+
+
+def final_script_truncation_error(content: str) -> str:
+    value = str(content or "").strip()
+    if not value:
+        return "最终剧本为空"
+    tail = value.rstrip()
+    if re.search(r"(?:^|[\s，。！？；：、])(?:他|她|它|我|你|我们|他们|她们|这|那|并|但|却|和|与|在|向|把|被|的|地|得)$", tail):
+        return f"最终剧本疑似在半句处中断：{tail[-20:]}"
+    pairs = (("（", "）"), ("“", "”"), ("《", "》"))
+    for opening, closing in pairs:
+        if tail.count(opening) != tail.count(closing):
+            return f"最终剧本疑似截断：{opening}{closing}未闭合"
+    return ""
 
 
 def _episode_batch_progress(

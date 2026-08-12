@@ -15,6 +15,7 @@ from workflow_code_skeleton.app.services.codebuddy_npc import (
     CodeBuddyNpcError,
     CodeBuddyNpcJobStore,
     finish_stage_timing,
+    final_script_truncation_error,
     public_job,
     stage_episode_range_error,
     start_stage_timing,
@@ -97,6 +98,11 @@ def test_local_scene_handoff_normalizer_aligns_hospital_transition() -> None:
     assert "下一场地点：医院急诊室" in normalized
     assert "下一场第一有效动作：主角推开急诊室门寻找医生" in normalized
     assert any("下一场地点已对齐" in warning for warning in warnings)
+
+
+def test_final_script_truncation_gate_rejects_half_sentence_only() -> None:
+    assert final_script_truncation_error("第2集：《急诊》\n她")
+    assert not final_script_truncation_error("第2集：《急诊》\n她推开了急诊室的门。")
 
 
 def test_local_writer_prompt_uses_specific_non_template_performance_cues() -> None:

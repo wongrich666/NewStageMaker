@@ -190,6 +190,11 @@ def test_scene_handoff_normalizer_aligns_next_location_and_action() -> None:
     assert len(warnings) == 2
 
 
+def test_final_script_truncation_gate_rejects_half_sentence() -> None:
+    assert MODULE.final_script_truncation_error("第2集：《急诊》\n她")
+    assert not MODULE.final_script_truncation_error("第2集：《急诊》\n她推开了急诊室的门。")
+
+
 def test_ip_anthology_contract_closes_each_episode_without_direct_handoff() -> None:
     instruction = MODULE.ip_anthology_contract_instruction({"ip_anthology_mode": True})
     contract = MODULE._episode_card_json_contract(1, 5, anthology=True)
