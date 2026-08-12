@@ -130,37 +130,111 @@ def split_episode_batches(episodes: list[dict[str, Any]], batch_size: int = BATC
     return batches
 
 
-def _extract_batch_payload(raw: Any) -> dict[str, Any]:
-    value = parse_workflow_output(raw)
-    keys = ("audit_batch", "auditBatch", "audit", "Output", "output", "content", "Content", "result", "data", "text")
-    seen: set[int] = set()
-    for _ in range(12):
-        if isinstance(value, dict):
-            if value.get("schema_version") == BATCH_SCHEMA_VERSION or {"batch_meta", "episode_reviews", "next_audit_memory"}.issubset(value):
-                return value
-            if id(value) in seen:
-                break
-            seen.add(id(value))
-            nested = next((value[key] for key in keys if key in value and value[key] not in (None, "", [], {})), None)
-            if nested is None and len(value) == 1:
-                nested = next(iter(value.values()))
-            if nested is None:
-                break
-            value = nested
-        elif isinstance(value, str):
-            parsed = parse_workflow_output(value)
-            if parsed == value:
-                break
-            value = parsed
-        elif isinstance(value, list) and value:
-            value = value[0]
-        else:
-            break
-    raise ValueError("心电图工作流未返回可解析的 script_audit_batch_v1 JSON。")
+def _iter_batch_candidates(raw: Any, *, max_depth: int = 18):
+    """Yield every plausible nested payload without letting a summary hide siblings."""
+    preferred = (
+        "audit_batch", "auditBatch", "audit", "Output", "output", "Outputs", "outputs",
+        "reply", "content", "Content", "Contents", "Text", "result", "data", "response",
+        "Response", "Messages", "Procedures", "Workflow", "RunNodes", "events", "message", "text",
+    )
+    seen_containers: set[int] = set()
+
+    def visit(value: Any, source: str, depth: int):
+        if depth > max_depth:
+            return
+        parsed = parse_workflow_output(value, max_depth=12)
+        yield source, parsed
+
+        # A JSON string can become a new object/list candidate.
+        if isinstance(value, str):
+            if parsed != value and isinstance(parsed, (dict, list)):
+                yield from visit(parsed, f"{source}.json", depth + 1)
+            return
+        if not isinstance(value, (dict, list)):
+            return
+        identity = id(value)
+        if identity in seen_containers:
+            return
+        seen_containers.add(identity)
+        if isinstance(value, list):
+            for index, item in enumerate(value):
+                yield from visit(item, f"{source}[{index}]", depth + 1)
+            return
+        visited: set[str] = set()
+        for key in preferred:
+            if key in value:
+                visited.add(key)
+                yield from visit(value[key], f"{source}.{key}", depth + 1)
+        for key, nested in value.items():
+            if str(key) not in visited:
+                yield from visit(nested, f"{source}.{key}", depth + 1)
+
+    yield from visit(raw, "response", 0)
 
 
-def validate_batch_output(raw: Any, expected_numbers: list[int]) -> tuple[dict[str, Any], list[str]]:
-    payload = _extract_batch_payload(raw)
+def _describe_incomplete_batch(
+    candidate: dict[str, Any],
+    source: str,
+    *,
+    expected_total_episodes: int | None = None,
+) -> str:
+    actual_keys = sorted(str(key) for key in candidate)
+    required = ("schema_version", "batch_meta", "episode_reviews", "next_audit_memory")
+    missing = [key for key in required if key not in candidate]
+    details = [
+        f"远端候选位置 {source}",
+        f"实际字段：{', '.join(actual_keys) or '(空)'}",
+        f"缺少字段：{', '.join(missing) or '(无)'}",
+    ]
+    if "reviewed_episode_numbers" in candidate and "episode_reviews" not in candidate:
+        details.append("当前返回只是批次摘要，不含逐集评分 episode_reviews")
+    returned_total = _int(candidate.get("total_episodes"))
+    if expected_total_episodes and returned_total and returned_total != expected_total_episodes:
+        details.append(
+            f"total_episodes 值错误：本地传入 {expected_total_episodes}，远端返回 {returned_total}"
+        )
+    return "；".join(details)
+
+
+def _extract_batch_payload(raw: Any, *, expected_total_episodes: int | None = None) -> dict[str, Any]:
+    incomplete: list[tuple[int, str]] = []
+    for source, value in _iter_batch_candidates(raw):
+        if not isinstance(value, dict):
+            continue
+        if value.get("schema_version") == BATCH_SCHEMA_VERSION or {
+            "batch_meta", "episode_reviews", "next_audit_memory",
+        }.issubset(value):
+            return value
+        business_keys = {
+            "batch_start_episode", "batch_end_episode", "total_episodes",
+            "reviewed_episode_numbers", "batch_core_judgement",
+        }
+        overlap = len(business_keys.intersection(value))
+        if overlap:
+            incomplete.append((overlap, _describe_incomplete_batch(
+                value,
+                source,
+                expected_total_episodes=expected_total_episodes,
+            )))
+    if incomplete:
+        detail = max(incomplete, key=lambda item: item[0])[1]
+        raise ValueError(
+            "心电图远端结束节点返回了不完整批次摘要，不能生成逐集心电图。"
+            f"{detail}。请将结束节点改为 Output.audit_batch = 大模型1.Output.Content，"
+            "并确认大模型最终回复含完整 script_audit_batch_v1 JSON。"
+        )
+    raise ValueError(
+        "心电图工作流未返回可解析的 script_audit_batch_v1 JSON。"
+        "请确认结束节点字段为 audit_batch，且引用大模型1.Output.Content。"
+    )
+
+
+def validate_batch_output(
+    raw: Any,
+    expected_numbers: list[int],
+    expected_total_episodes: int | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    payload = _extract_batch_payload(raw, expected_total_episodes=expected_total_episodes)
     warnings: list[str] = []
     if payload.get("schema_version") != BATCH_SCHEMA_VERSION:
         raise ValueError(f"批次 schema_version 必须是 {BATCH_SCHEMA_VERSION}。")
@@ -217,6 +291,11 @@ def validate_batch_output(raw: Any, expected_numbers: list[int]) -> tuple[dict[s
         raise ValueError(f"batch_meta 集号不匹配：期望 {expected_numbers}，实际 {reported}。")
     if _int(meta.get("batch_start_episode")) != expected_numbers[0] or _int(meta.get("batch_end_episode")) != expected_numbers[-1]:
         raise ValueError("batch_meta 的起止集数与当前批次不一致。")
+    if expected_total_episodes and _int(meta.get("total_episodes")) != expected_total_episodes:
+        raise ValueError(
+            f"batch_meta.total_episodes 值错误：期望全剧 {expected_total_episodes} 集，"
+            f"实际返回 {_int(meta.get('total_episodes'))}。"
+        )
     boundary = payload.get("boundary_review") if isinstance(payload.get("boundary_review"), dict) else {}
     expected_previous = expected_numbers[0] - 1 if expected_numbers[0] > 1 else 0
     if not boundary or _int(boundary.get("previous_episode_no"), -1) != expected_previous:
@@ -577,7 +656,11 @@ class ScriptAuditBatchService:
                     )
                     try:
                         raw = self._workflow_client().run_raw("hot_review", variables)
-                        batch_payload, batch_warnings = validate_batch_output(raw, chunk["episode_numbers"])
+                        batch_payload, batch_warnings = validate_batch_output(
+                            raw,
+                            chunk["episode_numbers"],
+                            record["total_episodes"],
+                        )
                         self._append_debug_event(
                             run_id,
                             "workflow_attempt_succeeded",

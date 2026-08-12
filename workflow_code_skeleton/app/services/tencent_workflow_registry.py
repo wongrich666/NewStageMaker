@@ -65,7 +65,9 @@ TENCENT_WORKFLOWS: dict[str, TencentWorkflowSpec] = {
             "batch_script_text": _sources("batch_script_text", "script_text", "text", "review_text"),
             "is_final_batch": _sources("is_final_batch"),
         },
-        response_fields=("audit_batch",),
+        # 新工作流文档约定 audit_batch；兼容已经发布成 audit 的结束节点。
+        # 批次服务仍会严格校验内部 script_audit_batch_v1，不会接受摘要冒充完整结果。
+        response_fields=("audit_batch", "audit"),
     ),
     "01": TencentWorkflowSpec(
         key="01",

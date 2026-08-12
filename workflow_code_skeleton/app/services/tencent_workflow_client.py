@@ -232,6 +232,11 @@ class TencentWorkflowClient:
             response_preview=safe_truncated_preview(raw_response, limit=1200),
             raw_response=raw_response,
         )
+        # 心电图的输出较大，而且部分腾讯私有部署会在 reply 中只放结束节点
+        # 的摘要、把模型正文留在 events/RunNodes 内。批次解析器需要看到整份
+        # 响应才能优先寻找完整 script_audit_batch_v1，避免被摘要抢占。
+        if stage_name == "hot_review":
+            return raw_response
         return selected
 
     def get_last_stage_debug_info(self, stage_name: str) -> dict[str, Any]:

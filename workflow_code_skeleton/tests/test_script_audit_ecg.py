@@ -192,7 +192,7 @@ class ScriptAuditEcgTests(unittest.TestCase):
             ),
             spec.input_names,
         )
-        self.assertEqual(("audit_batch",), spec.response_fields)
+        self.assertEqual(("audit_batch", "audit"), spec.response_fields)
         self.assertEqual("TENCENT_WORKFLOW_HOT_REVIEW_API_KEY", spec.api_key_env)
         self.assertEqual(
             {

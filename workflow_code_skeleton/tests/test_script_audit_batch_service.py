@@ -162,6 +162,45 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "期望.*实际"):
             validate_batch_output(value, [1, 2, 3, 4, 5])
 
+    def test_batch_parser_recovers_full_model_json_when_end_node_reply_is_summary(self) -> None:
+        complete = batch_payload(1, 1, 1)
+        raw = {
+            "reply": {"audit": {
+                "batch_start_episode": 1, "batch_end_episode": 1,
+                "reviewed_episode_numbers": [1], "batch_core_judgement": "摘要",
+            }},
+            "events": [{
+                "data": {"Response": {"Procedures": [{"Workflow": {"RunNodes": [{
+                    "NodeName": "大模型1", "NodeType": 4,
+                    "Output": {"Content": json.dumps(complete, ensure_ascii=False)},
+                }]}}]}},
+            }],
+        }
+
+        parsed, warnings = validate_batch_output(raw, [1])
+
+        self.assertEqual(BATCH_SCHEMA_VERSION, parsed["schema_version"])
+        self.assertEqual([], warnings)
+
+    def test_batch_parser_reports_remote_summary_fields_and_required_end_node(self) -> None:
+        raw = {"reply": {"audit": {
+            "batch_start_episode": 1, "batch_end_episode": 5, "total_episodes": 5,
+            "reviewed_episode_numbers": [1, 2, 3, 4, 5],
+            "is_final_batch": False, "batch_core_judgement": "只有摘要",
+        }}}
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "不完整批次摘要.*episode_reviews.*本地传入 48.*远端返回 5.*Output.audit_batch",
+        ):
+            validate_batch_output(raw, [1, 2, 3, 4, 5], 48)
+
+    def test_batch_contract_rejects_total_episode_count_replaced_by_batch_size(self) -> None:
+        value = batch_payload(1, 5, 5)
+
+        with self.assertRaisesRegex(ValueError, "期望全剧 48 集.*实际返回 5"):
+            validate_batch_output(value, [1, 2, 3, 4, 5], 48)
+
     def test_batch_contract_rejects_missing_emotion_and_incorrect_score_sum(self) -> None:
         missing_emotion = batch_payload(1, 1, 1)
         missing_emotion["episode_reviews"][0]["emotional_review"] = {}

@@ -50,6 +50,19 @@
 Output.audit_batch = 大模型1.Output.Content
 ```
 
+注意：字段名必须是 `audit_batch`，不要写成 `audit`。更不能在结束节点另外拼装
+`batch_start_episode`、`reviewed_episode_numbers`、`batch_core_judgement` 等摘要字段；
+这种摘要缺少逐集 `episode_reviews` 和 `next_audit_memory`，前端无法画出心电图，也无法继续下一批。
+
+如果腾讯后台最终响应类似下面这样，说明结束节点仍然配置错误：
+
+```json
+{"audit":{"batch_start_episode":1,"batch_end_episode":5,"reviewed_episode_numbers":[1,2,3,4,5],"batch_core_judgement":"..."}}
+```
+
+正确响应的最外层应是 `audit_batch`，它的值是大模型生成的整段 JSON 文本；解析后必须同时包含
+`schema_version`、`batch_meta`、`episode_reviews`、`next_audit_memory`。
+
 腾讯结束节点不需要结构化输出能力。大模型返回 JSON 文本，本地会从腾讯 SSE 包与 `Output.audit_batch` 中自动解包。
 
 ## 四、大模型系统提示词
