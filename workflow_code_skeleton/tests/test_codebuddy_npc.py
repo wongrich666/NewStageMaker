@@ -80,6 +80,7 @@ def test_local_scene_handoff_normalizer_aligns_hospital_transition() -> None:
 场景1：办公室｜日｜内
 场景承接：主角接起电话
 离场触发：医生告知母亲病危，主角决定赶去医院
+时间承接：赶往医院途中天色转暗
 下一场地点：咖啡馆
 下一场第一有效动作：主角坐下喝咖啡
 
@@ -87,6 +88,7 @@ def test_local_scene_handoff_normalizer_aligns_hospital_transition() -> None:
 场景1：医院急诊室｜日｜内
 场景承接：主角推开急诊室门寻找医生
 离场触发：医生把主角带向手术室
+时间承接：紧接上一场，无时间跳跃
 下一场地点：医院手术室
 下一场第一有效动作：主角追上医生"""
 
