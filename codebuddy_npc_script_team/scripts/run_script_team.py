@@ -217,10 +217,11 @@ episode_start、episode_end 与 episodes 共同定义本次唯一交付范围，
 scenes_per_episode 是逐集场景数量硬合同。1表示每一大集只能有一个场景，
 1-2表示每集一至两个，2表示每集必须两个，2-3表示每集两至三个，
 只有 flexible 才允许按剧情灵活安排。不得把一个场景内的小节拍拆成新场景。
-每个场景必须填写场景承接、离场触发、下一场地点和下一场第一有效动作。场景承接写本场
+每个场景必须填写场景承接、离场触发、时间承接、下一场地点和下一场第一有效动作。场景承接写本场
 第一拍如何接住上一场；离场触发写谁因何决定或被迫换场；下一场地点必须与实际下一场一致；
 下一场第一有效动作必须在下一场开头兑现。若下一集开在医院、法庭、公司或任何新地点，
 本集最后一场必须先演出人物决定、被带往或开始前往该地点的原因与行动。可省略路程，不可省略动机、去向和行动发起。
+相邻场景若时段改变，时间承接必须说明路程、等待或事件经过；若紧接发生则写无时间跳跃，时段不得无故改变。
 第一集第一有效拍必须让主角立刻面对不可回避的问题，并产生具体追问；优先使用
 高压命令、异常事实、关系破位或不可逆选择，随后立即出现后果、私人代价或主角选择。
 每集至少一个真正改变局势的情绪高点，每30至60秒出现一次局势变化或情绪释放。
@@ -247,9 +248,10 @@ episode_duration_seconds 是每集目标画面时长。按对白实际说完、�
 优先使用本来就在场且有信息来源的人物反应、对手指控、主角反问、公开通知、可见痕迹
 或规则反馈。不得固定使用路人解释；第三方开口必须同时在劝阻、站队、起哄、施压、
 自保或受到波及，不能像作者一样概述背景。钩子本身已经包含清楚原因时不得重复解释。
-逐字落实逐集卡的“结尾状态→下一集第一有效动作”及每场“场景承接→离场触发→
+逐字落实逐集卡的“结尾状态→下一集第一有效动作”及每场“场景承接→离场触发→时间承接→
 下一场地点→下一场第一有效动作”。每场结尾演出换场原因和行动发起，下一场开头兑现动作。
-允许省略无戏剧价值的赶路，但不能省略决定、去向、行动目的和关键结果；内部字段不得打印进正文。
+时段变化必须表现路程、等待、天色或事件经过。允许省略无戏剧价值的赶路，但不能省略决定、
+去向、行动目的和关键结果；内部字段不得打印进正文。
 每集由主角行动推动，不得瞬移。
 严格执行 scenes_per_episode。场景数按每一大集内出现的“场景N”标题计数；
 一个动作段、冲突阶段或人物进入不能自行升级为新场景。
@@ -297,8 +299,8 @@ MAINLINE_LOCK_JSON→逐集卡→正文既有事实→人物声音→Skill。先
 1.1 若缺少开场因果锚、观众仍不明白眼前处境为何发生，在强钩子后1至3个有效拍内补足：
     使用有来源的人物反应、指控、可见结果或规则反馈交代最小原因；不得在钩子前铺垫，
     不得新增只负责讲解的路人，也不得把完整前史一次说完；
-2. 其他集开头必须处理上集结尾状态；逐场核对上一场的下一地点与第一有效动作是否在
-   下一场场景头和开头兑现，缺失时只补离场原因、去向、行动发起和承接动作；
+2. 其他集开头必须处理上集结尾状态；逐场核对时间承接、下一地点与第一有效动作是否在
+   下一场场景头和开头兑现，缺失时只补时间经过、离场原因、去向、行动发起和承接动作；
 3. 增强同场多线压力、人物选择代价和每集至少一个真正改变局势的情绪高点；
 4. 改写泄气、解释性、AI味对白；
 5. 删掉不影响动作、信息和情绪的形容词。
@@ -827,7 +829,7 @@ def _valid_episode_parts(stage: str, text: str) -> dict[int, str]:
         and (not _scene_card_blocks(content) or all(
             all(
                 _scene_card_field(block, field)
-                for field in ("场景承接", "离场触发", "下一场地点", "下一场第一有效动作")
+                for field in ("场景承接", "离场触发", "时间承接", "下一场地点", "下一场第一有效动作")
             )
             for _location, block in _scene_card_blocks(content)
         ))
@@ -869,6 +871,7 @@ def _episode_card_json_contract(start: int, end: int, *, anthology: bool = False
     "dramatic_task": "本场必须完成的戏剧任务",
     "entry_action": "接住上一场的本场第一可见动作",
     "exit_trigger": "谁因什么决定或被迫离开本场",
+    "time_bridge": "紧接无跳跃，或说明路程等待造成的时间变化",
     "next_location": "实际紧接的下一场地点",
     "next_opening_action": "下一场开头真实发生的第一动作"
   }}]
@@ -958,11 +961,12 @@ def render_episode_card_json(
             task = str(scene.get("dramatic_task") or "").strip()
             entry_action = str(scene.get("entry_action") or item.get("opening_hook") or task).strip()
             exit_trigger = str(scene.get("exit_trigger") or item.get("choice_and_cost") or task).strip()
+            time_bridge = str(scene.get("time_bridge") or "紧接上一场，无时间跳跃").strip()
             next_location = str(scene.get("next_location") or location).strip()
             next_opening_action = str(
                 scene.get("next_opening_action") or item.get("next_opening_action") or task
             ).strip()
-            if not all((location, time_value, interior, task, entry_action, exit_trigger, next_location, next_opening_action)):
+            if not all((location, time_value, interior, task, entry_action, exit_trigger, time_bridge, next_location, next_opening_action)):
                 scene_error = f"第{episode}集场景{scene_index}信息不完整"
                 break
             characters = "、".join(str(value).strip() for value in scene.get("characters") or [] if str(value).strip())
@@ -974,6 +978,7 @@ def render_episode_card_json(
                 f"戏剧任务：{task}",
                 f"场景承接：{entry_action}",
                 f"离场触发：{exit_trigger}",
+                f"时间承接：{time_bridge}",
                 f"下一场地点：{next_location}",
                 f"下一场第一有效动作：{next_opening_action}",
             ))
