@@ -267,7 +267,10 @@ class ScriptAuditEcgTests(unittest.TestCase):
         )
 
         self.assertEqual(200, response.status_code)
-        self.assertIn("script_audit.js", response.get_data(as_text=True))
+        html = response.get_data(as_text=True)
+        self.assertIn("script_audit.js", html)
+        self.assertIn("20260812-audit-cip-contrast-v9", html)
+        self.assertIn("20260812-script-audit-theme-v3", html)
 
     @patch("workflow_code_skeleton.app.server.auth_store.get_user_by_token")
     def test_authenticated_txt_upload_extracts_script_without_starting_a_run(self, get_user_by_token) -> None:

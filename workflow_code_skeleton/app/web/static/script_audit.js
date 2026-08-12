@@ -62,7 +62,11 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const scoreColor = (value) => value > 0 ? "#1f8a5b" : value < 0 ? "#cf4b45" : "#888d84";
+  const scoreColor = (value) => value > 0
+    ? "var(--audit-chart-positive, #1f8a5b)"
+    : value < 0
+      ? "var(--audit-chart-negative, #cf4b45)"
+      : "var(--audit-chart-neutral, #888d84)";
 
   function renderChart(container, points, detailTarget) {
     container.replaceChildren();
@@ -88,19 +92,19 @@
       const line = document.createElementNS(ns, "line");
       line.setAttribute("x1", padX); line.setAttribute("x2", width - padX);
       line.setAttribute("y1", y(tick)); line.setAttribute("y2", y(tick));
-      line.setAttribute("stroke", tick === 0 ? "rgba(32,35,31,.35)" : "rgba(32,35,31,.09)");
+      line.setAttribute("stroke", tick === 0 ? "var(--audit-chart-grid-strong, rgba(32,35,31,.35))" : "var(--audit-chart-grid, rgba(32,35,31,.09))");
       line.setAttribute("stroke-width", tick === 0 ? "1.5" : "1");
       svg.append(line);
       const label = document.createElementNS(ns, "text");
       label.setAttribute("x", 9); label.setAttribute("y", y(tick) + 4);
-      label.setAttribute("fill", "#7a7d76"); label.setAttribute("font-size", "11");
+      label.setAttribute("fill", "var(--audit-chart-muted, #7a7d76)"); label.setAttribute("font-size", "11");
       label.textContent = tick > 0 ? `+${tick}` : String(tick);
       svg.append(label);
     });
 
     const polyline = document.createElementNS(ns, "polyline");
     polyline.setAttribute("points", points.map((point, index) => `${x(index)},${y(point.ecg_value)}`).join(" "));
-    polyline.setAttribute("fill", "none"); polyline.setAttribute("stroke", "#30332e");
+    polyline.setAttribute("fill", "none"); polyline.setAttribute("stroke", "var(--audit-chart-line, #30332e)");
     polyline.setAttribute("stroke-width", "2.5"); polyline.setAttribute("stroke-linejoin", "round");
     svg.append(polyline);
 
@@ -112,7 +116,7 @@
       const circle = document.createElementNS(ns, "circle");
       circle.setAttribute("cx", x(index)); circle.setAttribute("cy", y(point.ecg_value)); circle.setAttribute("r", "6");
       circle.setAttribute("fill", scoreColor(Number(point.ecg_value || 0)));
-      circle.setAttribute("stroke", "#fff"); circle.setAttribute("stroke-width", "2");
+      circle.setAttribute("stroke", "var(--audit-chart-point-ring, #fff)"); circle.setAttribute("stroke-width", "2");
       const title = document.createElementNS(ns, "title");
       title.textContent = `${text(point.x_label)}：${Number(point.ecg_value || 0) > 0 ? "+" : ""}${Number(point.ecg_value || 0)} ${text(point.audit_reason, "")}`;
       circle.append(title);
@@ -120,7 +124,7 @@
       if (points.length <= 30 || index % Math.ceil(points.length / 24) === 0 || index === points.length - 1) {
         const label = document.createElementNS(ns, "text");
         label.setAttribute("x", x(index)); label.setAttribute("y", height - 20);
-        label.setAttribute("fill", "#747870"); label.setAttribute("font-size", "10"); label.setAttribute("text-anchor", "middle");
+        label.setAttribute("fill", "var(--audit-chart-muted, #747870)"); label.setAttribute("font-size", "10"); label.setAttribute("text-anchor", "middle");
         label.textContent = text(point.x_label, String(index + 1)).slice(0, 9);
         group.append(label);
       }

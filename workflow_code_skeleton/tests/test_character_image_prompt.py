@@ -239,7 +239,9 @@ class CharacterImagePromptTests(unittest.TestCase):
         )
 
         self.assertEqual(200, response.status_code)
-        self.assertIn("character_image_prompts.js", response.get_data(as_text=True))
+        html = response.get_data(as_text=True)
+        self.assertIn("character_image_prompts.js", html)
+        self.assertIn("20260812-audit-cip-contrast-v9", html)
 
 
 if __name__ == "__main__":
