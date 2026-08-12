@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import uuid
 from typing import Any, Iterable
@@ -37,6 +38,7 @@ class TencentWorkflowClient:
 
     def __init__(self) -> None:
         self._last_stage_debug_info: dict[str, dict[str, Any]] = {}
+        self._debug_local = threading.local()
 
     def run_stage(self, stage_name: str, variables: dict[str, Any]) -> dict[str, Any]:
         spec = workflow_spec(stage_name)
@@ -72,9 +74,10 @@ class TencentWorkflowClient:
             api_url_source=url_source,
             input_keys=sorted(workflow_inputs),
             input_char_lengths={
-                key: len(value)
+                key: len(str(value))
                 for key, value in workflow_inputs.items()
             },
+            input_types={key: type(value).__name__ for key, value in workflow_inputs.items()},
             request_id=request_id,
         )
         response = self._post_with_retries(
@@ -83,7 +86,18 @@ class TencentWorkflowClient:
             headers=headers,
             body=body,
         )
-        raw_response = _response_payload(response)
+        try:
+            raw_response = _response_payload(response)
+        except Exception as exc:
+            self._remember_stage_debug_info(
+                stage_name,
+                status="response_parse_error",
+                http_status=getattr(response, "status_code", None),
+                response_preview=safe_truncated_preview(_response_text(response), limit=2000),
+                exception_type=type(exc).__name__,
+                last_failure_reason=str(exc),
+            )
+            raise
         error_message = _tencent_error_message(raw_response)
         if error_message:
             self._remember_stage_debug_info(
@@ -173,9 +187,10 @@ class TencentWorkflowClient:
             api_url_source=url_source,
             input_keys=sorted(workflow_inputs),
             input_char_lengths={
-                key: len(value)
+                key: len(str(value))
                 for key, value in workflow_inputs.items()
             },
+            input_types={key: type(value).__name__ for key, value in workflow_inputs.items()},
             request_id=request_id,
         )
         response = self._post_with_retries(
@@ -184,9 +199,27 @@ class TencentWorkflowClient:
             headers={"Content-Type": "application/json"},
             body=body,
         )
-        raw_response = _response_payload(response)
+        try:
+            raw_response = _response_payload(response)
+        except Exception as exc:
+            self._remember_stage_debug_info(
+                stage_name,
+                status="response_parse_error",
+                http_status=getattr(response, "status_code", None),
+                response_preview=safe_truncated_preview(_response_text(response), limit=2000),
+                exception_type=type(exc).__name__,
+                last_failure_reason=str(exc),
+            )
+            raise
         error_message = _tencent_error_message(raw_response)
         if error_message:
+            self._remember_stage_debug_info(
+                stage_name,
+                status="error_response",
+                response_preview=safe_truncated_preview(raw_response, limit=1600),
+                raw_response=raw_response,
+                last_failure_reason=error_message,
+            )
             raise RuntimeError(f"{spec.label} 返回错误：{error_message}")
         selected, candidate_sources = _select_response_payload(
             raw_response,
@@ -202,12 +235,26 @@ class TencentWorkflowClient:
         return selected
 
     def get_last_stage_debug_info(self, stage_name: str) -> dict[str, Any]:
-        return dict(self._last_stage_debug_info.get(str(stage_name), {}))
+        stage = str(stage_name)
+        thread_map = getattr(self._debug_local, "stages", {})
+        if isinstance(thread_map, dict) and isinstance(thread_map.get(stage), dict):
+            return dict(thread_map[stage])
+        return dict(self._last_stage_debug_info.get(stage, {}))
 
     def _remember_stage_debug_info(self, stage_name: str, **updates: Any) -> None:
-        current = dict(self._last_stage_debug_info.get(str(stage_name), {}))
+        stage = str(stage_name)
+        thread_map = getattr(self._debug_local, "stages", None)
+        if not isinstance(thread_map, dict):
+            thread_map = {}
+            self._debug_local.stages = thread_map
+        current = (
+            {}
+            if updates.get("status") == "requesting"
+            else dict(thread_map.get(stage) or self._last_stage_debug_info.get(stage, {}))
+        )
         current.update(updates)
-        self._last_stage_debug_info[str(stage_name)] = current
+        thread_map[stage] = current
+        self._last_stage_debug_info[stage] = current
 
     def _post_with_retries(
         self,
@@ -245,6 +292,15 @@ class TencentWorkflowClient:
                     time.monotonic() - started_at,
                     exc,
                 )
+                self._remember_stage_debug_info(
+                    stage_name,
+                    status="transport_error",
+                    http_attempt=attempt,
+                    http_attempts=attempts,
+                    elapsed_seconds=round(time.monotonic() - started_at, 3),
+                    exception_type=type(exc).__name__,
+                    last_failure_reason=str(exc),
+                )
                 if attempt >= attempts:
                     raise WorkflowTransientError(
                         f"腾讯工作流阶段 {stage_name} 请求失败：{exc}",
@@ -254,13 +310,42 @@ class TencentWorkflowClient:
                 time.sleep(delay * attempt)
                 continue
             except requests.RequestException as exc:
+                self._remember_stage_debug_info(
+                    stage_name,
+                    status="request_exception",
+                    http_attempt=attempt,
+                    http_attempts=attempts,
+                    elapsed_seconds=round(time.monotonic() - started_at, 3),
+                    exception_type=type(exc).__name__,
+                    last_failure_reason=str(exc),
+                )
                 raise RuntimeError(f"腾讯工作流阶段 {stage_name} 请求异常：{exc}") from exc
 
             if response.status_code in RETRYABLE_HTTP_STATUSES and attempt < attempts:
+                self._remember_stage_debug_info(
+                    stage_name,
+                    status="retryable_http_error",
+                    http_status=response.status_code,
+                    http_attempt=attempt,
+                    http_attempts=attempts,
+                    elapsed_seconds=round(time.monotonic() - started_at, 3),
+                    response_preview=safe_truncated_preview(_response_text(response), limit=1600),
+                    last_failure_reason=f"HTTP {response.status_code}",
+                )
                 time.sleep(delay * attempt)
                 continue
             if response.status_code >= 400:
-                preview = safe_truncated_preview(getattr(response, "text", "") or "", limit=1200)
+                preview = safe_truncated_preview(_response_text(response), limit=1600)
+                self._remember_stage_debug_info(
+                    stage_name,
+                    status="http_error",
+                    http_status=response.status_code,
+                    http_attempt=attempt,
+                    http_attempts=attempts,
+                    elapsed_seconds=round(time.monotonic() - started_at, 3),
+                    response_preview=preview,
+                    last_failure_reason=f"HTTP {response.status_code}: {preview}",
+                )
                 if response.status_code in RETRYABLE_HTTP_STATUSES:
                     raise WorkflowTransientError(
                         f"腾讯工作流阶段 {stage_name} 返回 HTTP {response.status_code}",
@@ -297,7 +382,7 @@ def _build_request_body(
     url: str,
     spec: Any,
     api_key: str,
-    workflow_inputs: dict[str, str],
+    workflow_inputs: dict[str, Any],
     request_id: str,
 ) -> dict[str, Any]:
     if "/adp/v2/chat" in str(url or "").lower():

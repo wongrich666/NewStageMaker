@@ -1,0 +1,99 @@
+:root {
+  color-scheme: light;
+  --ink: #242821;
+  --muted: #74796f;
+  --line: rgba(42, 48, 38, .14);
+  --paper: rgba(255, 255, 252, .84);
+  --accent: #3f684e;
+  --accent-soft: #e7f0e8;
+  --warm: #a5623c;
+  --shadow: 0 18px 55px rgba(43, 49, 39, .10);
+}
+* { box-sizing: border-box; }
+body { margin: 0; color: var(--ink); font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f3f2eb; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+.hidden { display: none !important; }
+.cip-shell { min-height: 100vh; display: grid; grid-template-columns: 238px minmax(0, 1fr); }
+.cip-sidebar { position: sticky; top: 0; height: 100vh; padding: 28px 20px; display: flex; flex-direction: column; background: rgba(31, 37, 30, .95); color: #fff; }
+.cip-brand { display: flex; align-items: center; gap: 12px; color: inherit; text-decoration: none; }
+.cip-brand img { width: 42px; height: 42px; border-radius: 13px; object-fit: cover; }
+.cip-brand span { display: grid; gap: 2px; }
+.cip-brand strong { font-size: 14px; letter-spacing: .06em; }
+.cip-brand small { color: rgba(255,255,255,.58); }
+.cip-nav { display: grid; gap: 8px; margin-top: 42px; }
+.cip-nav a, .cip-sidebar-foot a { color: rgba(255,255,255,.68); text-decoration: none; padding: 11px 13px; border-radius: 10px; transition: .18s ease; }
+.cip-nav a:hover, .cip-nav a.active { color: #fff; background: rgba(255,255,255,.10); }
+.cip-sidebar-foot { margin-top: auto; display: grid; gap: 3px; }
+.cip-main { width: min(1180px, 100%); margin: 0 auto; padding: 54px 48px 90px; }
+.cip-hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 32px; margin-bottom: 28px; }
+.cip-hero h1 { margin: 5px 0 10px; font-size: clamp(32px, 5vw, 54px); letter-spacing: -.045em; }
+.cip-hero p:not(.cip-kicker) { max-width: 760px; color: var(--muted); line-height: 1.8; margin: 0; }
+.cip-kicker { margin: 0; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .16em; }
+.cip-contract-tag { flex: 0 0 auto; padding: 9px 13px; border: 1px solid rgba(63,104,78,.28); border-radius: 999px; color: var(--accent); background: rgba(255,255,255,.48); font-size: 13px; }
+.cip-card { border: 1px solid var(--line); border-radius: 22px; background: var(--paper); box-shadow: var(--shadow); backdrop-filter: blur(16px); }
+.cip-form-card { padding: 28px; }
+.cip-grid { display: grid; gap: 18px; }
+.cip-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 19px; }
+.cip-field { display: grid; gap: 8px; }
+.cip-field > span, .cip-source-box > span, .cip-summary-card > span { color: var(--muted); font-size: 13px; font-weight: 700; }
+.cip-field select, .cip-field textarea { width: 100%; border: 1px solid var(--line); border-radius: 13px; color: var(--ink); background: rgba(255,255,255,.78); outline: none; }
+.cip-field select { height: 48px; padding: 0 13px; }
+.cip-field textarea { min-height: 132px; resize: vertical; padding: 13px 15px; line-height: 1.7; }
+.cip-field select:focus, .cip-field textarea:focus { border-color: rgba(63,104,78,.55); box-shadow: 0 0 0 3px rgba(63,104,78,.09); }
+.cip-source-box { display: grid; align-content: start; gap: 10px; }
+.cip-badges { display: flex; flex-wrap: wrap; gap: 7px; }
+.cip-badges span, .cip-badges em { padding: 6px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-style: normal; }
+.cip-badges span.missing { color: #9a5d3b; background: #f5e8df; }
+.cip-actions { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-top: 18px; color: var(--muted); font-size: 13px; }
+.cip-actions button, .cip-result-head > button { border: 0; border-radius: 12px; padding: 12px 20px; color: #fff; background: var(--accent); font-weight: 750; }
+.cip-actions button:disabled { cursor: not-allowed; opacity: .45; }
+.cip-status { margin-top: 14px; min-height: 24px; color: var(--muted); }
+.cip-status.error { color: #b2443e; }
+.cip-status.success { color: var(--accent); }
+.cip-preview { margin-top: 20px; padding: 24px 27px; }
+.cip-preview h2 { margin: 5px 0 18px; }
+.cip-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.cip-facts div { padding: 12px 13px; border-radius: 13px; background: rgba(238,239,232,.7); }
+.cip-facts span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 5px; }
+.cip-facts p { margin: 0; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cip-loading { display: flex; align-items: center; gap: 16px; margin: 24px 0; padding: 18px 22px; border-radius: 16px; background: rgba(255,255,255,.72); border: 1px solid var(--line); }
+.cip-loading div { display: grid; gap: 4px; }
+.cip-loading small { color: var(--muted); }
+.cip-spinner { width: 25px; height: 25px; border: 3px solid rgba(63,104,78,.16); border-top-color: var(--accent); border-radius: 50%; animation: cip-spin .75s linear infinite; }
+@keyframes cip-spin { to { transform: rotate(360deg); } }
+.cip-results { margin-top: 28px; display: grid; gap: 18px; }
+.cip-result-head { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.cip-result-head h2 { margin: 5px 0 0; font-size: 30px; }
+.cip-summary-card { padding: 22px 24px; }
+.cip-summary-card p { margin: 9px 0 0; line-height: 1.75; }
+.cip-prompt-grid { display: grid; grid-template-columns: 1.35fr .65fr; gap: 18px; }
+.cip-prompt-card { overflow: hidden; }
+.cip-prompt-card > div { display: flex; justify-content: space-between; align-items: center; padding: 18px 20px 0; }
+.cip-prompt-card h3 { margin: 0; }
+.cip-copy { border: 1px solid var(--line); border-radius: 9px; padding: 7px 11px; background: #fff; color: var(--accent); }
+.cip-prompt-card pre { margin: 0; padding: 18px 20px 22px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.75; }
+.cip-prompt-card.positive { border-top: 4px solid var(--accent); }
+.cip-prompt-card.negative { border-top: 4px solid var(--warm); }
+.cip-section-head { padding: 21px 23px 0; }
+.cip-section-head h3 { margin: 4px 0 0; }
+.cip-lock-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 18px 23px 23px; }
+.cip-lock-grid section { padding: 14px; border-radius: 14px; background: rgba(238,239,232,.72); }
+.cip-lock-grid h4 { margin: 0 0 8px; }
+.cip-lock-grid ul { margin: 0; padding-left: 18px; color: #4f554d; line-height: 1.7; }
+.cip-view-list { display: grid; gap: 10px; padding: 18px 23px 23px; }
+.cip-view-list article { padding: 14px 15px; border-radius: 13px; background: rgba(238,239,232,.72); }
+.cip-view-list strong { display: block; margin-bottom: 6px; }
+.cip-view-list p { margin: 0; white-space: pre-wrap; line-height: 1.65; }
+.cip-source-details { padding: 18px 22px; }
+.cip-source-details summary { cursor: pointer; font-weight: 750; }
+.cip-source-details .cip-facts { margin-top: 16px; }
+@media (max-width: 900px) {
+  .cip-shell { display: block; }
+  .cip-sidebar { position: static; height: auto; padding: 17px 20px; }
+  .cip-nav { margin-top: 18px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cip-sidebar-foot { display: none; }
+  .cip-main { padding: 34px 20px 70px; }
+  .cip-hero, .cip-result-head { align-items: stretch; flex-direction: column; }
+  .cip-grid.two, .cip-prompt-grid, .cip-lock-grid, .cip-facts { grid-template-columns: 1fr; }
+}

@@ -3317,6 +3317,17 @@ startRuntimeDebugPolling();
   }
 
   async function loadAssets({ resetPage = false, silent = false } = {}) {
+    // The home workspace no longer renders an asset panel. Keep asset loading
+    // scoped to pages that explicitly provide the list instead of issuing a
+    // hidden request on every home-page refresh and polling cycle.
+    if (!els.assetsList) {
+      state.assetsStatus = "empty";
+      state.assetsError = "";
+      state.assets = [];
+      state.assetsPage = 1;
+      refreshWorkspaceItems();
+      return;
+    }
     if (!isAuthenticated()) {
       state.assetsStatus = "empty";
       state.assetsError = "";

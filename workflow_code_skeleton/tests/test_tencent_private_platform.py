@@ -38,6 +38,33 @@ class ByteResponse:
 
 
 class TencentPrivatePlatformTests(unittest.TestCase):
+    def test_http_400_response_is_preserved_in_stage_debug_info(self) -> None:
+        response = Mock(
+            status_code=400,
+            content=(
+                b'{"Type":"error","Error":{"Code":999,'
+                b'"Message":"json: cannot unmarshal number into WorkflowInput of type string"}}'
+            ),
+            headers={"Content-Type": "application/json"},
+        )
+        client = TencentWorkflowClient()
+        with patch(
+            "workflow_code_skeleton.app.services.tencent_workflow_client.requests.post",
+            return_value=response,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 400"):
+                client._post_with_retries(
+                    stage_name="hot_review",
+                    url="http://example.invalid/adp/v2/chat",
+                    headers={"Content-Type": "application/json"},
+                    body={"WorkflowInput": {"total_episodes": 48}},
+                )
+
+        debug = client.get_last_stage_debug_info("hot_review")
+        self.assertEqual("http_error", debug["status"])
+        self.assertEqual(400, debug["http_status"])
+        self.assertIn("cannot unmarshal number", debug["response_preview"])
+
     def test_chunked_response_disconnect_is_retried(self) -> None:
         successful_response = Mock(status_code=200)
         client = TencentWorkflowClient()

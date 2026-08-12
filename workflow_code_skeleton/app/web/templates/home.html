@@ -33,34 +33,8 @@
       <div class="sidebar-primary">
         <a class="sidebar-create-btn" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') if current_user else url_for('login_page', next=url_for('framework_planner_page', new='1')) }}">＋ 新建框架</a>
         <a class="sidebar-create-btn" href="{{ '/framework-to-script?auth_token=' ~ current_auth_token if current_user and current_auth_token else ('/framework-to-script' if current_user else url_for('login_page', next='/framework-to-script')) }}">＋ 框架到剧本</a>
-      </div>
-
-      <div class="sidebar-nav">
-        <section class="sidebar-group">
-          <div class="sidebar-group-label">我的资产</div>
-          <div class="sidebar-section-head sidebar-section-head-compact">
-            <span>资产会话</span>
-        <a class="sidebar-refresh-btn prelogin-inline-link" href="{{ url_for('login_page', next=url_for('workspace_page')) if not current_user else url_for('workspace_page', auth_token=current_auth_token) }}">刷新</a>
-          </div>
-          <div class="sidebar-folders">
-            <details class="workspace-folder">
-              <summary>
-                <span>框架资产</span>
-              </summary>
-              <div class="workspace-compact-list">
-                <div class="workspace-empty">登录后查看 01-07 框架资产。</div>
-              </div>
-            </details>
-            <details class="workspace-folder">
-              <summary>
-                <span>剧本资产</span>
-              </summary>
-              <div class="workspace-compact-list">
-                <div class="workspace-empty">登录后查看 08-12 剧本资产。</div>
-              </div>
-            </details>
-          </div>
-        </section>
+        <a class="sidebar-create-btn" href="{{ url_for('script_audit_page', auth_token=current_auth_token) if current_user else url_for('login_page', next='/script-audit') }}">◇ 剧本心电图</a>
+        <a class="sidebar-create-btn" href="{{ url_for('character_image_prompts_page', auth_token=current_auth_token) if current_user else url_for('login_page', next='/character-image-prompts') }}">◇ 角色出图 Prompt</a>
       </div>
 
       <div class="sidebar-footer">
@@ -88,7 +62,7 @@
           <div class="workspace-landing__eyebrow">IDEA TO SCRIPT</div>
           <h1 class="workspace-landing__title">剧本平台</h1>
           <p class="workspace-landing__subtitle">
-            从框架策划到剧本生成，只保留两条核心入口。登录后可保存资产、查看进度。
+            从框架策划、剧本生成到成稿质检，登录后即可使用完整创作链路。
           </p>
 
           <div class="workspace-landing__actions">
@@ -98,6 +72,14 @@
 
             <a class="workspace-landing__card" href="{{ '/framework-to-script?auth_token=' ~ current_auth_token if current_user and current_auth_token else ('/framework-to-script' if current_user else url_for('login_page', next='/framework-to-script')) }}">
               <span class="workspace-landing__card-title">框架到剧本</span>
+            </a>
+
+            <a class="workspace-landing__card" href="{{ url_for('script_audit_page', auth_token=current_auth_token) if current_user else url_for('login_page', next='/script-audit') }}">
+              <span class="workspace-landing__card-title">剧本心电图</span>
+            </a>
+
+            <a class="workspace-landing__card" href="{{ url_for('character_image_prompts_page', auth_token=current_auth_token) if current_user else url_for('login_page', next='/character-image-prompts') }}">
+              <span class="workspace-landing__card-title">角色出图 Prompt</span>
             </a>
           </div>
 

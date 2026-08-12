@@ -31,6 +31,42 @@ def _sources(*names: str) -> tuple[str, ...]:
 
 
 TENCENT_WORKFLOWS: dict[str, TencentWorkflowSpec] = {
+    "character_image_prompt": TencentWorkflowSpec(
+        key="character_image_prompt",
+        label="角色出图提示词生成",
+        # 腾讯 ADP 的实际应用由 API Key 唯一确定；该值仅用于本地诊断。
+        workflow_id="character_image_prompt",
+        api_key_env="TENCENT_WORKFLOW_CHARACTER_IMAGE_PROMPT_API_KEY",
+        api_url_env="TENCENT_WORKFLOW_CHARACTER_IMAGE_PROMPT_API_URL",
+        input_sources={
+            "project_title": _sources("project_title", "title"),
+            "character_name": _sources("character_name", "name"),
+            "user_visual_requirements": _sources("user_visual_requirements", "user_requirements"),
+            "character_source_profile": _sources("character_source_profile"),
+            "appearance_mapping": _sources("appearance_mapping"),
+            "scene_prop_context": _sources("scene_prop_context"),
+            "selected_outfit_id": _sources("selected_outfit_id", "outfit_id"),
+        },
+        response_fields=("character_image_prompt",),
+    ),
+    "hot_review": TencentWorkflowSpec(
+        key="hot_review",
+        label="剧本心电图检测",
+        # 腾讯 ADP 的实际应用由 API Key 唯一确定；该占位符仅用于本地诊断信息。
+        workflow_id="hot_review",
+        api_key_env="TENCENT_WORKFLOW_HOT_REVIEW_API_KEY",
+        api_url_env="TENCENT_WORKFLOW_HOT_REVIEW_API_URL",
+        input_sources={
+            "script_title": _sources("script_title", "title"),
+            "total_episodes": _sources("total_episodes", "episode_count"),
+            "batch_start_episode": _sources("batch_start_episode", "start_episode"),
+            "batch_end_episode": _sources("batch_end_episode", "end_episode"),
+            "previous_audit_memory": _sources("previous_audit_memory", "audit_memory"),
+            "batch_script_text": _sources("batch_script_text", "script_text", "text", "review_text"),
+            "is_final_batch": _sources("is_final_batch"),
+        },
+        response_fields=("audit_batch",),
+    ),
     "01": TencentWorkflowSpec(
         key="01",
         label="01 提取故事梗概",
@@ -476,7 +512,7 @@ def first_present_value(variables: dict[str, Any], source_names: tuple[str, ...]
     return ""
 
 
-def build_workflow_inputs(stage_name: str, variables: dict[str, Any]) -> dict[str, str]:
+def build_workflow_inputs(stage_name: str, variables: dict[str, Any]) -> dict[str, Any]:
     spec = workflow_spec(stage_name)
     return {
         input_name: _as_custom_variable(

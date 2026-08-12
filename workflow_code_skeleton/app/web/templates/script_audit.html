@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <title>剧本心电图检测 · IDEA TO SCRIPT</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='script_audit.css') }}?v=20260811-script-audit-v1" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='theme_slideshow.css') }}?v=20260628-global-theme-v8" />
+</head>
+<body class="audit-page">
+  <div class="audit-shell">
+    <aside class="audit-sidebar">
+      <a class="audit-brand" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">
+        <img src="{{ url_for('static', filename='assets/logo.png') }}" alt="Logo" />
+        <span><strong>IDEA TO SCRIPT</strong><small>剧本平台</small></span>
+      </a>
+      <nav class="audit-nav" aria-label="主要功能">
+        <a href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">新建框架</a>
+        <a href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">框架到剧本</a>
+        <a class="active" href="{{ url_for('script_audit_page', auth_token=current_auth_token) }}">剧本心电图</a>
+        <a href="{{ url_for('character_image_prompts_page', auth_token=current_auth_token) }}">角色出图 Prompt</a>
+      </nav>
+      <div class="audit-sidebar-foot">
+        <a href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">返回工作台</a>
+        <a href="{{ url_for('logout', auth_token=current_auth_token) }}">退出登录</a>
+      </div>
+    </aside>
+
+    <main class="audit-main">
+      <header class="audit-hero">
+        <div>
+          <p class="audit-kicker">SCRIPT ECG REVIEW</p>
+          <h1>剧本心电图检测</h1>
+          <p>从开场、冲突节奏、爽点、人物对白与市场合规五个维度，对全剧和每一集进行可视化审核。</p>
+        </div>
+        <span class="audit-contract-tag">腾讯工作流 · 100 分制</span>
+      </header>
+
+      <section class="audit-input-card">
+        <div class="audit-field-row">
+          <label class="audit-field audit-title-field">
+            <span>剧本名称（选填）</span>
+            <input id="auditTitle" type="text" maxlength="120" placeholder="例如：系统随我渡劫失事" />
+          </label>
+          <label class="audit-file-button" for="auditFile">导入文本</label>
+          <input id="auditFile" class="visually-hidden" type="file" accept=".txt,.md,.json,.docx,text/plain,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+        </div>
+        <label class="audit-field">
+          <span>剧本正文</span>
+          <textarea id="auditText" maxlength="300000" placeholder="粘贴完整剧本。建议保留“第1集、第2集……”等集标题，系统会生成全剧总心电图和逐集诊断。"></textarea>
+        </label>
+        <div class="audit-action-row">
+          <span id="auditCount">0 / 300000 字符</span>
+          <button id="auditRun" type="button">开始检测</button>
+        </div>
+        <div id="auditStatus" class="audit-status" role="status" aria-live="polite">等待输入剧本</div>
+      </section>
+
+      <section id="auditLoading" class="audit-loading hidden" aria-live="polite">
+        <span class="audit-spinner"></span>
+        <div>
+          <strong id="auditLoadingTitle">正在分批审核整部剧本</strong>
+          <small id="auditLoadingDetail">系统每次分析五集，并自动衔接上一批审核记忆。</small>
+          <div class="audit-batch-progress" aria-hidden="true"><span id="auditBatchProgress"></span></div>
+        </div>
+      </section>
+
+      <section id="auditResult" class="audit-results hidden" aria-live="polite">
+        <div class="audit-result-head">
+          <div><p class="audit-kicker">AUDIT REPORT</p><h2 id="auditReportTitle">剧本审核报告</h2></div>
+          <div class="audit-downloads">
+            <button id="auditDownloadText" type="button">下载报告</button>
+            <button id="auditDownloadJson" type="button">下载 JSON</button>
+          </div>
+        </div>
+
+        <div id="auditSummary" class="audit-summary-grid"></div>
+
+        <article class="audit-panel audit-judgement">
+          <div><span>核心判断</span><p id="auditCoreJudgement">—</p></div>
+          <div><span>最大问题</span><p id="auditLargestProblem">—</p></div>
+          <div><span>优先修改</span><p id="auditPriorityFix">—</p></div>
+        </article>
+
+        <article class="audit-panel">
+          <div class="audit-panel-head">
+            <div><p class="audit-kicker">GLOBAL CURVE</p><h3>全剧总心电图</h3></div>
+            <div class="audit-legend"><span class="positive">正向刺激</span><span class="neutral">平稳过渡</span><span class="negative">留存风险</span></div>
+          </div>
+          <div id="auditGlobalChart" class="audit-chart" role="img" aria-label="全剧心电图"></div>
+          <div id="auditPointDetail" class="audit-point-detail">点击曲线节点查看审核理由与修改建议。</div>
+        </article>
+
+        <article class="audit-panel">
+          <div class="audit-panel-head"><div><p class="audit-kicker">FIVE DIMENSIONS</p><h3>五维评分</h3></div></div>
+          <div id="auditDimensions" class="audit-dimension-grid"></div>
+        </article>
+
+        <article id="auditEpisodePanel" class="audit-panel hidden">
+          <div class="audit-panel-head"><div><p class="audit-kicker">EPISODE REVIEW</p><h3>逐集诊断</h3></div></div>
+          <div id="auditEpisodeTabs" class="audit-episode-tabs" role="tablist"></div>
+          <div id="auditEpisodeDetail"></div>
+        </article>
+
+        <div class="audit-two-column">
+          <article class="audit-panel"><h3>关键问题</h3><div id="auditIssues" class="audit-record-list"></div></article>
+          <article class="audit-panel"><h3>修改任务</h3><div id="auditRewrite" class="audit-record-list"></div></article>
+          <article class="audit-panel"><h3>爽点与优势</h3><div id="auditPayoffs" class="audit-record-list"></div></article>
+          <article class="audit-panel"><h3>风险扫描</h3><div id="auditRisks" class="audit-record-list"></div></article>
+        </div>
+
+        <article id="auditCrossEpisodePanel" class="audit-panel hidden">
+          <div class="audit-panel-head"><div><p class="audit-kicker">CROSS EPISODE</p><h3>跨集分析</h3></div></div>
+          <div id="auditCrossEpisode" class="audit-facts"></div>
+        </article>
+        <div id="auditWarnings" class="audit-warnings hidden"></div>
+      </section>
+    </main>
+  </div>
+  <script>
+    window.SCRIPT_AUDIT_CONFIG = { authToken: {{ current_auth_token|tojson }} };
+  </script>
+  <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260628-global-theme-v8"></script>
+  <script src="{{ url_for('static', filename='script_audit.js') }}?v=20260811-script-audit-batch-v2" defer></script>
+</body>
+</html>

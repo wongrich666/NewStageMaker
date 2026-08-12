@@ -45,6 +45,11 @@ from .services.framework_planner_service import (
     write_framework_stage_exception_log,
 )
 from .services.simple_workflow_tools import ToolExecutionError, list_simple_tools, run_simple_tool
+from .services.script_audit_batch_service import script_audit_batch_service
+from .services.character_image_prompt_service import (
+    extract_character_catalog,
+    generate_character_image_prompt,
+)
 from .services.task_manager import task_manager
 from .services.stage10_resume import (
     load_stage10_resume,
@@ -2637,6 +2642,24 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             framework_planner_storage_key=FRAMEWORK_PLANNER_STORAGE_KEY,
         )
 
+    @app.get("/script-audit")
+    @_login_required
+    def script_audit_page():
+        return render_template(
+            "script_audit.html",
+            current_user=_current_user(),
+            current_auth_token=_current_auth_token(),
+        )
+
+    @app.get("/character-image-prompts")
+    @_login_required
+    def character_image_prompts_page():
+        return render_template(
+            "character_image_prompts.html",
+            current_user=_current_user(),
+            current_auth_token=_current_auth_token(),
+        )
+
     @app.get("/community/<int:project_id>")
     def community_detail_page(project_id: int):
         asset = task_manager.get_public_asset(project_id)
@@ -2772,6 +2795,116 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         except Exception as exc:
             return _json_error(str(exc), status=500, fallback="辅助工具列表加载失败，请稍后重试。")
         return _json_ok(ok=True, tools=tools)
+
+    @app.post("/api/script-audit/run")
+    @_login_required
+    def run_script_audit_api():
+        data = request.get_json(silent=True) or {}
+        script_title = str(data.get("script_title") or data.get("title") or "").strip()[:120]
+        script_text = str(
+            data.get("script_text")
+            or data.get("text")
+            or data.get("review_text")
+            or ""
+        ).strip()
+        if not script_text:
+            return _json_error("请先填写需要检测的剧本正文。", status=400)
+        if len(script_text) < 50:
+            return _json_error("剧本文本过短，至少需要 50 个字符才能生成有效心电图。", status=400)
+        if len(script_text) > 300000:
+            return _json_error("剧本文本超过 300000 字符，请分批检测。", status=413)
+
+        try:
+            run = script_audit_batch_service.start_run(
+                user_id=_require_user_id(),
+                script_title=script_title,
+                script_text=script_text,
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except Exception as exc:
+            logger.exception("script audit run creation failed")
+            return _json_error(str(exc), status=500, fallback="剧本心电图任务创建失败，请稍后重试。")
+        return jsonify({"success": True, **run}), 202
+
+    @app.get("/api/script-audit/runs/<run_id>")
+    @_login_required
+    def get_script_audit_run_api(run_id: str):
+        try:
+            run = script_audit_batch_service.get_run(run_id, user_id=_require_user_id())
+        except ValueError as exc:
+            return _json_error(str(exc), status=404)
+        except Exception as exc:
+            logger.exception("script audit run load failed")
+            return _json_error(str(exc), status=500, fallback="剧本心电图进度读取失败。")
+        return _json_ok(**run)
+
+    @app.get("/api/script-audit/runs/<run_id>/debug")
+    @_login_required
+    def get_script_audit_run_debug_api(run_id: str):
+        try:
+            debug = script_audit_batch_service.get_debug(run_id, user_id=_require_user_id())
+        except ValueError as exc:
+            return _json_error(str(exc), status=404)
+        except Exception as exc:
+            logger.exception("script audit debug load failed run_id=%s", run_id)
+            return _json_error(str(exc), status=500, fallback="剧本心电图调试记录读取失败。")
+        return _json_ok(debug=debug)
+
+    @app.post("/api/script-audit/runs/<run_id>/resume")
+    @_login_required
+    def resume_script_audit_run_api(run_id: str):
+        try:
+            run = script_audit_batch_service.resume_run(run_id, user_id=_require_user_id())
+        except ValueError as exc:
+            return _json_error(str(exc), status=404)
+        except Exception as exc:
+            logger.exception("script audit run resume failed")
+            return _json_error(str(exc), status=500, fallback="剧本心电图任务恢复失败。")
+        return _json_ok(**run)
+
+    @app.post("/api/script-audit/extract-file")
+    @_login_required
+    def extract_script_audit_file_api():
+        uploaded = request.files.get("file")
+        if uploaded is None or not str(uploaded.filename or "").strip():
+            return _json_error("请选择 TXT、Markdown、JSON 或 DOCX 文件。", status=400)
+        filename = str(uploaded.filename or "").strip()
+        suffix = Path(filename).suffix.lower()
+        if suffix not in {".txt", ".md", ".json", ".docx"}:
+            return _json_error("仅支持 TXT、Markdown、JSON 和 DOCX 文件。", status=400)
+        content = uploaded.read(10 * 1024 * 1024 + 1)
+        if len(content) > 10 * 1024 * 1024:
+            return _json_error("文件超过 10MB，请使用精简后的剧本文本。", status=413)
+        try:
+            if suffix == ".docx":
+                from docx import Document
+
+                document = Document(BytesIO(content))
+                lines = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
+                for table in document.tables:
+                    for row in table.rows:
+                        line = "\t".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                        if line:
+                            lines.append(line)
+                extracted = "\n".join(lines).strip()
+            else:
+                try:
+                    extracted = content.decode("utf-8-sig").strip()
+                except UnicodeDecodeError:
+                    extracted = content.decode("gb18030").strip()
+        except Exception as exc:
+            logger.warning("script audit file extraction failed: %s", exc)
+            return _json_error("文件解析失败，请改为粘贴剧本文本。", status=400)
+        if not extracted:
+            return _json_error("文件中没有识别到可审核文本。", status=400)
+        if len(extracted) > 300000:
+            return _json_error("解析后的剧本文本超过 300000 字符。", status=413)
+        return _json_ok(
+            filename=filename,
+            script_title=Path(filename).stem[:120],
+            script_text=extracted,
+        )
 
     def _run_tool_request(tool_key: str, data: dict):
         try:
@@ -3438,6 +3571,67 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         if not asset:
             return _json_error("框架资产不存在，或尚未完成 07 最终策划包。", status=404)
         return _json_ok(asset=_strip_raw_workflow_fields(asset))
+
+    @app.get("/api/character-image-prompts/context")
+    @_login_required
+    def character_image_prompt_context_api():
+        asset_id = str(
+            request.args.get("framework_asset_id")
+            or request.args.get("asset_id")
+            or ""
+        ).strip()
+        if not asset_id:
+            return _json_error("请先选择框架资产。", status=400)
+        asset = _load_framework_asset_for_user(asset_id, _require_user_id())
+        if not asset:
+            return _json_error("框架资产不存在，或不属于当前用户。", status=404)
+        try:
+            catalog = extract_character_catalog(asset)
+        except Exception as exc:
+            logger.exception("character image prompt context extraction failed asset_id=%s", asset_id)
+            return _json_error(str(exc), status=500, fallback="角色资料解析失败。")
+        if not catalog.get("characters"):
+            return _json_error("该资产没有可用的人物设定，请先完成 03 人设方案。", status=422)
+        return _json_ok(catalog=catalog)
+
+    @app.post("/api/character-image-prompts/generate")
+    @_login_required
+    def generate_character_image_prompt_api():
+        data = request.get_json(silent=True) or {}
+        asset_id = str(data.get("framework_asset_id") or data.get("asset_id") or "").strip()
+        character_id = str(data.get("character_id") or "").strip()
+        selected_outfit_id = str(data.get("selected_outfit_id") or data.get("outfit_id") or "").strip()
+        user_requirements = str(
+            data.get("user_visual_requirements")
+            or data.get("user_requirements")
+            or ""
+        ).strip()
+        if not asset_id:
+            return _json_error("请先选择框架资产。", status=400)
+        if not character_id:
+            return _json_error("请选择需要生成人设 Prompt 的角色。", status=400)
+        asset = _load_framework_asset_for_user(asset_id, _require_user_id())
+        if not asset:
+            return _json_error("框架资产不存在，或不属于当前用户。", status=404)
+        try:
+            result, source_summary = generate_character_image_prompt(
+                asset,
+                character_id=character_id,
+                selected_outfit_id=selected_outfit_id,
+                user_visual_requirements=user_requirements,
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except WorkflowTransientError as exc:
+            return _json_error(str(exc), status=502, fallback="腾讯角色出图提示词工作流暂时不可用，请稍后重试。")
+        except Exception as exc:
+            logger.exception(
+                "character image prompt workflow failed asset_id=%s character_id=%s",
+                asset_id,
+                character_id,
+            )
+            return _json_error(str(exc), status=502, fallback="角色出图提示词生成失败，请检查工作流输出。")
+        return _json_ok(result=result, source_summary=source_summary)
 
     @app.get("/api/framework-to-script/results-sync")
     @_login_required

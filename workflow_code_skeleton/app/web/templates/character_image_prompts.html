@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <title>角色出图提示词 · IDEA TO SCRIPT</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='character_image_prompts.css') }}?v=20260811-character-prompt-v1" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='theme_slideshow.css') }}?v=20260628-global-theme-v8" />
+</head>
+<body class="cip-page">
+  <div class="cip-shell">
+    <aside class="cip-sidebar">
+      <a class="cip-brand" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">
+        <img src="{{ url_for('static', filename='assets/logo.png') }}" alt="Logo" />
+        <span><strong>IDEA TO SCRIPT</strong><small>剧本平台</small></span>
+      </a>
+      <nav class="cip-nav" aria-label="主要功能">
+        <a href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">新建框架</a>
+        <a href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">框架到剧本</a>
+        <a href="{{ url_for('script_audit_page', auth_token=current_auth_token) }}">剧本心电图</a>
+        <a class="active" href="{{ url_for('character_image_prompts_page', auth_token=current_auth_token) }}">角色出图 Prompt</a>
+      </nav>
+      <div class="cip-sidebar-foot">
+        <a href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">返回工作台</a>
+        <a href="{{ url_for('logout', auth_token=current_auth_token) }}">退出登录</a>
+      </div>
+    </aside>
+
+    <main class="cip-main">
+      <header class="cip-hero">
+        <div>
+          <p class="cip-kicker">CHARACTER VISUAL PROMPT</p>
+          <h1>角色出图提示词</h1>
+          <p>从人物原始设定、服饰版本、相关场景和道具中提取视觉证据，再融合你的形象要求，生成可复制的人设 Prompt。</p>
+        </div>
+        <span class="cip-contract-tag">只生成 Prompt · 暂不出图</span>
+      </header>
+
+      <section class="cip-card cip-form-card">
+        <div class="cip-grid two">
+          <label class="cip-field">
+            <span>框架资产</span>
+            <select id="cipAsset"><option value="">正在读取资产…</option></select>
+          </label>
+          <label class="cip-field">
+            <span>角色</span>
+            <select id="cipCharacter" disabled><option value="">请先选择资产</option></select>
+          </label>
+        </div>
+        <div class="cip-grid two">
+          <label class="cip-field">
+            <span>服饰版本</span>
+            <select id="cipOutfit" disabled><option value="">自动选择默认服饰</option></select>
+          </label>
+          <div class="cip-source-box">
+            <span>已读取资料</span>
+            <div id="cipSourceBadges" class="cip-badges"><em>等待选择资产</em></div>
+          </div>
+        </div>
+        <label class="cip-field">
+          <span>你对人物形象的补充要求（选填）</span>
+          <textarea id="cipRequirements" maxlength="2000" placeholder="例如：希望整体偏国风写实，20岁左右，清冷但不柔弱；避免网红脸，服装颜色以墨绿和米白为主。"></textarea>
+        </label>
+        <div class="cip-actions">
+          <span id="cipCount">0 / 2000 字符</span>
+          <button id="cipGenerate" type="button" disabled>生成角色 Prompt</button>
+        </div>
+        <div id="cipStatus" class="cip-status" role="status" aria-live="polite">请选择一份框架资产</div>
+      </section>
+
+      <section id="cipCharacterPreview" class="cip-card cip-preview hidden">
+        <div>
+          <p class="cip-kicker">SOURCE PROFILE</p>
+          <h2 id="cipPreviewName">角色资料</h2>
+        </div>
+        <div id="cipPreviewFacts" class="cip-facts"></div>
+      </section>
+
+      <section id="cipLoading" class="cip-loading hidden" aria-live="polite">
+        <span class="cip-spinner"></span>
+        <div><strong>正在整合人物、服饰、场景与道具证据</strong><small>腾讯工作流只会收到当前选中角色的压缩上下文。</small></div>
+      </section>
+
+      <section id="cipResult" class="cip-results hidden" aria-live="polite">
+        <div class="cip-result-head">
+          <div><p class="cip-kicker">GENERATED PROMPT</p><h2 id="cipResultTitle">角色出图提示词</h2></div>
+          <button id="cipCopyAll" type="button">复制完整 Prompt</button>
+        </div>
+
+        <article class="cip-card cip-summary-card">
+          <span>设计摘要</span>
+          <p id="cipDesignSummary">—</p>
+        </article>
+
+        <div class="cip-prompt-grid">
+          <article class="cip-card cip-prompt-card positive">
+            <div><h3>正向 Prompt</h3><button class="cip-copy" data-copy-target="cipPositivePrompt" type="button">复制</button></div>
+            <pre id="cipPositivePrompt"></pre>
+          </article>
+          <article class="cip-card cip-prompt-card negative">
+            <div><h3>负向 Prompt</h3><button class="cip-copy" data-copy-target="cipNegativePrompt" type="button">复制</button></div>
+            <pre id="cipNegativePrompt"></pre>
+          </article>
+        </div>
+
+        <article class="cip-card">
+          <div class="cip-section-head"><p class="cip-kicker">CONSISTENCY LOCK</p><h3>角色一致性锁定</h3></div>
+          <div id="cipContinuity" class="cip-lock-grid"></div>
+        </article>
+
+        <article id="cipViewsPanel" class="cip-card hidden">
+          <div class="cip-section-head"><p class="cip-kicker">REFERENCE VIEWS</p><h3>补充视图 Prompt</h3></div>
+          <div id="cipViews" class="cip-view-list"></div>
+        </article>
+
+        <details class="cip-card cip-source-details">
+          <summary>查看本次使用的数据范围</summary>
+          <div id="cipSourceSummary" class="cip-facts"></div>
+        </details>
+      </section>
+    </main>
+  </div>
+  <script>
+    window.CHARACTER_IMAGE_PROMPT_CONFIG = { authToken: {{ current_auth_token|tojson }} };
+  </script>
+  <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260628-global-theme-v8"></script>
+  <script src="{{ url_for('static', filename='character_image_prompts.js') }}?v=20260811-character-prompt-v1" defer></script>
+</body>
+</html>
