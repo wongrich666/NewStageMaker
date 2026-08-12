@@ -85,7 +85,14 @@ episode_start、episode_end 与 episodes 共同构成交付范围，必须只交
 “开场钩子”必须从第N集“下一集第一有效动作”承诺的动作开始，再叠加本集新钩子。
 相邻两集不得复用完全相同的阻力或主线推进；阻力要形成反应或升级，主线推进要产生新的状态差。
 scenes_per_episode 是前端动态传入的逐集场景合同，必须执行；只有设置为 flexible
-时才可按剧情灵活决定。每个场景必须注明地点、日夜、内外、在场人物、关键道具和戏剧任务。
+时才可按剧情灵活决定。每个场景必须注明地点、日夜、内外、在场人物、关键道具和戏剧任务，
+并填写场景承接、离场触发、下一场地点、下一场第一有效动作四项内部执行字段。
+“场景承接”写本场第一拍如何接住上一场最后动作；“离场触发”写谁因何作出换场决定或被迫离场；
+“下一场地点”必须与下一场场景头一致；“下一场第一有效动作”必须成为下一场开头真实发生的动作。
+若下一集开在医院、法庭、公司或任何新地点，本集最后一场必须先出现人物决定、被带往或开始前往
+该地点的可见行动与原因。允许省略无戏剧价值的路程，不允许省略去向、动机和行动发起。
+每场固定逐行输出：场景N、人物、关键道具、戏剧任务、场景承接、离场触发、
+下一场地点、下一场第一有效动作。最后四项是内部执行合同，不得合并或省略。
 以创作合同确定的主角为行动锚；配角不能替主角完成关键选择。
 每个字段只写1至3句可执行内容，单集卡控制在350至700字；禁止复述人物小传、世界观和前集全文。
 """,
@@ -115,8 +122,10 @@ Skill只能影响题材表达、情绪和语言，不能覆盖主线、分集结
 关系破位或不可逆动作足够时立即收住；下一拍必须产生后果或迫使主角反应。
 禁止先介绍环境、解释会议背景、逐个点名人物或罗列道具，再让核心事件迟到；
 直接从异常结果、高压命令、关系反转或主角即将付出代价的动作开场。
-逐字落实逐集卡的“结尾状态→下一集第一有效动作”。可以省略赶路，但不能省略决定、
-去向、行动目的和关键结果。每集由主角行动推动，不得瞬移。
+逐字落实逐集卡的“结尾状态→下一集第一有效动作”及每场的“场景承接→离场触发→
+下一场地点→下一场第一有效动作”。每场结尾必须演出换场原因和行动发起，下一场开头必须
+兑现所承诺的动作。可以省略无戏剧价值的赶路，但不能省略决定、去向、行动目的和关键结果。
+这些是内部规划字段，正文中只写成动作或对白，不得打印字段名。每集由主角行动推动，不得瞬移。
 每集至少出现一次改变资源、关系、认知、身份、行动条件或风险等级的情绪高点，
 尾钩必须直接改变下一集开场行动。
 动作短、具体、可视、可由AI生成；对白口语化、有潜台词且人物声音可区分。
@@ -158,8 +167,9 @@ episodes 数组完整覆盖交付范围；未知事实写“未明确”，不�
 钩子不足时只重写开头1至3个有效拍并删除重复铺垫。不得新增重大事实、人物、能力、
 秘密或规则，不得改变主角当集目标、本集结果和下一集承接。
 最终每集标题必须统一为“第N集：《本集独有标题》”，不得删掉集名。
-严格保留 scenes_per_episode 对应的场景数量规则；需要换场时补齐人物去向、目的和承接动作，
-不得在终审中随意增删场景造成瞬移。
+严格保留 scenes_per_episode 对应的场景数量规则；逐场核对上一场“下一场地点/第一有效动作”
+是否在下一场场景头和开头兑现。缺失时只补人物离场原因、去向、行动发起及下一场承接动作，
+不得新增重大事件，也不得在终审中随意增删场景造成瞬移。
 每一集只保留紧凑场景头：“场景N：地点｜日/夜｜内/外”“人物”，随后立即进入戏。
 删除所有“场景任务”和独立“道具”清单，道具只能在被使用时写入动作。
 所有对白必须保持“人物名：台词”；所有心理活动必须保持“人物名OS：心理活动”。
@@ -219,6 +229,13 @@ def _valid_episode_parts(stage: str, text: str) -> dict[int, str]:
         episode: content
         for episode, content in parts.items()
         if not episode_card_missing_fields(content)
+        and (not _scene_card_blocks(content) or all(
+            all(
+                _scene_card_field(block, field)
+                for field in ("场景承接", "离场触发", "下一场地点", "下一场第一有效动作")
+            )
+            for _location, block in _scene_card_blocks(content)
+        ))
     }
 
 
@@ -271,6 +288,89 @@ def _replace_episode_card_field(content: str, field: str, value: str) -> str:
     return pattern.sub(lambda match: match.group(1) + str(value).strip(), content, count=1)
 
 
+_SCENE_CARD_HEADER = re.compile(
+    r"(?m)^\s*场景\s*\d+\s*[：:]\s*([^｜|；;\r\n]+)"
+)
+
+
+def _scene_card_blocks(content: str) -> list[tuple[str, str]]:
+    value = str(content or "")
+    matches = list(_SCENE_CARD_HEADER.finditer(value))
+    blocks: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(value)
+        blocks.append((str(match.group(1) or "").strip(), value[match.start() : end].strip()))
+    return blocks
+
+
+def _scene_card_field(content: str, field: str) -> str:
+    match = re.search(
+        rf"(?m)^\s*(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*[:：]\s*(.+?)\s*$",
+        str(content or ""),
+    )
+    return str(match.group(1) if match else "").strip()
+
+
+def _replace_scene_card_field(content: str, field: str, value: str) -> str:
+    pattern = re.compile(
+        rf"(?m)^(\s*(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*[:：]\s*).+?$"
+    )
+    return pattern.sub(lambda match: match.group(1) + str(value).strip(), content, count=1)
+
+
+def _normalize_scene_card_handoffs(
+    text: str,
+    *,
+    cross_episode: bool = True,
+) -> tuple[str, list[str]]:
+    """Align scene destinations/actions with the scene that actually follows."""
+    prefix, parts = _episode_parts(text)
+    warnings: list[str] = []
+    ordered = sorted(parts)
+    parsed = {number: _scene_card_blocks(parts[number]) for number in ordered}
+    for episode_index, episode in enumerate(ordered):
+        scenes = parsed[episode]
+        rebuilt: list[str] = []
+        for scene_index, (_location, block) in enumerate(scenes):
+            target: tuple[str, str] | None = None
+            if scene_index + 1 < len(scenes):
+                target = scenes[scene_index + 1]
+            elif cross_episode and episode_index + 1 < len(ordered):
+                next_episode = ordered[episode_index + 1]
+                if next_episode == episode + 1 and parsed[next_episode]:
+                    target = parsed[next_episode][0]
+            if target:
+                target_location, target_block = target
+                target_action = _scene_card_field(target_block, "场景承接")
+                if target_location and _compact_semantic_text(
+                    _scene_card_field(block, "下一场地点")
+                ) != _compact_semantic_text(target_location):
+                    block = _replace_scene_card_field(block, "下一场地点", target_location)
+                    warnings.append(
+                        f"第{episode}集场景{scene_index + 1}下一场地点已对齐为{target_location}"
+                    )
+                if target_action and _compact_semantic_text(
+                    _scene_card_field(block, "下一场第一有效动作")
+                ) != _compact_semantic_text(target_action):
+                    block = _replace_scene_card_field(
+                        block, "下一场第一有效动作", target_action
+                    )
+                    warnings.append(
+                        f"第{episode}集场景{scene_index + 1}的下一场动作已与实际承接动作对齐"
+                    )
+            rebuilt.append(block)
+        if scenes:
+            first_start = parts[episode].find(scenes[0][1])
+            scene_prefix = parts[episode][:first_start].rstrip()
+            parts[episode] = "\n".join(
+                item for item in (scene_prefix, "\n\n".join(rebuilt)) if item
+            )
+    output = "\n\n".join(
+        item for item in ([prefix] if prefix else []) + [parts[number] for number in ordered]
+    )
+    return output, warnings
+
+
 def _compact_semantic_text(value: str) -> str:
     return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]", "", str(value or "")).lower()
 
@@ -313,7 +413,8 @@ def _normalize_episode_card_handoffs(text: str) -> tuple[str, list[str]]:
     output = "\n\n".join(
         item for item in ([prefix] if prefix else []) + [parts[number] for number in ordered]
     )
-    return output, warnings
+    output, scene_warnings = _normalize_scene_card_handoffs(output)
+    return output, warnings + scene_warnings
 
 
 def _merge_episode_outputs(
@@ -1379,7 +1480,8 @@ class CodeBuddyNpcStageRunner:
                 batch_draft = "不适用。本节点只设计逐集卡，不写剧本正文。"
                 length_contract = (
                     "每集卡必须完整包含承接事实、开场钩子、最短因果锚、主角目标与动作、"
-                    "阻力、选择与代价、主线推进、结尾状态和下一集第一有效动作。"
+                    "阻力、选择与代价、主线推进、结尾状态和下一集第一有效动作。每个场景还必须逐行"
+                    "包含场景承接、离场触发、下一场地点和下一场第一有效动作。"
                 )
             else:
                 batch_material = episode_cards
@@ -1446,8 +1548,13 @@ class CodeBuddyNpcStageRunner:
                 episode_end=episode_end,
                 stage=stage,
             )
-            if stage == "episode_continuity" and not _ip_anthology_enabled(request_data):
-                result, handoff_warnings = _normalize_episode_card_handoffs(result)
+            if stage == "episode_continuity":
+                if _ip_anthology_enabled(request_data):
+                    result, handoff_warnings = _normalize_scene_card_handoffs(
+                        result, cross_episode=False
+                    )
+                else:
+                    result, handoff_warnings = _normalize_episode_card_handoffs(result)
                 if handoff_warnings:
                     fresh_warning = self.store.load(str(job["job_id"]), user_id=int(job["user_id"]))
                     if fresh_warning:

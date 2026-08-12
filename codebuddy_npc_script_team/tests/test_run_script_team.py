@@ -159,6 +159,32 @@ def test_episode_card_contract_exposes_machine_checkable_handoff() -> None:
     assert "carryover_fact必须逐字复制" in contract
     assert "opening_hook必须从" in contract
     assert "不得复用完全相同的obstacle或mainline_advance" in contract
+    assert '"entry_action"' in contract
+    assert '"exit_trigger"' in contract
+    assert '"next_location"' in contract
+    assert '"next_opening_action"' in contract
+
+
+def test_scene_handoff_normalizer_aligns_next_location_and_action() -> None:
+    cards = """第1集：《电话》
+场景1：办公室｜日｜内
+场景承接：主角接起电话
+离场触发：医生通知家属赶往医院
+下一场地点：商场
+下一场第一有效动作：主角走进商场
+
+第2集：《急诊》
+场景1：医院急诊室｜日｜内
+场景承接：主角推开急诊室门
+离场触发：医生要求主角去缴费
+下一场地点：医院缴费处
+下一场第一有效动作：主角递出银行卡"""
+
+    normalized, warnings = MODULE.normalize_scene_card_handoffs(cards)
+
+    assert "下一场地点：医院急诊室" in normalized
+    assert "下一场第一有效动作：主角推开急诊室门" in normalized
+    assert len(warnings) == 2
 
 
 def test_ip_anthology_contract_closes_each_episode_without_direct_handoff() -> None:

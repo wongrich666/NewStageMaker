@@ -28,6 +28,7 @@ from workflow_code_skeleton.app.services.codebuddy_npc_stage_runner import (
     _merge_episode_outputs,
     _missing_episode_ranges,
     _normalize_episode_card_handoffs,
+    _normalize_scene_card_handoffs,
     _episode_slice,
 )
 
@@ -72,6 +73,28 @@ def test_local_handoff_normalizer_repairs_cross_batch_boundary() -> None:
     assert "承接事实：门开后，主角被人从背后按住" in normalized
     assert "开场钩子：主角反肘挣脱控制；灯突然灭了" in normalized
     assert len(warnings) == 2
+
+
+def test_local_scene_handoff_normalizer_aligns_hospital_transition() -> None:
+    cards = """第1集：《急讯》
+场景1：办公室｜日｜内
+场景承接：主角接起电话
+离场触发：医生告知母亲病危，主角决定赶去医院
+下一场地点：咖啡馆
+下一场第一有效动作：主角坐下喝咖啡
+
+第2集：《抢救》
+场景1：医院急诊室｜日｜内
+场景承接：主角推开急诊室门寻找医生
+离场触发：医生把主角带向手术室
+下一场地点：医院手术室
+下一场第一有效动作：主角追上医生"""
+
+    normalized, warnings = _normalize_scene_card_handoffs(cards)
+
+    assert "下一场地点：医院急诊室" in normalized
+    assert "下一场第一有效动作：主角推开急诊室门寻找医生" in normalized
+    assert any("下一场地点已对齐" in warning for warning in warnings)
 
 
 def test_local_writer_prompt_uses_specific_non_template_performance_cues() -> None:
