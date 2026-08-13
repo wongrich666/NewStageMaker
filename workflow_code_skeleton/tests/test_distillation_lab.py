@@ -393,3 +393,177 @@ def test_quality_gate_rejects_skill_that_copies_sample_surface_elements(tmp_path
     assert score["checks"]["structural_purity"] == 0
     assert score["surface_leaks"]["hook_craft"] == ["替身", "验孕棒"]
     assert score["ready_to_publish"] is False
+
+
+def test_narrative_phrase_scores_are_quality_warnings_not_integrity_blockers(tmp_path) -> None:
+    store = DistillationLabStore(tmp_path / "distillation")
+    modules = {key: f"{key}：按样本提炼的叙事功能执行。" for key in SKILL_MODULE_KEYS}
+    evidence = [
+        {
+            "schema_version": EVIDENCE_SCHEMA_VERSION,
+            "source_id": "source-a",
+            "structure_map": {"engine": "选择推动后果"},
+            "surface_elements": {
+                "character_names": [],
+                "relationship_gimmicks": [],
+                "identity_jobs": [],
+                "props_and_evidence": [],
+                "locations_and_world_rules": [],
+                "concrete_incidents": [],
+                "medical_or_biological_elements": [],
+            },
+        }
+    ]
+    version = {
+        "skill_md": "---\nname: structure-only\n---\n# 边界与失效条件",
+        "modules": modules,
+        "assets": {
+            "manifest": {"schema_version": SKILL_SCHEMA_VERSION},
+            "verified_rules": [{"rule": "结构规律", "source_ids": ["source-a"]}],
+        },
+    }
+
+    score = store._evaluate(version, evidence)
+
+    assert score["narrative_quality_ready"] is False
+    assert score["quality_warnings"]
+    assert score["blocking_reasons"] == []
+    assert score["ready_to_publish"] is True
+
+
+def test_project_detail_recomputes_stale_cached_integrity_score(tmp_path) -> None:
+    store = DistillationLabStore(tmp_path / "distillation")
+    project = store.create_project(7, {"name": "缓存评测测试"})
+    now = "2026-08-12T10:00:00+08:00"
+    with store._connect() as db:
+        db.execute(
+            """INSERT INTO skill_versions
+            (id,project_id,user_id,version,status,skill_md,stage_prompts_json,
+             assets_json,evidence_json,score_json,created_at,updated_at,published_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "version-stale",
+                project["id"],
+                7,
+                "v1.0",
+                "candidate",
+                "",
+                "{}",
+                "{}",
+                "[]",
+                json.dumps({"total": 100, "ready_to_publish": True}),
+                now,
+                now,
+                "",
+            ),
+        )
+
+    version = store.get_project(7, project["id"])["versions"][0]
+
+    assert version["score"]["ready_to_publish"] is False
+    assert version["score"]["blocking_reasons"]
+
+
+def test_ai_quality_optimization_creates_new_version_and_preserves_source(
+    tmp_path, monkeypatch
+) -> None:
+    store = DistillationLabStore(tmp_path / "distillation")
+    project = store.create_project(7, {"name": "AI优化测试", "genre": "情感"})
+    modules = {key: f"原始-{key}" for key in SKILL_MODULE_KEYS}
+    evidence = [
+        {
+            "schema_version": EVIDENCE_SCHEMA_VERSION,
+            "source_id": "source-a",
+            "structure_map": {"engine": "选择推动后果"},
+            "surface_elements": {key: [] for key in (
+                "character_names", "relationship_gimmicks", "identity_jobs",
+                "props_and_evidence", "locations_and_world_rules", "concrete_incidents",
+                "medical_or_biological_elements",
+            )},
+        }
+    ]
+    assets = {
+        "manifest": {
+            "schema_version": SKILL_SCHEMA_VERSION,
+            "version": "v1.0",
+        },
+        "verified_rules": [{"rule": "结构规律", "source_ids": ["source-a"]}],
+    }
+    now = "2026-08-12T10:00:00+08:00"
+    with store._connect() as db:
+        db.execute(
+            """INSERT INTO skill_versions
+            (id,project_id,user_id,version,status,skill_md,stage_prompts_json,
+             assets_json,evidence_json,score_json,created_at,updated_at,published_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "version-source", project["id"], 7, "v1.0", "candidate",
+                "---\nname: ai-test\n---\n# 边界与失效条件", json.dumps(modules),
+                json.dumps(assets), json.dumps(evidence), "{}", now, now, "",
+            ),
+        )
+
+    def fake_optimize(_prompt: str, **_kwargs):
+        return {
+            "modules": {
+                "story_architecture": _quality_modules()["story_architecture"],
+                "adversity_payoff": _quality_modules()["adversity_payoff"],
+                "character_emotion": _quality_modules()["character_emotion"],
+                "continuity": _quality_modules()["continuity"],
+                "genre_profile": _quality_modules()["genre_profile"],
+                "anti_patterns": _quality_modules()["anti_patterns"],
+            }
+        }
+
+    monkeypatch.setattr(
+        "workflow_code_skeleton.app.services.distillation_lab._complete_json_with_repair",
+        fake_optimize,
+    )
+
+    optimized = store.optimize_version_with_ai(7, project["id"], "version-source")
+    source = store.get_version(7, project["id"], "version-source")
+
+    assert optimized["id"] != source["id"]
+    assert optimized["version"] == "v1.1"
+    assert source["modules"] == modules
+    assert optimized["modules"]["hook_craft"] == modules["hook_craft"]
+    assert optimized["modules"]["story_architecture"] != modules["story_architecture"]
+    assert optimized["evidence"] == source["evidence"]
+    assert optimized["assets"]["ai_optimization"]["source_version_id"] == source["id"]
+    assert optimized["score"]["quality_warnings"] == []
+
+
+def test_delete_single_version_preserves_other_versions_and_unlinks_published_skill(tmp_path) -> None:
+    store = DistillationLabStore(tmp_path / "distillation")
+    project = store.create_project(7, {"name": "版本删除测试"})
+    now = "2026-08-12T10:00:00+08:00"
+    rows = [
+        ("version-live", "v1.0", "published"),
+        ("version-candidate", "v1.1", "candidate"),
+    ]
+    with store._connect() as db:
+        for version_id, number, status in rows:
+            db.execute(
+                """INSERT INTO skill_versions
+                (id,project_id,user_id,version,status,skill_md,stage_prompts_json,
+                 assets_json,evidence_json,score_json,created_at,updated_at,published_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    version_id, project["id"], 7, number, status, "", "{}", "{}", "[]",
+                    "{}", now, now, now if status == "published" else "",
+                ),
+            )
+        db.execute(
+            "UPDATE projects SET status='published',active_version_id=? WHERE id=?",
+            ("version-live", project["id"]),
+        )
+
+    store.delete_version(7, project["id"], "version-live")
+    detail = store.get_project(7, project["id"])
+
+    assert [item["id"] for item in detail["versions"]] == ["version-candidate"]
+    assert detail["active_version_id"] == ""
+    assert detail["status"] == "candidate"
+
+    store.delete_version(7, project["id"], "version-candidate")
+    assert store.get_project(7, project["id"])["versions"] == []

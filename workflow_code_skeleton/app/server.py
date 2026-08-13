@@ -37,6 +37,12 @@ from .services.admin_store import admin_store
 from .services.agent_conversation_store import agent_conversation_store
 from .services.platform_agent import platform_conversation_agent
 from .services.deepseek_agent import DeepSeekAgentError
+from .services.compliance_review import catalog as compliance_catalog
+from .services.compliance_review import compliance_review_store
+from .services.compliance_review import review_script as run_compliance_review
+from .services.script_rating import rate_script as run_script_rating
+from .services.script_rating import repair_script as run_script_rating_repair
+from .services.script_rating import script_rating_store
 from .services.distillation_lab import distillation_lab_store
 from .services.codebuddy_npc import (
     STAGE_NAMES,
@@ -4019,6 +4025,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def distillation_lab_page():
         return render_template(
             "distillation_lab.html",
+            current_user=_current_user(),
+            current_auth_token=_current_auth_token(),
+        )
+
+    @app.get("/compliance-review")
+    @_login_required
+    def compliance_review_page():
+        return render_template(
+            "compliance_review.html",
             current_user=_current_user(),
             current_auth_token=_current_auth_token(),
         )
@@ -8590,6 +8605,152 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def test_workflow_status_api():
         return _json_ok(**test_workflow_status())
 
+    @app.get("/api/compliance-review/catalog")
+    @_login_required
+    def compliance_review_catalog_api():
+        return _json_ok(**compliance_catalog())
+
+    @app.post("/api/compliance-review/check")
+    @_login_required
+    def compliance_review_check_api():
+        payload = request.get_json(silent=True) or {}
+        try:
+            report = run_compliance_review(payload)
+            filename = str(payload.get("filename") or "").strip()
+            title = str(payload.get("title") or "").strip()
+            if not title and filename:
+                title = Path(filename).stem
+            if not title:
+                first_line = next(
+                    (
+                        line.strip(" #《》\t")
+                        for line in str(payload.get("text") or "").splitlines()
+                        if line.strip()
+                    ),
+                    "未命名检测",
+                )
+                title = first_line[:100] or "未命名检测"
+            history_record = None
+            history_warning = ""
+            try:
+                history_record = compliance_review_store.save(
+                    _require_user_id(),
+                    report=report,
+                    title=title,
+                    filename=filename,
+                    text=str(payload.get("text") or ""),
+                )
+            except Exception:
+                logger.exception("script compliance history save failed")
+                history_warning = "检测已完成，但记录保存失败。"
+            return _json_ok(
+                report=report,
+                history_record=history_record,
+                history_warning=history_warning,
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except Exception:
+            logger.exception("script compliance review failed")
+            return _json_error("合规检测暂时失败，请稍后重试。", status=500)
+
+    @app.get("/api/compliance-review/history")
+    @_login_required
+    def compliance_review_history_api():
+        try:
+            limit = int(request.args.get("limit") or 50)
+        except (TypeError, ValueError):
+            limit = 50
+        return _json_ok(
+            records=compliance_review_store.list(_require_user_id(), limit=limit)
+        )
+
+    @app.get("/api/compliance-review/history/<entry_id>")
+    @_login_required
+    def compliance_review_history_get_api(entry_id: str):
+        record = compliance_review_store.get(_require_user_id(), entry_id)
+        if not record:
+            return _json_error("检测记录不存在。", status=404)
+        return _json_ok(record=record)
+
+    @app.delete("/api/compliance-review/history/<entry_id>")
+    @_login_required
+    def compliance_review_history_delete_api(entry_id: str):
+        deleted = compliance_review_store.delete(_require_user_id(), entry_id)
+        if not deleted:
+            return _json_error("检测记录不存在。", status=404)
+        return _json_ok(deleted=True)
+
+    @app.delete("/api/compliance-review/history")
+    @_login_required
+    def compliance_review_history_clear_api():
+        return _json_ok(deleted=compliance_review_store.clear(_require_user_id()))
+
+    @app.post("/api/script-rating/check")
+    @_login_required
+    def script_rating_check_api():
+        payload = request.get_json(silent=True) or {}
+        try:
+            report = run_script_rating(payload)
+            text = str(payload.get("text") or "")
+            filename = str(payload.get("filename") or "").strip()
+            title = str(payload.get("title") or "").strip()
+            if not title and filename:
+                title = Path(filename).stem
+            if not title:
+                title = next((line.strip(" #《》\t") for line in text.splitlines() if line.strip()), "未命名评级")[:100]
+            record = script_rating_store.save(
+                _require_user_id(), report=report, title=title,
+                filename=filename, text=text,
+            )
+            return _json_ok(report=report, history_record=record)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except Exception:
+            logger.exception("script rating failed")
+            return _json_error("剧本评级暂时失败，请稍后重试。", status=500)
+
+    @app.get("/api/script-rating/history")
+    @_login_required
+    def script_rating_history_api():
+        try:
+            limit = int(request.args.get("limit") or 50)
+        except (TypeError, ValueError):
+            limit = 50
+        return _json_ok(records=script_rating_store.list(_require_user_id(), limit))
+
+    @app.get("/api/script-rating/history/<entry_id>")
+    @_login_required
+    def script_rating_history_get_api(entry_id: str):
+        record = script_rating_store.get(_require_user_id(), entry_id)
+        if not record:
+            return _json_error("评级记录不存在。", status=404)
+        return _json_ok(record=record)
+
+    @app.post("/api/script-rating/repair")
+    @_login_required
+    def script_rating_repair_api():
+        payload = request.get_json(silent=True) or {}
+        try:
+            return _json_ok(repair=run_script_rating_repair(payload))
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        except Exception:
+            logger.exception("script rating repair failed")
+            return _json_error("AI精准修复暂时失败，请稍后重试。", status=500)
+
+    @app.delete("/api/script-rating/history/<entry_id>")
+    @_login_required
+    def script_rating_history_delete_api(entry_id: str):
+        if not script_rating_store.delete(_require_user_id(), entry_id):
+            return _json_error("评级记录不存在。", status=404)
+        return _json_ok(deleted=True)
+
+    @app.delete("/api/script-rating/history")
+    @_login_required
+    def script_rating_history_clear_api():
+        return _json_ok(deleted=script_rating_store.clear(_require_user_id()))
+
     @app.get("/api/distillation-lab/overview")
     @_login_required
     def distillation_lab_overview_api():
@@ -8724,6 +8885,19 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
         except ValueError as exc:
             return _json_error(str(exc), status=400)
 
+    @app.post("/api/distillation-lab/projects/<project_id>/versions/<version_id>/optimize")
+    @_login_required
+    def distillation_lab_optimize_version_api(project_id: str, version_id: str):
+        try:
+            version = distillation_lab_store.optimize_version_with_ai(
+                _require_user_id(), project_id, version_id
+            )
+            return _json_ok(version=version)
+        except KeyError as exc:
+            return _json_error(str(exc).strip("'"), status=404)
+        except (ValueError, DeepSeekAgentError) as exc:
+            return _json_error(str(exc), status=400)
+
     @app.post("/api/distillation-lab/projects/<project_id>/versions/<version_id>/unpublish")
     @_login_required
     def distillation_lab_unpublish_version_api(project_id: str, version_id: str):
@@ -8736,6 +8910,15 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc).strip("'"), status=404)
         except ValueError as exc:
             return _json_error(str(exc), status=400)
+
+    @app.delete("/api/distillation-lab/projects/<project_id>/versions/<version_id>")
+    @_login_required
+    def distillation_lab_delete_version_api(project_id: str, version_id: str):
+        try:
+            distillation_lab_store.delete_version(_require_user_id(), project_id, version_id)
+            return _json_ok(deleted=True)
+        except KeyError as exc:
+            return _json_error(str(exc).strip("'"), status=404)
 
     @app.get("/api/distillation-lab/projects/<project_id>/versions/<version_id>/export")
     @_login_required

@@ -76,6 +76,14 @@ STAGE_PROMPT_KEYS = SKILL_MODULE_KEYS
 EVIDENCE_SCHEMA_VERSION = "script-team-evidence/v3"
 SKILL_SCHEMA_VERSION = "script-team-skill/v1"
 
+QUALITY_CHECK_MODULES = {
+    "mainline_clarity": ("story_architecture",),
+    "conflict_escalation": ("story_architecture", "adversity_payoff"),
+    "character_choice": ("character_emotion",),
+    "episode_handoff": ("continuity",),
+    "differentiation": ("genre_profile", "anti_patterns"),
+}
+
 SURFACE_ELEMENT_KEYS = (
     "character_names",
     "relationship_gimmicks",
@@ -591,6 +599,8 @@ class DistillationLabStore:
                     "SELECT * FROM skill_versions WHERE project_id=? ORDER BY created_at DESC", (project_id,)
                 ).fetchall()
             ]
+            for version in project["versions"]:
+                version["score"] = self._evaluate(version, version.get("evidence") or [])
         return project
 
     def update_project(self, user_id: int, project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1168,20 +1178,56 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
         checks.update(narrative_checks)
         total = round(sum(checks.values()) / len(checks))
         narrative_ready = all(score >= 80 for score in narrative_checks.values())
+        blocking_reasons: list[str] = []
+        if "---" not in str(version.get("skill_md") or ""):
+            blocking_reasons.append("SKILL.md 缺少完整的头部元信息。")
+        if filled != len(SKILL_MODULE_KEYS):
+            missing = [
+                SKILL_MODULE_SPECS[key]["label"]
+                for key in SKILL_MODULE_KEYS
+                if not str(modules.get(key) or "").strip()
+            ]
+            blocking_reasons.append("缺少运行模块：" + "、".join(missing) + "。")
+        if not verified_rules:
+            blocking_reasons.append("没有形成可追溯的已验证规律。")
+        elif validated_rules != len(verified_rules):
+            blocking_reasons.append(
+                f"有 {len(verified_rules) - validated_rules} 条规律缺少有效样本引用。"
+            )
+        if source_count == 0:
+            blocking_reasons.append("没有可用于发布的样本证据。")
+        if abstracted_cards != source_count:
+            blocking_reasons.append(
+                f"有 {max(0, source_count - abstracted_cards)} 份样本尚未完成结构化抽象。"
+            )
+        if surface_leaks:
+            blocking_reasons.append("Skill 中仍包含样本人物、道具或具体情节，请改为抽象结构规则。")
+        if assets.get("manifest", {}).get("schema_version") != SKILL_SCHEMA_VERSION:
+            blocking_reasons.append("缺少当前新工作流可识别的 Skill 清单。")
+        if not any(word in str(version.get("skill_md") or "") for word in ("边界", "失效", "不适用")):
+            blocking_reasons.append("SKILL.md 缺少适用边界或失效条件。")
+
+        quality_warnings = [
+            label
+            for key, label in (
+                ("mainline_clarity", "主线清晰度仍可加强"),
+                ("conflict_escalation", "冲突递进仍可加强"),
+                ("character_choice", "人物选择与代价仍可加强"),
+                ("episode_handoff", "集间因果交接仍可加强"),
+                ("differentiation", "题材差异化仍可加强"),
+            )
+            if narrative_checks.get(key, 0) < 80
+        ]
         return {
             "total": total,
             "grade": "A" if total >= 85 else "B" if total >= 75 else "C",
             "checks": checks,
             "source_count": source_count,
-            "ready_to_publish": (
-                total >= 78
-                and filled == len(SKILL_MODULE_KEYS)
-                and bool(verified_rules)
-                and validated_rules == len(verified_rules)
-                and not surface_leaks
-                and abstracted_cards == source_count
-                and narrative_ready
-            ),
+            # Narrative scores are quality guidance, not structural integrity. They use
+            # deterministic phrase matching and must not falsely block a complete Skill.
+            "ready_to_publish": not blocking_reasons,
+            "blocking_reasons": blocking_reasons,
+            "quality_warnings": quality_warnings,
             "validation_mode": "deterministic_evidence_gate",
             "deep_blind_test": "not_run",
             "verified_rule_count": len(verified_rules),
@@ -1217,6 +1263,117 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
             )
         return self.get_version(user_id, project_id, version_id)
 
+    def optimize_version_with_ai(
+        self, user_id: int, project_id: str, version_id: str
+    ) -> dict[str, Any]:
+        source = self.get_version(user_id, project_id, version_id)
+        score = source.get("score") if isinstance(source.get("score"), dict) else {}
+        checks = score.get("checks") if isinstance(score.get("checks"), dict) else {}
+        target_keys = sorted(
+            {
+                module_key
+                for check_key, module_keys in QUALITY_CHECK_MODULES.items()
+                if int(checks.get(check_key) or 0) < 80
+                for module_key in module_keys
+            }
+        )
+        if not target_keys:
+            raise ValueError("当前版本没有需要 AI 优化的质量建议。")
+
+        modules = source.get("modules") if isinstance(source.get("modules"), dict) else {}
+        target_modules = {key: str(modules.get(key) or "") for key in target_keys}
+        prompt = f"""仅优化一个剧本蒸馏 Skill 中存在质量建议的模块，不写具体剧情。
+待优化模块：{', '.join(target_keys)}
+当前模块内容：{_json(target_modules)}
+
+改写要求：
+1. 保留原有证据支持的有效结构，不删除题材差异化规律，只做增删改查与提纯。
+2. story_architecture需清楚写出主线长期目标、主角欲望、持续阻力或对手、升级阶梯、关键选择、失败代价、局势变化与结局兑现。
+3. adversity_payoff需写出冲突或阻力、对手反制、递进升级、主角抉择、代价及处境改变。
+4. character_emotion需写出人物目标或欲望、恐惧或伤口、压力下选择与行动、关系后果及代价。
+5. continuity需写出上一集结尾状态和未完成动作、下一集开场承接动作、因果交接，以及换场地点与理由。
+6. genre_profile与anti_patterns需写出题材、目标受众、情绪承诺、差异化机制、不适用条件、失效边界与应避免的反模式。
+7. 只写可迁移的结构和写法，禁止新增人物名、固定身份、具体道具、地点、疾病、证据手段或样本情节。
+8. 不改其他模块，不输出解释。返回合法JSON：{{"modules":{{...}}}}，modules必须且只能包含待优化模块。
+"""
+        optimized = _complete_json_with_repair(
+            prompt,
+            system_prompt="你是剧本 Skill 质量优化器，只输出合法JSON。",
+            max_tokens=9000,
+            timeout_seconds=1200,
+        )
+        optimized_modules = (
+            optimized.get("modules") if isinstance(optimized.get("modules"), dict) else {}
+        )
+        missing = [key for key in target_keys if not str(optimized_modules.get(key) or "").strip()]
+        if missing:
+            raise ValueError("AI 优化结果缺少模块：" + "、".join(missing) + "。")
+
+        next_modules = {key: str(modules.get(key) or "").strip() for key in SKILL_MODULE_KEYS}
+        for key in target_keys:
+            next_modules[key] = str(optimized_modules[key]).strip()
+        evidence = source.get("evidence") if isinstance(source.get("evidence"), list) else []
+        leaks = _surface_leaks(
+            next_modules,
+            evidence,
+            skill_md=str(source.get("skill_md") or ""),
+        )
+        if leaks:
+            raise ValueError("AI 优化结果包含样本表层内容，已拒绝保存，请重试。")
+
+        with self._connect() as db:
+            project = db.execute(
+                "SELECT * FROM projects WHERE id=? AND user_id=?", (project_id, user_id)
+            ).fetchone()
+            versions = [
+                row["version"]
+                for row in db.execute(
+                    "SELECT version FROM skill_versions WHERE project_id=?", (project_id,)
+                ).fetchall()
+            ]
+        if not project:
+            raise KeyError("蒸馏项目不存在。")
+        next_version = _version_number(versions)
+        assets = _loads(_json(source.get("assets") or {}), {})
+        assets["manifest"] = _skill_manifest(project, next_version)
+        assets["ai_optimization"] = {
+            "source_version_id": version_id,
+            "source_version": str(source.get("version") or ""),
+            "optimized_modules": target_keys,
+            "created_at": _now(),
+        }
+        candidate = {
+            "skill_md": str(source.get("skill_md") or ""),
+            "modules": next_modules,
+            "assets": assets,
+        }
+        next_score = self._evaluate(candidate, evidence)
+        version_id_new = f"ver-{uuid.uuid4().hex[:16]}"
+        now = _now()
+        with self._write_lock, self._connect() as db:
+            db.execute(
+                """INSERT INTO skill_versions
+                (id,project_id,user_id,version,status,skill_md,stage_prompts_json,
+                 assets_json,evidence_json,score_json,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    version_id_new,
+                    project_id,
+                    user_id,
+                    next_version,
+                    "candidate",
+                    candidate["skill_md"],
+                    _json(next_modules),
+                    _json(assets),
+                    _json(evidence),
+                    _json(next_score),
+                    now,
+                    now,
+                ),
+            )
+            db.execute("UPDATE projects SET status='candidate',updated_at=? WHERE id=?", (now, project_id))
+        return self.get_version(user_id, project_id, version_id_new)
+
     def get_version(self, user_id: int, project_id: str, version_id: str) -> dict[str, Any]:
         with self._connect() as db:
             row = db.execute(
@@ -1225,13 +1382,16 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
             ).fetchone()
         if not row:
             raise KeyError("Skill版本不存在。")
-        return self._version(row)
+        version = self._version(row)
+        version["score"] = self._evaluate(version, version.get("evidence") or [])
+        return version
 
     def publish_version(self, user_id: int, project_id: str, version_id: str) -> dict[str, Any]:
         version = self.get_version(user_id, project_id, version_id)
         score = self._evaluate(version, version.get("evidence") or [])
         if not score.get("ready_to_publish"):
-            raise ValueError("该版本尚未通过完整性评测，不能发布。")
+            reasons = score.get("blocking_reasons") or ["存在未完成的完整性检查。"]
+            raise ValueError("该版本尚未通过完整性评测：" + " ".join(reasons))
         now = _now()
         with self._write_lock, self._connect() as db:
             db.execute(
@@ -1267,6 +1427,35 @@ source_conflicts：样本之间互相冲突的规律；confidence_notes：能力
                 (now, project_id, user_id, version_id),
             )
         return self.get_version(user_id, project_id, version_id)
+
+    def delete_version(self, user_id: int, project_id: str, version_id: str) -> None:
+        version = self.get_version(user_id, project_id, version_id)
+        was_active = version.get("status") == "published"
+        now = _now()
+        with self._write_lock, self._connect() as db:
+            deleted = db.execute(
+                "DELETE FROM skill_versions WHERE id=? AND project_id=? AND user_id=?",
+                (version_id, project_id, user_id),
+            )
+            if not deleted.rowcount:
+                raise KeyError("Skill版本不存在。")
+            if was_active:
+                remaining = db.execute(
+                    "SELECT COUNT(*) AS count FROM skill_versions WHERE project_id=? AND user_id=?",
+                    (project_id, user_id),
+                ).fetchone()
+                next_status = "candidate" if int(remaining["count"] or 0) else "draft"
+                db.execute(
+                    """UPDATE projects
+                    SET status=?,active_version_id='',updated_at=?
+                    WHERE id=? AND user_id=? AND active_version_id=?""",
+                    (next_status, now, project_id, user_id, version_id),
+                )
+            else:
+                db.execute(
+                    "UPDATE projects SET updated_at=? WHERE id=? AND user_id=?",
+                    (now, project_id, user_id),
+                )
 
     def list_published_skills(self, user_id: int) -> list[dict[str, Any]]:
         """Return lightweight cards for Skills that can be attached to a script job."""
