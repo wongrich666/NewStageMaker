@@ -159,6 +159,12 @@
               <span class="workspace-landing__card-title">新工作流测试</span>
               <span class="workspace-landing__card-desc">独立 API 的全新 01-12 测试线路</span>
             </a>
+
+            <a class="workspace-landing__card" href="{{ url_for('compliance_review_page', auth_token=current_auth_token) if current_user else url_for('login_page') }}">
+              <span class="workspace-landing__card-badge">COMPLIANCE</span>
+              <span class="workspace-landing__card-title">合规检测 / 评级打分</span>
+              <span class="workspace-landing__card-desc">检测内容风险，并评估主线、钩子、情绪与商业质量</span>
+            </a>
           </div>
 
           <div class="workspace-landing__footnote">

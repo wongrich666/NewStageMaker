@@ -182,6 +182,12 @@
               <span class="workspace-landing__card-title">AI剧本医生</span>
               <span class="workspace-landing__card-desc">上传成稿，检查人物断线、爽点不足和逻辑漏洞</span>
             </a>
+
+            <a class="workspace-landing__card" href="{{ url_for('compliance_review_page', auth_token=current_auth_token) }}">
+              <span class="workspace-landing__card-badge">COMPLIANCE</span>
+              <span class="workspace-landing__card-title">合规检测 / 评级打分</span>
+              <span class="workspace-landing__card-desc">预检内容风险，八维评估剧本质量并给出可执行修改建议</span>
+            </a>
           </div>
         </div>
       </section>

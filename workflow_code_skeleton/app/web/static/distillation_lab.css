@@ -207,6 +207,14 @@ button { cursor: pointer; }
 .dl-version-title strong { font-size: 15px; }
 .dl-version-meta { margin-top: 8px; color: var(--dl-muted); font-size: 12px; }
 .dl-score { font-size: 22px; font-weight: 800; color: var(--dl-primary); }
+.dl-btn.ai { color: #8a5a00; border-color: #e8c978; background: #fff9e8; }
+.dl-btn.ai:hover { border-color: #c99a22; background: #fff4cf; }
+.dl-score-feedback { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 10px; font-size: 12px; line-height: 1.5; }
+.dl-score-feedback strong { display: inline-flex; align-items: center; gap: 5px; }
+.dl-score-feedback span::before { content: "·"; margin-right: 5px; }
+.dl-score-feedback.blocked { color: var(--dl-red); }
+.dl-score-feedback.warning { color: #9a6700; }
+.dl-score-feedback.passed { color: var(--dl-primary); }
 
 .dl-editor { display: grid; grid-template-columns: 250px minmax(0,1fr); min-height: 530px; border: 1px solid var(--dl-line); }
 .dl-editor-nav { padding: 10px; border-right: 1px solid var(--dl-line); background: var(--dl-panel-soft); }

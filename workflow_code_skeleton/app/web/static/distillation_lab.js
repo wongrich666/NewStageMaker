@@ -65,6 +65,18 @@
     return `<span class="dl-badge ${escapeHtml(value)}">${escapeHtml(STATUS[value] || value)}</span>`;
   }
 
+  function scoreFeedback(score) {
+    const blockers = Array.isArray(score?.blocking_reasons) ? score.blocking_reasons : [];
+    const warnings = Array.isArray(score?.quality_warnings) ? score.quality_warnings : [];
+    if (blockers.length) {
+      return `<div class="dl-score-feedback blocked"><strong>${icon("circle-alert", 14)} 发布前需处理</strong>${blockers.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`;
+    }
+    if (warnings.length) {
+      return `<div class="dl-score-feedback warning"><strong>${icon("sparkles", 14)} 可发布，仍有质量建议</strong>${warnings.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`;
+    }
+    return `<div class="dl-score-feedback passed"><strong>${icon("badge-check", 14)} 完整性评测已通过</strong></div>`;
+  }
+
   function apiUrl(path) {
     const separator = path.includes("?") ? "&" : "?";
     return `${path}${config.authToken ? `${separator}auth_token=${encodeURIComponent(config.authToken)}` : ""}`;
@@ -290,10 +302,10 @@
 
   function versionsView() {
     const versions = state.project.versions || [];
-    return `<section class="dl-section"><div class="dl-section-title"><div><h2>版本与测试</h2><p>发布会归档上一个版本；旧版本及其证据始终保留。</p></div></div>
+    return `<section class="dl-section"><div class="dl-section-title"><div><h2>版本与测试</h2><p>发布会归档上一个版本；每个版本可独立查看、发布或删除。</p></div></div>
       <div class="dl-version-list">${versions.map((version) => `<article class="dl-version-row">
-        <div><div class="dl-version-title"><strong>${escapeHtml(version.version)}</strong>${statusBadge(version.status)}<span class="dl-badge">${version.score?.grade || "待评测"}</span></div><div class="dl-version-meta">${formatDate(version.created_at)} · ${version.score?.source_count || 0}份证据 · 模块覆盖 ${version.score?.checks?.module_coverage ?? version.score?.checks?.stage_coverage ?? 0}%</div></div>
-        <div class="dl-actions"><span class="dl-score">${version.score?.total || "-"}</span><button class="dl-btn" data-open-version="${version.id}">${icon("file-pen-line")} 查看</button>${version.status === "published" ? `<button class="dl-btn danger" data-unpublish-version="${version.id}">${icon("circle-off")} 取消发布</button>` : `<button class="dl-btn primary" data-publish-version="${version.id}" ${version.status !== "candidate" || !version.score?.ready_to_publish ? "disabled" : ""}>${icon("badge-check")} 发布</button>`}</div>
+        <div><div class="dl-version-title"><strong>${escapeHtml(version.version)}</strong>${statusBadge(version.status)}<span class="dl-badge">${version.score?.grade || "待评测"}</span></div><div class="dl-version-meta">${formatDate(version.created_at)} · ${version.score?.source_count || 0}份证据 · 模块覆盖 ${version.score?.checks?.module_coverage ?? version.score?.checks?.stage_coverage ?? 0}%</div>${scoreFeedback(version.score)}</div>
+        <div class="dl-actions"><span class="dl-score">${version.score?.total || "-"}</span><button class="dl-btn" data-open-version="${version.id}">${icon("file-pen-line")} 查看</button>${version.score?.quality_warnings?.length ? `<button class="dl-btn ai" data-optimize-version="${version.id}">${icon("wand-sparkles")} AI优化建议</button>` : ""}${version.status === "published" ? `<button class="dl-btn danger" data-unpublish-version="${version.id}">${icon("circle-off")} 取消发布</button>` : `<button class="dl-btn primary" data-publish-version="${version.id}" ${version.status !== "candidate" || !version.score?.ready_to_publish ? "disabled" : ""}>${icon("badge-check")} 发布</button>`}<button class="dl-btn icon danger" title="删除此版本" aria-label="删除此版本" data-delete-version="${version.id}" data-version-status="${version.status}">${icon("trash-2")}</button></div>
       </article>`).join("") || `<div class="dl-empty"><div>暂无版本，先运行一次蒸馏。</div></div>`}</div>
     </section>`;
   }
@@ -441,6 +453,27 @@
       } catch (error) { toast(error.message, true); }
     }));
 
+    root.querySelectorAll("[data-optimize-version]").forEach((button) => button.addEventListener("click", async () => {
+      if (!window.confirm("AI 将只优化黄色建议对应的模块，并生成一个新候选版本；当前版本会完整保留。继续吗？")) return;
+      const original = button.innerHTML;
+      button.disabled = true;
+      button.innerHTML = `${icon("loader-circle")} 优化中`;
+      refreshIcons();
+      try {
+        const data = await api(`/api/distillation-lab/projects/${state.project.id}/versions/${button.dataset.optimizeVersion}/optimize`, { method: "POST", body: "{}" });
+        await selectProject(state.project.id, false);
+        state.activeVersionId = data.version.id;
+        state.activeTab = "versions";
+        render();
+        toast(`AI 优化完成，已生成 ${data.version.version}，原版本保持不变。`);
+      } catch (error) {
+        button.disabled = false;
+        button.innerHTML = original;
+        refreshIcons();
+        toast(error.message, true);
+      }
+    }));
+
     root.querySelectorAll("[data-unpublish-version]").forEach((button) => button.addEventListener("click", async () => {
       if (!window.confirm("取消发布后，该 Skill 会从专业剧本制作台的可选列表中消失；已创建任务不受影响。确定取消吗？")) return;
       try {
@@ -450,6 +483,26 @@
         await loadOverview(false);
         toast("已取消发布，制作台将不再显示该 Skill。");
       } catch (error) { toast(error.message, true); }
+    }));
+
+    root.querySelectorAll("[data-delete-version]").forEach((button) => button.addEventListener("click", async () => {
+      const isPublished = button.dataset.versionStatus === "published";
+      const message = isPublished
+        ? "这是当前已发布版本。删除后会立即从制作台 Skill 列表中下线，但已创建任务不受影响。确定永久删除吗？"
+        : "确定永久删除这个版本吗？素材、其他版本和已创建任务不受影响。";
+      if (!window.confirm(message)) return;
+      button.disabled = true;
+      try {
+        await api(`/api/distillation-lab/projects/${state.project.id}/versions/${button.dataset.deleteVersion}`, { method: "DELETE" });
+        if (state.activeVersionId === button.dataset.deleteVersion) state.activeVersionId = "";
+        await selectProject(state.project.id, false);
+        await loadOverview(false);
+        window.localStorage.setItem("distilledSkillCatalogChanged", String(Date.now()));
+        toast("该版本已删除。其他版本和素材未受影响。");
+      } catch (error) {
+        button.disabled = false;
+        toast(error.message, true);
+      }
     }));
 
     root.querySelector("[data-action='delete-project']")?.addEventListener("click", async () => {
