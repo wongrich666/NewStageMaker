@@ -143,7 +143,7 @@ def extract_audit_payload(raw: Any) -> dict[str, Any]:
             value = parsed
             continue
         break
-    raise ValueError("剧本心电图工作流未返回可解析的 script_audit_compact_v1 JSON。")
+    raise ValueError("文脉检测工作流未返回可解析的 script_audit_compact_v1 JSON。")
 
 
 def _normalize_dimensions(value: Any, warnings: list[str], *, scope: str) -> list[dict[str, Any]]:
@@ -285,7 +285,7 @@ def _normalize_records(value: Any, *, kind: str, episode_no: int = 0) -> list[di
 
 def normalize_script_audit(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     if not isinstance(payload, dict):
-        raise ValueError("剧本心电图输出必须是 JSON object。")
+        raise ValueError("文脉检测输出必须是 JSON object。")
     warnings: list[str] = []
     if payload.get("schema_version") != SCHEMA_VERSION:
         warnings.append(
@@ -404,7 +404,7 @@ def normalize_script_audit(payload: dict[str, Any]) -> tuple[dict[str, Any], lis
     missing_reviews = sorted(detected_numbers - episode_numbers)
     if missing_reviews:
         formatted = "、".join(f"第{number}集" for number in missing_reviews)
-        raise ValueError(f"剧本心电图输出缺少逐集审核：{formatted}。")
+        raise ValueError(f"文脉检测输出缺少逐集审核：{formatted}。")
 
     point_ids = {point["point_id"] for point in global_points}
     point_episode_numbers = {point["episode_no"] for point in global_points if point["episode_no"] > 0}
@@ -424,12 +424,12 @@ def normalize_script_audit(payload: dict[str, Any]) -> tuple[dict[str, Any], lis
     )
     global_review["global_ecg_points"] = global_points
     if not global_points:
-        raise ValueError("剧本心电图输出缺少 global_ecg_points 和单集 ecg_points。")
+        raise ValueError("文脉检测输出缺少 global_ecg_points 和单集 ecg_points。")
     covered_episode_numbers = {point["episode_no"] for point in global_points if point["episode_no"] > 0}
     missing_point_episodes = sorted(episode_numbers - covered_episode_numbers)
     if missing_point_episodes:
         formatted = "、".join(f"第{number}集" for number in missing_point_episodes)
-        raise ValueError(f"剧本心电图输出缺少心电节点：{formatted}。")
+        raise ValueError(f"文脉检测输出缺少心电节点：{formatted}。")
 
     audit = {
         "schema_version": SCHEMA_VERSION,
@@ -469,7 +469,7 @@ def build_script_audit_view_model(audit: dict[str, Any]) -> dict[str, Any]:
     points = _list(global_review.get("global_ecg_points"))
     episodes = _list(audit.get("episode_reviews"))
     report_lines = [
-        f"《{meta.get('script_title') or '未命名剧本'}》剧本心电图审核报告",
+        f"《{meta.get('script_title') or '未命名剧本'}》文脉检测审核报告",
         f"总评分：{_number(overall.get('total_score', 0)):g}/100",
         f"评级：{overall.get('level', '')}",
         f"修改成本：{overall.get('modification_cost', '')}",

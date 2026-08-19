@@ -6,19 +6,19 @@
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
   <title>角色出图提示词 · IDEA TO SCRIPT</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='character_image_prompts.css') }}?v=20260811-character-prompt-v1" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='theme_slideshow.css') }}?v=20260812-audit-cip-contrast-v9" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='editorial_theme.css') }}?v=20260818-scientific-editorial-v8" />
 </head>
 <body class="cip-page">
   <div class="cip-shell">
     <aside class="cip-sidebar">
       <a class="cip-brand" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">
         <img src="{{ url_for('static', filename='assets/logo.png') }}" alt="Logo" />
-        <span><strong>IDEA TO SCRIPT</strong><small>剧本平台</small></span>
+        <span><strong>IDEA TO SCRIPT</strong><small>智作剧本</small></span>
       </a>
       <nav class="cip-nav" aria-label="主要功能">
-        <a href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">新建框架</a>
+        <a href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">新建剧本框架</a>
         <a href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">框架到剧本</a>
-        <a href="{{ url_for('script_audit_page', auth_token=current_auth_token) }}">剧本心电图</a>
+        <a href="{{ url_for('script_audit_page', auth_token=current_auth_token) }}">文脉检测</a>
         <a class="active" href="{{ url_for('character_image_prompts_page', auth_token=current_auth_token) }}">角色出图 Prompt</a>
       </nav>
       <div class="cip-sidebar-foot">
@@ -124,7 +124,7 @@
   <script>
     window.CHARACTER_IMAGE_PROMPT_CONFIG = { authToken: {{ current_auth_token|tojson }} };
   </script>
-  <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260628-global-theme-v8"></script>
+  <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260818-editorial-motion-v1"></script>
   <script src="{{ url_for('static', filename='character_image_prompts.js') }}?v=20260811-character-prompt-v1" defer></script>
 </body>
 </html>

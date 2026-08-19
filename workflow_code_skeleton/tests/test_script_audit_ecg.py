@@ -269,8 +269,9 @@ class ScriptAuditEcgTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         html = response.get_data(as_text=True)
         self.assertIn("script_audit.js", html)
-        self.assertIn("20260812-audit-cip-contrast-v9", html)
-        self.assertIn("20260812-script-audit-theme-v3", html)
+        self.assertIn("20260818-scientific-editorial-v8", html)
+        self.assertIn("20260817-script-audit-chart-v3", html)
+        self.assertIn("auditAssetList", html)
 
     @patch("workflow_code_skeleton.app.server.auth_store.get_user_by_token")
     def test_authenticated_txt_upload_extracts_script_without_starting_a_run(self, get_user_by_token) -> None:
@@ -313,6 +314,28 @@ class ScriptAuditEcgTests(unittest.TestCase):
         self.assertTrue(data["success"])
         self.assertEqual(400, data["debug"]["events"][0]["details"]["http_status"])
         get_debug.assert_called_once_with("a" * 32, user_id=7)
+
+    @patch("workflow_code_skeleton.app.server.auth_store.get_user_by_token")
+    @patch("workflow_code_skeleton.app.server.script_audit_batch_service.list_assets")
+    def test_authenticated_asset_list_returns_persistent_audits(self, list_assets, get_user_by_token) -> None:
+        get_user_by_token.return_value = SimpleNamespace(id=7, username="tester")
+        list_assets.return_value = [{
+            "run_id": "a" * 32, "asset_id": "a" * 32, "script_title": "测试剧本",
+            "status": "succeeded", "total_episodes": 5, "progress_percent": 100,
+        }]
+        app = create_app()
+        app.config.update(TESTING=True)
+
+        response = app.test_client().get(
+            "/api/script-audit/assets",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        data = response.get_json()
+        self.assertTrue(data["success"])
+        self.assertEqual("测试剧本", data["assets"][0]["script_title"])
+        list_assets.assert_called_once_with(user_id=7)
 
 
 if __name__ == "__main__":

@@ -295,7 +295,7 @@ class TaskLifecycleMixin:
         if clean_episodes_per_season <= 0:
             missing.append("episodes_per_season")
         if missing:
-            raise ValueError("新建框架资产缺少总集数。")
+            raise ValueError("新建剧本框架资产缺少总集数。")
         clean_episode_word_count = _safe_int(episode_word_count, 600)
         if clean_episode_word_count <= 0:
             clean_episode_word_count = 600
@@ -434,7 +434,7 @@ class TaskLifecycleMixin:
             or basic_config.get("project_title")
             or basic_config.get("source_title")
             or ""
-        ).strip() or "未命名框架策划"
+        ).strip() or "未命名框架"
         now = now_iso()
 
         if project_id > 0:
@@ -960,8 +960,8 @@ class TaskLifecycleMixin:
                 framework_state.pop("framework_to_script_state", None)
                 basic_config = framework_state.get("basic_config") if isinstance(framework_state.get("basic_config"), dict) else {}
                 clean_input = {
-                    "title": snapshot.get("title") or input_payload.get("title") or "未命名框架策划",
-                    "project_title": snapshot.get("title") or input_payload.get("project_title") or "未命名框架策划",
+                    "title": snapshot.get("title") or input_payload.get("title") or "未命名框架",
+                    "project_title": snapshot.get("title") or input_payload.get("project_title") or "未命名框架",
                     "source_title": input_payload.get("source_title") or basic_config.get("source_title") or snapshot.get("title") or "",
                     "target_format": input_payload.get("target_format") or basic_config.get("target_format") or "短剧",
                     "season_count": _safe_int(input_payload.get("season_count") or basic_config.get("season_count"), 1),

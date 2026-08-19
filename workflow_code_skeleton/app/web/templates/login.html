@@ -8,7 +8,7 @@
   <meta http-equiv="Expires" content="0">
   <title>登录 - 剧本生成工作台</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260627-global-theme-v1">
-  <link rel="stylesheet" href="{{ url_for('static', filename='theme_slideshow.css') }}?v=20260628-global-theme-v8">
+  <link rel="stylesheet" href="{{ url_for('static', filename='editorial_theme.css') }}?v=20260818-scientific-editorial-v8">
 </head>
 <body class="workspace-body mono-page auth-page">
   <main class="chat-workspace-shell prelogin-shell">
@@ -24,14 +24,14 @@
             <span class="sidebar-brand-mark"><img src="{{ url_for('static', filename='assets/logo.png') }}" alt="Logo"></span>
             <span class="sidebar-brand-text">
               <strong>IDEA TO SCRIPT</strong>
-              <em>IDEA TO SCRIPTS 剧本平台</em>
+              <em>IDEA TO SCRIPTS 智作剧本</em>
             </span>
           </a>
         </div>
       </div>
 
       <div class="sidebar-primary">
-        <a class="sidebar-create-btn" href="{{ url_for('login_page', next=url_for('framework_planner_page', new='1')) }}">＋ 新建框架</a>
+        <a class="sidebar-create-btn" href="{{ url_for('login_page', next=url_for('framework_planner_page', new='1')) }}">＋ 新建剧本框架</a>
         <a class="sidebar-create-btn" href="{{ url_for('login_page', next='/framework-to-script') }}">＋ 框架到剧本</a>
       </div>
 
@@ -81,7 +81,7 @@
         </div>
         <div class="runtime-strip">
           <div class="runtime-brandline">
-            <span class="runtime-app-label">IDEA TO SCRIPT 剧本平台</span>
+            <span class="runtime-app-label">IDEA TO SCRIPT 智作剧本</span>
           </div>
           <div class="runtime-meta-strip">
             <div class="runtime-pill">
@@ -108,7 +108,7 @@
         <div class="chat-transcript prelogin-transcript">
           <section class="chat-empty-state prelogin-chat-empty">
             <strong>剧本创作工作台~</strong>
-            <p>登录后可新建框架、导入框架生成剧本，并在左侧管理资产。</p>
+            <p>登录后可新建剧本框架、导入框架生成剧本，并在左侧管理资产。</p>
           </section>
         </div>
 
@@ -138,7 +138,7 @@
 
     </section>
   </main>
-  <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260628-global-theme-v8"></script>
+  <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260818-editorial-motion-v1"></script>
   <script src="{{ url_for('static', filename='sidebar.js') }}?v=20260612-sidebar-collapse-v1" defer></script>
 </body>
 </html>

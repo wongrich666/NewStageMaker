@@ -2658,7 +2658,7 @@
         <div class="fp-modal" data-modal-content="new-script">
           <div class="fp-card-title-row">
             <div>
-            <h2 class="fp-card-title">新建框架项目</h2>
+            <h2 class="fp-card-title">新建剧本框架项目</h2>
               <p class="fp-card-sub">创建全新的 01-07 框架策划上下文，不会带入旧项目历史版本。</p>
             </div>
             <button class="fp-btn small" data-action="close-new-script">关闭</button>
@@ -2701,7 +2701,7 @@
           </div>
         </div>
         <div class="fp-side-actions">
-          <button class="fp-btn small primary" data-action="open-new-script" ${ui.assetImporting ? "disabled" : ""}>新建框架项目</button>
+          <button class="fp-btn small primary" data-action="open-new-script" ${ui.assetImporting ? "disabled" : ""}>新建剧本框架项目</button>
           <button class="fp-btn small" data-action="toggle-assets" ${ui.assetImporting ? "disabled" : ""}>${ui.assetsOpen ? "收起框架资产" : "框架资产"}</button>
         </div>
         ${ui.assetsOpen ? renderAssetManager("side") : ""}
@@ -2718,7 +2718,7 @@
       <div class="fp-top">
         <div>
           <div class="fp-kicker">01-07 框架策划阶段</div>
-          <h1 class="fp-title">${escapeHtml(state.basic_config.source_title || state.basic_config.project_title || "未命名框架策划")}</h1>
+          <h1 class="fp-title">${escapeHtml(state.basic_config.source_title || state.basic_config.project_title || "未命名框架")}</h1>
           <p class="fp-top-sub">目标：产出可保存的框架资产。当前阶段：${escapeHtml(stageTitle)} · 框架资产 ID：${escapeHtml(assetId)}</p>
         </div>
         <div class="fp-top-actions">
@@ -2741,7 +2741,7 @@
         <div class="fp-card-title-row">
           <div>
             <h2 class="fp-card-title">我的框架资产</h2>
-            <p class="fp-card-sub">从这里手动打开已保存的框架资产。新建框架不会自动恢复旧资产。${ui.assetsLastRefreshedAt ? `最近刷新：${escapeHtml(formatDateTime(ui.assetsLastRefreshedAt))}` : ""}</p>
+            <p class="fp-card-sub">从这里手动打开已保存的框架资产。新建剧本框架不会自动恢复旧资产。${ui.assetsLastRefreshedAt ? `最近刷新：${escapeHtml(formatDateTime(ui.assetsLastRefreshedAt))}` : ""}</p>
           </div>
           <button class="fp-btn small" data-action="refresh-assets" ${ui.assetsLoading || ui.assetImporting ? "disabled" : ""}>${ui.assetsLoading ? "刷新中..." : "刷新"}</button>
         </div>
@@ -2762,7 +2762,7 @@
         </div>
         ${ui.assetsLoading ? renderProcessingBanner("正在刷新资产列表...") : ""}
         <div class="fp-asset-list">
-          ${assets.length ? assets.map(renderAssetItem).join("") : `<div class="fp-empty">暂无匹配资产。可以点击“新建框架项目”开始一个新的 01-07 框架策划。</div>`}
+          ${assets.length ? assets.map(renderAssetItem).join("") : `<div class="fp-empty">暂无匹配资产。可以点击“新建剧本框架项目”开始一个新的 01-07 框架策划。</div>`}
         </div>
       </section>
     `;
@@ -3163,7 +3163,7 @@
         <div class="fp-grid two">
           <div class="fp-field">
             ${renderBasicFieldLabel("作品标题", "source_title")}
-            <input data-config-key="source_title" placeholder="例如：机甲纪元，拳爆天星" value="${escapeHtml(state.basic_config.source_title || state.basic_config.project_title)}" ${locked ? "disabled" : ""} />
+            <input data-config-key="source_title" placeholder="例如：系统随我渡劫失事：古今夹层的双向负债旅人" value="${escapeHtml(state.basic_config.source_title || state.basic_config.project_title)}" ${locked ? "disabled" : ""} />
           </div>
           <div class="fp-field">
             ${renderBasicFieldLabel("写作模式", "mode")}
@@ -5335,7 +5335,7 @@ function renderPackageBlocks() {
     const knowledgeFields = knowledgePayloadFields("package");
     const assetState = clone(state.asset_state || {});
     const projectId = currentProjectId();
-    const title = syncBasicTitles() || "未命名框架策划";
+    const title = syncBasicTitles() || "未命名框架";
     const episodeConfig = currentEpisodeConfig();
     const episodeWordCount = positiveNumber(state.basic_config.episode_word_count || state.basic_config.chars_per_episode, DEFAULT_EPISODE_WORD_COUNT);
     state.basic_config.episode_word_count = episodeWordCount;
@@ -6453,7 +6453,7 @@ function renderPackageBlocks() {
 
   function resetState() {
     if (!canClearFrameworkInput()) {
-      showToast("当前策划已开始，不能清空输入；如需新建，请点击新建框架项目");
+      showToast("当前策划已开始，不能清空输入；如需新建，请点击新建剧本框架项目");
       return;
     }
     const proceed = window.confirm("确认清空当前输入吗？已保存的资产和历史版本会保留。");
@@ -6864,7 +6864,7 @@ async function saveFrameworkAsset(options) {
       user_requirements: form.style || "",
     }, {
       form,
-      note: "新建框架项目提交时从当前 DOM 重新收集的表单值",
+      note: "新建剧本框架项目提交时从当前 DOM 重新收集的表单值",
     });
     const data = await requestJson("/api/framework-planner/assets", {
       method: "POST",
@@ -7570,7 +7570,7 @@ async function saveFrameworkAsset(options) {
       try {
         await createNewScript();
       } catch (error) {
-        showToast(error.message || "新建框架项目失败");
+        showToast(error.message || "新建剧本框架项目失败");
       }
       return;
     }

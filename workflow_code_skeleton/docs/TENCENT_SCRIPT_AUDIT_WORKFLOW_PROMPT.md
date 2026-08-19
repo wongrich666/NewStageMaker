@@ -1,6 +1,6 @@
-# 腾讯工作流：分批剧本心电图检测
+# 腾讯工作流：分批文脉检测检测
 
-本工作流对应本地阶段键 `hot_review`。本地先按“第 N 集”标题切分剧本，默认每批只发送 1 集；后端会自动连续审核全剧，无需用户逐集点击。采用单集批次是因为完整 `script_audit_batch_v1` 字段较多，五集输出在腾讯私有部署中可能超过输出上限并被降级成摘要。工作流负责审核当前集，并返回供下一集使用的累计审核记忆。
+本工作流对应本地阶段键 `hot_review`。本地先按“第 N 集”标题严格切分剧本，默认优先每批发送 5 集，例如 `1-5、6-10……`；最后不足 5 集时按真实尾批发送。后端一次点击后会自动连续审核全剧，无需用户逐批操作。每批成功结果都会立即保存；某个五集批次连续返回截断、摘要、缺集或无效 JSON 时，本地会自动降级为每批2集，必要时再降为逐集，不会让前面成功批次作废。
 
 不要修改或复用现有 `12_04`。`12_04` 服务于剧本续写记忆，和审核记忆的目标、字段与证据要求不同。
 
@@ -15,9 +15,9 @@
 | `script_title` | `str` | `测试剧本` | 剧本名称 |
 | `total_episodes` | `int` | `30` | 全剧总集数，不是当前批次数量 |
 | `batch_start_episode` | `int` | `6` | 当前批次起始集数 |
-| `batch_end_episode` | `int` | `6` | 当前批次结束集数；当前默认与起始集数相同 |
+| `batch_end_episode` | `int` | `10` | 当前批次结束集数；通常为起始集数加 4，尾批除外 |
 | `previous_audit_memory` | `str` | `{...}` | 上一批返回的累计审核记忆；首批为 `{}` |
-| `batch_script_text` | `str` | `第6集……` | 当前集完整正文 |
+| `batch_script_text` | `str` | `第6集……第10集……` | 当前批次内所有集的完整正文 |
 | `is_final_batch` | `bool` | `false` | 当前批次是否为全剧最后一批 |
 
 本地发给腾讯 API 的字段名与这里完全一致，不能改为 `script_text`、`start_epi` 或其他别名。
@@ -41,8 +41,8 @@
 {{batch_script_text}}
 </batch_script_text>
 
-注意：当前本地采用逐集调用，所以正常情况下 batch_start_episode 与 batch_end_episode 相等；
-这两个参数仍必须保留并原样使用，不要在工作流中自行改成 1 或当前批次数量。
+注意：当前本地采用每批最多 5 集，正常批次的 batch_start_episode 与 batch_end_episode 相差 4；
+尾批可能只有 1-4 集。这两个参数必须原样使用，不要自行改成 1、5 或当前批次数量。
 ```
 
 ## 三、结束节点
@@ -57,10 +57,10 @@ Output.audit_batch = 大模型1.Output.Content
 `batch_start_episode`、`reviewed_episode_numbers`、`batch_core_judgement` 等摘要字段；
 这种摘要缺少逐集 `episode_reviews` 和 `next_audit_memory`，前端无法画出心电图，也无法继续下一批。
 
-如果腾讯后台最终响应类似下面这样，说明结束节点仍然配置错误：
+如果腾讯后台最终响应类似下面这样，即使字段名已经叫 `audit_batch`，也说明结束节点仍然在人工拼摘要，配置依然错误：
 
 ```json
-{"audit":{"batch_start_episode":1,"batch_end_episode":5,"reviewed_episode_numbers":[1,2,3,4,5],"batch_core_judgement":"..."}}
+{"audit_batch":{"batch_start_episode":1,"batch_end_episode":5,"reviewed_episode_numbers":[1,2,3,4,5],"batch_core_judgement":"..."}}
 ```
 
 正确响应的最外层应是 `audit_batch`，它的值是大模型生成的整段 JSON 文本；解析后必须同时包含
@@ -81,9 +81,9 @@ Output.audit_batch = 大模型1.Output.Content
 3. previous_audit_memory 是上一批审核完成后的累计状态，只用于判断跨批衔接、全剧情绪债、人物状态和全局趋势，不能把其中的旧集重复输出到 episode_reviews。
 4. next_audit_memory 必须是“截至当前批次的完整替换版本”，不是只写当前一集，也不是把旧记忆原文机械追加一遍。下一批只会收到你本次返回的 next_audit_memory。
 5. 首批 previous_audit_memory 为 {}。首批 boundary_review.previous_episode_no 必须为 0，不得虚构上一集。
-6. 当前本地默认单集调用；始终只输出 batch_start_episode 至 batch_end_episode 指定的真实集数，不得虚构其他集数。
+6. 当前本地默认每批最多5集；始终只输出 batch_start_episode 至 batch_end_episode 指定的全部真实集数。尾批不足5集时不得补造集数。
 7. is_final_batch=true 时，next_audit_memory 必须形成全剧最终判断，补齐最强集、最弱集、全剧留存、爽点分布、人物弧线、未偿情绪债、最大问题和优先修改方案。
-8. 从第2集开始，previous_audit_memory.last_episode_handoff 是上一集结尾的强制交接基准。必须先逐项读取它，再审核当前集开场；不得仅凭 main_conflict_chain 等全局摘要猜测上一集发生了什么。
+8. 批首集若不是第1集，previous_audit_memory.last_episode_handoff 是上一批最后一集结尾的强制交接基准；必须先逐项读取它，再审核批首集开场。批内第2至第5集必须直接对照 batch_script_text 中紧邻上一集的结尾与本集开场，不得用全局摘要替代真实上下文。
 
 【最高优先级输出规则】
 1. 最终回复必须且只能是一个合法 JSON object。禁止输出 Markdown、代码围栏、解释、前言、结语或 JSON 外文字。
@@ -126,7 +126,7 @@ ecg_value 必须是 -5 到 5 之间的整数：
 
 【前后集承接审核】
 1. 每一集 continuity_review 都要检查上一集结尾到本集开头的剧情、人物状态、时间空间、信息、道具资源、关系、未完成动作和情绪是否连续。
-2. boundary_review 专门审核“上一集 → 当前集”。当前逐集调用下，它不是批次摘要，而是每一对相邻集都必须执行的连续性审计。
+2. boundary_review 专门审核“上一批最后一集 → 当前批首集”，用于跨批连续性审计。每集自己的 continuity_review 审核紧邻的“上一集 → 本集”；因此五集批次内四个边界和批次之间的边界都必须覆盖。
 3. handoff_smoothness_score 范围 0-10：
    9-10：上一集动作、危机或情绪在本集立即自然续接，并产生升级；
    7-8：衔接清楚，仅有轻微信息重复或节奏损失；
@@ -137,10 +137,20 @@ ecg_value 必须是 -5 到 5 之间的整数：
 5. 上一集强烈悲痛、危机或关系破裂，本集若无触发就恢复平静，必须标记情绪断裂。
 6. 角色伤势、服饰、道具、知识、立场、关系、资源和任务状态发生无解释变化，必须进入 break_points。
 7. 上一集结尾提出的问题若本集回避、延迟或换成另一条线，必须判断是否造成钩子落空。
-8. 从第2集开始，必须把 previous_audit_memory.last_episode_handoff 的下列字段与当前集开场逐项对照：ending_time_space、ending_emotion、active_action_or_crisis、ending_hook_promise、character_state_snapshot、information_state、prop_resource_state、relationship_state、unresolved_actions、continuity_watch_points。
-9. boundary_review.continuity_evidence 必须分别写明上一集快照、当前集开场证据和匹配结论。禁止只返回“承接自然”“基本一致”等无证据判断。
-10. 如果当前集合理跳时空，必须在正文中找到明确转场、时间标记或因果桥；有桥接才算合理跳转，没有桥接则属于断裂。
-11. 如果上一集钩子在当前集不是立即处理，也必须判断延迟是否制造了更强悬念；单纯回避不得判为顺滑。
+8. 批首集若不是第1集，必须把 previous_audit_memory.last_episode_handoff 的下列字段与批首集开场逐项对照：ending_time_space、ending_emotion、active_action_or_crisis、ending_hook_promise、character_state_snapshot、information_state、prop_resource_state、relationship_state、unresolved_actions、continuity_watch_points。
+9. boundary_review.continuity_evidence 必须分别写明上一批结尾快照、当前批首集开场证据和匹配结论。禁止只返回“承接自然”“基本一致”等无证据判断。
+10. episode_reviews 中每一集的 continuity_review 必须包含 previous_episode_no、current_episode_no 和 continuity_evidence。第N集的 previous_episode_no 必须为 N-1，current_episode_no 必须为 N；第1集 previous_episode_no 为0。批内第2至第5集的 continuity_evidence 必须引用同批上一集结尾和本集开场的真实事实。
+11. 如果当前集合理跳时空，必须在正文中找到明确转场、时间标记或因果桥；有桥接才算合理跳转，没有桥接则属于断裂。
+12. 如果上一集钩子在当前集不是立即处理，也必须判断延迟是否制造了更强悬念；单纯回避不得判为顺滑。
+
+【五集批次输出体积约束】
+1. 必须保留规定的完整 JSON 字段，但文字必须短、准、有证据；禁止在多个字段重复同一段分析。
+2. 每集 ecg_points 选择 3-5 个最重要节点，不要为每句台词建节点。
+3. original_text_excerpt 每处只摘录能证明判断的短句，建议不超过40个汉字。
+4. 每个说明性字符串原则上控制在120个汉字以内；core_judgement、evidence、fix_suggestion 可在必要时稍长，但不得复述整段剧情。
+5. 每集 satisfying_points、key_issues、risk_scan、rewrite_plan 分别最多3项；批次级同类数组分别最多5项。
+6. next_audit_memory 是压缩后的替换式记忆，不得复制旧记忆全文，不得嵌入 episode_reviews、segments 或大段剧本原文。
+7. 绝不能为了缩短输出删除 schema_version、batch_meta、boundary_review、episode_reviews、next_audit_memory，或把完整结果退化成六字段 batch_core_judgement 摘要。
 
 【犀利审核与证据约束】
 1. 禁止“整体不错但仍有提升空间”“节奏可以更紧凑”“人物可以更立体”“建议增强冲突”等可套用于任何剧本的空话。
@@ -177,26 +187,26 @@ ecg_value 必须是 -5 到 5 之间的整数：
 【累计审核记忆规则】
 1. next_audit_memory 必须保留截至当前批次仍影响后续判断的信息，不保存大段原文，不复述全部 episode_reviews。
 2. reviewed_through_episode 必须等于 batch_end_episode。
-3. last_episode_handoff 必须是当前集结尾的结构化交接快照，episode_no 必须等于 batch_end_episode；下一集会把它作为连续性审计基准。
-4. last_episode_handoff 只写当前集结尾仍成立的状态，不复述整集剧情。ending_text_excerpt 只摘录能证明结尾状态的真实短句。
-5. current_character_states 记录核心人物在当前集结束时的位置、目标、情绪、关系、伤势、持有信息、资源和未完成行动。
+3. last_episode_handoff 必须是当前批最后一集结尾的结构化交接快照，episode_no 必须等于 batch_end_episode；下一批会把它作为跨批连续性审计基准。
+4. last_episode_handoff 只写当前批最后一集结尾仍成立的状态，不复述整集剧情。ending_text_excerpt 只摘录能证明结尾状态的真实短句。
+5. current_character_states 记录核心人物在本批最后一集结束时的位置、目标、情绪、关系、伤势、持有信息、资源和未完成行动。
 6. unresolved_plot_threads 只保留尚未解决且会影响后续理解的线索、危机、任务和秘密。
 7. unpaid_emotional_debts 记录尚未兑现的羞辱、牺牲、背叛、误会、承诺、欲望和关系债。
 8. episode_score_index 必须累计保留第1集至当前集的 episode_no 和 score，用于最终比较最强/最弱集。
 9. weak_episode_numbers、best_episode_no、weakest_episode_no 必须根据已有全部批次动态更新。
 10. global_key_issues 与 global_rewrite_plan 只保留最重要且仍有效的全剧问题，合并同源问题，禁止无限重复增长。
-11. next_batch_watch_points 明确下一集需要验证的承接点、待回收情绪债和人物状态，并与 last_episode_handoff.continuity_watch_points 一致。
+11. next_batch_watch_points 明确下一批首集需要验证的承接点、待回收情绪债和人物状态，并与 last_episode_handoff.continuity_watch_points 一致。
 12. 整个 next_audit_memory 应尽量控制在 20000 个中文字符以内，绝不能超过 30000 字符。
 
 【必须返回的精确 JSON 结构】
-下面用“全剧共 48 集、当前只审核第 1 集”的非尾批展示单集对象的完整结构。当前本地默认逐集调用，因此正常情况下 `batch_start_episode` 与 `batch_end_episode` 相同，`episode_reviews` 只返回当前这一集的完整对象；不要附带旧集或下一集。特别注意：`total_episodes` 始终复制输入中的全剧总集数 48，绝不能写成当前批大小 1。
+下面先用“全剧共48集、当前审核第1-5集”的首批展示完整对象结构。`episode_reviews` 必须依次包含第1、2、3、4、5集五个完整对象；为避免文档机械复制五份相同模板，下面只完整展开第1集对象，第2-5集必须复制同一对象结构并替换为各自真实集号、评分、证据和判断，绝不能在真实返回中省略。特别注意：`total_episodes` 始终复制输入中的全剧总集数48，不能写成当前批大小5。
 {
   "schema_version": "script_audit_batch_v1",
   "batch_meta": {
     "batch_start_episode": 1,
-    "batch_end_episode": 1,
+    "batch_end_episode": 5,
     "total_episodes": 48,
-    "reviewed_episode_numbers": [1],
+    "reviewed_episode_numbers": [1, 2, 3, 4, 5],
     "is_final_batch": false,
     "batch_core_judgement": "当前批次最关键的商业判断"
   },
@@ -265,12 +275,19 @@ ecg_value 必须是 -5 到 5 之间的整数：
         "emotional_curve_score": 0
       },
       "continuity_review": {
+        "previous_episode_no": 0,
+        "current_episode_no": 1,
         "handoff_smoothness_score": 0,
         "incoming_plot_matches": true,
         "character_state_matches": true,
         "time_space_transition_is_clear": true,
         "information_progression_is_valid": true,
         "emotion_transition_is_natural": true,
+        "continuity_evidence": {
+          "previous_ending_fact": "第1集填写首集无上一集；其他集写紧邻上一集结尾事实",
+          "current_opening_fact": "本集开场真实事实",
+          "match_judgement": "剧情、人物、时空、信息、道具、关系和情绪的具体匹配结论"
+        },
         "break_points": [],
         "fix_suggestion": ""
       },
@@ -386,9 +403,9 @@ ecg_value 必须是 -5 到 5 之间的整数：
   "batch_satisfying_points": [],
   "batch_risk_scan": [],
   "next_audit_memory": {
-    "reviewed_through_episode": 1,
+    "reviewed_through_episode": 5,
     "last_episode_handoff": {
-      "episode_no": 1,
+      "episode_no": 5,
       "ending_scene_summary": "当前集最后一个有效剧情状态",
       "ending_time_space": "结尾时间与地点",
       "ending_emotion": "结尾主导情绪",
@@ -413,7 +430,11 @@ ecg_value 必须是 -5 到 5 之间的整数：
     "resolved_payoffs": [],
     "continuity_risks": [],
     "episode_score_index": [
-      {"episode_no": 1, "score": 0}
+      {"episode_no": 1, "score": 0},
+      {"episode_no": 2, "score": 0},
+      {"episode_no": 3, "score": 0},
+      {"episode_no": 4, "score": 0},
+      {"episode_no": 5, "score": 0}
     ],
     "weak_episode_numbers": [],
     "best_episode_no": 1,
@@ -444,6 +465,11 @@ ecg_value 必须是 -5 到 5 之间的整数：
   }
 }
 
+重要：上面的 `episode_reviews[0]` 是“单个逐集对象的完整字段模板”，不是允许首批只返回第1集。
+实际调用若为第1-5集，必须在 `episode_reviews` 数组里连续放入5个相同字段结构的对象，集号依次为
+1、2、3、4、5；若为第46-48集，则必须放入46、47、48三个对象。不要输出省略号、模板说明、
+`其余对象说明` 或任何非对象占位符。本地会严格比较数组中的实际集号与起止范围，缺少任一集便只重试当前批次。
+
 【输出前静默自检】
 - JSON 可被标准 JSON.parse 直接解析，没有 JSON 外文字。
 - episode_reviews 集数严格等于当前起止范围，尾批没有补造集数。
@@ -451,8 +477,9 @@ ecg_value 必须是 -5 到 5 之间的整数：
 - 每集 ecg_points 非空，ID 带真实集号且不重复。
 - 情绪判断有剧情触发和兑现依据，承接判断覆盖剧情、人物、时空、信息与情绪。
 - boundary_review 正确审核上一批最后一集到本批第一集；首批 previous_episode_no 为 0。
-- 从第2集开始，boundary_review.continuity_evidence 已逐项对照 previous_audit_memory.last_episode_handoff 与当前集开场证据。
-- next_audit_memory.last_episode_handoff.episode_no 等于当前集号，且准确保存结尾时空、情绪、人物/信息/道具/关系状态、未完成动作与钩子承诺。
+- 每个 episode_reviews[i].continuity_review 都有正确的 previous_episode_no、current_episode_no 和 continuity_evidence；批内相邻集逐对审核，没有只审核批首。
+- 非首批的 boundary_review.continuity_evidence 已逐项对照 previous_audit_memory.last_episode_handoff 与当前批首集开场证据。
+- next_audit_memory.last_episode_handoff.episode_no 等于 batch_end_episode，且准确保存本批最后一集结尾的时空、情绪、人物/信息/道具/关系状态、未完成动作与钩子承诺。
 - next_audit_memory.reviewed_through_episode 等于 batch_end_episode，并已合并而不是机械追加旧记忆。
 - 所有意见通过反泛化检查，负向判断有证据、后果和具体修改动作。
 ```
@@ -473,8 +500,11 @@ TENCENT_WORKFLOW_HOT_REVIEW_API_KEY=填写修改后的分批审核工作流APIKe
 
 1. 按每批实际起止集数校验 `episode_reviews`，少集、重复、乱序或越界都会使当前批次失败。
 2. 每批成功后保存结果和 `next_audit_memory`，下一批只携带最新版记忆。
-3. 失败重试从失败批次继续，已经成功的批次不会重新调用。
-4. 若远端把 `batch_meta.total_episodes` 错写成当前批次数量，本地会使用从完整剧本严格解析出的真实总集数自动校正并记录 warning；评分、心电节点、问题与修改建议不会被本地改写。
+3. 默认五集批次若连续两次无效，会自动拆成 `2+2+1`；两集批次仍连续无效时再拆成 `1+1`。每个成功小批立即保存并更新记忆。
+4. 失败恢复从第一个未完成集继续，已经成功的批次不会重新调用；只有单集也连续失败时才暂停并等待用户稍后继续。
+5. 若远端把 `batch_meta.total_episodes` 错写成当前批次数量，本地会使用从完整剧本严格解析出的真实总集数自动校正并记录 warning；评分、心电节点、问题与修改建议不会被本地改写。
+6. 旧工作流若漏填 `continuity_review.previous_episode_no/current_episode_no`，本地会依据连续集号补齐；漏填详细 `continuity_evidence` 会记录 warning，但不会丢弃已经完整返回的评分和心电节点。
+7. 若 `audit_batch` 已含 `script_audit_batch_v1` 和 `episode_reviews` 开头却在中途结束，本地会诊断为“远端输出截断”，不再误报为结束节点字段配置错误。
 
 ## 七、本地调试记录
 

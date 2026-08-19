@@ -1,4 +1,63 @@
 (function () {
+  // The product now uses a stable editorial canvas. Keep the legacy entry point
+  // so old templates and integrations remain compatible, but do not create or
+  // rotate full-screen image layers behind long-form writing surfaces.
+  document.documentElement.classList.add("has-editorial-theme");
+  const markEditorialBody = () => {
+    if (document.body) document.body.classList.add("has-editorial-theme");
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", markEditorialBody, { once: true });
+  } else {
+    markEditorialBody();
+  }
+
+  // Passive visual parallax for the scientific drawing field. It only writes
+  // CSS custom properties and never participates in product interactions.
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const coarsePointer = window.matchMedia("(pointer: coarse)");
+  if (!reducedMotion.matches && !coarsePointer.matches) {
+    const root = document.documentElement;
+    let frameId = 0;
+    let pointerX = window.innerWidth / 2;
+    let pointerY = window.innerHeight / 2;
+
+    const renderPointerField = () => {
+      frameId = 0;
+      const width = Math.max(1, window.innerWidth);
+      const height = Math.max(1, window.innerHeight);
+      const normalizedX = Math.max(-1, Math.min(1, (pointerX / width - .5) * 2));
+      const normalizedY = Math.max(-1, Math.min(1, (pointerY / height - .5) * 2));
+      root.style.setProperty("--editorial-shift-x", `${(normalizedX * 8).toFixed(2)}px`);
+      root.style.setProperty("--editorial-shift-y", `${(normalizedY * 6).toFixed(2)}px`);
+      root.style.setProperty("--editorial-shift-x-reverse", `${(normalizedX * -4).toFixed(2)}px`);
+      root.style.setProperty("--editorial-shift-y-reverse", `${(normalizedY * -3).toFixed(2)}px`);
+      root.style.setProperty("--editorial-grid-x", `${(normalizedX * 2).toFixed(2)}px`);
+      root.style.setProperty("--editorial-grid-y", `${(normalizedY * 2).toFixed(2)}px`);
+    };
+
+    const queuePointerField = (event) => {
+      pointerX = event.clientX;
+      pointerY = event.clientY;
+      if (!frameId) frameId = window.requestAnimationFrame(renderPointerField);
+    };
+
+    const resetPointerField = () => {
+      pointerX = window.innerWidth / 2;
+      pointerY = window.innerHeight / 2;
+      if (!frameId) frameId = window.requestAnimationFrame(renderPointerField);
+    };
+
+    window.addEventListener("pointermove", queuePointerField, { passive: true });
+    document.addEventListener("mouseleave", resetPointerField, { passive: true });
+    window.addEventListener("blur", resetPointerField, { passive: true });
+  }
+  window.ideaToScriptThemeSlideshow = {
+    slides: [],
+    applySlide: markEditorialBody,
+  };
+  return;
+
   const THEME_SLIDE_INTERVAL_MS = 30000;
   const STORAGE_KEY = "ideaToScript.themeSlideshow.v1";
   const SLIDES = [

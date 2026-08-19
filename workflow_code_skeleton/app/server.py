@@ -750,7 +750,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             or save_payload.get("project_title")
             or save_payload.get("title")
             or save_payload.get("basic_config", {}).get("project_title")
-            or "未命名框架策划"
+            or "未命名框架"
         )
         save_payload["source_title"] = save_payload["project_title"]
         save_payload["title"] = save_payload["project_title"]
@@ -2824,19 +2824,33 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=400)
         except Exception as exc:
             logger.exception("script audit run creation failed")
-            return _json_error(str(exc), status=500, fallback="剧本心电图任务创建失败，请稍后重试。")
+            return _json_error(str(exc), status=500, fallback="文脉检测任务创建失败，请稍后重试。")
         return jsonify({"success": True, **run}), 202
+
+    @app.get("/api/script-audit/assets")
+    @_login_required
+    def list_script_audit_assets_api():
+        try:
+            assets = script_audit_batch_service.list_assets(user_id=_require_user_id())
+        except Exception as exc:
+            logger.exception("script audit assets load failed")
+            return _json_error(str(exc), status=500, fallback="剧本测评资产读取失败。")
+        return _json_ok(assets=assets)
 
     @app.get("/api/script-audit/runs/<run_id>")
     @_login_required
     def get_script_audit_run_api(run_id: str):
         try:
-            run = script_audit_batch_service.get_run(run_id, user_id=_require_user_id())
+            run = script_audit_batch_service.get_run(
+                run_id,
+                user_id=_require_user_id(),
+                relaunch_stale=str(request.args.get("recover") or "").lower() in {"1", "true", "yes"},
+            )
         except ValueError as exc:
             return _json_error(str(exc), status=404)
         except Exception as exc:
             logger.exception("script audit run load failed")
-            return _json_error(str(exc), status=500, fallback="剧本心电图进度读取失败。")
+            return _json_error(str(exc), status=500, fallback="文脉检测进度读取失败。")
         return _json_ok(**run)
 
     @app.get("/api/script-audit/runs/<run_id>/debug")
@@ -2848,7 +2862,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=404)
         except Exception as exc:
             logger.exception("script audit debug load failed run_id=%s", run_id)
-            return _json_error(str(exc), status=500, fallback="剧本心电图调试记录读取失败。")
+            return _json_error(str(exc), status=500, fallback="文脉检测调试记录读取失败。")
         return _json_ok(debug=debug)
 
     @app.post("/api/script-audit/runs/<run_id>/resume")
@@ -2860,7 +2874,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=404)
         except Exception as exc:
             logger.exception("script audit run resume failed")
-            return _json_error(str(exc), status=500, fallback="剧本心电图任务恢复失败。")
+            return _json_error(str(exc), status=500, fallback="文脉检测任务恢复失败。")
         return _json_ok(**run)
 
     @app.post("/api/script-audit/extract-file")
@@ -3849,7 +3863,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             if episodes_per_season is None:
                 missing.append("episodes_per_season")
             if missing:
-                raise ValueError("新建框架资产缺少总集数。")
+                raise ValueError("新建剧本框架资产缺少总集数。")
             asset = task_manager.create_framework_planner_asset(
                 user_id=_require_user_id(),
                 title=str(data.get("source_title") or data.get("title") or data.get("project_title") or ""),

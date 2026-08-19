@@ -8,7 +8,7 @@
   <meta http-equiv="Expires" content="0">
   <title>IDEA TO SCRIPT 剧本生成工作台</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260627-global-theme-v1">
-  <link rel="stylesheet" href="{{ url_for('static', filename='theme_slideshow.css') }}?v=20260628-global-theme-v8">
+  <link rel="stylesheet" href="{{ url_for('static', filename='editorial_theme.css') }}?v=20260818-scientific-editorial-v8">
 </head>
 <body class="workspace-body">
   <main class="chat-workspace-shell">
@@ -24,16 +24,16 @@
             <span class="sidebar-brand-mark"><img src="{{ url_for('static', filename='assets/logo.png') }}" alt="Logo"></span>
             <span class="sidebar-brand-text">
               <strong>IDEA TO SCRIPT</strong>
-              <em>剧本平台</em>
+              <em>智作剧本</em>
             </span>
           </a>
         </div>
       </div>
 
       <div class="sidebar-primary">
-        <a class="sidebar-create-btn" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">＋ 新建框架</a>
+        <a class="sidebar-create-btn" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">＋ 新建剧本框架</a>
         <a class="sidebar-create-btn" href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">＋ 框架到剧本</a>
-        <a class="sidebar-create-btn" href="{{ url_for('script_audit_page', auth_token=current_auth_token) }}">◇ 剧本心电图</a>
+        <a class="sidebar-create-btn" href="{{ url_for('script_audit_page', auth_token=current_auth_token) }}">◇ 文脉检测</a>
         <a class="sidebar-create-btn" href="{{ url_for('character_image_prompts_page', auth_token=current_auth_token) }}">◇ 角色出图 Prompt</a>
       </div>
 
@@ -70,7 +70,7 @@
             </div>
           </div>
           <div class="workspace-landing__eyebrow">IDEA TO SCRIPT</div>
-          <h1 class="workspace-landing__title">剧本平台</h1>
+          <h1 class="workspace-landing__title">智作剧本</h1>
           <p class="workspace-landing__subtitle">
             可选流程：从头开始搭建框架，或者导入框架生成剧本
             剧本质量和提示词高度相关，如有需要可以在生成框架阶段的「智慧库」里选择基础提示词，或者存入自己的定制提示词哦~
@@ -78,7 +78,7 @@
 
           <div class="workspace-landing__actions">
             <a class="workspace-landing__card primary" href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">
-              <span class="workspace-landing__card-title">新建框架</span>
+              <span class="workspace-landing__card-title">新建剧本框架</span>
               <span class="workspace-landing__card-desc">进入 01-07 框架策划流程</span>
             </a>
 
@@ -88,7 +88,7 @@
             </a>
 
             <a class="workspace-landing__card" href="{{ url_for('script_audit_page', auth_token=current_auth_token) }}">
-              <span class="workspace-landing__card-title">剧本心电图</span>
+              <span class="workspace-landing__card-title">文脉检测</span>
               <span class="workspace-landing__card-desc">评分、留存曲线与逐集修改建议</span>
             </a>
 
@@ -105,7 +105,7 @@
         </div>
         <div class="runtime-strip">
           <div class="runtime-brandline">
-            <span class="runtime-app-label">IDEA TO SCRIPT 剧本平台</span>
+            <span class="runtime-app-label">IDEA TO SCRIPT 智作剧本</span>
             <strong id="projectText" class="hidden" aria-hidden="true">当前剧本：未选中</strong>
           </div>
           <div class="runtime-meta-strip">
@@ -275,7 +275,7 @@
       loginUrl: "{{ url_for('login_page') }}"
     };
   </script>
-  <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260628-global-theme-v8"></script>
+  <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260818-editorial-motion-v1"></script>
   <script src="{{ url_for('static', filename='field_labels_cn.js') }}?v=20260527-readable-labels"></script>
   <script src="{{ url_for('static', filename='app.js') }}?v=20260811-home-assets-cleanup-v1"></script>
 </body>

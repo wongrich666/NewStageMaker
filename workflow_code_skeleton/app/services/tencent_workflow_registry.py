@@ -51,7 +51,7 @@ TENCENT_WORKFLOWS: dict[str, TencentWorkflowSpec] = {
     ),
     "hot_review": TencentWorkflowSpec(
         key="hot_review",
-        label="剧本心电图检测",
+        label="文脉检测",
         # 腾讯 ADP 的实际应用由 API Key 唯一确定；该占位符仅用于本地诊断信息。
         workflow_id="hot_review",
         api_key_env="TENCENT_WORKFLOW_HOT_REVIEW_API_KEY",

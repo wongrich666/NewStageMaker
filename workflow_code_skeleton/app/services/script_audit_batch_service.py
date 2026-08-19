@@ -24,10 +24,10 @@ from .tencent_workflow_registry import build_workflow_inputs
 
 
 BATCH_SCHEMA_VERSION = "script_audit_batch_v1"
-# 腾讯私有部署会把较长的模型输出截断并退化为六字段摘要。真实 5 集
-# script_audit_batch_v1 已超过 5 万字符，因此默认逐集调用，保证完整 JSON。
-# 前端仍然只需点击一次，服务会自动连续运行到全剧结束。
-BATCH_SIZE = 1
+# 每次向腾讯工作流发送最多五集。尾批不足五集时按实际集数发送。
+# 每批成功后立即落盘，因此后续批次即使暂时失败，也不会丢失此前审核结果。
+BATCH_SIZE = 5
+BATCH_MAX_ATTEMPTS = 2
 MAX_MEMORY_CHARS = 30000
 MAX_DEBUG_EVENTS = 200
 
@@ -79,6 +79,16 @@ def _script_body(text: str) -> str:
     cleaned = str(text or "").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
     marker = re.search(r"(?m)^\s*四[、.]\s*剧本正文\s*$", cleaned)
     return cleaned[marker.end():].lstrip("\n") if marker else cleaned.strip()
+
+
+def canonical_script_text(text: str) -> str:
+    """Normalize transport-only differences while preserving the authored script."""
+    normalized = str(text or "").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    return "\n".join(line.rstrip() for line in normalized.split("\n")).strip()
+
+
+def script_content_hash(text: str) -> str:
+    return hashlib.sha256(canonical_script_text(text).encode("utf-8")).hexdigest()
 
 
 def parse_script_episodes(text: str) -> list[dict[str, Any]]:
@@ -133,6 +143,26 @@ def split_episode_batches(episodes: list[dict[str, Any]], batch_size: int = BATC
     return batches
 
 
+def pending_episode_batches(
+    episodes: list[dict[str, Any]],
+    completed_numbers: set[int],
+    batch_size: int = BATCH_SIZE,
+) -> list[dict[str, Any]]:
+    """Regroup only unfinished episodes without replaying an accepted partial prefix.
+
+    This matters when resuming a run created under a different batch-size policy. For
+    example, a former single-episode run that completed 1-9 must continue with 10-14,
+    rather than replaying the new nominal 6-10 batch and duplicating episodes 6-9.
+    """
+    pending = [item for item in episodes if _int(item.get("episode_no")) not in completed_numbers]
+    if not pending:
+        return []
+    numbers = [_int(item.get("episode_no")) for item in pending]
+    if numbers != list(range(numbers[0], numbers[-1] + 1)):
+        raise ValueError("已保存的心电图进度存在非连续缺口，无法安全地自动续跑。")
+    return split_episode_batches(pending, batch_size=batch_size)
+
+
 def _iter_batch_candidates(raw: Any, *, max_depth: int = 18):
     """Yield every plausible nested payload without letting a summary hide siblings."""
     preferred = (
@@ -146,13 +176,17 @@ def _iter_batch_candidates(raw: Any, *, max_depth: int = 18):
         if depth > max_depth:
             return
         parsed = parse_workflow_output(value, max_depth=12)
-        yield source, parsed
 
         # A JSON string can become a new object/list candidate.
         if isinstance(value, str):
+            # Keep the original text candidate as well. A lenient generic parser may
+            # discard an unfinished JSON prefix, but here that prefix is important
+            # evidence that the remote model hit its output ceiling.
+            yield source, value
             if parsed != value and isinstance(parsed, (dict, list)):
                 yield from visit(parsed, f"{source}.json", depth + 1)
             return
+        yield source, parsed
         if not isinstance(value, (dict, list)):
             return
         identity = id(value)
@@ -201,7 +235,17 @@ def _describe_incomplete_batch(
 
 def _extract_batch_payload(raw: Any, *, expected_total_episodes: int | None = None) -> dict[str, Any]:
     incomplete: list[tuple[int, str]] = []
+    truncated: list[tuple[int, str]] = []
     for source, value in _iter_batch_candidates(raw):
+        if isinstance(value, str) and BATCH_SCHEMA_VERSION in value and '"episode_reviews"' in value:
+            try:
+                json.loads(value)
+            except json.JSONDecodeError as exc:
+                truncated.append((
+                    len(value),
+                    f"远端候选位置 {source} 的 audit_batch 文本在第{exc.lineno}行第{exc.colno}列"
+                    f"中断（已收到{len(value)}字符）",
+                ))
         if not isinstance(value, dict):
             continue
         if value.get("schema_version") == BATCH_SCHEMA_VERSION or {
@@ -219,6 +263,12 @@ def _extract_batch_payload(raw: Any, *, expected_total_episodes: int | None = No
                 source,
                 expected_total_episodes=expected_total_episodes,
             )))
+    if truncated:
+        detail = max(truncated, key=lambda item: item[0])[1]
+        raise ValueError(
+            "心电图大模型已开始返回完整 script_audit_batch_v1，但 JSON 在输出中途被截断。"
+            f"{detail}；这不是前端解析丢失，也不是结束节点字段名错误。"
+        )
     if incomplete:
         detail = max(incomplete, key=lambda item: item[0])[1]
         raise ValueError(
@@ -279,6 +329,29 @@ def validate_batch_output(
             raise ValueError(f"第{episode_no}集缺少 emotional_review 情绪审核。")
         if not isinstance(review.get("continuity_review"), dict) or not review["continuity_review"]:
             raise ValueError(f"第{episode_no}集缺少 continuity_review 承接审核。")
+        continuity = review["continuity_review"]
+        expected_previous_episode = episode_no - 1 if episode_no > 1 else 0
+        reported_previous = continuity.get("previous_episode_no")
+        reported_current = continuity.get("current_episode_no")
+        if reported_previous is None or reported_current is None:
+            continuity["previous_episode_no"] = expected_previous_episode
+            continuity["current_episode_no"] = episode_no
+            warnings.append(
+                f"远端第{episode_no}集 continuity_review 漏填相邻集编号，"
+                "本地已按剧本连续集号补齐。"
+            )
+        elif _int(reported_previous, -1) != expected_previous_episode or _int(reported_current, -1) != episode_no:
+            raise ValueError(
+                f"第{episode_no}集 continuity_review 集号不正确："
+                f"期望 {expected_previous_episode}->{episode_no}。"
+            )
+        if episode_no > 1:
+            continuity_evidence = continuity.get("continuity_evidence")
+            if not isinstance(continuity_evidence, dict) or not continuity_evidence:
+                warnings.append(
+                    f"远端第{episode_no}集 continuity_review 缺少逐项 continuity_evidence；"
+                    "现有承接布尔判断和断点仍会保存，建议继续按最新提示词补齐证据。"
+                )
         points = review.get("ecg_points") if isinstance(review.get("ecg_points"), list) else []
         if not points:
             raise ValueError(f"第{episode_no}集没有返回心电节点。")
@@ -545,6 +618,9 @@ class ScriptAuditBatchService:
     def _debug_path(self, run_id: str) -> Path:
         return self._path(run_id).with_suffix(".debug.json")
 
+    def _summary_path(self, run_id: str) -> Path:
+        return self._path(run_id).with_suffix(".summary.json")
+
     def _append_debug_event(self, run_id: str, event: str, **details: Any) -> None:
         with self._lock:
             path = self._debug_path(run_id)
@@ -596,14 +672,93 @@ class ScriptAuditBatchService:
         temp = path.with_suffix(".tmp")
         temp.write_text(json.dumps(record, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         os.replace(temp, path)
+        summary = self.public_record(record, include_source=False)
+        summary["user_id"] = _int(record.get("user_id"))
+        summary_path = self._summary_path(record["run_id"])
+        summary_temp = summary_path.with_suffix(".summary.tmp")
+        summary_temp.write_text(json.dumps(summary, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        os.replace(summary_temp, summary_path)
+
+    def _all_records(self) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        for path in self.base_dir.glob("*.json"):
+            if path.name.endswith((".debug.json", ".summary.json")):
+                continue
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if isinstance(loaded, dict) and _text(loaded.get("run_id")):
+                records.append(loaded)
+        return records
+
+    def _all_summaries(self) -> list[dict[str, Any]]:
+        summaries: list[dict[str, Any]] = []
+        for path in self.base_dir.glob("*.summary.json"):
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if isinstance(loaded, dict) and _text(loaded.get("run_id")):
+                summaries.append(loaded)
+        # Existing installations have full run records but no sidecar index yet.
+        if not summaries:
+            for record in self._all_records():
+                summary = self.public_record(record, include_source=False)
+                summary["user_id"] = _int(record.get("user_id"))
+                summaries.append(summary)
+                try:
+                    self._summary_path(_text(record.get("run_id"))).write_text(
+                        json.dumps(summary, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+                    )
+                except Exception:
+                    pass
+        return summaries
+
+    def _find_user_script(self, user_id: int, content_hash: str) -> dict[str, Any] | None:
+        matches = []
+        for record in self._all_records():
+            if _int(record.get("user_id")) != int(user_id):
+                continue
+            stored_hash = _text(record.get("script_hash"))
+            recalculated_hash = (
+                script_content_hash(_text(record.get("script_text")))
+                if record.get("script_text") else ""
+            )
+            if content_hash in {stored_hash, recalculated_hash}:
+                matches.append(record)
+        if not matches:
+            return None
+        matches.sort(key=lambda item: _text(item.get("updated_at") or item.get("created_at")), reverse=True)
+        return matches[0]
 
     def start_run(self, *, user_id: int, script_title: str, script_text: str, launch: bool = True) -> dict[str, Any]:
+        script_text = canonical_script_text(script_text)
         episodes = parse_script_episodes(script_text)
+        content_hash = script_content_hash(script_text)
+        with self._lock:
+            existing = self._find_user_script(user_id, content_hash)
+            if existing is not None:
+                status = _text(existing.get("status"))
+                if status == "failed" and launch:
+                    existing.update(status="pending", error="", updated_at=_now_iso())
+                    self._write(existing)
+                existing_public = self.public_record(existing)
+                existing_public["asset_reused"] = True
+                existing_public["reuse_reason"] = (
+                    "completed_result" if status == "succeeded"
+                    else "resumed_failed_run" if status == "failed"
+                    else "active_run"
+                )
+                run_id = _text(existing.get("run_id"))
+                if launch and status != "succeeded":
+                    self._launch(run_id)
+                return existing_public
         run_id = uuid.uuid4().hex
         now = _now_iso()
         record = {
             "run_id": run_id, "user_id": int(user_id), "script_title": script_title or "未命名剧本",
-            "script_text": script_text, "script_hash": hashlib.sha256(script_text.encode("utf-8")).hexdigest(),
+            "script_text": script_text, "script_hash": content_hash,
             "status": "pending", "created_at": now, "updated_at": now, "total_episodes": len(episodes),
             "total_batches": len(split_episode_batches(episodes)), "completed_batches": 0,
             "completed_episode_numbers": [], "current_batch_start": 0, "current_batch_end": 0,
@@ -626,6 +781,28 @@ class ScriptAuditBatchService:
         with self._lock:
             current = self._read(run_id)
         return self.public_record(current)
+
+    def list_assets(self, *, user_id: int, limit: int = 100) -> list[dict[str, Any]]:
+        with self._lock:
+            records = [
+                record for record in self._all_summaries()
+                if _int(record.get("user_id")) == int(user_id)
+            ]
+        records.sort(key=lambda item: _text(item.get("updated_at") or item.get("created_at")), reverse=True)
+        assets: list[dict[str, Any]] = []
+        seen_hashes: set[str] = set()
+        for record in records:
+            content_hash = _text(record.get("script_hash")) or script_content_hash(_text(record.get("script_text")))
+            if content_hash and content_hash in seen_hashes:
+                continue
+            if content_hash:
+                seen_hashes.add(content_hash)
+            asset = copy.deepcopy(record)
+            asset.pop("user_id", None)
+            assets.append(asset)
+            if len(assets) >= max(1, min(200, int(limit))):
+                break
+        return assets
 
     def _launch(self, run_id: str) -> None:
         with self._lock:
@@ -650,7 +827,6 @@ class ScriptAuditBatchService:
                 record.update(status="running", error="", updated_at=_now_iso())
                 self._write(record)
             episodes = parse_script_episodes(record["script_text"])
-            chunks = split_episode_batches(episodes)
             stored_batches = record.get("batches") if isinstance(record.get("batches"), list) else []
             completed_numbers = {
                 _int(item.get("episode_no"))
@@ -659,13 +835,10 @@ class ScriptAuditBatchService:
                 for item in (batch.get("episode_reviews") or [])
                 if isinstance(item, dict)
             }
-            # Resume by completed episode numbers, not by old batch count. This keeps
-            # runs created under the former 5-episode policy safe after switching to
-            # single-episode batches and prevents skipped episodes.
-            pending_chunks = [
-                chunk for chunk in chunks
-                if not set(chunk["episode_numbers"]).issubset(completed_numbers)
-            ]
+            # Resume by completed episode numbers, then regroup only the unfinished
+            # suffix. This is safe for records created by both the former single-
+            # episode policy and the current five-episode policy.
+            pending_chunks = pending_episode_batches(episodes, completed_numbers)
             completed = len(stored_batches)
             memory = compact_audit_memory(record.get("audit_memory"))
             with self._lock:
@@ -685,7 +858,10 @@ class ScriptAuditBatchService:
                 resumed_from_episode=(pending_chunks[0]["start_episode"] if pending_chunks else 0),
                 batch_size=BATCH_SIZE,
             )
-            for chunk in pending_chunks:
+            work_queue = list(pending_chunks)
+            episode_by_number = {_int(item.get("episode_no")): item for item in episodes}
+            while work_queue:
+                chunk = work_queue.pop(0)
                 with self._lock:
                     record = self._read(run_id)
                     record.update(
@@ -705,8 +881,20 @@ class ScriptAuditBatchService:
                 last_error: Exception | None = None
                 batch_payload: dict[str, Any] | None = None
                 batch_warnings: list[str] = []
-                for attempt in range(2):
-                    transported = build_workflow_inputs("hot_review", variables)
+                for attempt in range(BATCH_MAX_ATTEMPTS):
+                    attempt_variables = dict(variables)
+                    if attempt:
+                        retry_memory = copy.deepcopy(memory)
+                        retry_memory["_format_retry_instruction"] = (
+                            f"这是当前第{chunk['start_episode']}-{chunk['end_episode']}集的第{attempt + 1}次格式重试。"
+                            "上一次只返回摘要或结构不完整。本次必须返回完整 script_audit_batch_v1 JSON，"
+                            "不得只返回 batch_meta、reviewed_episode_numbers 或 batch_core_judgement；"
+                            "episode_reviews 必须逐集齐全，且必须包含 next_audit_memory。"
+                        )
+                        attempt_variables["previous_audit_memory"] = json.dumps(
+                            retry_memory, ensure_ascii=False, separators=(",", ":")
+                        )
+                    transported = build_workflow_inputs("hot_review", attempt_variables)
                     self._append_debug_event(
                         run_id,
                         "workflow_attempt_started",
@@ -714,7 +902,7 @@ class ScriptAuditBatchService:
                         batch_start_episode=chunk["start_episode"],
                         batch_end_episode=chunk["end_episode"],
                         attempt=attempt + 1,
-                        max_attempts=2,
+                        max_attempts=BATCH_MAX_ATTEMPTS,
                         workflow_input_keys=sorted(transported),
                         workflow_input_types={key: type(value).__name__ for key, value in transported.items()},
                         workflow_input_char_lengths={key: len(str(value)) for key, value in transported.items()},
@@ -729,7 +917,7 @@ class ScriptAuditBatchService:
                         previous_memory_hash=hashlib.sha256(transported["previous_audit_memory"].encode("utf-8")).hexdigest(),
                     )
                     try:
-                        raw = self._workflow_client().run_raw("hot_review", variables)
+                        raw = self._workflow_client().run_raw("hot_review", attempt_variables)
                         batch_payload, batch_warnings = validate_batch_output(
                             raw,
                             chunk["episode_numbers"],
@@ -773,10 +961,57 @@ class ScriptAuditBatchService:
                                 getattr(self._workflow_client(), "get_last_stage_debug_info", lambda *_: {})("hot_review")
                             ),
                         )
-                        if attempt == 0:
-                            time.sleep(0.6)
+                        if attempt + 1 < BATCH_MAX_ATTEMPTS:
+                            self._append_debug_event(
+                                run_id,
+                                "batch_retry_scheduled",
+                                batch_index=chunk["batch_index"],
+                                batch_start_episode=chunk["start_episode"],
+                                batch_end_episode=chunk["end_episode"],
+                                next_attempt=attempt + 2,
+                                max_attempts=BATCH_MAX_ATTEMPTS,
+                                completed_episode_numbers=sorted(completed_numbers),
+                                progress_preserved=True,
+                            )
+                            time.sleep(min(1.5 * (attempt + 1), 5.0))
                 if last_error or batch_payload is None:
-                    raise last_error or RuntimeError("批次审核失败。")
+                    current_size = len(chunk["episode_numbers"])
+                    if current_size > 1:
+                        fallback_size = 2 if current_size > 2 else 1
+                        source_episodes = [episode_by_number[number] for number in chunk["episode_numbers"]]
+                        fallback_chunks = split_episode_batches(source_episodes, batch_size=fallback_size)
+                        work_queue = fallback_chunks + work_queue
+                        self._append_debug_event(
+                            run_id,
+                            "batch_adaptive_split",
+                            failed_batch_start=chunk["start_episode"],
+                            failed_batch_end=chunk["end_episode"],
+                            failed_batch_size=current_size,
+                            fallback_batch_size=fallback_size,
+                            fallback_ranges=[
+                                [item["start_episode"], item["end_episode"]]
+                                for item in fallback_chunks
+                            ],
+                            reason=safe_truncated_preview(str(last_error), limit=2000),
+                            progress_preserved=True,
+                        )
+                        with self._lock:
+                            record = self._read(run_id)
+                            record.update(
+                                total_batches=len(record.get("batches") or []) + len(work_queue),
+                                current_batch_start=fallback_chunks[0]["start_episode"],
+                                current_batch_end=fallback_chunks[0]["end_episode"],
+                                updated_at=_now_iso(),
+                            )
+                            self._write(record)
+                        continue
+                    reason = _text(last_error, "远端未返回完整批次结果。")
+                    raise RuntimeError(
+                        f"第{chunk['start_episode']}-{chunk['end_episode']}集已自动重试"
+                        f"{BATCH_MAX_ATTEMPTS}次仍未成功；此前已完成的"
+                        f"{len(completed_numbers)}集结果均已保留，可稍后点击继续检测，从本批次续跑。"
+                        f"最后一次错误：{reason}"
+                    ) from last_error
                 memory = compact_audit_memory(batch_payload["next_audit_memory"])
                 with self._lock:
                     record = self._read(run_id)
@@ -794,6 +1029,7 @@ class ScriptAuditBatchService:
                         updated_at=_now_iso(),
                     )
                     self._write(record)
+                completed_numbers = set(completed_numbers)
             with self._lock:
                 record = self._read(run_id)
                 audit, merge_warnings = merge_audit_batches(record["script_title"], record["total_episodes"], record["batches"])
@@ -830,11 +1066,13 @@ class ScriptAuditBatchService:
             except Exception:
                 pass
 
-    def get_run(self, run_id: str, *, user_id: int) -> dict[str, Any]:
+    def get_run(self, run_id: str, *, user_id: int, relaunch_stale: bool = False) -> dict[str, Any]:
         with self._lock:
             record = self._read(run_id)
         if int(record.get("user_id") or 0) != int(user_id):
             raise ValueError("心电图运行记录不存在。")
+        if relaunch_stale and _text(record.get("status")) in {"pending", "running"}:
+            self._launch(run_id)
         return self.public_record(record)
 
     def resume_run(self, run_id: str, *, user_id: int) -> dict[str, Any]:
@@ -866,20 +1104,31 @@ class ScriptAuditBatchService:
         events = document.get("events") if isinstance(document, dict) and isinstance(document.get("events"), list) else []
         return {"run_id": run_id, "debug_file": str(path), "events": events}
 
-    def public_record(self, record: dict[str, Any]) -> dict[str, Any]:
+    def public_record(self, record: dict[str, Any], *, include_source: bool = True) -> dict[str, Any]:
         total = max(1, _int(record.get("total_episodes"), 1))
         completed = len(record.get("completed_episode_numbers") or [])
+        public_keys = [
+            "run_id", "script_title", "status", "created_at", "updated_at", "total_episodes",
+            "total_batches", "completed_batches", "completed_episode_numbers", "current_batch_start",
+            "current_batch_end", "error", "debug_file", "debug_event_count", "debug_last_event",
+        ]
+        if include_source:
+            public_keys.extend(("warnings", "audit"))
         result = {
             key: copy.deepcopy(record.get(key))
-            for key in (
-                "run_id", "script_title", "status", "created_at", "updated_at", "total_episodes",
-                "total_batches", "completed_batches", "completed_episode_numbers", "current_batch_start",
-                "current_batch_end", "warnings", "error", "audit",
-                "debug_file", "debug_event_count", "debug_last_event",
-            )
+            for key in public_keys
         }
         result["progress_percent"] = round(min(100, completed / total * 100), 1)
-        if record.get("status") == "succeeded" and isinstance(record.get("audit"), dict):
+        result["asset_id"] = _text(record.get("run_id"))
+        result["script_hash"] = _text(record.get("script_hash"))
+        result["has_result"] = bool(record.get("status") == "succeeded" and isinstance(record.get("audit"), dict))
+        if not include_source and isinstance(record.get("audit"), dict):
+            overall = record["audit"].get("overall") if isinstance(record["audit"].get("overall"), dict) else {}
+            result["total_score"] = overall.get("total_score")
+            result["level"] = _text(overall.get("level"))
+        if include_source:
+            result["script_text"] = _text(record.get("script_text"))
+        if include_source and record.get("status") == "succeeded" and isinstance(record.get("audit"), dict):
             result["view"] = build_script_audit_view_model(record["audit"])
             result["result_type"] = "script_audit_ecg"
         return result

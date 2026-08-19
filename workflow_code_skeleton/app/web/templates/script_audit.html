@@ -4,21 +4,21 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
-  <title>剧本心电图检测 · IDEA TO SCRIPT</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='script_audit.css') }}?v=20260811-script-audit-v1" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='theme_slideshow.css') }}?v=20260812-audit-cip-contrast-v9" />
+  <title>文脉检测检测 · IDEA TO SCRIPT</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='script_audit.css') }}?v=20260817-script-audit-chart-v3" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='editorial_theme.css') }}?v=20260818-scientific-editorial-v8" />
 </head>
 <body class="audit-page">
   <div class="audit-shell">
     <aside class="audit-sidebar">
       <a class="audit-brand" href="{{ url_for('workspace_page', auth_token=current_auth_token) }}">
         <img src="{{ url_for('static', filename='assets/logo.png') }}" alt="Logo" />
-        <span><strong>IDEA TO SCRIPT</strong><small>剧本平台</small></span>
+        <span><strong>IDEA TO SCRIPT</strong><small>智作剧本</small></span>
       </a>
       <nav class="audit-nav" aria-label="主要功能">
-        <a href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">新建框架</a>
+        <a href="{{ url_for('framework_planner_page', auth_token=current_auth_token, new='1') }}">新建剧本框架</a>
         <a href="/framework-to-script{% if current_auth_token %}?auth_token={{ current_auth_token }}{% endif %}">框架到剧本</a>
-        <a class="active" href="{{ url_for('script_audit_page', auth_token=current_auth_token) }}">剧本心电图</a>
+        <a class="active" href="{{ url_for('script_audit_page', auth_token=current_auth_token) }}">文脉检测</a>
         <a href="{{ url_for('character_image_prompts_page', auth_token=current_auth_token) }}">角色出图 Prompt</a>
       </nav>
       <div class="audit-sidebar-foot">
@@ -31,11 +31,25 @@
       <header class="audit-hero">
         <div>
           <p class="audit-kicker">SCRIPT ECG REVIEW</p>
-          <h1>剧本心电图检测</h1>
+          <h1>文脉检测检测</h1>
           <p>从开场、冲突节奏、爽点、人物对白与市场合规五个维度，对全剧和每一集进行可视化审核。</p>
         </div>
         <span class="audit-contract-tag">腾讯工作流 · 100 分制</span>
       </header>
+
+      <section class="audit-assets-card" aria-labelledby="auditAssetsTitle">
+        <div class="audit-assets-head">
+          <div>
+            <p class="audit-kicker">MY AUDIT ASSETS</p>
+            <h2 id="auditAssetsTitle">我的测评剧本</h2>
+            <p>同一份剧本只保存一项资产；运行中可刷新恢复，已完成资产可直接查看报告。</p>
+          </div>
+          <button id="auditAssetsRefresh" type="button">刷新资产</button>
+        </div>
+        <div id="auditAssetList" class="audit-asset-list" aria-live="polite">
+          <div class="audit-asset-empty">正在读取测评资产…</div>
+        </div>
+      </section>
 
       <section class="audit-input-card">
         <div class="audit-field-row">
@@ -112,7 +126,7 @@
 
         <article id="auditCrossEpisodePanel" class="audit-panel hidden">
           <div class="audit-panel-head"><div><p class="audit-kicker">CROSS EPISODE</p><h3>跨集分析</h3></div></div>
-          <div id="auditCrossEpisode" class="audit-facts"></div>
+          <div id="auditCrossEpisode" class="audit-cross-grid"></div>
         </article>
         <div id="auditWarnings" class="audit-warnings hidden"></div>
       </section>
@@ -121,7 +135,7 @@
   <script>
     window.SCRIPT_AUDIT_CONFIG = { authToken: {{ current_auth_token|tojson }} };
   </script>
-  <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260628-global-theme-v8"></script>
-  <script src="{{ url_for('static', filename='script_audit.js') }}?v=20260812-script-audit-theme-v3" defer></script>
+  <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260818-editorial-motion-v1"></script>
+  <script src="{{ url_for('static', filename='script_audit.js') }}?v=20260817-script-audit-chart-v3" defer></script>
 </body>
 </html>
