@@ -24,11 +24,14 @@ from .tencent_workflow_registry import build_workflow_inputs
 
 
 BATCH_SCHEMA_VERSION = "script_audit_batch_v1"
-# 每次向腾讯工作流发送最多五集。尾批不足五集时按实际集数发送。
+# 每次向腾讯工作流发送最多三集。尾批不足三集时按实际集数发送。
 # 每批成功后立即落盘，因此后续批次即使暂时失败，也不会丢失此前审核结果。
-BATCH_SIZE = 5
+BATCH_SIZE = 3
 BATCH_MAX_ATTEMPTS = 2
 MAX_MEMORY_CHARS = 30000
+# Only this compact projection is sent back to the remote workflow. The complete
+# accepted batch data remains on disk and is used to build the final report.
+WORKFLOW_MEMORY_MAX_CHARS = 6000
 MAX_DEBUG_EVENTS = 200
 
 _EPISODE_HEADER = re.compile(
@@ -151,8 +154,8 @@ def pending_episode_batches(
     """Regroup only unfinished episodes without replaying an accepted partial prefix.
 
     This matters when resuming a run created under a different batch-size policy. For
-    example, a former single-episode run that completed 1-9 must continue with 10-14,
-    rather than replaying the new nominal 6-10 batch and duplicating episodes 6-9.
+    example, a former single-episode run that completed 1-9 must continue with 10-12,
+    rather than replaying a nominal batch that overlaps episodes 6-9.
     """
     pending = [item for item in episodes if _int(item.get("episode_no")) not in completed_numbers]
     if not pending:
@@ -469,6 +472,107 @@ def compact_audit_memory(value: Any) -> dict[str, Any]:
     return result
 
 
+def compact_workflow_audit_memory(value: Any, *, retry_instruction: str = "") -> dict[str, Any]:
+    """Build a bounded continuity memory for the next remote audit call.
+
+    The remote model needs the latest handoff and unresolved state, not every
+    verbose issue object accumulated across the whole series. Full accepted
+    batches stay persisted locally, so trimming this transport projection does
+    not remove scores, evidence, issues, or rewrite tasks from the final report.
+    """
+    source = compact_audit_memory(value)
+    if not source and not retry_instruction:
+        return {}
+
+    list_limits = {
+        "current_character_states": 20,
+        "unresolved_plot_threads": 16,
+        "unpaid_emotional_debts": 12,
+        "resolved_payoffs": 12,
+        "continuity_risks": 10,
+        "episode_score_index": 60,
+        "weak_episode_numbers": 30,
+        "next_batch_watch_points": 10,
+        "cross_batch_findings": 6,
+        "global_key_issues": 4,
+        "global_rewrite_plan": 4,
+        "global_risk_scan": 4,
+        "global_satisfying_points": 4,
+    }
+
+    def shrink(item: Any, depth: int = 0, *, list_limit: int = 12, text_limit: int = 360) -> Any:
+        if depth > 4:
+            return _text(item)[:160]
+        if isinstance(item, str):
+            return item[:text_limit if depth < 2 else min(text_limit, 240)]
+        if isinstance(item, list):
+            selected = item[-list_limit:]
+            return [shrink(child, depth + 1, list_limit=8, text_limit=text_limit) for child in selected]
+        if isinstance(item, dict):
+            return {
+                str(key): shrink(child, depth + 1, list_limit=8, text_limit=text_limit)
+                for key, child in list(item.items())[:24]
+            }
+        return item
+
+    result: dict[str, Any] = {}
+    for key, item in source.items():
+        if isinstance(item, list):
+            result[key] = shrink(item, list_limit=list_limits.get(key, 12))
+        elif key == "last_episode_handoff":
+            result[key] = shrink(item, list_limit=12, text_limit=300)
+        else:
+            result[key] = shrink(item)
+    if retry_instruction:
+        result["_format_retry_instruction"] = _text(retry_instruction)[:360]
+
+    def encoded_length() -> int:
+        return len(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+
+    # These verbose cumulative collections are already reconstructible from the
+    # accepted per-batch payloads. Drop them first when the transport budget is
+    # exceeded, while retaining current continuity and unresolved-story state.
+    optional_drop_order = (
+        "global_satisfying_points",
+        "global_risk_scan",
+        "resolved_payoffs",
+        "cross_batch_findings",
+        "global_rewrite_plan",
+        "global_key_issues",
+        "episode_score_index",
+    )
+    for key in optional_drop_order:
+        if encoded_length() <= WORKFLOW_MEMORY_MAX_CHARS:
+            break
+        result.pop(key, None)
+
+    if encoded_length() > WORKFLOW_MEMORY_MAX_CHARS:
+        result = {
+            key: shrink(item, list_limit=6, text_limit=180)
+            for key, item in result.items()
+        }
+
+    if encoded_length() > WORKFLOW_MEMORY_MAX_CHARS:
+        essential_keys = (
+            "reviewed_through_episode", "last_episode_handoff", "main_genre",
+            "main_emotional_contract", "main_conflict_chain", "protagonist_arc",
+            "payoff_chain", "current_character_states", "unresolved_plot_threads",
+            "unpaid_emotional_debts", "continuity_risks", "next_batch_watch_points",
+            "weak_episode_numbers", "best_episode_no", "best_episode_reason",
+            "weakest_episode_no", "weakest_episode_reason", "running_retention_judgement",
+            "largest_problem", "priority_fix", "_format_retry_instruction",
+        )
+        result = {
+            key: shrink(result[key], list_limit=5, text_limit=140)
+            for key in essential_keys
+            if key in result
+        }
+
+    if encoded_length() > WORKFLOW_MEMORY_MAX_CHARS:
+        raise ValueError("工作流审核记忆压缩后仍超过 6000 字符。")
+    return result
+
+
 def _records(batches: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -531,11 +635,24 @@ def merge_audit_batches(script_title: str, total_episodes: int, batches: list[di
     total_score = round(sum(item["score"] for item in dimensions), 2)
     level = "S" if total_score >= 90 else "A" if total_score >= 80 else "B" if total_score >= 70 else "C" if total_score >= 60 else "D"
     def memory_records(memory_key: str, batch_key: str) -> list[dict[str, Any]]:
-        # A model occasionally preserves the memory key but empties its value. In
-        # that case keep the evidence already returned by the individual batches
-        # instead of making it disappear from the final report.
+        # Transport memory is intentionally bounded, so the final report combines
+        # its curated global records with every accepted per-batch record.
         remembered = memory.get(memory_key)
-        return copy.deepcopy(remembered) if isinstance(remembered, list) and remembered else _records(batches, batch_key)
+        candidates = [
+            *([item for item in remembered if isinstance(item, dict)] if isinstance(remembered, list) else []),
+            *_records(batches, batch_key),
+        ]
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in candidates:
+            signature = _text(item.get("issue_id") or item.get("task_id") or item.get("risk_id") or item.get("point_id"))
+            signature = signature or hashlib.sha1(
+                json.dumps(item, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            if signature not in seen:
+                result.append(copy.deepcopy(item))
+                seen.add(signature)
+        return result
 
     global_issues = memory_records("global_key_issues", "batch_key_issues")
     global_rewrites = memory_records("global_rewrite_plan", "batch_rewrite_plan")
@@ -588,7 +705,10 @@ def merge_audit_batches(script_title: str, total_episodes: int, batches: list[di
             "hook_continuity_problem": _text(memory.get("hook_continuity_problem")),
             "character_arc_problem": _text(memory.get("character_arc_problem")),
             "fix_suggestion": _text(memory.get("fix_suggestion") or memory.get("priority_fix")),
-            "episode_score_trend": memory.get("episode_score_index") if isinstance(memory.get("episode_score_index"), list) else [],
+            "episode_score_trend": [
+                {"episode_no": _int(review.get("episode_no")), "score": review.get("episode_score")}
+                for review in reviews
+            ],
             "best_episode_no": _int(memory.get("best_episode_no")),
             "best_episode_reason": _text(memory.get("best_episode_reason")),
             "weakest_episode_no": _int(memory.get("weakest_episode_no")),
@@ -734,15 +854,26 @@ class ScriptAuditBatchService:
 
     def start_run(self, *, user_id: int, script_title: str, script_text: str, launch: bool = True) -> dict[str, Any]:
         script_text = canonical_script_text(script_text)
+        script_title = _text(script_title)[:120]
         episodes = parse_script_episodes(script_text)
         content_hash = script_content_hash(script_text)
         with self._lock:
             existing = self._find_user_script(user_id, content_hash)
             if existing is not None:
                 status = _text(existing.get("status"))
+                # 同一正文可以复用评分，但展示名称必须跟随本次上传的文件。
+                # 同步 audit.meta，避免资产卡和报告标题显示成两个不同剧本。
+                if script_title and script_title != _text(existing.get("script_title")):
+                    existing["script_title"] = script_title
+                    audit = existing.get("audit")
+                    if isinstance(audit, dict):
+                        meta = audit.get("meta") if isinstance(audit.get("meta"), dict) else {}
+                        meta["script_title"] = script_title
+                        audit["meta"] = meta
+                    existing["updated_at"] = _now_iso()
                 if status == "failed" and launch:
                     existing.update(status="pending", error="", updated_at=_now_iso())
-                    self._write(existing)
+                self._write(existing)
                 existing_public = self.public_record(existing)
                 existing_public["asset_reused"] = True
                 existing_public["reuse_reason"] = (
@@ -836,8 +967,8 @@ class ScriptAuditBatchService:
                 if isinstance(item, dict)
             }
             # Resume by completed episode numbers, then regroup only the unfinished
-            # suffix. This is safe for records created by both the former single-
-            # episode policy and the current five-episode policy.
+            # suffix. This is safe for records created by the former single- or
+            # five-episode policies and the current three-episode policy.
             pending_chunks = pending_episode_batches(episodes, completed_numbers)
             completed = len(stored_batches)
             memory = compact_audit_memory(record.get("audit_memory"))
@@ -869,12 +1000,18 @@ class ScriptAuditBatchService:
                         current_batch_end=chunk["end_episode"], updated_at=_now_iso(),
                     )
                     self._write(record)
+                stored_memory_text = json.dumps(memory, ensure_ascii=False, separators=(",", ":")) if memory else "{}"
+                workflow_memory = compact_workflow_audit_memory(memory)
+                workflow_memory_text = (
+                    json.dumps(workflow_memory, ensure_ascii=False, separators=(",", ":"))
+                    if workflow_memory else "{}"
+                )
                 variables = {
                     "script_title": record["script_title"],
                     "total_episodes": record["total_episodes"],
                     "batch_start_episode": chunk["start_episode"],
                     "batch_end_episode": chunk["end_episode"],
-                    "previous_audit_memory": json.dumps(memory, ensure_ascii=False, separators=(",", ":")) if memory else "{}",
+                    "previous_audit_memory": workflow_memory_text,
                     "batch_script_text": chunk["script_text"],
                     "is_final_batch": chunk["end_episode"] == record["total_episodes"],
                 }
@@ -884,12 +1021,15 @@ class ScriptAuditBatchService:
                 for attempt in range(BATCH_MAX_ATTEMPTS):
                     attempt_variables = dict(variables)
                     if attempt:
-                        retry_memory = copy.deepcopy(memory)
-                        retry_memory["_format_retry_instruction"] = (
+                        retry_instruction = (
                             f"这是当前第{chunk['start_episode']}-{chunk['end_episode']}集的第{attempt + 1}次格式重试。"
                             "上一次只返回摘要或结构不完整。本次必须返回完整 script_audit_batch_v1 JSON，"
                             "不得只返回 batch_meta、reviewed_episode_numbers 或 batch_core_judgement；"
                             "episode_reviews 必须逐集齐全，且必须包含 next_audit_memory。"
+                        )
+                        retry_memory = compact_workflow_audit_memory(
+                            memory,
+                            retry_instruction=retry_instruction,
                         )
                         attempt_variables["previous_audit_memory"] = json.dumps(
                             retry_memory, ensure_ascii=False, separators=(",", ":")
@@ -913,6 +1053,11 @@ class ScriptAuditBatchService:
                                 "batch_end_episode", "is_final_batch",
                             )
                         },
+                        stored_memory_char_length=len(stored_memory_text),
+                        transport_memory_char_length=len(transported["previous_audit_memory"]),
+                        transport_memory_saved_chars=max(
+                            0, len(stored_memory_text) - len(transported["previous_audit_memory"])
+                        ),
                         batch_script_hash=hashlib.sha256(chunk["script_text"].encode("utf-8")).hexdigest(),
                         previous_memory_hash=hashlib.sha256(transported["previous_audit_memory"].encode("utf-8")).hexdigest(),
                     )
@@ -1091,6 +1236,36 @@ class ScriptAuditBatchService:
         )
         self._launch(run_id)
         return self.get_run(run_id, user_id=user_id)
+
+    def delete_run(self, run_id: str, *, user_id: int) -> dict[str, Any]:
+        """Delete one owned, inactive audit record and its sidecar files."""
+        with self._lock:
+            record = self._read(run_id)
+            if int(record.get("user_id") or 0) != int(user_id):
+                raise ValueError("心电图运行记录不存在。")
+            thread = self._threads.get(run_id)
+            if _text(record.get("status")) in {"pending", "running"} or (thread and thread.is_alive()):
+                raise RuntimeError("评分仍在运行，完成或失败后才能删除该记录。")
+
+            record_path = self._path(run_id)
+            summary_path = self._summary_path(run_id)
+            debug_path = self._debug_path(run_id)
+            sidecars = (
+                summary_path,
+                debug_path,
+                record_path.with_suffix(".tmp"),
+                summary_path.with_suffix(".summary.tmp"),
+                debug_path.with_suffix(".debug.tmp"),
+            )
+            for path in sidecars:
+                path.unlink(missing_ok=True)
+            record_path.unlink()
+            self._threads.pop(run_id, None)
+        return {
+            "run_id": _text(run_id),
+            "script_title": _text(record.get("script_title"), "未命名剧本"),
+            "deleted": True,
+        }
 
     def get_debug(self, run_id: str, *, user_id: int) -> dict[str, Any]:
         with self._lock:

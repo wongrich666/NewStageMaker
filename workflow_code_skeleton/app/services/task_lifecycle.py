@@ -684,6 +684,72 @@ class TaskLifecycleMixin:
             return max(total_episodes, 1), True
         return 0, False
 
+    def _framework_to_script_stage11_coverage(
+        self,
+        workspace_state: dict[str, Any],
+        total_episodes: int,
+    ) -> tuple[int, bool]:
+        """Count only fully persisted stage-11 batches, not transient checkpoints."""
+        script_stages = workspace_state.get("scriptStages") or workspace_state.get("script_stages")
+        if not isinstance(script_stages, dict):
+            return 0, False
+        stage11 = script_stages.get("stage11")
+        if not isinstance(stage11, dict):
+            return 0, False
+        batches = stage11.get("batches")
+        if not isinstance(batches, dict) or not batches:
+            return 0, False
+
+        covered: set[int] = set()
+        for raw_key, batch in batches.items():
+            if not isinstance(batch, dict):
+                continue
+            status = str(batch.get("batchPipelineStatus") or batch.get("batch_pipeline_status") or "").strip().lower()
+            if status and status != "complete":
+                continue
+            conflict_plan = batch.get("batchCausalConflictPlan") or batch.get("batch_causal_conflict_plan")
+            review = batch.get("batchCausalConflictReview") or batch.get("batch_causal_conflict_review")
+            memory = batch.get("conflictMemory") or batch.get("conflict_memory")
+            if not isinstance(conflict_plan, dict) or not conflict_plan or not isinstance(review, dict) or not memory:
+                continue
+            review_passed = review.get("reviewPassed") is True or review.get("passed") is True
+            rewrite_required = review.get("rewriteRequired") is True or review.get("rewrite_required") is True
+            if not review_passed or rewrite_required:
+                continue
+            completed_sub_stages = batch.get("completedSubStages") or batch.get("completed_sub_stages") or []
+            if isinstance(completed_sub_stages, list) and completed_sub_stages:
+                completed_names = {str(item) for item in completed_sub_stages}
+                if "causal_conflict_memory" not in completed_names:
+                    continue
+            start = _safe_int(
+                batch.get("batchStartEpisode")
+                or batch.get("batch_start_episode")
+                or batch.get("start_episode")
+                or raw_key,
+                0,
+            )
+            end = _safe_int(
+                batch.get("batchEndEpisode")
+                or batch.get("batch_end_episode")
+                or batch.get("end_episode"),
+                0,
+            )
+            if start <= 0:
+                continue
+            if end < start:
+                end = start
+            for episode in range(start, end + 1):
+                if total_episodes <= 0 or episode <= total_episodes:
+                    covered.add(episode)
+
+        generated = len(covered)
+        complete = (
+            all(episode in covered for episode in range(1, total_episodes + 1))
+            if total_episodes > 0
+            else bool(covered)
+        )
+        return generated, complete
+
     def save_framework_to_script_asset(
         self,
         *,
@@ -738,6 +804,7 @@ class TaskLifecycleMixin:
             0,
         )
         generated_episodes, all_batches_complete = self._framework_to_script_batch_coverage(workspace_state, total_episodes)
+        stage11_episodes, _ = self._framework_to_script_stage11_coverage(workspace_state, total_episodes)
         clean_final_text = clean_multiline_user_visible_text(final_text or "")
         is_completed = bool(clean_final_text and all_batches_complete)
 
@@ -823,9 +890,29 @@ class TaskLifecycleMixin:
             if value > latest_stage:
                 latest_stage = value
         progress_percent = 100 if is_completed else min(99, max(0, latest_stage - 7) * 18)
-        if generated_episodes > 0 and total_episodes > 0 and not is_completed:
-            progress_percent = max(progress_percent, min(99, int(generated_episodes * 100 / total_episodes)))
-        stage_label = "剧本已锁定保存" if script_locked else ("08-12 剧本生成完成" if is_completed else f"08-12 剧本生成中（已完成到阶段 {latest_stage or 8}）")
+        if not is_completed and total_episodes > 0:
+            if generated_episodes > 0:
+                progress_percent = max(
+                    progress_percent,
+                    min(99, 72 + int(generated_episodes * 27 / total_episodes)),
+                )
+            elif stage11_episodes > 0:
+                progress_percent = max(
+                    progress_percent,
+                    min(72, 54 + int(stage11_episodes * 18 / total_episodes)),
+                )
+        if script_locked:
+            stage_label = "剧本已锁定保存"
+        elif is_completed:
+            stage_label = "08-12 剧本生成完成"
+        elif generated_episodes > 0 and total_episodes > 0:
+            stage_label = f"第 12 阶段正文已完成 {generated_episodes}/{total_episodes} 集"
+        elif latest_stage >= 11:
+            stage_label = "第 11 阶段已完成，等待第 12 阶段"
+        elif stage11_episodes > 0 and total_episodes > 0:
+            stage_label = f"第 11 阶段已完成 {stage11_episodes}/{total_episodes} 集"
+        else:
+            stage_label = f"08-12 剧本生成中（已完成到阶段 {latest_stage or 8}）"
 
         snapshot = {
             "user_id": int(user_id),

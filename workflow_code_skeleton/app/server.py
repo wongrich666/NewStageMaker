@@ -57,6 +57,7 @@ from .services.stage10_resume import (
     stage10_input_fingerprint,
 )
 from .services.stage11_chunks import (
+    build_local_review_acceptance,
     compact_appearance_mapping,
     compact_conflict_plan_for_review,
     compact_enriched_episode_plan,
@@ -2853,6 +2854,23 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
             return _json_error(str(exc), status=500, fallback="文脉检测进度读取失败。")
         return _json_ok(**run)
 
+    @app.delete("/api/script-audit/runs/<run_id>")
+    @_login_required
+    def delete_script_audit_run_api(run_id: str):
+        try:
+            deleted = script_audit_batch_service.delete_run(
+                run_id,
+                user_id=_require_user_id(),
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=404)
+        except RuntimeError as exc:
+            return _json_error(str(exc), status=409)
+        except Exception as exc:
+            logger.exception("script audit run deletion failed run_id=%s", run_id)
+            return _json_error(str(exc), status=500, fallback="评分记录删除失败。")
+        return _json_ok(**deleted, message="评分记录已删除。")
+
     @app.get("/api/script-audit/runs/<run_id>/debug")
     @_login_required
     def get_script_audit_run_debug_api(run_id: str):
@@ -3723,8 +3741,25 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
     def get_framework_to_script_run_api(run_id: str):
         user_id = _require_user_id()
         record = _framework_stage_run_private(run_id)
-        if not record or int(record.get("user_id") or 0) != int(user_id):
+        if record and int(record.get("user_id") or 0) != int(user_id):
             return _json_error("运行记录不存在。", status=404)
+        if not record:
+            # 运行记录保存在进程内存中；服务重启后，旧页面仍可能继续轮询旧 run_id。
+            # 返回一个不含资产信息的终止态，让新旧前端都能解除按钮锁并从持久化批次恢复。
+            return _json_ok(
+                run={
+                    "run_id": str(run_id or ""),
+                    "user_id": int(user_id),
+                    "asset_id": "",
+                    "stage": "",
+                    "status": "failed",
+                    "current_sub_stage": "interrupted",
+                    "progress_text": "上次后台进程已结束，已恢复到最近保存进度，请继续运行。",
+                    "latest_error": "上次后台进程已结束，已恢复到最近保存进度，请继续运行。",
+                    "recoverable": True,
+                    "missing_run_record": True,
+                }
+            )
         return _json_ok(run=_framework_stage_run_public(record))
 
     @app.post("/api/framework-to-script/lock")
@@ -7368,6 +7403,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         progress_text=f"第 11 阶段审核中：第 {start_episode}-{end_episode} 集，第 {review_round} 轮",
                     )
 
+                    review_format_error = None
                     try:
                         review_vars = {
                             **review_base_vars,
@@ -7391,14 +7427,27 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
 
                     except WorkflowStageFormatError as exc:
                         logger.warning(
-                            "framework-to-script stage11 review missing fields, using defaults: "
+                            "framework-to-script stage11 review missing fields; checking the already-written plan "
+                            "with the local structural validator: "
                             "asset_id=%s missing_fields=%s error=%s",
                             asset_id,
                             list(exc.missing_fields),
                             str(exc),
                         )
-                        review_output = {}
-                        duration_ms = 0
+                        review_format_error = exc
+                        local_review_issues = _validate_stage11_causal_conflict_plan(
+                            conflict_plan,
+                            start_episode=start_episode,
+                            end_episode=end_episode,
+                        )
+                        review_output = build_local_review_acceptance(
+                            local_review_issues,
+                            reason=(
+                                "remote stage-11 review contract invalid: "
+                                f"{exc.failure_reason or str(exc)}"
+                            ),
+                        ) or {}
+                        duration_ms = int((time.monotonic() - started) * 1000)
 
                     review_output_data = review_output if isinstance(review_output, dict) else {}
                     review_conflict_plan, review_plan_unwrapped, review_plan_error = _normalize_dict_output_alias(
@@ -7413,6 +7462,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                     non_blocking_issues = _get_list_alias(review_output_data, "nonBlockingIssues",
                                                           "non_blocking_issues")
                     rewrite_brief = _first_present(review_output_data, "rewriteBrief", "rewrite_brief", default="")
+                    accepted_by_local_structure = bool(
+                        _first_present(
+                            review_output_data,
+                            "acceptedByLocalStructureFallback",
+                            "accepted_by_local_structure_fallback",
+                            default=False,
+                        )
+                    )
 
                     if review_passed is None and rewrite_required is None:
                         if review_conflict_plan and not blocking_issues:
@@ -7451,6 +7508,14 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         "non_blocking_issues": non_blocking_issues,
                         "rewriteBrief": rewrite_brief,
                         "rewrite_brief": rewrite_brief,
+                        "acceptedByLocalStructureFallback": accepted_by_local_structure,
+                        "accepted_by_local_structure_fallback": accepted_by_local_structure,
+                        "reviewMode": _first_present(
+                            review_output_data,
+                            "reviewMode",
+                            "review_mode",
+                            default="remote_review",
+                        ),
                     }
                     rewrite_triggered = _framework_review_needs_rewrite(conflict_review)
 
@@ -7464,6 +7529,10 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                             "blockingIssues_count": len(blocking_issues),
                             "rewriteBrief_length": len(str(rewrite_brief or "")),
                             "rewrite_triggered": rewrite_triggered,
+                            "accepted_by_local_structure_fallback": accepted_by_local_structure,
+                            "review_format_error": (
+                                str(review_format_error) if review_format_error is not None else ""
+                            ),
                             "ended_at": _now_iso(),
                         }
                     )

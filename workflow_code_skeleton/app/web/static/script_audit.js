@@ -20,6 +20,7 @@
   let activeRunId = "";
   let activeRunFailed = false;
   let pollTimer = null;
+  let assetOpenRevision = 0;
   const ACTIVE_RUN_KEY = "scriptAudit.activeRun.v2";
 
   const requestedAssetId = () => new URLSearchParams(window.location.search).get("audit_asset_id") || "";
@@ -552,10 +553,18 @@
       if (asset.total_score !== null && asset.total_score !== undefined) meta.append(node("span", "", `${asset.total_score} 分${asset.level ? ` · ${asset.level}` : ""}`));
       if (asset.updated_at) meta.append(node("span", "", formatAssetTime(asset.updated_at)));
       card.append(meta);
-      const button = node("button", "audit-asset-open", asset.status === "succeeded" ? "打开评分结果" : asset.status === "failed" ? "打开并继续" : "查看进度");
-      button.type = "button";
-      button.addEventListener("click", () => openAsset(asset.run_id, { recover: true }));
-      card.append(button);
+      const actions = node("div", "audit-asset-actions");
+      const openButton = node("button", "audit-asset-open", asset.status === "succeeded" ? "打开评分结果" : asset.status === "failed" ? "打开并继续" : "查看进度");
+      openButton.type = "button";
+      openButton.addEventListener("click", () => openAsset(asset.run_id, { recover: true }));
+      const deleteButton = node("button", "audit-asset-delete", "删除");
+      deleteButton.type = "button";
+      const isRunning = asset.status === "pending" || asset.status === "running";
+      deleteButton.disabled = isRunning;
+      deleteButton.title = isRunning ? "评分运行中，完成或失败后才能删除" : `删除《${text(asset.script_title, "未命名剧本")}》的评分记录`;
+      deleteButton.addEventListener("click", () => deleteAsset(asset, deleteButton));
+      actions.append(openButton, deleteButton);
+      card.append(actions);
       els.assetList.append(card);
     });
   }
@@ -573,6 +582,7 @@
   async function openAsset(runId, options = {}) {
     const normalized = String(runId || "");
     if (!normalized) return;
+    const revision = ++assetOpenRevision;
     stopPolling();
     activeRunFailed = false;
     rememberActiveRun(normalized);
@@ -581,6 +591,7 @@
     try {
       const query = options.recover ? "?recover=1" : "";
       const payload = await requestApi(`/api/script-audit/runs/${encodeURIComponent(normalized)}${query}`);
+      if (revision !== assetOpenRevision || activeRunId !== normalized) return;
       els.title.value = payload.script_title || "";
       els.text.value = payload.script_text || "";
       els.count.textContent = `${els.text.value.length} / 300000 字符`;
@@ -599,8 +610,10 @@
         updateRunProgress(payload);
         pollTimer = window.setTimeout(pollActiveRun, 400);
       }
+      if (revision !== assetOpenRevision || activeRunId !== normalized) return;
       await loadAssets();
     } catch (error) {
+      if (revision !== assetOpenRevision || activeRunId !== normalized) return;
       setRunningUi(false);
       setStatus(error && error.message ? error.message : "测评资产打开失败。", "error");
     }
@@ -624,6 +637,39 @@
     if (pollTimer) window.clearTimeout(pollTimer);
     pollTimer = null;
   };
+
+  function detachActiveAudit() {
+    assetOpenRevision += 1;
+    stopPolling();
+    activeRunFailed = false;
+    rememberActiveRun("");
+    syncAssetUrl("");
+    latestPayload = null;
+    els.result.classList.add("hidden");
+    els.loading.classList.add("hidden");
+    els.batchProgress.style.width = "0%";
+    setRunningUi(false);
+  }
+
+  async function deleteAsset(asset, button) {
+    const runId = String(asset && asset.run_id || "");
+    if (!runId) return;
+    const scriptTitle = text(asset.script_title, "未命名剧本");
+    if (!window.confirm(`确定删除《${scriptTitle}》的评分记录吗？此操作不可撤销。`)) return;
+    button.disabled = true;
+    const previousLabel = button.textContent;
+    button.textContent = "删除中…";
+    try {
+      await requestApi(`/api/script-audit/runs/${encodeURIComponent(runId)}`, { method: "DELETE" });
+      if (activeRunId === runId) detachActiveAudit();
+      setStatus(`已删除《${scriptTitle}》的评分记录。`, "success");
+      await loadAssets();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = previousLabel;
+      setStatus(error && error.message ? error.message : "评分记录删除失败。", "error");
+    }
+  }
 
   async function requestApi(path, options = {}) {
     const response = await fetch(apiUrl(path), {
@@ -651,8 +697,10 @@
   async function pollActiveRun() {
     stopPolling();
     if (!activeRunId) return;
+    const pollingRunId = activeRunId;
     try {
-      const payload = await requestApi(`/api/script-audit/runs/${encodeURIComponent(activeRunId)}?recover=1`);
+      const payload = await requestApi(`/api/script-audit/runs/${encodeURIComponent(pollingRunId)}?recover=1`);
+      if (activeRunId !== pollingRunId) return;
       if (payload.status === "succeeded") {
         activeRunFailed = false;
         renderResult(payload);
@@ -676,6 +724,7 @@
       updateRunProgress(payload);
       pollTimer = window.setTimeout(pollActiveRun, 1800);
     } catch (error) {
+      if (activeRunId !== pollingRunId) return;
       setStatus(error && error.message ? error.message : "进度读取失败，正在重试…", "error");
       pollTimer = window.setTimeout(pollActiveRun, 3000);
     }
@@ -732,25 +781,23 @@
 
   els.text.addEventListener("input", () => {
     els.count.textContent = `${els.text.value.length} / 300000 字符`;
-    if (activeRunFailed) {
-      activeRunFailed = false;
-      rememberActiveRun("");
-      setRunningUi(false);
-    }
+    if (activeRunId) detachActiveAudit();
   });
   els.file.addEventListener("change", async () => {
     const file = els.file.files && els.file.files[0];
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) { setStatus("文件超过 10MB，请改为精简后的文本。", "error"); return; }
+    detachActiveAudit();
     try {
       setStatus(`正在解析 ${file.name}…`);
       const form = new FormData();
       form.append("file", file);
       const payload = await requestApi("/api/script-audit/extract-file", { method: "POST", body: form });
       els.text.value = payload.script_text || "";
-      if (!els.title.value) els.title.value = payload.script_title || file.name.replace(/\.[^.]+$/, "");
+      els.title.value = payload.script_title || file.name.replace(/\.[^.]+$/, "");
       els.text.dispatchEvent(new Event("input"));
-      setStatus(`已导入 ${file.name}`);
+      setStatus(`已导入 ${file.name}，已切换到新剧本。`, "success");
+      await loadAssets();
     } catch (_) { setStatus("文件读取失败，请改为粘贴文本。", "error"); }
   });
   els.run.addEventListener("click", runAudit);

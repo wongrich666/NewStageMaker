@@ -149,11 +149,14 @@
       const detailMessage = detail.error_message || detail.message || "";
       const failedSubStage = detail.failed_sub_stage ? `（${detail.failed_sub_stage}）` : "";
       const debugPath = detail.debug_path ? `debug: ${detail.debug_path}` : "";
-      throw new Error(
+      const requestError = new Error(
         [data.message || data.error || "请求失败，请稍后重试。", failedSubStage, detailMessage, debugPath]
           .filter(Boolean)
           .join(" ")
       );
+      requestError.status = response.status;
+      requestError.payload = data;
+      throw requestError;
     }
     return stripRaw(data);
   }
@@ -697,6 +700,7 @@
         startLocalStageRecoveryPolling();
       }
     } else if (state.runningStage && BACKGROUND_RUN_STAGES.has(String(state.runningStage || ""))) {
+      stopRunPolling();
       clearRunningStage(state.runningStage);
     } else if (state.activeRun && LOCAL_RECOVERY_STAGES.has(String(state.activeRun.stage || ""))) {
       state.activeRun = null;
@@ -795,6 +799,10 @@
         || partial.batchCausalConflict
         || partial.batch_causal_conflict;
       if (!hasContent(conflictPlan)) return false;
+      const savedBatch = stage11BatchMap({ completeOnly: true })[String(startEpisode || "")];
+      // 后端已经完整保存的批次不可再被较旧的轮询临时态降级为 running，
+      // 否则“（生成中）”会在保存完成后被重新挂回去。
+      if (savedBatch && isStage11BatchComplete(savedBatch)) return false;
       const partialKey = [
         run.run_id,
         stage,
@@ -812,8 +820,10 @@
         batchCausalConflictPlan: conflictPlan,
         batchCausalConflictReview: partial.batchCausalConflictReview || partial.batch_causal_conflict_review,
         conflictMemory: partial.conflictMemory || partial.conflict_memory,
-        batchPipelineStatus: partial.batchPipelineStatus || partial.batch_pipeline_status,
-        completedSubStages: partial.completedSubStages || partial.completed_sub_stages,
+        // 轮询中的 write/review/rewrite/memory 都只是可预览的临时态。
+        // 明确标为 running，不能继承上一批的 complete 状态并提前放行后续阶段。
+        batchPipelineStatus: partial.batchPipelineStatus || partial.batch_pipeline_status || "running",
+        completedSubStages: partial.completedSubStages || partial.completed_sub_stages || [],
       });
       state.lastRunPartialRenderKey = partialKey;
       saveWorkspace();
@@ -891,12 +901,16 @@
         const partial = run.latest_partial_result && typeof run.latest_partial_result === "object" ? run.latest_partial_result : {};
         const latestDone = partial.latest_batch_done || "";
         const refreshKey = latestDone ? `${run.run_id}:${latestDone}` : "";
+        let savedBatchAdvanced = false;
         let assetChanged = await syncGeneratedResultsFromBackend();
         if (refreshKey && refreshKey !== state.lastRunBatchRefreshKey) {
           state.lastRunBatchRefreshKey = refreshKey;
+          savedBatchAdvanced = true;
           assetChanged = assetChanged || await syncGeneratedResultsFromBackend({ force: true });
         }
-        if (assetChanged) {
+        if (assetChanged || savedBatchAdvanced) {
+          // 即使资产内容本身没有变化，completed_batch_starts 已推进时也要立刻重绘，
+          // 让对应批次的“（生成中）”无需刷新页面即可自动消失。
           renderStagesQuietly();
         } else if (partialMerged) {
           renderStagesQuietly();
@@ -921,6 +935,24 @@
       }
       render();
     } catch (error) {
+      if (Number(error && error.status) === 404) {
+        const staleRun = state.activeRun && String(state.activeRun.run_id || "") === id
+          ? state.activeRun
+          : (state.stageRuns || []).find((run) => String((run || {}).run_id || "") === id);
+        const staleStage = String((staleRun || {}).stage || state.runningStage || "");
+        stopRunPolling();
+        state.stageRuns = (state.stageRuns || []).filter((run) => String((run || {}).run_id || "") !== id);
+        if (state.activeRun && String(state.activeRun.run_id || "") === id) state.activeRun = null;
+        if (!staleStage || String(state.runningStage || "") === staleStage) clearRunningStage(staleStage);
+        setAutoGenerateScript(false);
+        state.error = null;
+        state.importStatus = "上次后台运行已结束，已恢复到最近保存进度。";
+        await refreshAssetAfterRunUpdate().catch((refreshError) => {
+          console.warn("stale run recovery asset refresh failed", refreshError);
+        });
+        render();
+        return;
+      }
       state.error = error.message || "运行状态刷新失败";
       render();
     } finally {
@@ -1006,10 +1038,6 @@ function hasCompletedSubStages(batch, required) {
   return required.every((item) => completed.has(item));
 }
 
-function batchPipelineComplete(batch) {
-  return String((batch || {}).batchPipelineStatus || (batch || {}).batch_pipeline_status || "").toLowerCase() === "complete";
-}
-
 function stage11ReviewFromBatch(batch) {
   return batch && (
     batch.batchCausalConflictReview
@@ -1028,7 +1056,9 @@ function isStage11BatchComplete(batch) {
   const hasCore = hasContent(stage11PlanFromBatch(batch))
     && hasContent(stage11ReviewFromBatch(batch))
     && hasContent(stage11MemoryFromBatch(batch));
-  if (batchPipelineComplete(batch)) return hasCore;
+  const pipelineStatus = String(batch.batchPipelineStatus || batch.batch_pipeline_status || "").toLowerCase();
+  if (pipelineStatus) return pipelineStatus === "complete" && hasCore;
+  // 兼容尚未写入 batchPipelineStatus 的旧资产；新运行一律有明确状态。
   return hasCore;
 }
 
@@ -1107,7 +1137,9 @@ function isStage12BatchComplete(batch) {
   const hasCore = hasContent(batch.batchScriptText || batch.batch_script_text)
     && hasContent(batch.batchScriptReview || batch.batch_script_review)
     && hasContent(batch.scriptMemory || batch.script_memory);
-  if (batchPipelineComplete(batch)) return hasCore;
+  const pipelineStatus = String(batch.batchPipelineStatus || batch.batch_pipeline_status || "").toLowerCase();
+  if (pipelineStatus) return pipelineStatus === "complete" && hasCore;
+  // 兼容尚未写入 batchPipelineStatus 的旧资产；新运行一律有明确状态。
   return hasCore;
 }
 
@@ -3047,8 +3079,14 @@ function stage12Completion() {
       : [];
     const fallbackExpected = Array.isArray((fallbackProgress || {}).expected) ? fallbackProgress.expected : [];
     const fallbackDone = Array.isArray((fallbackProgress || {}).done) ? fallbackProgress.done : [];
-    const doneCount = completed.length || fallbackDone.length;
-    const expectedCount = expected.length || (completed.length + remaining.length) || fallbackExpected.length;
+    // 后台运行状态与资产批次通过两个请求分别刷新，短时间内可能相差一个批次。
+    // 取两边的最大值，避免页面已经展示新批次，状态却仍显示旧进度。
+    const doneCount = Math.max(completed.length, fallbackDone.length);
+    const expectedCount = Math.max(
+      expected.length,
+      completed.length + remaining.length,
+      fallbackExpected.length
+    );
     return {
       doneCount,
       expectedCount,
@@ -3126,11 +3164,23 @@ function stage12Completion() {
     const run = activeRunForStage(stage);
     if (!run || !isRunActive(run)) {
       if (String(state.runningStage || "") === String(stage || "")) {
-        return `<div class="wts-run-status" data-run-status-stage="${escapeHtml(stage)}" aria-live="polite"></div>`;
+        return `
+          <div class="wts-run-status" data-run-status-stage="${escapeHtml(stage)}" aria-live="polite">
+            <strong>正在连接后台运行状态…</strong>
+            <span>生成会在后台继续，恢复状态前无需重复点击。</span>
+          </div>
+        `;
       }
       return "";
     }
-    return `<div class="wts-run-status" data-run-status-stage="${escapeHtml(stage)}" aria-live="polite"></div>`;
+    const fallbackProgress = String(stage || "") === "11" ? stage11Completion() : stage12Completion();
+    const progress = runBatchProgress(run, fallbackProgress);
+    return `
+      <div class="wts-run-status" data-run-status-stage="${escapeHtml(stage)}" aria-live="polite">
+        <strong>${escapeHtml(scriptRunStatusText(run))}</strong>
+        <span>已完成 ${escapeHtml(progress.doneCount)}/${escapeHtml(progress.expectedCount || "?")} 个批次。</span>
+        </div>
+    `;
   }
 
   function renderStages() {
@@ -3154,9 +3204,11 @@ function stage12Completion() {
     const has12Complete = stage12Progress.complete;
     const stage11Run = activeRunForStage("11");
     const stage12Run = activeRunForStage("12");
+    const stage11IsRunning = state.runningStage === "11" || isRunActive(stage11Run);
+    const stage12IsRunning = state.runningStage === "12" || isRunActive(stage12Run);
     const stage11RunProgress = runBatchProgress(stage11Run, stage11Progress);
     const stage12RunProgress = runBatchProgress(stage12Run, stage12Progress);
-    const stage11Status = (state.runningStage === "11" || isRunActive(stage11Run))
+    const stage11Status = stage11IsRunning
       ? `运行中 ${stage11RunProgress.label}`
       : has11Complete
         ? "已完成"
@@ -3165,7 +3217,7 @@ function stage12Completion() {
           : has10Output
             ? "待运行"
             : "等待 10";
-    const stage12Status = (state.runningStage === "12" || isRunActive(stage12Run))
+    const stage12Status = stage12IsRunning
       ? `运行中 ${stage12RunProgress.label}`
       : has12Complete
         ? "已完成"
@@ -3186,11 +3238,15 @@ function stage12Completion() {
     const stage11ProgressHint = has11 && !has11Complete
       ? `<p class="wts-hint">已保存第 ${escapeHtml(completedStage11Ranges.join("、"))} 集；${
           nextStage11Start > 0
-            ? `下一批从第 ${escapeHtml(nextStage11Start)} 集开始，后续内容尚未生成，并非前端展示丢失。`
+            ? stage11IsRunning
+              ? `后台正从第 ${escapeHtml(nextStage11Start)} 集起连续生成剩余内容，无需再次点击。`
+              : `下一批从第 ${escapeHtml(nextStage11Start)} 集开始。`
             : "仍有批次尚未生成。"
         }</p>`
       : "";
-    const stage11ButtonText = has11Complete
+    const stage11ButtonText = stage11IsRunning
+      ? `后台生成中（${stage11RunProgress.label}）`
+      : has11Complete
       ? "重新运行 11"
       : has11 && nextStage11Start > 0
         ? `继续生成第 ${nextStage11Start}-${stage11TotalEpisodes || "末"} 集`
@@ -3203,17 +3259,25 @@ function stage12Completion() {
     const stage12ProgressHint = has12 && !has12Complete
       ? `<p class="wts-hint">已保存正文第 ${escapeHtml(completedStage12Ranges.join("、"))} 集；${
           nextStage12Start > 0
-            ? `点击一次将从第 ${escapeHtml(nextStage12Start)} 集连续生成至全文结束。`
+            ? stage12IsRunning
+              ? `后台正从第 ${escapeHtml(nextStage12Start)} 集起连续生成至全文结束，无需再次点击。`
+              : `点击一次将从第 ${escapeHtml(nextStage12Start)} 集连续生成至全文结束。`
             : "后台将继续生成剩余正文。"
         } 运行中的临时 JSON 不会提前展示。</p>`
       : "";
-    const stage12ButtonText = has12Complete
+    const stage12ButtonText = stage12IsRunning
+      ? `后台生成中（${stage12RunProgress.label}）`
+      : has12Complete
       ? "重新运行 12"
       : has12 && nextStage12Start > 0
         ? `继续生成第 ${nextStage12Start}-${stage11TotalEpisodes || "末"} 集全文`
         : `一键生成第 1-${stage11TotalEpisodes || "末"} 集全文`;
     const stage12Action = has12Complete ? "rerun-stage-12" : "run-stage-12";
-    const fullButtonText = scriptLocked ? "已锁定保存" : (has12Complete ? "重写全剧剧本" : (has11 || has12 || state.autoGenerateScript) ? "继续一键生成剧本" : "一键生成剧本");
+    const fullButtonText = scriptLocked
+      ? "已锁定保存"
+      : stage11IsRunning || stage12IsRunning
+        ? `${state.runningStage || stage11Run?.stage || stage12Run?.stage || ""} 阶段正在后台生成`
+        : (has12Complete ? "重写全剧剧本" : (has11 || has12 || state.autoGenerateScript) ? "继续一键生成剧本" : "一键生成剧本");
     return `
       <section class="wts-card" id="scriptStageArea" data-script-stage-area>
         <div class="wts-card-head">

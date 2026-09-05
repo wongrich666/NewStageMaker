@@ -44,7 +44,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .audit-assets-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .audit-assets-head h2 { margin: 0; font-size: 22px; }
 .audit-assets-head > div > p:last-child { margin: 8px 0 0; color: var(--audit-muted); font-size: 12px; line-height: 1.6; }
-.audit-assets-head button, .audit-asset-open { border: 1px solid var(--audit-line); border-radius: 12px; color: var(--audit-ink); background: rgba(255,255,255,.65); cursor: pointer; font-weight: 700; }
+.audit-assets-head button, .audit-asset-open, .audit-asset-delete { border: 1px solid var(--audit-line); border-radius: 12px; color: var(--audit-ink); background: rgba(255,255,255,.65); cursor: pointer; font-weight: 700; }
 .audit-assets-head button { padding: 9px 13px; }
 .audit-asset-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
 .audit-asset-card { min-width: 0; padding: 16px; display: grid; gap: 10px; border: 1px solid var(--audit-line); border-radius: 16px; background: rgba(255,255,255,.54); }
@@ -54,7 +54,11 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .audit-asset-status { width: fit-content; padding: 4px 8px; border-radius: 999px; background: rgba(70,119,200,.11); color: var(--audit-blue); font-size: 11px; font-weight: 700; }
 .audit-asset-status.succeeded { color: var(--audit-green); background: rgba(31,138,91,.11); }
 .audit-asset-status.failed { color: var(--audit-red); background: rgba(207,75,69,.11); }
-.audit-asset-open { width: 100%; padding: 9px 12px; }
+.audit-asset-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.audit-asset-open, .audit-asset-delete { padding: 9px 12px; }
+.audit-asset-delete { color: var(--audit-red); border-color: rgba(207,75,69,.28); background: rgba(207,75,69,.06); }
+.audit-asset-delete:hover:not(:disabled) { border-color: rgba(207,75,69,.65); background: rgba(207,75,69,.11); }
+.audit-asset-delete:disabled { cursor: not-allowed; opacity: .42; }
 .audit-asset-empty { grid-column: 1 / -1; padding: 18px; border-radius: 14px; color: var(--audit-muted); background: rgba(32,35,31,.035); text-align: center; }
 .audit-input-card { padding: clamp(20px, 3vw, 34px); }
 .audit-field-row { display: flex; align-items: flex-end; gap: 12px; }

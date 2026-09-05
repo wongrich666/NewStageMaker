@@ -3475,7 +3475,7 @@
 
   function renderBeatTimeline(items, options) {
     if (!Array.isArray(items) || !items.length) {
-      return `<div class="fp-empty">尚未生成 04 阶段时间轴。确认 03 后，才能生成 15 条固定顺序的 beat_checkpoint_timeline。</div>`;
+      return `<div class="fp-empty">尚未生成 04 阶段时间轴。。</div>`;
     }
     const editable = Boolean(options && options.editable);
     const nodes = items.map((item) => {

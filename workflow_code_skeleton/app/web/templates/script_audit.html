@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
   <title>文脉检测检测 · IDEA TO SCRIPT</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='script_audit.css') }}?v=20260817-script-audit-chart-v3" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='script_audit.css') }}?v=20260902-script-audit-assets-v4" />
   <link rel="stylesheet" href="{{ url_for('static', filename='editorial_theme.css') }}?v=20260818-scientific-editorial-v8" />
 </head>
 <body class="audit-page">
@@ -42,7 +42,7 @@
           <div>
             <p class="audit-kicker">MY AUDIT ASSETS</p>
             <h2 id="auditAssetsTitle">我的测评剧本</h2>
-            <p>同一份剧本只保存一项资产；运行中可刷新恢复，已完成资产可直接查看报告。</p>
+            <p>同一份剧本只保存一项资产；运行中可刷新恢复，已完成资产可直接查看或删除。</p>
           </div>
           <button id="auditAssetsRefresh" type="button">刷新资产</button>
         </div>
@@ -136,6 +136,6 @@
     window.SCRIPT_AUDIT_CONFIG = { authToken: {{ current_auth_token|tojson }} };
   </script>
   <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260818-editorial-motion-v1"></script>
-  <script src="{{ url_for('static', filename='script_audit.js') }}?v=20260817-script-audit-chart-v3" defer></script>
+  <script src="{{ url_for('static', filename='script_audit.js') }}?v=20260902-script-audit-assets-v4" defer></script>
 </body>
 </html>

@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from workflow_code_skeleton.app.services.stage11_chunks import (
+    build_local_review_acceptance,
     compact_appearance_mapping,
     compact_conflict_plan_for_review,
     compact_enriched_episode_plan,
@@ -18,6 +19,18 @@ from workflow_code_skeleton.app.services.stage11_chunks import (
 
 
 class Stage11ChunkTests(unittest.TestCase):
+    def test_local_review_fallback_accepts_only_structurally_valid_plan(self) -> None:
+        accepted = build_local_review_acceptance([], reason="review contract invalid")
+        self.assertIsNotNone(accepted)
+        self.assertTrue(accepted["reviewPassed"])
+        self.assertFalse(accepted["rewriteRequired"])
+        self.assertTrue(accepted["acceptedByLocalStructureFallback"])
+        self.assertEqual("local_structural_fallback", accepted["reviewMode"])
+
+        self.assertIsNone(
+            build_local_review_acceptance(["episodes missing"], reason="review contract invalid")
+        )
+
     def test_split_and_merge_single_episode_plans(self) -> None:
         source = [{"episode": number, "title": f"第{number}集"} for number in range(1, 6)]
         self.assertEqual([1, 1, 1, 1, 1], [len(chunk) for chunk in split_episode_plan(source, 1)])

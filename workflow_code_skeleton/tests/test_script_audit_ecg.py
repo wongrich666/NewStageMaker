@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -270,7 +271,7 @@ class ScriptAuditEcgTests(unittest.TestCase):
         html = response.get_data(as_text=True)
         self.assertIn("script_audit.js", html)
         self.assertIn("20260818-scientific-editorial-v8", html)
-        self.assertIn("20260817-script-audit-chart-v3", html)
+        self.assertIn("20260902-script-audit-assets-v4", html)
         self.assertIn("auditAssetList", html)
 
     @patch("workflow_code_skeleton.app.server.auth_store.get_user_by_token")
@@ -336,6 +337,61 @@ class ScriptAuditEcgTests(unittest.TestCase):
         self.assertTrue(data["success"])
         self.assertEqual("测试剧本", data["assets"][0]["script_title"])
         list_assets.assert_called_once_with(user_id=7)
+
+    @patch("workflow_code_skeleton.app.server.auth_store.get_user_by_token")
+    @patch("workflow_code_skeleton.app.server.script_audit_batch_service.delete_run")
+    def test_authenticated_asset_delete_removes_owned_audit(self, delete_run, get_user_by_token) -> None:
+        get_user_by_token.return_value = SimpleNamespace(id=7, username="tester")
+        delete_run.return_value = {
+            "run_id": "a" * 32, "script_title": "测试剧本", "deleted": True,
+        }
+        app = create_app()
+        app.config.update(TESTING=True)
+
+        response = app.test_client().delete(
+            f"/api/script-audit/runs/{'a' * 32}",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        data = response.get_json()
+        self.assertTrue(data["success"])
+        self.assertTrue(data["deleted"])
+        delete_run.assert_called_once_with("a" * 32, user_id=7)
+
+    @patch("workflow_code_skeleton.app.server.auth_store.get_user_by_token")
+    @patch("workflow_code_skeleton.app.server.script_audit_batch_service.delete_run")
+    def test_running_asset_delete_returns_conflict(self, delete_run, get_user_by_token) -> None:
+        get_user_by_token.return_value = SimpleNamespace(id=7, username="tester")
+        delete_run.side_effect = RuntimeError("评分仍在运行，完成或失败后才能删除该记录。")
+        app = create_app()
+        app.config.update(TESTING=True)
+
+        response = app.test_client().delete(
+            f"/api/script-audit/runs/{'a' * 32}",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(409, response.status_code)
+        self.assertIn("仍在运行", response.get_json()["message"])
+
+    def test_frontend_upload_detaches_old_asset_and_always_uses_new_filename(self) -> None:
+        javascript = (
+            Path(__file__).parents[1] / "app" / "web" / "static" / "script_audit.js"
+        ).read_text(encoding="utf-8")
+
+        detach_body = javascript.split("function detachActiveAudit() {", 1)[1].split("\n  }", 1)[0]
+        upload_body = javascript.split('els.file.addEventListener("change", async () => {', 1)[1]
+        self.assertIn("assetOpenRevision += 1", detach_body)
+        self.assertIn("stopPolling()", detach_body)
+        self.assertNotIn("detachActiveAudit()", detach_body)
+        self.assertIn("detachActiveAudit()", upload_body)
+        self.assertIn(
+            'els.title.value = payload.script_title || file.name.replace(/\\.[^.]+$/, "")',
+            upload_body,
+        )
+        self.assertNotIn("if (!els.title.value)", upload_body)
+        self.assertIn('method: "DELETE"', javascript)
 
 
 if __name__ == "__main__":

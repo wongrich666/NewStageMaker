@@ -12,3 +12,8 @@ if __name__ == "__main__":
 cd "D:\MINE\grade_3_spring\进步\火山杯新版\idea_to_scripts"
 powershell -ExecutionPolicy Bypass -File ".\scripts\run_windows.ps1"
 """
+
+"""
+启动画图的语句
+powershell -ExecutionPolicy Bypass -File ".\scripts\run_architecture_graph.ps1"
+"""
