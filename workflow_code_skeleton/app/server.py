@@ -5101,7 +5101,7 @@ def create_app(*, workflow_spec_path: str | None = None) -> Flask:
                         framework_asset_id=asset_id,
                         appearanceMapping=restored_mapping,
                         fallback_used=True,
-                        warning="09 本次远端输出被截断，已保留并恢复上一次有效人物映射。",
+                        warning="09 本次工作流输出被截断，已保留并恢复上一次有效人物映射。",
                     )
                 return _json_error(
                     str(exc),

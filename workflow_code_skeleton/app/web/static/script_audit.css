@@ -201,8 +201,6 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .audit-boundary-fact p, .audit-boundary-fix p { margin: 4px 0 0; }
 .audit-boundary-breaks ul { margin: 6px 0 0; padding-left: 18px; color: var(--audit-muted); font-size: 12px; line-height: 1.65; }
 .audit-boundary-fix { padding: 10px 12px; border-radius: 10px; background: rgba(238,139,68,.08); }
-.audit-warnings { padding: 14px 18px; border-radius: 13px; color: #805124; background: #fff0d9; font-size: 12px; line-height: 1.6; }
-
 @media (max-width: 1040px) {
   .audit-shell { grid-template-columns: 1fr; }
   .audit-sidebar { position: relative; width: 100%; height: auto; padding: 16px 22px; flex-direction: row; align-items: center; gap: 18px; }

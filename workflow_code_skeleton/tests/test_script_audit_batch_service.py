@@ -10,8 +10,12 @@ from workflow_code_skeleton.app.services.script_audit_batch_service import (
     BATCH_SCHEMA_VERSION,
     WORKFLOW_MEMORY_MAX_CHARS,
     ScriptAuditBatchService,
+    build_audit_error_collection,
+    build_local_summary_fallback,
+    classify_audit_failure,
     compact_audit_memory,
     compact_workflow_audit_memory,
+    inspect_batch_response,
     merge_audit_batches,
     parse_script_episodes,
     pending_episode_batches,
@@ -27,6 +31,11 @@ DIMENSIONS = (
     ("character_dialogue_filming", "人物对白与可拍性", 20, 16),
     ("market_compliance", "市场适配与平台合规", 15, 12),
 )
+
+
+class AliveThread:
+    def is_alive(self) -> bool:
+        return True
 
 
 def episode_review(number: int) -> dict:
@@ -191,6 +200,26 @@ class FlakySummaryClient(FakeClient):
         return {"Output": {"audit_batch": json.dumps(batch_payload(start, end, total), ensure_ascii=False)}}
 
 
+class FlakyTruncatedClient(FakeClient):
+    def __init__(self, failures: int = 2) -> None:
+        super().__init__()
+        self.failures = failures
+
+    def run_raw(self, stage_name: str, variables: dict) -> dict:
+        self.calls.append(dict(variables))
+        if len(self.calls) <= self.failures:
+            return {
+                "audit_batch": (
+                    '{"schema_version":"script_audit_batch_v1",'
+                    '"episode_reviews":[{"episode_no":1}'
+                )
+            }
+        start = int(variables["batch_start_episode"])
+        end = int(variables["batch_end_episode"])
+        total = int(variables["total_episodes"])
+        return {"Output": {"audit_batch": json.dumps(batch_payload(start, end, total), ensure_ascii=False)}}
+
+
 class ScriptAuditBatchServiceTests(unittest.TestCase):
     def script(self, count: int) -> str:
         return "《测试》\n\n四、剧本正文\n" + "\n\n".join(
@@ -270,6 +299,7 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
             started = service.start_run(
                 user_id=7, script_title="运行中", script_text=self.script(1), launch=False,
             )
+            service._threads[started["run_id"]] = AliveThread()
 
             with self.assertRaisesRegex(ValueError, "不存在"):
                 service.delete_run(started["run_id"], user_id=8)
@@ -277,6 +307,74 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
                 service.delete_run(started["run_id"], user_id=7)
 
             self.assertTrue(service._path(started["run_id"]).exists())
+
+    def test_interrupted_running_record_becomes_resumable_after_process_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            first_process = ScriptAuditBatchService(Path(directory), client=FakeClient())
+            started = first_process.start_run(
+                user_id=7, script_title="被中断", script_text=self.script(6), launch=False,
+            )
+            private = first_process._read(started["run_id"])
+            private.update(
+                status="running",
+                current_batch_start=4,
+                current_batch_end=6,
+                completed_episode_numbers=[1, 2, 3],
+                runner_pid=0,
+            )
+            first_process._write(private)
+
+            restarted_process = ScriptAuditBatchService(Path(directory), client=FakeClient())
+            assets = restarted_process.list_assets(user_id=7)
+            self.assertEqual("failed", assets[0]["status"])
+            with patch.object(restarted_process, "_launch") as launch:
+                recovered = restarted_process.get_run(
+                    started["run_id"], user_id=7, relaunch_stale=True,
+                )
+
+            self.assertEqual("failed", recovered["status"])
+            self.assertIn("进程", recovered["error"])
+            self.assertIn("第1-3集结果已保留", recovered["error"])
+            launch.assert_not_called()
+            debug = restarted_process.get_debug(started["run_id"], user_id=7)
+            self.assertEqual("run_interrupted_detected", debug["events"][-1]["event"])
+
+    def test_interrupted_running_record_can_be_deleted_after_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            first_process = ScriptAuditBatchService(Path(directory), client=FakeClient())
+            started = first_process.start_run(
+                user_id=7, script_title="可删除孤儿任务", script_text=self.script(3), launch=False,
+            )
+            private = first_process._read(started["run_id"])
+            private.update(status="running", current_batch_start=1, current_batch_end=3, runner_pid=0)
+            first_process._write(private)
+
+            restarted_process = ScriptAuditBatchService(Path(directory), client=FakeClient())
+            deleted = restarted_process.delete_run(started["run_id"], user_id=7)
+
+            self.assertTrue(deleted["deleted"])
+            self.assertFalse(restarted_process._path(started["run_id"]).exists())
+
+    def test_same_script_explicitly_restarts_interrupted_record(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            first_process = ScriptAuditBatchService(Path(directory), client=FakeClient())
+            started = first_process.start_run(
+                user_id=7, script_title="重新提交", script_text=self.script(3), launch=False,
+            )
+            private = first_process._read(started["run_id"])
+            private.update(status="running", current_batch_start=1, current_batch_end=3, runner_pid=0)
+            first_process._write(private)
+
+            restarted_process = ScriptAuditBatchService(Path(directory), client=FakeClient())
+            with patch.object(restarted_process, "_launch") as launch:
+                resumed = restarted_process.start_run(
+                    user_id=7, script_title="重新提交", script_text=self.script(3), launch=True,
+                )
+
+            self.assertEqual(started["run_id"], resumed["run_id"])
+            self.assertEqual("pending", resumed["status"])
+            self.assertEqual("resumed_failed_run", resumed["reuse_reason"])
+            launch.assert_called_once_with(started["run_id"])
 
     def test_same_script_is_not_deduplicated_across_users(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -337,7 +435,7 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "不完整批次摘要.*episode_reviews.*本地传入 48.*远端返回 5.*Output.audit_batch",
+            "不完整批次摘要.*episode_reviews.*本地传入 48.*远端返回 5.*AppKey.*发布",
         ):
             validate_batch_output(raw, [1, 2, 3, 4, 5], 48)
 
@@ -347,6 +445,51 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "JSON 在输出中途被截断.*不是前端解析丢失"):
             validate_batch_output(raw, [1], 48)
 
+    def test_response_diagnostics_collect_shapes_without_model_text(self) -> None:
+        raw = {"reply": {"audit_batch": {
+            "batch_start_episode": 1,
+            "batch_end_episode": 3,
+            "total_episodes": 60,
+            "reviewed_episode_numbers": [1, 2, 3],
+            "is_final_batch": False,
+            "batch_core_judgement": "不应进入结构诊断",
+        }}}
+
+        diagnostics = inspect_batch_response(raw)
+
+        self.assertEqual(0, diagnostics["complete_candidate_count"])
+        self.assertGreaterEqual(diagnostics["incomplete_summary_candidate_count"], 1)
+        self.assertEqual("incomplete_batch_summary", diagnostics["candidate_shapes"][0]["kind"])
+        self.assertNotIn("不应进入结构诊断", json.dumps(diagnostics, ensure_ascii=False))
+
+    def test_failure_classifier_retries_summary_once_but_never_splits_it(self) -> None:
+        diagnosis = classify_audit_failure(
+            "心电图远端结束节点返回了不完整批次摘要，缺少字段：episode_reviews。"
+        )
+
+        self.assertEqual("end_node_summary", diagnosis["category"])
+        self.assertTrue(diagnosis["retry_current_batch"])
+        self.assertFalse(diagnosis["smaller_batch_may_help"])
+
+    def test_error_collection_backfills_category_for_legacy_failure_events(self) -> None:
+        collection = build_audit_error_collection([{
+            "index": 7,
+            "timestamp": "2026-09-05T21:01:29+08:00",
+            "event": "workflow_attempt_failed",
+            "details": {
+                "batch_start_episode": 1,
+                "batch_end_episode": 3,
+                "attempt": 1,
+                "exception_type": "ValueError",
+                "reason": "心电图远端结束节点返回了不完整批次摘要，缺少字段：episode_reviews。",
+                "client_debug": {"request_id": "request-001"},
+            },
+        }])
+
+        self.assertEqual(1, collection["total_failures"])
+        self.assertEqual("end_node_summary", collection["primary_cause"]["category"])
+        self.assertEqual("request-001", collection["latest_failure"]["request_id"])
+
     def test_batch_contract_repairs_total_episode_count_replaced_by_batch_size(self) -> None:
         value = batch_payload(1, 5, 5)
 
@@ -354,9 +497,9 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
 
         self.assertEqual(48, parsed["batch_meta"]["total_episodes"])
         self.assertFalse(parsed["batch_meta"]["is_final_batch"])
-        self.assertTrue(any("自动校正为 48" in warning for warning in warnings))
+        self.assertTrue(any("total_episodes" in warning and "本地已按输入剧本校正" in warning for warning in warnings))
 
-    def test_batch_contract_rejects_missing_emotion_and_incorrect_score_sum(self) -> None:
+    def test_batch_contract_rejects_missing_emotion_and_repairs_score_sum(self) -> None:
         missing_emotion = batch_payload(1, 1, 1)
         missing_emotion["episode_reviews"][0]["emotional_review"] = {}
         with self.assertRaisesRegex(ValueError, "emotional_review"):
@@ -364,8 +507,47 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
 
         incorrect_sum = batch_payload(1, 1, 1)
         incorrect_sum["episode_reviews"][0]["episode_score"] = 99
-        with self.assertRaisesRegex(ValueError, "五维合计"):
-            validate_batch_output(incorrect_sum, [1])
+        parsed, warnings = validate_batch_output(incorrect_sum, [1])
+        self.assertEqual(78, parsed["episode_reviews"][0]["episode_score"])
+        self.assertTrue(any("本地已按五维得分重算" in warning for warning in warnings))
+
+    def test_compact_complete_reviews_get_deterministic_scaffold_repairs(self) -> None:
+        value = batch_payload(1, 2, 6)
+        value.pop("schema_version")
+        value.pop("boundary_review")
+        value.pop("next_audit_memory")
+        for key in (
+            "segments", "batch_key_issues", "batch_rewrite_plan",
+            "batch_satisfying_points", "batch_risk_scan",
+        ):
+            value.pop(key)
+        value["batch_meta"] = {"reviewed_episode_numbers": [99]}
+        first = value["episode_reviews"][0]
+        first["dimension_scores"] = {
+            item["dimension_key"]: {"score": item["score"]}
+            for item in reversed(first["dimension_scores"])
+        }
+        first.pop("episode_score")
+        first.pop("level")
+
+        previous = {"main_genre": "都市逆袭", "unresolved_plot_threads": ["旧线索"]}
+        parsed, warnings = validate_batch_output(
+            value, [1, 2], 6, previous_memory=previous,
+        )
+
+        self.assertEqual(BATCH_SCHEMA_VERSION, parsed["schema_version"])
+        self.assertEqual([1, 2], parsed["batch_meta"]["reviewed_episode_numbers"])
+        self.assertEqual(6, parsed["batch_meta"]["total_episodes"])
+        self.assertEqual(0, parsed["boundary_review"]["previous_episode_no"])
+        self.assertEqual(2, parsed["next_audit_memory"]["reviewed_through_episode"])
+        self.assertEqual(["旧线索"], parsed["next_audit_memory"]["unresolved_plot_threads"])
+        self.assertEqual(78, parsed["episode_reviews"][0]["episode_score"])
+        self.assertEqual("B", parsed["episode_reviews"][0]["level"])
+        self.assertEqual(
+            [item[0] for item in DIMENSIONS],
+            [item["dimension_key"] for item in parsed["episode_reviews"][0]["dimension_scores"]],
+        )
+        self.assertGreaterEqual(len(warnings), 5)
 
     def test_legacy_memory_gets_a_handoff_snapshot_for_the_next_episode(self) -> None:
         value = batch_payload(1, 1, 2)
@@ -492,8 +674,8 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
         self.assertNotIn("本集有效剧本内容", json.dumps(debug, ensure_ascii=False))
 
     @patch("workflow_code_skeleton.app.services.script_audit_batch_service.time.sleep", return_value=None)
-    def test_incomplete_three_episode_summary_adaptively_splits_and_preserves_progress(self, _sleep) -> None:
-        client = FlakySummaryClient(failures=2)
+    def test_truncated_output_uses_local_fallback_without_retries_or_splits(self, _sleep) -> None:
+        client = FlakyTruncatedClient(failures=2)
         with tempfile.TemporaryDirectory() as directory:
             service = ScriptAuditBatchService(Path(directory), client=client)
             started = service.start_run(user_id=7, script_title="测试", script_text=self.script(5), launch=False)
@@ -503,11 +685,85 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
 
         self.assertEqual("succeeded", result["status"])
         self.assertEqual([1, 2, 3, 4, 5], result["completed_episode_numbers"])
-        self.assertEqual(5, len(client.calls))
-        self.assertEqual(1, len([event for event in debug["events"] if event["event"] == "batch_retry_scheduled"]))
+        self.assertEqual(2, len(client.calls))
+        self.assertEqual(0, len([event for event in debug["events"] if event["event"] == "batch_retry_scheduled"]))
         splits = [event for event in debug["events"] if event["event"] == "batch_adaptive_split"]
-        self.assertEqual(1, len(splits))
-        self.assertEqual([[1, 2], [3, 3]], splits[0]["details"]["fallback_ranges"])
+        self.assertEqual([], splits)
+        fallbacks = [event for event in debug["events"] if event["event"] == "local_truncated_fallback_succeeded"]
+        self.assertEqual(2, len(fallbacks))
+
+    @patch("workflow_code_skeleton.app.services.script_audit_batch_service.time.sleep", return_value=None)
+    def test_incomplete_summary_retries_once_without_pointless_smaller_batches(self, _sleep) -> None:
+        client = FlakySummaryClient(failures=99)
+        with tempfile.TemporaryDirectory() as directory:
+            service = ScriptAuditBatchService(Path(directory), client=client)
+            started = service.start_run(user_id=7, script_title="测试", script_text=self.script(5), launch=False)
+            service._run(started["run_id"])
+            result = service.get_run(started["run_id"], user_id=7)
+            debug = service.get_debug(started["run_id"], user_id=7)
+
+        self.assertEqual("succeeded", result["status"])
+        self.assertEqual([1, 2, 3, 4, 5], result["completed_episode_numbers"])
+        self.assertEqual(2, len(client.calls))
+        self.assertEqual(0, len([event for event in debug["events"] if event["event"] == "batch_retry_scheduled"]))
+        skipped_retries = [event for event in debug["events"] if event["event"] == "batch_retry_skipped"]
+        self.assertEqual([], skipped_retries)
+        self.assertEqual([], [event for event in debug["events"] if event["event"] == "batch_adaptive_split"])
+        skipped = [event for event in debug["events"] if event["event"] == "batch_adaptive_split_skipped"]
+        self.assertEqual([], skipped)
+        fallbacks = [event for event in debug["events"] if event["event"] == "local_summary_fallback_succeeded"]
+        self.assertEqual(2, len(fallbacks))
+        collection = debug["error_collection"]
+        self.assertEqual(2, collection["total_failures"])
+        self.assertEqual("end_node_summary", collection["primary_cause"]["category"])
+        self.assertTrue(collection["primary_cause"]["retry_current_batch"])
+        self.assertEqual({"3": 1, "2": 1}, collection["batch_size_counts"])
+        self.assertEqual(2, result["error_summary"]["total_failures"])
+        self.assertEqual(0, result["current_attempt"])
+        self.assertEqual("", result["error"])
+        self.assertTrue(any("本地规则逐集评分" in warning for warning in result["warnings"]))
+
+    @patch("workflow_code_skeleton.app.services.script_audit_batch_service.time.sleep", return_value=None)
+    def test_incomplete_summary_format_retry_can_recover_without_splitting(self, _sleep) -> None:
+        client = FlakySummaryClient(failures=1)
+        with tempfile.TemporaryDirectory() as directory:
+            service = ScriptAuditBatchService(Path(directory), client=client)
+            started = service.start_run(user_id=7, script_title="测试", script_text=self.script(3), launch=False)
+            service._run(started["run_id"])
+            result = service.get_run(started["run_id"], user_id=7)
+            debug = service.get_debug(started["run_id"], user_id=7)
+
+        self.assertEqual("succeeded", result["status"])
+        self.assertEqual(1, len(client.calls))
+        self.assertIn("本地规则兜底", result["audit"]["episode_reviews"][0]["episode_scope"])
+        self.assertEqual([], [event for event in debug["events"] if event["event"] == "batch_adaptive_split"])
+
+    def test_local_summary_fallback_is_complete_and_uses_real_episode_text(self) -> None:
+        episodes = parse_script_episodes(
+            "第1集：危机\n场景：夜\n沈砚舟：住手！门外突然响起追兵脚步。\n"
+            "他反击并发现密信。\n第2集：承接\n追兵闯门，沈砚舟夺回密信。\n众人震惊。"
+        )
+        raw = {"reply": {"audit_batch": {
+            "batch_start_episode": 1,
+            "batch_end_episode": 2,
+            "total_episodes": 2,
+            "reviewed_episode_numbers": [1, 2],
+            "is_final_batch": True,
+            "batch_core_judgement": "远端批次判断保留。",
+        }}}
+
+        fallback = build_local_summary_fallback(raw, episodes, [1, 2], 2)
+        parsed, warnings = validate_batch_output(fallback, [1, 2], 2)
+
+        self.assertEqual([], warnings)
+        self.assertEqual("remote_incomplete_plus_local_rule_fallback", parsed["analysis_source"])
+        self.assertEqual("远端批次判断保留。", parsed["batch_core_judgement"])
+        self.assertEqual([1, 2], [item["episode_no"] for item in parsed["episode_reviews"]])
+        self.assertTrue(any(
+            "追兵" in point["original_text_excerpt"]
+            for point in parsed["episode_reviews"][0]["ecg_points"]
+        ))
+        self.assertEqual(2, parsed["next_audit_memory"]["reviewed_through_episode"])
 
     def test_resume_of_legacy_five_episode_batch_continues_from_first_missing_episode(self) -> None:
         client = FakeClient()
@@ -553,10 +809,13 @@ class ScriptAuditBatchServiceTests(unittest.TestCase):
         self.assertEqual("failed", result["status"])
         self.assertTrue(result["debug_file"].endswith(".debug.json"))
         failures = [item for item in debug["events"] if item["event"] == "workflow_attempt_failed"]
-        self.assertEqual(2, len(failures))
+        self.assertEqual(1, len(failures))
         self.assertEqual(400, failures[-1]["details"]["client_debug"]["http_status"])
         self.assertIn("cannot unmarshal number", failures[-1]["details"]["client_debug"]["response_preview"])
         self.assertIn("Traceback", failures[-1]["details"]["traceback"])
+        skipped = [item for item in debug["events"] if item["event"] == "batch_retry_skipped"]
+        self.assertEqual(1, len(skipped))
+        self.assertEqual("input_contract", skipped[0]["details"]["category"])
         self.assertEqual("run_failed", debug["events"][-1]["event"])
 
 

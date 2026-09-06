@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" fill="none">
+  <defs>
+    <pattern id="micro-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" stroke="#111" stroke-opacity=".11" stroke-width=".55"/>
+    </pattern>
+    <pattern id="major-grid" width="160" height="160" patternUnits="userSpaceOnUse">
+      <path d="M160 0H0V160" stroke="#111" stroke-opacity=".15" stroke-width=".7"/>
+    </pattern>
+    <pattern id="node-field" width="54" height="54" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.1" fill="#111" fill-opacity=".24"/>
+    </pattern>
+    <clipPath id="planet-clip">
+      <circle cx="1320" cy="214" r="142"/>
+    </clipPath>
+    <style>
+      .trajectory { stroke-dasharray: 5 11; animation: trajectory 36s linear infinite; }
+      .scan-line { stroke-dasharray: 560; animation: trace 18s ease-in-out infinite alternate; }
+      .node-a { animation: pulse 5.4s ease-in-out infinite; }
+      .node-b { animation: pulse 7.1s ease-in-out 1.4s infinite; }
+      @keyframes trajectory { to { stroke-dashoffset: -320; } }
+      @keyframes trace { 0%, 12% { stroke-dashoffset: 560; } 72%, 100% { stroke-dashoffset: 0; } }
+      @keyframes pulse { 0%, 100% { opacity: .22; } 48% { opacity: .72; } }
+      @media (prefers-reduced-motion: reduce) {
+        .trajectory, .scan-line, .node-a, .node-b { animation: none; }
+      }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#micro-grid)"/>
+  <rect width="1600" height="1000" fill="url(#major-grid)"/>
+  <rect x="870" y="510" width="660" height="390" fill="url(#node-field)" opacity=".32"/>
+
+  <g stroke="#111" stroke-width=".75" opacity=".28">
+    <path d="M0 178H1600M0 742H1600M254 0V1000M1088 0V1000"/>
+    <path d="M0 174H1600M250 0V1000" stroke-dasharray="2 8"/>
+    <path d="M1078 0V1000M0 750H1600" stroke-dasharray="12 8 2 8"/>
+  </g>
+
+  <g transform="translate(252 744)" stroke="#111" fill="none">
+    <circle r="104" stroke-opacity=".26" stroke-width=".8"/>
+    <circle r="72" stroke-opacity=".20" stroke-width=".65" stroke-dasharray="2 5"/>
+    <circle r="26" stroke-opacity=".34" stroke-width=".8"/>
+    <ellipse rx="188" ry="68" transform="rotate(-18)" stroke-opacity=".30" stroke-width=".8"/>
+    <ellipse rx="232" ry="116" transform="rotate(28)" stroke-opacity=".20" stroke-width=".7"/>
+    <path d="M-132 0H132M0-132V132" stroke-opacity=".34" stroke-width=".65"/>
+    <circle cx="164" cy="-57" r="4" fill="#111" fill-opacity=".58" stroke="none" class="node-a"/>
+    <circle cx="-92" cy="-78" r="2.5" fill="#111" fill-opacity=".48" stroke="none"/>
+    <circle cx="4" cy="2" r="5" fill="#111" fill-opacity=".72" stroke="none"/>
+  </g>
+
+  <g clip-path="url(#planet-clip)">
+    <circle cx="1320" cy="214" r="142" fill="#111" fill-opacity=".025"/>
+    <path d="M1174 214H1466M1320 68V360" stroke="#111" stroke-opacity=".24" stroke-width=".7"/>
+    <ellipse cx="1320" cy="214" rx="142" ry="48" stroke="#111" stroke-opacity=".28" stroke-width=".75"/>
+    <ellipse cx="1320" cy="214" rx="142" ry="92" stroke="#111" stroke-opacity=".18" stroke-width=".65"/>
+    <ellipse cx="1320" cy="214" rx="58" ry="142" stroke="#111" stroke-opacity=".25" stroke-width=".7"/>
+    <ellipse cx="1320" cy="214" rx="102" ry="142" stroke="#111" stroke-opacity=".17" stroke-width=".6"/>
+    <g stroke="#111" stroke-opacity=".29" stroke-width=".7" class="scan-line">
+      <path d="M1200 153c26-24 41-12 58-31 18-20 34-8 45 11 17 29 46 22 66 3 24-22 47-4 61 19"/>
+      <path d="M1188 233c35-15 49 7 75-8 27-16 35-3 54 13 23 19 54 12 75-4 23-17 43-2 58 12"/>
+      <path d="M1210 288c29-19 42-2 65-15 31-17 53 19 81 4 25-14 43 2 62 17"/>
+      <path d="M1233 104c19 15 35 5 52 17 20 14 42-5 64 10 17 12 36 7 52 0"/>
+    </g>
+  </g>
+  <circle cx="1320" cy="214" r="142" stroke="#111" stroke-opacity=".36" stroke-width=".8"/>
+  <circle cx="1320" cy="214" r="158" stroke="#111" stroke-opacity=".18" stroke-width=".65" stroke-dasharray="3 7"/>
+  <ellipse cx="1320" cy="214" rx="276" ry="96" transform="rotate(-12 1320 214)" stroke="#111" stroke-opacity=".24" stroke-width=".8"/>
+  <circle cx="1054" cy="240" r="3.8" fill="#111" fill-opacity=".58" class="node-b"/>
+
+  <path class="trajectory" d="M72 368C340 228 540 440 746 328S1124 398 1528 116" stroke="#111" stroke-opacity=".34" stroke-width=".9"/>
+  <g fill="#111" fill-opacity=".55">
+    <circle cx="205" cy="321" r="2.6"/>
+    <circle cx="528" cy="384" r="3.6" class="node-a"/>
+    <circle cx="856" cy="313" r="2.4"/>
+    <circle cx="1191" cy="305" r="4" class="node-b"/>
+  </g>
+
+  <g stroke="#111" stroke-opacity=".34" stroke-width=".75">
+    <path d="M67 164h34m-17-17v34M1068 732h42m-21-21v42M1482 706h28m-14-14v28"/>
+    <circle cx="84" cy="164" r="9" fill="none"/>
+    <circle cx="1089" cy="732" r="12" fill="none"/>
+    <circle cx="1496" cy="706" r="7" fill="none"/>
+  </g>
+
+  <g fill="#111" fill-opacity=".42" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="9" letter-spacing="1.4">
+    <text x="40" y="42">SYSTEM / CELESTIAL ARCHIVE 01</text>
+    <text x="274" y="728">ORBITAL REFERENCE / N 31.2304</text>
+    <text x="1098" y="718">NODE 07 / WORLD DATA</text>
+    <text x="1190" y="52">SECTOR 04 / LONG 121.4737</text>
+    <text x="1290" y="398">PLANETARY SCAN / 0142</text>
+    <text x="132" y="938">ARCHITECTURAL GRID / SCALE 1:160</text>
+    <text x="1260" y="918">AI STORY RESEARCH LAB</text>
+  </g>
+
+  <g fill="#111" fill-opacity=".31">
+    <circle cx="42" cy="542" r="1.4"/><circle cx="78" cy="561" r="1.1"/><circle cx="115" cy="529" r="1.6"/>
+    <circle cx="612" cy="82" r="1.4"/><circle cx="674" cy="118" r="1.1"/><circle cx="716" cy="74" r="1.8"/>
+    <circle cx="928" cy="648" r="1.3"/><circle cx="970" cy="684" r="1.8"/><circle cx="1036" cy="626" r="1.1"/>
+    <circle cx="1514" cy="438" r="1.7"/><circle cx="1462" cy="466" r="1.2"/><circle cx="1540" cy="494" r="1.4"/>
+  </g>
+</svg>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,15 @@ EXPECTED_END_FIELDS = {
     "export-12_02剧本正文审核": "scriptreview",
     "export-12_03剧本正文修订": "script",
     "export-12_04剧本正文记忆": "memory",
+    "export-智能剧本评分工作流": "audit_batch",
 }
+
+SCRIPT_AUDIT_PROMPT_DOC = (
+    Path(__file__).resolve().parents[1]
+    / "workflow_code_skeleton"
+    / "docs"
+    / "TENCENT_SCRIPT_AUDIT_WORKFLOW_PROMPT.md"
+)
 
 CONFLICT_REVIEW_USER_PROMPT = (
     "执行阶段：开头冲突钩子审核。读取当前批次冲突计划及其上游材料，"
@@ -194,6 +203,39 @@ def _ensure_conflict_review_prompt(workflow: dict[str, Any]) -> bool:
     return changed
 
 
+def _script_audit_prompts() -> tuple[str, str]:
+    text = SCRIPT_AUDIT_PROMPT_DOC.read_text(encoding="utf-8")
+
+    def fenced_text(section: str) -> str:
+        match = re.search(
+            rf"(?s)## {re.escape(section)}.*?```text\s*\n(.*?)\n```",
+            text,
+        )
+        if not match:
+            raise RuntimeError(f"文脉检测提示词文档缺少章节：{section}")
+        return match.group(1).strip()
+
+    return fenced_text("二、大模型节点用户消息"), fenced_text("四、大模型系统提示词")
+
+
+def _ensure_script_audit_prompt(workflow: dict[str, Any]) -> bool:
+    llm_nodes = [node for node in workflow.get("Nodes") or [] if node.get("NodeType") == "LLM"]
+    if len(llm_nodes) != 1:
+        raise RuntimeError("文脉检测工作流应当且只能包含一个大模型节点")
+    llm = llm_nodes[0].get("LLMNodeData")
+    if not isinstance(llm, dict):
+        raise RuntimeError("文脉检测大模型节点缺少 LLMNodeData")
+    user_prompt, system_prompt = _script_audit_prompts()
+    changed = False
+    if llm.get("Prompt") != user_prompt:
+        llm["Prompt"] = user_prompt
+        changed = True
+    if llm.get("SystemPrompt") != system_prompt:
+        llm["SystemPrompt"] = system_prompt
+        changed = True
+    return changed
+
+
 def _ensure_prompt_block(workflow: dict[str, Any], token: str, block: str) -> bool:
     llm_nodes = [node for node in workflow.get("Nodes") or [] if node.get("NodeType") == "LLM"]
     if not llm_nodes:
@@ -296,6 +338,9 @@ def normalize_export(directory: Path, *, write: bool) -> dict[str, Any]:
     elif directory.name == "export-11_02开头冲突钩子审核":
         if _ensure_conflict_review_prompt(workflow):
             changes.append("replace copied writing prompt with review contract")
+    elif directory.name == "export-智能剧本评分工作流":
+        if _ensure_script_audit_prompt(workflow):
+            changes.append("sync three-episode compact prompt from documentation")
 
     prompt_block = REQUIRED_PROMPT_BLOCKS.get(directory.name)
     if prompt_block and _ensure_prompt_block(workflow, *prompt_block):

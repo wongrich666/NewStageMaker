@@ -1,0 +1,77 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #1d1d1b;
+  background: #e9e6dc;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+}
+
+.demo-shell {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  width: 100%;
+  height: 100%;
+  background: #f6f3ea;
+}
+
+.demo-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: 16px 22px;
+  border-bottom: 1px solid #b9b6ad;
+  background: #f6f3ea;
+}
+
+.demo-header span {
+  color: #6d6b65;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+}
+
+.demo-header strong {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.flow-canvas {
+  min-height: 0;
+}
+
+.react-flow__edge.animated path {
+  stroke: #1d1d1b;
+  stroke-width: 1.25;
+}
+
+.react-flow__controls {
+  border: 1px solid #b9b6ad;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.react-flow__controls-button {
+  border-bottom-color: #b9b6ad;
+  background: #f6f3ea;
+  color: #1d1d1b;
+}
+

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
   <title>文脉检测检测 · IDEA TO SCRIPT</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='script_audit.css') }}?v=20260902-script-audit-assets-v4" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='script_audit.css') }}?v=20260906-script-audit-asset-switch-v7" />
   <link rel="stylesheet" href="{{ url_for('static', filename='editorial_theme.css') }}?v=20260818-scientific-editorial-v8" />
 </head>
 <body class="audit-page">
@@ -128,7 +128,6 @@
           <div class="audit-panel-head"><div><p class="audit-kicker">CROSS EPISODE</p><h3>跨集分析</h3></div></div>
           <div id="auditCrossEpisode" class="audit-cross-grid"></div>
         </article>
-        <div id="auditWarnings" class="audit-warnings hidden"></div>
       </section>
     </main>
   </div>
@@ -136,6 +135,6 @@
     window.SCRIPT_AUDIT_CONFIG = { authToken: {{ current_auth_token|tojson }} };
   </script>
   <script src="{{ url_for('static', filename='theme_slideshow.js') }}?v=20260818-editorial-motion-v1"></script>
-  <script src="{{ url_for('static', filename='script_audit.js') }}?v=20260902-script-audit-assets-v4" defer></script>
+  <script src="{{ url_for('static', filename='script_audit.js') }}?v=20260906-script-audit-hide-compat-warnings-v8" defer></script>
 </body>
 </html>

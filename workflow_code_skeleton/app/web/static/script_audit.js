@@ -12,7 +12,7 @@
     pointDetail: $("auditPointDetail"), dimensions: $("auditDimensions"), episodePanel: $("auditEpisodePanel"),
     episodeTabs: $("auditEpisodeTabs"), episodeDetail: $("auditEpisodeDetail"), issues: $("auditIssues"),
     rewrite: $("auditRewrite"), payoffs: $("auditPayoffs"), risks: $("auditRisks"),
-    crossPanel: $("auditCrossEpisodePanel"), cross: $("auditCrossEpisode"), warnings: $("auditWarnings"),
+    crossPanel: $("auditCrossEpisodePanel"), cross: $("auditCrossEpisode"),
     downloadText: $("auditDownloadText"), downloadJson: $("auditDownloadJson"),
     assetList: $("auditAssetList"), assetsRefresh: $("auditAssetsRefresh")
   };
@@ -59,6 +59,47 @@
   const setStatus = (message, kind = "") => {
     els.status.textContent = message;
     els.status.className = `audit-status${kind ? ` ${kind}` : ""}`;
+  };
+
+  const elapsedLabel = (startedAt) => {
+    const started = Date.parse(String(startedAt || ""));
+    if (!Number.isFinite(started)) return "";
+    const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+    if (seconds < 60) return `${seconds} 秒`;
+    const minutes = Math.floor(seconds / 60);
+    const rest = seconds % 60;
+    return rest ? `${minutes} 分 ${rest} 秒` : `${minutes} 分钟`;
+  };
+
+  const failureMessage = (payload) => {
+    const base = payload.error || "当前批次审核失败，可以点击继续检测从失败批次重试。";
+    const primary = payload.error_summary && payload.error_summary.primary_cause || {};
+    const hint = String(primary.operator_hint || "").trim();
+    const hintText = hint && !base.includes(hint) ? ` 处理建议：${hint}` : "";
+    const debugHint = payload.debug_file ? ` 调试记录：${payload.debug_file}` : "";
+    return `${base}${hintText}${debugHint}`;
+  };
+
+  const clearAuditResult = () => {
+    latestPayload = null;
+    els.result.classList.add("hidden");
+    els.reportTitle.textContent = "剧本审核报告";
+    els.summary.replaceChildren();
+    els.core.textContent = "—";
+    els.problem.textContent = "—";
+    els.priority.textContent = "—";
+    els.chart.replaceChildren();
+    els.pointDetail.textContent = "点击曲线节点查看审核理由与修改建议。";
+    els.dimensions.replaceChildren();
+    els.episodeTabs.replaceChildren();
+    els.episodeDetail.replaceChildren();
+    els.episodePanel.classList.add("hidden");
+    els.issues.replaceChildren();
+    els.rewrite.replaceChildren();
+    els.payoffs.replaceChildren();
+    els.risks.replaceChildren();
+    els.cross.replaceChildren();
+    els.crossPanel.classList.add("hidden");
   };
 
   const apiUrl = (path = "/api/script-audit/run") => {
@@ -527,9 +568,6 @@
     renderRecords(els.payoffs, view.satisfying_point_cards, "爽点");
     renderRecords(els.risks, view.risk_cards, "风险");
     renderCrossEpisode(view.cross_episode_analysis || {});
-    const warnings = payload.warnings || [];
-    els.warnings.classList.toggle("hidden", !warnings.length);
-    els.warnings.textContent = warnings.length ? `兼容性提示：${warnings.join("；")}` : "";
     requestAnimationFrame(() => els.result.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
@@ -556,7 +594,7 @@
       const actions = node("div", "audit-asset-actions");
       const openButton = node("button", "audit-asset-open", asset.status === "succeeded" ? "打开评分结果" : asset.status === "failed" ? "打开并继续" : "查看进度");
       openButton.type = "button";
-      openButton.addEventListener("click", () => openAsset(asset.run_id, { recover: true }));
+      openButton.addEventListener("click", () => openAsset(asset.run_id));
       const deleteButton = node("button", "audit-asset-delete", "删除");
       deleteButton.type = "button";
       const isRunning = asset.status === "pending" || asset.status === "running";
@@ -579,18 +617,18 @@
     }
   }
 
-  async function openAsset(runId, options = {}) {
+  async function openAsset(runId) {
     const normalized = String(runId || "");
     if (!normalized) return;
     const revision = ++assetOpenRevision;
     stopPolling();
+    clearAuditResult();
     activeRunFailed = false;
     rememberActiveRun(normalized);
     syncAssetUrl(normalized);
     setStatus("正在打开已保存的测评资产…");
     try {
-      const query = options.recover ? "?recover=1" : "";
-      const payload = await requestApi(`/api/script-audit/runs/${encodeURIComponent(normalized)}${query}`);
+      const payload = await requestApi(`/api/script-audit/runs/${encodeURIComponent(normalized)}`);
       if (revision !== assetOpenRevision || activeRunId !== normalized) return;
       els.title.value = payload.script_title || "";
       els.text.value = payload.script_text || "";
@@ -604,7 +642,7 @@
         activeRunFailed = true;
         updateRunProgress(payload);
         setRunningUi(false);
-        setStatus(payload.error || "已恢复失败批次，可点击继续检测。", "error");
+        setStatus(failureMessage(payload), "error");
       } else {
         setRunningUi(true);
         updateRunProgress(payload);
@@ -644,8 +682,7 @@
     activeRunFailed = false;
     rememberActiveRun("");
     syncAssetUrl("");
-    latestPayload = null;
-    els.result.classList.add("hidden");
+    clearAuditResult();
     els.loading.classList.add("hidden");
     els.batchProgress.style.width = "0%";
     setRunningUi(false);
@@ -688,10 +725,16 @@
     const start = Number(payload.current_batch_start || 0);
     const end = Number(payload.current_batch_end || 0);
     const percent = Number(payload.progress_percent || 0);
+    const attempt = Number(payload.current_attempt || 0);
+    const maxAttempts = Number(payload.max_attempts || 0);
+    const waiting = elapsedLabel(payload.attempt_started_at);
+    const attemptDetail = attempt > 0
+      ? ` · 远端分析 ${attempt}/${maxAttempts || "?"}${waiting ? `，已等待 ${waiting}` : ""}`
+      : "";
     els.batchProgress.style.width = `${Math.max(0, Math.min(100, percent))}%`;
     els.loadingTitle.textContent = start > 0 ? `正在审核第 ${start}～${end} 集` : "正在准备分批审核";
-    els.loadingDetail.textContent = `已完成 ${completed}/${total || "?"} 集 · ${payload.completed_batches || 0}/${payload.total_batches || "?"} 批；刷新页面也会继续运行。`;
-    setStatus(`心电图审核进度：${completed}/${total || "?"} 集（${percent}%）`);
+    els.loadingDetail.textContent = `已完成 ${completed}/${total || "?"} 集 · ${payload.completed_batches || 0}/${payload.total_batches || "?"} 批${attemptDetail}；刷新页面也会继续运行。`;
+    setStatus(`心电图审核进度：${completed}/${total || "?"} 集（${percent}%）${waiting ? ` · 已分析 ${waiting}` : ""}`);
   }
 
   async function pollActiveRun() {
@@ -699,7 +742,7 @@
     if (!activeRunId) return;
     const pollingRunId = activeRunId;
     try {
-      const payload = await requestApi(`/api/script-audit/runs/${encodeURIComponent(pollingRunId)}?recover=1`);
+      const payload = await requestApi(`/api/script-audit/runs/${encodeURIComponent(pollingRunId)}`);
       if (activeRunId !== pollingRunId) return;
       if (payload.status === "succeeded") {
         activeRunFailed = false;
@@ -713,8 +756,7 @@
       if (payload.status === "failed") {
         activeRunFailed = true;
         updateRunProgress(payload);
-        const debugHint = payload.debug_file ? ` 调试记录：${payload.debug_file}` : "";
-        setStatus(`${payload.error || "当前批次审核失败，可以点击继续检测从失败批次重试。"}${debugHint}`, "error");
+        setStatus(failureMessage(payload), "error");
         setRunningUi(false);
         loadAssets();
         return;
@@ -749,7 +791,7 @@
     if (!scriptText) { setStatus("请先填写需要检测的剧本正文。", "error"); els.text.focus(); return; }
     if (scriptText.length < 50) { setStatus("剧本文本至少需要 50 个字符。", "error"); els.text.focus(); return; }
     setRunningUi(true);
-    els.result.classList.add("hidden");
+    clearAuditResult();
     els.batchProgress.style.width = "0%";
     setStatus("正在识别集标题并创建分批审核任务…");
     try {
@@ -811,6 +853,6 @@
   try { activeRunId = requestedAssetId() || window.localStorage.getItem(ACTIVE_RUN_KEY) || ""; } catch (_) { activeRunId = requestedAssetId(); }
   loadAssets();
   if (activeRunId) {
-    openAsset(activeRunId, { recover: true });
+    openAsset(activeRunId);
   }
 })();

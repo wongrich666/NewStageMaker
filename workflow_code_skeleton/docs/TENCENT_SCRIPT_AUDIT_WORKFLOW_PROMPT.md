@@ -1,6 +1,6 @@
-# 腾讯工作流：分批文脉检测检测
+# 腾讯工作流：分批文脉检测
 
-本工作流对应本地阶段键 `hot_review`。本地先按“第 N 集”标题严格切分剧本，默认优先每批发送 3 集，例如 `1-3、4-6……`；最后不足 3 集时按真实尾批发送。后端一次点击后会自动连续审核全剧，无需用户逐批操作。每批成功结果都会立即保存；某个三集批次连续返回截断、摘要、缺集或无效 JSON 时，本地会自动降级为 `2+1`，必要时再降为逐集，不会让前面成功批次作废。
+本工作流对应本地阶段键 `hot_review`。本地先按“第 N 集”标题严格切分剧本，默认优先每批发送 3 集，例如 `1-3、4-6……`；最后不足 3 集时按真实尾批发送。后端一次点击后会自动连续审核全剧，无需用户逐批操作。每批成功结果都会立即保存；输出截断、缺集或无效 JSON 等可能受体积影响的错误会自动重试，并降级为 `2+1`，必要时再降为逐集。远端只返回六字段摘要时，本地只对当前批次做一次携带显式格式修复指令的重试，仍不继续拆批；输入契约、网络/网关和本地错误会直接暂停，避免确定性错误持续消耗调用。
 
 不要修改或复用现有 `12_04`。`12_04` 服务于剧本续写记忆，和审核记忆的目标、字段与证据要求不同。
 
@@ -43,6 +43,8 @@
 
 注意：当前本地采用每批最多 3 集，正常批次的 batch_start_episode 与 batch_end_episode 相差 2；
 尾批可能只有 1-2 集。这两个参数必须原样使用，不要自行改成 1、3 或当前批次数量。
+如果 previous_audit_memory 中存在 `_format_retry_instruction`，说明上一次远端输出未通过格式校验；
+必须优先执行该指令并重新返回完整逐集 JSON，不能再次返回批次摘要。
 ```
 
 ## 三、结束节点
@@ -50,7 +52,7 @@
 结束节点只声明一个文本字段：
 
 ```text
-Output.audit_batch = 大模型1.Output.Content
+Output.audit_batch = 剧本文脉检测评分系统.Output.Content
 ```
 
 注意：字段名必须是 `audit_batch`，不要写成 `audit`。更不能在结束节点另外拼装
@@ -84,6 +86,7 @@ Output.audit_batch = 大模型1.Output.Content
 6. 当前本地默认每批最多3集；始终只输出 batch_start_episode 至 batch_end_episode 指定的全部真实集数。尾批不足3集时不得补造集数。
 7. is_final_batch=true 时，next_audit_memory 必须形成全剧最终判断，补齐最强集、最弱集、全剧留存、爽点分布、人物弧线、未偿情绪债、最大问题和优先修改方案。
 8. 批首集若不是第1集，previous_audit_memory.last_episode_handoff 是上一批最后一集结尾的强制交接基准；必须先逐项读取它，再审核批首集开场。批内第2至第3集必须直接对照 batch_script_text 中紧邻上一集的结尾与本集开场，不得用全局摘要替代真实上下文。
+9. previous_audit_memory 中若存在 `_format_retry_instruction`，它是本地校验器发出的最高优先级格式修复指令。必须先执行该指令，重新生成完整逐集结果；不得把它当作剧情记忆或忽略。
 
 【最高优先级输出规则】
 1. 最终回复必须且只能是一个合法 JSON object。禁止输出 Markdown、代码围栏、解释、前言、结语或 JSON 外文字。
@@ -98,7 +101,7 @@ Output.audit_batch = 大模型1.Output.Content
    character_dialogue_filming / 人物对白与可拍性 / 20
    market_compliance / 市场适配与平台合规 / 15
 7. 每集 episode_score 必须等于该集五项 score 之和，范围 0-100。
-8. 每集 ecg_points 至少 1 个，通常选择 3-8 个最有商业意义的节点。节点必须按本集发生顺序排列。
+8. 每集 ecg_points 至少 1 个、最多 2 个，只选择最有商业意义的节点，并按本集发生顺序排列。
 9. 所有判断必须来自当前正文或 previous_audit_memory 中已经确认的事实。original_text_excerpt 只能摘录当前批次正文中真实存在的短句。
 10. point_id、segment_id、issue_id、risk_id、task_id 必须带集号或批次范围，保证全剧唯一，例如 ecg_e06_001、seg_e06_001、issue_e06_001。
 
@@ -145,12 +148,13 @@ ecg_value 必须是 -5 到 5 之间的整数：
 
 【三集批次输出体积约束】
 1. 必须保留规定的完整 JSON 字段，但文字必须短、准、有证据；禁止在多个字段重复同一段分析。
-2. 每集 ecg_points 选择 2-3 个最重要节点，不要为每句台词建节点。
+2. 每集 ecg_points 选择 1-2 个最重要节点，不要为每句台词建节点。
 3. original_text_excerpt 每处只摘录能证明判断的短句，建议不超过40个汉字。
-4. 每个说明性字符串原则上控制在80个汉字以内；core_judgement、evidence、fix_suggestion 可在必要时稍长，但不得复述整段剧情。
-5. 每集 satisfying_points、key_issues、risk_scan、rewrite_plan 分别最多2项；批次级同类数组分别最多3项。
+4. 每个说明性字符串原则上控制在50个汉字以内；core_judgement、evidence、fix_suggestion 最多80个汉字，不得复述整段剧情。
+5. 每集 satisfying_points、key_issues、risk_scan、rewrite_plan 分别最多1项；批次级同类数组分别最多2项。空间不足时批次级数组返回空数组，本地仍会合并逐集记录。
 6. next_audit_memory 是压缩后的替换式记忆，不得复制旧记忆全文，不得嵌入 episode_reviews、segments 或大段剧本原文。
 7. 绝不能为了缩短输出删除 schema_version、batch_meta、boundary_review、episode_reviews、next_audit_memory，或把完整结果退化成六字段 batch_core_judgement 摘要。
+8. 不要设置低于 JSON 字段骨架本身的硬字符目标；“完整核心契约”优先于字符数。接近模型输出上限时，先清空 `segments`、批次级四类数组和各集没有内容的可选数组，再缩短说明文字。本地可确定性补齐 `batch_meta`、维度名称/满分、`episode_score`、等级、空数组和最小续跑记忆，但不得省略每集的 `episode_no`、五维实际得分、`emotional_review`、`continuity_review`、至少一个 `ecg_point`，更不得退化成六字段摘要。
 
 【犀利审核与证据约束】
 1. 禁止“整体不错但仍有提升空间”“节奏可以更紧凑”“人物可以更立体”“建议增强冲突”等可套用于任何剧本的空话。
@@ -192,11 +196,11 @@ ecg_value 必须是 -5 到 5 之间的整数：
 5. current_character_states 记录核心人物在本批最后一集结束时的位置、目标、情绪、关系、伤势、持有信息、资源和未完成行动。
 6. unresolved_plot_threads 只保留尚未解决且会影响后续理解的线索、危机、任务和秘密。
 7. unpaid_emotional_debts 记录尚未兑现的羞辱、牺牲、背叛、误会、承诺、欲望和关系债。
-8. episode_score_index 必须累计保留第1集至当前集的 episode_no 和 score，用于最终比较最强/最弱集。
+8. episode_score_index 只保留最近12集的 episode_no 和 score；best_episode_no、weakest_episode_no 继续根据已有记忆动态更新。最终全剧分数序列由本地已保存的逐集结果重建。
 9. weak_episode_numbers、best_episode_no、weakest_episode_no 必须根据已有全部批次动态更新。
 10. global_key_issues 与 global_rewrite_plan 只保留最重要且仍有效的全剧问题，合并同源问题，禁止无限重复增长。
 11. next_batch_watch_points 明确下一批首集需要验证的承接点、待回收情绪债和人物状态，并与 last_episode_handoff.continuity_watch_points 一致。
-12. 整个 next_audit_memory 应控制在 5000 个中文字符以内。全量逐集评分、问题和修改任务由本地批次记录保存，不要把它们重复塞进记忆。
+12. 整个 next_audit_memory 必须控制在 2500 个中文字符以内。current_character_states 最多8项，unresolved_plot_threads 最多6项，情绪债和连续性风险各最多4项，全局问题/任务各最多3项。全量逐集评分、问题和修改任务由本地批次记录保存，不要重复塞进记忆。
 
 【必须返回的精确 JSON 结构】
 下面先用“全剧共48集、当前审核第1-3集”的首批展示完整对象结构。`episode_reviews` 必须依次包含第1、2、3集三个完整对象；为避免文档机械复制三份相同模板，下面只完整展开第1集对象，第2-3集必须复制同一对象结构并替换为各自真实集号、评分、证据和判断，绝不能在真实返回中省略。特别注意：`total_episodes` 始终复制输入中的全剧总集数48，不能写成当前批大小3。
@@ -498,8 +502,8 @@ TENCENT_WORKFLOW_HOT_REVIEW_API_KEY=填写修改后的分批审核工作流APIKe
 
 1. 按每批实际起止集数校验 `episode_reviews`，少集、重复、乱序或越界都会使当前批次失败。
 2. 每批成功后保存结果和 `next_audit_memory`，下一批只携带最新版记忆。
-3. 默认三集批次若连续两次无效，会自动拆成 `2+1`；两集批次仍连续无效时再拆成 `1+1`。每个成功小批立即保存并更新记忆。
-4. 失败恢复从第一个未完成集继续，已经成功的批次不会重新调用；只有单集也连续失败时才暂停并等待用户稍后继续。
+3. 默认三集批次若连续两次出现输出截断、缺集或结构不完整等体积相关错误，会自动拆成 `2+1`；两集批次仍连续无效时再拆成 `1+1`。每个成功小批立即保存并更新记忆。
+4. 结束节点只返回摘要、输入类型错误、网络/网关故障或本地运行错误时，系统会在首次识别后保留已完成进度并直接暂停，不重试当前批次，也不再用更小批次重复同一错误；修复配置或网络后可从第一个未完成集继续。
 5. 若远端把 `batch_meta.total_episodes` 错写成当前批次数量，本地会使用从完整剧本严格解析出的真实总集数自动校正并记录 warning；评分、心电节点、问题与修改建议不会被本地改写。
 6. 旧工作流若漏填 `continuity_review.previous_episode_no/current_episode_no`，本地会依据连续集号补齐；漏填详细 `continuity_evidence` 会记录 warning，但不会丢弃已经完整返回的评分和心电节点。
 7. 若 `audit_batch` 已含 `script_audit_batch_v1` 和 `episode_reviews` 开头却在中途结束，本地会诊断为“远端输出截断”，不再误报为结束节点字段配置错误。
@@ -512,7 +516,7 @@ TENCENT_WORKFLOW_HOT_REVIEW_API_KEY=填写修改后的分批审核工作流APIKe
 workflow_code_skeleton/runtime_data/script_audits/<run_id>.debug.json
 ```
 
-记录内容包括运行创建、批次起止、每次重试、实际传输字段类型与字符长度、正文/记忆哈希、腾讯 RequestId、HTTP 状态、响应摘要、输出集号、异常类型和调用栈。不会记录 API Key，也不会保存批次剧本正文或完整审核记忆。
+记录内容包括运行创建、批次起止、每次重试、实际传输字段类型与字符长度、正文/记忆哈希、腾讯 RequestId、HTTP 状态、响应结构诊断、输出集号、异常类型和调用栈。不会记录 API Key，也不会保存批次剧本正文或完整审核记忆。调试文件还会生成 `error_collection`，按错误分类和批次大小聚合，并给出是否值得缩小批次及运维处理建议。
 
 登录后还可以读取指定运行的调试记录：
 
@@ -520,7 +524,7 @@ workflow_code_skeleton/runtime_data/script_audits/<run_id>.debug.json
 GET /api/script-audit/runs/<run_id>/debug
 ```
 
-前端任务失败时会显示对应调试文件路径。重新点击“继续检测”时，恢复操作和后续重试会追加到同一个调试文件中。
+调试接口仍可读取结构化错误记录；重新点击“继续检测”时，恢复操作和后续重试会追加到同一个调试文件中。
 4. 全剧五维分数取所有逐集同维度分数的算术平均，总分为五维之和。
 5. 全部逐集心电节点按集数和集内顺序合并，重新生成全剧 `segment_index_global`。
 6. 最后一批累计记忆用于生成全剧判断、跨集分析、最强/最弱集和全局修改优先级。

@@ -118,6 +118,34 @@ class TencentWorkflowRegistryTests(unittest.TestCase):
         self.assertIn('"stage": "causal_conflict_review"', system_prompt)
         self.assertIn("只负责审核", system_prompt)
 
+    def test_script_audit_export_returns_full_model_text_under_audit_batch(self) -> None:
+        workflow = load_export("export-智能剧本评分工作流")
+        llm = next(node for node in workflow["Nodes"] if node["NodeType"] == "LLM")
+        end = next(node for node in workflow["Nodes"] if node["NodeType"] == "END")
+        output = end["Outputs"][0]["Properties"]
+
+        self.assertEqual(1, len(output))
+        self.assertEqual("audit_batch", output[0]["Title"])
+        self.assertEqual("STRING", output[0]["Type"])
+        self.assertEqual(llm["NodeID"], output[0]["Value"]["Reference"]["NodeID"])
+        self.assertEqual("Output.Content", output[0]["Value"]["Reference"]["JsonPath"])
+
+        user_prompt = str(llm["LLMNodeData"]["Prompt"])
+        system_prompt = str(llm["LLMNodeData"]["SystemPrompt"])
+        self.assertIn("每批最多 3 集", user_prompt)
+        self.assertIn("_format_retry_instruction", user_prompt)
+        self.assertIn("不要设置低于 JSON 字段骨架本身的硬字符目标", system_prompt)
+        self.assertIn("2500 个中文字符以内", system_prompt)
+        self.assertNotIn("五集批次", system_prompt)
+        self.assertNotIn("第2至第5集", system_prompt)
+
+        template = re.search(
+            r'(?s)(\{\n  "schema_version".*?\n\})\n\n重要：',
+            system_prompt,
+        )
+        self.assertIsNotNone(template)
+        self.assertEqual("script_audit_batch_v1", json.loads(template.group(1))["schema_version"])
+
     def test_episode_word_count_is_sent_directly_as_character_count(self) -> None:
         payload = build_workflow_inputs(
             STAGE_FRAMEWORK_SCRIPT_WRITE,

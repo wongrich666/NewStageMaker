@@ -271,8 +271,9 @@ class ScriptAuditEcgTests(unittest.TestCase):
         html = response.get_data(as_text=True)
         self.assertIn("script_audit.js", html)
         self.assertIn("20260818-scientific-editorial-v8", html)
-        self.assertIn("20260902-script-audit-assets-v4", html)
+        self.assertIn("20260906-script-audit-hide-compat-warnings-v8", html)
         self.assertIn("auditAssetList", html)
+        self.assertNotIn("auditWarnings", html)
 
     @patch("workflow_code_skeleton.app.server.auth_store.get_user_by_token")
     def test_authenticated_txt_upload_extracts_script_without_starting_a_run(self, get_user_by_token) -> None:
@@ -381,10 +382,14 @@ class ScriptAuditEcgTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         detach_body = javascript.split("function detachActiveAudit() {", 1)[1].split("\n  }", 1)[0]
+        open_body = javascript.split("async function openAsset(runId) {", 1)[1].split("\n  }", 1)[0]
         upload_body = javascript.split('els.file.addEventListener("change", async () => {', 1)[1]
         self.assertIn("assetOpenRevision += 1", detach_body)
         self.assertIn("stopPolling()", detach_body)
+        self.assertIn("clearAuditResult()", detach_body)
         self.assertNotIn("detachActiveAudit()", detach_body)
+        self.assertIn("clearAuditResult()", open_body)
+        self.assertLess(open_body.index("clearAuditResult()"), open_body.index("requestApi("))
         self.assertIn("detachActiveAudit()", upload_body)
         self.assertIn(
             'els.title.value = payload.script_title || file.name.replace(/\\.[^.]+$/, "")',
